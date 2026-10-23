@@ -2,6 +2,7 @@ package mygame
 
 import "core:fmt"
 import "core:log"
+import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:engine"
@@ -10,8 +11,8 @@ import "cinnabar:engine"
 Game_State :: struct {
 	platform:    ^core.Platform_API,
 	frame_count: u64,
-	elapsed:     f64,
-	next_report: f64,
+	elapsed:     time.Duration,
+	next_report: time.Duration,
 }
 
 init :: proc(state: rawptr, platform: ^core.Platform_API) {
@@ -22,14 +23,14 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	log.info("mygame: init")
 }
 
-update :: proc(state: rawptr, dt: f32) -> (keep_running: bool) {
+update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
 	s.frame_count += 1
-	s.elapsed += f64(dt)
+	s.elapsed += dt
 
 	if s.elapsed >= s.next_report {
-		s.next_report += 1
-		title := fmt.aprintf("mygame | frame %d | %.1fs", s.frame_count, s.elapsed, allocator = s.platform.frame_allocator)
+		s.next_report += time.Second
+		title := fmt.aprintf("mygame | frame %d | %.1fs", s.frame_count, time.duration_seconds(s.elapsed), allocator = s.platform.frame_allocator)
 		s.platform.set_window_title(title)
 	}
 	return true

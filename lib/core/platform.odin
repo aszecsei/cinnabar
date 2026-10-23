@@ -66,12 +66,12 @@ platform_api :: proc() -> ^Platform_API {
 
 // begin_frame polls platform events and swaps the frame arena.
 // It returns false when the window was closed.
-begin_frame :: proc() -> (dt: f32, keep_running: bool) {
+begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	if elapsed := time.tick_since(platform.last_frame); elapsed < TARGET_FRAME_TIME {
 		time.sleep(TARGET_FRAME_TIME - elapsed)
 	}
 	now := time.tick_now()
-	dt = f32(time.duration_seconds(time.tick_diff(platform.last_frame, now)))
+	dt = time.tick_diff(platform.last_frame, now)
 	platform.last_frame = now
 
 	platform.frame_index += 1

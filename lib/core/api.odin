@@ -1,6 +1,7 @@
 package core
 
 import "base:runtime"
+import "core:time"
 
 // Platform_API is everything core provides to the game side (host -> game).
 // It is the complete porting surface.
@@ -18,7 +19,8 @@ Platform_API :: struct {
 // `state` always points at the game's root Game_State, which the host owns.
 Game_API :: struct {
 	init:        proc(state: rawptr, platform: ^Platform_API),
-	update:      proc(state: rawptr, dt: f32) -> (keep_running: bool),
+	// dt is fixed-point (integer nanoseconds), so accumulated world time does not drift.
+	update:      proc(state: rawptr, dt: time.Duration) -> (keep_running: bool),
 	shutdown:    proc(state: rawptr),
 	on_reload:   proc(state: rawptr, platform: ^Platform_API),
 	state_size:  proc() -> int,
