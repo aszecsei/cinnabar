@@ -22,11 +22,25 @@ default:
 
 # Install dependencies
 install:
-    echo "TODO: install dependencies via git submodules"
+    git submodule update --init --recursive
 
 # Setup project for first time
 setup: install
     echo "✓ Project ready"
+
+# Update all vendored submodules
+update: update-luau
+
+# Update Luau to a release tag (default: latest)
+update-luau tag="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git -C vendor/luau fetch --tags --quiet
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/luau tag --list '0.*' --sort=-v:refname | head -n 1)
+    git -C vendor/luau checkout --quiet "$tag"
+    git add vendor/luau
+    echo "✓ Luau at $tag"
 
 # =================================
 # Development
