@@ -7,7 +7,7 @@
 Windows and D3D12 are the first targets. A later port must only add files to `core`.
 
 - **OS layer:** Odin's file-suffix convention (`*_windows.odin`) selects the platform implementation at compile time.
-- **GPU backend:** a build define selects the backend at compile time. There is no runtime dispatch.
+- **GPU backend:** the `gpu_backend` collection selects the backend at compile time. There is no runtime dispatch. See [GPU](gpu.md#packages).
 - **Rules:** `lib/engine` and games never import `core:sys/windows`, `vendor:directx` or any backend package. `lib/core/gpu/d3d12` is the only code that imports `vendor:directx`.
 
 ## Job system

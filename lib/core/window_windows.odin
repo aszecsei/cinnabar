@@ -61,6 +61,10 @@ _window_poll :: proc() -> (open: bool) {
 	return !window.close_requested
 }
 
+_window_native_handle :: proc() -> rawptr {
+	return rawptr(window.hwnd)
+}
+
 _window_size :: proc() -> [2]i32 {
 	rect: win.RECT
 	win.GetClientRect(window.hwnd, &rect)

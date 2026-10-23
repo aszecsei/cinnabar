@@ -20,6 +20,7 @@ These rules apply to all game-side code (`lib/engine` and games).
 1. `core` detects a new DLL build.
 2. At the end of the frame, the host waits until the job system is drained.
 3. The host loads `mygame_N.dll` and resolves `Game_API`.
-4. The host compares the new `layout_hash` with the old one. The DLL computes this hash at runtime by walking the type info of `Game_State` (field names, offsets and types).
+4. The host compares the new GPU command format hash with its own (see [GPU](gpu.md#command-buffers)). If they differ, the host keeps the old DLL and asks for a restart.
+5. The host compares the new `layout_hash` with the old one. The DLL computes this hash at runtime by walking the type info of `Game_State` (field names, offsets and types).
    - **Same hash:** the host calls `on_reload`. State is kept.
    - **Different hash:** the host calls `shutdown` and then `init` with fresh state. This is a soft restart. The window, the GPU device and the loaded assets stay up.

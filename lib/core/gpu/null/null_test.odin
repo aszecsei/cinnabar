@@ -1,0 +1,118 @@
+package gpu_null
+
+import "core:log"
+import "core:mem/virtual"
+import "core:sync"
+import "core:testing"
+
+import "cinnabar:core/gpu"
+
+// The backend is a singleton, and the test runner runs tests on several threads.
+@(private = "file")
+backend_lock: sync.Mutex
+
+@(test)
+submit_accepts_valid_frame :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	shader := []byte{0}
+	pipeline := create_graphics_pipeline({vertex = shader, pixel = shader, colors = {{format = gpu.FRAME_TARGET_FORMAT}}})
+	testing.expect(t, pipeline != {})
+
+	cb := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_begin_pass(&cb, {{texture = frame_target(), load = .Clear}})
+	gpu.cmd_set_pipeline(&cb, pipeline)
+	gpu.cmd_draw(&cb, 3)
+	gpu.cmd_end_pass(&cb)
+	testing.expect(t, submit({cb}))
+}
+
+@(test)
+submit_rejects_unknown_texture :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	valid := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_begin_pass(&valid, {{texture = frame_target()}})
+	gpu.cmd_end_pass(&valid)
+
+	invalid := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_begin_pass(&invalid, {{texture = {index = 7, generation = 1}}})
+	gpu.cmd_end_pass(&invalid)
+
+	// The test runner fails a test that logs an error, and this rejection is expected.
+	context.logger = log.nil_logger()
+	testing.expect(t, !submit({valid, invalid}))
+}
+
+@(test)
+destroyed_handles_are_invalid :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	buffer := create_buffer({size = 64}, nil)
+	testing.expect(t, buffer != {})
+	destroy_buffer(buffer)
+	reused := create_buffer({size = 64}, nil)
+	testing.expect_value(t, reused.index, buffer.index)
+
+	cb := gpu.command_buffer(virtual.arena_allocator(&arena))
+	gpu.cmd_set_pass_constants(&cb, {buffer = buffer})
+	context.logger = log.nil_logger()
+	testing.expect(t, !submit({cb}))
+}
+
+@(test)
+create_rejects_bad_descs :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	context.logger = log.nil_logger()
+	testing.expect_value(t, create_buffer({size = 6}, nil), gpu.Buffer{})
+	testing.expect_value(t, create_buffer({size = 4}, {1, 2, 3, 4, 5}), gpu.Buffer{})
+	testing.expect_value(t, create_texture({size = {4, 4}, format = .D32_Float, usage = {.Sampled}}, nil), gpu.Texture{})
+	testing.expect_value(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}}, {1, 2, 3}), gpu.Texture{})
+	testing.expect_value(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, mip_count = 4, usage = {.Sampled}}, nil), gpu.Texture{})
+	testing.expect_value(t, create_graphics_pipeline({vertex = {0}, colors = {{format = .RGBA8_Unorm}}}), gpu.Pipeline{})
+	testing.expect_value(t, create_graphics_pipeline({vertex = {0}, pixel = {0}, colors = {{format = .D32_Float}}}), gpu.Pipeline{})
+	testing.expect_value(t, create_compute_pipeline({}), gpu.Pipeline{})
+
+	testing.expect(t, create_texture({size = {4, 4}, format = .RGBA8_Unorm, mip_count = 3, usage = {.Sampled}}, nil) != {})
+	testing.expect(t, create_graphics_pipeline({vertex = {0}, depth_format = .D32_Float}) != {})
+}
+
+@(test)
+upload_ring_resets_each_frame :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	a, a_ok := upload(3, 1)
+	b, b_ok := upload(16, gpu.PASS_CONSTANTS_ALIGN)
+	testing.expect(t, a_ok && b_ok)
+	testing.expect_value(t, len(a.data), 3)
+	testing.expect_value(t, b.offset, gpu.PASS_CONSTANTS_ALIGN)
+	_, full_ok := upload(UPLOAD_RING_SIZE, 1)
+	testing.expect(t, !full_ok)
+
+	begin_frame({1280, 720})
+	c, _ := upload(4, 4)
+	testing.expect_value(t, c.offset, 0)
+}

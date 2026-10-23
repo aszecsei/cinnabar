@@ -49,8 +49,10 @@ flowchart TB
 | Module | Side | Responsibility |
 |---|---|---|
 | `lib/core` | Host | Platform services and every OS or device resource: window, input, GPU device, audio device, worker threads, fiber scheduler, virtual memory, file I/O, file watching, dynamic library loading. |
-| `lib/core/gpu` | Host | Backend-agnostic GPU interface. It executes command lists that the engine records. |
+| `lib/core/gpu` | Shared | Backend-agnostic GPU interface: handles and the command list format. Backends execute the command lists that the engine records. |
+| `lib/core/layout` | Shared | Type layout hashing, used to detect `Game_State` and command format changes across a reload. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. |
+| `lib/core/gpu/null` | Host | A backend that validates command lists and executes nothing. Used for headless tests. |
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
@@ -122,6 +124,10 @@ The render frontend is in `lib/engine`. The GPU device and the backend are in `l
 - GPU resources (buffers, textures, pipelines) are handles that `core/gpu` owns. They survive code reload.
 
 With this boundary, rendering does not call across the DLL once per draw. The boundary is plain data, and porting means writing a new consumer of the command lists.
+
+Resource binding is bindless, and barriers come from a render graph in `lib/engine`. The backend translates commands and does not track state.
+
+Details: [GPU](gpu.md).
 
 ## Scripting
 

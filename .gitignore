@@ -1,2 +1,5 @@
 .env
 build
+vendor/agility
+vendor/dxc
+*.dxil

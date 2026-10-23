@@ -5,11 +5,11 @@ import "core:mem"
 import "core:mem/virtual"
 import "core:time"
 
+// The build selects the GPU backend by pointing this collection at a backend package.
+import backend "gpu_backend:."
+
 PERMANENT_RESERVE :: 4 * mem.Gigabyte
 FRAME_RESERVE :: 256 * mem.Megabyte
-
-// Until the GPU backend presents with vsync, frames are paced by sleeping.
-TARGET_FRAME_TIME :: time.Second / 60
 
 @(private)
 Platform :: struct {
@@ -39,20 +39,38 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		log.error("core: failed to open window")
 		return false
 	}
+	if !backend.init(_window_native_handle(), _window_size()) {
+		log.error("core: failed to initialize the GPU backend")
+		return false
+	}
 
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
 	platform.api = {
-		permanent_allocator = virtual.arena_allocator(&platform.permanent),
-		frame_allocator     = virtual.arena_allocator(&platform.frame[0]),
-		time_seconds        = time_seconds,
-		window_size         = _window_size,
-		set_window_title    = _window_set_title,
+		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
+		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
+		time_seconds                 = time_seconds,
+		window_size                  = _window_size,
+		set_window_title             = _window_set_title,
+		gpu_features                 = backend.features,
+		gpu_frame_target             = backend.frame_target,
+		gpu_submit                   = backend.submit,
+		gpu_upload                   = backend.upload,
+		gpu_create_buffer            = backend.create_buffer,
+		gpu_create_texture           = backend.create_texture,
+		gpu_create_sampler           = backend.create_sampler,
+		gpu_create_graphics_pipeline = backend.create_graphics_pipeline,
+		gpu_create_compute_pipeline  = backend.create_compute_pipeline,
+		gpu_destroy_buffer           = backend.destroy_buffer,
+		gpu_destroy_texture          = backend.destroy_texture,
+		gpu_destroy_sampler          = backend.destroy_sampler,
+		gpu_destroy_pipeline         = backend.destroy_pipeline,
 	}
 	return true
 }
 
 shutdown :: proc() {
+	backend.shutdown()
 	_window_close()
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
@@ -64,12 +82,12 @@ platform_api :: proc() -> ^Platform_API {
 	return &platform.api
 }
 
-// begin_frame polls platform events and swaps the frame arena.
-// It returns false when the window was closed.
+// begin_frame polls platform events, waits for the GPU backend to accept a new frame
+// and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
-	if elapsed := time.tick_since(platform.last_frame); elapsed < TARGET_FRAME_TIME {
-		time.sleep(TARGET_FRAME_TIME - elapsed)
-	}
+	keep_running = _window_poll()
+	backend.begin_frame(_window_size())
+
 	now := time.tick_now()
 	dt = time.tick_diff(platform.last_frame, now)
 	platform.last_frame = now
@@ -78,8 +96,12 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	frame := &platform.frame[platform.frame_index % len(platform.frame)]
 	virtual.arena_free_all(frame)
 	platform.api.frame_allocator = virtual.arena_allocator(frame)
+	return
+}
 
-	return dt, _window_poll()
+// end_frame presents the frame. The GPU backend paces frames to vsync.
+end_frame :: proc() {
+	backend.end_frame()
 }
 
 // alloc_game_state allocates zeroed root game state from the permanent arena.
