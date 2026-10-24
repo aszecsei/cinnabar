@@ -42,6 +42,9 @@ public sealed class CookSession : IDisposable
     LinkClient? _link;
     CancellationTokenSource? _connecting;
     readonly Stopwatch _uptime = new();
+    // The operations that wait for the daemon's answer, by request ID.
+    readonly Dictionary<uint, TaskCompletionSource<OperationResult>> _requests = [];
+    uint _nextRequest;
 
     public CookSession(CookOptions options, AssetIndex index)
     {
@@ -109,6 +112,28 @@ public sealed class CookSession : IDisposable
         _ = ConnectAsync(process, port, _connecting.Token);
     }
 
+    /// <summary>
+    /// Asks the daemon for an asset operation (see docs/content-pipeline.md#asset-operations), and completes with its
+    /// answer, which comes after the index's changes. Without the cook link, it fails at once.
+    /// </summary>
+    public Task<OperationResult> Request(ILinkMessage operation)
+    {
+        if (_link == null || State != CookState.Linked)
+        {
+            return Task.FromResult(new OperationResult("The cook daemon is not running, so the content cannot change.", []));
+        }
+        var request = ++_nextRequest;
+        if (request == 0)
+        {
+            // Request 0 is a message that wants no answer.
+            request = ++_nextRequest;
+        }
+        var answer = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _requests[request] = answer;
+        _link.Send(operation, request);
+        return answer.Task;
+    }
+
     public void Stop()
     {
         if (_process != null)
@@ -131,7 +156,7 @@ public sealed class CookSession : IDisposable
                     return;
                 }
                 _link = link;
-                link.Received += (message, _) => Post(() => OnReceived(link, message));
+                link.Received += (message, request) => Post(() => OnReceived(link, message, request));
                 link.Closed += error => Post(() => OnLinkClosed(link, error));
                 link.Start();
                 link.Send(new Hello(CookMessages.ProtocolVersion, "cinnabar editor"));
@@ -153,7 +178,7 @@ public sealed class CookSession : IDisposable
         }
     }
 
-    void OnReceived(LinkClient link, ILinkMessage message)
+    void OnReceived(LinkClient link, ILinkMessage message, uint request)
     {
         if (link != _link)
         {
@@ -176,6 +201,12 @@ public sealed class CookSession : IDisposable
                 LastCook = finished;
                 Cooked?.Invoke(finished);
                 break;
+            case OperationResult result:
+                if (_requests.Remove(request, out var answer))
+                {
+                    answer.SetResult(result);
+                }
+                break;
             case Hello:
                 Output?.Invoke("editor: the cook daemon sent a message that only the editor sends: Hello");
                 break;
@@ -196,6 +227,7 @@ public sealed class CookSession : IDisposable
         {
             Output?.Invoke($"editor: the cook link failed: {error.Message}");
         }
+        FailRequests();
         Index.Unlink();
         if (State == CookState.Linked)
         {
@@ -231,11 +263,22 @@ public sealed class CookSession : IDisposable
             _ = _link.DisposeAsync();
             _link = null;
         }
+        FailRequests();
         Index.Unlink();
         LastCook = null;
         // Closing the job kills the daemon.
         _process?.Dispose();
         _process = null;
+    }
+
+    // The daemon may have done an operation that it could not answer. Its next snapshot has the content as it is.
+    void FailRequests()
+    {
+        foreach (var answer in _requests.Values)
+        {
+            answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", []));
+        }
+        _requests.Clear();
     }
 
     void SetState(CookState state, int exitCode = 0)

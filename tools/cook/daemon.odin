@@ -7,10 +7,12 @@ import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import "core:time"
 
 import cook_link "cinnabar:engine/asset/cook_link"
+import format "cinnabar:engine/asset/format"
 
 // After a change, the daemon waits until this many milliseconds pass without another, so a save of several files, or
 // a program that writes a file in steps, makes one pass.
@@ -93,11 +95,11 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 }
 
 // daemon_pass cooks every kind of asset, and updates the index. It logs the problems that changed, says what it
-// cooked, and sends the editor what changed.
+// cooked, and sends the editor what changed. It cooks the assets in force whatever their keys.
 @(private = "file")
-daemon_pass :: proc(d: ^Daemon) {
+daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	start := time.tick_now()
-	pass := cook(d.options, ALL_KINDS, log_problems = false)
+	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force)
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
 	changes := index_diff(&d.index, &next)
@@ -112,6 +114,7 @@ daemon_pass :: proc(d: ^Daemon) {
 			log_problem({problem.file, int(problem.line), int(problem.column), problem.error, problem.text})
 		}
 	}
+	remove_blobs(d.options, changes.delta.removed, pass.shared)
 	elapsed := time.tick_since(start)
 	failed := 0
 	for a in pass.assets {
@@ -148,9 +151,36 @@ daemon_pass :: proc(d: ^Daemon) {
 	)
 }
 
-// handle_messages handles what the editor sent, and notices when it leaves.
+// remove_blobs deletes the blobs of the assets that left the content, so a game that starts later does not load them.
+// A game that runs keeps what it has loaded. An asset that only shares its GUID with another keeps its blob, which
+// comes back into use when the copy gets a GUID of its own.
+@(private = "file")
+remove_blobs :: proc(options: Cook_Options, removed: []string, shared: []format.Guid) {
+	for guid_text in removed {
+		guid, ok := format.guid_parse(guid_text)
+		if !ok || slice.contains(shared, guid) {
+			continue
+		}
+		path := fmt.tprintf("%s/%s.blob", config_dir(options), guid_text)
+		if err := os.remove(path); err != nil && err != .Not_Exist {
+			log.warnf("cook: cannot delete %s: %v", path, err)
+		}
+	}
+}
+
+// An operation's answer, which waits for the pass after the operations.
+@(private = "file")
+Answer :: struct {
+	request: u32,
+	result:  cook_link.Operation_Result,
+}
+
+// handle_messages handles what the editor sent, and notices when it leaves. After asset operations, it makes a pass,
+// so the editor has the changes to the index before the answers.
 @(private = "file")
 handle_messages :: proc(d: ^Daemon) {
+	answers := make([dynamic]Answer, context.temp_allocator)
+	force := make(map[format.Guid]bool, context.temp_allocator)
 	incoming, connection, dropped := server_take(&d.server)
 	defer server_release(incoming)
 	if d.linked_connection != 0 && connection != d.linked_connection {
@@ -180,7 +210,7 @@ handle_messages :: proc(d: ^Daemon) {
 				roots[i] = {r.name, r.dir}
 			}
 			// The Welcome and the index go out before the first log line, so the editor has them first.
-			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots})
+			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers()})
 			snapshot, problems := index_snapshot(&d.index)
 			server_send(&d.server, connection, snapshot)
 			for p in problems {
@@ -190,12 +220,49 @@ handle_messages :: proc(d: ^Daemon) {
 			server_log_to_editor(&d.server, true)
 			log.infof("cook: linked to %s", msg.editor)
 		case:
-			log.warnf("cook: cook link: the editor sent a message that only the daemon sends: %v", m.header.kind)
+			if connection != d.linked_connection {
+				log.warnf("cook: cook link: the editor sent a message of kind %d before its Hello", m.header.kind)
+				continue
+			}
+			result, is_operation := run_operation(d.options.roots[:], &d.index, message, &force)
+			if !is_operation {
+				log.warnf("cook: cook link: the editor sent a message that only the daemon sends: %v", m.header.kind)
+				continue
+			}
+			if result.error != "" {
+				log.warnf("cook: %s", result.error)
+			}
+			append(&answers, Answer{m.header.request, result})
 		}
 	}
 	if dropped > 0 {
 		log.warnf("cook: cook link: dropped %d log lines while the editor was slow to read", dropped)
 	}
+	if len(answers) == 0 {
+		return
+	}
+	daemon_pass(d, force)
+	for a in answers {
+		server_send(&d.server, d.linked_connection, a.result, a.request)
+	}
+}
+
+// importers is what the daemon cooks, for the editor: each kind's extension and import settings.
+@(private = "file")
+importers :: proc() -> []cook_link.Importer {
+	result := make([dynamic]cook_link.Importer, context.temp_allocator)
+	for extension, kind in IMPORTERS {
+		if kind == .None {
+			continue
+		}
+		settings := import_settings(kind)
+		infos := make([]cook_link.Setting_Info, len(settings), context.temp_allocator)
+		for s, i in settings {
+			infos[i] = {s.key, s.values, s.default, s.description}
+		}
+		append(&result, cook_link.Importer{kind = kind == .Scene ? .Scene : .Script, extension = extension, settings = infos})
+	}
+	return result[:]
 }
 
 clone_options :: proc(options: Cook_Options, allocator := context.allocator) -> Cook_Options {

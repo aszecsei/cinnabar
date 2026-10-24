@@ -73,9 +73,58 @@ public sealed class CookLinkTests : IDisposable
         Assert.Contains("levels", index.ChildFolders("game", ""));
         Assert.NotNull(session.LastCook);
 
-        // A removed asset leaves the index.
+        // A removed asset leaves the index, and its blob leaves the cache, so a game that starts later does not run it.
+        var blob = Path.Combine(_dir, "cache", "dev", util.Guid + ".blob");
+        Assert.True(File.Exists(blob));
         File.Delete(Path.Combine(_content, "scripts", "util.luau"));
         await Until(() => index.Find(util.Guid) == null && index.Find(door.Guid)?.Status == AssetStatus.Failed, session, output);
+        Assert.False(File.Exists(blob));
+    }
+
+    [Fact]
+    public async Task TheDaemonDoesAssetOperationsAndAnswersAfterTheIndexChanges()
+    {
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.State == CookState.Linked && index.Assets.Count == 4, session, output);
+        var script = Assert.Single(index.Importers, i => i.Kind == AssetKind.Script);
+        Assert.Equal(".luau", script.Extension);
+        Assert.Contains(script.Settings, s => s.Key == "native" && s.Default == "false");
+
+        var created = await session.Request(new CreateAsset(AssetTemplate.Behaviour, "game", "scripts", "gate"));
+        Assert.Equal("", created.Error);
+        var gate = Assert.Single(created.Guids);
+        Assert.Equal("Gate", index.Find(gate)?.Behaviour);
+        Assert.True(File.Exists(Path.Combine(_content, "scripts", "gate.luau.meta")));
+
+        Assert.Equal("", (await session.Request(new CreateFolder("game", "scripts/doors"))).Error);
+        Assert.Equal("", (await session.Request(new MoveAssets([gate], "game", "scripts/doors"))).Error);
+        Assert.Equal("", (await session.Request(new RenameAsset(gate, "portcullis"))).Error);
+        Assert.Equal("scripts/doors/portcullis.luau", index.Find(gate)?.Path);
+
+        var copy = Assert.Single((await session.Request(new DuplicateAssets([gate]))).Guids);
+        Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
+
+        Assert.Equal("", (await session.Request(new SetImportSettings(gate, [new Setting("native", "true")]))).Error);
+        Assert.Equal([new Setting("native", "true")], index.Find(gate)!.Settings);
+        Assert.Equal("", (await session.Request(new Reimport([gate]))).Error);
+        Assert.Equal(1u, session.LastCook?.Scripts);
+
+        // A refused operation changes nothing, and says why.
+        var refused = await session.Request(new RenameAsset(copy, "portcullis"));
+        Assert.Contains("already exists", refused.Error);
+        Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
+        Assert.Contains("root", (await session.Request(new DeleteAssets([], [new Folder("game", "")]))).Error);
+    }
+
+    [Fact]
+    public async Task AnOperationWithoutTheDaemonFails()
+    {
+        using var session = new CookSession(new CookOptions("missing.exe", "cache", null, [], _dir), new AssetIndex());
+        var result = await session.Request(new Reimport([]));
+        Assert.NotEqual("", result.Error);
     }
 
     [Fact]

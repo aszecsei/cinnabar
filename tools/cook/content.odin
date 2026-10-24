@@ -36,7 +36,11 @@ Pass :: struct {
 	// Every asset in the roots, with what the cook learnt of it, and every folder.
 	assets:     []Asset_Source,
 	folders:    []Folder,
+	// The GUIDs that more than one asset has, so that none of them is among the assets.
+	shared:     []format.Guid,
 	problems:   Problems,
+	// Assets to cook also when their blobs are up to date, as a re-import asks.
+	force:      map[format.Guid]bool,
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir>...`. The daemon
@@ -93,11 +97,12 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 
 // cook scans the roots and cooks the assets of the kinds whose keys changed. When it writes a blob, it then writes the
 // cache's generation, so a running game swaps the pass's blobs together (see docs/content-pipeline.md#loading). It
-// logs each problem as it finds it, unless log_problems is false.
-cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true) -> (pass: Pass) {
+// logs each problem as it finds it, unless log_problems is false. It cooks the assets in force whatever their keys.
+cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, force: map[format.Guid]bool = nil) -> (pass: Pass) {
 	pass.problems.log = log_problems
+	pass.force = force
 	scanned: bool
-	pass.assets, pass.folders, scanned = scan(options.roots[:], &pass.problems)
+	pass.assets, pass.folders, pass.shared, scanned = scan(options.roots[:], &pass.problems)
 	pass.ok = scanned
 	if .Script in kinds {
 		pass.ok = cook_scripts(options, pass.assets, &pass) && pass.ok

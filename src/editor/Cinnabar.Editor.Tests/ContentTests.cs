@@ -19,13 +19,68 @@ public sealed class ContentTests : IDisposable
         File.WriteAllText(scenePath, "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n\nentity 0000000000000002\nname = \"Gate\"\n");
         var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
             new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)]));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])]));
         shell.Assets.Apply(new AssetSnapshot(
         [
             new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript]),
-            new Asset(UtilScript, AssetKind.Script, "game", "util.luau", AssetStatus.Current, 0, 0, "", [], []),
-        ], []));
+            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], []),
+        ], [new Folder("game", "lib")]));
         return shell;
+    }
+
+    static readonly SettingInfo Native = new("native", ["true", "false"], "false", "Compile to machine code.");
+
+    [Fact]
+    public void ADeleteShowsTheAssetsThatUseWhatItTakes()
+    {
+        using var shell = NewShell();
+
+        var (deleted, users) = shell.DeleteEffects([new ContentItem(UtilScript, null)]);
+        Assert.Equal(UtilScript, Assert.Single(deleted).Guid);
+        Assert.Equal(DoorScript, Assert.Single(users).Guid);
+
+        // A folder takes the assets in it, and what uses each other goes with it.
+        (deleted, users) = shell.DeleteEffects([ContentItem.Of(new ContentFolder("game", "lib")), new ContentItem(DoorScript, null)]);
+        Assert.Equal(2, deleted.Count);
+        Assert.Empty(users);
+    }
+
+    [Fact]
+    public void ANewAssetIsNamedForWhatItIsAndNoFileHasTheName()
+    {
+        using var shell = NewShell();
+        shell.SelectContent(new ContentFolder("game", ""), []);
+        File.WriteAllText(Path.Combine(_directory, "new_script.luau"), "");
+
+        Assert.Equal("new_script_2", shell.NewName(AssetTemplate.Script));
+        Assert.Equal("new_behaviour", shell.NewName(AssetTemplate.Behaviour));
+        Assert.Equal("new_folder", shell.NewName(null));
+    }
+
+    [Fact]
+    public void AnImportSettingAtItsDefaultLeavesTheMetaFile()
+    {
+        Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
+
+        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], EditorShell.WithSetting(settings, [Native], "native", "false"));
+        Assert.Equal([new Setting("old", "1"), new Setting("native", "false"), new Setting("last", "2")],
+            EditorShell.WithSetting(settings, [], "native", "false"));
+        Assert.Equal([new Setting("native", "true")], EditorShell.WithSetting([], [Native], "native", "true"));
+    }
+
+    [Fact]
+    public async Task AnOperationWithoutTheDaemonFailsAndSaysWhy()
+    {
+        using var shell = NewShell();
+        shell.SelectContent(new ContentFolder("game", ""), [DoorScript]);
+        var failures = new List<string>();
+        shell.OperationFailed += failures.Add;
+
+        Assert.False(shell.CanChangeContent);
+        Assert.False(shell.Commands.Get(EditorCommands.DuplicateAsset).CanExecute);
+        Assert.False(await shell.Create(AssetTemplate.Script, "x"));
+        Assert.Single(failures);
+        Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.StartsWith("content: "));
     }
 
     [Fact]

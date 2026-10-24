@@ -120,7 +120,7 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked, behaviour := cooked_script(output); cooked == key {
+		if cooked, behaviour := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
 			s.behaviour = behaviour
 			pass.current[.Script] += 1
 			continue
@@ -181,7 +181,7 @@ collect_scripts :: proc(assets: []Asset_Source, problems: ^Problems) -> []Script
 				source = a.source,
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
-				failed = !check_script_settings(a, problems),
+				failed = !check_settings(a, problems),
 			},
 		)
 	}
@@ -206,23 +206,6 @@ fail_dependents :: proc(scripts: []Script_Source, problems: ^Problems) {
 			}
 		}
 	}
-}
-
-@(private = "file")
-check_script_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
-	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
-	for setting in a.meta.settings {
-		switch setting.key {
-		case "native":
-			if setting.value != "true" && setting.value != "false" {
-				report_error(problems, meta_path, 0, 0, "native must be true or false")
-				return false
-			}
-		case:
-			report_warning(problems, meta_path, 0, 0, "unknown setting %q", setting.key)
-		}
-	}
-	return true
 }
 
 @(private = "file")

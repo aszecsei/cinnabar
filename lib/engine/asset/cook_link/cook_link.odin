@@ -18,6 +18,16 @@ Message :: union {
 	Asset_Delta,
 	Asset_Problems,
 	Cook_Finished,
+	Create_Asset,
+	Create_Folder,
+	Move_Assets,
+	Rename_Asset,
+	Rename_Folder,
+	Duplicate_Assets,
+	Delete_Assets,
+	Set_Import_Settings,
+	Reimport,
+	Operation_Result,
 }
 
 // Editor to daemon, first: the editor's protocol version and its name.
@@ -28,16 +38,33 @@ Hello :: struct {
 
 // Daemon to editor, the answer to a Hello with the same protocol version. An Asset_Snapshot follows it.
 Welcome :: struct {
-	protocol: u64,
+	protocol:  u64,
 	// The configuration that the daemon cooks, "dev".
-	config:   string,
-	roots:    []Root,
+	config:    string,
+	roots:     []Root,
+	importers: []Importer,
 }
 
 // A content root, by its name, such as "game", and its directory: absolute, with forward slashes.
 Root :: struct {
 	name: string,
 	dir:  string,
+}
+
+// Importer is what the daemon cooks of one kind of asset: its extension, such as ".luau", and its import settings.
+Importer :: struct {
+	kind:      Asset_Kind,
+	extension: string,
+	settings:  []Setting_Info,
+}
+
+// Setting_Info is an import setting that an importer knows: its key in the .meta file, the values that it takes, and
+// the value that an asset without the setting has.
+Setting_Info :: struct {
+	key:         string,
+	values:      []string,
+	default:     string,
+	description: string,
 }
 
 // Daemon to editor, the answer to a Hello with another protocol version. The daemon closes the link after it.
@@ -147,6 +174,88 @@ Cook_Finished :: struct {
 	scenes:       u32,
 	failed:       u32,
 	milliseconds: f32,
+}
+
+// The asset operations go from the editor to the daemon, which is the only program that writes .meta files (see
+// docs/content-pipeline.md#asset-operations). Each is a request with an ID in its header. The daemon checks
+// everything first, so an operation fails without changing anything, or does all of it. It then cooks, sends what
+// changed, and answers with an Operation_Result with the request's ID, so the editor's index already has the change.
+// Names are file and folder names without a path, and an asset's name is without its extension.
+
+Asset_Template :: enum u8 {
+	// A module that returns a table.
+	Script,
+	// A script that defines a behaviour, whose class is named for the file.
+	Behaviour,
+	// An empty scene.
+	Scene,
+}
+
+// Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.
+Create_Asset :: struct {
+	template: Asset_Template,
+	root:     string,
+	// The folder's path in the root, or "" for the root.
+	folder:   string,
+	name:     string,
+}
+
+// Makes a folder. Its parent must exist.
+Create_Folder :: struct {
+	root: string,
+	path: string,
+}
+
+// Moves assets, each with its .meta file, into a folder, of the same root or another.
+Move_Assets :: struct {
+	guids:  []string,
+	root:   string,
+	folder: string,
+}
+
+// Renames an asset in its folder. It keeps its extension.
+Rename_Asset :: struct {
+	guid: string,
+	name: string,
+}
+
+// Renames a folder in its parent, with everything in it.
+Rename_Folder :: struct {
+	root: string,
+	path: string,
+	name: string,
+}
+
+// Copies assets in their folders, each with a new .meta file that has its import settings. The result has the copies'
+// GUIDs, in order.
+Duplicate_Assets :: struct {
+	guids: []string,
+}
+
+// Sends assets with their .meta files, and folders with everything in them, to the Recycle Bin.
+Delete_Assets :: struct {
+	guids:   []string,
+	folders: []Folder,
+}
+
+// Replaces an asset's import settings. The daemon checks them with the asset's importer, writes its .meta file, and
+// cooks it again.
+Set_Import_Settings :: struct {
+	guid:     string,
+	settings: []Setting,
+}
+
+// Cooks assets again with the same settings, also when their blobs are up to date.
+Reimport :: struct {
+	guids: []string,
+}
+
+// Daemon to editor: the answer to an operation, with its request's ID.
+Operation_Result :: struct {
+	// Why the operation failed, or "" when it succeeded.
+	error: string,
+	// The GUIDs of the assets that it made, if any.
+	guids: []string,
 }
 
 Header :: wire.Header

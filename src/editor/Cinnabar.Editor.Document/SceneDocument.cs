@@ -251,6 +251,13 @@ public sealed class SceneDocument(string path, Scene scene)
         Changed?.Invoke();
     }
 
+    /// <summary>The scene's file moved, as when the content browser moves or renames it. Nothing is written.</summary>
+    public void Move(string path)
+    {
+        Path = System.IO.Path.GetFullPath(path);
+        Changed?.Invoke();
+    }
+
     /// <summary>Writes text to a temporary file and moves it over the target, so a crash never leaves half a file.</summary>
     public static void WriteAtomically(string path, string text)
     {

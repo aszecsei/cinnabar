@@ -14,7 +14,7 @@ public class AssetIndexTests
     static AssetIndex Index(Asset[] assets, params string[] folders)
     {
         var index = new AssetIndex();
-        index.Apply(new Welcome(1, "dev", [new Root("game", "E:/game/content")]));
+        index.Apply(new Welcome(1, "dev", [new Root("game", "E:/game/content")], []));
         index.Apply(new AssetSnapshot(assets, [.. folders.Select(f => new Folder("game", f))]));
         return index;
     }

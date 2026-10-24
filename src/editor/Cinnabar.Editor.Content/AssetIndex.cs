@@ -11,11 +11,15 @@ namespace Cinnabar.Editor.Content;
 public sealed class AssetIndex
 {
     readonly List<Root> _roots = [];
+    readonly List<Importer> _importers = [];
     readonly Dictionary<string, Asset> _assets = [];
     readonly HashSet<Folder> _folders = [];
     readonly Dictionary<string, Problem[]> _problems = [];
 
     public IReadOnlyList<Root> Roots => _roots;
+
+    /// <summary>What the daemon cooks: each kind's extension and import settings.</summary>
+    public IReadOnlyList<Importer> Importers => _importers;
 
     /// <summary>By GUID.</summary>
     public IReadOnlyDictionary<string, Asset> Assets => _assets;
@@ -36,6 +40,8 @@ public sealed class AssetIndex
             case Welcome welcome:
                 _roots.Clear();
                 _roots.AddRange(welcome.Roots);
+                _importers.Clear();
+                _importers.AddRange(welcome.Importers);
                 break;
             case AssetSnapshot snapshot:
                 _assets.Clear();
@@ -89,6 +95,23 @@ public sealed class AssetIndex
     }
 
     public Asset? Find(string guid) => _assets.GetValueOrDefault(guid);
+
+    /// <summary>The import settings that an asset's kind takes.</summary>
+    public IReadOnlyList<SettingInfo> SettingsOf(AssetKind kind) => _importers.Find(i => i.Kind == kind)?.Settings ?? [];
+
+    /// <summary>The extension of a kind's sources, such as <c>.luau</c>.</summary>
+    public string ExtensionOf(AssetKind kind) => _importers.Find(i => i.Kind == kind)?.Extension ?? "";
+
+    /// <summary>The assets in a folder of a root and the folders under it, as a delete of the folder takes them.</summary>
+    public IEnumerable<Asset> AssetsUnder(string root, string folder) =>
+        _assets.Values.Where(a => a.Root == root && (folder == "" || a.Path.StartsWith(folder + "/", StringComparison.Ordinal)));
+
+    /// <summary>
+    /// The assets outside a set that depend on one in it: what a delete of the set breaks. Each comes once, by path.
+    /// </summary>
+    public IReadOnlyList<Asset> DependentsOutside(IReadOnlyCollection<string> guids) =>
+        [.. _assets.Values.Where(a => !guids.Contains(a.Guid) && a.Dependencies.Any(guids.Contains))
+            .OrderBy(a => a.Root, StringComparer.Ordinal).ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase)];
 
     /// <summary>The problems of an asset, or with <c>""</c>, those that belong to no asset.</summary>
     public IReadOnlyList<Problem> ProblemsOf(string guid) => _problems.GetValueOrDefault(guid) ?? [];

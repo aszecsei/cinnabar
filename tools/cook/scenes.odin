@@ -30,12 +30,10 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	ok := true
 	for i in assets_of(assets, .Scene) {
 		s := &assets[i]
-		for setting in s.meta.settings {
-			report_warning(problems, fmt.tprintf("%s%s", s.path, format.META_EXTENSION), 0, 0, "unknown setting %q", setting.key)
-		}
+		settings_ok := check_settings(s^, problems)
 		scene, scene_ok := parse_scene(s^, scripts, problems)
 		// A scene with errors keeps its old blob, so the running game keeps the last good version.
-		if !scene_ok {
+		if !scene_ok || !settings_ok {
 			s.failed = true
 			ok = false
 			continue
@@ -50,7 +48,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 		key := scene_key(options.config, s^)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked_key(output, .Scene, format.scene_layout()) == key {
+		if cooked_key(output, .Scene, format.scene_layout()) == key && !pass.force[s.meta.guid] {
 			pass.current[.Scene] += 1
 			continue
 		}

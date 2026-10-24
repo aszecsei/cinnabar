@@ -65,6 +65,10 @@ public sealed class MainWindow : Window
         shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
+        shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.RenameRequested += item => _ = AskRename(item);
+        shell.DeleteRequested += items => _ = ConfirmDelete(items);
+        shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -160,6 +164,77 @@ public sealed class MainWindow : Window
         else
         {
             _shell.DiscardAutosave();
+        }
+    }
+
+    async Task AskNewAsset(Link.Cook.AssetTemplate? template)
+    {
+        if (_shell.ContentFolder is not { } folder)
+        {
+            return;
+        }
+        var (title, what) = template switch
+        {
+            Link.Cook.AssetTemplate.Script => ("New Script", "script"),
+            Link.Cook.AssetTemplate.Behaviour => ("New Behaviour", "behaviour, whose class is named for its file,"),
+            Link.Cook.AssetTemplate.Scene => ("New Scene", "scene"),
+            _ => ("New Folder", "folder"),
+        };
+        var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";
+        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.NewName(template), "Create");
+        if (name != null)
+        {
+            await _shell.Create(template, name);
+        }
+    }
+
+    async Task AskRename(Shell.ContentItem item)
+    {
+        string current;
+        if (item.Guid is { } guid && _shell.Assets.Find(guid) is { } asset)
+        {
+            current = System.IO.Path.GetFileNameWithoutExtension(asset.Path);
+        }
+        else if (item.Folder is { Path: not "" } folder)
+        {
+            current = folder.Name;
+        }
+        else
+        {
+            return;
+        }
+        var name = await Dialogs.AskName(this, "Rename", $"Rename {current}. Its .meta file goes with it, so it keeps its GUID.", current, "Rename");
+        if (name != null && name != current)
+        {
+            await _shell.Rename(item, name);
+        }
+    }
+
+    async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
+    {
+        var (deleted, users) = _shell.DeleteEffects(items);
+        var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)
+            .OfType<string>().ToList();
+        if (names.Count == 0)
+        {
+            return;
+        }
+        var what = names.Count == 1 ? names[0] : $"{names.Count} items";
+        var message = $"Send {what} to the Recycle Bin";
+        message += deleted.Count > 0 && items.Any(i => i.Folder != null) ? $", with the {deleted.Count} {(deleted.Count == 1 ? "asset" : "assets")} in it?" : "?";
+        if (users.Count > 0)
+        {
+            const int Shown = 8;
+            var list = string.Join("\n", users.Take(Shown).Select(u => $"    {u.Root}/{u.Path}"));
+            if (users.Count > Shown)
+            {
+                list += $"\n    and {users.Count - Shown} more";
+            }
+            message += $"\n\nThese use it, and will fail to cook until they no longer do:\n{list}";
+        }
+        if (await Dialogs.Ask(this, "Delete", message, "Delete", "Cancel") == "Delete")
+        {
+            await _shell.Delete(items);
         }
     }
 

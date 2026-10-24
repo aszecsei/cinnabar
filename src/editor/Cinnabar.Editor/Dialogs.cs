@@ -47,4 +47,48 @@ static class Dialogs
         await dialog.ShowDialog(owner);
         return answer;
     }
+
+    /// <summary>Asks for a name, with a text that starts selected, and returns it, or null if the user cancelled.</summary>
+    public static async Task<string?> AskName(Window owner, string title, string message, string initial, string accept)
+    {
+        string? answer = null;
+        var dialog = new Window
+        {
+            Title = title,
+            SizeToContent = SizeToContent.WidthAndHeight,
+            CanResize = false,
+            ShowInTaskbar = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Background = new SolidColorBrush(Color.Parse("#232326")),
+        };
+        var box = new TextBox { Text = initial, MinWidth = 320 };
+        var ok = new Button { Content = accept, MinWidth = 88, HorizontalContentAlignment = HorizontalAlignment.Center, IsDefault = true, Classes = { "accent" } };
+        var cancel = new Button { Content = "Cancel", MinWidth = 88, HorizontalContentAlignment = HorizontalAlignment.Center, IsCancel = true };
+        ok.Click += (_, _) =>
+        {
+            answer = box.Text?.Trim();
+            dialog.Close();
+        };
+        cancel.Click += (_, _) => dialog.Close();
+        box.TextChanged += (_, _) => ok.IsEnabled = !string.IsNullOrWhiteSpace(box.Text);
+        dialog.Opened += (_, _) =>
+        {
+            box.Focus();
+            box.SelectAll();
+        };
+        dialog.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 12,
+            MaxWidth = 460,
+            Children =
+            {
+                new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+                box,
+                new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Right, Children = { ok, cancel } },
+            },
+        };
+        await dialog.ShowDialog(owner);
+        return string.IsNullOrEmpty(answer) ? null : answer;
+    }
 }

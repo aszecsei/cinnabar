@@ -39,7 +39,7 @@ A script that fails keeps its old blob, so the running game keeps the last good 
 
 The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, the definition file, and the sources of every module that the script requires, directly or not. A behaviour's field defaults and the type check depend on those modules, so a changed dependency cooks its dependents again.
 
-Script import settings in `.meta`: `native = true` compiles the module to machine code at load, like a `--!native` comment at the top of the source. An unknown setting is a warning.
+Script import settings in `.meta`: `native = true` compiles the module to machine code at load, like a `--!native` comment at the top of the source. Each importer has a table of the settings that it takes, with their values, defaults and descriptions (`import_settings` in `tools/cook`). Every cook checks the `.meta` files with it: an unknown setting is a warning, and a value that the setting does not take is an error. The daemon sends the table to the editor, which shows an editor for each setting.
 
 ### Scenes
 
@@ -54,22 +54,29 @@ In development, the cook daemon keeps the cache up to date while the sources cha
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
 - **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
 - **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names) and problems, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **Removed assets:** when an asset leaves the index, the daemon deletes its blob, so a game that starts later does not load it. A running game keeps the modules that it has loaded. An asset that only shares its GUID with a copy keeps its blob.
+- **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
 - **Problems:** an asset that fails is tried again at each pass until it cooks. The daemon logs an asset's problems when they change, and not again at each pass, and a pass that cooks something says how much. A `.meta` file that the daemon writes for a new asset is a change too, so it makes one more pass, which finds nothing to cook.
 - **One writer:** the daemon holds the cache's lock while it runs. A second daemon of the same cache stops with an error.
 
 ### Asset operations
 
-The daemon is the only program that writes `.meta` files, and it moves every asset with its `.meta` file. The editor asks the daemon for every change to the content roots, except the text of a scene that it saves (see [Editor](editor.md#content-browser)).
+The daemon is the only program that writes `.meta` files, and it moves every asset with its `.meta` file. The editor asks the daemon for every change to the content roots, except the text of a scene that it saves (see [Editor](editor.md#content-browser)). The operations are in `tools/cook/operations.odin`.
 
-- **Create** makes an asset from a template, such as a script, a behaviour or a scene, with a new `.meta` file. Save As for a scene creates the asset first, so the editor knows the GUID before it writes the scene.
-- **Move and rename** change the index first, then move the source and its `.meta` file. The daemon recognizes the watcher's events for its own operations, so it does not see the files as new assets. Folders have no `.meta` files and no GUIDs.
-- **Duplicate** copies the source and gives the copy a new `.meta` file.
-- **Delete** sends the source and its `.meta` file to the Recycle Bin. The editor first asks the daemon for the asset's dependents, and shows them in the confirmation.
-- **Import settings:** the daemon checks new settings with the asset's importer, writes the `.meta` file, and cooks the asset again. **Re-import** cooks an asset again with the same settings.
+- **All or nothing:** an operation checks everything first: the root, the folder, each name, and that no file is in the way. It then fails without changing anything, or does all of it. A move that fails halfway moves back what it moved.
+- **Names** are what Windows takes and the scan does not skip: no `<>:"/\|?*`, no name that starts with a dot or ends with a dot or a space, and no device name such as `CON`. An asset's name is without its extension, which the daemon adds.
+- **Then a pass:** after the operations that the editor sent, the daemon makes a pass, sends what changed, and then answers each operation. The editor's index therefore has the change when the answer comes. The watcher's events for the operation make one more pass, which finds nothing to cook.
+- **Create** makes an asset from a template, with a new `.meta` file: a script that returns a table, a behaviour whose class is named for its file (`door_bell.luau` defines `Door_Bell`), or an empty scene. A folder's parent must exist.
+- **Move and rename** move the `.meta` file, then the source. They never replace a file, and a rename that changes only the case works. A file moves to another drive too. Folders have no `.meta` files and no GUIDs. A folder renames with everything in it, on its drive.
+- **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings.
+- **Delete** sends sources with their `.meta` files, and folders with everything in them, to the Recycle Bin. A root cannot be deleted. The editor finds the assets that use what a delete takes in its index, and shows them in the confirmation.
+- **Import settings:** the daemon checks new settings with the asset's importer, writes the `.meta` file through a temporary file, and cooks the asset again, because the settings are part of its key. The `.meta` file keeps its comments. A setting that the importer does not know stays as the file has it, but the editor cannot add one. **Re-import** cooks assets again with the same settings, also when their keys say that they are up to date.
+- **Saving a scene** is the editor's. Save As writes the scene's text where the user picks, and a new scene in a root gets its `.meta` file at the daemon's next pass, as any new file does.
 - **No undo:** asset operations change the project, not the scene, so they are not on the editor's undo stack. The Recycle Bin recovers a deleted asset.
 - **Moved modules:** a `require` names a path, so moving or renaming a script breaks the requires of the scripts that require it. The next pass reports each broken require as a problem of the script that has it, with its line. *Later, the daemon offers to rewrite the requires when it moves a module.*
-- **Moves outside the editor:** a source that Explorer or git moves without its `.meta` file gets a new GUID, and the `.meta` file that stays behind is an orphan. The daemon reports each orphan as a warning. *Later, it pairs an orphan with a new source that has the same contents.*
+- **Moves outside the editor:** a source that Explorer or git moves without its `.meta` file gets a new GUID, and the `.meta` file that stays behind is an orphan. The scan reports each orphan as a warning. *Later, it pairs an orphan with a new source that has the same contents.*
+- **Directory handles:** the scan reads each directory with `os.read_all_directory_by_path`. Odin's `os.walker` leaves the last directory that it reads open, which would stop the daemon from renaming or deleting that folder.
 
 ### Cook link
 
@@ -77,7 +84,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 
 - **One transport:** `lib/engine/wire` has the framing, the wire format and the schema writer, for any union of messages. `lib/engine/editor/link` and `lib/engine/asset/cook_link` each give a union of messages. Neither imports anything from core or engine.
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
-- **Handshake:** `Hello`, then `Welcome` with the roots and the configuration, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
+- **Handshake:** `Hello`, then `Welcome` with the roots, the configuration and the importers, each with its extension and import settings, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed. It sends `Cook_Finished` after every pass.
 - **An entry has everything that the editor shows,** the import settings and the behaviour class included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
 - **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
@@ -87,13 +94,13 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 | Session | `Hello`, `Welcome`, `Refused`, `Log` |
 | Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the changed and removed assets and the folders that came and went |
 | Cooking | `Asset_Problems` with each problem's file, line, column and text, and `Cook_Finished` with the generation, the counts and the time |
-| Operations | *Phase 3:* `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each answered with `Operation_Result` |
+| Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made |
 
 ### Implementation phases
 
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
-3. **Asset operations.**
+3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
 4. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Blob format
