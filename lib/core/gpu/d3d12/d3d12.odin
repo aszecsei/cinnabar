@@ -190,6 +190,9 @@ begin_frame :: proc(size: [2]i32) {
 	target.resource = dev.back_buffers[dev.back_buffer_index]
 	target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
 	texture_barrier(dev.list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	when ODIN_DEBUG {
+		gpu.track_layout(&dev.layouts, dev.frame_target, .Render_Target)
+	}
 }
 
 // submit translates the command buffers into the frame's command list.
@@ -197,7 +200,7 @@ begin_frame :: proc(size: [2]i32) {
 submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 	when ODIN_DEBUG {
 		for cb, i in buffers {
-			if err, packet := gpu.validate(cb, VALIDATION_RESOURCES); err != .None {
+			if err, packet := gpu.validate(cb, VALIDATION_RESOURCES, &dev.layouts); err != .None {
 				log.errorf("gpu: command buffer %d, packet %d: %v", i, packet, err)
 				return false
 			}
@@ -219,6 +222,11 @@ end_frame :: proc() {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
 		return
+	}
+	when ODIN_DEBUG {
+		if layout, _ := gpu.tracked_layout(&dev.layouts, dev.frame_target); layout != .Render_Target {
+			log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
+		}
 	}
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	texture_barrier(dev.list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)

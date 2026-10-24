@@ -60,6 +60,8 @@ Resources :: struct {
 	dsv_size:         u32,
 	releases:         [dynamic]Release,
 	releases_mutex:   sync.Mutex,
+	// Only debug validation tracks layouts.
+	layouts:          gpu.Layout_Tracker,
 }
 
 @(private)
@@ -68,6 +70,7 @@ init_resources :: proc() -> bool {
 	gpu.pool_init(&dev.textures, gpu.MAX_TEXTURES, dev.allocator)
 	gpu.pool_init(&dev.samplers, gpu.MAX_SAMPLERS, dev.allocator)
 	dev.releases = make([dynamic]Release, dev.allocator)
+	gpu.layout_tracker_init(&dev.layouts, dev.allocator)
 
 	dev.resource_heap = create_descriptor_heap(.CBV_SRV_UAV, gpu.RESOURCE_DESCRIPTOR_COUNT, {.SHADER_VISIBLE}) or_return
 	dev.sampler_heap = create_descriptor_heap(.SAMPLER, gpu.MAX_SAMPLERS, {.SHADER_VISIBLE}) or_return
@@ -98,6 +101,7 @@ shutdown_resources :: proc() {
 	gpu.pool_destroy(&dev.buffers)
 	gpu.pool_destroy(&dev.textures)
 	gpu.pool_destroy(&dev.samplers)
+	gpu.layout_tracker_destroy(&dev.layouts)
 	release(&dev.resource_heap)
 	release(&dev.sampler_heap)
 	release(&dev.rtv_heap)
@@ -219,10 +223,8 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		resource_desc.Flags += {.ALLOW_UNORDERED_ACCESS}
 	}
 
-	layout := initial_layout(desc.usage)
-	if data != nil {
-		layout = .COPY_DEST
-	}
+	// Data arrives through a copy, and the copy moves the texture to the sampled layout.
+	layout := data != nil ? d3d.BARRIER_LAYOUT.COPY_DEST : LAYOUT[gpu.initial_layout(desc.usage, false)]
 	resource: ^d3d.IResource
 	hr := dev.device->CreateCommittedResource3(&heap_props, {}, &resource_desc, layout, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&resource))
 	if !check(hr, "CreateCommittedResource3(texture)") {
@@ -238,24 +240,13 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	}
 	entry := gpu.pool_get(&dev.textures, texture)
 	write_texture_views(texture, entry)
+	when ODIN_DEBUG {
+		gpu.track_layout(&dev.layouts, texture, gpu.initial_layout(desc.usage, data != nil))
+	}
 	if data != nil {
 		upload_texture(resource, &resource_desc, data)
 	}
 	return texture
-}
-
-// initial_layout is the layout of a texture's first usage. See gpu.Texture_Desc.
-@(private = "file")
-initial_layout :: proc(usage: gpu.Texture_Usages) -> d3d.BARRIER_LAYOUT {
-	switch {
-	case .Render_Target in usage:
-		return .RENDER_TARGET
-	case .Depth_Stencil in usage:
-		return .DEPTH_STENCIL_WRITE
-	case .Storage in usage:
-		return .UNORDERED_ACCESS
-	}
-	return .SHADER_RESOURCE
 }
 
 @(private = "file")
@@ -340,6 +331,9 @@ destroy_texture :: proc(texture: gpu.Texture) {
 	assert(texture != dev.frame_target, "gpu: the frame target cannot be destroyed")
 	if entry, ok := gpu.pool_remove(&dev.textures, texture); ok {
 		defer_release(entry.resource, .Texture, texture.index)
+		when ODIN_DEBUG {
+			gpu.untrack_layout(&dev.layouts, texture)
+		}
 	}
 }
 

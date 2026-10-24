@@ -24,6 +24,7 @@ state: struct {
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
+	layouts:       gpu.Layout_Tracker,
 }
 
 init :: proc(window: rawptr, size: [2]i32) -> bool {
@@ -34,7 +35,9 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	gpu.pool_init(&state.textures, gpu.MAX_TEXTURES)
 	gpu.pool_init(&state.samplers, gpu.MAX_SAMPLERS)
 	gpu.pool_init(&state.pipelines, gpu.MAX_PIPELINES)
+	gpu.layout_tracker_init(&state.layouts)
 	state.frame_target = gpu.pool_add(&state.textures, frame_target_desc(size))
+	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
 	state.upload_buffer = gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = UPLOAD_RING_SIZE})
 	state.upload_memory = make([]byte, UPLOAD_RING_SIZE)
 	return true
@@ -42,6 +45,7 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 
 shutdown :: proc() {
 	delete(state.upload_memory)
+	gpu.layout_tracker_destroy(&state.layouts)
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
@@ -62,13 +66,14 @@ begin_frame :: proc(size: [2]i32) {
 	}
 	state.frame_start = time.tick_now()
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
+	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
 	state.upload_offset = 0
 }
 
 // submit returns false if any command buffer breaks a rule. It then drops all of them.
 submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 	for cb, i in buffers {
-		if err, packet := gpu.validate(cb, RESOURCES); err != .None {
+		if err, packet := gpu.validate(cb, RESOURCES, &state.layouts); err != .None {
 			log.errorf("gpu: command buffer %d, packet %d: %v", i, packet, err)
 			return false
 		}
@@ -76,7 +81,12 @@ submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 	return true
 }
 
-end_frame :: proc() {}
+// end_frame checks that the game left the frame target in the render target layout.
+end_frame :: proc() {
+	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target); layout != .Render_Target {
+		log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
+	}
+}
 
 create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 	if err := gpu.validate_buffer_desc(desc, data); err != .None {
@@ -93,7 +103,11 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	}
 	stored := desc
 	stored.label = ""
-	return gpu.pool_add(&state.textures, stored)
+	texture := gpu.pool_add(&state.textures, stored)
+	if texture != {} {
+		gpu.track_layout(&state.layouts, texture, gpu.initial_layout(desc.usage, data != nil))
+	}
+	return texture
 }
 
 create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
@@ -129,6 +143,7 @@ destroy_texture :: proc(texture: gpu.Texture) {
 	assert(texture != state.frame_target, "gpu: the frame target cannot be destroyed")
 	if _, ok := gpu.pool_remove(&state.textures, texture); ok {
 		gpu.pool_free(&state.textures, texture.index)
+		gpu.untrack_layout(&state.layouts, texture)
 	}
 }
 

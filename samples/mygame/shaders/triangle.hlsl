@@ -7,7 +7,7 @@ struct Vertex {
 	float4 color;
 };
 
-// Matches Triangle_Constants in game.odin.
+// Matches Scene_Constants in game.odin.
 struct Push {
 	uint vertices;
 	uint texture;
@@ -28,16 +28,20 @@ struct Varyings {
 	float4 color : COLOR0;
 };
 
-Varyings vs_main(uint vertex_id : SV_VertexID) {
+// Instance 0 is a bright triangle in front. Instance 1 is a larger, dimmer triangle behind it that turns the
+// other way, so the depth test hides the part of it that the first one covers.
+Varyings vs_main(uint vertex_id : SV_VertexID, uint instance : SV_InstanceID) {
 	Vertex v = cn_buffer(push.vertices).Load<Vertex>(vertex_id * sizeof(Vertex));
+	bool front = instance == 0;
 	float s, c;
-	sincos(pass.time, s, c);
-	float2 p = float2(v.position.x * c - v.position.y * s, v.position.x * s + v.position.y * c);
+	sincos(front ? pass.time : -0.7 * pass.time, s, c);
+	float2 p = float2(v.position.x * c - v.position.y * s, v.position.x * s + v.position.y * c) * (front ? 1.0 : 1.5);
 
 	Varyings o;
-	o.position = float4(p.x / pass.aspect, p.y, 0, 1);
+	o.position = float4(p.x / pass.aspect, p.y, front ? 0.4 : 0.6, 1);
 	o.uv = v.uv;
-	o.color = v.color;
+	// The scene is HDR. The composite pass tone maps it.
+	o.color = v.color * (front ? 3.0 : 0.6);
 	return o;
 }
 

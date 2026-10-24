@@ -33,13 +33,13 @@ The engine checks `Features` before it uses a capability. Every capability must 
 | `lib/core/gpu` | Both | Pure Odin. Handles, descriptions, enums, command packet definitions, `Command_Buffer` recording procedures, the format hash. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. The only package that imports `vendor:directx`. |
 | `lib/core/gpu/null` | Host | Validates command buffers and executes nothing. Used for headless tests. |
-| `lib/engine/render` | Game | Render graph, frame setup, render extraction. |
+| `lib/engine/render` | Game | Render graph (barriers, pass culling, transient textures), frame setup, render extraction. |
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
 **Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, and `create_*` and `destroy_*` for buffers, textures, samplers and pipelines. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
-The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. Use it to find code that only D3D12 accepts.
+The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 
 ## Binding model
 
@@ -75,7 +75,7 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 - **Bindless indices:** see [Bindless indices](#bindless-indices).
 - **Creation:** `create_*` returns the nil handle and logs an error if the description is invalid. The backend copies the description and the initial data, so neither can point into the DLL image after the call.
 - **Initial data:** a buffer or texture created with data gets it through a staging buffer. The copies run before the command lists of the frame, so the resource is ready in the frame that creates it. Texture data is mip 0 with tightly packed rows.
-- **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout. The render graph (phase 2) takes over from there.
+- **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout. `gpu.initial_layout` gives the layout. The [render graph](#render-graph) takes over from there.
 - **Deferred destruction:** `destroy` invalidates the handle at once. The backend releases the resource, and reuses the pool slot and its descriptors, when the GPU finishes the frame that destroyed it. Two frames are in flight.
 - **Lifetime scopes:** each resource belongs to a scope: `Permanent`, `Level`, `Asset` or `Game`. On a soft restart (see [Hot reload](hot-reload.md#reload-sequence)), `core` destroys all `Game` resources and keeps the others.
 - **Memory:** the first version uses committed resources. Suballocation is a later change inside the backend.
@@ -110,9 +110,27 @@ These rules come from Metal's encoder model. All backends enforce them.
 
 ### Barriers
 
-- Barriers use the Enhanced Barriers model: sync stages, access flags and texture layouts. This model maps one-to-one to Vulkan `synchronization2`. On Metal, most barriers become nothing or fences.
-- The backend does not track resource states. State tracking would serialize parallel recording.
-- The render graph in `lib/engine/render` emits all barriers. Passes declare how they use each resource, and the graph computes the barriers.
+- Barriers use the Enhanced Barriers model: sync stages (`Syncs`), access flags (`Accesses`) and texture layouts (`Texture_Layout`). This model maps one-to-one to Vulkan `synchronization2`. On Metal, most barriers become nothing or fences.
+- `cmd_barriers` records buffer and texture barriers. Barriers occur only outside a render pass. A barrier covers the whole resource.
+- An empty `Syncs` means no synchronization, and an empty `Accesses` means no access. A side with no synchronization has no access.
+- `Undefined` as the layout before discards the contents, whatever the texture's layout is.
+- The backend does not track resource states to translate barriers. State tracking would serialize parallel recording.
+- Validation in debug builds and in the null backend tracks texture layouts. It rejects a barrier whose layout before is wrong, and a render pass whose attachments are not in the render target or depth write layout.
+- **Frame boundary:** a frame starts after the GPU completes the work of the previous frame. A resource therefore needs no barrier for work in an earlier frame, only a layout change. The D3D12 backend executes each frame's work in one `ExecuteCommandLists` call. A Vulkan backend adds a full barrier at the start of each frame.
+- The render graph in `lib/engine/render` records all barriers.
+
+### Render graph
+
+The game builds a `render.Graph` every frame in frame memory. Passes declare how they use each resource, and the graph computes the barriers.
+
+- **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
+- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
+- **Imported resources:** `import_texture` and `import_buffer` add resources that outlive the frame. An imported texture has a resting use, and the graph returns it to that layout at the end of the frame. The frame target rests as `Color`. A texture created with data rests as `Sampled`.
+- **Transient textures:** `create_texture` adds a texture that exists for one frame. The graph adds the usages that its uses need. A `Texture_Cache` in `Game_State` keeps the textures between frames, keyed by description and label, and destroys a texture after `CACHE_LIFETIME` frames without use.
+- **Barriers:** a use needs a barrier when it changes the layout, when it follows a write, or when it writes after any access. Reads in the same layout merge without a barrier, so a later write waits for all of them. A transient texture starts `Undefined`, and sampling it before a pass writes it is an error.
+- **Culling:** the graph walks the passes backward from the imported resources. A pass is live if it writes a resource that a later live pass reads, if it writes an imported resource, or if `keep_pass` marks it. A write that does not read (for example a clear) makes earlier writers of that resource unnecessary.
+- **Handles:** graph handles are valid for one graph. In a `Pass_Proc`, `gpu_texture` and `gpu_buffer` return the `gpu` handles, because transient textures exist only after recording starts.
+- **Execution:** `execute` records one command buffer and submits it. Phase 3 records passes on jobs.
 
 ## GPU-driven rendering
 
@@ -138,6 +156,7 @@ The engine culls and builds draws on the GPU. The interface supports this from t
 
 - The game renders into a frame target texture that `core` provides. The engine never sees a swapchain.
 - The frame target is in the render target layout when the frame starts, and the game must leave it in that layout. Its contents are undefined at the start of each frame.
+- `core` reads the window size once at the start of each frame. The frame target has that size, and `window_size` returns it for the whole frame. While the window is minimized, the size is zero and the game renders nothing.
 - **Standalone:** `core` copies the frame target to the swapchain and presents with vsync. Vsync paces the frame.
 - **Editor:** `core` renders into a shared texture and signals a shared fence instead (see [Editor](editor.md#viewport)).
 
@@ -155,7 +174,7 @@ The engine culls and builds draws on the GPU. The interface supports this from t
 
 ## Debugging
 
-- Development builds enable the D3D12 debug layer and DRED.
+- Development builds enable the D3D12 debug layer and DRED. They also validate each command buffer, including barrier layouts, before translation.
 - Every resource and pipeline has a debug name. Command buffers carry debug markers for PIX.
 
 ## Implementation phases

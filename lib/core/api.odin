@@ -13,6 +13,7 @@ Platform_API :: struct {
 	frame_allocator:     runtime.Allocator,
 
 	time_seconds:     proc() -> f64,
+	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),
 

@@ -72,6 +72,8 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 		case .Dispatch:
 			d := gpu.payload(p, gpu.Dispatch)
 			list->Dispatch(d.groups.x, d.groups.y, d.groups.z)
+		case .Barriers:
+			barriers(list, p)
 		}
 	}
 }
@@ -138,6 +140,105 @@ beginning_access :: proc(load: gpu.Load_Op, format: gpu.Format, clear: d3d.CLEAR
 @(private = "file")
 ending_access :: proc(store: gpu.Store_Op) -> d3d.RENDER_PASS_ENDING_ACCESS_TYPE {
 	return store == .Store ? .PRESERVE : .DISCARD
+}
+
+@(private = "file")
+barriers :: proc(list: ^d3d.IGraphicsCommandList7, packet: gpu.Packet) {
+	buffers, textures := gpu.barrier_data(packet)
+	buffer_barriers: [gpu.MAX_PACKET_BARRIERS]d3d.BUFFER_BARRIER
+	texture_barriers: [gpu.MAX_PACKET_BARRIERS]d3d.TEXTURE_BARRIER
+	for b, i in buffers {
+		buffer_barriers[i] = {
+			SyncBefore   = sync_flags(b.sync_before),
+			SyncAfter    = sync_flags(b.sync_after),
+			AccessBefore = access_flags(b.access_before),
+			AccessAfter  = access_flags(b.access_after),
+			pRessource   = buffer_entry(b.buffer).resource,
+			Size         = max(u64),
+		}
+	}
+	for b, i in textures {
+		texture_barriers[i] = {
+			SyncBefore = sync_flags(b.sync_before),
+			SyncAfter = sync_flags(b.sync_after),
+			AccessBefore = access_flags(b.access_before),
+			AccessAfter = access_flags(b.access_after),
+			LayoutBefore = LAYOUT[b.layout_before],
+			LayoutAfter = LAYOUT[b.layout_after],
+			pResource = texture_entry(b.texture).resource,
+			// 0xffffffff selects all subresources.
+			Subresources = {IndexOrFirstMipLevel = 0xffffffff},
+		}
+	}
+
+	groups: [2]d3d.BARRIER_GROUP
+	count: u32
+	if len(buffers) > 0 {
+		groups[count] = {
+			Type            = .BUFFER,
+			NumBarriers     = u32(len(buffers)),
+			pBufferBarriers = &buffer_barriers[0],
+		}
+		count += 1
+	}
+	if len(textures) > 0 {
+		groups[count] = {
+			Type             = .TEXTURE,
+			NumBarriers      = u32(len(textures)),
+			pTextureBarriers = &texture_barriers[0],
+		}
+		count += 1
+	}
+	list->Barrier(count, &groups[0])
+}
+
+@(private = "file")
+sync_flags :: proc(syncs: gpu.Syncs) -> (flags: d3d.BARRIER_SYNC_FLAGS) {
+	for s in syncs {
+		flags += {SYNC[s]}
+	}
+	return
+}
+
+// An empty gpu.Accesses is NO_ACCESS. D3D12's empty access set means COMMON, which the interface does not use.
+@(private = "file")
+access_flags :: proc(accesses: gpu.Accesses) -> (flags: d3d.BARRIER_ACCESS_FLAGS) {
+	if accesses == {} {
+		return {.NO_ACCESS}
+	}
+	for a in accesses {
+		flags += {ACCESS[a]}
+	}
+	return
+}
+
+@(private = "file")
+SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
+	.All             = .ALL,
+	.Index_Input     = .INDEX_INPUT,
+	.Vertex_Shading  = .VERTEX_SHADING,
+	.Pixel_Shading   = .PIXEL_SHADING,
+	.Depth_Stencil   = .DEPTH_STENCIL,
+	.Render_Target   = .RENDER_TARGET,
+	.Compute_Shading = .COMPUTE_SHADING,
+}
+
+@(private = "file")
+ACCESS := [gpu.Access]d3d.BARRIER_ACCESS_FLAG {
+	.Index_Buffer        = .INDEX_BUFFER,
+	.Render_Target       = .RENDER_TARGET,
+	.Depth_Stencil_Write = .DEPTH_STENCIL_WRITE,
+	.Shader_Resource     = .SHADER_RESOURCE,
+	.Unordered_Access    = .UNORDERED_ACCESS,
+}
+
+@(private)
+LAYOUT := [gpu.Texture_Layout]d3d.BARRIER_LAYOUT {
+	.Undefined           = .UNDEFINED,
+	.Render_Target       = .RENDER_TARGET,
+	.Depth_Stencil_Write = .DEPTH_STENCIL_WRITE,
+	.Shader_Resource     = .SHADER_RESOURCE,
+	.Unordered_Access    = .UNORDERED_ACCESS,
 }
 
 @(private = "file")

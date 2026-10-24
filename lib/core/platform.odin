@@ -18,6 +18,8 @@ Platform :: struct {
 	frame_index: u64,
 	start:       time.Tick,
 	last_frame:  time.Tick,
+	// Read once per frame, so the game and the GPU backend agree on it.
+	window_size: [2]i32,
 	api:         Platform_API,
 }
 
@@ -39,7 +41,8 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		log.error("core: failed to open window")
 		return false
 	}
-	if !backend.init(_window_native_handle(), _window_size()) {
+	platform.window_size = _window_size()
+	if !backend.init(_window_native_handle(), platform.window_size) {
 		log.error("core: failed to initialize the GPU backend")
 		return false
 	}
@@ -50,7 +53,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
 		time_seconds                 = time_seconds,
-		window_size                  = _window_size,
+		window_size                  = window_size,
 		set_window_title             = _window_set_title,
 		gpu_features                 = backend.features,
 		gpu_frame_target             = backend.frame_target,
@@ -86,7 +89,8 @@ platform_api :: proc() -> ^Platform_API {
 // and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	keep_running = _window_poll()
-	backend.begin_frame(_window_size())
+	platform.window_size = _window_size()
+	backend.begin_frame(platform.window_size)
 
 	now := time.tick_now()
 	dt = time.tick_diff(platform.last_frame, now)
@@ -116,6 +120,11 @@ alloc_game_state :: proc(size: int) -> rawptr {
 // reset_permanent frees all permanent allocations, for a soft restart with fresh state.
 reset_permanent :: proc() {
 	virtual.arena_free_all(&platform.permanent)
+}
+
+// window_size is the client area size at the start of the frame. It is zero while the window is minimized.
+window_size :: proc() -> [2]i32 {
+	return platform.window_size
 }
 
 time_seconds :: proc() -> f64 {

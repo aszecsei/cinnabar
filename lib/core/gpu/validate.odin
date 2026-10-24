@@ -1,5 +1,7 @@
 package gpu
 
+import "core:sync"
+
 Validation_Error :: enum u8 {
 	None,
 	Nested_Pass,
@@ -22,6 +24,10 @@ Validation_Error :: enum u8 {
 	No_Index_Buffer,
 	Draw_Outside_Pass,
 	Dispatch_Inside_Pass,
+	Barrier_Inside_Pass,
+	Bad_Barrier,
+	Layout_Mismatch,
+	Attachment_Layout,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -31,9 +37,50 @@ Resources :: struct {
 	pipeline: proc(pipeline: Pipeline) -> (Pipeline_Info, bool),
 }
 
+// Layout_Tracker follows texture layouts across submissions for validation. The backends do not track layouts
+// to translate barriers. Validation tracks them to find wrong barriers on every backend.
+// A backend tracks each texture from its creation, and the frame target from the start of each frame.
+Layout_Tracker :: struct {
+	layouts: map[Texture]Texture_Layout,
+	mutex:   sync.Mutex,
+}
+
+layout_tracker_init :: proc(tracker: ^Layout_Tracker, allocator := context.allocator) {
+	tracker.layouts = make(map[Texture]Texture_Layout, allocator)
+}
+
+layout_tracker_destroy :: proc(tracker: ^Layout_Tracker) {
+	delete(tracker.layouts)
+	tracker^ = {}
+}
+
+track_layout :: proc(tracker: ^Layout_Tracker, texture: Texture, layout: Texture_Layout) {
+	sync.guard(&tracker.mutex)
+	tracker.layouts[texture] = layout
+}
+
+untrack_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) {
+	sync.guard(&tracker.mutex)
+	delete_key(&tracker.layouts, texture)
+}
+
+tracked_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) -> (layout: Texture_Layout, ok: bool) {
+	sync.guard(&tracker.mutex)
+	return tracker.layouts[texture]
+}
+
 // validate checks the rules that every backend enforces (see docs/gpu.md#pass-rules).
+// With a tracker, it also checks barrier layouts and attachment layouts, and applies the barriers to the tracker.
+// After a rejected command buffer, the tracker holds the layouts that the valid packets left.
 // packet is the index of the offending packet, or the packet count for errors found at the end.
-validate :: proc(cb: Command_Buffer, resources: Resources) -> (err: Validation_Error, packet: int) {
+validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Tracker = nil) -> (err: Validation_Error, packet: int) {
+	if layouts != nil {
+		sync.lock(&layouts.mutex)
+	}
+	defer if layouts != nil {
+		sync.unlock(&layouts.mutex)
+	}
+
 	in_pass := false
 	// The attachment formats of the current pass, as a pipeline would declare them.
 	pass_formats: Pipeline_Info
@@ -56,6 +103,9 @@ validate :: proc(cb: Command_Buffer, resources: Resources) -> (err: Validation_E
 			pass_formats, err = validate_attachments(pass, resources)
 			if err != .None {
 				return err, packet
+			}
+			if layouts != nil && !attachments_in_layout(pass, layouts) {
+				return .Attachment_Layout, packet
 			}
 			in_pass = true
 			pass_marker_depth = marker_depth
@@ -131,6 +181,37 @@ validate :: proc(cb: Command_Buffer, resources: Resources) -> (err: Validation_E
 			if !compute_bound {
 				return .No_Pipeline, packet
 			}
+		case .Barriers:
+			if in_pass {
+				return .Barrier_Inside_Pass, packet
+			}
+			buffers, textures := barrier_data(p)
+			for b in buffers {
+				desc, ok := resources.buffer(b.buffer)
+				if !ok {
+					return .Invalid_Buffer, packet
+				}
+				if !valid_buffer_barrier(b, desc) {
+					return .Bad_Barrier, packet
+				}
+			}
+			for b in textures {
+				desc, ok := resources.texture(b.texture)
+				if !ok {
+					return .Invalid_Texture, packet
+				}
+				if !valid_texture_barrier(b, desc) {
+					return .Bad_Barrier, packet
+				}
+				if layouts == nil {
+					continue
+				}
+				// Undefined as the layout before discards the contents, whatever the layout is.
+				if current, tracked := layouts.layouts[b.texture]; tracked && b.layout_before != .Undefined && b.layout_before != current {
+					return .Layout_Mismatch, packet
+				}
+				layouts.layouts[b.texture] = b.layout_after
+			}
 		}
 	}
 
@@ -182,6 +263,53 @@ validate_attachments :: proc(pass: ^Begin_Pass, resources: Resources) -> (format
 		formats.depth_format = desc.format
 	}
 	return formats, .None
+}
+
+// attachments_in_layout checks that color attachments are in the render target layout and the depth attachment
+// is in the depth write layout. The caller holds the tracker's mutex.
+@(private = "file")
+attachments_in_layout :: proc(pass: ^Begin_Pass, layouts: ^Layout_Tracker) -> bool {
+	in_layout :: proc(layouts: ^Layout_Tracker, texture: Texture, layout: Texture_Layout) -> bool {
+		current, tracked := layouts.layouts[texture]
+		return !tracked || current == layout
+	}
+	for color in pass.colors[:pass.color_count] {
+		if !in_layout(layouts, color.texture, .Render_Target) {
+			return false
+		}
+	}
+	return pass.depth.texture == {} || in_layout(layouts, pass.depth.texture, .Depth_Stencil_Write)
+}
+
+// A barrier without synchronization on one side has no access on that side.
+@(private = "file")
+valid_sync :: proc(sync: Syncs, access: Accesses) -> bool {
+	return sync != {} || access == {}
+}
+
+@(private = "file")
+valid_buffer_barrier :: proc(b: Buffer_Barrier, desc: Buffer_Desc) -> bool {
+	allowed := Accesses{.Shader_Resource}
+	if .Index in desc.usage {
+		allowed += {.Index_Buffer}
+	}
+	if .Storage in desc.usage {
+		allowed += {.Unordered_Access}
+	}
+	return b.access_before <= allowed && b.access_after <= allowed && valid_sync(b.sync_before, b.access_before) && valid_sync(b.sync_after, b.access_after)
+}
+
+@(private = "file")
+valid_texture_barrier :: proc(b: Texture_Barrier, desc: Texture_Desc) -> bool {
+	allowed_layout :: proc(layout: Texture_Layout, usage: Texture_Usages) -> bool {
+		needed, has_need := layout_usage(layout)
+		return !has_need || needed in usage
+	}
+	if b.layout_after == .Undefined || !allowed_layout(b.layout_before, desc.usage) || !allowed_layout(b.layout_after, desc.usage) {
+		return false
+	}
+	access_ok := b.access_before <= layout_accesses(b.layout_before) && b.access_after <= layout_accesses(b.layout_after)
+	return access_ok && valid_sync(b.sync_before, b.access_before) && valid_sync(b.sync_after, b.access_after)
 }
 
 Desc_Error :: enum u8 {

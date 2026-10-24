@@ -154,7 +154,7 @@ Texture_Usage :: enum u8 {
 Texture_Usages :: bit_set[Texture_Usage;u8]
 
 // A new texture starts in the layout of its first usage in this order: Render_Target, Depth_Stencil, Storage, Sampled.
-// A texture created with data starts in the sampled layout.
+// A texture created with data starts in the sampled layout. See initial_layout.
 Texture_Desc :: struct {
 	size:      [2]u32,
 	format:    Format,
@@ -162,6 +162,91 @@ Texture_Desc :: struct {
 	mip_count: u32,
 	usage:     Texture_Usages,
 	label:     string,
+}
+
+// initial_layout is the layout a new texture starts in. A texture created with data starts in the sampled layout.
+initial_layout :: proc(usage: Texture_Usages, has_data: bool) -> Texture_Layout {
+	switch {
+	case has_data:
+		return .Shader_Resource
+	case .Render_Target in usage:
+		return .Render_Target
+	case .Depth_Stencil in usage:
+		return .Depth_Stencil_Write
+	case .Storage in usage:
+		return .Unordered_Access
+	}
+	return .Shader_Resource
+}
+
+// Barriers follow the Enhanced Barriers model (see docs/gpu.md#barriers). An empty Syncs means no
+// synchronization, and an empty Accesses means no access.
+Sync :: enum u8 {
+	All,
+	Index_Input,
+	Vertex_Shading,
+	Pixel_Shading,
+	Depth_Stencil,
+	Render_Target,
+	Compute_Shading,
+}
+
+Syncs :: bit_set[Sync;u16]
+
+Access :: enum u8 {
+	Index_Buffer,
+	Render_Target,
+	// Includes the depth test's reads.
+	Depth_Stencil_Write,
+	Shader_Resource,
+	Unordered_Access,
+}
+
+Accesses :: bit_set[Access;u16]
+
+WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access}
+
+Texture_Layout :: enum u8 {
+	// The contents are undefined. As a barrier's layout_before, it discards the contents.
+	Undefined,
+	Render_Target,
+	Depth_Stencil_Write,
+	Shader_Resource,
+	Unordered_Access,
+}
+
+// layout_accesses are the accesses that a texture allows in a layout.
+layout_accesses :: proc(layout: Texture_Layout) -> Accesses {
+	switch layout {
+	case .Undefined:
+		return {}
+	case .Render_Target:
+		return {.Render_Target}
+	case .Depth_Stencil_Write:
+		return {.Depth_Stencil_Write}
+	case .Shader_Resource:
+		return {.Shader_Resource}
+	case .Unordered_Access:
+		return {.Unordered_Access}
+	}
+	return {}
+}
+
+// layout_usage is the usage a texture needs to enter a layout. Every texture can be Undefined.
+layout_usage :: proc(layout: Texture_Layout) -> (usage: Texture_Usage, needed: bool) {
+	switch layout {
+	case .Undefined:
+		return {}, false
+	case .Render_Target:
+		return .Render_Target, true
+	case .Depth_Stencil_Write:
+		return .Depth_Stencil, true
+	case .Shader_Resource:
+		return .Sampled, true
+	case .Unordered_Access:
+		return .Storage, true
+	}
+	return {}, false
 }
 
 Filter :: enum u8 {

@@ -3,6 +3,7 @@ package gpu
 import "base:runtime"
 import "core:log"
 import "core:mem"
+import "core:slice"
 
 import "cinnabar:core/layout"
 
@@ -15,6 +16,8 @@ MAX_COLOR_ATTACHMENTS :: 8
 MAX_LABEL_LENGTH :: 255
 // The root constant size that Vulkan guarantees for push constants.
 MAX_PUSH_CONSTANTS_SIZE :: 128
+// cmd_barriers splits longer lists into several packets.
+MAX_PACKET_BARRIERS :: 48
 
 Packet_Kind :: enum u16 {
 	Begin_Pass,
@@ -30,6 +33,7 @@ Packet_Kind :: enum u16 {
 	Draw,
 	Draw_Indexed,
 	Dispatch,
+	Barriers,
 }
 
 // size includes the header and the padding after the payload.
@@ -138,6 +142,31 @@ Dispatch :: struct {
 	groups: [3]u32,
 }
 
+Buffer_Barrier :: struct {
+	buffer:        Buffer,
+	sync_before:   Syncs,
+	sync_after:    Syncs,
+	access_before: Accesses,
+	access_after:  Accesses,
+}
+
+Texture_Barrier :: struct {
+	texture:       Texture,
+	sync_before:   Syncs,
+	sync_after:    Syncs,
+	access_before: Accesses,
+	access_after:  Accesses,
+	layout_before: Texture_Layout,
+	layout_after:  Texture_Layout,
+}
+
+// The barriers follow the payload: buffer_count Buffer_Barriers, then texture_count Texture_Barriers.
+// Barriers occur only outside a render pass.
+Barriers :: struct {
+	buffer_count:  u16,
+	texture_count: u16,
+}
+
 // Format lists every packet type, so format_hash changes when any packet layout changes.
 // Add new packet types here.
 @(private = "file")
@@ -156,11 +185,16 @@ Packet_Format :: struct {
 	draw:               Draw,
 	draw_indexed:       Draw_Indexed,
 	dispatch:           Dispatch,
+	barriers:           Barriers,
+	buffer_barrier:     Buffer_Barrier,
+	texture_barrier:    Texture_Barrier,
 }
 
 #assert(size_of(Packet_Header) + size_of(Begin_Pass) <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Begin_Marker) + MAX_LABEL_LENGTH <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Push_Constants) + MAX_PUSH_CONSTANTS_SIZE <= MAX_PACKET_SIZE)
+#assert(size_of(Packet_Header) + size_of(Barriers) + MAX_PACKET_BARRIERS * size_of(Texture_Barrier) <= MAX_PACKET_SIZE)
+#assert(size_of(Buffer_Barrier) <= size_of(Texture_Barrier))
 #assert(size_of(Chunk) + MAX_PACKET_SIZE <= CHUNK_SIZE)
 
 // format_hash identifies the packet format. The host refuses a game DLL with a different hash.
@@ -261,10 +295,25 @@ cmd_dispatch :: proc(cb: ^Command_Buffer, groups: [3]u32) {
 	push(cb, .Dispatch, Dispatch{groups})
 }
 
+// cmd_barriers records barriers that the backend issues together. The render graph records all barriers.
+cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: []Texture_Barrier) {
+	buffers, textures := buffers, textures
+	for len(buffers) > 0 || len(textures) > 0 {
+		b := min(len(buffers), MAX_PACKET_BARRIERS)
+		t := min(len(textures), MAX_PACKET_BARRIERS - b)
+		push(cb, .Barriers, Barriers{u16(b), u16(t)}, slice.to_bytes(buffers[:b]), slice.to_bytes(textures[:t]))
+		buffers, textures = buffers[b:], textures[t:]
+	}
+}
+
 @(private)
-push :: proc(cb: ^Command_Buffer, kind: Packet_Kind, payload: $T, extra: []byte = nil) {
+push :: proc(cb: ^Command_Buffer, kind: Packet_Kind, payload: $T, extra: ..[]byte) {
 	#assert(align_of(T) <= PACKET_ALIGN)
-	size := mem.align_forward_int(size_of(Packet_Header) + size_of(T) + len(extra), PACKET_ALIGN)
+	extra_size := 0
+	for e in extra {
+		extra_size += len(e)
+	}
+	size := mem.align_forward_int(size_of(Packet_Header) + size_of(T) + extra_size, PACKET_ALIGN)
 	assert(size <= MAX_PACKET_SIZE)
 
 	if cb.last == nil || len(chunk_data(cb.last)) - cb.last.used < size {
@@ -287,7 +336,11 @@ push :: proc(cb: ^Command_Buffer, kind: Packet_Kind, payload: $T, extra: []byte 
 	payload := payload
 	mem.copy(dst, &header, size_of(Packet_Header))
 	mem.copy(&dst[size_of(Packet_Header)], &payload, size_of(T))
-	mem.copy(&dst[size_of(Packet_Header) + size_of(T)], raw_data(extra), len(extra))
+	offset := size_of(Packet_Header) + size_of(T)
+	for e in extra {
+		mem.copy(&dst[offset], raw_data(e), len(e))
+		offset += len(e)
+	}
 	cb.last.used += size
 }
 
@@ -334,4 +387,13 @@ marker_label :: proc(packet: Packet) -> string {
 push_constants_data :: proc(packet: Packet) -> []byte {
 	constants := payload(packet, Push_Constants)
 	return packet.data[size_of(Push_Constants):][:constants.size]
+}
+
+barrier_data :: proc(packet: Packet) -> (buffers: []Buffer_Barrier, textures: []Texture_Barrier) {
+	barriers := payload(packet, Barriers)
+	data := packet.data[size_of(Barriers):]
+	buffers = slice.reinterpret([]Buffer_Barrier, data)[:barriers.buffer_count]
+	data = data[int(barriers.buffer_count) * size_of(Buffer_Barrier):]
+	textures = slice.reinterpret([]Texture_Barrier, data)[:barriers.texture_count]
+	return
 }

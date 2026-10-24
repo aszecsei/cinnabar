@@ -12,6 +12,8 @@ DEPTH :: Texture{index = 2, generation = 1}
 @(private = "file")
 SAMPLED :: Texture{index = 3, generation = 1}
 @(private = "file")
+MULTI :: Texture{index = 4, generation = 1}
+@(private = "file")
 INDICES :: Buffer{index = 0, generation = 1}
 @(private = "file")
 PLAIN :: Buffer{index = 1, generation = 1}
@@ -34,6 +36,8 @@ RESOURCES :: Resources {
 			return {size = {64, 64}, format = .D32_Float, usage = {.Depth_Stencil}}, true
 		case SAMPLED:
 			return {size = {64, 64}, format = .RGBA8_Unorm, usage = {.Sampled}}, true
+		case MULTI:
+			return {size = {64, 64}, format = FRAME_TARGET_FORMAT, usage = {.Sampled, .Render_Target}}, true
 		}
 		return {}, false
 	},
@@ -278,4 +282,150 @@ validate_rules :: proc(t: ^testing.T) {
 		err, packet := validate(cb, RESOURCES)
 		testing.expectf(t, err == c.err && packet == c.packet, "case %d: got %v at %d, want %v at %d", i, err, packet, c.err, c.packet)
 	}
+}
+
+@(test)
+barriers_split_into_packets :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+
+	COUNT :: MAX_PACKET_BARRIERS + 10
+	buffers: [COUNT]Buffer_Barrier
+	textures: [COUNT]Texture_Barrier
+	for i in 0 ..< COUNT {
+		buffers[i] = {buffer = {index = u32(i), generation = 1}, access_after = {.Shader_Resource}}
+		textures[i] = {texture = {index = u32(i), generation = 1}, layout_after = .Shader_Resource}
+	}
+	cb := command_buffer(virtual.arena_allocator(&arena))
+	cmd_barriers(&cb, buffers[:], textures[:])
+
+	packets := 0
+	got_buffers, got_textures: [dynamic]u32
+	got_buffers.allocator, got_textures.allocator = cb.allocator, cb.allocator
+	it := packet_iterator(cb)
+	for p in next_packet(&it) {
+		packets += 1
+		b, tx := barrier_data(p)
+		testing.expect(t, len(b) + len(tx) <= MAX_PACKET_BARRIERS)
+		for x in b {
+			append(&got_buffers, x.buffer.index)
+		}
+		for x in tx {
+			testing.expect_value(t, x.layout_after, Texture_Layout.Shader_Resource)
+			append(&got_textures, x.texture.index)
+		}
+	}
+	testing.expect_value(t, packets, 3)
+	testing.expect_value(t, len(got_buffers), COUNT)
+	testing.expect_value(t, len(got_textures), COUNT)
+	for i in 0 ..< min(COUNT, len(got_buffers), len(got_textures)) {
+		testing.expect_value(t, got_buffers[i], u32(i))
+		testing.expect_value(t, got_textures[i], u32(i))
+	}
+}
+
+@(test)
+validate_barriers :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		buffers:  []Buffer_Barrier,
+		textures: []Texture_Barrier,
+		err:      Validation_Error,
+	}
+	TO_SAMPLED :: Texture_Barrier {
+		texture       = SAMPLED,
+		sync_after    = {.Pixel_Shading},
+		access_after  = {.Shader_Resource},
+		layout_after  = .Shader_Resource,
+	}
+	cases := []Case {
+		{textures = {TO_SAMPLED}, err = .None},
+		{buffers = {{buffer = INDICES, sync_after = {.Index_Input}, access_after = {.Index_Buffer}}}, err = .None},
+		{buffers = {{buffer = PLAIN, sync_after = {.Index_Input}, access_after = {.Index_Buffer}}}, err = .Bad_Barrier},
+		{buffers = {{buffer = PLAIN, access_after = {.Shader_Resource}}}, err = .Bad_Barrier},
+		{buffers = {{buffer = {index = 9, generation = 1}}}, err = .Invalid_Buffer},
+		{textures = {{texture = {index = 9, generation = 1}, layout_after = .Shader_Resource}}, err = .Invalid_Texture},
+		{textures = {{texture = SAMPLED, layout_after = .Render_Target}}, err = .Bad_Barrier},
+		{textures = {{texture = SAMPLED, layout_before = .Shader_Resource}}, err = .Bad_Barrier},
+		{textures = {{texture = TARGET, sync_after = {.Render_Target}, access_after = {.Shader_Resource}, layout_after = .Render_Target}}, err = .Bad_Barrier},
+		{textures = {{texture = DEPTH, sync_after = {.Depth_Stencil}, access_after = {.Depth_Stencil_Write}, layout_after = .Depth_Stencil_Write}}, err = .None},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		cmd_barriers(&cb, c.buffers, c.textures)
+		err, _ := validate(cb, RESOURCES)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	inside := command_buffer(allocator)
+	cmd_begin_pass(&inside, {{texture = TARGET}})
+	cmd_barriers(&inside, nil, {TO_SAMPLED})
+	cmd_end_pass(&inside)
+	err, packet := validate(inside, RESOURCES)
+	testing.expect_value(t, err, Validation_Error.Barrier_Inside_Pass)
+	testing.expect_value(t, packet, 1)
+}
+
+@(test)
+validate_tracks_layouts :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	layouts: Layout_Tracker
+	layout_tracker_init(&layouts)
+	defer layout_tracker_destroy(&layouts)
+	track_layout(&layouts, MULTI, .Render_Target)
+
+	TO_SAMPLED :: Texture_Barrier {
+		texture       = MULTI,
+		sync_before   = {.Render_Target},
+		sync_after    = {.Pixel_Shading},
+		access_before = {.Render_Target},
+		access_after  = {.Shader_Resource},
+		layout_before = .Render_Target,
+		layout_after  = .Shader_Resource,
+	}
+	TO_TARGET :: Texture_Barrier {
+		texture       = MULTI,
+		sync_before   = {.Pixel_Shading},
+		sync_after    = {.Render_Target},
+		access_before = {.Shader_Resource},
+		access_after  = {.Render_Target},
+		layout_before = .Shader_Resource,
+		layout_after  = .Render_Target,
+	}
+
+	mismatch := command_buffer(allocator)
+	cmd_barriers(&mismatch, nil, {TO_TARGET})
+	err, _ := validate(mismatch, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.Layout_Mismatch)
+
+	sampled_pass := command_buffer(allocator)
+	cmd_barriers(&sampled_pass, nil, {TO_SAMPLED})
+	cmd_begin_pass(&sampled_pass, {{texture = MULTI}})
+	cmd_end_pass(&sampled_pass)
+	err, _ = validate(sampled_pass, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.Attachment_Layout)
+
+	back := command_buffer(allocator)
+	cmd_barriers(&back, nil, {TO_TARGET})
+	cmd_begin_pass(&back, {{texture = MULTI}})
+	cmd_end_pass(&back)
+	err, _ = validate(back, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.None)
+
+	// Undefined as the layout before is valid in any layout.
+	discard := command_buffer(allocator)
+	cmd_barriers(&discard, nil, {{texture = MULTI, sync_after = {.Pixel_Shading}, access_after = {.Shader_Resource}, layout_after = .Shader_Resource}})
+	err, _ = validate(discard, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.None)
+	layout, _ := tracked_layout(&layouts, MULTI)
+	testing.expect_value(t, layout, Texture_Layout.Shader_Resource)
 }
