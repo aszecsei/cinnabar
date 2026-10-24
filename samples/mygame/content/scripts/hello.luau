@@ -14,7 +14,9 @@ while true do
 	if Input.was_pressed(Key.Space) then
 		for _, triangle in World.query(Spin) do
 			local spin = triangle:get(Spin)
-			spin.speed = -spin.speed
+			if spin then
+				spin.speed = -spin.speed
+			end
 		end
 		Debug.log("reversed the spin at", Time.time, "s")
 	end

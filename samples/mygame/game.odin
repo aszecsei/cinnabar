@@ -383,11 +383,11 @@ register_scripts :: proc(r: ^script.Runtime) {
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
-	})
+	}, "() -> number")
 	script.define(r, "Game.greeting", proc(L: ^luau.State) -> c.int {
 		luau.pushstring(L, "hello from Luau")
 		return 1
-	})
+	}, "() -> string")
 }
 
 // game_of is the Game_State of a script binding.
@@ -929,6 +929,23 @@ layout_hash :: proc() -> u64 {
 	return hash.fnv64a(slice.to_bytes(hashes[:]))
 }
 
+// script_types writes the scripts' definition file from a world and a script runtime of its own, so it makes no
+// game state and no GPU resources.
+script_types :: proc(platform: ^core.Platform_API) -> string {
+	world := new(ecs.World, platform.permanent_allocator)
+	if !ecs.init(world, platform) {
+		log.panic("mygame: cannot create a world for the script types")
+	}
+	defer ecs.destroy(world)
+	register_components(&world.registry)
+	r := new(script.Runtime, platform.permanent_allocator)
+	if !script.init(r, platform, world, nil, register_scripts) {
+		log.panic("mygame: cannot open a script VM for the script types")
+	}
+	defer script.destroy(r)
+	return script.definitions(r, platform.permanent_allocator)
+}
+
 @(export)
 cinnabar_game_api :: proc() -> core.Game_API {
 	return {
@@ -939,5 +956,6 @@ cinnabar_game_api :: proc() -> core.Game_API {
 		state_size = state_size,
 		layout_hash = layout_hash,
 		gpu_format_hash = gpu.format_hash,
+		script_types = script_types,
 	}
 }

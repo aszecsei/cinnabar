@@ -74,7 +74,7 @@ flowchart TB
 The two sides communicate only through two structs of procedures:
 
 - **`Platform_API`** (host → game): what `core` provides to the engine.
-- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, plus the editor procedures described in [Editor](#editor).
+- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), plus the editor procedures described in [Editor](#editor).
 
 In development, the host gets `Game_API` from the DLL's exports. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
 

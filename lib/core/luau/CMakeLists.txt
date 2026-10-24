@@ -46,5 +46,5 @@ else()
     # Helpers for tools/cook over Luau's C++ libraries.
     add_library(luau_tools STATIC luau_tools.cpp)
     target_compile_definitions(luau_tools PRIVATE "CN_LUAU_API=extern \"C\"")
-    target_link_libraries(luau_tools PRIVATE Luau.Ast)
+    target_link_libraries(luau_tools PRIVATE Luau.Ast Luau.Analysis)
 endif()

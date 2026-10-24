@@ -26,12 +26,12 @@ For each script, the cooker:
 
 1. Finds every call of the global `require` with Luau's parser, so comments and strings never look like requires. A `require` whose argument is not one string literal is an error. The parser also tells whether the script calls `Behaviour.define`.
 2. Resolves every `require` string to a GUID, with Luau's rules (see [Scripting](scripting.md#modules-and-require)). A missing module, a path that names both `x.luau` and `x/init.luau`, or a cycle is an error.
-3. Type checks the module against the engine definition file (see [Scripting](scripting.md#types-and-tooling)) and the modules it requires. *Not yet: phase 5.*
+3. Type checks the module against the definition file that `--definitions` names (see [Scripting](scripting.md#types-and-tooling)), and the modules it requires, with Luau's analyzer. The cooker gives the analyzer every module's source and resolved requires, so it reads no files. A type error is a cook error.
 4. Compiles it with `luau_compile`. Development uses optimization level 1 and debug level 2. Release uses optimization level 2 and debug level 1.
 5. For a script that calls `Behaviour.define`: runs its top level in a sandboxed VM with the Luau libraries, the prelude (`lib/engine/script/prelude.luau`) and a `require` that follows the resolved requires, but no engine. If it returns a behaviour class, the cooker records the class name and the fields (see [Scripting](scripting.md#behaviours)).
 6. Writes the blob to a temporary file and renames it, so the running game never reads a partial blob.
 
-The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, and the sources of every module that the script requires, directly or not. A behaviour's field defaults can come from those modules, so a changed dependency cooks its dependents again. With type checking, the key will also include the definition file.
+The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, the definition file, and the sources of every module that the script requires, directly or not. A behaviour's field defaults and the type check depend on those modules, so a changed dependency cooks its dependents again.
 
 Script import settings in `.meta`: `native = true` compiles the module to machine code at load. An unknown setting is a warning.
 

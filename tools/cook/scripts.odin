@@ -1,5 +1,6 @@
-// `cook scripts --cache <dir> --config dev|release --root <name>=<dir>...` cooks every .luau file in the content
-// roots into <cache>/<config>/<guid>.blob. See docs/content-pipeline.md#scripts.
+// `cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir>...` cooks every .luau
+// file in the content roots into <cache>/<config>/<guid>.blob, and type checks it against the definition file. See
+// docs/content-pipeline.md#scripts.
 package cook
 
 import "base:runtime"
@@ -18,7 +19,7 @@ import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker compiles scripts changes this, which invalidates every cooked script.
-SCRIPT_COOK_VERSION :: "scripts 3"
+SCRIPT_COOK_VERSION :: "scripts 4"
 // The justfile passes the vendor/luau tag, so a Luau update cooks every script again.
 LUAU_VERSION :: #config(LUAU_VERSION, "unknown")
 SCRIPT_EXTENSION :: ".luau"
@@ -36,9 +37,11 @@ Root :: struct {
 }
 
 Script_Options :: struct {
-	cache:  string,
-	config: Script_Config,
-	roots:  [dynamic]Root,
+	cache:       string,
+	config:      Script_Config,
+	roots:       [dynamic]Root,
+	// The definition file to type check against, or "" for none.
+	definitions: string,
 }
 
 Script_Source :: struct {
@@ -79,6 +82,8 @@ parse_script_args :: proc(args: []string) -> (options: Script_Options, ok: bool)
 		switch args[i] {
 		case "--cache":
 			options.cache = value
+		case "--definitions":
+			options.definitions = value
 		case "--config":
 			switch value {
 			case "dev":
@@ -133,16 +138,26 @@ cook_scripts :: proc(options: Script_Options) -> bool {
 		log.errorf("cook: %s: %v", out_dir, err)
 		return false
 	}
+	checker: Type_Checker
+	if !type_checker_open(&checker, options.definitions, scripts) {
+		return false
+	}
+	defer type_checker_close(&checker)
 	compiled, current := 0, 0
 	// The VM that reads behaviours' fields opens on the first behaviour that needs cooking.
 	vm: Schema_VM
 	defer schema_vm_close(&vm)
 	for &s, index in scripts {
-		key := script_key(options.config, s, dependency_hash(scripts, index))
+		key := script_key(options.config, s, dependency_hash(scripts, index) ~ checker.definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked_script_key(output) == key {
 			current += 1
+			continue
+		}
+		// A script with type errors keeps its old blob, so the running game keeps the last good version.
+		if !type_check(&checker, s) {
+			ok = false
 			continue
 		}
 		class_name: string

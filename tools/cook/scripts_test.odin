@@ -361,3 +361,93 @@ a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	expect_error(t, &errors, "game/eager.luau:1: World is not available when the cooker reads a behaviour's fields")
 	expect_error(t, &errors, "the top level ran for more than 2 seconds")
 }
+
+// The engine's definitions, with the parts that host.exe --emit-script-types generates cut down to what the tests
+// use.
+@(private)
+TEST_DEFINITIONS :: #load("../../lib/engine/script/engine.d.luau", string) + `
+declare extern type Entity with
+	function is_alive(self): boolean
+end
+`
+
+@(private)
+typed_options :: proc(t: ^testing.T, tree: Tree, definitions := TEST_DEFINITIONS) -> Script_Options {
+	options := tree_options(tree)
+	options.definitions = fmt.tprintf("%s/types.d.luau", tree.dir)
+	testing.expect(t, os.write_entire_file(options.definitions, transmute([]byte)definitions) == nil)
+	return options
+}
+
+@(test)
+type_errors_fail_the_cook :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			// A nonstrict module's exports are loosely typed, so this one is strict.
+			{"content/m.luau", "--!strict\nreturn {x = 1}"},
+			{"content/a.luau", "--!strict\nlocal alive: number = World.spawn():is_alive()\nreturn alive"},
+			{"content/b.luau", "--!strict\nlocal m = require('./m')\nlocal s: string = m.x\nreturn s"},
+			{"content/fine.luau", "--!strict\nlocal q = Quaternion.euler(vector.create(0, 90, 0)) * vector.create(0, 0, 1)\nreturn q.x"},
+		},
+	)
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	expect_error(t, &errors, "a.luau:2:")
+	expect_error(t, &errors, "Expected this to be 'number', but got 'boolean'")
+	// Types flow through require.
+	expect_error(t, &errors, "b.luau:3:")
+	testing.expect_value(t, len(errors.messages), 2)
+	// A script with type errors gets no blob.
+	buffer: [32]u8
+	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "a.luau"), &buffer))))
+	testing.expect(t, os.exists(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "fine.luau"), &buffer))))
+}
+
+@(test)
+luaurc_sets_the_default_mode :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/.luaurc", `{"languageMode": "nocheck"}`},
+			{"content/unchecked.luau", "local n: number = 'text'\nreturn n"},
+			{"content/checked.luau", "--!strict\nlocal n: number = 'text'\nreturn n"},
+		},
+	)
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	testing.expect_value(t, len(errors.messages), 1)
+	expect_error(t, &errors, "checked.luau:2:")
+}
+
+@(test)
+without_definitions_the_cook_does_not_type_check :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.luau", "--!strict\nlocal n: number = 'text'\nreturn n"}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	options.definitions = fmt.tprintf("%s/missing.d.luau", tree.dir)
+	testing.expect(t, cook_scripts(options))
+	// The definition file's hash is in the key, so the script is checked once the file exists.
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	expect_error(t, &errors, "a.luau:2:")
+}
+
+@(test)
+a_broken_definition_file_fails_the_cook :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.luau", "return 1"}})
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook_scripts(typed_options(t, tree, "declare World: {")))
+	expect_error(t, &errors, "is not a valid definition file")
+}

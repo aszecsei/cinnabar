@@ -36,6 +36,9 @@ Runtime :: struct {
 	// Registrations, which reload clears: the methods of each engine type, and the exposed components.
 	light_methods:    [Light_Tag]Type_Methods,
 	userdata_methods: [Userdata_Tag]Type_Methods,
+	defined:          [MAX_DEFINED]Defined,
+	defined_count:    int,
+	defining_engine:  bool,
 	exposed:          [MAX_EXPOSED]Exposed,
 	exposed_count:    int,
 	fields:           [MAX_FIELDS]Field,
@@ -131,6 +134,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.userdata_methods = {}
 	r.exposed_count = 0
 	r.field_count = 0
+	r.defined_count = 0
 	register_engine(r)
 	register(r)
 }
@@ -144,9 +148,11 @@ destroy :: proc(r: ^Runtime) {
 
 // define registers a binding and sets the global with its name: "print" sets a global function, and "Debug.log" the
 // field log of the global table Debug. The globals are read-only to scripts, so a code reload can define new
-// bindings, but scripts cannot replace them.
-define :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
+// bindings, but scripts cannot replace them. signature is the binding's Luau type for the definition file, such as
+// "(count: number) -> string". Without one, it takes and returns anything.
+define :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc, signature := "") {
 	script_host.register(&r.bindings, name, procedure)
+	record_defined(r, name, signature)
 	r.platform.script_push_binding(r.L, name)
 	set_path(r, name)
 }
@@ -342,6 +348,8 @@ create_metatables :: proc(r: ^Runtime) {
 
 @(private = "file")
 register_engine :: proc(r: ^Runtime) {
+	r.defining_engine = true
+	defer r.defining_engine = false
 	bind :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
 		script_host.register(&r.bindings, name, procedure)
 	}

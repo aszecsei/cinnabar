@@ -115,6 +115,9 @@ Game_API :: struct {
 	layout_hash: proc() -> u64,
 	// The host refuses a DLL whose GPU command format differs from its own (see docs/gpu.md#command-buffers).
 	gpu_format_hash: proc() -> u64,
+	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
+	// must not need init: it makes its own script runtime. See docs/scripting.md#types-and-tooling.
+	script_types:    proc(platform: ^Platform_API) -> string,
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

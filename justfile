@@ -27,6 +27,8 @@ cmake_generator := "Visual Studio 17 2022"
 luau_version := `git -C vendor/luau describe --tags --always`
 content_root := "samples/" + game + "/content"
 cache_dir := build_dir + "/cache"
+# The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
+script_types := build_dir + "/script-types/cinnabar.d.luau"
 packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
@@ -94,7 +96,7 @@ update-luau tag="":
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts
-build: host game-dll
+build: host game-dll script-types scripts
 
 # Build the development host
 host: agility-runtime luau
@@ -122,7 +124,11 @@ cook: luau
 
 # Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
-    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
+    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" --root game="{{content_root}}"
+
+# Write the scripts' type definitions from the game's bindings
+script-types: host game-dll
+    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
 
 # Cook the game's shaders: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray tracing library.
 # Only changed shaders recompile (see tools/cook).
@@ -130,7 +136,7 @@ shaders: install-dxc cook
     "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: shaders luau scripts
+game-dll: shaders luau
     mkdir -p "{{build_dir}}/pdb"
     odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{build_dir}}/{{game}}.dll" \
@@ -164,7 +170,7 @@ dev-shared name="cinnabar": build viewer
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Build the statically linked release executable
-release: agility-runtime shaders luau (scripts "release")
+release: agility-runtime shaders luau script-types (scripts "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 

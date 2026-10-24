@@ -29,7 +29,7 @@ Options :: struct {
 }
 
 USAGE :: `usage: cook shaders --dxc <dxc.exe> [--include <dir>]... <shader dir>
-       cook scripts --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...`
+       cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...`
 
 main :: proc() {
 	context.logger = log.create_console_logger(.Info)
