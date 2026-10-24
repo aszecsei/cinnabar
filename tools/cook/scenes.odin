@@ -12,20 +12,18 @@ import format "cinnabar:engine/asset/format"
 // Changing how the cooker cooks scenes changes this, which invalidates every cooked scene.
 SCENE_COOK_VERSION :: "scenes 1"
 
-// cook_scenes cooks every scene in the roots. The cooker cannot lay out native components, because their types exist
-// only in the game DLL, so it checks only what the file itself says: its syntax, and that the scene IDs and script
-// GUIDs that it refers to exist. It reports every failure, and returns false if any.
-cook_scenes :: proc(options: Script_Options) -> bool {
-	scenes, ok := collect_assets(options.roots[:], format.SCENE_EXTENSION)
-	scripts, scripts_ok := collect_assets(options.roots[:], SCRIPT_EXTENSION)
-	ok &&= scripts_ok
-	out_dir := fmt.tprintf("%s/%s", options.cache, options.config == .Dev ? "dev" : "release")
+// cook_scenes cooks the scenes among the assets whose keys changed. The cooker cannot lay out native components,
+// because their types exist only in the game DLL, so it checks only what the file itself says: its syntax, and that
+// the scene IDs and script GUIDs that it refers to exist. It reports every failure, and returns false if any.
+cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
+	scripts := assets_of(assets, .Script)
+	out_dir := config_dir(options)
 	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
 		log.errorf("cook: %s: %v", out_dir, err)
 		return false
 	}
-	cooked, current := 0, 0
-	for s in scenes {
+	ok := true
+	for s in assets_of(assets, .Scene) {
 		for setting in s.meta.settings {
 			log.warnf("cook: %s%s: unknown setting %q", s.path, format.META_EXTENSION, setting.key)
 		}
@@ -33,7 +31,7 @@ cook_scenes :: proc(options: Script_Options) -> bool {
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked_key(output, .Scene, format.scene_layout()) == key {
-			current += 1
+			pass.current[.Scene] += 1
 			continue
 		}
 		scene, scene_ok := parse_scene(s, scripts)
@@ -46,9 +44,8 @@ cook_scenes :: proc(options: Script_Options) -> bool {
 			ok = false
 			continue
 		}
-		cooked += 1
+		pass.cooked[.Scene] += 1
 	}
-	log.infof("cook: %d scenes cooked, %d up to date", cooked, current)
 	return ok
 }
 

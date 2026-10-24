@@ -9,8 +9,21 @@ import "core:strings"
 
 import format "cinnabar:engine/asset/format"
 
+// IMPORTERS gives the extension of each kind of asset that the cooker cooks. Other files in the content roots are not
+// assets.
+IMPORTERS :: [format.Asset_Kind]string {
+	.None   = "",
+	.Script = SCRIPT_EXTENSION,
+	.Scene  = format.SCENE_EXTENSION,
+}
+
+Asset_Kinds :: bit_set[format.Asset_Kind]
+
+ALL_KINDS :: Asset_Kinds{.Script, .Scene}
+
 // Asset_Source is a source asset with its .meta file.
 Asset_Source :: struct {
+	kind:      format.Asset_Kind,
 	root:      int,
 	// Absolute, with forward slashes.
 	path:      string,
@@ -21,10 +34,9 @@ Asset_Source :: struct {
 	source:    []byte,
 }
 
-// collect_assets reads every file with the extension in the roots, with its .meta file, in path order. An asset
-// without a .meta file gets a new GUID, and the cooker writes its .meta file. Files and directories whose names
-// start with a dot are skipped.
-collect_assets :: proc(roots: []Root, extension: string) -> (assets: []Asset_Source, ok: bool) {
+// scan reads every asset in the roots, with its .meta file, in path order. An asset without a .meta file gets a new
+// GUID, and the cooker writes its .meta file. Files and directories whose names start with a dot are skipped.
+scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
 	found := make([dynamic]Asset_Source, context.temp_allocator)
 	ok = true
 	for root, root_index in roots {
@@ -37,11 +49,13 @@ collect_assets :: proc(roots: []Root, extension: string) -> (assets: []Asset_Sou
 				}
 				continue
 			}
-			if info.type != .Regular || !strings.has_suffix(info.name, extension) {
+			kind := kind_of(info.name)
+			if info.type != .Regular || kind == .None {
 				continue
 			}
 			path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
 			a := Asset_Source {
+				kind = kind,
 				root = root_index,
 				path = path,
 				name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
@@ -58,15 +72,46 @@ collect_assets :: proc(roots: []Root, extension: string) -> (assets: []Asset_Sou
 		}
 	}
 	slice.sort_by(found[:], proc(a, b: Asset_Source) -> bool {return a.path < b.path})
-	for i in 1 ..< len(found) {
-		for j in 0 ..< i {
-			if found[i].meta.guid == found[j].meta.guid {
-				log.errorf("cook: %s and %s have the same GUID. Delete the .meta file of the copy.", found[j].path, found[i].path)
-				ok = false
-			}
+	// Assets that share a GUID would write the same blob, so none of them cooks.
+	first := make(map[format.Guid]int, len(found), context.temp_allocator)
+	shared := make(map[format.Guid]bool, context.temp_allocator)
+	for a, i in found {
+		if j, seen := first[a.meta.guid]; seen {
+			log.errorf("cook: %s and %s have the same GUID. Delete the .meta file of the copy.", found[j].path, a.path)
+			shared[a.meta.guid] = true
+			ok = false
+			continue
+		}
+		first[a.meta.guid] = i
+	}
+	unique := make([dynamic]Asset_Source, 0, len(found), context.temp_allocator)
+	for a in found {
+		if !shared[a.meta.guid] {
+			append(&unique, a)
 		}
 	}
-	return found[:], ok
+	return unique[:], ok
+}
+
+// kind_of is the kind of asset that a file name is, or .None.
+kind_of :: proc(name: string) -> format.Asset_Kind {
+	for extension, kind in IMPORTERS {
+		if kind != .None && strings.has_suffix(name, extension) {
+			return kind
+		}
+	}
+	return .None
+}
+
+// assets_of is the assets of one kind, in the scan's order.
+assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []Asset_Source {
+	result := make([dynamic]Asset_Source, context.temp_allocator)
+	for a in assets {
+		if a.kind == kind {
+			append(&result, a)
+		}
+	}
+	return result[:]
 }
 
 @(private = "file")

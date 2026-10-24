@@ -25,7 +25,7 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
-	testing.expect(t, cook_scenes(options))
+	testing.expect(t, cook(options, {.Scene}).ok)
 
 	guid := tree_guid(t, tree, "levels/hall.scene")
 	blob := tree_blob(t, tree, guid)
@@ -41,7 +41,7 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 
 	// A second cook finds the scene up to date.
 	key := (^format.Blob_Header)(raw_data(blob)).key
-	testing.expect(t, cook_scenes(options))
+	testing.expect(t, cook(options, {.Scene}).ok)
 	testing.expect_value(t, cooked_key(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(guid)), .Scene, format.scene_layout()), key)
 }
 
@@ -53,6 +53,6 @@ a_broken_scene_names_its_line :: proc(t: ^testing.T) {
 	defer release_errors(&errors)
 	context.logger = capture_errors(&errors)
 
-	testing.expect(t, !cook_scenes(tree_options(tree)))
+	testing.expect(t, !cook(tree_options(tree), {.Scene}).ok)
 	expect_error(t, &errors, "bad.scene:3: a component needs its stable ID")
 }

@@ -1,7 +1,8 @@
 // tools/cook compiles source assets. See docs/content-pipeline.md#cooking.
 //
 // `cook shaders --dxc <dxc.exe> --include <dir> <dir>` cooks shaders, `cook scripts` cooks scripts (see
-// scripts.odin), and `cook scenes` cooks scenes (see scenes.odin).
+// scripts.odin), `cook scenes` cooks scenes (see scenes.odin), and `cook daemon` cooks both whenever they change (see
+// daemon.odin).
 //
 // Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points to <name>.<stage>.dxil,
 // with the fixed root signature attached, so DXC rejects a shader that does not fit it. A file with [shader("...")]
@@ -17,6 +18,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
+import format "cinnabar:engine/asset/format"
+
 // Changing how the cooker compiles changes this, which invalidates every cached output.
 COOK_VERSION :: "shaders 1"
 SHADER_MODEL :: "6_6"
@@ -30,7 +33,8 @@ Options :: struct {
 
 USAGE :: `usage: cook shaders --dxc <dxc.exe> [--include <dir>]... <shader dir>
        cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...
-       cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...`
+       cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook daemon --cache <dir> [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...`
 
 main :: proc() {
 	context.logger = log.create_console_logger(.Info)
@@ -43,14 +47,19 @@ main :: proc() {
 			ok = cook_shaders(options)
 		}
 	case "scripts":
-		options: Script_Options
-		if options, parsed = parse_script_args(os.args[2:]); parsed {
-			ok = cook_scripts(options)
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Script)
 		}
 	case "scenes":
-		options: Script_Options
-		if options, parsed = parse_script_args(os.args[2:]); parsed {
-			ok = cook_scenes(options)
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Scene)
+		}
+	case "daemon":
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:], daemon = true); parsed {
+			ok = run_daemon(options)
 		}
 	}
 	if !parsed {
@@ -60,6 +69,19 @@ main :: proc() {
 	if !ok {
 		os.exit(1)
 	}
+}
+
+// cook_batch cooks one kind of asset once, while it holds the cache's lock.
+cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
+	lock := lock_cache(options.cache) or_return
+	defer unlock_cache(&lock)
+	pass := cook(options, {kind})
+	if kind == .Script {
+		log.infof("cook: %d scripts compiled, %d up to date", pass.cooked[kind], pass.current[kind])
+	} else {
+		log.infof("cook: %d scenes cooked, %d up to date", pass.cooked[kind], pass.current[kind])
+	}
+	return pass.ok
 }
 
 parse_args :: proc(args: []string) -> (options: Options, ok: bool) {

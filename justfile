@@ -134,6 +134,11 @@ scripts config="dev": cook
 scenes config="dev": cook
     "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
 
+# Run the cook daemon, which cooks the game's scripts and scenes into build/cache/dev whenever they change, until it is
+# stopped. A running game swaps the new blobs (see docs/content-pipeline.md#cook-daemon).
+watch: cook
+    "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" --root game="{{content_root}}"
+
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"

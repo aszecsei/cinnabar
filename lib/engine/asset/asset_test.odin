@@ -31,8 +31,6 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 		asset_allocator = runtime.heap_allocator(),
 		file_read       = core.file_read,
 		file_modified   = core.file_modified,
-		// poll compares this with last_poll, which the tests set.
-		time_seconds    = proc() -> f64 {return 1000},
 	}
 	temp, err := os.make_directory_temp("", "asset_test_*", context.allocator)
 	testing.expect(t, err == nil)
@@ -87,6 +85,15 @@ write_blob :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, key: u64, modi
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer))
 	testing.expect(t, os.write_entire_file(path, blob) == nil)
+	testing.expect(t, os.change_times(path, modified, modified) == nil)
+}
+
+// write_generation writes the cache's generation file, as a cook does after its blobs. modified sets its modification
+// time, as in write_blob.
+@(private)
+write_generation :: proc(t: ^testing.T, f: ^Fixture, modified: time.Time) {
+	path := fmt.tprintf("%s/%s", f.dir, format.GENERATION_FILE)
+	testing.expect(t, os.write_entire_file(path, transmute([]byte)string("1")) == nil)
 	testing.expect(t, os.change_times(path, modified, modified) == nil)
 }
 
@@ -154,13 +161,13 @@ poll_swaps_a_rewritten_blob :: proc(t: ^testing.T) {
 	h, _ := load(&f.assets, test_guid(1))
 	other, _ := load(&f.assets, test_guid(2))
 
-	f.assets.last_poll = 0
+	write_generation(t, f, start)
 	testing.expect_value(t, len(poll(&f.assets)), 0)
 
 	write_blob(t, f, test_guid(1), 9, time.time_add(start, time.Second))
-	// poll waits for its interval.
+	// poll waits for the cook to write its generation.
 	testing.expect_value(t, len(poll(&f.assets)), 0)
-	f.assets.last_poll = 0
+	write_generation(t, f, time.time_add(start, time.Second))
 	changed := poll(&f.assets)
 	testing.expect_value(t, len(changed), 1)
 	if len(changed) == 1 {

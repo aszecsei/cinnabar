@@ -12,9 +12,17 @@ import "core:path/slashpath"
 // Type_Checker checks scripts against the definition file that host.exe --emit-script-types writes (see
 // docs/scripting.md#types-and-tooling).
 Type_Checker :: struct {
-	handle:      ^Luau_Checker,
-	// The definition file's hash, which is part of every script's cache key. Zero when there is none.
-	definitions: u64,
+	handle: ^Luau_Checker,
+}
+
+// definitions_hash is the definition file's hash, which is part of every script's cache key. It is zero when there is
+// no file.
+definitions_hash :: proc(definitions: string) -> u64 {
+	if definitions == "" {
+		return 0
+	}
+	source, err := os.read_entire_file(definitions, context.temp_allocator)
+	return hash.fnv64a(source) if err == nil else 0
 }
 
 @(private = "file")
@@ -37,7 +45,6 @@ type_checker_open :: proc(checker: ^Type_Checker, definitions: string, scripts: 
 		return true
 	}
 	checker.handle = cn_luau_checker_create()
-	checker.definitions = hash.fnv64a(source)
 	report := Report_Context{context, definitions, true}
 	on_error :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
 		r := (^Report_Context)(ud)

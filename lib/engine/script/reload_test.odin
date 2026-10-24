@@ -69,7 +69,8 @@ write_script :: proc(t: ^testing.T, f: ^Reload_Fixture, n: u8, version: int, sou
 // script runtime reloads them.
 @(private)
 hot_reload :: proc(f: ^Reload_Fixture) {
-	f.assets.last_poll = -1
+	// No cook writes the cache's generation here, so poll is made to check the blobs.
+	f.assets.cache_generation = -1
 	reload_changed(&f.runtime, asset.poll(f.assets))
 }
 

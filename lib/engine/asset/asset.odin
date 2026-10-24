@@ -1,5 +1,5 @@
 // Package asset is the asset runtime: it loads cooked blobs by GUID and keeps them behind generational handles. In
-// development it reloads a blob when the cooker writes a new one. See docs/content-pipeline.md#loading.
+// development it reloads the blobs that a cook writes again. See docs/content-pipeline.md#loading.
 package asset
 
 import "core:fmt"
@@ -10,8 +10,6 @@ import format "cinnabar:engine/asset/format"
 
 MAX_ASSETS :: 4096
 MAX_PATH :: 260
-// How often poll checks the loaded blobs for changes, in seconds.
-POLL_INTERVAL :: 0.25
 
 // Handle is a loaded asset. The zero handle is no asset, and a handle to an unloaded asset is detected.
 Handle :: struct {
@@ -61,15 +59,16 @@ Assets :: struct {
 	source:    Source,
 	records:   [MAX_ASSETS]Record,
 	// Records below this index have been used.
-	used:      u32,
-	last_poll: f64,
+	used:             u32,
+	// The modification time of the cache's generation file when poll last checked the blobs.
+	cache_generation: i64,
 }
 
 init :: proc(a: ^Assets, platform: ^core.Platform_API, source: Source) {
 	a.platform = platform
 	a.source = source
 	a.used = 0
-	a.last_poll = platform.time_seconds()
+	a.cache_generation = platform.file_modified(generation_path(a))
 }
 
 // reload keeps every loaded asset after a code reload.
@@ -149,13 +148,14 @@ guid :: proc(a: ^Assets, h: Handle) -> format.Guid {
 }
 
 // poll swaps the blobs that the cooker has written again, and returns their handles in frame memory. Call it at the
-// end of the frame, when nothing holds a blob. It checks at most every POLL_INTERVAL.
+// end of the frame, when nothing holds a blob. It checks the blobs only when the cache's generation file changes,
+// which a cook writes after all of its blobs, so every blob of one cook is swapped in the same frame.
 poll :: proc(a: ^Assets) -> []Handle {
-	now := a.platform.time_seconds()
-	if now - a.last_poll < POLL_INTERVAL {
+	generation := a.platform.file_modified(generation_path(a))
+	if generation == a.cache_generation {
 		return nil
 	}
-	a.last_poll = now
+	a.cache_generation = generation
 	changed := make([dynamic]Handle, a.platform.frame_allocator)
 	for &r, i in a.records[:a.used] {
 		if r.generation % 2 == 0 {
@@ -167,7 +167,7 @@ poll :: proc(a: ^Assets) -> []Handle {
 		}
 		data, modified, ok := read_blob(a, r.guid)
 		if !ok {
-			// The old blob stays. A cook that is still writing gives a new modification time again.
+			// The old blob stays, and the next cook's generation tries again.
 			continue
 		}
 		free_data(a, &r)
@@ -201,6 +201,15 @@ blob_path :: proc(a: ^Assets, guid: format.Guid) -> string {
 	switch &source in a.source {
 	case Loose_Cache:
 		return fmt.aprintf("%s/%s.blob", string(source.dir[:source.dir_len]), format.guid_format(guid, &buffer), allocator = a.platform.frame_allocator)
+	}
+	return ""
+}
+
+@(private)
+generation_path :: proc(a: ^Assets) -> string {
+	switch &source in a.source {
+	case Loose_Cache:
+		return fmt.aprintf("%s/%s", string(source.dir[:source.dir_len]), format.GENERATION_FILE, allocator = a.platform.frame_allocator)
 	}
 	return ""
 }

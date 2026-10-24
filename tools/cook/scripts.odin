@@ -29,20 +29,6 @@ Script_Config :: enum {
 	Release,
 }
 
-Root :: struct {
-	name: string,
-	// Absolute, with forward slashes.
-	dir:  string,
-}
-
-Script_Options :: struct {
-	cache:       string,
-	config:      Script_Config,
-	roots:       [dynamic]Root,
-	// The definition file to type check against, or "" for none.
-	definitions: string,
-}
-
 Script_Source :: struct {
 	root:      int,
 	// Absolute, with forward slashes.
@@ -59,6 +45,8 @@ Script_Source :: struct {
 	native_comment:    bool,
 	// The resolved requires, sorted by path.
 	resolved:  [dynamic]Resolved_Require,
+	// The script cannot cook: it has an error, or it requires a script that has one.
+	failed:    bool,
 }
 
 Resolved_Require :: struct {
@@ -72,91 +60,61 @@ Found_Require :: struct {
 	line: int,
 }
 
-parse_script_args :: proc(args: []string) -> (options: Script_Options, ok: bool) {
-	options.roots = make([dynamic]Root, context.temp_allocator)
-	config_set := false
-	for i := 0; i < len(args); i += 1 {
-		if i + 1 >= len(args) {
-			return
-		}
-		value := args[i + 1]
-		switch args[i] {
-		case "--cache":
-			options.cache = value
-		case "--definitions":
-			options.definitions = value
-		case "--config":
-			switch value {
-			case "dev":
-				options.config = .Dev
-			case "release":
-				options.config = .Release
-			case:
-				return
-			}
-			config_set = true
-		case "--root":
-			equals := strings.index_byte(value, '=')
-			if equals <= 0 {
-				return
-			}
-			dir, err := os.get_absolute_path(value[equals + 1:], context.temp_allocator)
-			if err != nil {
-				return
-			}
-			append(&options.roots, Root{value[:equals], forward_slashes(dir)})
-		case:
-			return
-		}
-		i += 1
-	}
-	return options, options.cache != "" && config_set && len(options.roots) > 0
-}
-
-// cook_scripts cooks every script in the roots. It reports every failure, and returns false if any.
-cook_scripts :: proc(options: Script_Options) -> bool {
-	scripts, collected := collect_scripts(options.roots[:])
-	ok := collected
+// cook_scripts cooks the scripts among the assets whose keys changed. A script that fails keeps its old blob, so the
+// running game keeps the last good version, and so does every script that requires it, directly or not. The other
+// scripts still cook. It reports every failure, and returns false if any.
+cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
+	scripts := collect_scripts(assets)
 	by_path := make(map[string]int, len(scripts), context.temp_allocator)
 	for s, i in scripts {
 		by_path[s.path] = i
 	}
 	for &s in scripts {
-		if !find_requires(&s) {
-			ok = false
+		if s.failed || !find_requires(&s) {
+			s.failed = true
 			continue
 		}
 		if !resolve_requires(scripts, by_path, &s) {
-			ok = false
+			s.failed = true
 		}
 	}
-	if !ok || !check_cycles(scripts) {
-		return false
+	check_cycles(scripts)
+	fail_dependents(scripts)
+	ok := true
+	for s in scripts {
+		ok &&= !s.failed
 	}
 
-	out_dir := fmt.tprintf("%s/%s", options.cache, options.config == .Dev ? "dev" : "release")
+	out_dir := config_dir(options)
 	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
 		log.errorf("cook: %s: %v", out_dir, err)
 		return false
 	}
+	definitions := definitions_hash(options.definitions)
+	// The type checker and the VM that reads behaviours' fields open on the first script that needs them, so a cook
+	// that finds everything up to date stays quick.
 	checker: Type_Checker
-	if !type_checker_open(&checker, options.definitions, scripts) {
-		return false
-	}
+	checker_open := false
 	defer type_checker_close(&checker)
-	compiled, current := 0, 0
-	// The VM that reads behaviours' fields opens on the first behaviour that needs cooking.
 	vm: Schema_VM
 	defer schema_vm_close(&vm)
 	for &s, index in scripts {
-		key := script_key(options.config, s, dependency_hash(scripts, index) ~ checker.definitions)
+		if s.failed {
+			continue
+		}
+		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked_script_key(output) == key {
-			current += 1
+			pass.current[.Script] += 1
 			continue
 		}
-		// A script with type errors keeps its old blob, so the running game keeps the last good version.
+		if !checker_open {
+			if !type_checker_open(&checker, options.definitions, scripts) {
+				return false
+			}
+			checker_open = true
+		}
 		if !type_check(&checker, s) {
 			ok = false
 			continue
@@ -178,22 +136,16 @@ cook_scripts :: proc(options: Script_Options) -> bool {
 			ok = false
 			continue
 		}
-		compiled += 1
+		pass.cooked[.Script] += 1
 	}
-	log.infof("cook: %d scripts compiled, %d up to date", compiled, current)
 	return ok
 }
 
-// collect_scripts reads every script in the roots with its .meta file, in path order, and checks its settings.
-collect_scripts :: proc(roots: []Root) -> (scripts: []Script_Source, ok: bool) {
-	assets: []Asset_Source
-	assets, ok = collect_assets(roots, SCRIPT_EXTENSION)
+// collect_scripts gives the scripts among the assets, and checks their settings. A script with a bad setting is
+// marked failed.
+collect_scripts :: proc(assets: []Asset_Source) -> []Script_Source {
 	found := make([dynamic]Script_Source, 0, len(assets), context.temp_allocator)
-	for a in assets {
-		if !check_script_settings(a) {
-			ok = false
-			continue
-		}
+	for a in assets_of(assets, .Script) {
 		append(
 			&found,
 			Script_Source {
@@ -205,10 +157,31 @@ collect_scripts :: proc(roots: []Root) -> (scripts: []Script_Source, ok: bool) {
 				source = a.source,
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
+				failed = !check_script_settings(a),
 			},
 		)
 	}
-	return found[:], ok
+	return found[:]
+}
+
+// fail_dependents marks every script that requires a failed script, directly or not, as failed, and says why.
+fail_dependents :: proc(scripts: []Script_Source) {
+	for changed := true; changed; {
+		changed = false
+		for &s in scripts {
+			if s.failed {
+				continue
+			}
+			for r in s.resolved {
+				if scripts[r.target].failed {
+					log.errorf("cook: %s: not cooked, because it requires %s, which did not cook", s.path, scripts[r.target].name)
+					s.failed = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
 }
 
 @(private = "file")
@@ -357,8 +330,8 @@ find_alias :: proc(dir, alias: string) -> (target: string, found: bool, message:
 	}
 }
 
-// check_cycles reports each require cycle once.
-check_cycles :: proc(scripts: []Script_Source) -> bool {
+// check_cycles reports each require cycle once, and marks the scripts in it failed.
+check_cycles :: proc(scripts: []Script_Source) {
 	State :: enum u8 {
 		New,
 		Visiting,
@@ -366,15 +339,14 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 	}
 	states := make([]State, len(scripts), context.temp_allocator)
 	stack := make([dynamic]int, context.temp_allocator)
-	ok := true
-	visit :: proc(scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int, ok: ^bool) {
+	visit :: proc(scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int) {
 		states[i] = .Visiting
 		append(stack, i)
 		for r in scripts[i].resolved {
 			t := r.target
 			switch states[t] {
 			case .New:
-				visit(scripts, states, stack, t, ok)
+				visit(scripts, states, stack, t)
 			case .Visiting:
 				builder := strings.builder_make(context.temp_allocator)
 				start, _ := slice.linear_search(stack[:], t)
@@ -383,7 +355,9 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 				}
 				strings.write_string(&builder, scripts[t].name)
 				log.errorf("cook: require cycle: %s", strings.to_string(builder))
-				ok^ = false
+				for s in stack[start:] {
+					scripts[s].failed = true
+				}
 			case .Done:
 			}
 		}
@@ -392,10 +366,9 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 	}
 	for i in 0 ..< len(scripts) {
 		if states[i] == .New {
-			visit(scripts, states, &stack, i, &ok)
+			visit(scripts, states, &stack, i)
 		}
 	}
-	return ok
 }
 
 // script_key covers everything that the blob depends on: the cooker, Luau, the configuration, the source, the

@@ -8,7 +8,7 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 
 - A GUID is 128 random bits, written as 32 hex digits. Engine content (such as the script prelude) has fixed GUIDs in committed `.meta` files.
 - A `.meta` file has lines of `key = value`, and `#` comments. `guid` is required. The other keys are import settings. When the cooker finds an asset without a `.meta` file, it writes one. Commit it with the asset.
-- Two assets with the same GUID are a cook error. This happens when an asset is copied with its `.meta` file. Delete the copy's `.meta` file to give it a new GUID.
+- Two assets with the same GUID, of any kinds, are a cook error, and neither cooks. This happens when an asset is copied with its `.meta` file. Delete the copy's `.meta` file to give it a new GUID.
 - Each game has one content root, `samples/<game>/content/`. Engine content is in `lib/engine/content/`. The cooker takes each root with a name, such as `--root game=samples/mygame/content`, and an asset's source path is the root's name and its path in the root, such as `game/scripts/hello.luau`.
 - At runtime, a loaded asset is a generational handle in the asset runtime's table. Persistent state holds handles or GUIDs, never pointers into blobs (see [Hot reload](hot-reload.md#rules)).
 
@@ -16,6 +16,9 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 
 - **Shared schemas:** `tools/cook` imports the same asset-type package from `lib/engine` that the runtime uses, `lib/engine/asset/format`, so their struct layouts cannot diverge. That package imports nothing from `lib/core`. Each asset type's version comes from its layout hash, so changing a type invalidates its cache entries.
 - **Incremental cooking:** a cache key is a hash of the source files, the import settings and the cooker version.
+- **One scan:** every command that cooks scripts or scenes scans the roots once for every kind of asset, and gives each new asset its `.meta` file, whatever kind it cooks. Then it cooks each asset of its kinds whose key changed.
+- **The cache's generation:** after a cook writes blobs, it adds one to the counter in `<cache>/<config>/.generation` (see [Loading](#loading)).
+- **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs, and a second cook of the same cache stops with an error. Otherwise both could give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes.
 - **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. A Vulkan port adds SPIR-V from DXC, and a Metal port adds a metallib from `metal-shaderconverter`. All shaders use one fixed bindless root signature (see [GPU](gpu.md#binding-model)), and the cooker rejects a shader that does not fit it. The runtime never compiles or reflects shaders. The DXC version is part of the cache key. For now the cooker cooks only shaders, and writes each output next to its source with its cache key in `<output>.key` (see [GPU](gpu.md#shaders)).
 
 ### Scripts
@@ -31,6 +34,8 @@ For each script, the cooker:
 5. For a script that calls `Behaviour.define`: runs its top level in a sandboxed VM with the Luau libraries, the prelude (`lib/engine/script/prelude.luau`) and a `require` that follows the resolved requires, but no engine. If it returns a behaviour class, the cooker records the class name and the fields (see [Scripting](scripting.md#behaviours)).
 6. Writes the blob to a temporary file and renames it, so the running game never reads a partial blob.
 
+A script that fails keeps its old blob, so the running game keeps the last good version. Every script that requires it, directly or not, also keeps its old blob, with an error that names the script it requires. The other scripts still cook. Every script in a require cycle fails.
+
 The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, the definition file, and the sources of every module that the script requires, directly or not. A behaviour's field defaults and the type check depend on those modules, so a changed dependency cooks its dependents again.
 
 Script import settings in `.meta`: `native = true` compiles the module to machine code at load, like a `--!native` comment at the top of the source. An unknown setting is a warning.
@@ -43,14 +48,14 @@ Scenes are `.scene` text files (see [Editor](editor.md#scenes)). `just scenes` r
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
 
-`cook daemon --link <port> --cache <dir> --definitions <file> --root <name>=<dir>...`
+`cook daemon --cache <dir> [--definitions <file>] --root <name>=<dir>...` *The editor's `--link <port>` comes with the cook link.*
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
-- **Importers:** each asset kind has an importer, chosen by the source's extension. An importer collects its sources, gives each asset's dependencies, cooks one asset, and checks the import settings that it accepts. A batch command indexes every asset of its kind and cooks each one whose key changed. The daemon cooks only the assets that a change makes dirty. Shaders are not assets yet, so the daemon does not cook them.
-- **Index:** the daemon keeps every asset in memory: its GUID, source path, kind, import settings, cache key, status (current, cooking or failed) and problems. It also keeps each asset's dependencies (a script's requires, and the scripts that a scene names) and its dependents, the assets that depend on it. A scan of the roots builds the index when the daemon starts. *A saved index comes when the scan becomes slow.*
-- **Watching:** the daemon watches each root, and the definition file, with `ReadDirectoryChangesW`. It collects changes until 100 ms pass without one, then cooks them in one pass. A new definition file makes every script dirty, because it is part of every script's key.
-- **A pass** cooks the dirty assets and their dependents, directly or not, each after its dependencies. An asset that fails keeps its old blob, as in a batch cook, and its problems go to the editor. After a pass that writes blobs, the daemon writes the cache's generation (see [Loading](#loading)).
-- **One writer:** the daemon holds `build/cache/.cook.lock` while it runs. A batch cook that cannot take the lock stops with an error that names the daemon, so the two never both give an asset a `.meta` file.
+- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
+- **Index:** *with the cook link,* the daemon keeps every asset in memory for the editor: its GUID, source path, kind, import settings, status (current or failed) and problems, its dependencies (a script's requires, and the scripts that a scene names) and its dependents. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
+- **Problems** go to the daemon's log, and a pass that cooks something says how much. An asset that fails is tried again, and its problems reported again, at each pass until it cooks. *With the cook link, problems also go to the editor.* A `.meta` file that the daemon writes for a new asset is a change too, so it makes one more pass, which finds nothing to cook.
+- **One writer:** the daemon holds the cache's lock while it runs, so a batch cook stops with an error that names the daemon.
 
 ### Asset operations
 
@@ -84,8 +89,8 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 
 ### Implementation phases
 
-1. **Daemon:** the importers, the index, the watcher, incremental passes, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
-2. **Cook link:** `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
+1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
+2. **Cook link:** the index, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
 3. **Asset operations.**
 4. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
@@ -113,5 +118,5 @@ A scene blob holds a table of entities: the scene ID, the parent's scene ID, the
 - **Loose cache:** one blob per asset, `build/cache/<config>/<guid>.blob`. The cooker overwrites a blob when its cache key changes. The runtime reads files through `file_read` and `file_modified` in `Platform_API`, and keeps blobs in memory from `asset_allocator`, the host's heap.
 - **Handles:** `asset.load` returns a generational handle, and the same handle for an asset that is already loaded. A handle to an unloaded asset is detected. The asset table lives in `Game_State`, so a code reload keeps every loaded asset. A soft restart loads them again.
 - **Bundles** (`*.cbb`) contain a header, a table of contents sorted by GUID, and aligned blobs. A bundle is a load unit (global, per-level, or a streaming chunk), and it lists the bundles it depends on.
-- **Asset hot reload:** in development, after a cook writes blobs, it writes a counter to `build/cache/<config>/.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. *Until the daemon exists, `poll` checks each loaded blob at most every 0.25 s.* The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](scripting.md#script-hot-reload)).
+- **Asset hot reload:** in development, after a cook writes blobs, it writes a counter to `build/cache/<config>/.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](scripting.md#script-hot-reload)).
 - **Scripts load on demand.** A script blob stays loaded while its module is loaded. The VM holds the module's result, not the blob, so the blob can be swapped under it.

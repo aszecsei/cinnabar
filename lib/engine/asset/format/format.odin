@@ -51,6 +51,10 @@ hex_digit :: proc "contextless" (c: u8) -> (u8, bool) {
 
 META_EXTENSION :: ".meta"
 
+// After a cook writes blobs into a configuration's cache directory, it writes a counter to this file in it. The
+// runtime checks the blobs it has loaded only when the file changes (see docs/content-pipeline.md#loading).
+GENERATION_FILE :: ".generation"
+
 // Meta is a parsed .meta file: lines of `key = value`, with `#` comments. Every .meta has a guid. The other keys are
 // the asset's import settings.
 Meta :: struct {
