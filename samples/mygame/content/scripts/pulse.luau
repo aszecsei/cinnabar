@@ -22,6 +22,11 @@ function Pulse:update(dt: number)
 	self.entity:get(Triangle).brightness = self.base * (1 + self.depth * math.sin(self.phase))
 end
 
+-- A script hot reload keeps the instance's state, such as phase, and runs the new update from the next frame.
+function Pulse:on_reload()
+	Debug.log("reloaded the pulse of", self.entity)
+end
+
 -- Disabled, the triangle goes back to its own brightness.
 function Pulse:on_disable()
 	if self.base then

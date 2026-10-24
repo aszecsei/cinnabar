@@ -207,8 +207,8 @@ Game_State :: struct {
 	triangles:   render.Extractor,
 	assets:      asset.Assets,
 	scripts:     script.Runtime,
-	// The thread of content/scripts/hello.luau, which the scheduler runs.
-	hello:       script.Thread,
+	// content/scripts/hello.luau, which the scheduler runs.
+	hello:       script.Main_Script,
 }
 
 Pipelines :: struct {
@@ -449,11 +449,9 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	return true
 }
 
-// end_frame swaps the blobs that the cooker rewrote. Scripts take up a new version once script hot reload exists.
+// end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
 end_frame :: proc(s: ^Game_State) {
-	if changed := asset.poll(&s.assets); len(changed) > 0 {
-		log.infof("mygame: %d assets changed", len(changed))
-	}
+	script.reload_changed(&s.scripts, asset.poll(&s.assets))
 }
 
 // stream_rings generates the rings' mip chain and streams it. The backend copies the data before the call returns.

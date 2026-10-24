@@ -19,7 +19,12 @@ Module :: struct {
 	state:  Module_State,
 	// A registry reference to the module's result, once it is Loaded.
 	result: c.int,
+	// For a Main module: the registry reference of its thread, which the scheduler runs.
+	thread: c.int,
 }
+
+// Main_Script is a script that spawn_script started. It stays valid when a script hot reload restarts the script.
+Main_Script :: distinct u32
 
 @(private)
 Module_State :: enum u8 {
@@ -34,7 +39,7 @@ Module_State :: enum u8 {
 // spawn_script starts a script asset on a new sandboxed thread, which runs until its first wait. Then the scheduler
 // runs it, like a coroutine: coroutine.yield waits one frame. Its requires load the modules that the cooker
 // resolved. stop ends it.
-spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: bool) {
+spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (script: Main_Script, ok: bool) {
 	m := module_for(r, guid)
 	if m == nil {
 		return
@@ -43,6 +48,26 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: boo
 		log.errorf("script: %s already runs", guid_text(r, guid))
 		return
 	}
+	if !start_main(r, m) {
+		return
+	}
+	return Main_Script(module_index(r, m) + 1), true
+}
+
+// stop ends a script that spawn_script started.
+stop :: proc(r: ^Runtime, script: Main_Script) {
+	if int(script) < 1 || int(script) > r.module_count {
+		return
+	}
+	m := &r.modules[script - 1]
+	if m.state == .Main {
+		stop_thread(r, m.thread)
+	}
+}
+
+// start_main runs a Main module's top level on a new sandboxed thread, until its first wait.
+@(private = "file")
+start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
 	bytecode, chunkname := load_module_asset(r, m) or_return
 	L := r.L
 	co := luau.newthread(L)
@@ -50,18 +75,186 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: boo
 	if luau.load(co, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
 		log.errorf("script: %s", luau.toodinstring(co, -1))
 		luau.pop(L, 1)
-		return 0, false
+		return false
 	}
 	m.state = .Main
 	index := add_waiter(r, L, {})
 	luau.pop(L, 1)
-	thread = Thread(r.waiters[index].thread)
+	m.thread = r.waiters[index].thread
 	switch run_waiter(r, index) {
 	case .OK, .YIELD:
-		return thread, true
+		return true
 	case .ERRRUN, .ERRSYNTAX, .ERRMEM, .ERRERR, .BREAK:
 	}
-	return 0, false
+	return false
+}
+
+@(private = "file")
+module_index :: proc(r: ^Runtime, m: ^Module) -> int {
+	return int((uintptr(m) - uintptr(&r.modules[0])) / size_of(Module))
+}
+
+// reload_changed reloads the modules whose blobs the asset runtime swapped: pass it asset.poll's result, at the end of
+// the frame, when no script runs. See docs/scripting.md#script-hot-reload.
+reload_changed :: proc(r: ^Runtime, changed: []asset.Handle) {
+	// Modules first, so a main script that restarts already requires their new versions.
+	for main in ([2]bool{false, true}) {
+		for h in changed {
+			for &m in r.modules[:r.module_count] {
+				if m.handle == h && (m.state == .Main) == main {
+					reload_module(r, &m)
+				}
+			}
+		}
+	}
+}
+
+// reload_module runs a module's new version. A required module's table is patched in place, so every holder of it
+// sees the new code. A main script restarts. If the new version fails, the old one stays.
+@(private = "file")
+reload_module :: proc(r: ^Runtime, m: ^Module) {
+	switch m.state {
+	case .Unloaded, .Loading:
+		// It loads the new version when it is next required.
+		return
+	case .Main:
+		stop_thread(r, m.thread)
+		m.state = .Unloaded
+		if start_main(r, m) {
+			log.infof("script: restarted %s", module_name(r, m))
+		}
+		return
+	case .Loaded:
+	}
+	L := r.L
+	top := luau.gettop(L)
+	defer luau.settop(L, top)
+	bytecode, chunkname, ok := load_module_asset(r, m)
+	if !ok {
+		return
+	}
+	luau.newtable(L)
+	luau.newtable(L)
+	luau.getref(L, r.globals)
+	luau.setfield(L, -2, "__index")
+	luau.setreadonly(L, -1, true)
+	luau.setmetatable(L, -2)
+	luau.setsafeenv(L, -1, true)
+	env := luau.gettop(L)
+	if luau.load(L, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), env) != .OK {
+		log.errorf("script: %s keeps its old version: %s", module_name(r, m), luau.toodinstring(L, -1))
+		return
+	}
+	luau.remove(L, env)
+	m.state = .Loading
+	ran := protected_call(r, L, 0, 1)
+	m.state = .Loaded
+	if !ran {
+		log.errorf("script: %s keeps its old version", module_name(r, m))
+		return
+	}
+	luau.getref(L, m.result)
+	if !luau.istable(L, -1) || !luau.istable(L, -2) {
+		// Nothing can be patched: the cache gets the new value, and modules that required the old one keep it.
+		log.warnf("script: %s does not return a table, so the modules that required it keep the old value", module_name(r, m))
+		luau.pop(L, 1)
+		luau.unref(L, m.result)
+		m.result = luau.ref(L, -1)
+		return
+	}
+	patch_module(r, L, luau.gettop(L), luau.gettop(L) - 1)
+	log.infof("script: reloaded %s", module_name(r, m))
+}
+
+// patch_module makes the old table at old match the new table at new: every key of the new one, and none that the new
+// one lacks. A behaviour class keeps its own __index and __newindex, which find the patched methods in it. Its
+// instances get the defaults of new fields, and then on_reload.
+@(private = "file")
+patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
+	is_class := is_class(L, old) && is_class(L, new)
+	keep :: proc(L: ^luau.State, is_class: bool) -> bool {
+		key, _ := key_atom(L, -1)
+		return is_class && luau.type(L, -1) == .STRING && (key == "__index" || key == "__newindex")
+	}
+	readonly := luau.getreadonly(L, old)
+	luau.setreadonly(L, old, false)
+	defer luau.setreadonly(L, old, readonly)
+
+	// The class's old fields, to find the new ones.
+	old_fields: c.int = 0
+	if is_class {
+		luau.rawgetfield(L, old, "__fields")
+		old_fields = luau.gettop(L)
+	}
+
+	// Remove the keys that the new version lacks. Clearing a field during next is allowed.
+	luau.pushnil(L)
+	for luau.next(L, old) {
+		luau.pop(L, 1)
+		kept := keep(L, is_class)
+		luau.pushvalue(L, -1)
+		missing := luau.rawget(L, new) == .NIL
+		luau.pop(L, 1)
+		if missing && !kept {
+			luau.pushvalue(L, -1)
+			luau.pushnil(L)
+			luau.rawset(L, old)
+		}
+	}
+	luau.pushnil(L)
+	for luau.next(L, new) {
+		luau.pushvalue(L, -2)
+		if keep(L, is_class) {
+			luau.pop(L, 2)
+			continue
+		}
+		luau.insert(L, -2)
+		luau.rawset(L, old)
+	}
+	if !is_class {
+		return
+	}
+
+	luau.rawgetfield(L, old, "__fields")
+	fields := luau.gettop(L)
+	updates := luau.rawgetfield(L, old, "update") == .FUNCTION
+	luau.pop(L, 1)
+	for &i, index in r.instances[:r.instance_used] {
+		if .Live not_in i.flags {
+			continue
+		}
+		luau.getref(L, i.table)
+		instance := luau.gettop(L)
+		luau.getmetatable(L, instance)
+		same := luau.rawequal(L, -1, old)
+		luau.pop(L, 1)
+		if !same {
+			luau.pop(L, 1)
+			continue
+		}
+		luau.pushnil(L)
+		for luau.next(L, fields) {
+			luau.pushvalue(L, -2)
+			is_new := luau.rawget(L, old_fields) == .NIL
+			luau.pop(L, 1)
+			luau.pushvalue(L, -2)
+			unset := luau.rawget(L, instance) == .NIL
+			luau.pop(L, 1)
+			if is_new && unset {
+				luau.pushvalue(L, -2)
+				luau.rawgetfield(L, -2, "default")
+				luau.rawset(L, instance)
+			}
+			luau.pop(L, 1)
+		}
+		luau.pop(L, 1)
+		if updates {
+			i.flags += {.Updates}
+		} else {
+			i.flags -= {.Updates}
+		}
+		call_method(r, {u32(index), i.generation}, "on_reload")
+	}
 }
 
 // require_binding is the global require. It finds the calling module by its chunk name, and loads the module that

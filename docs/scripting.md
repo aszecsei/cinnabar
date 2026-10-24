@@ -203,7 +203,7 @@ Unity has two switches, and so does cinnabar:
 
 - `self:start_coroutine(fn, ...)` starts a Luau thread that the instance owns, as in Unity's `StartCoroutine`. It runs until its first wait before `start_coroutine` returns the thread, which `self:stop_coroutine(co)` stops. A destroyed or deactivated entity stops its coroutines. A coroutine that was stopped does not start again when the entity comes back, as in Unity.
 - Inside a coroutine: `wait(seconds)` (world time), `wait_realtime(seconds)`, `wait_frames(n)`, `wait_until(predicate)` (called each frame) and `wait_event(entity, name)`, which returns the event's arguments. A plain `coroutine.yield()` waits one frame. A wait outside of a coroutine that the engine runs raises an error.
-- A script from `spawn_script` is a coroutine of the scheduler too, with no owner. `script.stop` ends it.
+- A script from `spawn_script` is a coroutine of the scheduler too, with no owner. `spawn_script` returns a `Main_Script`, which `script.stop` ends.
 - The scheduler is native and lives in `Game_State`, at most 4096 threads. Each frame it resumes the threads that are due, ordered by wake time and then by start order, so resume order is deterministic. Each entry holds a `lua_ref` to its thread.
 - An error in a coroutine logs the message with a traceback and stops only that coroutine.
 
@@ -256,17 +256,20 @@ The game runs the script phase with one call, `script.run_phase(r, dt, platform.
 
 ## Script hot reload
 
-In development, a changed script reloads at the start of the next script phase. Release builds do not reload scripts.
+In development, a changed script reloads at the end of the frame in which the asset runtime swaps its blob. The game calls `script.reload_changed(r, asset.poll(assets))` there, when no script runs. Release builds read bundles and do not reload scripts.
 
-1. The asset runtime swaps the blob behind the script's handle (see [Content pipeline](content-pipeline.md#loading)).
-2. The script runtime runs the new bytecode in a fresh module thread. If it fails, the old version stays and the error is logged.
-3. If the old and the new results are both tables, the runtime **patches the old table in place**: it copies every key of the new table, and removes keys that the new table does not have. Modules that hold the old table see the new functions, and instances keep their metatable.
-4. For a behaviour class, existing instances get the default value of each new field. Then each instance gets `on_reload`, if the class defines it.
+1. The asset runtime swaps the blob behind the script's handle (see [Content pipeline](content-pipeline.md#loading)). A script with a type error keeps its old blob, so the game never sees it.
+2. The script runtime runs the new version's top level in a fresh environment. If it fails, the old version stays and the error is logged.
+3. If the old and the new results are both tables, the runtime **patches the old table in place**: it copies every key of the new table, and removes keys that the new table does not have. Modules that hold the old table see the new functions, and instances keep their metatable. If either result is not a table, the cache gets the new value, and modules that required the old one keep it, with a warning.
+4. For a behaviour class, the class keeps its own `__index` and `__newindex`, which find the patched methods in it. Existing instances keep their state, get the default value of each new field, and start or stop getting `update` if the new version adds or removes it. Then each instance gets `on_reload`, if the class defines it.
+5. **A main script restarts.** A script from `spawn_script` is one thread whose body is its top level, so nothing can be patched: its thread stops, and the new version runs from the top. Its `Main_Script` handle stays valid. Modules reload before main scripts restart, so a restarted script requires the new versions.
+6. A module that no one has required yet loads the new version when it is first required.
 
 Consequences for scripters:
 
 - **Keep state on instances, not in module locals.** A module's locals are created again by the new version. Old closures keep the old locals.
 - **A running coroutine finishes in its old code.** Its stack holds the old functions. New coroutines run the new code.
+- **A main script's state resets.** Keep long-lived state in behaviours, or in a module's table, which survives the patch.
 
 A code reload of the DLL does not touch scripts. The VM, the instances and the coroutines stay, and `on_reload` fills the binding tables again.
 
@@ -308,5 +311,5 @@ A module marked `--!native`, or with `native = true` in its `.meta`, is compiled
 3. **World view:** `Entity`, component references, `vector`, `Quaternion`, `WorldPosition`, `Time`, `Input`, `Debug`, and platform input in `core`.
 4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler, the despawn log, and field schemas in the cooker.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
-6. **Script hot reload.**
+6. **Script hot reload:** module patching, behaviour classes and `on_reload`, main script restarts.
 7. **Later:** editor inspector for fields, native code generation, direct field access, bundles.

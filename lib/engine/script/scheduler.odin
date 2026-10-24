@@ -201,10 +201,11 @@ stop_owned :: proc(r: ^Runtime, owner: Instance_Handle) {
 	}
 }
 
-// stop stops a script that spawn_script started.
-stop :: proc(r: ^Runtime, thread: Thread) {
+// stop_thread stops the waiter with this thread reference.
+@(private)
+stop_thread :: proc(r: ^Runtime, thread: c.int) {
 	for &w, i in r.waiters[:r.waiter_used] {
-		if w.live && w.thread == c.int(thread) {
+		if w.live && w.thread == thread {
 			stop_waiter(r, i)
 		}
 	}
