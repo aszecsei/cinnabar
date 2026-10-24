@@ -13,6 +13,8 @@ struct Push {
 	uint vertex_offset;
 	// 0 draws the outline, 1 the gizmo.
 	uint mode;
+	// The scene's depth, which tells the selection's own edges from the edges of what is in front of it.
+	uint depth;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -62,19 +64,33 @@ bool selected(int2 pixel) {
 	return (cn_buffer(push.selection).Load(push.selection_offset + slot / 32 * 4) >> (slot % 32)) & 1;
 }
 
+float depth_at(int2 pixel) {
+	return cn_texture(push.depth).Load(int3(pixel, 0)).r;
+}
+
 float4 ps_main(Varyings i) : SV_Target {
 	if (push.mode != 0) {
 		return i.color;
 	}
-	// A pixel is on the outline where the selection's edge is near: some pixel within the radius differs from it.
+	// A pixel is on the outline where the selection's edge is near: some pixel within the radius differs from it. The
+	// edge must be the selection's silhouette, where the other side is behind it or is the background. Where the other
+	// side is in front, the edge is an occluder's, which would look selected.
 	int2 pixel = int2(i.position.xy);
 	uint2 size;
 	cn_uint_texture(push.ids).GetDimensions(size.x, size.y);
 	bool inside = selected(pixel);
+	float here = depth_at(pixel);
 	for (int y = -OUTLINE_RADIUS; y <= OUTLINE_RADIUS; y++) {
 		for (int x = -OUTLINE_RADIUS; x <= OUTLINE_RADIUS; x++) {
 			int2 other = clamp(pixel + int2(x, y), 0, int2(size) - 1);
-			if (x * x + y * y <= OUTLINE_RADIUS * OUTLINE_RADIUS && selected(other) != inside) {
+			if (x * x + y * y > OUTLINE_RADIUS * OUTLINE_RADIUS || selected(other) == inside) {
+				continue;
+			}
+			float there = depth_at(other);
+			// Depth grows with distance, and the background is 1.
+			float selected_depth = inside ? here : there;
+			float other_depth = inside ? there : here;
+			if (other_depth >= selected_depth) {
 				return OUTLINE;
 			}
 		}

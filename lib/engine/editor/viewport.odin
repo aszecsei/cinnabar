@@ -152,6 +152,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	overlay^ = {
 		pipeline = v.overlay_pipeline,
 		ids = frame.ids,
+		depth = frame.depth,
 		slots = slots,
 		view_projection = render.view_projection(frame.view, f32(frame.size.x) / f32(max(frame.size.y, 1))),
 	}
@@ -175,6 +176,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		p := render.add_render_pass(g, "editor overlay", draw_overlay, overlay)
 		render.color(g, p, frame.target, .Load)
 		render.read(g, p, frame.ids)
+		render.read(g, p, frame.depth)
 	}
 }
 
@@ -242,12 +244,14 @@ Overlay_Constants :: struct {
 	vertices:         u32,
 	vertex_offset:    u32,
 	mode:             u32,
+	depth:            u32,
 }
 
 @(private)
 Overlay_Pass :: struct {
 	pipeline:        gpu.Pipeline,
 	ids:             render.Texture,
+	depth:           render.Texture,
 	slots:           u32,
 	view_projection: matrix[4, 4]f32,
 	outline:         bool,
@@ -262,6 +266,7 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 	constants := Overlay_Constants {
 		view_projection = o.view_projection,
 		ids             = gpu.read_index(render.gpu_texture(ctx.graph, o.ids)),
+		depth           = gpu.read_index(render.gpu_texture(ctx.graph, o.depth)),
 		slots           = o.slots,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, o.pipeline)
