@@ -1,5 +1,6 @@
 package ecs
 
+import "core:slice"
 import "core:sync"
 
 // Entity is a generational handle: the slot index in the low 32 bits and the generation in the high 32 bits.
@@ -83,8 +84,50 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	return true
 }
 
+// despawn_all despawns every entity. The next spawns take the freed slots from the lowest index up, so a world that is
+// filled again, such as by a scene load, gets its handles in the order that it spawns them.
+despawn_all :: proc(w: ^World) {
+	flush_reserved(w)
+	for index in 0 ..< w.entities.count {
+		record := &records(w)[index]
+		if record.archetype != NO_ARCHETYPE {
+			despawn_one(w, make_entity(index, record.generation))
+		}
+	}
+	// Every entity is gone, so no child is left for despawn_orphans to find.
+	w.orphans_pending = false
+	// reserve takes slots from the end of the free list.
+	es := &w.entities
+	slice.sort_by(free_list(w)[:es.free_count], proc(a, b: u32) -> bool {return a > b})
+}
+
 is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {
 	return live_record(w, e) != nil
+}
+
+// entity_count is the number of live entities. It visits every slot.
+entity_count :: proc "contextless" (w: ^World) -> (count: u32) {
+	for record in records(w)[:w.entities.count] {
+		count += u32(record.archetype != NO_ARCHETYPE)
+	}
+	return
+}
+
+// slot_count is the number of entity slots, so every entity's index is below it.
+slot_count :: proc "contextless" (w: ^World) -> u32 {
+	return w.entities.count
+}
+
+// slot_entity is the live entity in a slot, for code that keeps only an entity's index, such as an ID buffer.
+slot_entity :: proc "contextless" (w: ^World, index: u32) -> (Entity, bool) {
+	if index >= w.entities.count {
+		return 0, false
+	}
+	record := records(w)[index]
+	if record.archetype == NO_ARCHETYPE {
+		return 0, false
+	}
+	return make_entity(index, record.generation), true
 }
 
 // despawn_one destroys one entity and leaves its children for despawn_orphans.

@@ -28,9 +28,10 @@ function Pulse:on_reload()
 	Debug.log("reloaded the pulse of", self.entity)
 end
 
--- Disabled, the triangle goes back to its own brightness.
+-- Disabled, the triangle goes back to its own brightness. A despawned triangle, as when a scene replaces the world,
+-- is gone by the time on_disable runs, so there is nothing to restore.
 function Pulse:on_disable()
-	if self.base then
+	if self.base and self.entity:is_alive() then
 		self.entity:get(Triangle).brightness = self.base
 	end
 end

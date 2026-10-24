@@ -43,3 +43,20 @@ losing_focus_releases_every_key :: proc(t: ^testing.T) {
 	input_key_down(&input, .None)
 	testing.expect_value(t, input.down, Keys{})
 }
+
+@(test)
+input_events_from_elsewhere_act_as_the_window_does :: proc(t: ^testing.T) {
+	input: Input
+	input_apply(&input, {kind = .Mouse_Move, position = {10, 20}})
+	input_apply(&input, {kind = .Mouse_Move, position = {13, 16}})
+	input_apply(&input, {kind = .Key_Down, key = .Mouse_Left})
+	input_apply(&input, {kind = .Scroll, scroll = 2})
+	testing.expect_value(t, input.mouse_position, [2]f32{13, 16})
+	testing.expect_value(t, input.mouse_delta, [2]f32{13, 16})
+	testing.expect_value(t, input.down, Keys{.Mouse_Left})
+	testing.expect_value(t, input.scroll, 2)
+
+	input_apply(&input, {kind = .Release_All})
+	testing.expect_value(t, input.down, Keys{})
+	testing.expect_value(t, input.released, Keys{.Mouse_Left})
+}

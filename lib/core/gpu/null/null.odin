@@ -40,14 +40,17 @@ state: struct {
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
+	upload_peak:   int,
 	layouts:       gpu.Layout_Tracker,
 	// Textures that have been streamed. Each is streamed once.
 	streamed:      map[gpu.Texture]bool,
 	transfers:     u64,
+	// The memory of each Readback buffer. Nothing copies into it, so it stays zero.
+	readbacks:     map[gpu.Buffer][]byte,
 }
 
-// The null backend has no shared mode: it renders nothing to share.
-init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
+// The null backend has no shared mode and no adapter: it renders nothing to share.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	state = {
 		frame_start = time.tick_now(),
 	}
@@ -68,6 +71,10 @@ shutdown :: proc() {
 	delete(state.upload_memory)
 	gpu.layout_tracker_destroy(&state.layouts)
 	delete(state.streamed)
+	for _, memory in state.readbacks {
+		delete(memory)
+	}
+	delete(state.readbacks)
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
@@ -82,9 +89,32 @@ features :: proc() -> gpu.Features {
 	return FEATURES
 }
 
+// stats counts the live resources. The null backend has no video memory.
+stats :: proc() -> gpu.Stats {
+	s := gpu.Stats {
+		buffers          = gpu.pool_live(&state.buffers),
+		textures         = gpu.pool_live(&state.textures),
+		samplers         = gpu.pool_live(&state.samplers),
+		pipelines        = gpu.pool_live(&state.pipelines),
+		accels           = gpu.pool_live(&state.accels),
+		upload_bytes_max = u64(state.upload_peak),
+	}
+	state.upload_peak = 0
+	return s
+}
+
 frame_target :: proc() -> gpu.Texture {
 	return state.frame_target
 }
+
+// The null backend has no shared target, so these do nothing.
+shared_target :: proc() -> (prefix: string, generation: u32, size: [2]i32) {
+	return
+}
+
+pace_shared_frames :: proc(paced: bool) {}
+
+acknowledge_shared_frame :: proc(generation: u32, frame: u64) {}
 
 begin_frame :: proc(size: [2]i32) {
 	if elapsed := time.tick_since(state.frame_start); elapsed < FRAME_TIME {
@@ -93,6 +123,7 @@ begin_frame :: proc(size: [2]i32) {
 	state.frame_start = time.tick_now()
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
+	state.upload_peak = max(state.upload_peak, state.upload_offset)
 	state.upload_offset = 0
 }
 
@@ -118,7 +149,11 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		log.errorf("gpu: buffer %q: %v", desc.label, err)
 		return {}
 	}
-	return gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
+	buffer := gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
+	if buffer != {} && .Readback in desc.usage {
+		state.readbacks[buffer] = make([]byte, desc.size)
+	}
+	return buffer
 }
 
 create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
@@ -213,6 +248,10 @@ update_pipeline :: proc(pipeline: gpu.Pipeline, info: gpu.Pipeline_Info, label: 
 destroy_buffer :: proc(buffer: gpu.Buffer) {
 	if _, ok := gpu.pool_remove(&state.buffers, buffer); ok {
 		gpu.pool_free(&state.buffers, buffer.index)
+		if memory, readback := state.readbacks[buffer]; readback {
+			delete(memory)
+			delete_key(&state.readbacks, buffer)
+		}
 	}
 }
 
@@ -337,6 +376,12 @@ stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
 
 transfer_done :: proc(transfer: gpu.Transfer) -> bool {
 	return true
+}
+
+// read_buffer returns a Readback buffer's memory, which is always ready.
+read_buffer :: proc(buffer: gpu.Buffer) -> ([]byte, bool) {
+	memory, ok := state.readbacks[buffer]
+	return memory, ok
 }
 
 // upload returns false when the frame's upload ring is full.

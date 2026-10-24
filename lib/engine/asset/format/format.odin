@@ -36,7 +36,7 @@ guid_format :: proc "contextless" (guid: Guid, buffer: ^[2 * len(Guid)]u8) -> st
 	return string(buffer[:])
 }
 
-@(private = "file")
+@(private)
 hex_digit :: proc "contextless" (c: u8) -> (u8, bool) {
 	switch c {
 	case '0' ..= '9':
@@ -128,6 +128,7 @@ BLOB_ALIGN :: 16
 Asset_Kind :: enum u32 {
 	None,
 	Script,
+	Scene,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.
@@ -334,14 +335,14 @@ script_write :: proc(contents: Script_Contents, allocator := context.allocator) 
 	return buffer[:]
 }
 
-@(private = "file")
+@(private)
 reserve_bytes :: proc(buffer: ^[dynamic]byte, size, align: int) -> Slice {
 	offset := mem.align_forward_int(len(buffer), align)
 	resize(buffer, offset + size)
 	return {u32(offset), u32(size)}
 }
 
-@(private = "file")
+@(private)
 append_bytes :: proc(buffer: ^[dynamic]byte, data: []byte) -> Slice {
 	s := reserve_bytes(buffer, len(data), 1)
 	copy(buffer[s.offset:], data)

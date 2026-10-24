@@ -58,6 +58,9 @@ flowchart TB
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
+| `lib/engine/scene` | Game | The scene loader, which replaces the world with a cooked scene or the editor's snapshot, and the walk over a component's fields that scenes and the editor share. |
+| `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, watched values, scene snapshots and edit operations, and the viewport tools' passes: picking from the entity ID buffer, the selection outline and the gizmo. |
+| `lib/engine/editor/link` | Shared | The editor link's messages, their wire format and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
@@ -74,7 +77,7 @@ flowchart TB
 The two sides communicate only through two structs of procedures:
 
 - **`Platform_API`** (host → game): what `core` provides to the engine.
-- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), plus the editor procedures described in [Editor](#editor).
+- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](editor.md#world)).
 
 In development, the host gets `Game_API` from the DLL's exports. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
 
@@ -148,7 +151,7 @@ Details: [Scripting](scripting.md).
 
 ## Editor
 
-The editor is a separate C# application. It is not part of the engine, and games never link it.
+The editor is a separate C# application, built with Avalonia. It is not part of the engine, and games never link it.
 
 ```mermaid
 flowchart LR
@@ -167,6 +170,7 @@ flowchart LR
 - The editor runs `host.exe` as a child process. The host also runs without the editor, in its own window.
 - The editor controls the host through the **editor link**, a message protocol. The host serves it by calling the editor procedures in `Game_API`. Type info for game-side types exists only in the DLL, so all introspection goes through those procedures.
 - The host renders the game into a shared GPU texture, which the editor displays in its viewport.
+- The editor owns the scene being edited, and the host's world mirrors it. A host crash or a soft restart therefore loses no edits: the editor sends the scene again.
 
 Details: [Editor](editor.md).
 

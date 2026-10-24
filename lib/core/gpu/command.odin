@@ -199,7 +199,7 @@ Build_Accel :: struct {
 }
 
 // Copy_Buffer copies size bytes between two different buffers, outside a render pass. Offsets and size are
-// multiples of 4. The source can be the upload ring.
+// multiples of 4. The source can be the upload ring, and the dest a Readback buffer, but not the source.
 Copy_Buffer :: struct {
 	source:      Buffer,
 	source_offset: u32,

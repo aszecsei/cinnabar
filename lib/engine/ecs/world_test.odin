@@ -268,3 +268,25 @@ unregistered_components_are_rejected :: proc(t: ^testing.T) {
 	testing.expect(t, get(w, e, Unknown) == nil)
 	testing.expect(t, !add_raw(w, e, 7, nil))
 }
+
+@(test)
+despawn_all_reuses_slots_from_the_lowest :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	old: [4]Entity
+	for &e in old {
+		e = spawn(w)
+	}
+	add(w, old[1], Parent{old[0]})
+	despawn(w, old[2])
+
+	despawn_all(w)
+
+	for e in old {
+		testing.expect(t, !is_alive(w, e))
+	}
+	for i in 0 ..< 5 {
+		testing.expect_value(t, entity_index(spawn(w)), u32(i))
+	}
+}

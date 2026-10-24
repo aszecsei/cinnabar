@@ -33,10 +33,16 @@ Platform :: struct {
 	last_frame:  time.Tick,
 	// Read once per frame, so the game and the GPU backend agree on it.
 	window_size: [2]i32,
+	// In shared mode, the size that the reader asked for, which replaces the hidden window's. Zero until it asks.
+	shared_size: [2]i32,
 	disabled_features: gpu.Features,
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
+	// The most that a frame's arena used since memory_stats last read it.
+	frame_peak:  uint,
+	// Input from the editor, for the next frame.
+	input_queue: [dynamic]Input_Event,
 	api:         Platform_API,
 }
 
@@ -44,8 +50,8 @@ Platform :: struct {
 platform: Platform
 
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
-// hidden (see docs/gpu.md#presentation).
-init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "") -> bool {
+// hidden (see docs/gpu.md#presentation). A non-zero adapter is the LUID of the GPU to use.
+init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
 		return false
@@ -65,7 +71,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		return false
 	}
 	platform.window_size = _window_size()
-	if !backend.init(_window_native_handle(), platform.window_size, shared_target) {
+	if !backend.init(_window_native_handle(), platform.window_size, shared_target, adapter) {
 		log.error("core: failed to initialize the GPU backend")
 		return false
 	}
@@ -79,6 +85,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
 		asset_allocator              = runtime.heap_allocator(),
+		heap_allocator               = runtime.heap_allocator(),
 		memory_reserve               = memory_reserve,
 		memory_commit                = memory_commit,
 		memory_release               = memory_release,
@@ -100,6 +107,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		gpu_stream_buffer            = backend.stream_buffer,
 		gpu_stream_texture           = backend.stream_texture,
 		gpu_transfer_done            = backend.transfer_done,
+		gpu_read_buffer              = backend.read_buffer,
 		gpu_create_buffer            = backend.create_buffer,
 		gpu_create_texture           = backend.create_texture,
 		gpu_create_sampler           = backend.create_sampler,
@@ -132,6 +140,7 @@ shutdown :: proc() {
 	jobs.shutdown()
 	release_reservations()
 	delete(platform.reservations)
+	delete(platform.input_queue)
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
@@ -146,7 +155,9 @@ platform_api :: proc() -> ^Platform_API {
 // and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	keep_running = _window_poll()
-	platform.window_size = _window_size()
+	_window_apply_input(platform.input_queue[:])
+	clear(&platform.input_queue)
+	platform.window_size = platform.shared_size if platform.shared_size != {} else _window_size()
 	backend.begin_frame(platform.window_size)
 
 	now := time.tick_now()
@@ -155,6 +166,7 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 
 	platform.frame_index += 1
 	frame := &platform.frame[platform.frame_index % len(platform.frame)]
+	platform.frame_peak = max(platform.frame_peak, frame.total_used)
 	virtual.arena_free_all(frame)
 	platform.api.frame_allocator = virtual.arena_allocator(frame)
 	return
@@ -214,6 +226,41 @@ read_disabled_features :: proc() -> (disabled: gpu.Features) {
 	}
 	return
 }
+
+// queue_input adds input that does not come from the window, such as the editor's, to the next frame's. Call it from
+// the main thread between frames.
+queue_input :: proc(events: []Input_Event) {
+	append(&platform.input_queue, ..events)
+}
+
+// The largest shared target side. A reader that asks for more gets this.
+MAX_SHARED_SIZE :: 8192
+
+// resize_shared_target sets the size of the shared target from the next frame (see docs/editor.md#viewport). The
+// game sees it as the window size.
+resize_shared_target :: proc(size: [2]i32) {
+	platform.shared_size = {clamp(size.x, 1, MAX_SHARED_SIZE), clamp(size.y, 1, MAX_SHARED_SIZE)}
+}
+
+// shared_target is the shared target's current generation: its object name prefix, in temporary memory, its
+// generation number and its size. It is empty outside shared mode.
+shared_target :: backend.shared_target
+
+// gpu_stats is the GPU backend's resource counts and memory, for the host's stats. Call it between frames.
+gpu_stats :: backend.stats
+
+// memory_stats is the permanent arena's bytes in use, and the most that a frame's arena used since the last call.
+memory_stats :: proc() -> (permanent, frame_max: u64) {
+	permanent, frame_max = u64(platform.permanent.total_used), u64(platform.frame_peak)
+	platform.frame_peak = 0
+	return
+}
+
+// pace_shared_frames turns the reader's back-pressure on or off (see docs/editor.md#viewport).
+pace_shared_frames :: backend.pace_shared_frames
+
+// acknowledge_shared_frame records that the reader has finished with a frame of a generation.
+acknowledge_shared_frame :: backend.acknowledge_shared_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

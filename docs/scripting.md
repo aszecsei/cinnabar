@@ -63,7 +63,7 @@ The `interrupt` callback checks a deadline at loop back edges and calls. A scrip
 ### Garbage collection
 
 - The script phase runs an incremental GC step with a fixed budget each frame. It never runs a full collection during a frame.
-- Each loaded module gets a Luau memory category (`lua_setmemcat`), up to 255 modules. Category 0 is the engine. The debug overlay and the editor show memory by module.
+- Each loaded module gets a Luau memory category (`lua_setmemcat`): its index + 1, and the last of the 256 modules shares the 255th's. Category 0 is the engine. A module's top level runs in its category, a main script's thread has its module's, and each behaviour instance keeps its class's module's, which its callbacks run in. A coroutine's thread keeps the category of the code that started it, so what a behaviour's coroutines allocate counts toward its module too. `script.memory` gives the VM's total and each module's part, and the editor's resource monitor shows them.
 
 ## Values
 
@@ -163,7 +163,7 @@ return Door
 - **A behaviour module returns its class.** `Behaviour.define` and `Field` are engine globals. `Behaviour.define` takes the class name and its fields. Fields are what Unity serializes: the editor shows them, scenes and prefabs store their values, and the instance gets them as plain table fields. Other table fields are runtime state.
 - **Field kinds:** `Field.number(default?)`, `Field.boolean(default?)`, `Field.string(default?)`, `Field.vector(default?)` and `Field.entity()`. *`Field.asset(kind)` waits for asset references.* `entity`, `transform` and `enabled` are reserved names.
 - **The cooker reads the fields.** For a script that calls `Behaviour.define`, it runs the top level in a sandboxed VM that has the Luau libraries and the prelude, but no engine, and stores the class name and the fields in the blob (see [Content pipeline](content-pipeline.md#scripts)). Such a top level must therefore only require modules and define classes. Reading an engine global, such as `World`, raises "World is not available when the cooker reads a behaviour's fields", and a top level that runs for more than 2 s is stopped. Both are cook errors. A script without `Behaviour.define`, such as a main script for `spawn_script`, is not run.
-- **Attaching:** `entity:add(Door, values?)` from a script, or `script.attach_script(r, entity, guid)` from native code until scenes exist. `values` is a table of field values, and `enabled = false` starts the instance disabled. A value for a field that the class does not declare, or of the wrong kind, raises an error. `entity:get(Door)`, `entity:has(Door)` and `entity:remove(Door)` work as for components.
+- **Attaching:** `entity:add(Door, values?)` from a script, a `behaviour` block in a scene, or `script.attach_script(r, entity, guid, fields)` from native code. The scene loader skips a field value that the class does not declare, or of the wrong kind, with a warning. `values` is a table of field values, and `enabled = false` starts the instance disabled. A value for a field that the class does not declare, or of the wrong kind, raises an error. `entity:get(Door)`, `entity:has(Door)` and `entity:remove(Door)` work as for components.
 - **Storage:** an entity with behaviours has the native `Behaviours` component (ID 16, registered by `script.register_components`), which holds a `lua_ref` to the entity's record table. The record lists the instances in the order they were added, and maps each class to its instance. An entity has at most one instance of a class, so `entity:get(Door)` has one answer. The native side of each instance (its lifecycle flags) is a slot in the runtime, at most 4096.
 - **Instance members:** `self.entity` (Unity's `gameObject`), `self.transform`, `self.enabled`, `self:start_coroutine(fn, ...)`, `self:stop_coroutine(co)` and `self:stop_all_coroutines()`.
 - **Classes are metatables.** An instance is a table whose metatable is its class. The class's `__index` finds methods in the class first, so a method call never reaches the engine. `enabled` is never stored in the instance, so its reads and writes reach the engine through `__index` and `__newindex`. Luau's `class` syntax is experimental (behind `DebugLuauUserDefinedClasses`), so the engine does not use it, and the flag stays off in the cooker and in the VM.
@@ -222,7 +222,7 @@ Unity has two switches, and so does cinnabar:
 The game runs the script phase with one call, `script.run_phase(r, dt, platform.input())`, between the `Update` and `Late` stages. It covers phases 5 and 6 of [Frame](architecture.md#frame), in Unity's order:
 
 1. Set `Time` and `Input`.
-2. Drain the world's log: `on_disable` and `on_destroy` for despawned behaviours, and `awake`, `on_enable` or `on_disable` for activity changes from native code.
+2. Drain the world's log: `on_disable` and `on_destroy` for despawned behaviours, and `awake`, `on_enable` or `on_disable` for activity changes from native code. While the runtime is quiet, as in the editor's edit mode, `script.settle` drains it instead, with none of these callbacks (see [Editor](editor.md#modes)).
 3. `awake` and `on_enable` for instances that native code attached.
 4. `start` for instances that are enabled and active and have not started.
 5. Deliver the events that the fixed ticks and the `Update` systems queued.

@@ -81,6 +81,14 @@ pool_each :: proc(pool: ^Pool($H, $T), f: proc(item: ^T)) {
 	}
 }
 
+// pool_live is the number of live slots.
+pool_live :: proc(pool: ^Pool($H, $T)) -> (live: u32) {
+	for i in 0 ..< pool.count {
+		live += pool.generations[i] & 1
+	}
+	return
+}
+
 // pool_lookup returns a copy of the item.
 pool_lookup :: proc(pool: ^Pool($H, $T), handle: H) -> (item: T, ok: bool) {
 	ptr := pool_get(pool, handle)

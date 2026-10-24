@@ -4,6 +4,8 @@
 
 // The object size, in the units of object_center.
 static const float OBJECT_RADIUS = 0.03;
+// The objects' depth, just short of infinity, so the scene is always in front of them.
+static const float OBJECT_DEPTH = 0.99999;
 
 // object_center is in units where the screen spans -aspect to aspect horizontally and -1 to 1 vertically.
 // Objects sit in a grid that covers the screen and sway a little.

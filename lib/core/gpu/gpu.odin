@@ -153,11 +153,14 @@ Buffer_Usage :: enum u8 {
 	// The buffer has a write view.
 	Storage,
 	Indirect,
+	// The CPU reads the buffer with gpu_read_buffer, and the GPU only copies into it with cmd_copy_buffer. It has no
+	// views and no other usage, and no initial data (see docs/gpu.md#readback).
+	Readback,
 }
 
 Buffer_Usages :: bit_set[Buffer_Usage;u8]
 
-// Every buffer has a read view. Shaders read buffers as ByteAddressBuffer.
+// Every buffer but a Readback buffer has a read view. Shaders read buffers as ByteAddressBuffer.
 // size must be a multiple of 4.
 Buffer_Desc :: struct {
 	size:  u32,
@@ -538,6 +541,21 @@ accel_instance :: proc(
 		hit_group_offset_flags = (hit_group_offset & 0xffffff) | u32(transmute(u8)flags) << 24,
 		accel = accel_reference,
 	}
+}
+
+// Stats is what a backend holds, for the editor's resource monitor (see docs/editor.md#resource-monitor). The live
+// counts include the backend's own permanent resources.
+Stats :: struct {
+	buffers:             u32,
+	textures:            u32,
+	samplers:            u32,
+	pipelines:           u32,
+	accels:              u32,
+	// The most that a frame's upload ring used since the last call.
+	upload_bytes_max:    u64,
+	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
+	video_memory_used:   u64,
+	video_memory_budget: u64,
 }
 
 // Transfer identifies a streaming copy (see docs/gpu.md#streaming). gpu_transfer_done reports when the resource can

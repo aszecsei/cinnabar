@@ -109,7 +109,9 @@ dev: struct {
 }
 
 // A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
-init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
+// A non-zero adapter is the LUID of the only adapter to use. Shared objects open only on the adapter that made them,
+// so the editor passes the LUID of the adapter that composites its window.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	dev.logger = context.logger
 	dev.allocator = context.allocator
 	when ODIN_DEBUG {
@@ -126,7 +128,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
 			return false
 		}
 	}
-	if !create_device() {
+	if !create_device(adapter) {
 		return false
 	}
 	when ODIN_DEBUG {
@@ -231,6 +233,28 @@ features :: proc() -> gpu.Features {
 	return dev.features
 }
 
+// stats counts the live resources, and reads the adapter's memory use. Call it between frames.
+stats :: proc() -> gpu.Stats {
+	s := gpu.Stats {
+		buffers          = gpu.pool_live(&dev.buffers),
+		textures         = gpu.pool_live(&dev.textures),
+		samplers         = gpu.pool_live(&dev.samplers),
+		pipelines        = gpu.pool_live(&dev.pipeline_pool),
+		accels           = gpu.pool_live(&dev.accels),
+		upload_bytes_max = u64(dev.upload_peak),
+	}
+	dev.upload_peak = 0
+	adapter: ^dxgi.IAdapter3
+	if dev.adapter != nil && win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
+		info: dxgi.QUERY_VIDEO_MEMORY_INFO
+		if win.SUCCEEDED(adapter->QueryVideoMemoryInfo(0, .LOCAL, &info)) {
+			s.video_memory_used, s.video_memory_budget = info.CurrentUsage, info.Budget
+		}
+		adapter->Release()
+	}
+	return s
+}
+
 frame_target :: proc() -> gpu.Texture {
 	return dev.frame_target
 }
@@ -244,7 +268,7 @@ begin_frame :: proc(size: [2]i32) {
 	reset_scratch_pool(&frame.scratch)
 	collect_releases()
 
-	// In shared mode the window is hidden and the frame target keeps its size.
+	// In shared mode the window is hidden, and the frame target has the size that the reader asks for.
 	dev.recording = dev.shared_mode || (size.x > 0 && size.y > 0)
 	if !dev.recording {
 		time.sleep(MINIMIZED_FRAME_TIME)
@@ -256,7 +280,7 @@ begin_frame :: proc(size: [2]i32) {
 
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	if dev.shared_mode {
-		target.resource, target.rtv = begin_shared_frame()
+		target.resource, target.rtv = begin_shared_frame(size)
 	} else {
 		win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
 		dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
@@ -377,6 +401,7 @@ end_frame :: proc() {
 	if !dev.recording {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
+		stamp_readbacks(dev.fence_value)
 		return
 	}
 	when ODIN_DEBUG {
@@ -421,6 +446,7 @@ end_frame :: proc() {
 	signal()
 	frame.fence_value = dev.fence_value
 	stamp_releases(dev.fence_value)
+	stamp_readbacks(dev.fence_value)
 	dev.frame_index += 1
 }
 
@@ -482,10 +508,15 @@ create_command_list :: proc(
 }
 
 @(private = "file")
-create_device :: proc() -> bool {
+create_device :: proc(luid: u64) -> bool {
 	for i: u32 = 0;; i += 1 {
 		adapter: ^dxgi.IAdapter1
-		if win.FAILED(dev.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+		if luid != 0 {
+			// Only the named adapter, so the second pass ends the loop.
+			if i > 0 || win.FAILED(dev.factory->EnumAdapterByLuid(transmute(dxgi.LUID)luid, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+				break
+			}
+		} else if win.FAILED(dev.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
 			break
 		}
 		desc: dxgi.ADAPTER_DESC1
@@ -515,7 +546,11 @@ create_device :: proc() -> bool {
 		log.infof("d3d12: using %s, optional features %v", name, dev.features)
 		return true
 	}
-	log.error("d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers")
+	if luid != 0 {
+		log.errorf("d3d12: adapter %16x is missing, or lacks Shader Model 6.6, resource binding tier 3 or Enhanced Barriers", luid)
+	} else {
+		log.error("d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers")
+	}
 	return false
 }
 

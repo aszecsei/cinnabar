@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Cinnabar.Editor.Link</RootNamespace>
+    <!-- Written by just link-schema. The generator reports a missing file. -->
+    <LinkSchema>$(MSBuildThisFileDirectory)..\..\..\build\link\link-schema.json</LinkSchema>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinnabar.Editor.Link.Generator\Cinnabar.Editor.Link.Generator.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <AdditionalFiles Include="$(LinkSchema)" Condition="Exists('$(LinkSchema)')" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cinnabar.Editor.Tests" />
+  </ItemGroup>
+</Project>

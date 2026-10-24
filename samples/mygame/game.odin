@@ -17,7 +17,10 @@ import "cinnabar:core/luau"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/editor"
+import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
@@ -34,9 +37,9 @@ COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
 // The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
-// Content refers to content by GUID. Until scenes exist, the game reads its one script's GUID from the .meta file.
+// Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
-PULSE_META :: #load("content/scripts/pulse.luau.meta", string)
+MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -55,19 +58,16 @@ Shadow_Mode :: enum u8 {
 	Pipeline,
 }
 
-// The large triangles: rotation speed in radians per second, scale, depth in front of the camera and HDR
-// brightness. Instance 0 is a bright triangle in front. Instance 1 is a larger, dimmer triangle behind it that turns
-// the other way, so the depth test hides the part of it that the first one covers.
-TRIANGLE_INSTANCES :: [2]struct {
-	speed, scale, depth, brightness: f32,
-} {
-	{1, 1, 0.4, 3},
-	{-0.7, 1.5, 0.6, 0.6},
-}
+// The large triangles come from content/scenes/main.scene: a bright one in front, and a larger, dimmer one behind it
+// that turns the other way, so the depth test hides the part of it that the first one covers. The scene is about 1 AU
+// from the world origin. Fixed-point positions keep it exact there: the camera-relative transforms that the GPU sees
+// are small. The acceleration structure holds at most this many.
+MAX_TRIANGLES :: 2
 
-// The scene is about 1 AU from the world origin. Fixed-point positions keep it exact there: the camera-relative
-// transforms that the GPU sees are small.
-SCENE_ORIGIN :: [3]f64{1.5e11, 0, 0}
+// The scene's camera: its vertical field of view, in radians, and its near plane in meters. In the editor, the
+// editor's camera is used instead (see docs/editor.md#viewport).
+CAMERA_FOV :: 70 * math.PI / 180
+CAMERA_NEAR :: 0.05
 
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
@@ -111,8 +111,15 @@ Scene_Constants :: struct {
 Triangle_Instance :: struct {
 	rows:       [3][4]f32,
 	brightness: f32,
-	_:          [3]f32,
+	// The entity's value in the editor's ID buffer.
+	id:         u32,
+	_:          [2]f32,
 }
+
+// The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
+SPIN_ID :: ecs.Component_Id(1001)
+TRIANGLE_ID :: ecs.Component_Id(1002)
+CAMERA_ID :: ecs.Component_Id(1003)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
@@ -123,6 +130,9 @@ Spin :: struct {
 Triangle :: struct {
 	brightness: f32,
 }
+
+// Camera marks the entity that the frame is drawn from.
+Camera :: struct {}
 
 // Matches Push in shaders/objects.hlsl.
 Object_Constants :: struct {
@@ -165,10 +175,16 @@ Composite_Constants :: struct {
 	sampler: u32,
 }
 
-// Matches Pass in shaders/triangle.hlsl, shaders/objects.hlsl and shaders/cull.hlsl.
+// Matches Pass in shaders/pass.hlsli.
 Pass_Constants :: struct {
-	time:   f32,
-	aspect: f32,
+	view_projection: matrix[4, 4]f32,
+	right:           [4]f32,
+	up:              [4]f32,
+	forward:         [4]f32,
+	time:            f32,
+	aspect:          f32,
+	tan_half_fov:    f32,
+	near:            f32,
 }
 
 // Game_State is the root of all persistent game-side state. The host owns its memory.
@@ -202,6 +218,7 @@ Game_State :: struct {
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
 	world:       ecs.World,
+	// The scene's Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
@@ -209,6 +226,8 @@ Game_State :: struct {
 	scripts:     script.Runtime,
 	// content/scripts/hello.luau, which the scheduler runs.
 	hello:       script.Main_Script,
+	// What the editor knows of the world (see docs/editor.md#world).
+	editor:      editor.Editor,
 }
 
 Pipelines :: struct {
@@ -227,6 +246,7 @@ Pipelines :: struct {
 Frame :: struct {
 	state:          ^Game_State,
 	size:           [2]u32,
+	view:           render.View,
 	pass_constants: gpu.Upload,
 	vertices:       render.Buffer,
 	indices:        render.Buffer,
@@ -239,10 +259,13 @@ Frame :: struct {
 	// The accel instances, and the triangle instances that the scene pass draws.
 	instances:      gpu.Upload,
 	triangles:      gpu.Upload,
-	// The number of triangle instances. The acceleration structure holds at most len(TRIANGLE_INSTANCES).
+	// The number of triangle instances. The acceleration structure holds at most MAX_TRIANGLES.
 	triangle_count: int,
 	checker:        render.Texture,
 	scene:          render.Texture,
+	// The editor's entity ID buffer (see editor.ID_FORMAT).
+	ids:            render.Texture,
+	depth:          render.Texture,
 	shadows:        render.Texture,
 	post:           render.Texture,
 }
@@ -252,6 +275,8 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
+	editor.init(&s.editor, platform)
+	register_editor_commands(s)
 
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
@@ -312,7 +337,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 			opaque        = true,
 		}
 		s.blas = platform.gpu_create_accel({kind = .Bottom, geometries = {triangle}, label = "triangle"})
-		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = len(TRIANGLE_INSTANCES), label = "scene"})
+		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"})
 	}
 	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
 
@@ -320,7 +345,6 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		log.panic("mygame: cannot create the world")
 	}
 	register_world(s)
-	spawn_scene(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
@@ -328,13 +352,9 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if hello, ok := format.meta_guid(HELLO_META); ok {
 		s.hello, _ = script.spawn_script(&s.scripts, hello)
 	}
-	// Until scenes exist, the game attaches the large triangles' behaviour itself.
-	if pulse, ok := format.meta_guid(PULSE_META); ok {
-		triangles := make([dynamic]ecs.Entity, platform.frame_allocator)
-		ecs.collect(&s.world, {ecs.registry_find_type(&s.world.registry, Triangle).id}, &triangles)
-		for e in triangles {
-			script.attach_script(&s.scripts, e, pulse)
-		}
+	// An editor replaces this scene with its own document when it links (see docs/editor.md#document-model).
+	if main_scene, ok := format.meta_guid(MAIN_SCENE_META); ok {
+		scene.load_asset(&s.world, &s.scripts, &s.assets, main_scene)
 	}
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
@@ -344,8 +364,10 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_engine_components(r)
 	script.register_components(r)
-	ecs.register_component(r, Spin)
-	ecs.register_component(r, Triangle)
+	scene.register_components(r)
+	ecs.register_component(r, Spin, SPIN_ID)
+	ecs.register_component(r, Triangle, TRIANGLE_ID)
+	ecs.register_component(r, Camera, CAMERA_ID)
 }
 
 // register_world makes the world's registrations: components, systems and queries.
@@ -356,24 +378,14 @@ register_world :: proc(s: ^Game_State) {
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
 
-// spawn_scene places the camera and the large triangles at SCENE_ORIGIN.
-spawn_scene :: proc(s: ^Game_State) {
-	w := &s.world
-	origin := ecs.position_from_meters(SCENE_ORIGIN)
-	s.camera = ecs.spawn(w)
-	ecs.add(w, s.camera, ecs.Transform{position = origin, rotation = 1, scale = 1})
-	for t in TRIANGLE_INSTANCES {
-		pose := ecs.Transform {
-			position = ecs.position_offset(origin, {0, 0, t.depth}),
-			rotation = 1,
-			scale    = t.scale,
-		}
-		e := ecs.spawn(w)
-		ecs.add(w, e, pose)
-		ecs.add(w, e, ecs.Previous_Transform(pose))
-		ecs.add(w, e, Spin{t.speed})
-		ecs.add(w, e, Triangle{t.brightness})
+// find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
+find_camera :: proc(s: ^Game_State) {
+	if ecs.is_alive(&s.world, s.camera) {
+		return
 	}
+	cameras := make([dynamic]ecs.Entity, s.platform.frame_allocator)
+	ecs.collect(&s.world, {CAMERA_ID}, &cameras)
+	s.camera = cameras[0] if len(cameras) > 0 else 0
 }
 
 // register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
@@ -410,13 +422,23 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
 	defer end_frame(s)
 	s.frame_count += 1
-	s.elapsed += dt
 
-	ecs.run_fixed(&s.world, dt, s)
-	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase, with its structural changes (phases 5 and 6).
-	script.run_phase(&s.scripts, dt, s.platform.input())
-	ecs.run_stage(&s.world, .Late, dt, s)
+	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
+	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
+	// despawns (see docs/editor.md#modes).
+	run, step := editor.simulation(&s.editor, &s.world, dt)
+	script.set_quiet(&s.scripts, !run)
+	if run {
+		s.elapsed += step
+		ecs.run_fixed(&s.world, step, s)
+		ecs.run_stage(&s.world, .Update, step, s)
+		// The script phase, with its structural changes (phases 5 and 6).
+		script.run_phase(&s.scripts, step, s.platform.input())
+		ecs.run_stage(&s.world, .Late, step, s)
+	} else {
+		ecs.update_transforms(&s.world)
+		script.settle(&s.scripts)
+	}
 
 	if s.elapsed >= s.next_report {
 		s.next_report += time.Second
@@ -432,6 +454,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		log.infof("mygame: rings streamed in at frame %d", s.frame_count)
 	}
 
+	find_camera(s)
 	// A minimized window has no size, and nothing is rendered.
 	size := s.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
@@ -441,12 +464,33 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if !ok {
 		return true
 	}
+	view := camera_view(s)
+	aspect := f32(size.x) / f32(size.y)
+	right, up, forward := render.view_axes(view)
 	(^Pass_Constants)(raw_data(pass.data))^ = {
-		time   = f32(time.duration_seconds(s.elapsed)),
-		aspect = f32(size.x) / f32(size.y),
+		view_projection = render.view_projection(view, aspect),
+		right           = {right.x, right.y, right.z, 0},
+		up              = {up.x, up.y, up.z, 0},
+		forward         = {forward.x, forward.y, forward.z, 0},
+		time            = f32(time.duration_seconds(s.elapsed)),
+		aspect          = aspect,
+		tan_half_fov    = math.tan(view.vertical_fov * 0.5),
+		near            = view.near,
 	}
-	render_frame(s, {u32(size.x), u32(size.y)}, pass)
+	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
 	return true
+}
+
+// camera_view is the editor's camera while an editor is linked, and the scene's camera otherwise.
+camera_view :: proc(s: ^Game_State) -> render.View {
+	if view, ok := editor.view(&s.editor); ok {
+		return view
+	}
+	camera, ok := ecs.presented(&s.world, s.camera)
+	if !ok {
+		camera = ecs.TRANSFORM_IDENTITY
+	}
+	return {position = camera.position, rotation = camera.rotation, vertical_fov = CAMERA_FOV, near = CAMERA_NEAR}
 }
 
 // end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
@@ -480,14 +524,17 @@ stream_rings :: proc(s: ^Game_State) {
 
 // render_frame culls the objects on the compute queue, draws the scene into an HDR target with depth,
 // post-processes it in a compute pass, and tone maps it into the frame target. The render graph places the
-// barriers between the passes and the waits between the queues.
-render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
+// barriers between the passes and the waits between the queues. While an editor is linked, the editor's tools draw
+// over the frame and pick from its entity IDs.
+render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
 	frame := new(Frame, s.platform.frame_allocator)
 	frame^ = {
 		state          = s,
 		size           = size,
+		view           = view,
 		pass_constants = pass_constants,
 	}
+	editing := editor.active(&s.editor)
 
 	g := render.begin(s.platform, &s.textures)
 	target := render.import_texture(&g, s.platform.gpu_frame_target(), .Color)
@@ -502,7 +549,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 		frame.mesh_draw = render.import_buffer(&g, s.mesh_draw)
 	}
 	frame.scene = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
-	depth := render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
+	frame.ids = render.create_texture(&g, {size = size, format = editor.ID_FORMAT, label = "entity ids"})
+	frame.depth = render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
 	extract_triangles(frame)
 
@@ -519,7 +567,9 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 
 	p := render.add_render_pass(&g, "scene", draw_scene, frame, pieces = SCENE_PIECES)
 	render.color(&g, p, frame.scene, .Clear, {0.02, 0.02, 0.035, 1})
-	render.depth(&g, p, depth, .Clear, store = .Discard)
+	// The editor picks from the IDs and the depth. Without one, nothing reads them.
+	render.color(&g, p, frame.ids, .Clear, store = editing ? .Store : .Discard)
+	render.depth(&g, p, frame.depth, .Clear, store = editing ? .Store : .Discard)
 	render.read(&g, p, frame.checker)
 	render.read(&g, p, frame.vertices)
 	render.index_buffer(&g, p, frame.indices)
@@ -547,13 +597,17 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	render.read(&g, p, frame.post)
 	render.color(&g, p, target, .Discard)
 
+	if editing {
+		editor.add_viewport_passes(&s.editor, &g, &s.world, {view = view, size = size, target = target, ids = frame.ids, depth = frame.depth})
+	}
+
 	if render.execute(&g) && building_blas {
 		s.blas_built = true
 	}
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
-// their poses relative to the camera, interpolated between the last two ticks, and their brightness.
+// their poses relative to the camera, interpolated between the last two ticks, their brightness and their IDs.
 extract_triangles :: proc(frame: ^Frame) {
 	s := frame.state
 	w := &s.world
@@ -562,14 +616,25 @@ extract_triangles :: proc(frame: ^Frame) {
 	if !ok || count == 0 {
 		return
 	}
-	camera, _ := ecs.presented(w, s.camera)
-	chunks := render.extract(w, s.triangles, camera.position, triangles.data, size_of(Triangle_Instance))
+	chunks := render.extract(w, s.triangles, frame.view.position, triangles.data, size_of(Triangle_Instance))
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
+	// The triangles that the editor hides are left out, and the others close up behind them.
+	visibility := editor.visibility(&s.editor, w)
+	kept := 0
 	for c in chunks {
+		entities := ecs.entities(c.view)
 		for t, i in ecs.column(c.view, render.EXTRACT_TERMS, Triangle) {
-			instances[c.first + i].brightness = t.brightness
+			if !editor.is_visible(visibility, entities[i]) {
+				continue
+			}
+			instance := instances[c.first + i]
+			instance.brightness = t.brightness
+			instance.id = editor.entity_id(entities[i])
+			instances[kept] = instance
+			kept += 1
 		}
 	}
+	count = kept
 	frame.triangles = triangles
 	frame.triangle_count = count
 }
@@ -589,8 +654,8 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 		building_blas = true
 	}
 
-	count := min(frame.triangle_count, len(TRIANGLE_INSTANCES))
-	instances, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(gpu.Accel_Instance), 16)
+	count := min(frame.triangle_count, MAX_TRIANGLES)
+	instances, ok := s.platform.gpu_upload(MAX_TRIANGLES * size_of(gpu.Accel_Instance), 16)
 	if !ok || count == 0 {
 		return
 	}
@@ -625,7 +690,7 @@ build_blas :: proc(ctx: ^render.Pass_Context) {
 build_tlas :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
 	upload := frame.instances
-	count := u32(min(frame.triangle_count, len(TRIANGLE_INSTANCES)))
+	count := u32(min(frame.triangle_count, MAX_TRIANGLES))
 	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, count)
 }
 
@@ -754,6 +819,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
+	editor.destroy(&s.editor)
 	script.destroy(&s.scripts)
 	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
@@ -783,6 +849,8 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
+	editor.reload(&s.editor, platform)
+	register_editor_commands(s)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {
@@ -838,10 +906,13 @@ create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_m
 	}
 }
 
+// The scene pass's targets: the HDR colors, and the editor's entity IDs.
+SCENE_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT}, {format = editor.ID_FORMAT}}
+
 SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	vertex        = TRIANGLE_VS,
 	pixel         = TRIANGLE_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,
@@ -851,7 +922,7 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	vertex        = OBJECTS_VS,
 	pixel         = OBJECTS_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,
@@ -862,7 +933,7 @@ OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	amplification = OBJECTS_AS,
 	mesh          = OBJECTS_MS,
 	pixel         = OBJECTS_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,
@@ -955,5 +1026,94 @@ cinnabar_game_api :: proc() -> core.Game_API {
 		layout_hash = layout_hash,
 		gpu_format_hash = gpu.format_hash,
 		script_types = script_types,
+		editor_poll = editor_poll,
 	}
+}
+
+// register_editor_commands describes the game's commands, which the editor shows on its Game tab (see
+// docs/editor.md#commands). init and on_reload call it.
+register_editor_commands :: proc(s: ^Game_State) {
+	editor.register_command(&s.editor, {
+		id = "mygame.add_triangle",
+		label = "Add Triangle",
+		description = "Add a spinning triangle 2 m in front of the editor's camera.",
+		tab = "Game",
+		group = "Triangles",
+		icon = "add",
+		edits = true,
+		procedure = add_triangle,
+	})
+	editor.register_command(&s.editor, {
+		id = "mygame.reverse_spin",
+		label = "Reverse Spin",
+		description = "Turn the selected triangles the other way.",
+		tab = "Game",
+		group = "Triangles",
+		icon = "rotate",
+		edits = true,
+		procedure = reverse_spin,
+	})
+	editor.register_command(&s.editor, {
+		id = "mygame.world_report",
+		label = "World Report",
+		description = "Write the number of entities and triangles to the console.",
+		tab = "Game",
+		group = "Debug",
+		icon = "stats",
+		procedure = world_report,
+	})
+}
+
+// add_triangle creates an entity with the triangle's components, as an operation, so the editor can undo it.
+add_triangle :: proc(ctx: ^editor.Command_Context) {
+	c := ctx.camera
+	rotation := quaternion(x = c.rotation.x, y = c.rotation.y, z = c.rotation.z, w = c.rotation.w)
+	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
+	position := ecs.position_offset({c.position}, forward * 2)
+	id := editor.new_scene_id()
+	triangle := link.Scene_Entity {
+		id     = id,
+		name   = "Triangle",
+		active = true,
+		components = slice.clone([]link.Scene_Component{
+			{
+				id = u64(ecs.TRANSFORM_ID),
+				name = "Transform",
+				fields = slice.clone([]link.Scene_Field{
+					editor.scene_field("position", editor.scene_position(position)),
+					editor.scene_field("rotation", editor.scene_numbers(0, 0, 0, 1)),
+					editor.scene_field("scale", editor.scene_numbers(1, 1, 1)),
+				}),
+			},
+			{id = u64(ecs.PREVIOUS_TRANSFORM_ID), name = "Previous_Transform"},
+			{id = u64(SPIN_ID), name = "Spin", fields = slice.clone([]link.Scene_Field{editor.scene_field("speed", editor.scene_numbers(1))})},
+			{id = u64(TRIANGLE_ID), name = "Triangle", fields = slice.clone([]link.Scene_Field{editor.scene_field("brightness", editor.scene_numbers(2))})},
+		}),
+	}
+	append(&ctx.operations, link.Operation{kind = .Create_Entity, entity = id, created = slice.clone([]link.Scene_Entity{triangle})})
+}
+
+// reverse_spin sets the negated speed of each selected entity that spins.
+reverse_spin :: proc(ctx: ^editor.Command_Context) {
+	for entity in ctx.selection {
+		id := editor.scene_id(ctx.world, entity)
+		if spin := ecs.get(ctx.world, entity, Spin); spin != nil && id != 0 {
+			field := editor.scene_field("speed", editor.scene_numbers(f64(-spin.speed)))
+			append(&ctx.operations, link.Operation{kind = .Set_Field, entity = id, component = u64(SPIN_ID), fields = slice.clone([]link.Scene_Field{field})})
+		}
+	}
+	if len(ctx.operations) == 0 {
+		ctx.message = "mygame: select a triangle of the scene to reverse its spin"
+	}
+}
+
+// world_report counts, and changes nothing.
+world_report :: proc(ctx: ^editor.Command_Context) {
+	s := (^Game_State)(ctx.user)
+	ctx.message = fmt.aprintf("mygame: %d entities, %d triangles, frame %d", ecs.entity_count(ctx.world), render.extract_count(ctx.world, s.triangles), s.frame_count, allocator = ctx.allocator)
+}
+
+editor_poll :: proc(state: rawptr, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
+	s := (^Game_State)(state)
+	editor.poll(&s.editor, &s.world, &s.scripts, connection, incoming, out, s)
 }

@@ -1,4 +1,5 @@
 #include "cinnabar.hlsli"
+#include "pass.hlsli"
 #include "objects.hlsli"
 
 // Matches Vertex in game.odin.
@@ -19,12 +20,6 @@ struct Push {
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Matches Pass_Constants in game.odin.
-struct Pass {
-	float time;
-	float aspect;
-};
-CN_PASS_CONSTANTS(Pass, pass);
 
 struct Varyings {
 	float4 position : SV_Position;
@@ -41,7 +36,8 @@ Varyings object_vertex(uint object, uint vertex_id) {
 	p += float2(v.position.x * c - v.position.y * s, v.position.x * s + v.position.y * c) * (OBJECT_RADIUS / 0.6);
 
 	Varyings o;
-	o.position = float4(p.x / pass.aspect, p.y, 0.8, 1);
+	// The objects are a layer on the screen behind the scene, as far as the depth buffer reaches.
+	o.position = float4(p.x / pass.aspect, p.y, OBJECT_DEPTH, 1);
 	o.uv = v.uv;
 	o.color = v.color * 0.8;
 	return o;
@@ -108,6 +104,15 @@ void ms_main(
 	}
 }
 
-float4 ps_main(Varyings i) : SV_Target {
-	return cn_texture(push.texture).Sample(cn_sampler(push.sampler_index), i.uv) * i.color;
+// The objects are no entities, so the editor's ID buffer gets 0.
+struct Targets {
+	float4 color : SV_Target0;
+	uint id : SV_Target1;
+};
+
+Targets ps_main(Varyings i) {
+	Targets o;
+	o.color = cn_texture(push.texture).Sample(cn_sampler(push.sampler_index), i.uv) * i.color;
+	o.id = 0;
+	return o;
 }

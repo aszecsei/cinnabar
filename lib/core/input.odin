@@ -59,3 +59,42 @@ input_begin_frame :: proc "contextless" (input: ^Input) {
 	input.mouse_delta = {}
 	input.scroll = 0
 }
+
+Input_Event_Kind :: enum u8 {
+	Key_Down,
+	Key_Up,
+	// The mouse is at position. The move adds to the frame's mouse delta.
+	Mouse_Move,
+	Scroll,
+	// Every key goes up, as when the window loses focus.
+	Release_All,
+}
+
+// Input_Event is a change of the keyboard or mouse that does not come from the window: in shared mode, the editor's
+// viewport sends them while the game plays (see docs/editor.md#modes). queue_input applies them at the start of the
+// next frame, after the window's own messages.
+Input_Event :: struct {
+	kind:     Input_Event_Kind,
+	key:      Key,
+	// Mouse_Move: in pixels from the frame's top-left corner.
+	position: [2]f32,
+	// Scroll: wheel notches, positive away from the user.
+	scroll:   f32,
+}
+
+@(private)
+input_apply :: proc "contextless" (input: ^Input, event: Input_Event) {
+	switch event.kind {
+	case .Key_Down:
+		input_key_down(input, event.key)
+	case .Key_Up:
+		input_key_up(input, event.key)
+	case .Mouse_Move:
+		input.mouse_delta += event.position - input.mouse_position
+		input.mouse_position = event.position
+	case .Scroll:
+		input.scroll += event.scroll
+	case .Release_All:
+		input_release_all(input)
+	}
+}

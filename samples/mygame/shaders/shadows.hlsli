@@ -3,27 +3,36 @@
 #ifndef SHADOWS_HLSLI
 #define SHADOWS_HLSLI
 
-// The world matches the scene: the screen spans -aspect to aspect horizontally and -1 to 1 vertically, the large
-// triangles are at depths 0.4 and 0.6, and a background plane is at depth 1.
-static const float BACKGROUND_DEPTH = 1.0;
-// Toward the light: up, left and toward the viewer, so shadows fall down and right onto what is behind.
+#include "pass.hlsli"
+
+// The rays start at the camera, and the acceleration structure holds the triangles relative to it, as the scene pass
+// draws them. Where a ray hits nothing, it ends on a background plane this far ahead of the camera, in meters, which
+// catches the triangles' shadows.
+static const float BACKGROUND_DEPTH = 2.0;
+// Toward the light, in the world: up, left and toward -z, so shadows fall down and right onto what is behind.
 static const float3 TO_LIGHT = float3(-0.4, 0.5, -1.0);
 // The light that reaches a shadowed surface.
 static const float SHADOWED = 0.35;
 
-// world_xy is a pixel's position in the world.
-float2 world_xy(uint2 pixel, uint2 size, float aspect) {
+// view_ray is the direction through a pixel's center, in the world.
+float3 view_ray(uint2 pixel, uint2 size) {
 	float2 ndc = (pixel + 0.5) / float2(size) * 2 - 1;
-	return float2(ndc.x * aspect, -ndc.y);
+	float2 slope = float2(ndc.x * pass.aspect, -ndc.y) * pass.tan_half_fov;
+	return normalize(pass.forward.xyz + pass.right.xyz * slope.x + pass.up.xyz * slope.y);
 }
 
-// primary_ray looks straight into the screen from in front of everything, as far as the background.
-RayDesc primary_ray(float2 xy) {
+// background_distance is how far a view ray goes to reach the background plane.
+float background_distance(float3 direction) {
+	return BACKGROUND_DEPTH / max(dot(direction, pass.forward.xyz), 1e-3);
+}
+
+// primary_ray finds the nearest surface along a view ray, as far as the background.
+RayDesc primary_ray(float3 direction) {
 	RayDesc ray;
-	ray.Origin = float3(xy, -1);
-	ray.Direction = float3(0, 0, 1);
-	ray.TMin = 0;
-	ray.TMax = BACKGROUND_DEPTH + 1;
+	ray.Origin = 0;
+	ray.Direction = direction;
+	ray.TMin = pass.near;
+	ray.TMax = background_distance(direction);
 	return ray;
 }
 

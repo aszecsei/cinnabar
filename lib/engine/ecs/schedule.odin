@@ -179,6 +179,17 @@ run_stage :: proc(w: ^World, stage: Stage, dt: time.Duration, user: rawptr) {
 	}
 }
 
+// update_transforms propagates transforms without running any system, as the editor's edit mode does: the world
+// does not move, but an edit of a parent moves its children.
+update_transforms :: proc(w: ^World) {
+	propagate(w)
+}
+
+// tick_length is the time of one fixed tick, which a step of one frame advances by.
+tick_length :: proc "contextless" (w: ^World) -> time.Duration {
+	return time.Second / time.Duration(w.clock.tick_rate)
+}
+
 tick_start :: proc "contextless" (c: ^Clock, tick: u64) -> time.Duration {
 	return c.base_time + time.Duration(i64(tick - c.base_tick) * i64(time.Second) / i64(c.tick_rate))
 }

@@ -169,3 +169,25 @@ a_require_cycle_fails_at_runtime_too :: proc(t: ^testing.T) {
 	testing.expect(t, !ok)
 	expect_error(t, f.base, "require cycle at game/a.luau")
 }
+
+@(test)
+memory_counts_toward_the_module_that_allocated_it :: proc(t: ^testing.T) {
+	f := setup_modules(t)
+	defer teardown_modules(f)
+	context.user_ptr = f.base
+	// A module whose top level holds about 800 KB, and a main script that holds a little.
+	big := add_script(t, &f, "game/big.luau", "local t = table.create(100000, 1.5); return {t = t}")
+	main := add_script(t, &f, "game/main.luau", "local big = require('./big'); local mine = {1, 2, 3}; coroutine.yield()", {{"./big", big}})
+	_, ok := spawn_script(&f.runtime, main)
+	testing.expect(t, ok)
+
+	total, modules := memory(&f.runtime, context.temp_allocator)
+	bytes := map[string]int{}
+	defer delete(bytes)
+	for m in modules {
+		bytes[m.name] = m.bytes
+	}
+	testing.expectf(t, bytes["game/big.luau"] >= 100000 * 8, "big has %d bytes", bytes["game/big.luau"])
+	testing.expect(t, bytes["game/main.luau"] > 0 && bytes["game/main.luau"] < 100000)
+	testing.expect(t, total > bytes["game/big.luau"] + bytes["game/main.luau"])
+}

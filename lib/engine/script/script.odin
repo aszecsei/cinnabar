@@ -53,6 +53,10 @@ Runtime :: struct {
 	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.
 	instances:        [MAX_INSTANCES]Instance,
 	instance_used:    int,
+	// The memory category that set_category last gave a thread.
+	category:         c.int,
+	// While set, no script code runs for the world's changes (see set_quiet).
+	quiet:            bool,
 	waiters:          [MAX_WAITERS]Waiter,
 	waiter_used:      int,
 	waiter_seq:       u64,

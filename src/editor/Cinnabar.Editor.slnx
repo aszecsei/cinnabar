@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="Cinnabar.Editor.Commands/Cinnabar.Editor.Commands.csproj" />
+  <Project Path="Cinnabar.Editor.Document/Cinnabar.Editor.Document.csproj" />
+  <Project Path="Cinnabar.Editor.Link.Generator/Cinnabar.Editor.Link.Generator.csproj" />
+  <Project Path="Cinnabar.Editor.Link/Cinnabar.Editor.Link.csproj" />
+  <Project Path="Cinnabar.Editor.Model/Cinnabar.Editor.Model.csproj" />
+  <Project Path="Cinnabar.Editor.Tests/Cinnabar.Editor.Tests.csproj" />
+  <Project Path="Cinnabar.Editor.Tools/Cinnabar.Editor.Tools.csproj" />
+  <Project Path="Cinnabar.Editor/Cinnabar.Editor.csproj" />
+</Solution>
