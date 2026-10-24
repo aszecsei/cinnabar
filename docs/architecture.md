@@ -60,12 +60,14 @@ flowchart TB
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
 | `lib/engine/scene` | Game | The scene loader, which replaces the world with a cooked scene or the editor's snapshot, and the walk over a component's fields that scenes and the editor share. |
 | `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, watched values, scene snapshots and edit operations, and the viewport tools' passes: picking from the entity ID buffer, the selection outline and the gizmo. |
-| `lib/engine/editor/link` | Shared | The editor link's messages, their wire format and the schema that the editor's C# is generated from. The host and the game both import it. |
+| `lib/engine/wire` | Shared | The transport of the editor link and the cook link: framing, the wire format and the schema writer, for any union of messages. |
+| `lib/engine/editor/link` | Shared | The editor link's messages, and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
+| `lib/engine/asset/cook_link` | Shared | The cook link's messages, between the editor and the cook daemon. `tools/cook` imports it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
 | `src/editor` | — | The C# editor application. It runs `host.exe` as a child process. |
-| `tools/cook` | — | The asset compiler and its watch daemon. |
+| `tools/cook` | — | The asset compiler and the cook daemon, which watches the content roots and does the editor's asset operations. |
 | `vendor/luau` | Shared | The Luau VM and compiler. |
 | `vendor/dxc` | Tools | The DXC shader compiler. Only `tools/cook` uses it. |
 | `vendor/` | — | Other third-party code. |
@@ -163,8 +165,8 @@ flowchart LR
     EDITOR -->|"starts"| COOK
     EDITOR <-->|"editor link: commands, input, introspection"| HOST
     HOST -->|"shared texture"| EDITOR
-    COOK -->|"blob changed"| HOST
-    EDITOR <-->|"create, move, re-import"| COOK
+    COOK -->|"cache generation"| HOST
+    EDITOR <-->|"cook link: index, problems, asset operations"| COOK
 ```
 
 - The editor runs `host.exe` as a child process. The host also runs without the editor, in its own window.
@@ -193,6 +195,7 @@ flowchart TB
 - Every source asset has a GUID. Content refers to other content only by GUID.
 - `tools/cook` compiles source assets into a cache of blobs. `tools/cook` and the runtime share the asset type definitions from `lib/engine`.
 - In development, the runtime reads blobs from the cache. In release, it reads them from bundles. The blob format is the same in both.
-- In development, the cook daemon watches the source files and tells the running game when a blob changes. The game swaps the asset in place.
+- In development, the cook daemon watches the source files and cooks what changes. After each pass, it writes a counter to the cache, and the running game swaps every new blob in place in one frame.
+- The cook daemon is the only program that writes `.meta` files. The editor's content browser asks it to create, move, rename and delete assets.
 
 Details: [Content pipeline](content-pipeline.md).
