@@ -5,10 +5,13 @@ struct Push {
 	uint input;
 	uint output;
 	uint2 size;
+	// The shadow mask, when has_shadows is not 0.
+	uint shadows;
+	uint has_shadows;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Chromatic aberration and a vignette, in linear HDR.
+// Shadows, chromatic aberration and a vignette, in linear HDR.
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (any(id.xy >= push.size)) {
@@ -22,5 +25,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float g = input.Load(int3(id.xy, 0)).g;
 	float b = input.Load(int3(clamp(int2(id.xy) - shift, 0, last), 0)).b;
 	float vignette = saturate(1.0 - dot(from_center, from_center) * 1.6);
-	cn_rw_texture(push.output)[id.xy] = float4(float3(r, g, b) * vignette, 1);
+	float light = push.has_shadows != 0 ? cn_texture(push.shadows).Load(int3(id.xy, 0)).r : 1.0;
+	cn_rw_texture(push.output)[id.xy] = float4(float3(r, g, b) * vignette * light, 1);
 }

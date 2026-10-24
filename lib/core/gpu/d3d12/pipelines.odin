@@ -1,9 +1,11 @@
 package gpu_d3d12
 
 import "core:log"
+import "core:mem"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import win "core:sys/windows"
 
 import d3d "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
@@ -19,12 +21,13 @@ ROOT_PASS_CONSTANTS :: 1
 // Every other draw sees 0.
 ROOT_DRAW_ID :: 2
 
-// pso is nil until the pipeline's first compile job finishes. An update replaces it when the new version is
-// ready. Read and write it atomically.
+// pso, or program for a ray tracing pipeline, is nil until the pipeline's first compile job finishes. An update
+// replaces it when the new version is ready. Read and write them atomically.
 @(private)
 Pipeline_Entry :: struct {
 	info:     gpu.Pipeline_Info,
 	pso:      ^d3d.IPipelineState,
+	program:  ^Ray_Program,
 	topology: d3d.PRIMITIVE_TOPOLOGY,
 	scope:    gpu.Scope,
 	// The latest compile. A compile job publishes its result only if no later update started.
@@ -138,7 +141,14 @@ wait_compiles :: proc() {
 
 @(private)
 shutdown_pipelines :: proc() {
-	gpu.pool_each(&dev.pipeline_pool, proc(entry: ^Pipeline_Entry) {release(&entry.pso)})
+	gpu.pool_each(&dev.pipeline_pool, proc(entry: ^Pipeline_Entry) {
+		release(&entry.pso)
+		if entry.program != nil {
+			release(&entry.program.state)
+			release(&entry.program.table)
+			free(entry.program, dev.allocator)
+		}
+	})
 	gpu.pool_destroy(&dev.pipeline_pool)
 	delete(dev.compiling, dev.allocator)
 	release(&dev.draw_signature)
@@ -187,11 +197,183 @@ update_compute_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeli
 	return start_update(pipeline, task, entry)
 }
 
+create_ray_tracing_pipeline :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline {
+	task, ok := ray_tracing_task(desc)
+	return ok ? start_compile(task, {info = {kind = .Ray_Tracing}, scope = desc.scope}) : {}
+}
+
+update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool {
+	task := ray_tracing_task(desc) or_return
+	return start_update(pipeline, task, {info = {kind = .Ray_Tracing}})
+}
+
 destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	sync.guard(&dev.pipeline_mutex)
 	if entry, ok := gpu.pool_remove(&dev.pipeline_pool, pipeline); ok {
 		defer_release(sync.atomic_load(&entry.pso), .Pipeline, pipeline.index)
+		if program := sync.atomic_load(&entry.program); program != nil {
+			release_program(program)
+		}
 	}
+}
+
+// The shader table layout that D3D12 requires.
+SHADER_IDENTIFIER_SIZE :: 32
+SHADER_RECORD_ALIGNMENT :: 32
+SHADER_TABLE_ALIGNMENT :: 64
+
+// Ray_Program is a compiled ray tracing pipeline: its state object, and its shader table in an upload heap.
+// A new version replaces the whole program, which stays alive until the frames that use it finish.
+@(private)
+Ray_Program :: struct {
+	state:  ^d3d.IStateObject,
+	table:  ^d3d.IResource,
+	rays:   d3d.DISPATCH_RAYS_DESC,
+}
+
+// release_program releases a program after the GPU finishes the current frame.
+@(private = "file")
+release_program :: proc(program: ^Ray_Program) {
+	defer_release(program.state, .None, 0)
+	defer_release(program.table, .None, 0)
+	defer_free(program)
+}
+
+// ray_tracing_task copies the library and the export names, as wide strings, into a compile task.
+@(private = "file")
+ray_tracing_task :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> (task: ^Compile_Task, ok: bool) {
+	if err := gpu.validate_ray_tracing_pipeline_desc(desc); err != .None {
+		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return
+	}
+	if .Ray_Tracing_Pipeline not_in dev.features {
+		log.errorf("gpu: pipeline %q: the device has no ray tracing pipelines. Check gpu_features.", desc.label)
+		return
+	}
+	task = new_task(desc.label, desc.library)
+	task.is_ray_tracing = true
+	task.payload_size = desc.max_payload_size
+	task.attribute_size = desc.max_attribute_size > 0 ? desc.max_attribute_size : 8
+	task.recursion = desc.max_recursion > 0 ? desc.max_recursion : 1
+	task.miss_count = len(desc.miss)
+	task.hit_count = len(desc.hit_groups)
+	task.names = make([dynamic]win.wstring, dev.allocator)
+	append(&task.names, wide(desc.ray_generation))
+	for name in desc.miss {
+		append(&task.names, wide(name))
+	}
+	for group in desc.hit_groups {
+		append(&task.names, wide(group.name), wide(group.closest_hit), wide(group.any_hit))
+	}
+	return task, true
+}
+
+// wide copies a name for D3D12. An empty name is nil, which D3D12 reads as no shader.
+@(private = "file")
+wide :: proc(name: string) -> win.wstring {
+	return name == "" ? nil : win.utf8_to_wstring(name, dev.allocator)
+}
+
+// build_program creates the state object and fills the shader table: the ray generation record, the miss records,
+// then the hit group records, each table aligned as D3D12 requires. It runs on the compile job.
+@(private = "file")
+build_program :: proc(task: ^Compile_Task) -> (program: ^Ray_Program, ok: bool) {
+	subobjects := make([dynamic]d3d.STATE_SUBOBJECT, context.temp_allocator)
+	library := d3d.DXIL_LIBRARY_DESC {
+		DXILLibrary = bytecode(task.blobs[0]),
+	}
+	append(&subobjects, d3d.STATE_SUBOBJECT{.DXIL_LIBRARY, &library})
+	groups := make([]d3d.HIT_GROUP_DESC, task.hit_count, context.temp_allocator)
+	first_group := 1 + task.miss_count
+	for &group, i in groups {
+		names := task.names[first_group + 3 * i:]
+		group = {
+			HitGroupExport         = names[0],
+			Type                   = .TRIANGLES,
+			ClosestHitShaderImport = names[1],
+			AnyHitShaderImport     = names[2],
+		}
+		append(&subobjects, d3d.STATE_SUBOBJECT{.HIT_GROUP, &group})
+	}
+	shader_config := d3d.RAYTRACING_SHADER_CONFIG {
+		MaxPayloadSizeInBytes   = task.payload_size,
+		MaxAttributeSizeInBytes = task.attribute_size,
+	}
+	append(&subobjects, d3d.STATE_SUBOBJECT{.RAYTRACING_SHADER_CONFIG, &shader_config})
+	root := d3d.GLOBAL_ROOT_SIGNATURE {
+		pGlobalRootSignature = dev.root_signature,
+	}
+	append(&subobjects, d3d.STATE_SUBOBJECT{.GLOBAL_ROOT_SIGNATURE, &root})
+	pipeline_config := d3d.RAYTRACING_PIPELINE_CONFIG {
+		MaxTraceRecursionDepth = task.recursion,
+	}
+	append(&subobjects, d3d.STATE_SUBOBJECT{.RAYTRACING_PIPELINE_CONFIG, &pipeline_config})
+
+	desc := d3d.STATE_OBJECT_DESC {
+		Type          = .RAYTRACING_PIPELINE,
+		NumSubobjects = u32(len(subobjects)),
+		pSubobjects   = raw_data(subobjects),
+	}
+	state: ^d3d.IStateObject
+	check(dev.device->CreateStateObject(&desc, d3d.IStateObject_UUID, (^rawptr)(&state)), "CreateStateObject") or_return
+	properties: ^d3d.IStateObjectProperties
+	if !check(state->QueryInterface(d3d.IStateObjectProperties_IID, (^rawptr)(&properties)), "QueryInterface(IStateObjectProperties)") {
+		state->Release()
+		return
+	}
+	defer properties->Release()
+
+	miss_start := mem.align_forward_int(SHADER_IDENTIFIER_SIZE, SHADER_TABLE_ALIGNMENT)
+	hit_start := mem.align_forward_int(miss_start + task.miss_count * SHADER_RECORD_ALIGNMENT, SHADER_TABLE_ALIGNMENT)
+	size := hit_start + task.hit_count * SHADER_RECORD_ALIGNMENT
+	table, table_ok := create_buffer_resource({size = u32(size), label = "shader table"}, .UPLOAD)
+	if !table_ok {
+		state->Release()
+		return
+	}
+	mapped: [^]byte
+	check(table->Map(0, &d3d.RANGE{}, (^rawptr)(&mapped)), "Map(shader table)")
+	write_record :: proc(properties: ^d3d.IStateObjectProperties, name: win.wstring, record: [^]byte) -> bool {
+		identifier := properties->GetShaderIdentifier(name)
+		if identifier == nil {
+			return false
+		}
+		mem.copy(record, identifier, SHADER_IDENTIFIER_SIZE)
+		return true
+	}
+	ok = write_record(properties, task.names[0], mapped)
+	for i in 0 ..< task.miss_count {
+		ok &&= write_record(properties, task.names[1 + i], mapped[miss_start + i * SHADER_RECORD_ALIGNMENT:])
+	}
+	for i in 0 ..< task.hit_count {
+		ok &&= write_record(properties, task.names[first_group + 3 * i], mapped[hit_start + i * SHADER_RECORD_ALIGNMENT:])
+	}
+	table->Unmap(0, nil)
+	if !ok {
+		log.errorf("gpu: pipeline %q: the library does not export a named shader or hit group", task.label)
+		state->Release()
+		table->Release()
+		return nil, false
+	}
+
+	address := table->GetGPUVirtualAddress()
+	program = new(Ray_Program, dev.allocator)
+	program^ = {
+		state = state,
+		table = table,
+	}
+	program.rays.RayGenerationShaderRecord = {address, SHADER_IDENTIFIER_SIZE}
+	program.rays.MissShaderTable = {
+		address + d3d.GPU_VIRTUAL_ADDRESS(miss_start),
+		u64(task.miss_count * SHADER_RECORD_ALIGNMENT),
+		SHADER_RECORD_ALIGNMENT,
+	}
+	program.rays.HitGroupTable = {
+		address + d3d.GPU_VIRTUAL_ADDRESS(hit_start),
+		u64(task.hit_count * SHADER_RECORD_ALIGNMENT),
+		SHADER_RECORD_ALIGNMENT,
+	}
+	return program, true
 }
 
 // graphics_task builds the compile task and the pool entry for a description.
@@ -275,6 +457,15 @@ Compile_Task :: struct {
 	is_compute: bool,
 	// blobs holds the pixel, amplification and mesh shaders.
 	is_mesh:    bool,
+	// blobs holds the library, and names the ray generation shader, the miss shaders, then each hit group's
+	// name, closest hit and any hit.
+	is_ray_tracing: bool,
+	names:          [dynamic]win.wstring,
+	miss_count:     int,
+	hit_count:      int,
+	payload_size:   u32,
+	attribute_size: u32,
+	recursion:      u32,
 	graphics:   d3d.GRAPHICS_PIPELINE_STATE_DESC,
 	compute:    d3d.COMPUTE_PIPELINE_STATE_DESC,
 }
@@ -297,6 +488,10 @@ free_task :: proc(task: ^Compile_Task) {
 	}
 	delete(task.blobs, dev.allocator)
 	delete(task.label, dev.allocator)
+	for name in task.names {
+		free(rawptr(name), dev.allocator)
+	}
+	delete(task.names)
 	free(task, dev.allocator)
 }
 
@@ -340,6 +535,14 @@ start_update :: proc(pipeline: gpu.Pipeline, task: ^Compile_Task, entry: Pipelin
 compile_job :: proc(data: rawptr) {
 	task := (^Compile_Task)(data)
 	defer free_task(task)
+	if task.is_ray_tracing {
+		program, ok := build_program(task)
+		if !ok {
+			log.errorf(task.serial == 0 ? "gpu: pipeline %q was not created. Dispatches with it are skipped." : "gpu: pipeline %q was not updated. The previous version stays in use.", task.label)
+		}
+		publish_program(task, program)
+		return
+	}
 	pso: ^d3d.IPipelineState
 	hr: d3d.HRESULT
 	if task.is_compute {
@@ -428,6 +631,26 @@ mesh_stream :: proc(task: ^Compile_Task) -> Mesh_Stream {
 		rt_formats = {.RENDER_TARGET_FORMATS, {RTFormats = g.RTVFormats, NumRenderTargets = g.NumRenderTargets}},
 		dsv_format = {.DEPTH_STENCIL_FORMAT, g.DSVFormat},
 		sample_desc = {.SAMPLE_DESC, g.SampleDesc},
+	}
+}
+
+// publish_program makes a compiled program the pipeline's current version, as compile_job does for a PSO.
+@(private = "file")
+publish_program :: proc(task: ^Compile_Task, program: ^Ray_Program) {
+	sync.guard(&dev.pipeline_mutex)
+	defer sync.atomic_sub(&dev.compiling[task.pipeline.index], 1)
+	entry := gpu.pool_get(&dev.pipeline_pool, task.pipeline)
+	if entry == nil || entry.serial != task.serial {
+		if program != nil {
+			release_program(program)
+		}
+		return
+	}
+	if program == nil {
+		return
+	}
+	if previous := sync.atomic_exchange(&entry.program, program); previous != nil {
+		release_program(previous)
 	}
 }
 

@@ -13,6 +13,8 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 	in_pass := false
 	// False while the bound pipeline is still compiling: its draws and dispatches are skipped.
 	pipeline_ready := false
+	// The bound ray tracing pipeline's program, for Dispatch_Rays.
+	program: ^Ray_Program
 	it := gpu.packet_iterator(cb)
 	for p in gpu.next_packet(&it) {
 		switch p.kind {
@@ -31,6 +33,14 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 		case .Set_Pipeline:
 			entry := gpu.pool_get(&dev.pipeline_pool, gpu.payload(p, gpu.Set_Pipeline).pipeline)
 			assert(entry != nil, "gpu: invalid pipeline handle")
+			if entry.info.kind == .Ray_Tracing {
+				program = sync.atomic_load(&entry.program)
+				pipeline_ready = program != nil
+				if pipeline_ready {
+					list->SetPipelineState1(program.state)
+				}
+				continue
+			}
 			pso := sync.atomic_load(&entry.pso)
 			pipeline_ready = pso != nil
 			if !pipeline_ready {
@@ -114,6 +124,16 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			d := gpu.payload(p, gpu.Draw_Indirect)
 			execute_indirect(list, dev.mesh_signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
+		case .Build_Accel:
+			build_accel(list, gpu.payload(p, gpu.Build_Accel))
+		case .Dispatch_Rays:
+			if !pipeline_ready {
+				continue
+			}
+			d := gpu.payload(p, gpu.Dispatch_Rays)
+			rays := program.rays
+			rays.Width, rays.Height, rays.Depth = d.size.x, d.size.y, d.size.z
+			list->DispatchRays(&rays)
 		case .Dispatch_Indirect:
 			if !pipeline_ready {
 				continue
@@ -216,7 +236,7 @@ execute_indirect :: proc(
 
 @(private = "file")
 barriers :: proc(list: ^d3d.IGraphicsCommandList7, packet: gpu.Packet) {
-	buffers, textures := gpu.barrier_data(packet)
+	buffers, textures, accels := gpu.barrier_data(packet)
 	buffer_barriers: [gpu.MAX_PACKET_BARRIERS]d3d.BUFFER_BARRIER
 	texture_barriers: [gpu.MAX_PACKET_BARRIERS]d3d.TEXTURE_BARRIER
 	for b, i in buffers {
@@ -226,6 +246,19 @@ barriers :: proc(list: ^d3d.IGraphicsCommandList7, packet: gpu.Packet) {
 			AccessBefore = access_flags(b.access_before),
 			AccessAfter  = access_flags(b.access_after),
 			pRessource   = buffer_entry(b.buffer).resource,
+			Size         = max(u64),
+		}
+	}
+	// An acceleration structure is a buffer to D3D12.
+	for b, i in accels {
+		entry := gpu.pool_get(&dev.accels, b.accel)
+		assert(entry != nil, "gpu: invalid acceleration structure handle")
+		buffer_barriers[len(buffers) + i] = {
+			SyncBefore   = sync_flags(b.sync_before),
+			SyncAfter    = sync_flags(b.sync_after),
+			AccessBefore = access_flags(b.access_before),
+			AccessAfter  = access_flags(b.access_after),
+			pRessource   = entry.resource,
 			Size         = max(u64),
 		}
 	}
@@ -245,10 +278,10 @@ barriers :: proc(list: ^d3d.IGraphicsCommandList7, packet: gpu.Packet) {
 
 	groups: [2]d3d.BARRIER_GROUP
 	count: u32
-	if len(buffers) > 0 {
+	if len(buffers) + len(accels) > 0 {
 		groups[count] = {
 			Type            = .BUFFER,
-			NumBarriers     = u32(len(buffers)),
+			NumBarriers     = u32(len(buffers) + len(accels)),
 			pBufferBarriers = &buffer_barriers[0],
 		}
 		count += 1
@@ -294,6 +327,8 @@ SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
 	.Render_Target   = .RENDER_TARGET,
 	.Compute_Shading = .COMPUTE_SHADING,
 	.Execute_Indirect = .EXECUTE_INDIRECT,
+	.Build_Accel      = .BUILD_RAYTRACING_ACCELERATION_STRUCTURE,
+	.Ray_Tracing      = .RAYTRACING,
 }
 
 @(private = "file")
@@ -304,6 +339,8 @@ ACCESS := [gpu.Access]d3d.BARRIER_ACCESS_FLAG {
 	.Shader_Resource     = .SHADER_RESOURCE,
 	.Unordered_Access    = .UNORDERED_ACCESS,
 	.Indirect_Argument   = .INDIRECT_ARGUMENT,
+	.Accel_Read          = .RAYTRACING_ACCELERATION_STRUCTURE_READ,
+	.Accel_Write         = .RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
 }
 
 @(private)

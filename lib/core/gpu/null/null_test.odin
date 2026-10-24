@@ -188,3 +188,37 @@ mesh_updates_keep_the_kind :: proc(t: ^testing.T) {
 	vertex.mesh, vertex.vertex = nil, shader
 	testing.expect(t, !update_graphics_pipeline(pipeline, vertex), "an update turned a mesh pipeline into a vertex pipeline")
 }
+
+@(test)
+ray_tracing_resources :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	desc := gpu.Ray_Tracing_Pipeline_Desc {
+		library          = {0},
+		ray_generation   = "ray_generation",
+		max_payload_size = 4,
+	}
+	pipeline := create_ray_tracing_pipeline(desc)
+	testing.expect(t, pipeline != {})
+	testing.expect(t, update_ray_tracing_pipeline(pipeline, desc))
+
+	vertices := create_buffer({size = 96}, nil)
+	blas := create_accel({kind = .Bottom, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	tlas := create_accel({kind = .Top, max_instances = 4})
+	testing.expect(t, blas != {} && tlas != {})
+	testing.expect(t, accel_reference(blas) != accel_reference(tlas))
+
+	context.logger = log.nil_logger()
+	testing.expect(t, !update_compute_pipeline(pipeline, {compute = {0}}), "an update turned a ray tracing pipeline into a compute pipeline")
+	testing.expect_value(t, create_accel({kind = .Bottom, geometries = {{vertices = {index = 99, generation = 1}, vertex_stride = 32, vertex_count = 3}}}), gpu.Accel_Struct{})
+
+	// Destroying a geometry buffer leaves the bottom-level structure unbuildable.
+	cb := gpu.command_buffer(context.temp_allocator)
+	gpu.cmd_build_accel(&cb, blas)
+	testing.expect(t, submit({cb}))
+	destroy_buffer(vertices)
+	testing.expect(t, !submit({cb}))
+	testing.expect_value(t, destroy_scope(.Game), 3)
+}

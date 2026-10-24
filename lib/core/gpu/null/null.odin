@@ -19,6 +19,15 @@ Pipeline_Entry :: struct {
 	scope: gpu.Scope,
 }
 
+// Accel_Entry keeps the geometry buffers of a bottom-level structure, so validation sees when one is destroyed.
+@(private = "file")
+Accel_Entry :: struct {
+	info:           gpu.Accel_Info,
+	scope:          gpu.Scope,
+	geometry_count: int,
+	geometries:     [gpu.MAX_ACCEL_GEOMETRIES][2]gpu.Buffer,
+}
+
 @(private = "file")
 state: struct {
 	frame_start:   time.Tick,
@@ -27,6 +36,7 @@ state: struct {
 	textures:      gpu.Pool(gpu.Texture, gpu.Texture_Desc),
 	samplers:      gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
 	pipelines:     gpu.Pool(gpu.Pipeline, Pipeline_Entry),
+	accels:        gpu.Pool(gpu.Accel_Struct, Accel_Entry),
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
@@ -41,6 +51,7 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	gpu.pool_init(&state.textures, gpu.MAX_TEXTURES)
 	gpu.pool_init(&state.samplers, gpu.MAX_SAMPLERS)
 	gpu.pool_init(&state.pipelines, gpu.MAX_PIPELINES)
+	gpu.pool_init(&state.accels, gpu.MAX_ACCEL_STRUCTS)
 	gpu.layout_tracker_init(&state.layouts)
 	state.frame_target = gpu.pool_add(&state.textures, frame_target_desc(size))
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
@@ -56,10 +67,11 @@ shutdown :: proc() {
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
 	gpu.pool_destroy(&state.pipelines)
+	gpu.pool_destroy(&state.accels)
 }
 
-// The null backend validates mesh pipelines and draws, so it reports mesh shaders. Ray tracing does not exist yet.
-FEATURES :: gpu.Features{.Mesh_Shaders}
+// The null backend validates every optional feature's commands, so it reports all of them.
+FEATURES :: gpu.Features{.Mesh_Shaders, .Ray_Query, .Ray_Tracing_Pipeline}
 
 features :: proc() -> gpu.Features {
 	return FEATURES
@@ -144,6 +156,22 @@ create_compute_pipeline :: proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline
 	return gpu.pool_add(&state.pipelines, Pipeline_Entry{{kind = .Compute}, desc.scope})
 }
 
+create_ray_tracing_pipeline :: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline {
+	if err := gpu.validate_ray_tracing_pipeline_desc(desc); err != .None {
+		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return {}
+	}
+	return gpu.pool_add(&state.pipelines, Pipeline_Entry{{kind = .Ray_Tracing}, desc.scope})
+}
+
+update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool {
+	if err := gpu.validate_ray_tracing_pipeline_desc(desc); err != .None {
+		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return false
+	}
+	return update_pipeline(pipeline, {kind = .Ray_Tracing}, desc.label)
+}
+
 // An update must keep the pipeline's attachment formats, as in the real backends. Nothing compiles, so the new
 // version is ready at once.
 update_graphics_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool {
@@ -197,6 +225,39 @@ destroy_sampler :: proc(sampler: gpu.Sampler) {
 	}
 }
 
+create_accel :: proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct {
+	if err := gpu.validate_accel_desc(desc); err != .None {
+		log.errorf("gpu: acceleration structure %q: %v", desc.label, err)
+		return {}
+	}
+	entry := Accel_Entry {
+		info           = gpu.accel_info(desc),
+		scope          = desc.scope,
+		geometry_count = len(desc.geometries),
+	}
+	for g, i in desc.geometries {
+		_, vertices_ok := gpu.pool_lookup(&state.buffers, g.vertices)
+		_, indices_ok := gpu.pool_lookup(&state.buffers, g.indices)
+		if !vertices_ok || (g.indices != {} && !indices_ok) {
+			log.errorf("gpu: acceleration structure %q: geometry %d has an invalid buffer", desc.label, i)
+			return {}
+		}
+		entry.geometries[i] = {g.vertices, g.indices}
+	}
+	return gpu.pool_add(&state.accels, entry)
+}
+
+destroy_accel :: proc(accel: gpu.Accel_Struct) {
+	if _, ok := gpu.pool_remove(&state.accels, accel); ok {
+		gpu.pool_free(&state.accels, accel.index)
+	}
+}
+
+// Nothing is built, so a reference only has to be unique.
+accel_reference :: proc(accel: gpu.Accel_Struct) -> u64 {
+	return u64(accel.index) << 32 | u64(accel.generation)
+}
+
 destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	if _, ok := gpu.pool_remove(&state.pipelines, pipeline); ok {
 		gpu.pool_free(&state.pipelines, pipeline.index)
@@ -220,6 +281,12 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 	for i in 0 ..< state.samplers.count {
 		if sampler, ok := gpu.pool_handle(&state.samplers, i); ok && state.samplers.items[i].scope == scope {
 			destroy_sampler(sampler)
+			count += 1
+		}
+	}
+	for i in 0 ..< state.accels.count {
+		if accel, ok := gpu.pool_handle(&state.accels, i); ok && state.accels.items[i].scope == scope {
+			destroy_accel(accel)
 			count += 1
 		}
 	}
@@ -261,6 +328,15 @@ RESOURCES :: gpu.Resources {
 	},
 	pipeline = proc(pipeline: gpu.Pipeline) -> (gpu.Pipeline_Info, bool) {
 		entry, ok := gpu.pool_lookup(&state.pipelines, pipeline)
+		return entry.info, ok
+	},
+	accel = proc(accel: gpu.Accel_Struct) -> (gpu.Accel_Info, bool) {
+		entry, ok := gpu.pool_lookup(&state.accels, accel)
+		for buffers in entry.geometries[:entry.geometry_count] {
+			_, vertices_ok := gpu.pool_lookup(&state.buffers, buffers[0])
+			_, indices_ok := gpu.pool_lookup(&state.buffers, buffers[1])
+			entry.info.inputs_valid &&= vertices_ok && (buffers[1] == {} || indices_ok)
+		}
 		return entry.info, ok
 	},
 }

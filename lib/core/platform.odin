@@ -88,10 +88,15 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		gpu_create_compute_pipeline  = backend.create_compute_pipeline,
 		gpu_update_graphics_pipeline = backend.update_graphics_pipeline,
 		gpu_update_compute_pipeline  = backend.update_compute_pipeline,
+		gpu_create_ray_tracing_pipeline = backend.create_ray_tracing_pipeline,
+		gpu_update_ray_tracing_pipeline = backend.update_ray_tracing_pipeline,
+		gpu_create_accel             = backend.create_accel,
+		gpu_accel_reference          = backend.accel_reference,
 		gpu_destroy_buffer           = backend.destroy_buffer,
 		gpu_destroy_texture          = backend.destroy_texture,
 		gpu_destroy_sampler          = backend.destroy_sampler,
 		gpu_destroy_pipeline         = backend.destroy_pipeline,
+		gpu_destroy_accel            = backend.destroy_accel,
 		gpu_destroy_scope            = backend.destroy_scope,
 	}
 	return true

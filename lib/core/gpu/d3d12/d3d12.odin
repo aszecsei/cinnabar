@@ -49,6 +49,7 @@ Frame :: struct {
 	// the frame's work on both queues is done when it passes.
 	fence_value: u64,
 	upload:      Upload_Ring,
+	scratch:     Scratch_Pool,
 	lists:       [gpu.Queue][dynamic]Command_List,
 	lists_used:  [gpu.Queue]int,
 	// The frame's submissions in order, and their closed command lists.
@@ -183,6 +184,7 @@ shutdown :: proc() {
 		}
 		delete(frame.ops)
 		delete(frame.op_lists)
+		destroy_scratch_pool(&frame.scratch)
 		for pending in frame.pending {
 			delete(pending)
 		}
@@ -227,6 +229,7 @@ begin_frame :: proc(size: [2]i32) {
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	wait_fence(frame.fence_value)
 	reset_upload_ring(&frame.upload)
+	reset_scratch_pool(&frame.scratch)
 	collect_releases()
 
 	dev.recording = size.x > 0 && size.y > 0

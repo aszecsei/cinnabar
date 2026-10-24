@@ -39,6 +39,8 @@ Packet_Kind :: enum u16 {
 	Dispatch_Indirect,
 	Draw_Mesh,
 	Draw_Mesh_Indirect,
+	Build_Accel,
+	Dispatch_Rays,
 }
 
 // size includes the header and the padding after the payload.
@@ -183,6 +185,23 @@ Dispatch_Indirect :: struct {
 	offset:    u32,
 }
 
+// Build_Accel builds or updates an acceleration structure from its inputs. A bottom-level structure reads the geometry
+// in its description. A top-level structure reads count Accel_Instance records at offset in instances.
+// Builds occur only outside a render pass.
+Build_Accel :: struct {
+	accel:     Accel_Struct,
+	instances: Buffer,
+	offset:    u32,
+	count:     u32,
+	// Update refits the structure from its last build. It needs Allow_Update.
+	update:    b32,
+}
+
+// Dispatch_Rays launches the bound ray tracing pipeline's ray generation shader once per element of size.
+Dispatch_Rays :: struct {
+	size: [3]u32,
+}
+
 Buffer_Barrier :: struct {
 	buffer:        Buffer,
 	sync_before:   Syncs,
@@ -201,11 +220,22 @@ Texture_Barrier :: struct {
 	layout_after:  Texture_Layout,
 }
 
-// The barriers follow the payload: buffer_count Buffer_Barriers, then texture_count Texture_Barriers.
-// Barriers occur only outside a render pass.
+// Acceleration structures have only the Accel_Read and Accel_Write accesses.
+Accel_Barrier :: struct {
+	accel:         Accel_Struct,
+	sync_before:   Syncs,
+	sync_after:    Syncs,
+	access_before: Accesses,
+	access_after:  Accesses,
+}
+
+// The barriers follow the payload: buffer_count Buffer_Barriers, texture_count Texture_Barriers, then accel_count
+// Accel_Barriers. Barriers occur only outside a render pass.
 Barriers :: struct {
 	buffer_count:  u16,
 	texture_count: u16,
+	accel_count:   u16,
+	_:             u16,
 }
 
 // Format lists every packet type, so format_hash changes when any packet layout changes.
@@ -236,13 +266,17 @@ Packet_Format :: struct {
 	dispatch_args:      Dispatch_Indirect_Args,
 	draw_mesh:          Draw_Mesh,
 	draw_mesh_args:     Draw_Mesh_Indirect_Args,
+	build_accel:        Build_Accel,
+	dispatch_rays:      Dispatch_Rays,
+	accel_barrier:      Accel_Barrier,
+	accel_instance:     Accel_Instance,
 }
 
 #assert(size_of(Packet_Header) + size_of(Begin_Pass) <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Begin_Marker) + MAX_LABEL_LENGTH <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Push_Constants) + MAX_PUSH_CONSTANTS_SIZE <= MAX_PACKET_SIZE)
 #assert(size_of(Packet_Header) + size_of(Barriers) + MAX_PACKET_BARRIERS * size_of(Texture_Barrier) <= MAX_PACKET_SIZE)
-#assert(size_of(Buffer_Barrier) <= size_of(Texture_Barrier))
+#assert(size_of(Buffer_Barrier) <= size_of(Texture_Barrier) && size_of(Accel_Barrier) <= size_of(Texture_Barrier))
 #assert(size_of(Chunk) + MAX_PACKET_SIZE <= CHUNK_SIZE)
 
 // format_hash identifies the packet format. The host refuses a game DLL with a different hash.
@@ -375,14 +409,36 @@ cmd_dispatch_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset: u3
 }
 
 // cmd_barriers records barriers that the backend issues together. The render graph records all barriers.
-cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: []Texture_Barrier) {
-	buffers, textures := buffers, textures
-	for len(buffers) > 0 || len(textures) > 0 {
+cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier = nil) {
+	buffers, textures, accels := buffers, textures, accels
+	for len(buffers) > 0 || len(textures) > 0 || len(accels) > 0 {
 		b := min(len(buffers), MAX_PACKET_BARRIERS)
 		t := min(len(textures), MAX_PACKET_BARRIERS - b)
-		push(cb, .Barriers, Barriers{u16(b), u16(t)}, slice.to_bytes(buffers[:b]), slice.to_bytes(textures[:t]))
-		buffers, textures = buffers[b:], textures[t:]
+		a := min(len(accels), MAX_PACKET_BARRIERS - b - t)
+		packet := Barriers {
+			buffer_count  = u16(b),
+			texture_count = u16(t),
+			accel_count   = u16(a),
+		}
+		push(cb, .Barriers, packet, slice.to_bytes(buffers[:b]), slice.to_bytes(textures[:t]), slice.to_bytes(accels[:a]))
+		buffers, textures, accels = buffers[b:], textures[t:], accels[a:]
 	}
+}
+
+// cmd_dispatch_rays needs a ray tracing pipeline, outside a render pass.
+cmd_dispatch_rays :: proc(cb: ^Command_Buffer, size: [3]u32) {
+	push(cb, .Dispatch_Rays, Dispatch_Rays{size})
+}
+
+// cmd_build_accel builds a bottom-level acceleration structure from the geometry in its description.
+cmd_build_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, update := false) {
+	push(cb, .Build_Accel, Build_Accel{accel = accel, update = b32(update)})
+}
+
+// cmd_build_top_accel builds a top-level acceleration structure from count Accel_Instance records at offset in
+// instances. The offset is a multiple of 16. The instances may be in the upload ring.
+cmd_build_top_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, instances: Buffer, offset, count: u32, update := false) {
+	push(cb, .Build_Accel, Build_Accel{accel, instances, offset, count, b32(update)})
 }
 
 @(private)
@@ -468,11 +524,13 @@ push_constants_data :: proc(packet: Packet) -> []byte {
 	return packet.data[size_of(Push_Constants):][:constants.size]
 }
 
-barrier_data :: proc(packet: Packet) -> (buffers: []Buffer_Barrier, textures: []Texture_Barrier) {
+barrier_data :: proc(packet: Packet) -> (buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier) {
 	barriers := payload(packet, Barriers)
 	data := packet.data[size_of(Barriers):]
 	buffers = slice.reinterpret([]Buffer_Barrier, data)[:barriers.buffer_count]
 	data = data[int(barriers.buffer_count) * size_of(Buffer_Barrier):]
 	textures = slice.reinterpret([]Texture_Barrier, data)[:barriers.texture_count]
+	data = data[int(barriers.texture_count) * size_of(Texture_Barrier):]
+	accels = slice.reinterpret([]Accel_Barrier, data)[:barriers.accel_count]
 	return
 }

@@ -27,6 +27,16 @@ DEPTH_PIPELINE :: Pipeline{index = 1, generation = 1}
 COMPUTE_PIPELINE :: Pipeline{index = 2, generation = 1}
 @(private = "file")
 MESH_PIPELINE :: Pipeline{index = 3, generation = 1}
+@(private = "file")
+RT_PIPELINE :: Pipeline{index = 4, generation = 1}
+@(private = "file")
+BLAS :: Accel_Struct{index = 0, generation = 1}
+@(private = "file")
+UPDATABLE_BLAS :: Accel_Struct{index = 1, generation = 1}
+@(private = "file")
+TLAS :: Accel_Struct{index = 2, generation = 1}
+@(private = "file")
+STALE_BLAS :: Accel_Struct{index = 3, generation = 1}
 
 @(private = "file")
 RESOURCES :: Resources {
@@ -66,6 +76,21 @@ RESOURCES :: Resources {
 			return {kind = .Compute}, true
 		case MESH_PIPELINE:
 			return pipeline_info({mesh = {0}, colors = {{format = FRAME_TARGET_FORMAT}}}), true
+		case RT_PIPELINE:
+			return {kind = .Ray_Tracing}, true
+		}
+		return {}, false
+	},
+	accel = proc(accel: Accel_Struct) -> (Accel_Info, bool) {
+		switch accel {
+		case BLAS:
+			return {kind = .Bottom, inputs_valid = true}, true
+		case UPDATABLE_BLAS:
+			return {kind = .Bottom, flags = {.Allow_Update}, inputs_valid = true}, true
+		case TLAS:
+			return {kind = .Top, max_instances = 2, inputs_valid = true}, true
+		case STALE_BLAS:
+			return {kind = .Bottom}, true
 		}
 		return {}, false
 	},
@@ -314,7 +339,7 @@ barriers_split_into_packets :: proc(t: ^testing.T) {
 	it := packet_iterator(cb)
 	for p in next_packet(&it) {
 		packets += 1
-		b, tx := barrier_data(p)
+		b, tx, _ := barrier_data(p)
 		testing.expect(t, len(b) + len(tx) <= MAX_PACKET_BARRIERS)
 		for x in b {
 			append(&got_buffers, x.buffer.index)
@@ -659,4 +684,128 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, amplification = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
 	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}), Desc_Error.Missing_Shader)
 	testing.expect_value(t, pipeline_info({mesh = shader}).kind, Pipeline_Kind.Mesh)
+}
+
+@(test)
+validate_accel_builds :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		queue:  Queue,
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		// INDIRECT holds 96 bytes: one instance at offset 16.
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_build_accel(cb, BLAS)
+				cmd_build_accel(cb, UPDATABLE_BLAS, update = true)
+				barrier := Accel_Barrier {
+					accel         = BLAS,
+					sync_before   = {.Build_Accel},
+					access_before = {.Accel_Write},
+					sync_after    = {.Build_Accel},
+					access_after  = {.Accel_Read},
+				}
+				cmd_barriers(cb, nil, nil, {barrier})
+				cmd_build_top_accel(cb, TLAS, INDIRECT, 16, 1)
+			},
+			.Compute,
+			.None,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, {index = 9, generation = 1})}, .Graphics, .Invalid_Accel},
+		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, BLAS, update = true)}, .Graphics, .Bad_Accel_Build},
+		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, STALE_BLAS)}, .Graphics, .Invalid_Buffer},
+		{proc(cb: ^Command_Buffer) {cmd_build_accel(cb, TLAS)}, .Graphics, .Invalid_Buffer},
+		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, BLAS, INDIRECT, 0, 1)}, .Graphics, .Bad_Accel_Build},
+		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 8, 1)}, .Graphics, .Bad_Accel_Build},
+		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 0, 3)}, .Graphics, .Bad_Accel_Build},
+		{proc(cb: ^Command_Buffer) {cmd_build_top_accel(cb, TLAS, INDIRECT, 48, 1)}, .Graphics, .Bad_Accel_Build},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_build_accel(cb, BLAS)}, .Graphics, .Build_Inside_Pass},
+		{proc(cb: ^Command_Buffer) {cmd_barriers(cb, nil, nil, {{accel = BLAS, sync_after = {.Compute_Shading}, access_after = {.Shader_Resource}}})}, .Graphics, .Bad_Barrier},
+		{proc(cb: ^Command_Buffer) {cmd_barriers(cb, nil, nil, {{accel = BLAS, sync_after = {.Pixel_Shading}, access_after = {.Accel_Read}}})}, .Compute, .Bad_Barrier},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES, queue = c.queue)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	instance := accel_instance({{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}, 0xabc, id = 0x1234567, mask = 0x0f, hit_group_offset = 2, flags = {.Force_Opaque})
+	testing.expect_value(t, instance.id_and_mask, 0x0f234567)
+	testing.expect_value(t, instance.hit_group_offset_flags, 0x04000002)
+	testing.expect_value(t, instance.accel, 0xabc)
+
+	shared := Accel_Geometry {
+		vertices      = PLAIN,
+		vertex_stride = 8,
+		vertex_count  = 3,
+	}
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {shared}}), Desc_Error.None)
+	testing.expect_value(t, validate_accel_desc({kind = .Top, max_instances = 4}), Desc_Error.None)
+	testing.expect_value(t, validate_accel_desc({kind = .Top}), Desc_Error.Bad_Geometry)
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom}), Desc_Error.Bad_Geometry)
+	bad := shared
+	bad.vertex_count = 4
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+	bad = shared
+	bad.vertex_format = .RGB32_Float
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+	bad = shared
+	bad.indices, bad.index_count = INDICES, 4
+	testing.expect_value(t, validate_accel_desc({kind = .Bottom, geometries = {bad}}), Desc_Error.Bad_Geometry)
+}
+
+@(test)
+validate_ray_dispatches :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch_rays(cb, {64, 64, 1})}, .None},
+		{proc(cb: ^Command_Buffer) {cmd_dispatch_rays(cb, {1, 1, 1})}, .No_Pipeline},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_rays(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, RT_PIPELINE); cmd_dispatch(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, RT_PIPELINE)}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_dispatch_rays(cb, {1, 1, 1})}, .Dispatch_Inside_Pass},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	library := []byte{0}
+	desc := Ray_Tracing_Pipeline_Desc {
+		library          = library,
+		ray_generation   = "ray_generation",
+		miss             = {"miss"},
+		hit_groups       = {{name = "hit", closest_hit = "closest_hit"}},
+		max_payload_size = 4,
+	}
+	testing.expect_value(t, validate_ray_tracing_pipeline_desc(desc), Desc_Error.None)
+	bad := desc
+	bad.ray_generation = ""
+	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Missing_Shader)
+	bad = desc
+	bad.hit_groups = {{name = "hit"}}
+	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Missing_Shader)
+	bad = desc
+	bad.max_payload_size = 6
+	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Bad_Stages)
+	bad = desc
+	bad.max_recursion = 32
+	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Bad_Stages)
 }

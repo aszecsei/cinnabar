@@ -51,11 +51,18 @@ Platform_API :: struct {
 	// formats or the topology: create a new pipeline for those.
 	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
 	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
+	// Ray tracing pipelines need Ray_Tracing_Pipeline.
+	gpu_create_ray_tracing_pipeline: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline,
+	gpu_update_ray_tracing_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool,
+	// Acceleration structures need Ray_Query or Ray_Tracing_Pipeline. The reference goes in Accel_Instance records.
+	gpu_create_accel:             proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct,
+	gpu_accel_reference:          proc(accel: gpu.Accel_Struct) -> u64,
 	// Destruction invalidates the handle at once and releases the resource when the GPU no longer uses it.
 	gpu_destroy_buffer:           proc(buffer: gpu.Buffer),
 	gpu_destroy_texture:          proc(texture: gpu.Texture),
 	gpu_destroy_sampler:          proc(sampler: gpu.Sampler),
 	gpu_destroy_pipeline:         proc(pipeline: gpu.Pipeline),
+	gpu_destroy_accel:            proc(accel: gpu.Accel_Struct),
 	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
 	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
 }

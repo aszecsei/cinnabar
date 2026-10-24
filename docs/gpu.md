@@ -39,7 +39,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
-**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers and pipelines, `update_*_pipeline`, and `destroy_scope`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
+**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference` and `destroy_scope`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
 The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 
@@ -62,7 +62,7 @@ All resource binding is bindless. There is one fixed root signature for all pipe
 
 A bindless index is a fixed function of the handle's pool index: `gpu.read_index`, `gpu.write_index` and `gpu.sampler_index`. The game computes indices without a call to `core`, and an index never changes while the handle lives.
 
-The resource heap has four ranges, in order: buffer reads, buffer writes, texture reads and texture writes. Each range has the capacity of its pool (`MAX_BUFFERS`, `MAX_TEXTURES`). Samplers use their pool index in the sampler heap. Vulkan descriptor arrays and Metal argument buffers can use the same fixed indices.
+The resource heap has five ranges, in order: buffer reads, buffer writes, texture reads, texture writes and acceleration structures. Each range has the capacity of its pool (`MAX_BUFFERS`, `MAX_TEXTURES`, `MAX_ACCEL_STRUCTS`). Only top-level acceleration structures have a view. Samplers use their pool index in the sampler heap. Vulkan descriptor arrays and Metal argument buffers can use the same fixed indices.
 
 - Every buffer has a read view. Buffers with the `Storage` usage also have a write view.
 - Textures with the `Sampled` usage have a read view. Textures with the `Storage` usage have a write view.
@@ -128,7 +128,7 @@ A large render pass can be recorded in parallel as pieces, in consecutive comman
 ### Barriers
 
 - Barriers use the Enhanced Barriers model: sync stages (`Syncs`), access flags (`Accesses`) and texture layouts (`Texture_Layout`). This model maps one-to-one to Vulkan `synchronization2`. On Metal, most barriers become nothing or fences.
-- `cmd_barriers` records buffer and texture barriers. Barriers occur only outside a render pass. A barrier covers the whole resource.
+- `cmd_barriers` records buffer, texture and acceleration structure barriers. Barriers occur only outside a render pass. A barrier covers the whole resource. Acceleration structures have only the `Accel_Read` and `Accel_Write` accesses.
 - An empty `Syncs` means no synchronization, and an empty `Accesses` means no access. A side with no synchronization has no access.
 - `Undefined` as the layout before discards the contents, whatever the texture's layout is.
 - The backend does not track resource states to translate barriers. State tracking would serialize parallel recording.
@@ -143,7 +143,7 @@ The game builds a `render.Graph` every frame in frame memory. Passes declare how
 
 - **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands through a `Pass_Context`. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
 - **Pieces:** `pieces = n` splits a pass across `n` jobs (at most `MAX_PASS_PIECES`). The `Pass_Proc` runs once per piece, and `Pass_Context.piece` and `piece_count` tell it which share of the work to record. The first piece records the barriers. A render pass becomes a [split pass](#split-passes): the graph makes the pieces load and store between each other, and puts each piece's debug marker inside its pass. A compute pass's pieces are plain command buffers.
-- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer, and `indirect_buffer` declares indirect arguments or a count. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
+- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer, and `indirect_buffer` declares indirect arguments or a count. `import_accel`, `build_accel`, `read_accel` and `build_input` declare acceleration structures, their builds, traces against them, and the geometry and bottom-level structures that a build reads. `add_ray_tracing_pass` adds a pass whose shader accesses synchronize with the ray tracing stage. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
 - **Imported resources:** `import_texture` and `import_buffer` add resources that outlive the frame. An imported texture has a resting use, and the graph returns it to that layout at the end of the frame. The frame target rests as `Color`. A texture created with data rests as `Sampled`.
 - **Transient textures:** `create_texture` adds a texture that exists for one frame. The graph adds the usages that its uses need. A `Texture_Cache` in `Game_State` keeps the textures between frames, keyed by description and label, and destroys a texture after `CACHE_LIFETIME` frames without use.
 - **Barriers:** a use needs a barrier when it changes the layout, when it follows a write, or when it writes after any access. Reads in the same layout merge without a barrier, so a later write waits for all of them. A transient texture starts `Undefined`, and sampling it before a pass writes it is an error.
@@ -182,9 +182,14 @@ The engine culls and builds draws on the GPU.
 
 ## Ray tracing
 
-- **Acceleration structures** are a resource type. Builds and refits are commands, outside render passes. Build scratch memory comes from the backend.
-- **Inline ray tracing first.** `RayQuery` in any shader stage maps to `VK_KHR_ray_query` and to Metal intersection queries. This is the main ray tracing path.
-- **Ray tracing pipelines second.** Shader tables and `dispatch_rays` map to `VK_KHR_ray_tracing_pipeline`. Metal has no native equivalent, so a Metal backend may not report this capability. Effects must have an inline or raster fallback.
+- **Acceleration structures** are a resource type (`Accel_Struct`), and need `Ray_Query` or `Ray_Tracing_Pipeline`. A bottom-level structure holds triangle geometries from vertex and optional index buffers. A top-level structure holds instances. The backend sizes each structure at creation, for its largest build. Build scratch memory comes from the backend's scratch pool.
+- **Builds:** `cmd_build_accel` builds a bottom-level structure from the geometry in its description. `cmd_build_top_accel` builds a top-level structure from `Accel_Instance` records, which can be in the upload ring. `update` refits a structure that has `Allow_Update`. Builds occur outside render passes and work on the compute queue. Validation rejects a build whose geometry buffer was destroyed.
+- **Instances:** `Accel_Instance` is the 64-byte record that D3D12 and Vulkan share: a row-major 3x4 transform, a 24-bit ID and 8-bit mask, a 24-bit hit group offset and 8 flag bits, and a reference from `gpu_accel_reference`. That is a GPU address on D3D12 and a device address on Vulkan. A Metal backend converts the records in a compute pass at build time.
+- **Inline ray tracing first.** `RayQuery` in any shader stage maps to `VK_KHR_ray_query` and to Metal intersection queries. Shaders get a top-level structure with `cn_accel(read_index(accel))`. This is the main ray tracing path.
+- **Ray tracing pipelines second.** `Ray_Tracing_Pipeline_Desc` names a ray generation shader, miss shaders and hit groups in a DXIL library. The backend builds the shader table in that order, with no local data, because shaders get their resources bindless. `cmd_dispatch_rays` runs the bound pipeline outside a render pass. They map to `VK_KHR_ray_tracing_pipeline`. Metal has no native equivalent, so a Metal backend may not report this capability. Effects must have an inline or raster fallback.
+- **Scratch pool:** each frame in flight has a pool of build scratch memory, and every build takes its own region of it. So builds in a frame never share scratch memory and need no barriers between them, on either queue. A pool resets when its frame's fence passes, like the upload ring. It grows in 16 MB blocks, and a larger build gets a block of its own size. Blocks are kept for later frames and never shrink.
+- **D3D12:** Ray tracing pipelines compile to a state object on the background compile jobs, with the fixed root signature as the global root signature. The shader table is in an upload heap. A new version replaces the state object and table together, and the old ones are released after the frames that use them.
+- **Sample:** the large triangles cast ray-traced shadows. With `Ray_Tracing_Pipeline`, a ray generation shader traces them. With only `Ray_Query`, a compute pass traces the same rays inline. Without either, there are no shadows.
 
 ## Presentation
 
@@ -204,7 +209,7 @@ The engine culls and builds draws on the GPU.
 
 - Shaders are HLSL. `tools/cook` compiles each shader to DXIL with DXC. A Vulkan port adds SPIR-V from DXC. A Metal port adds a metallib from `metal-shaderconverter`.
 - The cooker checks that each shader fits the fixed root signature. The runtime never compiles or reflects shaders.
-- Until `tools/cook` exists, the build compiles shaders with DXC directly. `just install` downloads the DXC release that the justfile pins. `just shaders` compiles each `<name>.hlsl` in the game's `shaders/` directory: its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points become `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`.
+- Until `tools/cook` exists, the build compiles shaders with DXC directly. `just install` downloads the DXC release that the justfile pins. `just shaders` compiles each `<name>.hlsl` in the game's `shaders/` directory: its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points become `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`. A file with `[shader("...")]` attributes is a ray tracing library and becomes `<name>.lib.dxil`.
 - The game embeds the DXIL with `#load`. A hot reload therefore brings new shaders, and the game recreates its pipelines in `on_reload`.
 
 ## Debugging

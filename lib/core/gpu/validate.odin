@@ -32,6 +32,9 @@ Validation_Error :: enum u8 {
 	Bad_Suspend,
 	Wrong_Queue,
 	Bad_Indirect,
+	Invalid_Accel,
+	Build_Inside_Pass,
+	Bad_Accel_Build,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -39,6 +42,7 @@ Resources :: struct {
 	texture:  proc(texture: Texture) -> (Texture_Desc, bool),
 	buffer:   proc(buffer: Buffer) -> (Buffer_Desc, bool),
 	pipeline: proc(pipeline: Pipeline) -> (Pipeline_Info, bool),
+	accel:    proc(accel: Accel_Struct) -> (Accel_Info, bool),
 }
 
 // Layout_Tracker follows texture layouts across submissions for validation. The backends do not track layouts
@@ -107,6 +111,7 @@ validate :: proc(
 	graphics_bound := false
 	mesh_bound := false
 	compute_bound := false
+	ray_tracing_bound := false
 	index_buffer_set := false
 
 	it := packet_iterator(cb)
@@ -137,7 +142,7 @@ validate :: proc(
 			}
 			in_pass = true
 			pass_marker_depth = marker_depth
-			graphics_bound, mesh_bound, compute_bound = false, false, false
+			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound = false, false, false, false
 			index_buffer_set = false
 		case .End_Pass:
 			if !in_pass {
@@ -150,7 +155,7 @@ validate :: proc(
 				suspended_at = packet
 			}
 			in_pass = false
-			graphics_bound, mesh_bound, compute_bound = false, false, false
+			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound = false, false, false, false
 			index_buffer_set = false
 		case .Begin_Marker:
 			marker_depth += 1
@@ -167,13 +172,15 @@ validate :: proc(
 			if !ok {
 				return .Invalid_Pipeline, packet
 			}
-			if (info.kind != .Compute) != in_pass {
+			raster := info.kind == .Graphics || info.kind == .Mesh
+			if raster != in_pass {
 				return .Wrong_Pipeline_Kind, packet
 			}
-			if info.kind != .Compute && !same_formats(info, pass_formats) {
+			if raster && !same_formats(info, pass_formats) {
 				return .Pipeline_Pass_Mismatch, packet
 			}
-			graphics_bound, mesh_bound, compute_bound = info.kind == .Graphics, info.kind == .Mesh, info.kind == .Compute
+			graphics_bound, mesh_bound = info.kind == .Graphics, info.kind == .Mesh
+			compute_bound, ray_tracing_bound = info.kind == .Compute, info.kind == .Ray_Tracing
 		case .Push_Constants:
 		case .Set_Pass_Constants:
 			if _, ok := resources.buffer(payload(p, Set_Pass_Constants).buffer); !ok {
@@ -211,6 +218,9 @@ validate :: proc(
 		case .Dispatch:
 			if in_pass {
 				return .Dispatch_Inside_Pass, packet
+			}
+			if ray_tracing_bound {
+				return .Wrong_Pipeline_Kind, packet
 			}
 			if !compute_bound {
 				return .No_Pipeline, packet
@@ -267,6 +277,23 @@ validate :: proc(
 					return err, packet
 				}
 			}
+		case .Dispatch_Rays:
+			if in_pass {
+				return .Dispatch_Inside_Pass, packet
+			}
+			if compute_bound {
+				return .Wrong_Pipeline_Kind, packet
+			}
+			if !ray_tracing_bound {
+				return .No_Pipeline, packet
+			}
+		case .Build_Accel:
+			if in_pass {
+				return .Build_Inside_Pass, packet
+			}
+			if err = validate_build(resources, payload(p, Build_Accel)); err != .None {
+				return err, packet
+			}
 		case .Dispatch_Indirect:
 			if in_pass {
 				return .Dispatch_Inside_Pass, packet
@@ -282,9 +309,18 @@ validate :: proc(
 			if in_pass {
 				return .Barrier_Inside_Pass, packet
 			}
-			buffers, textures := barrier_data(p)
-			if queue == .Compute && !compute_queue_barriers(buffers, textures) {
+			buffers, textures, accels := barrier_data(p)
+			if queue == .Compute && !compute_queue_barriers(buffers, textures, accels) {
 				return .Bad_Barrier, packet
+			}
+			for b in accels {
+				if _, ok := resources.accel(b.accel); !ok {
+					return .Invalid_Accel, packet
+				}
+				valid := b.access_before <= ACCEL_ACCESSES && b.access_after <= ACCEL_ACCESSES
+				if !valid || !valid_sync(b.sync_before, b.access_before) || !valid_sync(b.sync_after, b.access_after) {
+					return .Bad_Barrier, packet
+				}
 			}
 			for b in buffers {
 				desc, ok := resources.buffer(b.buffer)
@@ -506,8 +542,45 @@ validate_indirect :: proc(resources: Resources, buffer: Buffer, offset: u32, siz
 	return .None
 }
 
+// validate_build checks a build against its acceleration structure. A bottom-level build takes no instances, and a
+// top-level build's instance records are 16-byte aligned and in range.
 @(private = "file")
-compute_queue_barriers :: proc(buffers: []Buffer_Barrier, textures: []Texture_Barrier) -> bool {
+validate_build :: proc(resources: Resources, build: ^Build_Accel) -> Validation_Error {
+	info, ok := resources.accel(build.accel)
+	if !ok {
+		return .Invalid_Accel
+	}
+	if build.update && .Allow_Update not_in info.flags {
+		return .Bad_Accel_Build
+	}
+	switch info.kind {
+	case .Bottom:
+		if build.instances != {} || build.count != 0 {
+			return .Bad_Accel_Build
+		}
+		if !info.inputs_valid {
+			return .Invalid_Buffer
+		}
+	case .Top:
+		desc, has_instances := resources.buffer(build.instances)
+		if !has_instances {
+			return .Invalid_Buffer
+		}
+		end := int(build.offset) + int(build.count) * size_of(Accel_Instance)
+		if build.offset % 16 != 0 || build.count > info.max_instances || end > int(desc.size) {
+			return .Bad_Accel_Build
+		}
+	}
+	return .None
+}
+
+@(private = "file")
+compute_queue_barriers :: proc(buffers: []Buffer_Barrier, textures: []Texture_Barrier, accels: []Accel_Barrier) -> bool {
+	for b in accels {
+		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) {
+			return false
+		}
+	}
 	for b in buffers {
 		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) || !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
 			return false
@@ -565,6 +638,9 @@ Desc_Error :: enum u8 {
 	Bad_Color_Count,
 	// A graphics pipeline has a vertex shader or a mesh shader, not both, and an amplification shader needs a mesh shader.
 	Bad_Stages,
+	// A bottom-level acceleration structure has 1 to MAX_ACCEL_GEOMETRIES whole-triangle geometries, and a top-level
+	// one has no geometries and room for at least one instance.
+	Bad_Geometry,
 }
 
 // Backends check descriptions with these procedures before they create a resource.
@@ -621,6 +697,51 @@ validate_graphics_pipeline_desc :: proc(desc: Graphics_Pipeline_Desc) -> Desc_Er
 	}
 	if desc.depth_format != .Unknown && !is_depth_format(desc.depth_format) {
 		return .Bad_Format
+	}
+	return .None
+}
+
+validate_ray_tracing_pipeline_desc :: proc(desc: Ray_Tracing_Pipeline_Desc) -> Desc_Error {
+	if len(desc.library) == 0 || desc.ray_generation == "" {
+		return .Missing_Shader
+	}
+	if desc.max_payload_size == 0 || desc.max_payload_size % 4 != 0 || desc.max_attribute_size % 4 != 0 || desc.max_recursion > 31 {
+		return .Bad_Stages
+	}
+	for group in desc.hit_groups {
+		if group.name == "" || (group.closest_hit == "" && group.any_hit == "") {
+			return .Missing_Shader
+		}
+	}
+	for name in desc.miss {
+		if name == "" {
+			return .Missing_Shader
+		}
+	}
+	return .None
+}
+
+// validate_accel_desc checks the shape of a description. The backend checks that the geometry buffers are valid.
+validate_accel_desc :: proc(desc: Accel_Struct_Desc) -> Desc_Error {
+	switch desc.kind {
+	case .Top:
+		if len(desc.geometries) > 0 || desc.max_instances == 0 {
+			return .Bad_Geometry
+		}
+	case .Bottom:
+		if len(desc.geometries) == 0 || len(desc.geometries) > MAX_ACCEL_GEOMETRIES {
+			return .Bad_Geometry
+		}
+		for g in desc.geometries {
+			min_stride: u32 = g.vertex_format == .RG32_Float ? 8 : 12
+			if g.vertex_count == 0 || g.vertex_stride < min_stride || g.vertex_stride % 4 != 0 || g.vertex_offset % 4 != 0 {
+				return .Bad_Geometry
+			}
+			triangles_whole := g.indices == {} ? g.vertex_count % 3 == 0 : g.index_count > 0 && g.index_count % 3 == 0
+			if !triangles_whole {
+				return .Bad_Geometry
+			}
+		}
 	}
 	return .None
 }

@@ -12,6 +12,8 @@ Buffer :: distinct Handle
 Texture :: distinct Handle
 Sampler :: distinct Handle
 Pipeline :: distinct Handle
+// An acceleration structure for ray tracing (see docs/gpu.md#ray-tracing).
+Accel_Struct :: distinct Handle
 
 // Capabilities above the hardware floor. The backend reports them at device creation.
 Feature :: enum u8 {
@@ -27,19 +29,26 @@ MAX_BUFFERS :: 16384
 MAX_TEXTURES :: 16384
 MAX_SAMPLERS :: 1024
 MAX_PIPELINES :: 4096
+MAX_ACCEL_STRUCTS :: 4096
+// The geometries of one bottom-level acceleration structure.
+MAX_ACCEL_GEOMETRIES :: 16
 
 // The bindless index of a view is a fixed function of the handle's pool index (see docs/gpu.md#binding-model).
-// The resource descriptor heap holds these ranges in order: buffer reads, buffer writes, texture reads, texture writes.
+// The resource descriptor heap holds these ranges in order: buffer reads, buffer writes, texture reads, texture writes,
+// acceleration structures.
 BUFFER_READ_BASE :: 0
 BUFFER_WRITE_BASE :: BUFFER_READ_BASE + MAX_BUFFERS
 TEXTURE_READ_BASE :: BUFFER_WRITE_BASE + MAX_BUFFERS
 TEXTURE_WRITE_BASE :: TEXTURE_READ_BASE + MAX_TEXTURES
-RESOURCE_DESCRIPTOR_COUNT :: TEXTURE_WRITE_BASE + MAX_TEXTURES
+ACCEL_READ_BASE :: TEXTURE_WRITE_BASE + MAX_TEXTURES
+RESOURCE_DESCRIPTOR_COUNT :: ACCEL_READ_BASE + MAX_ACCEL_STRUCTS
 
-// read_index is the bindless index of a buffer's ByteAddressBuffer view, or a texture's sampled view.
+// read_index is the bindless index of a buffer's ByteAddressBuffer view, a texture's sampled view, or an
+// acceleration structure's RaytracingAccelerationStructure view.
 read_index :: proc {
 	buffer_read_index,
 	texture_read_index,
+	accel_read_index,
 }
 
 // write_index is the bindless index of a buffer's RWByteAddressBuffer view, or a texture's storage view.
@@ -63,6 +72,11 @@ texture_read_index :: proc(texture: Texture) -> u32 {
 
 texture_write_index :: proc(texture: Texture) -> u32 {
 	return TEXTURE_WRITE_BASE + texture.index
+}
+
+// Shaders trace only against top-level structures, but every acceleration structure has a view.
+accel_read_index :: proc(accel: Accel_Struct) -> u32 {
+	return ACCEL_READ_BASE + accel.index
 }
 
 // sampler_index is the bindless index in the sampler descriptor heap.
@@ -202,6 +216,10 @@ Sync :: enum u8 {
 	Compute_Shading,
 	// Reading indirect arguments and counts.
 	Execute_Indirect,
+	// Acceleration structure builds, with their inputs and scratch memory.
+	Build_Accel,
+	// The shaders of a ray tracing pipeline.
+	Ray_Tracing,
 }
 
 Syncs :: bit_set[Sync;u16]
@@ -214,15 +232,19 @@ Access :: enum u8 {
 	Shader_Resource,
 	Unordered_Access,
 	Indirect_Argument,
+	Accel_Read,
+	Accel_Write,
 }
 
 Accesses :: bit_set[Access;u16]
 
-WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access}
+WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access, .Accel_Write}
 
 // A compute queue runs no graphics work, so its barriers use only these.
-COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect}
-COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument}
+COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing}
+COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument, .Accel_Read, .Accel_Write}
+// The accesses an acceleration structure can have.
+ACCEL_ACCESSES :: Accesses{.Accel_Read, .Accel_Write}
 
 // Queue is where a submission runs. Compute runs alongside graphics (async compute). Cross-queue dependencies
 // are declared at submission (see docs/gpu.md#queues).
@@ -359,11 +381,38 @@ Compute_Pipeline_Desc :: struct {
 	label:   string,
 }
 
-// Graphics is a vertex pipeline, and Mesh a mesh pipeline. Both run in render passes.
+// Graphics is a vertex pipeline, and Mesh a mesh pipeline. Both run in render passes. Compute and Ray_Tracing
+// pipelines run outside them.
 Pipeline_Kind :: enum u8 {
 	Graphics,
 	Mesh,
 	Compute,
+	Ray_Tracing,
+}
+
+// Hit_Group names its closest hit and any hit shaders in the library. Either can be empty, but not both.
+Hit_Group :: struct {
+	name:        string,
+	closest_hit: string,
+	any_hit:     string,
+}
+
+// Ray_Tracing_Pipeline_Desc names exports of a DXIL library. The backend builds the shader table: the ray generation
+// shader, the miss shaders in order (TraceRay's miss index), and the hit groups in order (an instance's hit_group_offset
+// plus TraceRay's offset). Records have no local data: shaders get their resources bindless. Ray tracing pipelines
+// need Features.Ray_Tracing_Pipeline. 0 sizes and recursion take the defaults.
+Ray_Tracing_Pipeline_Desc :: struct {
+	library:            []byte,
+	ray_generation:     string,
+	miss:               []string,
+	hit_groups:         []Hit_Group,
+	max_payload_size:   u32,
+	// The default is 8: the barycentrics of a triangle hit.
+	max_attribute_size: u32,
+	// The default is 1: TraceRay only from the ray generation shader.
+	max_recursion:      u32,
+	scope:              Scope,
+	label:              string,
 }
 
 // Pipeline_Info is what validation needs to know about a pipeline.
@@ -384,6 +433,105 @@ pipeline_info :: proc(desc: Graphics_Pipeline_Desc) -> Pipeline_Info {
 		info.color_formats[i] = color.format
 	}
 	return info
+}
+
+Accel_Kind :: enum u8 {
+	// Geometry: triangles in vertex and index buffers.
+	Bottom,
+	// Instances of bottom-level structures. Shaders trace against these.
+	Top,
+}
+
+Accel_Flag :: enum u8 {
+	// The structure can be updated (refit) instead of rebuilt.
+	Allow_Update,
+	// Faster builds and slower traces. The default prefers fast traces.
+	Prefer_Fast_Build,
+}
+
+Accel_Flags :: bit_set[Accel_Flag;u8]
+
+Accel_Vertex_Format :: enum u8 {
+	// Two floats: the third coordinate is 0.
+	RG32_Float,
+	RGB32_Float,
+}
+
+// Accel_Geometry is triangles for a bottom-level structure. A nil index buffer means a triangle list of vertices.
+// The structure keeps these handles: its builds read the buffers.
+Accel_Geometry :: struct {
+	vertices:      Buffer,
+	vertex_offset: u32,
+	vertex_stride: u32,
+	vertex_count:  u32,
+	vertex_format: Accel_Vertex_Format,
+	indices:       Buffer,
+	index_offset:  u32,
+	index_count:   u32,
+	index_format:  Index_Format,
+	opaque:        bool,
+}
+
+// A bottom-level structure has geometries. A top-level structure has room for max_instances instances.
+// The backend sizes the structure and its build scratch memory at creation.
+Accel_Struct_Desc :: struct {
+	kind:          Accel_Kind,
+	flags:         Accel_Flags,
+	geometries:    []Accel_Geometry,
+	max_instances: u32,
+	scope:         Scope,
+	label:         string,
+}
+
+// Accel_Info is what validation needs to know about an acceleration structure. inputs_valid is false when a
+// geometry buffer of a bottom-level structure was destroyed.
+Accel_Info :: struct {
+	kind:          Accel_Kind,
+	flags:         Accel_Flags,
+	max_instances: u32,
+	inputs_valid:  bool,
+}
+
+accel_info :: proc(desc: Accel_Struct_Desc) -> Accel_Info {
+	return {kind = desc.kind, flags = desc.flags, max_instances = desc.max_instances, inputs_valid = true}
+}
+
+Accel_Instance_Flag :: enum u8 {
+	Cull_Disable,
+	Front_Counterclockwise,
+	Force_Opaque,
+	Force_Non_Opaque,
+}
+
+Accel_Instance_Flags :: bit_set[Accel_Instance_Flag;u8]
+
+// Accel_Instance is a top-level structure's instance record, in the layout that D3D12 and Vulkan share. transform is
+// row-major 3x4, object to world. id is 24 bits and reaches shaders as InstanceID(). hit_group_offset is 24 bits and
+// offsets the hit group index in ray tracing pipelines. accel is gpu_accel_reference of a bottom-level structure.
+// Records are 16-byte aligned. A Metal backend converts them at build time.
+Accel_Instance :: struct {
+	transform:              [3][4]f32,
+	id_and_mask:            u32,
+	hit_group_offset_flags: u32,
+	accel:                  u64,
+}
+
+#assert(size_of(Accel_Instance) == 64)
+
+accel_instance :: proc(
+	transform: [3][4]f32,
+	accel_reference: u64,
+	id: u32 = 0,
+	mask: u8 = 0xff,
+	hit_group_offset: u32 = 0,
+	flags: Accel_Instance_Flags = {},
+) -> Accel_Instance {
+	return {
+		transform = transform,
+		id_and_mask = (id & 0xffffff) | u32(mask) << 24,
+		hit_group_offset_flags = (hit_group_offset & 0xffffff) | u32(transmute(u8)flags) << 24,
+		accel = accel_reference,
+	}
 }
 
 // Upload is memory in the frame's upload ring. It is valid until the end of the frame.

@@ -23,5 +23,7 @@ RWByteAddressBuffer cn_rw_buffer(uint index) { return ResourceDescriptorHeap[ind
 Texture2D<float4> cn_texture(uint index) { return ResourceDescriptorHeap[index]; }
 RWTexture2D<float4> cn_rw_texture(uint index) { return ResourceDescriptorHeap[index]; }
 SamplerState cn_sampler(uint index) { return SamplerDescriptorHeap[index]; }
+// A top-level acceleration structure, from gpu.read_index(accel).
+RaytracingAccelerationStructure cn_accel(uint index) { return ResourceDescriptorHeap[index]; }
 
 #endif

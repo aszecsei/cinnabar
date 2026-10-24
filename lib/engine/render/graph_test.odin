@@ -71,7 +71,7 @@ inspect :: proc(cbs: []gpu.Command_Buffer, allocator := context.allocator) -> (r
 		for p in gpu.next_packet(&it) {
 			#partial switch p.kind {
 			case .Barriers:
-				buffers, textures := gpu.barrier_data(p)
+				buffers, textures, _ := gpu.barrier_data(p)
 				append(&r.buffers, ..buffers)
 				append(&r.textures, ..textures)
 			case .Begin_Marker:
@@ -481,4 +481,68 @@ async_compute_waits_across_queues :: proc(t: ^testing.T) {
 	for s in subs {
 		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
 	}
+}
+
+@(test)
+accel_builds_order_before_traces :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	vertices := null.create_buffer({size = 96}, nil)
+	defer null.destroy_buffer(vertices)
+	instances := null.create_buffer({size = 64}, nil)
+	defer null.destroy_buffer(instances)
+	blas := null.create_accel({kind = .Bottom, geometries = {{vertices = vertices, vertex_stride = 32, vertex_count = 3}}})
+	defer null.destroy_accel(blas)
+	tlas := null.create_accel({kind = .Top, max_instances = 1})
+	defer null.destroy_accel(tlas)
+	testing.expect(t, blas != {} && tlas != {})
+
+	g := begin(&f.platform, &f.cache)
+	geometry := import_buffer(&g, vertices)
+	bottom := import_accel(&g, blas)
+	top := import_accel(&g, tlas)
+	shadows := create_texture(&g, {size = SIZE, format = .R16_Float, label = "shadows"})
+
+	p := add_compute_pass(&g, "build bottom", nothing)
+	build_input(&g, p, geometry)
+	build_accel(&g, p, bottom)
+	p = add_compute_pass(&g, "build top", nothing)
+	build_input(&g, p, bottom)
+	build_accel(&g, p, top)
+	p = add_compute_pass(&g, "trace", nothing)
+	read_accel(&g, p, top)
+	write(&g, p, shadows)
+	keep_pass(&g, p)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	r := inspect(all_buffers(subs), f.platform.frame_allocator)
+	accels := make([dynamic]gpu.Accel_Barrier, f.platform.frame_allocator)
+	for s in subs {
+		for cb in s.buffers {
+			it := gpu.packet_iterator(cb)
+			for p in gpu.next_packet(&it) {
+				if p.kind == .Barriers {
+					_, _, a := gpu.barrier_data(p)
+					append(&accels, ..a)
+				}
+			}
+		}
+	}
+	// The bottom structure's build finishes before the top build reads it, and the top build before the trace.
+	testing.expect_value(t, len(accels), 2)
+	if len(accels) == 2 {
+		testing.expect_value(t, accels[0].accel, blas)
+		testing.expect_value(t, accels[0].access_before, gpu.Accesses{.Accel_Write})
+		testing.expect_value(t, accels[0].sync_after, gpu.Syncs{.Build_Accel})
+		testing.expect_value(t, accels[0].access_after, gpu.Accesses{.Accel_Read})
+		testing.expect_value(t, accels[1].accel, tlas)
+		testing.expect_value(t, accels[1].sync_after, gpu.Syncs{.Compute_Shading})
+	}
+	testing.expect_value(t, len(r.buffers), 0)
+	testing.expect_value(t, gpu_accel(&g, top), tlas)
+	testing.expect(t, null.submit(all_buffers(subs)))
 }

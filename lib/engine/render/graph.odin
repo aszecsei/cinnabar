@@ -12,6 +12,7 @@ import "cinnabar:core/jobs"
 // Graph handles are valid in the graph that returned them. 0 is the nil handle.
 Texture :: distinct u32
 Buffer :: distinct u32
+Accel :: distinct u32
 Pass :: distinct u32
 
 Texture_Use :: enum u8 {
@@ -33,11 +34,24 @@ Buffer_Use :: enum u8 {
 	Index,
 	// Indirect arguments or a count, read by an indirect command.
 	Indirect,
+	// Geometry that an acceleration structure build reads.
+	Build_Input,
+}
+
+Accel_Use :: enum u8 {
+	// The pass builds or updates the structure.
+	Build,
+	// Shaders in the pass trace against the structure.
+	Read,
+	// A build in the pass reads the structure: a top-level build reads its bottom-level structures.
+	Build_Input,
 }
 
 Pass_Kind :: enum u8 {
 	Render,
 	Compute,
+	// A pass that dispatches rays with a ray tracing pipeline.
+	Ray_Tracing,
 }
 
 // A pass can be split into at most this many pieces.
@@ -94,9 +108,11 @@ Texture_Node :: struct {
 	used:     bool,
 }
 
+// Acceleration structures share the buffer nodes: accel selects the barrier type, and buffer holds the handle.
 @(private)
 Buffer_Node :: struct {
 	buffer:  gpu.Buffer,
+	accel:   bool,
 	state:   State,
 	needed:  bool,
 	queue:   gpu.Queue,
@@ -147,6 +163,7 @@ Piece :: struct {
 Barriers :: struct {
 	buffers:  [dynamic]gpu.Buffer_Barrier,
 	textures: [dynamic]gpu.Texture_Barrier,
+	accels:   [dynamic]gpu.Accel_Barrier,
 }
 
 // begin starts the frame's graph. Build one graph per frame for each cache.
@@ -180,12 +197,23 @@ import_texture :: proc(g: ^Graph, texture: gpu.Texture, resting: Texture_Use) ->
 // import_buffer adds a buffer that outlives the frame.
 import_buffer :: proc(g: ^Graph, buffer: gpu.Buffer) -> Buffer {
 	for node, i in g.buffers {
-		if node.buffer == buffer {
+		if !node.accel && node.buffer == buffer {
 			return Buffer(i + 1)
 		}
 	}
 	append(&g.buffers, Buffer_Node{buffer = buffer, needed = true})
 	return Buffer(len(g.buffers))
+}
+
+// import_accel adds an acceleration structure. Acceleration structures are always imported.
+import_accel :: proc(g: ^Graph, accel: gpu.Accel_Struct) -> Accel {
+	for node, i in g.buffers {
+		if node.accel && node.buffer == gpu.Buffer(accel) {
+			return Accel(i + 1)
+		}
+	}
+	append(&g.buffers, Buffer_Node{buffer = gpu.Buffer(accel), accel = true, needed = true})
+	return Accel(len(g.buffers))
 }
 
 // create_texture adds a transient texture. Its contents are undefined until a pass writes them.
@@ -212,6 +240,11 @@ add_compute_pass :: proc(
 	queue := gpu.Queue.Graphics,
 ) -> Pass {
 	return add_pass(g, name, .Compute, execute, data, pieces, queue)
+}
+
+// add_ray_tracing_pass adds a pass that dispatches rays. Its shader accesses synchronize with the ray tracing stage.
+add_ray_tracing_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, queue := gpu.Queue.Graphics) -> Pass {
+	return add_pass(g, name, .Ray_Tracing, execute, data, 1, queue)
 }
 
 // keep_pass stops the graph from culling a pass whose results it cannot see, for example a readback.
@@ -276,6 +309,30 @@ indirect_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Indirect)
 }
 
+// build_accel declares that the pass builds or updates an acceleration structure.
+build_accel :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Build)
+}
+
+// read_accel declares that shaders in the pass trace rays against an acceleration structure.
+read_accel :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Read)
+}
+
+// build_input declares that a build in the pass reads a geometry buffer or a bottom-level structure.
+build_input :: proc {
+	build_input_buffer,
+	build_input_accel,
+}
+
+build_input_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
+	use_buffer(g, pass, buffer, .Build_Input)
+}
+
+build_input_accel :: proc(g: ^Graph, pass: Pass, accel: Accel) {
+	use_accel(g, pass, accel, .Build_Input)
+}
+
 // gpu_texture returns the texture behind a graph texture. Use it in a Pass_Proc: transient textures exist
 // only after the graph starts recording.
 gpu_texture :: proc(g: ^Graph, texture: Texture) -> gpu.Texture {
@@ -284,6 +341,10 @@ gpu_texture :: proc(g: ^Graph, texture: Texture) -> gpu.Texture {
 
 gpu_buffer :: proc(g: ^Graph, buffer: Buffer) -> gpu.Buffer {
 	return g.buffers[buffer - 1].buffer
+}
+
+gpu_accel :: proc(g: ^Graph, accel: Accel) -> gpu.Accel_Struct {
+	return gpu.Accel_Struct(g.buffers[accel - 1].buffer)
 }
 
 // Submission is one gpu_submit call: the command buffers of consecutive live passes on one queue.
@@ -389,13 +450,22 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 		if !pass.live {
 			continue
 		}
-		pass.barriers = {make([dynamic]gpu.Buffer_Barrier, g.allocator), make([dynamic]gpu.Texture_Barrier, g.allocator)}
+		pass.barriers = {
+			make([dynamic]gpu.Buffer_Barrier, g.allocator),
+			make([dynamic]gpu.Texture_Barrier, g.allocator),
+			make([dynamic]gpu.Accel_Barrier, g.allocator),
+		}
 		for use in pass.uses {
 			if use.buffer {
 				node := &g.buffers[use.index]
 				cross_queue(&pass, &node.state, &node.queue, &node.touched)
 				if before, needed := transition(&node.state, use.state); needed {
-					append(&pass.barriers.buffers, gpu.Buffer_Barrier{node.buffer, before.sync, use.state.sync, before.access, use.state.access})
+					if node.accel {
+						barrier := gpu.Accel_Barrier{gpu.Accel_Struct(node.buffer), before.sync, use.state.sync, before.access, use.state.access}
+						append(&pass.barriers.accels, barrier)
+					} else {
+						append(&pass.barriers.buffers, gpu.Buffer_Barrier{node.buffer, before.sync, use.state.sync, before.access, use.state.access})
+					}
 				}
 				continue
 			}
@@ -442,7 +512,7 @@ record_piece :: proc(data: rawptr) {
 	pass.cbs[i] = gpu.command_buffer(g.allocator)
 	cb := &pass.cbs[i]
 	if i == 0 {
-		gpu.cmd_barriers(cb, pass.barriers.buffers[:], pass.barriers.textures[:])
+		gpu.cmd_barriers(cb, pass.barriers.buffers[:], pass.barriers.textures[:], pass.barriers.accels[:])
 	}
 	if !split_render {
 		gpu.cmd_begin_marker(cb, pass.name)
@@ -514,6 +584,13 @@ use_texture :: proc(g: ^Graph, pass: Pass, texture: Texture, use: Texture_Use, r
 }
 
 @(private = "file")
+use_accel :: proc(g: ^Graph, pass: Pass, accel: Accel, use: Accel_Use) {
+	p := &g.passes[pass - 1]
+	assert(p.kind != .Render, "render: acceleration structures are built and traced outside render passes")
+	add_use(p, {index = u32(accel - 1), buffer = true, state = accel_state(use, p.kind), reads = use != .Build})
+}
+
+@(private = "file")
 use_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer, use: Buffer_Use) {
 	p := &g.passes[pass - 1]
 	add_use(p, {index = u32(buffer - 1), buffer = true, state = buffer_state(use, p.kind), reads = true})
@@ -540,7 +617,28 @@ add_use :: proc(pass: ^Pass_Node, use: Use) {
 
 @(private = "file")
 shading_sync :: proc(kind: Pass_Kind) -> gpu.Syncs {
-	return kind == .Render ? {.Vertex_Shading, .Pixel_Shading} : {.Compute_Shading}
+	switch kind {
+	case .Render:
+		return {.Vertex_Shading, .Pixel_Shading}
+	case .Compute:
+		return {.Compute_Shading}
+	case .Ray_Tracing:
+		return {.Ray_Tracing}
+	}
+	return {}
+}
+
+@(private = "file")
+accel_state :: proc(use: Accel_Use, kind: Pass_Kind) -> State {
+	switch use {
+	case .Build:
+		return {sync = {.Build_Accel}, access = {.Accel_Write}}
+	case .Read:
+		return {sync = shading_sync(kind), access = {.Accel_Read}}
+	case .Build_Input:
+		return {sync = {.Build_Accel}, access = {.Accel_Read}}
+	}
+	return {}
 }
 
 @(private = "file")
@@ -569,6 +667,8 @@ buffer_state :: proc(use: Buffer_Use, kind: Pass_Kind) -> State {
 		return {sync = {.Index_Input}, access = {.Index_Buffer}}
 	case .Indirect:
 		return {sync = {.Execute_Indirect}, access = {.Indirect_Argument}}
+	case .Build_Input:
+		return {sync = {.Build_Accel}, access = {.Shader_Resource}}
 	}
 	return {}
 }

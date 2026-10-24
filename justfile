@@ -90,11 +90,15 @@ host: agility-runtime
     odin build src/host {{collections}} -out:"{{build_dir}}/host.exe" -debug
 
 # Compile the game's shaders. Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points
-# to <name>.<stage>.dxil.
+# to <name>.<stage>.dxil. A file with [shader("...")] attributes is a ray tracing library: <name>.lib.dxil.
 shaders: install-dxc
     #!/usr/bin/env bash
     set -euo pipefail
     for src in samples/{{game}}/shaders/*.hlsl; do
+        if grep -q '\[shader("' "$src"; then
+            "{{dxc}}" -nologo -HV 2021 -T lib_6_6 -I lib/core/gpu/shaders -Zi -Qembed_debug -Fo "${src%.hlsl}.lib.dxil" "$src"
+            continue
+        fi
         for stage in vs ps cs as ms; do
             grep -q "\b${stage}_main\b" "$src" || continue
             "{{dxc}}" -nologo -HV 2021 -T "${stage}_6_6" -E "${stage}_main" -I lib/core/gpu/shaders -Zi -Qembed_debug \

@@ -2,6 +2,7 @@ package mygame
 
 import "core:fmt"
 import "core:log"
+import "core:math"
 import "core:time"
 
 import "cinnabar:core"
@@ -18,6 +19,8 @@ OBJECTS_PS :: #load("shaders/objects.ps.dxil")
 COUNT_RESET_CS :: #load("shaders/count_reset.cs.dxil")
 CULL_CS :: #load("shaders/cull.cs.dxil")
 POST_CS :: #load("shaders/post.cs.dxil")
+SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
+SHADOWS_RT_LIB :: #load("shaders/shadows_rt.lib.dxil")
 COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
 
@@ -27,6 +30,24 @@ DEPTH_FORMAT :: gpu.Format.D32_Float
 POST_GROUP_SIZE :: 8
 // Matches numthreads in shaders/cull.hlsl.
 CULL_GROUP_SIZE :: 64
+// Matches numthreads in shaders/shadows.hlsl.
+SHADOW_GROUP_SIZE :: 8
+
+// The large triangles cast ray-traced shadows. Ray_Tracing_Pipeline traces them with a ray tracing pipeline, and
+// Ray_Query with inline ray tracing in a compute pass. Without either, there are no shadows.
+Shadow_Mode :: enum u8 {
+	None,
+	Inline,
+	Pipeline,
+}
+
+// The large triangles, as triangle.hlsl places them: rotation speed, scale and depth. Instance 0 is in front.
+TRIANGLE_INSTANCES :: [2]struct {
+	speed, scale, depth: f32,
+} {
+	{1, 1, 0.4},
+	{-0.7, 1.5, 0.6},
+}
 
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
@@ -84,7 +105,16 @@ Cull_Constants :: struct {
 
 // Matches Push in shaders/post.hlsl.
 Post_Constants :: struct {
-	input:  u32,
+	input:       u32,
+	output:      u32,
+	size:        [2]u32,
+	shadows:     u32,
+	has_shadows: u32,
+}
+
+// Matches Push in shaders/shadows.hlsl.
+Shadow_Constants :: struct {
+	accel:  u32,
 	output: u32,
 	size:   [2]u32,
 }
@@ -118,6 +148,11 @@ Game_State :: struct {
 	visible:     gpu.Buffer,
 	// The mesh path's one Draw_Mesh_Indirect_Args record.
 	mesh_draw:   gpu.Buffer,
+	shadow_mode: Shadow_Mode,
+	// The triangle, built once, and the two large triangles as its instances, built every frame.
+	blas:        gpu.Accel_Struct,
+	tlas:        gpu.Accel_Struct,
+	blas_built:  bool,
 	checker:     gpu.Texture,
 	nearest:     gpu.Sampler,
 	linear:      gpu.Sampler,
@@ -131,6 +166,8 @@ Pipelines :: struct {
 	mesh:        gpu.Pipeline,
 	count_reset: gpu.Pipeline,
 	cull:        gpu.Pipeline,
+	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and nil otherwise.
+	shadows:     gpu.Pipeline,
 	post:        gpu.Pipeline,
 	composite:   gpu.Pipeline,
 }
@@ -146,8 +183,12 @@ Frame :: struct {
 	draw_count:     render.Buffer,
 	visible:        render.Buffer,
 	mesh_draw:      render.Buffer,
+	blas:           render.Accel,
+	tlas:           render.Accel,
+	instances:      gpu.Upload,
 	checker:        render.Texture,
 	scene:          render.Texture,
+	shadows:        render.Texture,
 	post:           render.Texture,
 }
 
@@ -192,8 +233,30 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	)
 	s.nearest = platform.gpu_create_sampler({label = "nearest"})
 	s.linear = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "linear clamp"})
-	s.pipelines = create_pipelines(platform, s.mesh_path)
-	log.infof("mygame: init, objects on the %s path", s.mesh_path ? "mesh" : "vertex")
+
+	features := platform.gpu_features()
+	switch {
+	case .Ray_Tracing_Pipeline in features:
+		s.shadow_mode = .Pipeline
+	case .Ray_Query in features:
+		s.shadow_mode = .Inline
+	}
+	if s.shadow_mode != .None {
+		triangle := gpu.Accel_Geometry {
+			vertices      = s.vertices,
+			vertex_stride = size_of(Vertex),
+			vertex_count  = 3,
+			vertex_format = .RG32_Float,
+			indices       = s.indices,
+			index_count   = 3,
+			index_format  = .U16,
+			opaque        = true,
+		}
+		s.blas = platform.gpu_create_accel({kind = .Bottom, geometries = {triangle}, label = "triangle"})
+		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = len(TRIANGLE_INSTANCES), label = "scene"})
+	}
+	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
+	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
 
 update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
@@ -275,15 +338,100 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 		render.read(&g, p, frame.visible)
 	}
 
+	building_blas := false
+	if s.shadow_mode != .None {
+		building_blas = add_shadow_passes(&g, frame)
+	}
+
 	p = render.add_compute_pass(&g, "post", run_post, frame)
 	render.read(&g, p, frame.scene)
 	render.write(&g, p, frame.post)
+	if frame.shadows != 0 {
+		render.read(&g, p, frame.shadows)
+	}
 
 	p = render.add_render_pass(&g, "composite", draw_composite, frame)
 	render.read(&g, p, frame.post)
 	render.color(&g, p, target, .Discard)
 
-	render.execute(&g)
+	if render.execute(&g) && building_blas {
+		s.blas_built = true
+	}
+}
+
+// add_shadow_passes builds the acceleration structures and traces the shadow mask. The triangle's bottom-level
+// structure is built in the first frame, and the top-level structure every frame from the instances' transforms.
+// It returns true if it builds the bottom-level structure this frame.
+add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bool) {
+	s := frame.state
+	frame.blas = render.import_accel(g, s.blas)
+	frame.tlas = render.import_accel(g, s.tlas)
+	if !s.blas_built {
+		p := render.add_compute_pass(g, "build triangle", build_blas, frame)
+		render.build_input(g, p, frame.vertices)
+		render.build_input(g, p, frame.indices)
+		render.build_accel(g, p, frame.blas)
+		building_blas = true
+	}
+
+	instances, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(gpu.Accel_Instance), 16)
+	if !ok {
+		return
+	}
+	time := (^Pass_Constants)(raw_data(frame.pass_constants.data)).time
+	records := ([^]gpu.Accel_Instance)(raw_data(instances.data))[:len(TRIANGLE_INSTANCES)]
+	blas := s.platform.gpu_accel_reference(s.blas)
+	for t, i in TRIANGLE_INSTANCES {
+		// triangle.hlsl rotates by speed * time, scales and places at depth, in the same world units.
+		sin, cos := math.sincos(t.speed * time)
+		transform := [3][4]f32{{cos * t.scale, -sin * t.scale, 0, 0}, {sin * t.scale, cos * t.scale, 0, 0}, {0, 0, 1, t.depth}}
+		records[i] = gpu.accel_instance(transform, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
+	}
+	frame.instances = instances
+
+	p := render.add_compute_pass(g, "build scene", build_tlas, frame)
+	render.build_input(g, p, frame.blas)
+	render.build_accel(g, p, frame.tlas)
+
+	frame.shadows = render.create_texture(g, {size = frame.size, format = .R16_Float, label = "shadows"})
+	if s.shadow_mode == .Pipeline {
+		p = render.add_ray_tracing_pass(g, "shadows", trace_shadows, frame)
+	} else {
+		p = render.add_compute_pass(g, "shadows", trace_shadows, frame)
+	}
+	render.read_accel(g, p, frame.tlas)
+	render.write(g, p, frame.shadows)
+	return
+}
+
+build_blas :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	gpu.cmd_build_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.blas))
+}
+
+build_tlas :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	upload := frame.instances
+	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, len(TRIANGLE_INSTANCES))
+}
+
+trace_shadows :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
+	constants := Shadow_Constants {
+		accel  = gpu.read_index(render.gpu_accel(g, frame.tlas)),
+		output = gpu.write_index(render.gpu_texture(g, frame.shadows)),
+		size   = frame.size,
+	}
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.shadows)
+	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
+	gpu.cmd_push_constants(cb, &constants)
+	if frame.state.shadow_mode == .Pipeline {
+		gpu.cmd_dispatch_rays(cb, {frame.size.x, frame.size.y, 1})
+	} else {
+		groups := (frame.size + SHADOW_GROUP_SIZE - 1) / SHADOW_GROUP_SIZE
+		gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
+	}
 }
 
 reset_count :: proc(ctx: ^render.Pass_Context) {
@@ -358,6 +506,10 @@ run_post :: proc(ctx: ^render.Pass_Context) {
 		output = gpu.write_index(render.gpu_texture(g, frame.post)),
 		size   = frame.size,
 	}
+	if frame.shadows != 0 {
+		constants.shadows = gpu.read_index(render.gpu_texture(g, frame.shadows))
+		constants.has_shadows = 1
+	}
 	groups := (frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
 	gpu.cmd_set_pipeline(cb, frame.state.pipelines.post)
 	gpu.cmd_push_constants(cb, &constants)
@@ -382,6 +534,8 @@ shutdown :: proc(state: rawptr) {
 	destroy_pipelines(s.platform, s.pipelines)
 	s.platform.gpu_destroy_sampler(s.linear)
 	s.platform.gpu_destroy_sampler(s.nearest)
+	s.platform.gpu_destroy_accel(s.tlas)
+	s.platform.gpu_destroy_accel(s.blas)
 	s.platform.gpu_destroy_texture(s.checker)
 	s.platform.gpu_destroy_buffer(s.mesh_draw)
 	s.platform.gpu_destroy_buffer(s.visible)
@@ -406,6 +560,16 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	reload_compute_pipeline(platform, &s.pipelines.count_reset, COUNT_RESET_PIPELINE)
 	reload_compute_pipeline(platform, &s.pipelines.cull, CULL_PIPELINE)
 	reload_compute_pipeline(platform, &s.pipelines.post, POST_PIPELINE)
+	switch s.shadow_mode {
+	case .None:
+	case .Inline:
+		reload_compute_pipeline(platform, &s.pipelines.shadows, SHADOWS_PIPELINE)
+	case .Pipeline:
+		if !platform.gpu_update_ray_tracing_pipeline(s.pipelines.shadows, SHADOWS_RT_PIPELINE) {
+			platform.gpu_destroy_pipeline(s.pipelines.shadows)
+			s.pipelines.shadows = platform.gpu_create_ray_tracing_pipeline(SHADOWS_RT_PIPELINE)
+		}
+	}
 	log.infof("mygame: reloaded at frame %d", s.frame_count)
 }
 
@@ -423,13 +587,22 @@ reload_compute_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pip
 	}
 }
 
-create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool) -> Pipelines {
+create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_mode: Shadow_Mode) -> Pipelines {
+	shadows: gpu.Pipeline
+	switch shadow_mode {
+	case .None:
+	case .Inline:
+		shadows = platform.gpu_create_compute_pipeline(SHADOWS_PIPELINE)
+	case .Pipeline:
+		shadows = platform.gpu_create_ray_tracing_pipeline(SHADOWS_RT_PIPELINE)
+	}
 	return {
 		scene = platform.gpu_create_graphics_pipeline(SCENE_PIPELINE),
 		objects = platform.gpu_create_graphics_pipeline(OBJECTS_PIPELINE),
 		mesh = mesh_path ? platform.gpu_create_graphics_pipeline(OBJECTS_MESH_PIPELINE) : {},
 		count_reset = platform.gpu_create_compute_pipeline(COUNT_RESET_PIPELINE),
 		cull = platform.gpu_create_compute_pipeline(CULL_PIPELINE),
+		shadows = shadows,
 		post = platform.gpu_create_compute_pipeline(POST_PIPELINE),
 		composite = platform.gpu_create_graphics_pipeline(COMPOSITE_PIPELINE),
 	}
@@ -476,6 +649,20 @@ CULL_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	label   = "cull",
 }
 
+SHADOWS_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	compute = SHADOWS_CS,
+	label   = "shadows",
+}
+
+SHADOWS_RT_PIPELINE :: gpu.Ray_Tracing_Pipeline_Desc {
+	library          = SHADOWS_RT_LIB,
+	ray_generation   = "ray_generation",
+	miss             = {"miss"},
+	hit_groups       = {{name = "hit", closest_hit = "closest_hit"}},
+	max_payload_size = 4,
+	label            = "shadows (ray tracing pipeline)",
+}
+
 POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	compute = POST_CS,
 	label   = "post",
@@ -494,6 +681,7 @@ destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: Pipelines) {
 	platform.gpu_destroy_pipeline(pipelines.mesh)
 	platform.gpu_destroy_pipeline(pipelines.count_reset)
 	platform.gpu_destroy_pipeline(pipelines.cull)
+	platform.gpu_destroy_pipeline(pipelines.shadows)
 	platform.gpu_destroy_pipeline(pipelines.post)
 	platform.gpu_destroy_pipeline(pipelines.composite)
 }

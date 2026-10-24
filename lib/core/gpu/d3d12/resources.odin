@@ -30,6 +30,7 @@ Release_Pool :: enum u8 {
 	Texture,
 	Sampler,
 	Pipeline,
+	Accel,
 }
 
 // A destroyed object waits here until the GPU passes fence_value. Then the object is released
@@ -37,6 +38,8 @@ Release_Pool :: enum u8 {
 @(private)
 Release :: struct {
 	object:      ^d3d.IUnknown,
+	// Backend memory, from dev.allocator, that the GPU work may still use.
+	memory:      rawptr,
 	pool:        Release_Pool,
 	index:       u32,
 	// 0 until end_frame stamps it with the fence value of the frame that destroyed it.
@@ -48,6 +51,7 @@ Resources :: struct {
 	buffers:          gpu.Pool(gpu.Buffer, Buffer_Entry),
 	textures:         gpu.Pool(gpu.Texture, Texture_Entry),
 	samplers:         gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
+	accels:           gpu.Pool(gpu.Accel_Struct, Accel_Entry),
 	// Shader-visible heaps, indexed by bindless index.
 	resource_heap:    ^d3d.IDescriptorHeap,
 	sampler_heap:     ^d3d.IDescriptorHeap,
@@ -69,6 +73,7 @@ init_resources :: proc() -> bool {
 	gpu.pool_init(&dev.buffers, gpu.MAX_BUFFERS, dev.allocator)
 	gpu.pool_init(&dev.textures, gpu.MAX_TEXTURES, dev.allocator)
 	gpu.pool_init(&dev.samplers, gpu.MAX_SAMPLERS, dev.allocator)
+	gpu.pool_init(&dev.accels, gpu.MAX_ACCEL_STRUCTS, dev.allocator)
 	dev.releases = make([dynamic]Release, dev.allocator)
 	gpu.layout_tracker_init(&dev.layouts, dev.allocator)
 
@@ -90,6 +95,7 @@ shutdown_resources :: proc() {
 		if r.object != nil {
 			r.object->Release()
 		}
+		free(r.memory, dev.allocator)
 	}
 	delete(dev.releases)
 	// The back buffers are released with the swapchain.
@@ -98,6 +104,8 @@ shutdown_resources :: proc() {
 	}
 	gpu.pool_each(&dev.buffers, proc(entry: ^Buffer_Entry) {release(&entry.resource)})
 	gpu.pool_each(&dev.textures, proc(entry: ^Texture_Entry) {release(&entry.resource)})
+	gpu.pool_each(&dev.accels, proc(entry: ^Accel_Entry) {release(&entry.resource)})
+	gpu.pool_destroy(&dev.accels)
 	gpu.pool_destroy(&dev.buffers)
 	gpu.pool_destroy(&dev.textures)
 	gpu.pool_destroy(&dev.samplers)
@@ -363,6 +371,12 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 			count += 1
 		}
 	}
+	for i in 0 ..< dev.accels.count {
+		if accel, ok := gpu.pool_handle(&dev.accels, i); ok && dev.accels.items[i].scope == scope {
+			destroy_accel(accel)
+			count += 1
+		}
+	}
 	for i in 0 ..< dev.pipeline_pool.count {
 		if pipeline, ok := gpu.pool_handle(&dev.pipeline_pool, i); ok && dev.pipeline_pool.items[i].scope == scope {
 			destroy_pipeline(pipeline)
@@ -377,6 +391,13 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
 	sync.guard(&dev.releases_mutex)
 	append(&dev.releases, Release{object = object, pool = pool, index = index})
+}
+
+// defer_free frees backend memory after the GPU finishes the current frame.
+@(private)
+defer_free :: proc(memory: rawptr) {
+	sync.guard(&dev.releases_mutex)
+	append(&dev.releases, Release{memory = memory})
 }
 
 // stamp_releases assigns the fence value that the frame's work signals to the releases queued during the frame.
@@ -404,6 +425,7 @@ collect_releases :: proc() {
 		if r.object != nil {
 			r.object->Release()
 		}
+		free(r.memory, dev.allocator)
 		switch r.pool {
 		case .None:
 		case .Buffer:
@@ -414,6 +436,8 @@ collect_releases :: proc() {
 			gpu.pool_free(&dev.samplers, r.index)
 		case .Pipeline:
 			gpu.pool_free(&dev.pipeline_pool, r.index)
+		case .Accel:
+			gpu.pool_free(&dev.accels, r.index)
 		}
 		unordered_remove(&dev.releases, i)
 	}
@@ -477,6 +501,11 @@ VALIDATION_RESOURCES :: gpu.Resources {
 	},
 	pipeline = proc(pipeline: gpu.Pipeline) -> (gpu.Pipeline_Info, bool) {
 		entry, ok := gpu.pool_lookup(&dev.pipeline_pool, pipeline)
+		return entry.info, ok
+	},
+	accel = proc(accel: gpu.Accel_Struct) -> (gpu.Accel_Info, bool) {
+		entry, ok := gpu.pool_lookup(&dev.accels, accel)
+		entry.info.inputs_valid = ok && accel_inputs_valid(&entry)
 		return entry.info, ok
 	},
 }
