@@ -114,23 +114,93 @@ public class WorldModelTests
         var data = new byte[64];
         BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(0), 1.5f);
         BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(4), -2f);
-        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(8), 0.25f);
-        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(16), 3L << 24);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(8), 0.700034f);
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(16), 3_000L << 24);
         BinaryPrimitives.WriteUInt64LittleEndian(data.AsSpan(40), Handle(3, 2));
         data[48] = 5;
         data[49] = 1;
-        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(52), -7);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(52), -70000);
 
         Assert.Equal("1.5", FieldValues.Format(Field(FieldKind.F32), data));
-        Assert.Equal("(1.5, -2, 0.25)", FieldValues.Format(Field(FieldKind.Vector3), data));
-        Assert.Equal("(3, 0, 0) m", FieldValues.Format(Field(FieldKind.Position, 16), data));
+        var vector = FieldValues.Display(Field(FieldKind.Vector3), data);
+        Assert.Equal(DisplayKind.Axes, vector.Kind);
+        Assert.Equal(["1.5", "-2", "0.7"], vector.Axes);
+        var position = FieldValues.Display(Field(FieldKind.Position, 16), data);
+        Assert.Equal(["3,000 m", "0 m", "0 m"], position.Axes);
+        Assert.Contains("(3,000, 0, 0)", position.Tooltip);
         Assert.Equal("Entity(3:2)", FieldValues.Format(Field(FieldKind.Entity, 40), data));
-        Assert.Equal(Handle(3, 2), FieldValues.Entity(Field(FieldKind.Entity, 40), data));
-        Assert.Equal("Busy", FieldValues.Format(Field(FieldKind.Enum, 48, FieldKind.U8, new EnumValue("Idle", 0), new EnumValue("Busy", 5)), data));
-        Assert.Equal("true", FieldValues.Format(Field(FieldKind.Bool, 49), data));
-        Assert.Equal("-7", FieldValues.Format(Field(FieldKind.I32, 52), data));
+        Assert.Equal(Handle(3, 2), FieldValues.Display(Field(FieldKind.Entity, 40), data).Entity);
+        Assert.Equal("Very Busy", FieldValues.Format(Field(FieldKind.Enum, 48, FieldKind.U8, new EnumValue("Idle", 0), new EnumValue("Very_Busy", 5)), data));
+        Assert.True(FieldValues.Display(Field(FieldKind.Bool, 49), data).Flag);
+        Assert.Equal("-70,000", FieldValues.Format(Field(FieldKind.I32, 52), data));
         Assert.Equal("none", FieldValues.Format(Field(FieldKind.Entity, 56), data));
     }
+
+    [Fact]
+    public void ARotationShowsAsEulerAnglesWithTheQuaternionInItsTooltip()
+    {
+        var q = FieldValues.Quaternion(0, 0, 90);
+        var data = new byte[16];
+        for (var i = 0; i < 4; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(i * 4), (float)q[i]);
+        }
+
+        var display = FieldValues.Display(Field(FieldKind.Quaternion), data);
+
+        Assert.Equal(["0°", "0°", "90°"], display.Axes);
+        Assert.Contains("Quaternion: (0, 0, 0.707, 0.707)", display.Tooltip);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]
+    [InlineData(30, 0, 0)]
+    [InlineData(0, 45, 0)]
+    [InlineData(0, 0, -120)]
+    [InlineData(20, -135, 60)]
+    [InlineData(-89, 10, 170)]
+    [InlineData(10, 180, -30)]
+    public void EulerAnglesRoundTripThroughAQuaternion(double x, double y, double z)
+    {
+        var q = FieldValues.Quaternion(x, y, z);
+        var euler = FieldValues.Euler(q[0], q[1], q[2], q[3]);
+
+        Assert.Equal(x, euler[0], 3);
+        Assert.Equal(y, euler[1], 3);
+        Assert.Equal(z, euler[2], 3);
+    }
+
+    [Fact]
+    public void AtGimbalLockZIsZeroAndTheRotationIsKept()
+    {
+        var q = FieldValues.Quaternion(90, 30, 20);
+        var euler = FieldValues.Euler(q[0], q[1], q[2], q[3]);
+        var again = FieldValues.Quaternion(euler[0], euler[1], euler[2]);
+
+        Assert.Equal(0, euler[2], 6);
+        // The same rotation: q and -q are equal, so compare the absolute dot product.
+        Assert.Equal(1, Math.Abs(q.Zip(again, (a, b) => a * b).Sum()), 4);
+    }
+
+    [Theory]
+    [InlineData("Previous_Transform", "Previous Transform")]
+    [InlineData("inner.amount", "Inner › Amount")]
+    [InlineData("layout_hash", "Layout Hash")]
+    [InlineData("speed", "Speed")]
+    public void NamesAreHumanized(string name, string expected) => Assert.Equal(expected, FieldValues.Humanize(name));
+
+    [Theory]
+    [InlineData(0.6, "0.6 m")]
+    [InlineData(9_999, "9,999 m")]
+    [InlineData(12_500, "12.5 km")]
+    [InlineData(-150_000_000_000, "-150 Gm")]
+    public void DistancesScaleTheirUnit(double meters, string expected) => Assert.Equal(expected, FieldValues.Distance(meters));
+
+    [Theory]
+    [InlineData(-0.0001, "0")]
+    [InlineData(1234567.891, "1,234,567.891")]
+    [InlineData(0.700034, "0.7")]
+    public void NumbersReadCleanly(double value, string expected) => Assert.Equal(expected, FieldValues.Number(value));
 
     [Fact]
     public void AFieldPastTheEndOfItsComponentIsNull() =>

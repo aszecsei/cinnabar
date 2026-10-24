@@ -92,7 +92,7 @@ public sealed class OutlinerView : DockPanel
     // filter, a match shows with its ancestors, expanded or not.
     bool Add(List<OutlinerRow> rows, EntityNode node, int depth, string filter)
     {
-        var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)));
+        var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
         var label = node.ToString();
         var row = new OutlinerRow(node, depth, label, summary, node.Children.Count > 0, !_collapsed.Contains(node.Handle));
         var at = rows.Count;

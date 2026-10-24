@@ -203,7 +203,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - An entity reference, such as `Parent` or an entity field, is a link that selects that entity.
 - **Reset:** a field that differs from its default shows a reset button. With prefabs, the default is the prefab's value.
 - **Multi-select:** the panel shows the components that every selected entity has. A field whose values differ shows as mixed, and setting it makes one operation for each entity, in one transaction.
-- `World_Position` shows meters, and sets raw values.
+- **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
 - An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference shows the asset's name, and accepts a drag from the asset browser.
 
 ### Asset browser

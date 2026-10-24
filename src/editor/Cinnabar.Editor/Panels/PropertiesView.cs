@@ -1,9 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
-using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 
@@ -11,19 +11,17 @@ namespace Cinnabar.Editor.Panels;
 
 /// <summary>
 /// The properties panel (see docs/editor.md#properties): the selected entity's components and behaviours, read-only
-/// for now. The editor watches the selected entity, and when only values change, their text changes in place, so
-/// the panel keeps its expanders and scroll position at twenty updates a second.
+/// for now. The editor watches the selected entity, and when only values change, each field's view shows the new
+/// value, so the panel keeps its expanders and scroll position at twenty updates a second.
 /// </summary>
 public sealed class PropertiesView : ScrollViewer
 {
-    const string Waiting = "…";
-
     readonly WorldModel _world;
     readonly Selection _selection;
     readonly StackPanel _content = new() { Classes = { "properties" } };
-    // The value text of each field, by component ID or behaviour class, and field name.
-    readonly Dictionary<(string Owner, string Field), TextBlock> _values = [];
-    // Expanders that the user collapsed, by component or behaviour name, which stay collapsed across selections.
+    // The view of each field, by component ID or behaviour class, and field name.
+    readonly Dictionary<(string Owner, string Field), FieldView> _views = [];
+    // Groups that the user collapsed, by title, which stay collapsed across selections.
     readonly HashSet<string> _collapsed = [];
     string _structure = "";
 
@@ -32,7 +30,7 @@ public sealed class PropertiesView : ScrollViewer
         _world = world;
         _selection = selection;
         Content = _content;
-        HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled;
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         AttachedToVisualTree += (_, _) =>
         {
             _selection.Changed += OnSelectionChanged;
@@ -64,13 +62,13 @@ public sealed class PropertiesView : ScrollViewer
             Rebuild();
             return;
         }
-        FillValues();
+        ShowValues();
     }
 
     void Rebuild()
     {
         _content.Children.Clear();
-        _values.Clear();
+        _views.Clear();
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
         if (node == null)
@@ -81,28 +79,35 @@ public sealed class PropertiesView : ScrollViewer
             return;
         }
         _content.Children.Add(Header(node));
+        var tags = new List<string>();
         foreach (var id in node.Components)
         {
             var type = _world.Type(id);
-            var name = _world.TypeName(id);
+            var title = FieldValues.Humanize(_world.TypeName(id));
             if (type == null || type.Fields.Length == 0)
             {
                 // A tag, or a component whose fields the editor cannot show.
-                _content.Children.Add(new TextBlock { Text = name, Classes = { "component-tag" } });
+                tags.Add(title);
                 continue;
             }
-            var rows = Rows(type.Fields.Select(f => (id.ToString("x16"), f.Name)));
-            _content.Children.Add(Section(name, rows));
+            var owner = id.ToString("x16");
+            _content.Children.Add(Group(title, type.Fields.Select(f => (owner, f.Name, FieldValues.DisplayKindOf(f.Kind)))));
         }
         foreach (var behaviour in _world.Values(node.Handle)?.Behaviours ?? [])
         {
-            var title = behaviour.Enabled ? behaviour.Class : $"{behaviour.Class} (disabled)";
-            _content.Children.Add(Section(title, Rows(behaviour.Fields.Select(f => ("behaviour:" + behaviour.Class, f.Name)))));
+            var title = FieldValues.Humanize(behaviour.Class);
+            var owner = "behaviour:" + behaviour.Class;
+            _content.Children.Add(Group(title, behaviour.Fields.Select(f => (owner, f.Name, FieldValues.DisplayKindOf(f.Kind))),
+                badge: "Script", disabled: !behaviour.Enabled));
         }
-        FillValues();
+        if (tags.Count > 0)
+        {
+            _content.Children.Add(Tags(tags));
+        }
+        ShowValues();
     }
 
-    void FillValues()
+    void ShowValues()
     {
         var values = _world.Values(_selection.Entity);
         if (values == null)
@@ -111,13 +116,12 @@ public sealed class PropertiesView : ScrollViewer
         }
         foreach (var component in values.Components)
         {
-            var type = _world.Type(component.Id);
-            foreach (var field in type?.Fields ?? [])
+            var owner = component.Id.ToString("x16");
+            foreach (var field in _world.Type(component.Id)?.Fields ?? [])
             {
-                if (_values.TryGetValue((component.Id.ToString("x16"), field.Name), out var text))
+                if (_views.TryGetValue((owner, field.Name), out var view))
                 {
-                    text.Text = FieldValues.Format(field, component.Data) ?? "?";
-                    SetLink(text, FieldValues.Entity(field, component.Data));
+                    view.Show(FieldValues.Display(field, component.Data));
                 }
             }
         }
@@ -125,16 +129,16 @@ public sealed class PropertiesView : ScrollViewer
         {
             foreach (var field in behaviour.Fields)
             {
-                if (_values.TryGetValue(("behaviour:" + behaviour.Class, field.Name), out var text))
+                if (_views.TryGetValue(("behaviour:" + behaviour.Class, field.Name), out var view))
                 {
-                    text.Text = FieldValues.Format(field);
-                    SetLink(text, field.Kind == BehaviourFieldKind.Entity ? field.Entity : 0);
+                    view.Show(FieldValues.Display(field));
                 }
             }
         }
     }
 
-    // What decides the panel's controls: the entity, its components, its behaviours and their fields. Values do not.
+    // What decides the panel's controls: the entity, its components, its behaviours, and how each of their fields
+    // shows. Values do not.
     string Structure()
     {
         var node = _world.Find(_selection.Entity);
@@ -143,84 +147,95 @@ public sealed class PropertiesView : ScrollViewer
             return "";
         }
         var behaviours = _world.Values(node.Handle)?.Behaviours ?? [];
-        return $"{node.Handle}|{string.Join(",", node.Components)}|{_world.Types.Count}|" +
-            string.Join(";", behaviours.Select(b => $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => f.Name))}"));
+        return $"{node.Handle}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|" +
+            string.Join(";", behaviours.Select(b =>
+                $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
     }
 
     Control Header(EntityNode node)
     {
-        var header = new StackPanel { Classes = { "properties-header" }, Spacing = 2 };
-        header.Children.Add(new TextBlock { Text = node.ToString(), Classes = { "title" } });
-        var state = new TextBlock { Text = node.Active ? "Active" : "Inactive", Classes = { "dim" } };
-        header.Children.Add(state);
+        var title = new TextBlock { Text = node.ToString(), Classes = { "title" } };
+        var state = new Border
+        {
+            Classes = { "badge", node.Active ? "active" : "inactive" },
+            Child = new TextBlock { Text = node.Active ? "Active" : "Inactive" },
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var top = new DockPanel { Children = { state, title } };
+        DockPanel.SetDock(state, Avalonia.Controls.Dock.Right);
+        var header = new StackPanel { Classes = { "properties-header" }, Spacing = 4, Children = { top } };
         if (node.Parent != 0)
         {
-            var parent = new TextBlock { Text = $"Parent: {EntityNode.Format(node.Parent)}" };
-            SetLink(parent, node.Parent);
-            header.Children.Add(parent);
+            var parent = new EntityView(_selection.Select);
+            parent.Show(new FieldDisplay(DisplayKind.Entity, EntityNode.Format(node.Parent), [], false, node.Parent, null));
+            header.Children.Add(new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 6,
+                Children = { new TextBlock { Text = "Parent", Classes = { "field-name" } }, parent.Control },
+            });
         }
         return header;
     }
 
-    Control Section(string title, Control rows)
+    Control Group(string title, IEnumerable<(string Owner, string Field, DisplayKind Kind)> fields, string? badge = null, bool disabled = false)
     {
+        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Classes = { "fields" } };
+        var row = 0;
+        foreach (var (owner, field, kind) in fields)
+        {
+            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var name = new TextBlock
+            {
+                Text = FieldValues.Humanize(field),
+                Classes = { "field-name" },
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            ToolTip.SetTip(name, field);
+            var view = FieldView.Create(kind, _selection.Select);
+            Grid.SetRow(name, row);
+            Grid.SetRow(view.Control, row);
+            Grid.SetColumn(view.Control, 1);
+            rows.Children.Add(name);
+            rows.Children.Add(view.Control);
+            _views[(owner, field)] = view;
+            row++;
+        }
+
+        var header = new DockPanel();
+        if (badge != null)
+        {
+            var tag = new Border { Classes = { "badge", "script" }, Child = new TextBlock { Text = disabled ? $"{badge}, disabled" : badge } };
+            DockPanel.SetDock(tag, Avalonia.Controls.Dock.Right);
+            header.Children.Add(tag);
+        }
+        header.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+
         var expander = new Expander
         {
-            Header = title,
+            Header = header,
             Content = rows,
             IsExpanded = !_collapsed.Contains(title),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Classes = { "component" },
+            Opacity = disabled ? 0.6 : 1,
         };
         expander.Expanded += (_, _) => _collapsed.Remove(title);
         expander.Collapsed += (_, _) => _collapsed.Add(title);
         return expander;
     }
 
-    Grid Rows(IEnumerable<(string Owner, string Field)> fields)
+    // Components without fields to show, such as tags, as a row of chips under the groups.
+    static Control Tags(IEnumerable<string> names)
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("2*,3*"), Classes = { "fields" } };
-        var row = 0;
-        foreach (var (owner, field) in fields)
+        var panel = new WrapPanel { Classes = { "tags" } };
+        foreach (var name in names)
         {
-            grid.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var name = new TextBlock { Text = field, Classes = { "field-name" }, TextTrimming = TextTrimming.CharacterEllipsis };
-            var value = new TextBlock { Text = Waiting, Classes = { "field-value" }, TextTrimming = TextTrimming.CharacterEllipsis };
-            ToolTip.SetTip(name, field);
-            Grid.SetRow(name, row);
-            Grid.SetRow(value, row);
-            Grid.SetColumn(value, 1);
-            grid.Children.Add(name);
-            grid.Children.Add(value);
-            _values[(owner, field)] = value;
-            row++;
+            panel.Children.Add(new Border { Classes = { "badge", "tag" }, Child = new TextBlock { Text = name } });
         }
-        return grid;
-    }
-
-    // An entity reference selects its entity when clicked.
-    void SetLink(TextBlock text, ulong entity)
-    {
-        text.Tag = entity;
-        if (entity != 0 && !text.Classes.Contains("link"))
-        {
-            text.Classes.Add("link");
-            text.Cursor = new Cursor(StandardCursorType.Hand);
-            text.PointerPressed += (_, e) =>
-            {
-                if (text.Tag is ulong target && target != 0)
-                {
-                    _selection.Select(target);
-                    e.Handled = true;
-                }
-            };
-        }
-        else if (entity == 0 && text.Classes.Contains("link"))
-        {
-            text.Classes.Remove("link");
-            text.Cursor = Cursor.Default;
-        }
+        return panel;
     }
 
     static TextBlock Empty(string message) => new()
