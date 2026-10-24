@@ -91,13 +91,23 @@ sealed class SharedFrames : IDisposable
     public static SharedFrames? TryOpen(ViewportDevice device, string prefix)
     {
         // The host makes the textures before the fence, so an open fence means the textures exist, unless a resize
-        // releases them right after.
+        // releases them right after. The host's first generation has its window's size, and the viewport's own size
+        // replaces it at once, so that race is common at start: the fence, or a texture, is then gone between its name
+        // and its open, and the next poll opens the generation that replaced it.
         using var fenceHandle = device.OpenByName($"{prefix}.fence");
         if (fenceHandle == null)
         {
             return null;
         }
-        var fence = device.OpenFence(fenceHandle);
+        ID3D12Fence fence;
+        try
+        {
+            fence = device.OpenFence(fenceHandle);
+        }
+        catch (SharpGen.Runtime.SharpGenException e) when (e.HResult == E_HANDLE)
+        {
+            return null;
+        }
         var textures = new List<ID3D11Texture2D>(TextureCount);
         try
         {
