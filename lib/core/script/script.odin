@@ -207,7 +207,11 @@ interrupt :: proc "c" (L: ^luau.State, gc: c.int) {
 	}
 	if time.tick_diff(b.deadline, time.tick_now()) > 0 {
 		b.deadline = {}
-		luau.L_errorL(L, "script ran past its time budget")
+		// Level 0 is the function that is running. L_errorL would name the level above it.
+		luau.L_where(L, 0)
+		luau.pushstring(L, "script ran past its time budget")
+		luau.concat(L, 2)
+		luau.error(L)
 	}
 }
 

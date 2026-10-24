@@ -19,6 +19,8 @@ register_world :: proc(r: ^Runtime) {
 	light_method(r, .Entity, "offset_to", entity_offset_to)
 	light_method(r, .Entity, "move", entity_move)
 	light_method(r, .Entity, "set_parent", entity_set_parent)
+	light_method(r, .Entity, "set_active", entity_set_active)
+	light_method(r, .Entity, "send", send_binding)
 
 	define(r, "World.spawn", world_spawn)
 	define(r, "World.query", world_query)
@@ -75,6 +77,12 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			parent := ecs.get(r.world, e, ecs.Parent)
 			push_entity(L, parent.entity if parent != nil else 0)
 			return 1
+		case "active_self":
+			luau.pushboolean(L, b32(ecs.active_self(r.world, e)))
+			return 1
+		case "active_in_hierarchy":
+			luau.pushboolean(L, b32(ecs.active_in_hierarchy(r.world, e)))
+			return 1
 		}
 		raise(L, fmt.aprintf("Entity has no field %s", key, allocator = frame(r)))
 	case .Component_Type:
@@ -88,7 +96,7 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			return 1
 		}
 		raise(L, fmt.aprintf("ComponentType has no field %s", key, allocator = frame(r)))
-	case .None:
+	case .None, .Instance_Key:
 	}
 	raise(L, "this value has no fields")
 }
@@ -118,7 +126,7 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 		luau.pushodinstring(L, fmt.aprintf("Entity(%s)", entity_text(r, to_entity(L, 1)), allocator = frame(r)))
 	case .Component_Type:
 		luau.pushodinstring(L, fmt.aprintf("ComponentType(%s)", component_name(r, check_component_type(L, 1)), allocator = frame(r)))
-	case .None:
+	case .None, .Instance_Key:
 		luau.pushstring(L, "lightuserdata")
 	}
 	return 1
@@ -126,8 +134,16 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 
 @(private = "file")
 entity_get :: proc(L: ^luau.State) -> c.int {
-	_, w := world_of(L)
+	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if is_class(L, 2) {
+		push_record(r, L, e, false)
+		if !luau.isnil(L, -1) {
+			luau.pushvalue(L, 2)
+			luau.rawget(L, -2)
+		}
+		return 1
+	}
 	id := check_component_type(L, 2)
 	if ecs.has_raw(w, e, id) {
 		push_userdata(L, .Component_Ref, Component_Ref{e, id})
@@ -139,6 +155,11 @@ entity_get :: proc(L: ^luau.State) -> c.int {
 
 @(private = "file")
 entity_has :: proc(L: ^luau.State) -> c.int {
+	if is_class(L, 2) {
+		entity_get(L)
+		luau.pushboolean(L, !luau.isnil(L, -1))
+		return 1
+	}
 	_, w := world_of(L)
 	luau.pushboolean(L, b32(ecs.has_raw(w, alive_entity(L, 1), check_component_type(L, 2))))
 	return 1
@@ -150,6 +171,13 @@ entity_has :: proc(L: ^luau.State) -> c.int {
 entity_add :: proc(L: ^luau.State) -> c.int {
 	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if is_class(L, 2) {
+		if !luau.isnoneornil(L, 3) {
+			luau.L_checktype(L, 3, .TABLE)
+		}
+		attach(r, L, e, 2, luau.isnoneornil(L, 3) ? 0 : 3, immediate = true)
+		return 1
+	}
 	id := check_component_type(L, 2)
 	x := find_exposed(r, id)
 	if x == nil {
@@ -172,13 +200,27 @@ entity_add :: proc(L: ^luau.State) -> c.int {
 
 @(private = "file")
 entity_remove :: proc(L: ^luau.State) -> c.int {
-	_, w := world_of(L)
+	r, w := world_of(L)
 	e := alive_entity(L, 1)
+	if is_class(L, 2) {
+		luau.pushboolean(L, b32(detach(r, L, e, 2)))
+		return 1
+	}
 	id := check_component_type(L, 2)
 	if id == ecs.LOCAL_TRANSFORM_ID || id == ecs.PARENT_ID {
 		raise(L, "use entity:set_parent(nil) to change the hierarchy")
 	}
 	luau.pushboolean(L, b32(ecs.remove_raw(w, e, id)))
+	return 1
+}
+
+// entity_set_active activates or deactivates the entity and its descendants, like Unity's SetActive. The callbacks
+// run before it returns.
+@(private = "file")
+entity_set_active :: proc(L: ^luau.State) -> c.int {
+	r, w := world_of(L)
+	ecs.set_active(w, alive_entity(L, 1), bool(luau.L_checkboolean(L, 2)))
+	drain_log(r)
 	return 0
 }
 
@@ -243,6 +285,8 @@ entity_set_parent :: proc(L: ^luau.State) -> c.int {
 	if luau.isnoneornil(L, 2) {
 		ecs.remove_raw(w, e, ecs.PARENT_ID)
 		ecs.remove_raw(w, e, ecs.LOCAL_TRANSFORM_ID)
+		ecs.update_activity(w)
+		drain_log(r)
 		return 0
 	}
 	parent := alive_entity(L, 2)
@@ -252,6 +296,9 @@ entity_set_parent :: proc(L: ^luau.State) -> c.int {
 	parent_pose := (^ecs.Transform)(component_data(r, L, {parent, ecs.TRANSFORM_ID}))^
 	ecs.add(w, e, ecs.Parent{parent})
 	ecs.add(w, e, local_from_world(parent_pose, pose))
+	// A new parent can make the entity inactive, or active.
+	ecs.update_activity(w)
+	drain_log(r)
 	return 0
 }
 

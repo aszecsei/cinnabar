@@ -31,8 +31,9 @@ Module_State :: enum u8 {
 	Main,
 }
 
-// spawn_script starts a script asset on a new sandboxed thread, which runs until its first yield. Its requires load
-// the modules that the cooker resolved.
+// spawn_script starts a script asset on a new sandboxed thread, which runs until its first wait. Then the scheduler
+// runs it, like a coroutine: coroutine.yield waits one frame. Its requires load the modules that the cooker
+// resolved. stop ends it.
 spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: bool) {
 	m := module_for(r, guid)
 	if m == nil {
@@ -45,20 +46,22 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: boo
 	bytecode, chunkname := load_module_asset(r, m) or_return
 	L := r.L
 	co := luau.newthread(L)
-	thread = Thread(luau.ref(L, -1))
-	luau.pop(L, 1)
 	luau.L_sandboxthread(co)
 	if luau.load(co, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
 		log.errorf("script: %s", luau.toodinstring(co, -1))
-		release(r, thread)
+		luau.pop(L, 1)
 		return 0, false
 	}
 	m.state = .Main
-	if resume(r, thread) == .Failed {
-		release(r, thread)
-		return 0, false
+	index := add_waiter(r, L, {})
+	luau.pop(L, 1)
+	thread = Thread(r.waiters[index].thread)
+	switch run_waiter(r, index) {
+	case .OK, .YIELD:
+		return thread, true
+	case .ERRRUN, .ERRSYNTAX, .ERRMEM, .ERRERR, .BREAK:
 	}
-	return thread, true
+	return 0, false
 }
 
 // require_binding is the global require. It finds the calling module by its chunk name, and loads the module that
@@ -67,11 +70,8 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (thread: Thread, ok: boo
 require_binding :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
 	path := checkodinstring(L, 1)
-	ar: luau.Debug
-	requirer: ^Module
-	if luau.getinfo(L, 1, "s", &ar) {
-		requirer = module_by_chunkname(r, string(ar.source))
-	}
+	// The caller can be a C function, as in pcall(require, path), so the module is the nearest Luau caller.
+	requirer := module_by_chunkname(r, luau.caller_source(L))
 	if requirer == nil {
 		raise(L, "require works only in cooked scripts")
 	}

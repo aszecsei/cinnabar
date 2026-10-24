@@ -337,6 +337,9 @@ foreign lib {
 	L_typename :: proc(L: ^State, idx: c.int) -> cstring ---
 	L_traceback :: proc(L: ^State, L1: ^State, msg: cstring, level: c.int) ---
 
+	// L_newstate opens a VM with the C runtime's allocator. The engine's VMs use the host's allocator instead (see
+	// cinnabar:core/script), so only tools use it.
+	L_newstate :: proc() -> ^State ---
 	L_openlibs :: proc(L: ^State) ---
 	// L_sandbox makes the built-in libraries and the globals read-only. Call it after the globals are set up.
 	L_sandbox :: proc(L: ^State) ---
@@ -475,6 +478,18 @@ getref :: #force_inline proc "c" (L: ^State, ref: c.int) -> Type {
 
 L_checkstring :: #force_inline proc "c" (L: ^State, n: c.int) -> cstring {
 	return cstring(L_checklstring(L, n, nil))
+}
+
+// caller_source is the chunk name of the nearest Luau function that called the running C function, skipping C
+// functions such as pcall in between. It is "" if there is none.
+caller_source :: proc "c" (L: ^State) -> string {
+	ar: Debug
+	for level: c.int = 1; getinfo(L, level, "s", &ar); level += 1 {
+		if ar.what != "C" {
+			return string(ar.source)
+		}
+	}
+	return ""
 }
 
 L_getmetatable :: #force_inline proc "c" (L: ^State, n: cstring) -> Type {

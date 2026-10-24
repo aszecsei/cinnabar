@@ -15,6 +15,9 @@ Light_Tag :: enum c.int {
 	Entity,
 	// The payload is the component ID.
 	Component_Type,
+	// The key under which an instance table holds its native handle. Scripts cannot make light userdata, so they
+	// cannot reach it.
+	Instance_Key,
 }
 
 // The tags of the engine's full userdata. Each has its own metatable.

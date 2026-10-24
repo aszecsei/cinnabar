@@ -17,9 +17,18 @@ struct RequireVisitor : Luau::AstVisitor
     void* ud;
     cn_luau_require_fn onRequire;
     cn_luau_error_fn onError;
+    bool definesBehaviour = false;
 
     bool visit(Luau::AstExprCall* call) override
     {
+        // Behaviour.define(...)
+        if (Luau::AstExprIndexName* index = call->func->as<Luau::AstExprIndexName>())
+        {
+            Luau::AstExprGlobal* object = index->expr->as<Luau::AstExprGlobal>();
+            if (object && strcmp(object->name.value, "Behaviour") == 0 && strcmp(index->index.value, "define") == 0)
+                definesBehaviour = true;
+        }
+
         Luau::AstExprGlobal* global = call->func->as<Luau::AstExprGlobal>();
         if (global && strcmp(global->name.value, "require") == 0)
         {
@@ -42,9 +51,13 @@ struct RequireVisitor : Luau::AstVisitor
 } // namespace
 
 // cn_luau_find_requires parses source and reports every call to the global require. It returns false if the source
-// does not parse; the errors are reported through onError.
-CN_LUAU_API bool cn_luau_find_requires(const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError)
+// does not parse; the errors are reported through onError. definesBehaviour is set if the source calls
+// Behaviour.define.
+CN_LUAU_API bool cn_luau_find_requires(
+    const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError, bool* definesBehaviour
+)
 {
+    *definesBehaviour = false;
     Luau::Allocator allocator;
     Luau::AstNameTable names(allocator);
     Luau::ParseResult result = Luau::Parser::parse(source, size, names, allocator);
@@ -61,5 +74,6 @@ CN_LUAU_API bool cn_luau_find_requires(const char* source, size_t size, void* ud
     visitor.onRequire = onRequire;
     visitor.onError = onError;
     result.root->visit(&visitor);
+    *definesBehaviour = visitor.definesBehaviour;
     return true;
 }

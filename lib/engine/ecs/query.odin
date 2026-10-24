@@ -107,12 +107,17 @@ query :: proc(w: ^World, terms: []Term) -> Query {
 	return Query(index + 1)
 }
 
-// collect appends every entity that has all the components to out, in archetype order. It scans every archetype,
-// so it is for occasional lookups, such as scripts' World.query, not for systems.
+// collect appends every entity that has all the components to out, in archetype order. Like a query, it skips
+// Inactive entities unless ids names Inactive. It scans every archetype, so it is for occasional lookups, such as
+// scripts' World.query, not for systems.
 collect :: proc(w: ^World, ids: []Component_Id, out: ^[dynamic]Entity) {
+	_, include_inactive := slice.linear_search(ids, INACTIVE_ID)
 	outer: for index in 0 ..< w.archetype_count {
 		a := archetype(w, index)
 		components := archetype_components(a)
+		if _, inactive := slice.binary_search(components, INACTIVE_ID); inactive && !include_inactive {
+			continue
+		}
 		for id in ids {
 			if _, found := slice.binary_search(components, id); !found {
 				continue outer
@@ -229,6 +234,16 @@ match_archetype :: proc(w: ^World, q: u32, a: u32) {
 	ids := archetype_components(archetype(w, a))
 	match := Query_Match {
 		archetype = a,
+	}
+	// An archetype of Inactive entities matches only a query that names Inactive.
+	if _, inactive := slice.linear_search(ids, INACTIVE_ID); inactive {
+		named := false
+		for term in state.terms[:state.term_count] {
+			named ||= term.id == INACTIVE_ID
+		}
+		if !named {
+			return
+		}
 	}
 	for term, i in state.terms[:state.term_count] {
 		column := NO_COLUMN

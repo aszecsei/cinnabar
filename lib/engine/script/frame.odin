@@ -42,17 +42,15 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	luau.pop(L, 1)
 }
 
-// end_phase runs the collector's step for the frame and returns the scripts' structural changes, such as
-// entity:destroy, for ecs.apply. They are in frame memory.
-end_phase :: proc(r: ^Runtime) -> []ecs.Commands {
-	step(r)
-	if r.commands.data.allocator.procedure == nil {
-		return nil
+// end_phase applies the scripts' structural changes, such as entity:destroy, and runs the callbacks for them: phase
+// 6 of the frame. Then it runs the collector's step for the frame.
+end_phase :: proc(r: ^Runtime) {
+	if r.world != nil && r.commands.data.allocator.procedure != nil {
+		ecs.apply(r.world, {r.commands})
 	}
-	buffers := make([]ecs.Commands, 1, frame(r))
-	buffers[0] = r.commands
 	r.commands = {}
-	return buffers
+	drain_log(r)
+	step(r)
 }
 
 @(private = "file")

@@ -1,7 +1,9 @@
 --!strict
--- A coroutine that the game resumes once per frame. It stays suspended across code reloads of the game DLL: its count
--- keeps going, and Game.greeting shows the new code. Space reverses the large triangles' spin.
+-- The game's main script. The scheduler resumes it once per frame, and it stays suspended across code reloads of the
+-- game DLL: its count keeps going, and Game.greeting shows the new code. Space reverses the large triangles' spin,
+-- and Tab turns their Pulse off and on.
 local greeting = require("./greeting")
+local Pulse = require("./pulse")
 
 local count = 0
 while true do
@@ -15,6 +17,14 @@ while true do
 			spin.speed = -spin.speed
 		end
 		Debug.log("reversed the spin at", Time.time, "s")
+	end
+	if Input.was_pressed(Key.Tab) then
+		for _, triangle in World.query(Triangle) do
+			local pulse = triangle:get(Pulse)
+			if pulse then
+				pulse.enabled = not pulse.enabled
+			end
+		end
 	end
 	coroutine.yield()
 end

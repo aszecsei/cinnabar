@@ -39,6 +39,7 @@ World_Fixture :: struct {
 	runtime:  Runtime,
 	reports:  [dynamic]f64,
 	errors:   [dynamic]string,
+	runner:   log.Logger,
 }
 
 @(private)
@@ -80,6 +81,7 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Health)
+	register_components(&f.world.registry)
 	context.user_ptr = f
 	testing.expect(t, init(&f.runtime, &f.platform, &f.world, nil, register_world_test))
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
@@ -120,9 +122,15 @@ expect_reports :: proc(t: ^testing.T, f: ^World_Fixture, expected: []f64, loc :=
 
 @(private)
 capture_world_errors :: proc(f: ^World_Fixture) -> log.Logger {
+	f.runner = context.logger
 	return {
 		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
 			f := (^World_Fixture)(data)
+			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
+			if strings.has_suffix(location.file_path, "_test.odin") {
+				f.runner.procedure(f.runner.data, level, text, options, location)
+				return
+			}
 			append(&f.errors, strings.clone(text))
 		},
 		data = f,
@@ -220,7 +228,7 @@ e:destroy()
 Test.report(e:is_alive() and 1 or 0)
 `))
 	expect_reports(t, f, {1})
-	ecs.apply(&f.world, end_phase(&f.runtime))
+	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect(t, run(t, f, "Test.report(#World.query(Health))"))
 	expect_reports(t, f, {0})
@@ -240,7 +248,7 @@ coroutine.yield()
 local _ = h.value
 `)
 	testing.expect(t, ok)
-	ecs.apply(&f.world, end_phase(&f.runtime))
+	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Failed)
 	expect_world_error(t, f, "stale:6: the entity is destroyed")

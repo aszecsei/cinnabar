@@ -19,6 +19,7 @@ Fixture :: struct {
 	dir:      string,
 	assets:   Assets,
 	errors:   [dynamic]string,
+	runner:   log.Logger,
 }
 
 @(private)
@@ -57,9 +58,15 @@ teardown :: proc(f: ^Fixture) {
 // capture_errors records errors in the fixture instead of failing the test.
 @(private)
 capture_errors :: proc(f: ^Fixture) -> log.Logger {
+	f.runner = context.logger
 	return {
 		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
 			f := (^Fixture)(data)
+			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
+			if strings.has_suffix(location.file_path, "_test.odin") {
+				f.runner.procedure(f.runner.data, level, text, options, location)
+				return
+			}
 			append(&f.errors, strings.clone(text))
 		},
 		data = f,

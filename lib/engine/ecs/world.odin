@@ -35,6 +35,15 @@ World :: struct {
 	hierarchy_dirty: bool,
 	// Set when an entity is despawned, so its children may need to be despawned too.
 	orphans_pending: bool,
+	// Set when a Disabled or a Parent is added or removed, so Inactive may need to change. See update_activity.
+	activity_dirty:  bool,
+	// The changes that the script runtime reacts to (see watch and take_log).
+	log:             Region,
+	log_count:       u32,
+	log_full:        bool,
+	watched:         [MAX_WATCHED]Component_Id,
+	watched_count:   int,
+	log_activity:    bool,
 }
 
 // init reserves the world's storage and creates the empty archetype. Register the components after it.
@@ -53,7 +62,8 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_init(&w.chunks.memory, platform, MAX_CHUNKS * CHUNK_SIZE) &&
 		region_init(&w.queries, platform, MAX_QUERIES * size_of(Query_State)) &&
 		region_init(&w.matches, platform, MAX_QUERIES * MAX_ARCHETYPES * size_of(Query_Match)) &&
-		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity))
+		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity)) &&
+		region_init(&w.log, platform, MAX_LOG * size_of(Log_Entry))
 	w.chunks.free_head = NO_CHUNK
 	if !ok || find_or_create_archetype(w, {}) != EMPTY_ARCHETYPE {
 		log.error("ecs: cannot reserve storage")
@@ -65,7 +75,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 
 // destroy releases the world's storage. Every handle becomes invalid.
 destroy :: proc(w: ^World) {
-	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.queries, &w.matches, &w.hierarchy}) {
+	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.queries, &w.matches, &w.hierarchy, &w.log}) {
 		region_release(r, w.platform)
 	}
 	w^ = {}

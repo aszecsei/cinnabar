@@ -31,7 +31,8 @@ All world data lives in a native ECS in `lib/engine/ecs`. Scripts see an object-
 - Iteration gives chunks. A system gets a typed slice of each column from the chunk. In debug builds, the column type is checked against the term.
 - Iteration can start at a chunk index and stop after a number of chunks. This is how a system divides its work into jobs.
 - Queries are registrations. `reload` clears them, and the game creates them again in `on_reload`.
-- **Inactive entities:** a query excludes the `Inactive` tag unless it names `Inactive` in a term. Render extraction, physics and game systems therefore skip inactive entities without extra terms. `Disabled` marks an entity that was deactivated itself. The world adds `Inactive` to it and to its descendants, and updates them when `Disabled` or the hierarchy changes. Activity is the scripts' `set_active` (see [Scripting](scripting.md#enabled-state)).
+- **Inactive entities:** a query excludes the `Inactive` tag unless it names `Inactive` in a term. Render extraction, physics and game systems therefore skip inactive entities without extra terms. `ecs.collect` skips them the same way. `Disabled` marks an entity that was deactivated itself. The world adds `Inactive` to it and to its descendants. `ecs.set_active` updates them at once, and `apply` updates them for the changes in its buffers. Native code that adds or removes `Parent` or `Disabled` directly calls `update_activity` before the next query. Activity is the scripts' `set_active` (see [Scripting](scripting.md#enabled-state)).
+- **The log:** `ecs.watch` makes the world log the removal of chosen components, with their first 8 bytes, and every change of `Inactive`. The script runtime watches `Behaviours`, and drains the log with `take_log` each script phase. A world that nothing watches logs nothing.
 
 ### Systems
 

@@ -47,6 +47,18 @@ Runtime :: struct {
 	frame:            u64,
 	// The script phase's structural changes, in frame memory. See end_phase.
 	commands:         ecs.Commands,
+	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.
+	instances:        [MAX_INSTANCES]Instance,
+	instance_used:    int,
+	waiters:          [MAX_WAITERS]Waiter,
+	waiter_used:      int,
+	waiter_seq:       u64,
+	// The waiter that is running, or -1, and the wait that its wait call asked for.
+	current_waiter:   int,
+	pending_wait:     Wait,
+	// Registry references: the event queue, and protected_call's message handler.
+	events:           c.int,
+	traceback:        c.int,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -77,6 +89,9 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, asset
 	r.assets = assets
 	r.budget = DEFAULT_BUDGET
 	r.module_count = 0
+	r.instance_used = 0
+	r.waiter_used = 0
+	r.current_waiter = -1
 	r.bindings.ctx = context
 	r.L = platform.script_open(&r.bindings)
 	if r.L == nil {
@@ -87,9 +102,19 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, asset
 	create_metatables(r)
 	create_frame_values(r)
 	create_math_values(r)
+	r.platform.script_push_binding(r.L, "Script.traceback")
+	r.traceback = luau.ref(r.L, -1)
+	luau.pop(r.L, 1)
+	luau.newtable(r.L)
+	r.events = luau.ref(r.L, -1)
+	luau.pop(r.L, 1)
 	register_engine(r)
 	register(r)
+	run_prelude(r)
 	luau.L_sandbox(r.L)
+	if world != nil {
+		ecs.watch(world, {BEHAVIOURS_ID}, activity = true)
+	}
 	luau.pushvalue(r.L, luau.GLOBALSINDEX)
 	r.globals = luau.ref(r.L, -1)
 	luau.pop(r.L, 1)
@@ -124,6 +149,12 @@ define :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
 	script_host.register(&r.bindings, name, procedure)
 	r.platform.script_push_binding(r.L, name)
 	set_path(r, name)
+}
+
+// register_binding registers a binding without setting a global, for metamethods and the prelude's natives.
+@(private)
+register_binding :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
+	script_host.register(&r.bindings, name, procedure)
 }
 
 // set_path pops the value on top of the stack into the global with this name: "Key" or "Quaternion.identity". It
@@ -330,6 +361,9 @@ register_engine :: proc(r: ^Runtime) {
 	bind(r, "ComponentRef.__newindex", ref_newindex)
 	bind(r, "ComponentRef.__eq", ref_eq)
 	bind(r, "ComponentRef.__tostring", ref_tostring)
+	bind(r, "Script.traceback", traceback_binding)
+	register_behaviours(r)
+	register_waits(r)
 
 	define(r, "require", require_binding)
 	define(r, "Debug.log", proc(L: ^luau.State) -> c.int {return log_binding(L, .Info)})

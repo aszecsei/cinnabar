@@ -17,15 +17,22 @@ import format "cinnabar:engine/asset/format"
 Errors :: struct {
 	arena:    virtual.Arena,
 	messages: [dynamic]string,
+	runner:   log.Logger,
 }
 
 @(private)
 capture_errors :: proc(e: ^Errors) -> log.Logger {
 	_ = virtual.arena_init_growing(&e.arena)
 	e.messages = make([dynamic]string, virtual.arena_allocator(&e.arena))
+	e.runner = context.logger
 	return {
 		procedure = proc(data: rawptr, level: log.Level, text: string, options: log.Options, location := #caller_location) {
 			e := (^Errors)(data)
+			// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
+			if strings.has_suffix(location.file_path, "_test.odin") {
+				e.runner.procedure(e.runner.data, level, text, options, location)
+				return
+			}
 			append(&e.messages, strings.clone(text, virtual.arena_allocator(&e.arena)))
 		},
 		data = e,
@@ -236,11 +243,12 @@ guid_text :: proc(guid: format.Guid) -> string {
 @(test)
 a_changed_dependency_changes_the_key :: proc(t: ^testing.T) {
 	a := Script_Source{name = "game/a.luau", source = transmute([]byte)string("return 1")}
-	before := script_key(.Dev, a)
+	before := script_key(.Dev, a, 0)
 	a.resolved = make([dynamic]Resolved_Require, context.temp_allocator)
 	append(&a.resolved, Resolved_Require{entry = {"./b", {1 = 1}}})
-	testing.expect(t, script_key(.Dev, a) != before, "a require did not change the key")
-	testing.expect(t, script_key(.Release, a) != script_key(.Dev, a), "the configuration did not change the key")
+	testing.expect(t, script_key(.Dev, a, 0) != before, "a require did not change the key")
+	testing.expect(t, script_key(.Release, a, 0) != script_key(.Dev, a, 0), "the configuration did not change the key")
+	testing.expect(t, script_key(.Dev, a, 1) != script_key(.Dev, a, 0), "a dependency's source did not change the key")
 }
 
 @(test)
@@ -275,4 +283,81 @@ missing_modules_are_errors :: proc(t: ^testing.T) {
 	defer release_errors(&errors)
 	testing.expect(t, !cook_scripts(tree_options(tree)))
 	expect_error(t, &errors, `a.luau:1: cannot require "./nothing": no module at`)
+}
+
+@(test)
+behaviours_get_their_fields_in_the_blob :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/door.luau", `
+local defaults = require("./defaults")
+local Door = Behaviour.define("Door", {
+	speed = Field.number(defaults.speed),
+	open = Field.boolean(true),
+	label = Field.string("front"),
+	offset = Field.vector(vector.create(1, 2, 3)),
+	target = Field.entity(),
+})
+function Door:start() World.spawn() end
+return Door`},
+			{"content/defaults.luau", "return {speed = 4}"},
+			// A script that runs as a coroutine is never run by the cooker: it would not return.
+			{"content/main.luau", "while true do coroutine.yield() end"},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	testing.expect(t, cook_scripts(options))
+
+	data := tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
+	blob, ok := format.script_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.flags, format.Script_Flags{.Behaviour})
+	testing.expect_value(t, format.blob_string(data, blob.class_name), "Door")
+	fields := format.script_fields(data, blob)
+	testing.expect_value(t, len(fields), 5)
+	if len(fields) == 5 {
+		// Sorted by name: label, offset, open, speed, target.
+		testing.expect_value(t, format.blob_string(data, fields[0].name), "label")
+		testing.expect_value(t, format.blob_string(data, fields[0].text), "front")
+		testing.expect_value(t, fields[1].vector, [3]f32{1, 2, 3})
+		testing.expect_value(t, fields[2].kind, format.Script_Field_Kind.Boolean)
+		testing.expect_value(t, fields[2].number, 1)
+		testing.expect_value(t, fields[3].number, 4)
+		testing.expect_value(t, fields[4].kind, format.Script_Field_Kind.Entity)
+	}
+	main := tree_blob(t, tree, tree_guid(t, tree, "main.luau"))
+	main_blob, _ := format.script_view(main)
+	testing.expect_value(t, main_blob.flags, format.Script_Flags{})
+
+	// A field default that comes from a dependency changes with it.
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/defaults.luau", tree.dir), transmute([]byte)string("return {speed = 9}")) == nil)
+	testing.expect(t, cook_scripts(options))
+	data = tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
+	blob, _ = format.script_view(data)
+	fields = format.script_fields(data, blob)
+	testing.expect(t, len(fields) == 5 && fields[3].number == 9)
+}
+
+@(test)
+a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/eager.luau", `local Eager = Behaviour.define("Eager") World.spawn() return Eager`},
+			{"content/stuck.luau", `local Stuck = Behaviour.define("Stuck") while true do end`},
+		},
+	)
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook_scripts(tree_options(tree)))
+	expect_error(t, &errors, "eager.luau: a behaviour script's top level runs when it is cooked")
+	expect_error(t, &errors, "game/eager.luau:1: World is not available when the cooker reads a behaviour's fields")
+	expect_error(t, &errors, "the top level ran for more than 2 seconds")
 }

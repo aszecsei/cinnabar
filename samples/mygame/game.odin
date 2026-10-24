@@ -6,6 +6,7 @@ import "core:hash"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 import "core:slice"
 import "core:time"
 
@@ -35,6 +36,7 @@ COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
 // Content refers to content by GUID. Until scenes exist, the game reads its one script's GUID from the .meta file.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
+PULSE_META :: #load("content/scripts/pulse.luau.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -205,9 +207,8 @@ Game_State :: struct {
 	triangles:   render.Extractor,
 	assets:      asset.Assets,
 	scripts:     script.Runtime,
-	// The coroutine of content/scripts/hello.luau, while it runs.
+	// The thread of content/scripts/hello.luau, which the scheduler runs.
 	hello:       script.Thread,
-	hello_running: bool,
 }
 
 Pipelines :: struct {
@@ -248,9 +249,9 @@ Frame :: struct {
 
 init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
-	s^ = {
-		platform = platform,
-	}
+	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
+	mem.zero_item(s)
+	s.platform = platform
 
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
@@ -325,7 +326,15 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		log.panic("mygame: cannot open the script VM")
 	}
 	if hello, ok := format.meta_guid(HELLO_META); ok {
-		s.hello, s.hello_running = script.spawn_script(&s.scripts, hello)
+		s.hello, _ = script.spawn_script(&s.scripts, hello)
+	}
+	// Until scenes exist, the game attaches the large triangles' behaviour itself.
+	if pulse, ok := format.meta_guid(PULSE_META); ok {
+		triangles := make([dynamic]ecs.Entity, platform.frame_allocator)
+		ecs.collect(&s.world, {ecs.registry_find_type(&s.world.registry, Triangle).id}, &triangles)
+		for e in triangles {
+			script.attach_script(&s.scripts, e, pulse)
+		}
 	}
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
@@ -334,6 +343,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 // layout_hash on its own, so a component change restarts the game.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_engine_components(r)
+	script.register_components(r)
 	ecs.register_component(r, Spin)
 	ecs.register_component(r, Triangle)
 }
@@ -404,13 +414,8 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 
 	ecs.run_fixed(&s.world, dt, s)
 	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase and its structural changes. Until behaviours exist, it resumes the one script coroutine.
-	script.begin_phase(&s.scripts, dt, s.platform.input())
-	if s.hello_running && script.resume(&s.scripts, s.hello) != .Yielded {
-		script.release(&s.scripts, s.hello)
-		s.hello_running = false
-	}
-	ecs.apply(&s.world, script.end_phase(&s.scripts))
+	// The script phase, with its structural changes (phases 5 and 6).
+	script.run_phase(&s.scripts, dt, s.platform.input())
 	ecs.run_stage(&s.world, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {

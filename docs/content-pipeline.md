@@ -24,14 +24,14 @@ Scripts are `.luau` files. `just scripts` runs `cook scripts --cache build/cache
 
 For each script, the cooker:
 
-1. Finds every call of the global `require` with Luau's parser, so comments and strings never look like requires. A `require` whose argument is not one string literal is an error.
+1. Finds every call of the global `require` with Luau's parser, so comments and strings never look like requires. A `require` whose argument is not one string literal is an error. The parser also tells whether the script calls `Behaviour.define`.
 2. Resolves every `require` string to a GUID, with Luau's rules (see [Scripting](scripting.md#modules-and-require)). A missing module, a path that names both `x.luau` and `x/init.luau`, or a cycle is an error.
 3. Type checks the module against the engine definition file (see [Scripting](scripting.md#types-and-tooling)) and the modules it requires. *Not yet: phase 5.*
 4. Compiles it with `luau_compile`. Development uses optimization level 1 and debug level 2. Release uses optimization level 2 and debug level 1.
-5. Runs its top level in a sandboxed VM with the prelude and no native bindings. If it returns a behaviour class, the cooker records the field schema. *Not yet: phase 4.*
+5. For a script that calls `Behaviour.define`: runs its top level in a sandboxed VM with the Luau libraries, the prelude (`lib/engine/script/prelude.luau`) and a `require` that follows the resolved requires, but no engine. If it returns a behaviour class, the cooker records the class name and the fields (see [Scripting](scripting.md#behaviours)).
 6. Writes the blob to a temporary file and renames it, so the running game never reads a partial blob.
 
-The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, and the GUID that each require resolves to. With type checking, it will also include the definition file and the sources of every module that the script requires, directly or not, because the type check depends on them.
+The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, and the sources of every module that the script requires, directly or not. A behaviour's field defaults can come from those modules, so a changed dependency cooks its dependents again. With type checking, the key will also include the definition file.
 
 Script import settings in `.meta`: `native = true` compiles the module to machine code at load. An unknown setting is a warning.
 
@@ -48,7 +48,7 @@ A script blob holds:
 | Header | The blob header, and flags (`Native`, `Behaviour`) |
 | Bytecode | The output of `luau_compile` |
 | Requires | Sorted pairs of require string and target GUID |
-| Fields | For a behaviour: class name, and each field's name, type and default value |
+| Fields | For a behaviour (flag `Behaviour`): the class name, and each field's name, kind and default, sorted by name |
 | Source path | The root's name and the path in the root. Error messages and tracebacks use it as the chunk name. |
 
 ## Loading

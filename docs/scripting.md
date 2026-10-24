@@ -11,7 +11,7 @@ The reference API is Unity's. A scripter who knows `GameObject`, `MonoBehaviour`
 | `lib/core/luau` | Shared | Odin bindings to the Luau C API: VM, compiler and code generator. Its `CMakeLists.txt` builds Luau. The `LUAU_SHARED` config selects `luau.dll` or the static libraries. |
 | `lib/core/script` | Host | Package `script_host`: the VM's heap, and every function pointer that Luau stores (see [Host trampolines](#host-trampolines)). The game uses its types, and calls it only through `Platform_API`. |
 | `lib/engine/script` | Game | Binding registration, the entity and component view, behaviours, the scheduler, events, module loading and script hot reload. |
-| `lib/engine/script/luau` | Content | The engine prelude: the parts of the API that are written in Luau, such as `Behaviour.define`. It is content with fixed GUIDs, and scripts reach it as `@engine/...`. |
+| `lib/engine/script/prelude.luau` | Shared | The engine prelude: `Behaviour.define` and `Field`, written in Luau. The runtime runs it at init, and `tools/cook` runs the same source to read behaviours' fields. |
 
 `lib/engine` and games import `lib/core/luau` for types and calls. They never store a Luau function pointer of their own.
 
@@ -128,9 +128,6 @@ A behaviour is Unity's `MonoBehaviour`: a script class whose instances are attac
 
 ```luau
 --!strict
-local Behaviour = require("@engine/Behaviour")
-local Field = require("@engine/Field")
-
 local Door = Behaviour.define("Door", {
 	open_angle = Field.number(90),
 	speed = Field.number(2),
@@ -160,11 +157,13 @@ end
 return Door
 ```
 
-- **A behaviour module returns its class.** `Behaviour.define` takes the class name and its fields. Fields are what Unity serializes: the editor shows them, scenes and prefabs store their values, and the instance gets them as plain table fields. Other table fields are runtime state.
-- **The cooker reads the fields.** It runs the module's top level in a sandboxed VM that has the prelude but no native bindings, and stores the field schema in the blob (see [Content pipeline](content-pipeline.md#scripts)). A module's top level must therefore only require modules and define classes. A call to a native binding at the top level is a cook error.
-- **Storage:** an entity with behaviours has the native `Behaviours` component, which holds a `lua_ref` to the entity's record table. The record holds one instance per class. An entity has at most one instance of a class, so `entity:get(Door)` has one answer.
+- **A behaviour module returns its class.** `Behaviour.define` and `Field` are engine globals. `Behaviour.define` takes the class name and its fields. Fields are what Unity serializes: the editor shows them, scenes and prefabs store their values, and the instance gets them as plain table fields. Other table fields are runtime state.
+- **Field kinds:** `Field.number(default?)`, `Field.boolean(default?)`, `Field.string(default?)`, `Field.vector(default?)` and `Field.entity()`. *`Field.asset(kind)` waits for asset references.* `entity`, `transform` and `enabled` are reserved names.
+- **The cooker reads the fields.** For a script that calls `Behaviour.define`, it runs the top level in a sandboxed VM that has the Luau libraries and the prelude, but no engine, and stores the class name and the fields in the blob (see [Content pipeline](content-pipeline.md#scripts)). Such a top level must therefore only require modules and define classes. Reading an engine global, such as `World`, raises "World is not available when the cooker reads a behaviour's fields", and a top level that runs for more than 2 s is stopped. Both are cook errors. A script without `Behaviour.define`, such as a main script for `spawn_script`, is not run.
+- **Attaching:** `entity:add(Door, values?)` from a script, or `script.attach_script(r, entity, guid)` from native code until scenes exist. `values` is a table of field values, and `enabled = false` starts the instance disabled. A value for a field that the class does not declare, or of the wrong kind, raises an error. `entity:get(Door)`, `entity:has(Door)` and `entity:remove(Door)` work as for components.
+- **Storage:** an entity with behaviours has the native `Behaviours` component (ID 16, registered by `script.register_components`), which holds a `lua_ref` to the entity's record table. The record lists the instances in the order they were added, and maps each class to its instance. An entity has at most one instance of a class, so `entity:get(Door)` has one answer. The native side of each instance (its lifecycle flags) is a slot in the runtime, at most 4096.
 - **Instance members:** `self.entity` (Unity's `gameObject`), `self.transform`, `self.enabled`, `self:start_coroutine(fn, ...)`, `self:stop_coroutine(co)` and `self:stop_all_coroutines()`.
-- **Classes are metatables.** An instance is a table whose metatable is its class. Luau's `class` syntax is experimental (behind `DebugLuauUserDefinedClasses`), so the engine does not use it, and the flag stays off in the cooker and in the VM.
+- **Classes are metatables.** An instance is a table whose metatable is its class. The class's `__index` finds methods in the class first, so a method call never reaches the engine. `enabled` is never stored in the instance, so its reads and writes reach the engine through `__index` and `__newindex`. Luau's `class` syntax is experimental (behind `DebugLuauUserDefinedClasses`), so the engine does not use it, and the flag stays off in the cooker and in the VM.
 
 ### Lifecycle
 
@@ -179,9 +178,10 @@ return Door
 | `on_reload()` | none | After a script hot reload patched the class (see [Script hot reload](#script-hot-reload)) |
 | `on_<event>(...)` | `OnTriggerEnter` and similar | When the event is delivered (see [Events](#events)) |
 
-- **`update` is opt-in.** A class that defines `update` puts its instances in an update list, and the script phase calls them in spawn order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and the API favors events and coroutines.
+- **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and the API favors events and coroutines.
 - **No `fixed_update`.** Scripts do not run in fixed ticks. Logic that must run every tick is a native `Fixed` system. A script influences the simulation by writing components, and the next tick reads them.
-- **Despawn notification:** `ecs.apply` and the immediate `despawn` log each removed `Behaviours` component with its record reference. The script phase drains the log at its start, and again after phase 6, so `on_destroy` runs in the same frame as a script's `destroy`.
+- **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`.
+- **Callbacks** run on the main thread in a protected call, under the watchdog. An error logs the message with a traceback, and the other callbacks still run. A callback cannot wait: it is not a coroutine.
 
 ### Enabled state
 
@@ -201,31 +201,34 @@ Unity has two switches, and so does cinnabar:
 
 ### Coroutines
 
-- `self:start_coroutine(fn, ...)` starts a Luau thread that the instance owns, as in Unity's `StartCoroutine`. A destroyed or deactivated entity stops its coroutines.
-- Inside a coroutine: `wait(seconds)` (game time), `wait_realtime(seconds)`, `wait_frames(n)`, `wait_until(predicate)` and `wait_event(entity, name)`.
-- The scheduler is native and lives in `Game_State`. It keeps waiting threads in a heap ordered by wake time and then by start order, so resume order is deterministic. Each entry holds a `lua_ref` to its thread.
+- `self:start_coroutine(fn, ...)` starts a Luau thread that the instance owns, as in Unity's `StartCoroutine`. It runs until its first wait before `start_coroutine` returns the thread, which `self:stop_coroutine(co)` stops. A destroyed or deactivated entity stops its coroutines. A coroutine that was stopped does not start again when the entity comes back, as in Unity.
+- Inside a coroutine: `wait(seconds)` (world time), `wait_realtime(seconds)`, `wait_frames(n)`, `wait_until(predicate)` (called each frame) and `wait_event(entity, name)`, which returns the event's arguments. A plain `coroutine.yield()` waits one frame. A wait outside of a coroutine that the engine runs raises an error.
+- A script from `spawn_script` is a coroutine of the scheduler too, with no owner. `script.stop` ends it.
+- The scheduler is native and lives in `Game_State`, at most 4096 threads. Each frame it resumes the threads that are due, ordered by wake time and then by start order, so resume order is deterministic. Each entry holds a `lua_ref` to its thread.
 - An error in a coroutine logs the message with a traceback and stops only that coroutine.
 
 ### Events
 
-- Native systems push events into the event queue in frame memory: an entity, an event name (an atom) and a payload. Physics contacts become `on_trigger_enter`, `on_collision_enter` and similar.
-- `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase.
+- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors or entities. Call it from the frame code: the queue is not safe for jobs. *Physics contacts will become `on_trigger_enter`, `on_collision_enter` and similar, through per-job event buffers.*
+- `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase: events are delivered before `update` and again after the coroutines. Events that handlers send are delivered in the next round, for up to 16 rounds.
 - The script phase calls `on_<name>` on every enabled instance on the entity that defines it, in the order that the instances were added. An inactive entity gets no events.
 - An error in a handler logs the message with a traceback. The other handlers still run.
 
 ## Frame
 
-The game runs the script phase with `script.begin_phase(r, dt, platform.input())`, then resumes and calls scripts, then applies `script.end_phase(r)`'s commands with `ecs.apply`. `begin_phase` sets `Time` and `Input`, and `end_phase` runs the collector's step and returns the script phase's structural changes.
+The game runs the script phase with one call, `script.run_phase(r, dt, platform.input())`, between the `Update` and `Late` stages. It covers phases 5 and 6 of [Frame](architecture.md#frame), in Unity's order:
 
-The script phase (phase 5 in [Frame](architecture.md#frame)) runs in Unity's order:
+1. Set `Time` and `Input`.
+2. Drain the world's log: `on_disable` and `on_destroy` for despawned behaviours, and `awake`, `on_enable` or `on_disable` for activity changes from native code.
+3. `awake` and `on_enable` for instances that native code attached.
+4. `start` for instances that are enabled and active and have not started.
+5. Deliver the events that the fixed ticks and the `Update` systems queued.
+6. `update` for the classes that define it.
+7. Resume the coroutines that are due.
+8. Deliver the events that `update` and the coroutines sent.
+9. Apply the scripts' structural changes, such as `destroy`, drain the log again, and run the collector's step.
 
-1. Drain the despawn log: `on_disable`, then `on_destroy`.
-2. Drain the activity log of native changes: `awake` and `on_enable`, or `on_disable`.
-3. `start` for instances that became enabled and active since the last script phase and have not started.
-4. Deliver the events that the fixed ticks and the `Update` systems queued.
-5. `update` for the classes that opt in.
-6. Resume the coroutines that are due.
-7. After phase 6 applies the script command buffer: drain the despawn log again.
+`begin_phase` and `end_phase` run steps 1 and 9 alone, for tests and tools.
 
 ## Modules and `require`
 
@@ -294,7 +297,7 @@ A module marked `--!native`, or with `native = true` in its `.meta`, is compiled
 1. **VM:** build Luau with the justfile, `lib/core/luau`, `script_open` with the host allocator and trampolines, and the binding registry. A test script survives a code reload with a suspended coroutine.
 2. **Script assets:** GUIDs and `.meta` files, the `Loose_Cache` source, `cook scripts`, and `require`. The host polls the cache until the cook daemon exists.
 3. **World view:** `Entity`, component references, `vector`, `Quaternion`, `WorldPosition`, `Time`, `Input`, `Debug`, and platform input in `core`.
-4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler and the despawn log.
+4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler, the despawn log, and field schemas in the cooker.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
 6. **Script hot reload.**
 7. **Later:** editor inspector for fields, native code generation, direct field access, bundles.

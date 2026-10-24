@@ -18,7 +18,7 @@ import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker compiles scripts changes this, which invalidates every cooked script.
-SCRIPT_COOK_VERSION :: "scripts 2"
+SCRIPT_COOK_VERSION :: "scripts 3"
 // The justfile passes the vendor/luau tag, so a Luau update cooks every script again.
 LUAU_VERSION :: #config(LUAU_VERSION, "unknown")
 SCRIPT_EXTENSION :: ".luau"
@@ -51,6 +51,8 @@ Script_Source :: struct {
 	meta:      format.Meta,
 	source:    []byte,
 	requires:  [dynamic]Found_Require,
+	// The source calls Behaviour.define, so the cooker runs its top level to read the fields.
+	defines_behaviour: bool,
 	// The resolved requires, sorted by path.
 	resolved:  [dynamic]Resolved_Require,
 }
@@ -132,15 +134,31 @@ cook_scripts :: proc(options: Script_Options) -> bool {
 		return false
 	}
 	compiled, current := 0, 0
-	for &s in scripts {
-		key := script_key(options.config, s)
+	// The VM that reads behaviours' fields opens on the first behaviour that needs cooking.
+	vm: Schema_VM
+	defer schema_vm_close(&vm)
+	for &s, index in scripts {
+		key := script_key(options.config, s, dependency_hash(scripts, index))
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked_script_key(output) == key {
 			current += 1
 			continue
 		}
-		if !compile_script(options.config, s, key, output) {
+		class_name: string
+		fields: []format.Field_Entry
+		if s.defines_behaviour {
+			if vm.L == nil && !schema_vm_open(&vm, options.config, scripts) {
+				return false
+			}
+			schema_ok: bool
+			class_name, fields, schema_ok = read_schema(&vm, index)
+			if !schema_ok {
+				ok = false
+				continue
+			}
+		}
+		if !compile_script(options.config, s, key, output, class_name, fields) {
 			ok = false
 			continue
 		}
@@ -267,7 +285,7 @@ find_requires :: proc(s: ^Script_Source) -> bool {
 		f.failed = true
 	}
 	f := Find_Context{ctx = context, script = s}
-	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error)
+	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_behaviour)
 	return !f.failed
 }
 
@@ -418,9 +436,9 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 }
 
 // script_key covers everything that the blob depends on: the cooker, Luau, the configuration, the source, the
-// settings and the GUIDs that the requires resolve to.
-script_key :: proc(config: Script_Config, s: Script_Source) -> u64 {
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00", SCRIPT_COOK_VERSION, LUAU_VERSION, config, s.name))
+// settings, the GUIDs that the requires resolve to, and the dependencies' sources (see dependency_hash).
+script_key :: proc(config: Script_Config, s: Script_Source, dependencies: u64) -> u64 {
+	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00", SCRIPT_COOK_VERSION, LUAU_VERSION, config, s.name, dependencies))
 	key = hash.fnv64a(s.source, key)
 	key = hash.fnv64a(transmute([]byte)s.meta_text, key)
 	for r in s.resolved {
@@ -448,19 +466,12 @@ cooked_script_key :: proc(output: string) -> u64 {
 
 // compile_script compiles a script and writes its blob. The blob is written to a temporary file and renamed, so the
 // running game never reads a partial blob.
-compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string) -> bool {
-	mutable_globals := format.script_mutable_globals()
-	options := luau.Compile_Options {
-		optimizationLevel = config == .Dev ? 1 : 2,
-		debugLevel        = config == .Dev ? 2 : 1,
-		mutableGlobals    = &mutable_globals[0],
-	}
-	size: c.size_t
-	bytecode := luau.compile(raw_data(s.source), c.size_t(len(s.source)), &options, &size)
-	defer luau.free_bytecode(bytecode)
+compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string, class_name: string, fields: []format.Field_Entry) -> bool {
+	bytecode := compile_source(config, string(s.source))
+	defer luau.free_bytecode(raw_data(bytecode))
 	// Failed compilation gives a zero byte and the message.
-	if size == 0 || bytecode[0] == 0 {
-		log.errorf("cook: %s%s", s.path, size > 1 ? string(bytecode[1:size]) : ": cannot compile")
+	if len(bytecode) == 0 || bytecode[0] == 0 {
+		log.errorf("cook: %s%s", s.path, len(bytecode) > 1 ? string(bytecode[1:]) : ": cannot compile")
 		return false
 	}
 	requires := make([]format.Require_Entry, len(s.resolved), context.temp_allocator)
@@ -471,14 +482,19 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 	if native, _ := format.meta_value(s.meta, "native"); native == "true" {
 		flags += {.Native}
 	}
+	if class_name != "" {
+		flags += {.Behaviour}
+	}
 	blob := format.script_write(
 		{
 			guid = s.meta.guid,
 			key = key,
 			flags = flags,
-			bytecode = bytecode[:size],
+			bytecode = bytecode,
 			requires = requires,
 			source_path = s.name,
+			class_name = class_name,
+			fields = fields,
 		},
 		context.temp_allocator,
 	)
@@ -492,6 +508,19 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 		return false
 	}
 	return true
+}
+
+// compile_source compiles with the configuration's settings. Release the result with luau.free_bytecode.
+compile_source :: proc(config: Script_Config, source: string) -> []byte {
+	mutable_globals := format.script_mutable_globals()
+	options := luau.Compile_Options {
+		optimizationLevel = config == .Dev ? 1 : 2,
+		debugLevel        = config == .Dev ? 2 : 1,
+		mutableGlobals    = &mutable_globals[0],
+	}
+	size: c.size_t
+	bytecode := luau.compile(raw_data(source), c.size_t(len(source)), &options, &size)
+	return bytecode[:size]
 }
 
 forward_slashes :: proc(path: string) -> string {

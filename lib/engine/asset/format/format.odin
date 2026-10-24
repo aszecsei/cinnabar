@@ -163,8 +163,27 @@ Script_Blob :: struct {
 	requires:    Slice,
 	// The path relative to the content root, prefixed with the root's name, such as "game/scripts/hello.luau".
 	source_path: Slice,
-	// The behaviour's field schema. Empty until behaviours exist.
+	// For a behaviour: the class name, and its Script_Field records, sorted by name.
+	class_name:  Slice,
 	fields:      Slice,
+}
+
+Script_Field_Kind :: enum u32 {
+	Number,
+	Boolean,
+	String,
+	Vector,
+	Entity,
+}
+
+// Script_Field is a field of a behaviour, from Behaviour.define. number holds the default of a Number, and 1 or 0
+// for a Boolean. text holds a String's default.
+Script_Field :: struct {
+	name:   Slice,
+	kind:   Script_Field_Kind,
+	number: f64,
+	vector: [3]f32,
+	text:   Slice,
 }
 
 // Script_Require maps a require string to the module it resolves to.
@@ -174,7 +193,7 @@ Script_Require :: struct {
 }
 
 script_layout :: proc() -> u64 {
-	return layout.hash(Script_Blob) ~ layout.hash(Script_Require) * 31
+	return layout.hash(Script_Blob) ~ layout.hash(Script_Require) * 31 ~ layout.hash(Script_Field) * 961
 }
 
 blob_bytes :: proc "contextless" (data: []byte, s: Slice) -> []byte {
@@ -200,7 +219,7 @@ script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 		return
 	}
 	blob = (^Script_Blob)(raw_data(data))
-	slices := [?]Slice{blob.bytecode, blob.requires, blob.source_path, blob.fields}
+	slices := [?]Slice{blob.bytecode, blob.requires, blob.source_path, blob.class_name, blob.fields}
 	for s in slices {
 		if u64(s.offset) + u64(s.size) > u64(len(data)) {
 			return nil, false
@@ -214,7 +233,20 @@ script_view :: proc(data: []byte) -> (blob: ^Script_Blob, ok: bool) {
 			return nil, false
 		}
 	}
+	if blob.fields.size % size_of(Script_Field) != 0 || blob.fields.offset % align_of(Script_Field) != 0 {
+		return nil, false
+	}
+	for f in script_fields(data, blob) {
+		if u64(f.name.offset) + u64(f.name.size) > u64(len(data)) || u64(f.text.offset) + u64(f.text.size) > u64(len(data)) {
+			return nil, false
+		}
+	}
 	return blob, true
+}
+
+script_fields :: proc "contextless" (data: []byte, blob: ^Script_Blob) -> []Script_Field {
+	bytes := blob_bytes(data, blob.fields)
+	return ([^]Script_Field)(raw_data(bytes))[:len(bytes) / size_of(Script_Field)]
 }
 
 script_requires :: proc "contextless" (data: []byte, blob: ^Script_Blob) -> []Script_Require {
@@ -245,6 +277,14 @@ Require_Entry :: struct {
 	target: Guid,
 }
 
+Field_Entry :: struct {
+	name:   string,
+	kind:   Script_Field_Kind,
+	number: f64,
+	vector: [3]f32,
+	text:   string,
+}
+
 Script_Contents :: struct {
 	guid:        Guid,
 	key:         u64,
@@ -253,14 +293,29 @@ Script_Contents :: struct {
 	// Sorted by path.
 	requires:    []Require_Entry,
 	source_path: string,
+	class_name:  string,
+	// Sorted by name.
+	fields:      []Field_Entry,
 }
 
 // script_write builds a script blob.
 script_write :: proc(contents: Script_Contents, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Script_Blob), allocator)
 	requires := reserve_bytes(&buffer, len(contents.requires) * size_of(Script_Require), align_of(Script_Require))
+	fields := reserve_bytes(&buffer, len(contents.fields) * size_of(Script_Field), align_of(Script_Field))
 	bytecode := append_bytes(&buffer, contents.bytecode)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
+	class_name := append_bytes(&buffer, transmute([]byte)contents.class_name)
+	for f, i in contents.fields {
+		record := Script_Field {
+			name   = append_bytes(&buffer, transmute([]byte)f.name),
+			kind   = f.kind,
+			number = f.number,
+			vector = f.vector,
+			text   = append_bytes(&buffer, transmute([]byte)f.text),
+		}
+		mem.copy(&buffer[fields.offset + u32(i * size_of(Script_Field))], &record, size_of(record))
+	}
 	for r, i in contents.requires {
 		path := append_bytes(&buffer, transmute([]byte)r.path)
 		record := Script_Require{path, r.target}
@@ -272,6 +327,8 @@ script_write :: proc(contents: Script_Contents, allocator := context.allocator) 
 		bytecode = bytecode,
 		requires = requires,
 		source_path = source_path,
+		class_name = class_name,
+		fields = fields,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]
