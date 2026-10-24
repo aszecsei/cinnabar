@@ -63,7 +63,7 @@ setup :: proc(t: ^testing.T, register: Register_Proc) -> ^Fixture {
 	}
 	f.reports = make([dynamic]f64)
 	f.errors = make([dynamic]string)
-	testing.expect(t, init(&f.runtime, &f.platform, nil, register))
+	testing.expect(t, init(&f.runtime, &f.platform, nil, nil, register))
 	return f
 }
 

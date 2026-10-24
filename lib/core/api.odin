@@ -25,6 +25,9 @@ Platform_API :: struct {
 	memory_release: proc(ptr: rawptr, size: int),
 
 	time_seconds:     proc() -> f64,
+	// The keyboard and mouse at the start of the frame. In shared mode the window is hidden, so the input is empty
+	// until the editor link sends input.
+	input:            proc() -> Input,
 	// File I/O for the asset runtime. Paths are relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
 	// or 0 if it does not exist.

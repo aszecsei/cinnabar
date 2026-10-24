@@ -10,6 +10,10 @@ Windows and D3D12 are the first targets. A later port must only add files to `co
 - **GPU backend:** the `gpu_backend` collection selects the backend at compile time. There is no runtime dispatch. See [GPU](gpu.md#packages).
 - **Rules:** `lib/engine` and games never import `core:sys/windows`, `vendor:directx` or any backend package. `lib/core/gpu/d3d12` is the only code that imports `vendor:directx`.
 
+## Input
+
+`core` translates the window's keyboard and mouse messages into `core.Input`: the keys and buttons that are down, the ones pressed or released since the previous frame, and the mouse position, delta and wheel. `Platform_API.input` gives the state at the start of the frame. A key that goes down and up within one frame is in both `pressed` and `released`. Losing focus releases every key. In shared mode the window is hidden, so the input is empty until the editor link sends input.
+
 ## Job system
 
 The job system in `lib/core/jobs` has one worker thread per core and a pool of fibers. Jobs wait on atomic counters. Job entry procedures can come from the game DLL.

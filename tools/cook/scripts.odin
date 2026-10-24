@@ -18,7 +18,7 @@ import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker compiles scripts changes this, which invalidates every cooked script.
-SCRIPT_COOK_VERSION :: "scripts 1"
+SCRIPT_COOK_VERSION :: "scripts 2"
 // The justfile passes the vendor/luau tag, so a Luau update cooks every script again.
 LUAU_VERSION :: #config(LUAU_VERSION, "unknown")
 SCRIPT_EXTENSION :: ".luau"
@@ -449,9 +449,11 @@ cooked_script_key :: proc(output: string) -> u64 {
 // compile_script compiles a script and writes its blob. The blob is written to a temporary file and renamed, so the
 // running game never reads a partial blob.
 compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string) -> bool {
+	mutable_globals := format.script_mutable_globals()
 	options := luau.Compile_Options {
 		optimizationLevel = config == .Dev ? 1 : 2,
 		debugLevel        = config == .Dev ? 2 : 1,
+		mutableGlobals    = &mutable_globals[0],
 	}
 	size: c.size_t
 	bytecode := luau.compile(raw_data(s.source), c.size_t(len(s.source)), &options, &size)

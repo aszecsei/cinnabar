@@ -1,7 +1,6 @@
 package script
 
 import "base:runtime"
-import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:testing"
@@ -51,10 +50,9 @@ teardown_modules :: proc(f: Module_Fixture) {
 add_script :: proc(t: ^testing.T, f: ^Module_Fixture, name, source: string, requires: []format.Require_Entry = nil) -> format.Guid {
 	f.next += 1
 	guid := format.Guid{0 = f.next}
-	size: c.size_t
-	bytecode := luau.compile(raw_data(source), c.size_t(len(source)), nil, &size)
-	defer luau.free_bytecode(bytecode)
-	blob := format.script_write({guid = guid, bytecode = bytecode[:size], requires = requires, source_path = name}, context.temp_allocator)
+	bytecode := compile(source)
+	defer luau.free_bytecode(raw_data(bytecode))
+	blob := format.script_write({guid = guid, bytecode = bytecode, requires = requires, source_path = name}, context.temp_allocator)
 	buffer: [32]u8
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer)), blob) == nil)
 	return guid

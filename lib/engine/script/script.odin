@@ -11,6 +11,8 @@ import "cinnabar:core"
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
 import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
 
 // The watchdog's limit for one resume (see docs/scripting.md#watchdog).
 DEFAULT_BUDGET :: 100 * time.Millisecond
@@ -23,12 +25,28 @@ Runtime :: struct {
 	bindings:     script_host.Bindings,
 	L:            ^luau.State,
 	budget:       time.Duration,
-	// Where script assets come from. It lives in Game_State too, so the pointer stays valid across reloads.
-	assets:       ^asset.Assets,
+	// The world and the assets live in Game_State too, so the pointers stay valid across reloads. Tests may leave
+	// them nil.
+	world:            ^ecs.World,
+	assets:           ^asset.Assets,
 	// A registry reference to the shared global table, which module environments read through to.
-	globals:      c.int,
-	modules:      [MAX_MODULES]Module,
-	module_count: int,
+	globals:          c.int,
+	modules:          [MAX_MODULES]Module,
+	module_count:     int,
+	// Registrations, which reload clears: the methods of each engine type, and the exposed components.
+	light_methods:    [Light_Tag]Type_Methods,
+	userdata_methods: [Userdata_Tag]Type_Methods,
+	exposed:          [MAX_EXPOSED]Exposed,
+	exposed_count:    int,
+	fields:           [MAX_FIELDS]Field,
+	field_count:      int,
+	// Registry references to the Time and Input tables, which begin_phase updates.
+	time_table:       c.int,
+	input_table:      c.int,
+	input:            core.Input,
+	frame:            u64,
+	// The script phase's structural changes, in frame memory. See end_phase.
+	commands:         ecs.Commands,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -50,10 +68,12 @@ Resume_Result :: enum u8 {
 	Failed,
 }
 
-// init opens the VM, defines the engine's and the game's bindings, and sandboxes the globals. Scripts load from
-// assets.
-init :: proc(r: ^Runtime, platform: ^core.Platform_API, assets: ^asset.Assets, register: Register_Proc) -> bool {
+// init opens the VM, defines the engine's and the game's bindings, and sandboxes the globals. Scripts see the world
+// and load from the assets. Register the world's components before init, because the game's Register_Proc exposes
+// them.
+init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, assets: ^asset.Assets, register: Register_Proc) -> bool {
 	r.platform = platform
+	r.world = world
 	r.assets = assets
 	r.budget = DEFAULT_BUDGET
 	r.module_count = 0
@@ -63,6 +83,10 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, assets: ^asset.Assets, r
 		log.error("script: cannot open the VM")
 		return false
 	}
+	// Values in the VM that a code reload keeps: the metatables hold dispatcher closures, which stay valid.
+	create_metatables(r)
+	create_frame_values(r)
+	create_math_values(r)
 	register_engine(r)
 	register(r)
 	luau.L_sandbox(r.L)
@@ -78,6 +102,10 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	r.platform = platform
 	r.bindings.ctx = context
 	script_host.clear(&r.bindings)
+	r.light_methods = {}
+	r.userdata_methods = {}
+	r.exposed_count = 0
+	r.field_count = 0
 	register_engine(r)
 	register(r)
 }
@@ -94,7 +122,16 @@ destroy :: proc(r: ^Runtime) {
 // bindings, but scripts cannot replace them.
 define :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
 	script_host.register(&r.bindings, name, procedure)
+	r.platform.script_push_binding(r.L, name)
+	set_path(r, name)
+}
+
+// set_path pops the value on top of the stack into the global with this name: "Key" or "Quaternion.identity". It
+// creates a missing library table, and works after the sandbox made the globals read-only.
+@(private)
+set_path :: proc(r: ^Runtime, name: string) {
 	L := r.L
+	value := luau.gettop(L)
 	luau.pushvalue(L, luau.GLOBALSINDEX)
 	field := name
 	if dot := strings.last_index_byte(name, '.'); dot >= 0 {
@@ -110,9 +147,9 @@ define :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
 		}
 		luau.remove(L, -2)
 	}
-	r.platform.script_push_binding(L, name)
+	luau.pushvalue(L, value)
 	set_field(L, -2, cstring_of(r, field))
-	luau.pop(L, 1)
+	luau.settop(L, value - 1)
 }
 
 // set_field sets t[k] to the value on top of the stack, and pops it. It works on a read-only table too.
@@ -125,7 +162,7 @@ set_field :: proc(L: ^luau.State, index: c.int, k: cstring) {
 	luau.setreadonly(L, t, readonly)
 }
 
-@(private = "file")
+@(private)
 cstring_of :: proc(r: ^Runtime, s: string) -> cstring {
 	return strings.clone_to_cstring(s, r.platform.frame_allocator)
 }
@@ -139,10 +176,9 @@ spawn_source :: proc(r: ^Runtime, chunkname, source: string) -> (thread: Thread,
 	luau.pop(L, 1)
 	luau.L_sandboxthread(co)
 
-	size: c.size_t
-	bytecode := luau.compile(raw_data(source), c.size_t(len(source)), nil, &size)
-	status := luau.load(co, cstring_of(r, chunkname), bytecode, size, 0)
-	luau.free_bytecode(bytecode)
+	bytecode := compile(source)
+	status := luau.load(co, cstring_of(r, chunkname), raw_data(bytecode), c.size_t(len(bytecode)), 0)
+	luau.free_bytecode(raw_data(bytecode))
 	if status != .OK {
 		log.errorf("script: %s", luau.toodinstring(co, -1))
 		release(r, thread)
@@ -153,6 +189,20 @@ spawn_source :: proc(r: ^Runtime, chunkname, source: string) -> (thread: Thread,
 		return 0, false
 	}
 	return thread, true
+}
+
+// compile compiles source with the settings that the engine's globals need. Release the result with
+// luau.free_bytecode. A failed compilation gives bytecode that luau.load reports as an error.
+compile :: proc(source: string) -> []byte {
+	mutable_globals := format.script_mutable_globals()
+	options := luau.Compile_Options {
+		optimizationLevel = 1,
+		debugLevel        = 2,
+		mutableGlobals    = &mutable_globals[0],
+	}
+	size: c.size_t
+	bytecode := luau.compile(raw_data(source), c.size_t(len(source)), &options, &size)
+	return bytecode[:size]
 }
 
 // resume runs a thread until it yields, returns or fails. A failure logs the error with a traceback. The watchdog
@@ -192,12 +242,121 @@ step :: proc(r: ^Runtime) {
 	luau.gc(r.L, .STEP, GC_STEP_KB)
 }
 
+// METAMETHODS are the bindings in the engine types' metatables. Each is registered by name, like any binding.
+@(private = "file")
+METAMETHODS :: [?]struct {
+	tag:       Userdata_Tag,
+	event:     cstring,
+	binding:   string,
+} {
+	{.World_Position, "__add", "WorldPosition.__add"},
+	{.World_Position, "__sub", "WorldPosition.__sub"},
+	{.World_Position, "__eq", "WorldPosition.__eq"},
+	{.World_Position, "__tostring", "WorldPosition.__tostring"},
+	{.World_Position, "__namecall", "Userdata.__namecall"},
+	{.Quaternion, "__mul", "Quaternion.__mul"},
+	{.Quaternion, "__eq", "Quaternion.__eq"},
+	{.Quaternion, "__index", "Quaternion.__index"},
+	{.Quaternion, "__tostring", "Quaternion.__tostring"},
+	{.Quaternion, "__namecall", "Userdata.__namecall"},
+	{.Component_Ref, "__index", "ComponentRef.__index"},
+	{.Component_Ref, "__newindex", "ComponentRef.__newindex"},
+	{.Component_Ref, "__eq", "ComponentRef.__eq"},
+	{.Component_Ref, "__tostring", "ComponentRef.__tostring"},
+}
+
+@(private = "file")
+USERDATA_NAMES := [Userdata_Tag]cstring {
+	.None           = "userdata",
+	.World_Position = "WorldPosition",
+	.Quaternion     = "Quaternion",
+	.Component_Ref  = "ComponentRef",
+}
+
+// create_metatables makes the metatables of the engine's types. Luau sets each only once, so init makes them, and a
+// code reload keeps them.
+@(private = "file")
+create_metatables :: proc(r: ^Runtime) {
+	L := r.L
+	luau.newtable(L)
+	for event in ([?][2]cstring{{"__index", "Light.__index"}, {"__namecall", "Light.__namecall"}, {"__tostring", "Light.__tostring"}}) {
+		r.platform.script_push_binding(L, string(event[1]))
+		luau.rawsetfield(L, -2, event[0])
+	}
+	luau.setreadonly(L, -1, true)
+	luau.pushlightuserdata(L, nil)
+	luau.pushvalue(L, -2)
+	luau.setmetatable(L, -2)
+	luau.pop(L, 2)
+	luau.setlightuserdataname(L, c.int(Light_Tag.Entity), "Entity")
+	luau.setlightuserdataname(L, c.int(Light_Tag.Component_Type), "ComponentType")
+
+	for tag in Userdata_Tag {
+		if tag == .None {
+			continue
+		}
+		luau.newtable(L)
+		luau.pushstring(L, USERDATA_NAMES[tag])
+		luau.rawsetfield(L, -2, "__type")
+		for m in METAMETHODS {
+			if m.tag == tag {
+				r.platform.script_push_binding(L, m.binding)
+				luau.rawsetfield(L, -2, m.event)
+			}
+		}
+		luau.setreadonly(L, -1, true)
+		luau.setuserdatametatable(L, c.int(tag))
+	}
+}
+
 @(private = "file")
 register_engine :: proc(r: ^Runtime) {
+	bind :: proc(r: ^Runtime, name: string, procedure: script_host.Binding_Proc) {
+		script_host.register(&r.bindings, name, procedure)
+	}
+	bind(r, "Light.__index", light_index)
+	bind(r, "Light.__namecall", light_namecall)
+	bind(r, "Light.__tostring", light_tostring)
+	bind(r, "Userdata.__namecall", userdata_namecall)
+	bind(r, "WorldPosition.__add", position_add)
+	bind(r, "WorldPosition.__sub", position_sub)
+	bind(r, "WorldPosition.__eq", position_eq)
+	bind(r, "WorldPosition.__tostring", position_tostring)
+	bind(r, "Quaternion.__mul", quaternion_mul)
+	bind(r, "Quaternion.__eq", quaternion_eq)
+	bind(r, "Quaternion.__index", quaternion_index)
+	bind(r, "Quaternion.__tostring", quaternion_tostring)
+	bind(r, "ComponentRef.__index", ref_index)
+	bind(r, "ComponentRef.__newindex", ref_newindex)
+	bind(r, "ComponentRef.__eq", ref_eq)
+	bind(r, "ComponentRef.__tostring", ref_tostring)
+
 	define(r, "require", require_binding)
 	define(r, "Debug.log", proc(L: ^luau.State) -> c.int {return log_binding(L, .Info)})
 	define(r, "Debug.warn", proc(L: ^luau.State) -> c.int {return log_binding(L, .Warning)})
 	define(r, "Debug.error", proc(L: ^luau.State) -> c.int {return log_binding(L, .Error)})
+	register_frame(r)
+	register_math(r)
+	if r.world != nil {
+		register_world(r)
+	}
+}
+
+// userdata_namecall is the __namecall of the engine's full userdata.
+@(private = "file")
+userdata_namecall :: proc(L: ^luau.State) -> c.int {
+	r := runtime_of(L)
+	atom: c.int
+	name := string(luau.namecallatom(L, &atom))
+	tag := Userdata_Tag(luau.userdatatag(L, 1))
+	if tag < min(Userdata_Tag) || tag > max(Userdata_Tag) {
+		raise(L, "this value has no methods")
+	}
+	procedure := find_method(&r.userdata_methods[tag], atom, name)
+	if procedure == nil {
+		raise(L, strings.concatenate({string(USERDATA_NAMES[tag]), " has no method ", name}, frame(r)))
+	}
+	return procedure(L)
 }
 
 // log_binding logs its arguments, separated by spaces, with the script's location.

@@ -71,33 +71,56 @@ The `interrupt` callback checks a deadline at loop back edges and calls. A scrip
 | `vector` | Built-in `vector`, 3 × `f32` | No | Unity's `Vector3`. Matches `[3]f32` exactly. |
 | `Entity` | Tagged light userdata, payload = the 64-bit handle | No | Equality is by value, so entities work as table keys. |
 | Component type | Tagged light userdata, payload = the component ID | No | The globals `Transform`, `Health` and so on |
-| Asset reference | Tagged light userdata, payload = the generational asset handle | No | |
-| `WorldPosition` | Tagged userdata, 24 bytes | Yes | Supports only `-` (gives a `vector`) and `+ vector`. See [World](world.md#where-positions-go). |
-| `Quaternion` | Tagged userdata, 16 bytes | Yes | `q * q`, `q * v`, `Quaternion.euler`, `Quaternion.look_rotation` |
+| Asset reference | Tagged light userdata, payload = the generational asset handle | No | *Not yet: with asset fields in phase 4.* |
+| `WorldPosition` | Tagged userdata, 24 bytes | Yes | `a - b` gives a `vector`, and `p + v`, `v + p` and `p - v` give a `WorldPosition`. See [World](world.md#where-positions-go). |
+| `Quaternion` | Tagged userdata, 16 bytes | Yes | `q * q`, `q * v` |
 | Component reference | Tagged userdata: entity handle and component ID | Yes | The result of `entity:get(Health)` |
 | Behaviour instance | Table with the class as its metatable | Yes | The result of `entity:get(Door)` |
 
-- All light userdata share one metatable in Luau. Its trampolines dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`.
+- All light userdata share one metatable in Luau. Its metamethods dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`. `typeof` gives `Entity`, `ComponentType`, `WorldPosition`, `Quaternion` and `ComponentRef`.
 - Userdata tags and light userdata tags are engine constants. They never depend on registration order.
+- Luau sets each metatable only once, so `init` makes them, and a code reload keeps them. Their metamethods are dispatcher closures, so they reach the new DLL's bindings.
+- `WorldPosition` and `Quaternion` values are immutable, so scripts can share them, as `Quaternion.identity` and `WorldPosition.origin` are shared.
+
+### Globals that change
+
+In a sandbox, `luau_load` resolves a chain such as `Time.delta` once, and keeps the value. A field that changes after the script loads would look frozen. The compiler's `mutableGlobals` option turns this off for the globals that `format.script_mutable_globals` lists, `Time` and `Input`, so their fields are read each time the code runs. The cooker and `script.compile` both pass the list. A new global whose fields change must go in it.
 - Entity handles are value types, so a script never sees a stale object. `entity:is_alive()` checks the generation. Any other use of a dead entity raises an error, like Unity's `MissingReferenceException`.
 
 ## The entity and component view
 
 - `entity:get(T)` returns a component reference for a native component type, or the instance for a behaviour class. It returns `nil` if the entity does not have it. `entity:has(T)` does not allocate.
 - **A component reference holds no pointer.** Each field access looks up the entity's row again, because storage moves when components are added or removed. A reference to a removed component raises an error.
-- **Fields come from Odin type info.** The game exposes a native component with `script.expose(bindings, Health)`. Registration walks the struct's fields and maps each supported field type: numbers, `bool`, enums (as strings), `[3]f32` (as `vector`), `quaternion128`, `World_Position`, `Entity` and asset handles. Other fields are hidden from scripts. The struct tag `script:"read"` makes a field read-only, and `script:"-"` hides it.
+- **Fields come from Odin type info.** The game exposes a native component with `script.expose(r, Health)` in its `Register_Proc`, or `script.expose(r, Health, default)` to give `entity:add` a starting value other than zero. The component must already be registered with the world. Registration walks the struct's fields and maps each supported field type: numbers, `bool`, enums (as strings), `[3]f32` (as `vector`), `quaternion128`, `World_Position` and `Entity`. Other fields are hidden from scripts. The struct tag `script:"read"` makes a field read-only, and `script:"-"` hides it. A value of the wrong type raises an error. The engine exposes `Transform`, `LocalTransform` and `Parent`.
 - **Names:** the script name of a type is its Odin name without underscores (`Local_Transform` becomes `LocalTransform`). Field and method names are snake_case, the same as the Odin fields that they come from.
 - **Writes are immediate.** The script phase is serial, so a field write goes straight to storage. A write that affects the simulation takes effect at the next fixed tick.
-- **`entity.transform`** is a reference with Unity's properties: `position` (`WorldPosition`), `rotation`, `scale`, and `local_position`, `local_rotation` and `local_scale` for children. Setting `position` on a child computes its `Local_Transform` from the parent. `teleport` sets the pose without interpolation (see [World](world.md#fixed-and-variable-rate)).
+- **`entity.transform`** is a reference with Unity's properties: `position` (`WorldPosition`), `rotation`, `scale`, `local_position`, `local_rotation` and `local_scale` for children, and the read-only axes `forward` (+Z), `up` (+Y) and `right` (+X), as in Unity. Setting `position`, `rotation` or `scale` on a child computes its `Local_Transform` from the parent, so the pose stays after propagation. Setting a local field updates the world pose at once.
+- **Entity methods:** `get`, `has`, `add`, `remove`, `destroy`, `is_alive`, `teleport(position, rotation?)` (no interpolation, see [World](world.md#fixed-and-variable-rate)), `offset_to(other)` and `move(v)`, which do not allocate a `WorldPosition`, and `set_parent(parent)`, which keeps the world pose, like Unity's `SetParent`. `entity.parent` is the parent or `nil`. `add` and `remove` refuse `Parent` and `LocalTransform`: `set_parent` keeps the two consistent.
 
 ### Structural changes
 
 Scripts change the world structure **immediately**, except for despawns. The script phase is serial, and no job reads the world while it runs.
 
-- `World.spawn(prefab, position?, rotation?)` creates the entity and its components at once and returns its handle. Its behaviours get `awake` before `spawn` returns, as in Unity's `Instantiate`.
-- `entity:add(T, value?)` and `entity:remove(T)` take effect at once.
+- `World.spawn(position?, rotation?)` creates an entity with a `Transform` at once and returns its handle. With prefabs, `World.spawn(prefab, position?, rotation?)` will create the prefab's components, and its behaviours will get `awake` before `spawn` returns, as in Unity's `Instantiate`.
+- `entity:add(T, values?)` and `entity:remove(T)` take effect at once. `values` is a table of field values, and `add` returns the component.
 - `entity:destroy()` is deferred to the end of the script phase, as in Unity's `Destroy`. It goes into the script command buffer, which phase 6 of the frame applies.
-- `World.query(T, ...)` collects the matching entity handles before the loop starts. Structural changes inside the loop are therefore safe. A query from a script costs a full scan, so performance-critical work belongs in a native system.
+- `World.query(T, ...)` returns an array of the matching entities, collected before the loop starts. Structural changes inside the loop are therefore safe. A query from a script scans every archetype, so performance-critical work belongs in a native system.
+
+## Engine libraries
+
+| Global | Contents |
+|---|---|
+| `World` | `spawn`, `query` |
+| `Quaternion` | `identity`, `new(x, y, z, w)`, `euler(degrees)`, `angle_axis(degrees, axis)`, `look_rotation(forward, up?)`, `slerp`, `angle`, `rotate_towards(from, to, max_degrees)`. Methods: `inverse`, `normalized`, `euler`, `approx`, `angle_to`, `rotate_towards`, `slerp`. Fields `x`, `y`, `z`, `w`. |
+| `WorldPosition` | `origin`, `from_meters(x, y, z)` (for authoring), `lerp`. Methods: `lerp`, `to_meters` (for display). |
+| `Time` | `delta` (the frame), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction) |
+| `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
+| `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
+| `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
+
+- **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
+- `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
+- An arithmetic result outside the world (±2^38 m) raises an error.
 
 ## Behaviours
 
@@ -192,6 +215,8 @@ Unity has two switches, and so does cinnabar:
 
 ## Frame
 
+The game runs the script phase with `script.begin_phase(r, dt, platform.input())`, then resumes and calls scripts, then applies `script.end_phase(r)`'s commands with `ecs.apply`. `begin_phase` sets `Time` and `Input`, and `end_phase` runs the collector's step and returns the script phase's structural changes.
+
 The script phase (phase 5 in [Frame](architecture.md#frame)) runs in Unity's order:
 
 1. Drain the despawn log: `on_disable`, then `on_destroy`.
@@ -253,7 +278,7 @@ A module marked `--!native`, or with `native = true` in its `.meta`, is compiled
 | `Quaternion` | `Quaternion` |
 | `Mathf` | `math` and the `vector` library |
 | `Time.deltaTime`, `Time.time` | `Time.delta`, `Time.time` |
-| `Input.GetKey`, `GetKeyDown` | `Input.is_down`, `Input.was_pressed` |
+| `Input.GetKey(KeyCode.Space)`, `GetKeyDown` | `Input.is_down(Key.Space)`, `Input.was_pressed` |
 | `Debug.Log`, `Debug.DrawLine` | `Debug.log`, `Debug.draw_line` |
 | `Random` | `Random`, seeded per world |
 | `StartCoroutine`, `yield return new WaitForSeconds(t)` | `self:start_coroutine(fn)`, `wait(t)` |
@@ -268,7 +293,7 @@ A module marked `--!native`, or with `native = true` in its `.meta`, is compiled
 
 1. **VM:** build Luau with the justfile, `lib/core/luau`, `script_open` with the host allocator and trampolines, and the binding registry. A test script survives a code reload with a suspended coroutine.
 2. **Script assets:** GUIDs and `.meta` files, the `Loose_Cache` source, `cook scripts`, and `require`. The host polls the cache until the cook daemon exists.
-3. **World view:** `Entity`, component references, `vector`, `Quaternion`, `WorldPosition`, `Time`, `Input`, `Debug`.
+3. **World view:** `Entity`, component references, `vector`, `Quaternion`, `WorldPosition`, `Time`, `Input`, `Debug`, and platform input in `core`.
 4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler and the despawn log.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
 6. **Script hot reload.**

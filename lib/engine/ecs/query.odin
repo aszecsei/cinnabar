@@ -1,6 +1,7 @@
 package ecs
 
 import "core:log"
+import "core:slice"
 
 MAX_QUERIES :: 256
 MAX_QUERY_TERMS :: 12
@@ -104,6 +105,23 @@ query :: proc(w: ^World, terms: []Term) -> Query {
 		match_archetype(w, index, a)
 	}
 	return Query(index + 1)
+}
+
+// collect appends every entity that has all the components to out, in archetype order. It scans every archetype,
+// so it is for occasional lookups, such as scripts' World.query, not for systems.
+collect :: proc(w: ^World, ids: []Component_Id, out: ^[dynamic]Entity) {
+	outer: for index in 0 ..< w.archetype_count {
+		a := archetype(w, index)
+		components := archetype_components(a)
+		for id in ids {
+			if _, found := slice.binary_search(components, id); !found {
+				continue outer
+			}
+		}
+		for row in 0 ..< a.count {
+			append(out, entity_at(w, index, row)^)
+		}
+	}
 }
 
 // query_iter iterates over count chunks of the results, from chunk first. Jobs can split the results into ranges

@@ -321,7 +321,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	spawn_scene(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
-	if !script.init(&s.scripts, platform, &s.assets, register_scripts) {
+	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
 	}
 	if hello, ok := format.meta_guid(HELLO_META); ok {
@@ -366,8 +366,10 @@ spawn_scene :: proc(s: ^Game_State) {
 	}
 }
 
-// register_scripts defines the game's script bindings. init and on_reload call it.
+// register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
 register_scripts :: proc(r: ^script.Runtime) {
+	script.expose(r, Spin)
+	script.expose(r, Triangle)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -402,12 +404,13 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 
 	ecs.run_fixed(&s.world, dt, s)
 	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase. Until behaviours exist, it resumes the one script coroutine.
+	// The script phase and its structural changes. Until behaviours exist, it resumes the one script coroutine.
+	script.begin_phase(&s.scripts, dt, s.platform.input())
 	if s.hello_running && script.resume(&s.scripts, s.hello) != .Yielded {
 		script.release(&s.scripts, s.hello)
 		s.hello_running = false
 	}
-	script.step(&s.scripts)
+	ecs.apply(&s.world, script.end_phase(&s.scripts))
 	ecs.run_stage(&s.world, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {

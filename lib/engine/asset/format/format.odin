@@ -112,6 +112,14 @@ meta_guid :: proc(text: string) -> (Guid, bool) {
 	return meta.guid, ok
 }
 
+// script_mutable_globals lists the engine globals whose fields change while scripts run, such as Time.delta. In a
+// sandbox, luau_load resolves a chain like Time.delta once and keeps the value, so every call of luau.compile passes
+// these as mutableGlobals, which turns that off for them. The list ends with nil, as the compiler expects. Keep it in
+// a local while the compiler runs.
+script_mutable_globals :: proc "contextless" () -> [3]cstring {
+	return {"Time", "Input", nil}
+}
+
 // "CNB1" in a little-endian u32.
 BLOB_MAGIC :: 0x31424e43
 // The runtime loads blobs at this alignment, so every structure in a blob is aligned to it at most.

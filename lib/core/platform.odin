@@ -83,6 +83,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		memory_commit                = memory_commit,
 		memory_release               = memory_release,
 		time_seconds                 = time_seconds,
+		input                        = _window_input,
 		file_read                    = file_read,
 		file_modified                = file_modified,
 		window_size                  = window_size,
