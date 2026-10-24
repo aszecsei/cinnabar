@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 import "core:time"
@@ -103,12 +103,12 @@ System :: struct {
 register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 	s := &w.schedule
 	if s.count == MAX_SYSTEMS || len(desc.after) > MAX_SYSTEM_AFTER || desc.procedure == nil {
-		log.errorf("world: cannot register system %s", desc.name)
+		log.errorf("ecs: cannot register system %s", desc.name)
 		return false
 	}
 	for &other in s.systems[:s.count] {
 		if other.name == desc.name {
-			log.errorf("world: system %s is registered twice", desc.name)
+			log.errorf("ecs: system %s is registered twice", desc.name)
 			return false
 		}
 	}
@@ -155,7 +155,7 @@ run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> (ticks: int) {
 	c.time += dt
 	for tick_start(c, c.tick + 1) <= c.time {
 		if ticks == MAX_TICKS_PER_FRAME {
-			log.warnf("world: the simulation is behind, so it dropped %v", c.time - tick_start(c, c.tick))
+			log.warnf("ecs: the simulation is behind, so it dropped %v", c.time - tick_start(c, c.tick))
 			c.time = tick_start(c, c.tick)
 			break
 		}
@@ -172,7 +172,7 @@ run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> (ticks: int) {
 
 // run_stage runs the Update or Late systems and applies their commands. After Late, it propagates transforms.
 run_stage :: proc(w: ^World, stage: Stage, dt: time.Duration, user: rawptr) {
-	assert(stage != .Fixed, "world: run the Fixed stage with run_fixed")
+	assert(stage != .Fixed, "ecs: run the Fixed stage with run_fixed")
 	run_systems(w, stage, f32(time.duration_seconds(dt)), user, false)
 	if stage == .Late {
 		propagate(w)
@@ -358,7 +358,7 @@ build_schedule :: proc(w: ^World) -> bool {
 				}
 			}
 			if after[i][a] < 0 {
-				log.errorf("world: system %s runs after %s, which is not in its stage", sys.name, name)
+				log.errorf("ecs: system %s runs after %s, which is not in its stage", sys.name, name)
 				return false
 			}
 		}
@@ -389,7 +389,7 @@ build_schedule :: proc(w: ^World) -> bool {
 				break
 			}
 			if next < 0 {
-				log.errorf("world: the after lists of the %v systems form a cycle", stage)
+				log.errorf("ecs: the after lists of the %v systems form a cycle", stage)
 				return false
 			}
 			placed[next] = true
@@ -439,7 +439,7 @@ overlaps :: proc(a, b: []Component_Id) -> bool {
 @(private = "file")
 add_access :: proc(list: ^[MAX_SYSTEM_ACCESS]Component_Id, count: ^int, id: Component_Id) -> bool {
 	if count^ == MAX_SYSTEM_ACCESS {
-		log.errorf("world: a system has more than %d accesses", MAX_SYSTEM_ACCESS)
+		log.errorf("ecs: a system has more than %d accesses", MAX_SYSTEM_ACCESS)
 		return false
 	}
 	list[count^] = id

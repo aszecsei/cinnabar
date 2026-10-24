@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 import "core:mem"
@@ -56,7 +56,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity))
 	w.chunks.free_head = NO_CHUNK
 	if !ok || find_or_create_archetype(w, {}) != EMPTY_ARCHETYPE {
-		log.error("world: cannot reserve storage")
+		log.error("ecs: cannot reserve storage")
 		destroy(w)
 		return false
 	}

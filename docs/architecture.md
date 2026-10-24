@@ -110,7 +110,7 @@ One frame runs these phases in order:
 
 ## World model
 
-All world data lives in a native ECS in `lib/engine/world`. Native systems run on the job system, at a fixed tick rate or once per frame. World positions are fixed-point. Scripts see an object-style API on top of the ECS: entity handles, component access through those handles, and behaviour components that hold script objects.
+All world data lives in a native ECS in `lib/engine/ecs`. Native systems run on the job system, at a fixed tick rate or once per frame. World positions are fixed-point. Scripts see an object-style API on top of the ECS: entity handles, component access through those handles, and behaviour components that hold script objects.
 
 Component types have stable IDs. Cooked scenes, the editor link and scripts all identify component types by these IDs.
 

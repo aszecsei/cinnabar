@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "base:runtime"
 import "core:hash"
@@ -55,17 +55,17 @@ register_component :: proc(r: ^Registry, $T: typeid, id := Component_Id(0)) -> C
 		}
 	}
 	if component == 0 {
-		log.panicf("world: component type %v has no name, so it needs an explicit ID", typeid_of(T))
+		log.panicf("ecs: component type %v has no name, so it needs an explicit ID", typeid_of(T))
 	}
 	if size_of(T) > MAX_COMPONENT_SIZE || align_of(T) > MAX_COMPONENT_ALIGN {
-		log.panicf("world: component %s is too large or too aligned", name)
+		log.panicf("ecs: component %s is too large or too aligned", name)
 	}
 	if r.count == MAX_COMPONENTS {
-		log.panicf("world: more than %d component types", MAX_COMPONENTS)
+		log.panicf("ecs: more than %d component types", MAX_COMPONENTS)
 	}
 	for info in r.infos[:r.count] {
 		if info.id == component || info.type == T {
-			log.panicf("world: component %s conflicts with %s", name, info.name)
+			log.panicf("ecs: component %s conflicts with %s", name, info.name)
 		}
 	}
 	r.infos[r.count] = {

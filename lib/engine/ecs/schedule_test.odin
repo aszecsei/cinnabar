@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 import "core:sync"

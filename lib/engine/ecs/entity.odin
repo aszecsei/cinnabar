@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:sync"
 
@@ -108,7 +108,7 @@ despawn_one :: proc(w: ^World, e: Entity) -> bool {
 	record.generation += 1
 	es := &w.entities
 	if !region_commit(&es.free, w.platform, int(es.free_count + 1) * size_of(u32)) {
-		panic("world: cannot commit the free list")
+		panic("ecs: cannot commit the free list")
 	}
 	free_list(w)[es.free_count] = entity_index(e)
 	es.free_count += 1
@@ -187,7 +187,7 @@ flush_reserved :: proc(w: ^World) {
 		es.free_count = 0
 		fresh := u32(min(-cursor, MAX_ENTITIES - i64(es.count)))
 		if !region_commit(&es.records, w.platform, int(es.count + fresh) * size_of(Entity_Record)) {
-			panic("world: cannot commit entity records")
+			panic("ecs: cannot commit entity records")
 		}
 		for index in es.count ..< es.count + fresh {
 			records(w)[index].generation = 1

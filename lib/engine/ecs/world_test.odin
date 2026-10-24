@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 import "core:mem/virtual"
@@ -234,7 +234,7 @@ columns_fit_in_a_chunk :: proc(t: ^testing.T) {
 @(test)
 registry_ids_are_stable :: proc(t: ^testing.T) {
 	r: Registry
-	testing.expect_value(t, register_component(&r, Health), component_id("world.Health"))
+	testing.expect_value(t, register_component(&r, Health), component_id("ecs.Health"))
 	testing.expect_value(t, register_component(&r, Velocity, 42), Component_Id(42))
 	testing.expect_value(t, registry_find(&r, 42).type, typeid_of(Velocity))
 

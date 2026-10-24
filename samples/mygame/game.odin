@@ -12,7 +12,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
 import "cinnabar:engine/render"
-import "cinnabar:engine/world"
+import "cinnabar:engine/ecs"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
 TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
@@ -191,10 +191,10 @@ Game_State :: struct {
 	nearest:     gpu.Sampler,
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
-	scene:       world.World,
-	camera:      world.Entity,
+	world:       ecs.World,
+	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
-	triangles:   world.Query,
+	triangles:   ecs.Query,
 }
 
 Pipelines :: struct {
@@ -300,7 +300,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
 
-	if !world.init(&s.scene, platform) {
+	if !ecs.init(&s.world, platform) {
 		log.panic("mygame: cannot create the world")
 	}
 	register_world(s)
@@ -310,52 +310,52 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 
 // register_components registers every component type. init and on_reload call it on the world's registry, and
 // layout_hash on its own, so a component change restarts the game.
-register_components :: proc(r: ^world.Registry) {
-	world.register_engine_components(r)
-	world.register_component(r, Spin)
-	world.register_component(r, Triangle)
+register_components :: proc(r: ^ecs.Registry) {
+	ecs.register_engine_components(r)
+	ecs.register_component(r, Spin)
+	ecs.register_component(r, Triangle)
 }
 
 // register_world makes the world's registrations: components, systems and queries.
 register_world :: proc(s: ^Game_State) {
-	w := &s.scene
+	w := &s.world
 	register_components(&w.registry)
-	world.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {world.write(w, world.Transform), world.read(w, Spin)}})
-	s.triangles = world.query(
+	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
+	s.triangles = ecs.query(
 		w,
 		{
-			world.read(w, world.Transform),
-			world.optional(world.read(w, world.Previous_Transform)),
-			world.read(w, Triangle),
+			ecs.read(w, ecs.Transform),
+			ecs.optional(ecs.read(w, ecs.Previous_Transform)),
+			ecs.read(w, Triangle),
 		},
 	)
 }
 
 // spawn_scene places the camera and the large triangles at SCENE_ORIGIN.
 spawn_scene :: proc(s: ^Game_State) {
-	w := &s.scene
-	origin := world.position_from_meters(SCENE_ORIGIN)
-	s.camera = world.spawn(w)
-	world.add(w, s.camera, world.Transform{position = origin, rotation = 1, scale = 1})
+	w := &s.world
+	origin := ecs.position_from_meters(SCENE_ORIGIN)
+	s.camera = ecs.spawn(w)
+	ecs.add(w, s.camera, ecs.Transform{position = origin, rotation = 1, scale = 1})
 	for t, i in TRIANGLE_INSTANCES {
-		pose := world.Transform {
-			position = world.position_offset(origin, {0, 0, t.depth}),
+		pose := ecs.Transform {
+			position = ecs.position_offset(origin, {0, 0, t.depth}),
 			rotation = 1,
 			scale    = t.scale,
 		}
-		e := world.spawn(w)
-		world.add(w, e, pose)
-		world.add(w, e, world.Previous_Transform(pose))
-		world.add(w, e, Spin{t.speed})
-		world.add(w, e, Triangle{u32(i), t.brightness})
+		e := ecs.spawn(w)
+		ecs.add(w, e, pose)
+		ecs.add(w, e, ecs.Previous_Transform(pose))
+		ecs.add(w, e, Spin{t.speed})
+		ecs.add(w, e, Triangle{u32(i), t.brightness})
 	}
 }
 
-spin :: proc(ctx: ^world.System_Context) {
-	it := world.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
-	for view in world.query_next(&it) {
-		spins := world.column(view, 1, Spin)
-		for &pose, i in world.column(view, 0, world.Transform) {
+spin :: proc(ctx: ^ecs.System_Context) {
+	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
+	for view in ecs.query_next(&it) {
+		spins := ecs.column(view, 1, Spin)
+		for &pose, i in ecs.column(view, 0, ecs.Transform) {
 			turn := linalg.quaternion_angle_axis_f32(spins[i].speed * ctx.dt, {0, 0, 1})
 			pose.rotation = linalg.normalize(turn * pose.rotation)
 		}
@@ -367,10 +367,10 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s.frame_count += 1
 	s.elapsed += dt
 
-	world.run_fixed(&s.scene, dt, s)
-	world.run_stage(&s.scene, .Update, dt, s)
+	ecs.run_fixed(&s.world, dt, s)
+	ecs.run_stage(&s.world, .Update, dt, s)
 	// The script phase and its apply go here once scripts exist.
-	world.run_stage(&s.scene, .Late, dt, s)
+	ecs.run_stage(&s.world, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {
 		s.next_report += time.Second
@@ -505,22 +505,22 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 // for the scene pass and the acceleration structure.
 extract_triangles :: proc(frame: ^Frame) {
 	s := frame.state
-	w := &s.scene
+	w := &s.world
 	triangles, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(Triangle_Instance), 16)
 	if !ok {
 		return
 	}
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:len(TRIANGLE_INSTANCES)]
-	camera, _ := world.presented(w, s.camera)
+	camera, _ := ecs.presented(w, s.camera)
 
-	it := world.query_iter(w, s.triangles)
-	for view in world.query_next(&it) {
-		previous := world.column(view, 1, world.Previous_Transform)
-		info := world.column(view, 2, Triangle)
-		for current, i in world.column(view, 0, world.Transform) {
+	it := ecs.query_iter(w, s.triangles)
+	for view in ecs.query_next(&it) {
+		previous := ecs.column(view, 1, ecs.Previous_Transform)
+		info := ecs.column(view, 2, Triangle)
+		for current, i in ecs.column(view, 0, ecs.Transform) {
 			pose := current
 			if previous != nil {
-				pose = world.interpolate(world.Transform(previous[i]), current, w.clock.alpha)
+				pose = ecs.interpolate(ecs.Transform(previous[i]), current, w.clock.alpha)
 			}
 			instances[info[i].instance] = {
 				rows       = camera_relative(pose, camera.position),
@@ -533,9 +533,9 @@ extract_triangles :: proc(frame: ^Frame) {
 
 // camera_relative is a pose as the rows of a 3x4 matrix, relative to the camera's position. Only the difference of
 // two world positions reaches the GPU, so it is small and precise however far the scene is from the origin.
-camera_relative :: proc(pose: world.Transform, camera: world.World_Position) -> (rows: [3][4]f32) {
+camera_relative :: proc(pose: ecs.Transform, camera: ecs.World_Position) -> (rows: [3][4]f32) {
 	m := linalg.matrix3_from_quaternion_f32(pose.rotation)
-	offset := world.position_sub(pose.position, camera)
+	offset := ecs.position_sub(pose.position, camera)
 	for r in 0 ..< 3 {
 		rows[r] = {m[r, 0] * pose.scale.x, m[r, 1] * pose.scale.y, m[r, 2] * pose.scale.z, offset[r]}
 	}
@@ -720,7 +720,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
-	world.destroy(&s.scene)
+	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
 	destroy_pipelines(s.platform, s.pipelines)
 	s.platform.gpu_destroy_sampler(s.linear)
@@ -743,7 +743,7 @@ shutdown :: proc(state: rawptr) {
 on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
-	world.reload(&s.scene, platform)
+	ecs.reload(&s.world, platform)
 	register_world(s)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
@@ -883,9 +883,9 @@ state_size :: proc() -> int {
 // layout_hash covers the component layouts too: the world stores components as bytes, so Game_State's own layout
 // does not show them.
 layout_hash :: proc() -> u64 {
-	components: world.Registry
+	components: ecs.Registry
 	register_components(&components)
-	hashes := [2]u64{layout.hash(Game_State), world.registry_layout_hash(&components)}
+	hashes := [2]u64{layout.hash(Game_State), ecs.registry_layout_hash(&components)}
 	return hash.fnv64a(slice.to_bytes(hashes[:]))
 }
 

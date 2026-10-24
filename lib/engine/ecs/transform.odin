@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 import "core:math/linalg"
@@ -181,7 +181,7 @@ rebuild_hierarchy :: proc(w: ^World) {
 		}
 	}
 	if !region_commit(&w.hierarchy, w.platform, count * size_of(Entity)) {
-		panic("world: cannot commit the hierarchy")
+		panic("ecs: cannot commit the hierarchy")
 	}
 
 	found := make([]Entity, count, w.platform.frame_allocator)
@@ -197,7 +197,7 @@ rebuild_hierarchy :: proc(w: ^World) {
 			e := entity_at(w, index, row)^
 			depth := hierarchy_depth(w, e)
 			if depth < 0 {
-				log.errorf("world: the hierarchy above entity %x is a cycle or deeper than %d", u64(e), MAX_HIERARCHY_DEPTH)
+				log.errorf("ecs: the hierarchy above entity %x is a cycle or deeper than %d", u64(e), MAX_HIERARCHY_DEPTH)
 			}
 			// A child whose parent is not alive has depth 0. It is despawned at the next apply, and until then
 			// propagation leaves it alone.

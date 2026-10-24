@@ -1,5 +1,5 @@
-// Package world is the native ECS: entities, components, systems and fixed-point positions. See docs/world.md.
-package world
+// Package ecs is the native ECS: entities, components, systems and fixed-point positions. See docs/world.md.
+package ecs
 
 import "core:math"
 
@@ -30,9 +30,9 @@ position_offset :: proc(p: World_Position, delta: [3]f32) -> World_Position {
 		// The scale is a power of two, so the product is exact.
 		step := math.round(delta[i] * POSITION_SCALE)
 		// This also rejects NaN.
-		assert(abs(step) < f32(POSITION_LIMIT), "world: position delta out of range")
+		assert(abs(step) < f32(POSITION_LIMIT), "ecs: position delta out of range")
 		result.raw[i] += i64(step)
-		assert(abs(result.raw[i]) <= POSITION_LIMIT, "world: position out of range")
+		assert(abs(result.raw[i]) <= POSITION_LIMIT, "ecs: position out of range")
 	}
 	return result
 }
@@ -50,7 +50,7 @@ position_from_meters :: proc(meters: [3]f64) -> World_Position {
 	result: World_Position
 	for i in 0 ..< 3 {
 		raw := math.round(meters[i] * f64(POSITION_SCALE))
-		assert(abs(raw) <= f64(POSITION_LIMIT), "world: position out of range")
+		assert(abs(raw) <= f64(POSITION_LIMIT), "ecs: position out of range")
 		result.raw[i] = i64(raw)
 	}
 	return result

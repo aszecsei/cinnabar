@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:hash"
 import "core:log"
@@ -70,7 +70,7 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if !found {
 		n := int(a.component_count)
 		if n == MAX_ARCHETYPE_COMPONENTS {
-			log.errorf("world: an entity cannot have more than %d components", MAX_ARCHETYPE_COMPONENTS)
+			log.errorf("ecs: an entity cannot have more than %d components", MAX_ARCHETYPE_COMPONENTS)
 			return false
 		}
 		ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
@@ -89,7 +89,7 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if data == nil {
 		mem.zero(ptr, size)
 	} else {
-		assert(len(data) == size, "world: component data has the wrong size")
+		assert(len(data) == size, "ecs: component data has the wrong size")
 		mem.copy(ptr, raw_data(data), size)
 	}
 	return true
@@ -143,7 +143,7 @@ add :: proc(w: ^World, e: Entity, value: $T) -> bool {
 	value := value
 	info := registry_find_type(&w.registry, T)
 	if info == nil {
-		log.errorf("world: component %v is not registered", typeid_of(T))
+		log.errorf("ecs: component %v is not registered", typeid_of(T))
 		return false
 	}
 	return add_raw(w, e, info.id, mem.ptr_to_bytes(&value))
@@ -185,7 +185,7 @@ find_or_create_archetype :: proc(w: ^World, ids: []Component_Id) -> u32 {
 	}
 
 	if w.archetype_count == MAX_ARCHETYPES {
-		log.errorf("world: more than %d archetypes", MAX_ARCHETYPES)
+		log.errorf("ecs: more than %d archetypes", MAX_ARCHETYPES)
 		return NO_ARCHETYPE
 	}
 	created := Archetype {
@@ -197,7 +197,7 @@ find_or_create_archetype :: proc(w: ^World, ids: []Component_Id) -> u32 {
 	for id, i in ids {
 		info := registry_find(&w.registry, id)
 		if info == nil {
-			log.errorf("world: component %x is not registered", u64(id))
+			log.errorf("ecs: component %x is not registered", u64(id))
 			return NO_ARCHETYPE
 		}
 		created.ids[i] = id
@@ -211,14 +211,14 @@ find_or_create_archetype :: proc(w: ^World, ids: []Component_Id) -> u32 {
 		capacity -= 1
 	}
 	if capacity == 0 {
-		log.errorf("world: the components of an archetype do not fit in a chunk")
+		log.errorf("ecs: the components of an archetype do not fit in a chunk")
 		return NO_ARCHETYPE
 	}
 	created.capacity = u32(capacity)
 
 	index := w.archetype_count
 	if !region_commit(&w.archetypes, w.platform, int(index + 1) * size_of(Archetype)) {
-		log.error("world: cannot commit an archetype")
+		log.error("ecs: cannot commit an archetype")
 		return NO_ARCHETYPE
 	}
 	archetype(w, index)^ = created
@@ -270,12 +270,12 @@ push_row :: proc(w: ^World, index: u32, e: Entity) -> u32 {
 	a := archetype(w, index)
 	if a.count == a.chunk_count * a.capacity {
 		if a.chunk_count == MAX_ARCHETYPE_CHUNKS {
-			log.panicf("world: an archetype has more than %d chunks", MAX_ARCHETYPE_CHUNKS)
+			log.panicf("ecs: an archetype has more than %d chunks", MAX_ARCHETYPE_CHUNKS)
 		}
 		directory := chunk_directory(w, index)
 		if a.chunk_count * size_of(u32) % DIRECTORY_PAGE == 0 &&
 		   !w.platform.memory_commit(&directory[a.chunk_count], DIRECTORY_PAGE) {
-			panic("world: cannot commit a chunk directory")
+			panic("ecs: cannot commit a chunk directory")
 		}
 		directory[a.chunk_count] = chunk_alloc(w)
 		a.chunk_count += 1
@@ -335,7 +335,7 @@ chunk_alloc :: proc(w: ^World) -> u32 {
 		return chunk
 	}
 	if pool.used == MAX_CHUNKS || !region_commit(&pool.memory, w.platform, int(pool.used + 1) * CHUNK_SIZE) {
-		panic("world: out of chunk memory")
+		panic("ecs: out of chunk memory")
 	}
 	pool.used += 1
 	return pool.used - 1

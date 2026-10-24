@@ -15,7 +15,7 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render lib/engine/world src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render lib/engine/ecs src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -164,7 +164,7 @@ fmt:
 # =================================
 
 test:
-    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render lib/engine/world tools/cook; do odin test "$p" {{collections}} || exit 1; done
+    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render lib/engine/ecs tools/cook; do odin test "$p" {{collections}} || exit 1; done
 
 # =================================
 # Cleanup

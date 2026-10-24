@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:log"
 
@@ -79,18 +79,18 @@ optional :: proc(term: Term) -> Term {
 // query creates a query. It returns nil if a term's component is not registered.
 query :: proc(w: ^World, terms: []Term) -> Query {
 	if len(terms) > MAX_QUERY_TERMS {
-		log.errorf("world: a query has more than %d terms", MAX_QUERY_TERMS)
+		log.errorf("ecs: a query has more than %d terms", MAX_QUERY_TERMS)
 		return 0
 	}
 	for term in terms {
 		if registry_find(&w.registry, term.id) == nil {
-			log.errorf("world: query component %x is not registered", u64(term.id))
+			log.errorf("ecs: query component %x is not registered", u64(term.id))
 			return 0
 		}
 	}
 	if w.query_count == MAX_QUERIES ||
 	   !region_commit(&w.queries, w.platform, int(w.query_count + 1) * size_of(Query_State)) {
-		log.errorf("world: cannot create more than %d queries", w.query_count)
+		log.errorf("ecs: cannot create more than %d queries", w.query_count)
 		return 0
 	}
 	index := w.query_count
@@ -175,10 +175,10 @@ column :: proc(view: Chunk_View, term: int, $T: typeid) -> []T {
 		return nil
 	}
 	a := view.archetype
-	assert(int(a.sizes[c]) == size_of(T), "world: the column type has the wrong size")
+	assert(int(a.sizes[c]) == size_of(T), "ecs: the column type has the wrong size")
 	when ODIN_DEBUG {
 		info := registry_find_type(&view.world.registry, T)
-		assert(info != nil && info.id == a.ids[c], "world: the column type differs from the term")
+		assert(info != nil && info.id == a.ids[c], "ecs: the column type differs from the term")
 	}
 	return ([^]T)(&view.data[a.offsets[c]])[:view.count]
 }
@@ -199,7 +199,7 @@ match_new_archetype :: proc(w: ^World, a: u32) {
 type_component :: proc(w: ^World, T: typeid) -> Component_Id {
 	info := registry_find_type(&w.registry, T)
 	if info == nil {
-		log.errorf("world: component %v is not registered", T)
+		log.errorf("ecs: component %v is not registered", T)
 		return 0
 	}
 	return info.id
@@ -231,7 +231,7 @@ match_archetype :: proc(w: ^World, q: u32, a: u32) {
 	list := matches(w, q)
 	if state.match_count * size_of(Query_Match) % DIRECTORY_PAGE == 0 &&
 	   !w.platform.memory_commit(&list[state.match_count], DIRECTORY_PAGE) {
-		panic("world: cannot commit query matches")
+		panic("ecs: cannot commit query matches")
 	}
 	list[state.match_count] = match
 	state.match_count += 1

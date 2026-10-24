@@ -1,4 +1,4 @@
-package world
+package ecs
 
 import "core:testing"
 
@@ -22,7 +22,7 @@ commands_apply_in_order :: proc(t: ^testing.T) {
 	command_remove(&first, w, existing, Health)
 	// Later buffers see the effects of earlier ones.
 	command_add(&second, w, spawned, Health{6})
-	command_add_raw(&second, existing, component_id("world.Health"), nil)
+	command_add_raw(&second, existing, component_id("ecs.Health"), nil)
 
 	testing.expect(t, !is_alive(w, spawned))
 	apply(w, {first, second})
