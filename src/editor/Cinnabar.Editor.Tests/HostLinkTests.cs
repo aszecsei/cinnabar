@@ -224,6 +224,46 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheWorldRunsOnlyInPlayAndInPausedSteps()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        var snapshot = await editor.Next<EntitySnapshot>();
+        // The front triangle spins in a Fixed system, and its script pulses its brightness.
+        var front = Assert.Single(snapshot.Entities, e => e.Name == "Front Triangle").Entity;
+        // The values as they are now: a watch sends them at once, and values that stream while the world runs are
+        // dropped before the next look.
+        async Task<string> Values()
+        {
+            editor.Link.Send(new WatchEntity(front));
+            var values = await editor.Next<EntityValues>(v => v.Entity == front);
+            editor.Link.Send(new UnwatchEntity(front));
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            editor.Drain();
+            return string.Join(";", values.Components.Select(c => Convert.ToHexString(c.Data)));
+        }
+
+        // A linked editor starts in Edit, where nothing moves.
+        var still = await Values();
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal(still, await Values());
+
+        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        var played = await Values();
+        Assert.NotEqual(still, played);
+
+        editor.Link.Send(new SetMode(EditorMode.Paused, false));
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        var paused = await Values();
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        Assert.Equal(paused, await Values());
+        editor.Link.Send(new StepFrame());
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.NotEqual(paused, await Values());
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();
@@ -298,6 +338,14 @@ public sealed class HostLinkTests : IAsyncDisposable
             {
             }
             throw new InvalidOperationException($"no {typeof(T).Name} came. These did:\n{string.Join("\n", skipped)}");
+        }
+
+        /// <summary>Drops the messages that have come.</summary>
+        public void Drain()
+        {
+            while (_received.Reader.TryRead(out _))
+            {
+            }
         }
 
         public ValueTask DisposeAsync() => Link.DisposeAsync();

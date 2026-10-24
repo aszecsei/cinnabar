@@ -68,6 +68,13 @@ _window_poll :: proc() -> (open: bool) {
 	return !window.close_requested
 }
 
+// _window_apply_input applies input from elsewhere after the window's messages of the frame.
+_window_apply_input :: proc(events: []Input_Event) {
+	for e in events {
+		input_apply(&window.input, e)
+	}
+}
+
 _window_native_handle :: proc() -> rawptr {
 	return rawptr(window.hwnd)
 }

@@ -76,10 +76,11 @@ active :: proc(e: ^Editor) -> bool {
 	return e.connection != 0
 }
 
-// view is the editor's camera, once a linked editor has sent one.
+// view is the editor's camera, once a linked editor has sent one, in edit mode or with the free camera.
 view :: proc(e: ^Editor) -> (render.View, bool) {
 	c := e.viewport.camera
-	if !active(e) || !e.viewport.has_camera {
+	// In play mode the game's own camera draws, unless the editor flies its free camera.
+	if !active(e) || !e.viewport.has_camera || (e.mode != .Edit && !e.free_camera) {
 		return {}, false
 	}
 	return {

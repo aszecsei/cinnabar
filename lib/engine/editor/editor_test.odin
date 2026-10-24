@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:mem/virtual"
 import "core:slice"
 import "core:testing"
+import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:engine/ecs"
@@ -529,4 +530,45 @@ hidden_entities_hide_their_descendants :: proc(t: ^testing.T) {
 @(private = "file")
 editor_visible :: proc(f: ^Fixture, entity: ecs.Entity) -> bool {
 	return is_visible(visibility(&f.editor, &f.world), entity)
+}
+
+@(test)
+the_editors_mode_decides_whether_the_world_runs :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	frame := 16 * time.Millisecond
+
+	// Without an editor, the world runs.
+	run, dt := simulation(&f.editor, w, frame)
+	testing.expect(t, run && dt == frame)
+	// A new editor starts in Edit, where it does not.
+	step(f, 1)
+	run, _ = simulation(&f.editor, w, frame)
+	testing.expect(t, !run)
+
+	step(f, 1, link.Set_Mode{mode = .Play})
+	run, dt = simulation(&f.editor, w, frame)
+	testing.expect(t, run && dt == frame)
+
+	// Paused, each step runs one frame of one tick.
+	step(f, 1, link.Set_Mode{mode = .Paused}, link.Step_Frame{}, link.Step_Frame{})
+	for _ in 0 ..< 2 {
+		run, dt = simulation(&f.editor, w, frame)
+		testing.expect(t, run && dt == ecs.tick_length(w))
+	}
+	run, _ = simulation(&f.editor, w, frame)
+	testing.expect(t, !run)
+
+	// The editor's camera draws in Edit, and in Play only as the free camera.
+	camera := link.Editor_Camera{rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05}
+	step(f, 1, camera)
+	_, ok := view(&f.editor)
+	testing.expect(t, !ok)
+	step(f, 1, link.Set_Mode{mode = .Play, free_camera = true})
+	_, ok = view(&f.editor)
+	testing.expect(t, ok)
+	step(f, 1, link.Set_Mode{mode = .Edit})
+	_, ok = view(&f.editor)
+	testing.expect(t, ok)
 }

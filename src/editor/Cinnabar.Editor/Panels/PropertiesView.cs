@@ -55,6 +55,7 @@ public sealed class PropertiesView : ScrollViewer
             _world.ValuesChanged += OnValuesChanged;
             _shell.SceneChanged += OnSceneChanged;
             _shell.ProblemsChanged += Rebuild;
+            _shell.ModeChanged += Rebuild;
             Rebuild();
         };
         DetachedFromVisualTree += (_, _) =>
@@ -65,6 +66,7 @@ public sealed class PropertiesView : ScrollViewer
             _world.ValuesChanged -= OnValuesChanged;
             _shell.SceneChanged -= OnSceneChanged;
             _shell.ProblemsChanged -= Rebuild;
+            _shell.ModeChanged -= Rebuild;
         };
     }
 

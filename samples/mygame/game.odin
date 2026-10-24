@@ -420,13 +420,19 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
 	defer end_frame(s)
 	s.frame_count += 1
-	s.elapsed += dt
 
-	ecs.run_fixed(&s.world, dt, s)
-	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase, with its structural changes (phases 5 and 6).
-	script.run_phase(&s.scripts, dt, s.platform.input())
-	ecs.run_stage(&s.world, .Late, dt, s)
+	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
+	// edits show (see docs/editor.md#modes).
+	if run, step := editor.simulation(&s.editor, &s.world, dt); run {
+		s.elapsed += step
+		ecs.run_fixed(&s.world, step, s)
+		ecs.run_stage(&s.world, .Update, step, s)
+		// The script phase, with its structural changes (phases 5 and 6).
+		script.run_phase(&s.scripts, step, s.platform.input())
+		ecs.run_stage(&s.world, .Late, step, s)
+	} else {
+		ecs.update_transforms(&s.world)
+	}
 
 	if s.elapsed >= s.next_report {
 		s.next_report += time.Second

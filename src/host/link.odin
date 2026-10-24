@@ -177,6 +177,8 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 	if l.linked && (!connected || connection != l.linked_connection) {
 		l.linked = false
 		core.pace_shared_frames(false)
+		// Keys that the editor held stay down otherwise.
+		core.queue_input({{kind = .Release_All}})
 		log.info("host: the editor disconnected")
 	}
 	arena := virtual.arena_allocator(&l.decode_arena)
@@ -231,7 +233,7 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged):
+	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Editor_Input):
 		return true
 	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target):
 		// Only the host sends these, so handle_message reports them.
@@ -267,9 +269,17 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if l.linked {
 			core.acknowledge_shared_frame(m.generation, m.frame)
 		}
+	case link.Editor_Input:
+		if l.linked {
+			events := make([]core.Input_Event, len(m.events), context.temp_allocator)
+			for e, i in m.events {
+				events[i] = {kind = core.Input_Event_Kind(e.kind), key = core.Key(e.key), position = e.position, scroll = e.scroll}
+			}
+			core.queue_input(events)
+		}
 	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame:
 		// is_host_message sends these to the game.
 	}
 }
@@ -396,3 +406,8 @@ send_all :: proc(client: net.TCP_Socket, buf: []byte) -> bool {
 	}
 	return true
 }
+
+// The editor's input is core's, value for value.
+#assert(len(link.Input_Key) == len(core.Key))
+#assert(int(link.Input_Key.Mouse_5) == int(core.Key.Mouse_5) && int(link.Input_Key.F1) == int(core.Key.F1))
+#assert(len(link.Input_Event_Kind) == len(core.Input_Event_Kind))

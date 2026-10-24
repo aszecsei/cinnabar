@@ -337,6 +337,21 @@
         <Setter Property="BorderBrush" Value="#333337" />
         <Setter Property="BorderThickness" Value="0,1,0,0" />
     </Style>
+    <Style Selector="Border.status.playing">
+        <Setter Property="Background" Value="#2E6B3A" />
+    </Style>
+    <Style Selector="Border.status.paused">
+        <Setter Property="Background" Value="#7A5A1E" />
+    </Style>
+    <Style Selector="Border.viewport-frame">
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.viewport-frame.playing">
+        <Setter Property="BorderBrush" Value="#4CAF50" />
+    </Style>
+    <Style Selector="Border.viewport-frame.paused">
+        <Setter Property="BorderBrush" Value="#E8B04A" />
+    </Style>
     <Style Selector="Border.status TextBlock">
         <Setter Property="FontSize" Value="12" />
     </Style>

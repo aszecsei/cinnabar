@@ -28,6 +28,9 @@ Message :: union {
 	Pick_Request,
 	Pick_Result,
 	Set_Hidden,
+	Set_Mode,
+	Step_Frame,
+	Editor_Input,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -449,4 +452,62 @@ Pick_Result :: struct {
 // and after each Entity_Snapshot.
 Set_Hidden :: struct {
 	entities: []u64,
+}
+
+// Modes (see docs/editor.md#modes).
+
+Editor_Mode :: enum u8 {
+	// The world does not run: no Fixed or Update systems and no scripts. Transforms still propagate, so edits show.
+	Edit,
+	// The full frame.
+	Play,
+	// Nothing runs, except one frame for each Step_Frame.
+	Paused,
+}
+
+// Editor to game: the mode. A game that an editor has just linked to is in Edit. The editor stops play by setting
+// Edit and sending its scene again, so nothing of play mode stays.
+Set_Mode :: struct {
+	mode:        Editor_Mode,
+	// In Play and Paused, the game draws from the editor's camera instead of its own.
+	free_camera: bool,
+}
+
+// Editor to game: while paused, run one frame of one fixed tick.
+Step_Frame :: struct {}
+
+// A key or a mouse button, as core.Key has them.
+Input_Key :: enum u8 {
+	None,
+	A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z,
+	Num_0, Num_1, Num_2, Num_3, Num_4, Num_5, Num_6, Num_7, Num_8, Num_9,
+	Space, Enter, Escape, Tab, Backspace, Delete, Insert, Home, End, Page_Up, Page_Down,
+	Left, Right, Up, Down,
+	Left_Shift, Right_Shift, Left_Control, Right_Control, Left_Alt, Right_Alt,
+	F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12,
+	Mouse_Left, Mouse_Right, Mouse_Middle, Mouse_4, Mouse_5,
+}
+
+// As core.Input_Event_Kind.
+Input_Event_Kind :: enum u8 {
+	Key_Down,
+	Key_Up,
+	Mouse_Move,
+	Scroll,
+	Release_All,
+}
+
+Input_Event :: struct {
+	kind:     Input_Event_Kind,
+	key:      Input_Key,
+	// Mouse_Move: in pixels from the frame's top-left corner.
+	position: [2]f32,
+	// Scroll: wheel notches, positive away from the user.
+	scroll:   f32,
+}
+
+// Editor to host: keyboard and mouse input while the viewport has focus in play mode. The host gives it to the game as
+// core.Input from the next frame.
+Editor_Input :: struct {
+	events: []Input_Event,
 }

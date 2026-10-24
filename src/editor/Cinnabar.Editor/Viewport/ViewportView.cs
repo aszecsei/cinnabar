@@ -15,7 +15,9 @@ namespace Cinnabar.Editor.Viewport;
 /// The viewport panel: the frames, the tool palette, the camera's speed and the stats over them, and the input that
 /// drives the editor's tools (see docs/editor.md#viewport). The right button flies with WASD, Q and E; Alt with the
 /// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
-/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it.
+/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it. While
+/// the game plays, the viewport gives the game its keyboard and mouse instead, unless the free camera is on, and a
+/// frame in the mode's color goes around it.
 /// </summary>
 public sealed class ViewportView : Grid
 {
@@ -43,6 +45,7 @@ public sealed class ViewportView : Grid
     readonly TextBlock _stats;
     readonly Border _box;
     readonly TextBlock _speed;
+    readonly Border _modeFrame;
     readonly List<(ToggleButton Button, string Command)> _tools = [];
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
@@ -74,6 +77,8 @@ public sealed class ViewportView : Grid
             IsHitTestVisible = false,
         };
         Children.Add(_box);
+        _modeFrame = new Border { Classes = { "viewport-frame" }, BorderThickness = new Thickness(2), IsHitTestVisible = false };
+        Children.Add(_modeFrame);
 
         _stats = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
         _overlay = Overlay(_stats, HorizontalAlignment.Right, VerticalAlignment.Top);
@@ -88,14 +93,20 @@ public sealed class ViewportView : Grid
 
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => UpdateStats());
         _flyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => FlyStep());
-        // Keys that are released elsewhere would keep the camera flying.
-        LostFocus += (_, _) => _held.Clear();
+        // Keys that are released elsewhere would keep the camera flying, or stay down in the game.
+        LostFocus += (_, _) =>
+        {
+            _held.Clear();
+            _shell.SendInput(GameInput.ReleaseAll());
+        };
         AttachedToVisualTree += (_, _) =>
         {
             _session.ViewChanged += ShowOverlay;
             _shell.ToolsChanged += ShowTools;
             _shell.Camera.Changed += ShowSpeed;
+            _shell.ModeChanged += ShowMode;
             _timer.Start();
+            ShowMode();
             ShowTools();
             ShowSpeed();
         };
@@ -104,6 +115,7 @@ public sealed class ViewportView : Grid
             _session.ViewChanged -= ShowOverlay;
             _shell.ToolsChanged -= ShowTools;
             _shell.Camera.Changed -= ShowSpeed;
+            _shell.ModeChanged -= ShowMode;
             _timer.Stop();
             _flyTimer.Stop();
         };
@@ -164,6 +176,17 @@ public sealed class ViewportView : Grid
         }
     }
 
+    void ShowMode()
+    {
+        _modeFrame.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
+        _modeFrame.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);
+        if (_shell.InputGoesToGame)
+        {
+            EndGesture();
+        }
+        ShowSpeed();
+    }
+
     void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}";
 
     static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
@@ -180,6 +203,17 @@ public sealed class ViewportView : Grid
         }
         Focus();
         var point = e.GetCurrentPoint(this);
+        if (_shell.InputGoesToGame)
+        {
+            ForwardMove(point.Position);
+            if (GameInput.Button(point.Properties.PointerUpdateKind) is { } button)
+            {
+                _shell.SendInput(GameInput.Down(button));
+            }
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            return;
+        }
         var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
         _start = _last = point.Position;
         if (point.Properties.IsRightButtonPressed)
@@ -221,6 +255,11 @@ public sealed class ViewportView : Grid
     {
         base.OnPointerMoved(e);
         var position = e.GetPosition(this);
+        if (_shell.InputGoesToGame)
+        {
+            ForwardMove(position);
+            return;
+        }
         // Looking and orbiting turn by frame pixels, so they feel the same at any window scale.
         var delta = (position - _last) * _control.FrameScale;
         _last = position;
@@ -267,6 +306,15 @@ public sealed class ViewportView : Grid
     {
         base.OnPointerReleased(e);
         var position = e.GetPosition(this);
+        if (_shell.InputGoesToGame)
+        {
+            if (GameInput.Button(e.GetCurrentPoint(this).Properties.PointerUpdateKind) is { } button)
+            {
+                _shell.SendInput(GameInput.Up(button));
+            }
+            e.Pointer.Capture(null);
+            return;
+        }
         var mode = ModeOf(e.KeyModifiers);
         switch (_gesture)
         {
@@ -310,6 +358,12 @@ public sealed class ViewportView : Grid
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
+        if (_shell.InputGoesToGame)
+        {
+            _shell.SendInput(GameInput.Scroll(e.Delta.Y));
+            e.Handled = true;
+            return;
+        }
         if (_gesture == Gesture.Fly)
         {
             _shell.Camera.ChangeSpeed(e.Delta.Y);
@@ -324,6 +378,16 @@ public sealed class ViewportView : Grid
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
+        if (_shell.InputGoesToGame)
+        {
+            if (GameInput.Key(e.Key) is { } key)
+            {
+                _shell.SendInput(GameInput.Down(key));
+            }
+            // The function keys stay the editor's too, so F5 and Shift+F5 work while the game has the keys.
+            e.Handled = e.Key is not (>= Avalonia.Input.Key.F1 and <= Avalonia.Input.Key.F24);
+            return;
+        }
         if (_gesture == Gesture.Fly)
         {
             _held.Add(e.Key);
@@ -362,6 +426,10 @@ public sealed class ViewportView : Grid
     {
         base.OnKeyUp(e);
         _held.Remove(e.Key);
+        if (_shell.InputGoesToGame && GameInput.Key(e.Key) is { } key)
+        {
+            _shell.SendInput(GameInput.Up(key));
+        }
     }
 
     // Each tick of a flight moves the camera by the keys that are held, for the time since the last tick.
@@ -374,6 +442,15 @@ public sealed class ViewportView : Grid
         var direction = new Vec3(Axis(Key.D, Key.A), Axis(Key.E, Key.Q), Axis(Key.W, Key.S));
         var boost = _held.Contains(Key.LeftShift) || _held.Contains(Key.RightShift) ? 4 : 1;
         _shell.Camera.Fly(direction, seconds, boost);
+    }
+
+    // The game sees the mouse in pixels of its frame.
+    void ForwardMove(Point position)
+    {
+        if (_control.FramePoint(position) is { } pixel)
+        {
+            _shell.SendInput(GameInput.Move(pixel));
+        }
     }
 
     void ShowBox(Point to)

@@ -22,6 +22,8 @@ public sealed class MainWindow : Window
     readonly TextBlock _hostStatus = new();
     readonly TextBlock _worldStatus = new();
     readonly TextBlock _sceneStatus = new();
+    readonly TextBlock _modeStatus = new() { Text = "Edit" };
+    Border? _status;
     readonly Ellipse _hostDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
     // The autosave is due at most every 30 s, so a check every few seconds is close enough.
     readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
@@ -79,6 +81,7 @@ public sealed class MainWindow : Window
         UpdateHostStatus();
         shell.World.EntitiesChanged += UpdateWorldStatus;
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
+        shell.ModeChanged += UpdateModeStatus;
         _autosave.Tick += (_, _) => shell.Tick(DateTime.UtcNow);
         _autosave.Start();
         // The command line's scene opened before the window could ask about its autosave.
@@ -175,11 +178,12 @@ public sealed class MainWindow : Window
 
     Control StatusBar()
     {
-        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { _sceneStatus, _worldStatus, new TextBlock { Text = "Edit" } } };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { _sceneStatus, _worldStatus, _modeStatus } };
         var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _hostDot, _hostStatus } };
         var bar = new DockPanel { Children = { right, left } };
         DockPanel.SetDock(right, DockSide.Right);
-        return new Border { Classes = { "status" }, Child = bar };
+        _status = new Border { Classes = { "status" }, Child = bar };
+        return _status;
     }
 
     async Task PickScene()
@@ -222,6 +226,19 @@ public sealed class MainWindow : Window
             var n => $"  ·  {n} selected",
         };
         _worldStatus.Text = _shell.World.HasWorld ? $"{count} {(count == 1 ? "entity" : "entities")}{selected}" : "";
+    }
+
+    // Play mode tints the status bar, as the viewport's frame, so nobody edits by mistake while the game runs.
+    void UpdateModeStatus()
+    {
+        _modeStatus.Text = _shell.Mode switch
+        {
+            Link.Protocol.EditorMode.Play => _shell.FreeCamera ? "Play, free camera" : "Play",
+            Link.Protocol.EditorMode.Paused => "Paused",
+            _ => "Edit",
+        };
+        _status?.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
+        _status?.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);
     }
 
     void UpdateHostStatus()

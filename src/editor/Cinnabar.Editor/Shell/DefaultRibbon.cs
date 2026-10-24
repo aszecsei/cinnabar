@@ -34,6 +34,12 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.RotateTool, EditorCommands.ScaleTool]),
                         new SmallStack([EditorCommands.LocalSpace, EditorCommands.Snap]),
                     ]),
+                    new RibbonGroup("Play",
+                    [
+                        new LargeButton(EditorCommands.PlayMode),
+                        new SmallStack([EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode]),
+                        new SmallStack([EditorCommands.FreeCamera]),
+                    ]),
                     new RibbonGroup("Host", [new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost])]),
                     new RibbonGroup("Window",
                     [

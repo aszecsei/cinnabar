@@ -77,6 +77,8 @@ public sealed partial class EditorShell : IDisposable
         {
             if (kind == ReloadKind.SoftRestart)
             {
+                // The new game state starts in Edit, with the game's own scene.
+                ResetMode();
                 SendScene();
             }
         };
@@ -160,6 +162,7 @@ public sealed partial class EditorShell : IDisposable
         // A new link is a host that has its own world, from a start, a restart or a crash.
         if (Host.Linked && !_linked)
         {
+            ResetMode();
             SendScene();
             SendViewportTools();
         }

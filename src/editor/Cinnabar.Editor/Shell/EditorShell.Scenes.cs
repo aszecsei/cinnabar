@@ -161,6 +161,11 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        if (!IsEditing)
+        {
+            Console.Add(LogLevel.Warning, $"edit: cannot {label.ToLowerInvariant()} while the game plays. Stop it to edit the scene.");
+            return false;
+        }
         try
         {
             Scene.Apply(label, operations);
@@ -176,7 +181,7 @@ public sealed partial class EditorShell
     /// <summary>The steps of a drag: <see cref="SceneDocument.Begin"/>, then a preview per step, then commit or cancel.</summary>
     public void BeginEdit(string label)
     {
-        if (Scene is { InTransaction: false })
+        if (Scene is { InTransaction: false } && IsEditing)
         {
             Scene.Begin(label);
         }
@@ -205,12 +210,13 @@ public sealed partial class EditorShell
     public void CancelEdit() => Scene?.Cancel();
 
     /// <summary>The primary selected entity as the document has it, or null for none, or for one that the game spawned.</summary>
+    /// In play mode the host's world is not the document's, so there is none.
     public SceneEntity? SelectedSceneEntity =>
-        World.Find(Selection.Entity) is { SceneId: not 0 } node ? Scene?.Scene.Find(node.SceneId) : null;
+        IsEditing && World.Find(Selection.Entity) is { SceneId: not 0 } node ? Scene?.Scene.Find(node.SceneId) : null;
 
     /// <summary>The selected entities that the document has, in the order they were selected.</summary>
     public IReadOnlyList<SceneEntity> SelectedSceneEntities =>
-        Scene == null ? [] : [.. Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Scene.Find(id)).OfType<SceneEntity>()];
+        Scene == null || !IsEditing ? [] : [.. Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Scene.Find(id)).OfType<SceneEntity>()];
 
     /// <summary>Selects an entity by scene ID, now, or when the host reports it.</summary>
     public void SelectScene(ulong sceneId) => SelectScenes([sceneId]);

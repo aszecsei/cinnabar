@@ -35,6 +35,11 @@ Editor :: struct {
 	// The entity of each scene ID, for the editor's operations (see find_scene_entity).
 	by_scene_id: map[u64]ecs.Entity,
 	viewport:    Viewport,
+	// The mode that the editor set (see modes.odin).
+	mode:        link.Editor_Mode,
+	free_camera: bool,
+	// Step_Frame messages that wait for a paused frame.
+	steps:       int,
 	last_scan:   f64,
 	last_values: f64,
 }
@@ -103,6 +108,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		clear(&e.known)
 		clear(&e.watched)
 		reset_viewport(e)
+		e.mode, e.free_camera, e.steps = .Edit, false, 0
 		snapshot = connection != 0
 	}
 	if connection == 0 {
@@ -135,6 +141,15 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			apply_operations(e, w, scripts, v.operations, &problems)
 			if len(problems) > 0 {
 				link.write_message(out, edit_problems(problems[:], false, frame))
+			}
+		case link.Set_Mode:
+			e.mode, e.free_camera = v.mode, v.free_camera
+			if v.mode != .Paused {
+				e.steps = 0
+			}
+		case link.Step_Frame:
+			if e.mode == .Paused {
+				e.steps += 1
 			}
 		case:
 			if !handle_viewport_message(e, message) {

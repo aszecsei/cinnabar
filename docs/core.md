@@ -12,7 +12,7 @@ Windows and D3D12 are the first targets. A later port must only add files to `co
 
 ## Input
 
-`core` translates the window's keyboard and mouse messages into `core.Input`: the keys and buttons that are down, the ones pressed or released since the previous frame, and the mouse position, delta and wheel. `Platform_API.input` gives the state at the start of the frame. A key that goes down and up within one frame is in both `pressed` and `released`. Losing focus releases every key. In shared mode the window is hidden, so the input is empty until the editor link sends input.
+`core` translates the window's keyboard and mouse messages into `core.Input`: the keys and buttons that are down, the ones pressed or released since the previous frame, and the mouse position, delta and wheel. `Platform_API.input` gives the state at the start of the frame. A key that goes down and up within one frame is in both `pressed` and `released`. Losing focus releases every key. In shared mode the window is hidden, so the input is empty until the editor link sends input: `core.queue_input` takes `Input_Event`s from the host, and the next frame applies them after the window's own messages.
 
 ## Job system
 

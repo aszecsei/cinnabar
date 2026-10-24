@@ -24,6 +24,11 @@ static class EditorCommands
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SelectAll = "edit.selectAll";
+    public const string PlayMode = "mode.play";
+    public const string PauseMode = "mode.pause";
+    public const string StepFrame = "mode.step";
+    public const string StopMode = "mode.stop";
+    public const string FreeCamera = "viewport.freeCamera";
     public const string HideSelected = "entity.hide";
     public const string ShowAll = "entity.showAll";
     public const string LockSelected = "entity.lock";
@@ -73,21 +78,21 @@ static class EditorCommands
             Description = "Undo the last edit.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
-            CanExecuteWhen = () => shell.Scene?.CanUndo == true,
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanUndo == true,
         });
         commands.Register(new Command(Redo, "Redo", () => shell.Scene?.Redo())
         {
             Description = "Apply the last undone edit again.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
-            CanExecuteWhen = () => shell.Scene?.CanRedo == true,
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanRedo == true,
         });
         commands.Register(new Command(CreateEntity, "New Entity", shell.CreateEntity)
         {
             Description = "Add an entity with a Transform, where the selected entity is.",
             Icon = "add",
             Shortcut = "Ctrl+Shift+N",
-            CanExecuteWhen = () => shell.Scene != null,
+            CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
         });
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
         {
@@ -102,6 +107,42 @@ static class EditorCommands
             Icon = "delete",
             Shortcut = "Delete",
             CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(PlayMode, "Play", shell.Play)
+        {
+            Description = "Run the game's world from the scene, or go on after a pause. Edits wait until Stop.",
+            Icon = "play",
+            Shortcut = "F5",
+            CanExecuteWhen = () => shell.Host.Linked && shell.Mode != Link.Protocol.EditorMode.Play,
+            IsCheckedWhen = () => shell.Mode == Link.Protocol.EditorMode.Play,
+        });
+        commands.Register(new Command(PauseMode, "Pause", shell.TogglePause)
+        {
+            Description = "Stop the world where it is, or let it go on.",
+            Icon = "pause",
+            Shortcut = "F6",
+            CanExecuteWhen = () => !shell.IsEditing,
+            IsCheckedWhen = () => shell.Mode == Link.Protocol.EditorMode.Paused,
+        });
+        commands.Register(new Command(StepFrame, "Step", shell.Step)
+        {
+            Description = "While paused, run one frame of one fixed tick.",
+            Icon = "step",
+            Shortcut = "F10",
+            CanExecuteWhen = () => shell.Mode == Link.Protocol.EditorMode.Paused,
+        });
+        commands.Register(new Command(StopMode, "Stop", shell.Stop)
+        {
+            Description = "End play. The game gets the scene again, and nothing of play stays.",
+            Icon = "stop",
+            Shortcut = "Shift+F5",
+            CanExecuteWhen = () => !shell.IsEditing,
+        });
+        commands.Register(new Command(FreeCamera, "Free Camera", shell.ToggleFreeCamera)
+        {
+            Description = "While the game plays, fly the editor's camera in the viewport and draw from it, instead of giving the game its input.",
+            Icon = "free-camera",
+            IsCheckedWhen = () => shell.FreeCamera,
         });
         commands.Register(new Command(SelectAll, "Select All", () => shell.Selection.Set(shell.World.Entities.Select(e => e.Handle)))
         {
@@ -175,7 +216,6 @@ static class EditorCommands
         {
             Description = "Stop the host. The viewport goes blank until it starts again.",
             Icon = "stop",
-            Shortcut = "Shift+F5",
             CanExecuteWhen = () => shell.Host.State == HostState.Running,
         });
         foreach (var panel in shell.Layout.Panels)

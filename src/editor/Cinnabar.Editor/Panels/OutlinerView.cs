@@ -266,7 +266,7 @@ public sealed class OutlinerView : DockPanel
     bool CanDrop(DragEventArgs e, ulong parent)
     {
         var dragged = _world.Find(EntityView.Dropped(e));
-        if (dragged is not { SceneId: not 0 } || _shell.Scene == null || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
+        if (dragged is not { SceneId: not 0 } || _shell.Scene == null || !_shell.IsEditing || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
         {
             return false;
         }

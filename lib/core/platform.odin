@@ -39,6 +39,8 @@ Platform :: struct {
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
+	// Input from the editor, for the next frame.
+	input_queue: [dynamic]Input_Event,
 	api:         Platform_API,
 }
 
@@ -136,6 +138,7 @@ shutdown :: proc() {
 	jobs.shutdown()
 	release_reservations()
 	delete(platform.reservations)
+	delete(platform.input_queue)
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
@@ -150,6 +153,8 @@ platform_api :: proc() -> ^Platform_API {
 // and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	keep_running = _window_poll()
+	_window_apply_input(platform.input_queue[:])
+	clear(&platform.input_queue)
 	platform.window_size = platform.shared_size if platform.shared_size != {} else _window_size()
 	backend.begin_frame(platform.window_size)
 
@@ -217,6 +222,12 @@ read_disabled_features :: proc() -> (disabled: gpu.Features) {
 		log.infof("core: hiding GPU features %v", disabled)
 	}
 	return
+}
+
+// queue_input adds input that does not come from the window, such as the editor's, to the next frame's. Call it from
+// the main thread between frames.
+queue_input :: proc(events: []Input_Event) {
+	append(&platform.input_queue, ..events)
 }
 
 // The largest shared target side. A reader that asks for more gets this.
