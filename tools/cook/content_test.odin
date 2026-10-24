@@ -64,7 +64,7 @@ assets_of_any_kind_that_share_a_guid_do_not_cook :: proc(t: ^testing.T) {
 
 	pass := cook(tree_options(tree), ALL_KINDS)
 	testing.expect(t, !pass.ok)
-	expect_error(t, &errors, "have the same GUID")
+	expect_error(t, &errors, "has the same GUID as")
 	testing.expect(t, !has_blob(t, tree, "a.luau"))
 	testing.expect(t, has_blob(t, tree, "c.luau"))
 }
@@ -100,18 +100,13 @@ one_cook_at_a_time_uses_a_cache :: proc(t: ^testing.T) {
 	tree := make_tree(t, {})
 	defer remove_tree(tree)
 	cache := fmt.tprintf("%s/cache", tree.dir)
-	errors: Errors
-	context.logger = capture_errors(&errors)
-	defer release_errors(&errors)
-
-	held, ok := lock_cache(cache)
-	testing.expect(t, ok)
+	held, first := lock_cache(cache)
+	testing.expect_value(t, first, Lock_Result.Locked)
 	_, second := lock_cache(cache)
-	testing.expect(t, !second)
-	expect_error(t, &errors, "another cook is using")
+	testing.expect_value(t, second, Lock_Result.Held)
 	unlock_cache(&held)
 	again, third := lock_cache(cache)
-	testing.expect(t, third)
+	testing.expect_value(t, third, Lock_Result.Locked)
 	unlock_cache(&again)
 	// The lock deletes itself, so it never looks held after a crash.
 	testing.expect(t, !os.exists(fmt.tprintf("%s/%s", cache, LOCK_FILE)))
@@ -126,7 +121,12 @@ the_watcher_sees_changes_under_its_directories :: proc(t: ^testing.T) {
 	testing.expect(t, watcher_open(&watcher, dirs))
 	defer watcher_close(&watcher)
 
-	testing.expect(t, !watcher_wait(&watcher, 0))
+	testing.expect_value(t, watcher_wait(&watcher, 0), Wait_Result.Timeout)
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/scripts/a.luau", tree.dir), transmute([]byte)string("return 2")) == nil)
-	testing.expect(t, watcher_wait(&watcher, 5000))
+	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
+	// Another thread wakes the wait, as the cook link does when a message arrives.
+	for watcher_wait(&watcher, 100) == .Changed {
+	}
+	watcher_wake(&watcher)
+	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Woken)
 }

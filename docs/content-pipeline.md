@@ -18,7 +18,8 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 - **Incremental cooking:** a cache key is a hash of the source files, the import settings and the cooker version.
 - **One scan:** every command that cooks scripts or scenes scans the roots once for every kind of asset, and gives each new asset its `.meta` file, whatever kind it cooks. Then it cooks each asset of its kinds whose key changed.
 - **The cache's generation:** after a cook writes blobs, it adds one to the counter in `<cache>/<config>/.generation` (see [Loading](#loading)).
-- **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs, and a second cook of the same cache stops with an error. Otherwise both could give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes.
+- **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs. Otherwise two cooks could both give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes. A dev batch cook that finds the lock held leaves the cache to the cook daemon, which keeps it up to date, so `just build` works while the editor is open. Any other cook stops with an error.
+- **Problems:** each error and warning names its file (the asset's source or `.meta` file, or another file such as the definition file), and its line and column when it has them. A batch cook logs each one as `cook: <file>:<line>:<column>: <text>`.
 - **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. A Vulkan port adds SPIR-V from DXC, and a Metal port adds a metallib from `metal-shaderconverter`. All shaders use one fixed bindless root signature (see [GPU](gpu.md#binding-model)), and the cooker rejects a shader that does not fit it. The runtime never compiles or reflects shaders. The DXC version is part of the cache key. For now the cooker cooks only shaders, and writes each output next to its source with its cache key in `<output>.key` (see [GPU](gpu.md#shaders)).
 
 ### Scripts
@@ -48,14 +49,14 @@ Scenes are `.scene` text files (see [Editor](editor.md#scenes)). `just scenes` r
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
 
-`cook daemon --cache <dir> [--definitions <file>] --root <name>=<dir>...` *The editor's `--link <port>` comes with the cook link.*
+`cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...`
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
-- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
-- **Index:** *with the cook link,* the daemon keeps every asset in memory for the editor: its GUID, source path, kind, import settings, status (current or failed) and problems, its dependencies (a script's requires, and the scripts that a scene names) and its dependents. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
+- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names) and problems, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
-- **Problems** go to the daemon's log, and a pass that cooks something says how much. An asset that fails is tried again, and its problems reported again, at each pass until it cooks. *With the cook link, problems also go to the editor.* A `.meta` file that the daemon writes for a new asset is a change too, so it makes one more pass, which finds nothing to cook.
-- **One writer:** the daemon holds the cache's lock while it runs, so a batch cook stops with an error that names the daemon.
+- **Problems:** an asset that fails is tried again at each pass until it cooks. The daemon logs an asset's problems when they change, and not again at each pass, and a pass that cooks something says how much. A `.meta` file that the daemon writes for a new asset is a change too, so it makes one more pass, which finds nothing to cook.
+- **One writer:** the daemon holds the cache's lock while it runs. A second daemon of the same cache stops with an error.
 
 ### Asset operations
 
@@ -76,21 +77,22 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 
 - **One transport:** `lib/engine/wire` has the framing, the wire format and the schema writer, for any union of messages. `lib/engine/editor/link` and `lib/engine/asset/cook_link` each give a union of messages. Neither imports anything from core or engine.
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
-- **Handshake:** `Hello`, then `Welcome` with the roots and the configuration, or `Refused`, as in the editor link.
-- **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# as it does the editor link's schema.
+- **Handshake:** `Hello`, then `Welcome` with the roots and the configuration, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
+- **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed. It sends `Cook_Finished` after every pass.
+- **An entry has everything that the editor shows,** the import settings and the behaviour class included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
+- **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
 
 | Group | Messages |
 |---|---|
 | Session | `Hello`, `Welcome`, `Refused`, `Log` |
-| Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the added, changed and removed ones |
-| Cooking | `Cook_Started`, `Cook_Finished` with the generation and the counts, `Asset_Problems` with each problem's file, line, column and text |
-| Details | `Asset_Details_Request`, answered with the import settings, dependencies, dependents, and a behaviour's class and fields |
-| Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each answered with `Operation_Result` |
+| Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the changed and removed assets and the folders that came and went |
+| Cooking | `Asset_Problems` with each problem's file, line, column and text, and `Cook_Finished` with the generation, the counts and the time |
+| Operations | *Phase 3:* `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each answered with `Operation_Result` |
 
 ### Implementation phases
 
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
-2. **Cook link:** the index, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
+2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
 3. **Asset operations.**
 4. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 

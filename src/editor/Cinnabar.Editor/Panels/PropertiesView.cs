@@ -47,6 +47,18 @@ public sealed class PropertiesView : ScrollViewer
         _selection = shell.Selection;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        // A script that defines a behaviour drags in from the content browser, and adds it to the selected entities.
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, (_, e) =>
+            e.DragEffects = ContentBrowserView.Dropped(e) is { } script && _shell.CanAddBehaviour(SelectedSceneIds(), script)
+                ? DragDropEffects.Link : DragDropEffects.None);
+        AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (ContentBrowserView.Dropped(e) is { } script)
+            {
+                _shell.AddBehaviour(SelectedSceneIds(), script);
+            }
+        });
         AttachedToVisualTree += (_, _) =>
         {
             _selection.Changed += OnSelectionChanged;
@@ -71,6 +83,8 @@ public sealed class PropertiesView : ScrollViewer
     }
 
     void OnSelectionChanged(IReadOnlyList<ulong> old, IReadOnlyList<ulong> entities) => Rebuild();
+
+    IEnumerable<ulong> SelectedSceneIds() => _selection.Entities.Select(e => _world.Find(e)?.SceneId ?? 0).Where(id => id != 0);
 
     void OnValuesChanged(ulong entity)
     {
@@ -174,6 +188,7 @@ public sealed class PropertiesView : ScrollViewer
         if (document != null)
         {
             _content.Children.Add(AddComponentButton(node, document));
+            _content.Children.Add(AddBehaviourButton(document));
         }
         ShowValues();
     }
@@ -612,6 +627,38 @@ public sealed class PropertiesView : ScrollViewer
             HorizontalContentAlignment = HorizontalAlignment.Center,
             Classes = { "add-component" },
             IsEnabled = menu.Items.Count > 0,
+        };
+    }
+
+    // The scripts that define a behaviour and that the entity lacks, from the cook daemon's index, in a menu that is
+    // filled when it opens, so it has the scripts of the latest cook.
+    Control AddBehaviourButton(SceneEntity document)
+    {
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            foreach (var script in _shell.Assets.Behaviours.Where(a => !document.Behaviours.Any(b => b.Script == a.Guid)))
+            {
+                var item = new MenuItem { Header = FieldValues.Humanize(script.Behaviour) };
+                ToolTip.SetTip(item, $"{script.Root}/{script.Path}");
+                var guid = script.Guid;
+                item.Click += (_, _) => _shell.AddBehaviour([document.Id], guid);
+                menu.Items.Add(item);
+            }
+            if (menu.Items.Count == 0)
+            {
+                var why = _shell.Assets.Roots.Count == 0 ? "The cook daemon lists the scripts once it runs" : "No other script defines a behaviour";
+                menu.Items.Add(new MenuItem { Header = why, IsEnabled = false });
+            }
+        };
+        return new Button
+        {
+            Content = "Add Behaviour",
+            Flyout = menu,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Classes = { "add-component" },
         };
     }
 

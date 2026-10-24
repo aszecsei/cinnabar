@@ -1,69 +1,201 @@
-// `cook daemon --cache <dir> [--definitions <file>] --root <name>=<dir>...` cooks the dev configuration, and then cooks
-// again each time the roots or the definition file change, until it is stopped. See
-// docs/content-pipeline.md#cook-daemon.
+// `cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...` cooks the dev
+// configuration, and then cooks again each time the roots or the definition file change, until it is stopped. With
+// --link, it serves the editor the index of the content over the cook link. See docs/content-pipeline.md#cook-daemon.
 package cook
 
+import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
+import cook_link "cinnabar:engine/asset/cook_link"
+
 // After a change, the daemon waits until this many milliseconds pass without another, so a save of several files, or
 // a program that writes a file in steps, makes one pass.
 SETTLE_MS :: 100
 
+@(private = "file")
+Daemon :: struct {
+	options:           Cook_Options,
+	watcher:           Watcher,
+	server:            Server,
+	index:             Index,
+	// The editor's connection once it said Hello, or 0.
+	linked_connection: u64,
+}
+
 run_daemon :: proc(parsed: Cook_Options) -> bool {
+	d: Daemon
 	// Each pass frees the temporary allocator, so the options must live elsewhere.
-	options := clone_options(parsed)
-	lock := lock_cache(options.cache) or_return
+	d.options = clone_options(parsed)
+	lock, locked := lock_cache(d.options.cache)
+	if locked == .Held {
+		log.errorf("cook: another cook is using %s, such as the daemon of another editor or `just watch`. Stop it, and start this one again.", d.options.cache)
+	}
+	if locked != .Locked {
+		return false
+	}
 	defer unlock_cache(&lock)
 
 	dirs := make([dynamic]string)
-	for root in options.roots {
+	for root in d.options.roots {
 		append(&dirs, root.dir)
 	}
-	if options.definitions != "" {
+	if d.options.definitions != "" {
 		// The definition file's directory is watched, so a definition file that `just script-types` writes later, or
 		// writes again, cooks the scripts again.
-		dir := filepath.dir(options.definitions)
+		dir := filepath.dir(d.options.definitions)
 		if err := os.make_directory_all(dir); err != nil && err != .Exist {
 			log.errorf("cook: %s: %v", dir, err)
 			return false
 		}
 		append(&dirs, dir)
 	}
-	watcher: Watcher
-	watcher_open(&watcher, dirs[:]) or_return
-	defer watcher_close(&watcher)
+	watcher_open(&d.watcher, dirs[:]) or_return
+	defer watcher_close(&d.watcher)
+	if d.options.link != 0 {
+		wake :: proc(data: rawptr) {
+			watcher_wake((^Watcher)(data))
+		}
+		server_start(&d.server, d.options.link, wake, &d.watcher) or_return
+		context.logger = server_logger(&d.server)
+	}
+	defer server_stop(&d.server)
+	defer index_destroy(&d.index)
 	log.infof("cook: watching %s", strings.join(dirs[:], ", ", context.temp_allocator))
 
+	daemon_pass(&d)
 	for {
-		daemon_pass(options)
 		free_all(context.temp_allocator)
-		if !watcher_wait(&watcher, WAIT_FOREVER) {
+		switch watcher_wait(&d.watcher, WAIT_FOREVER) {
+		case .Changed:
+			settle: for {
+				switch watcher_wait(&d.watcher, SETTLE_MS) {
+				case .Changed:
+				case .Woken:
+					handle_messages(&d)
+				case .Timeout:
+					break settle
+				case .Failed:
+					return false
+				}
+			}
+			daemon_pass(&d)
+		case .Woken:
+			handle_messages(&d)
+		case .Timeout:
+		case .Failed:
 			return false
-		}
-		for watcher_wait(&watcher, SETTLE_MS) {
 		}
 	}
 }
 
-// daemon_pass cooks every kind of asset. It says what it cooked, and is quiet when everything was up to date. Its
-// failures report themselves.
-daemon_pass :: proc(options: Cook_Options) {
+// daemon_pass cooks every kind of asset, and updates the index. It logs the problems that changed, says what it
+// cooked, and sends the editor what changed.
+@(private = "file")
+daemon_pass :: proc(d: ^Daemon) {
 	start := time.tick_now()
-	pass := cook(options, ALL_KINDS)
-	if pass.cooked[.Script] + pass.cooked[.Scene] == 0 {
+	pass := cook(d.options, ALL_KINDS, log_problems = false)
+	next: Index
+	index_build(&next, pass, d.options.roots[:])
+	changes := index_diff(&d.index, &next)
+	// What went away is in the old index, so it stays until the changes are sent.
+	defer {
+		index_destroy(&d.index)
+		d.index = next
+	}
+
+	for p in changes.problems {
+		for problem in p.problems {
+			log_problem({problem.file, int(problem.line), int(problem.column), problem.error, problem.text})
+		}
+	}
+	elapsed := time.tick_since(start)
+	failed := 0
+	for a in pass.assets {
+		failed += int(a.failed)
+	}
+	if pass.cooked[.Script] + pass.cooked[.Scene] > 0 {
+		log.infof(
+			"cook: %d scripts compiled and %d scenes cooked in %v, generation %d",
+			pass.cooked[.Script],
+			pass.cooked[.Scene],
+			elapsed,
+			pass.generation,
+		)
+	}
+	if d.linked_connection == 0 {
 		return
 	}
-	log.infof(
-		"cook: %d scripts compiled and %d scenes cooked in %v, generation %d",
-		pass.cooked[.Script],
-		pass.cooked[.Scene],
-		time.tick_since(start),
-		pass.generation,
+	if index_changed(changes) {
+		server_send(&d.server, d.linked_connection, changes.delta)
+		for p in changes.problems {
+			server_send(&d.server, d.linked_connection, p)
+		}
+	}
+	server_send(
+		&d.server,
+		d.linked_connection,
+		cook_link.Cook_Finished {
+			generation = pass.generation,
+			scripts = u32(pass.cooked[.Script]),
+			scenes = u32(pass.cooked[.Scene]),
+			failed = u32(failed),
+			milliseconds = f32(time.duration_milliseconds(elapsed)),
+		},
 	)
+}
+
+// handle_messages handles what the editor sent, and notices when it leaves.
+@(private = "file")
+handle_messages :: proc(d: ^Daemon) {
+	incoming, connection, dropped := server_take(&d.server)
+	defer server_release(incoming)
+	if d.linked_connection != 0 && connection != d.linked_connection {
+		d.linked_connection = 0
+		log.info("cook: the editor disconnected")
+	}
+	for m in incoming {
+		if m.connection != connection {
+			continue
+		}
+		message, ok := cook_link.decode_message(m.header.kind, m.payload, context.temp_allocator)
+		if !ok {
+			log.warnf("cook: cook link: cannot decode a message of kind %d", m.header.kind)
+			continue
+		}
+		#partial switch msg in message {
+		case cook_link.Hello:
+			version := cook_link.protocol_version()
+			if msg.protocol != version {
+				reason := fmt.tprintf("the editor's protocol is %016x and the daemon's is %016x. Rebuild both with just cook editor.", msg.protocol, version)
+				server_send(&d.server, connection, cook_link.Refused{reason = reason, protocol = version})
+				log.errorf("cook: cook link: %s", reason)
+				continue
+			}
+			roots := make([]cook_link.Root, len(d.options.roots), context.temp_allocator)
+			for r, i in d.options.roots {
+				roots[i] = {r.name, r.dir}
+			}
+			// The Welcome and the index go out before the first log line, so the editor has them first.
+			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots})
+			snapshot, problems := index_snapshot(&d.index)
+			server_send(&d.server, connection, snapshot)
+			for p in problems {
+				server_send(&d.server, connection, p)
+			}
+			d.linked_connection = connection
+			server_log_to_editor(&d.server, true)
+			log.infof("cook: linked to %s", msg.editor)
+		case:
+			log.warnf("cook: cook link: the editor sent a message that only the daemon sends: %v", m.header.kind)
+		}
+	}
+	if dropped > 0 {
+		log.warnf("cook: cook link: dropped %d log lines while the editor was slow to read", dropped)
+	}
 }
 
 clone_options :: proc(options: Cook_Options, allocator := context.allocator) -> Cook_Options {
@@ -71,6 +203,7 @@ clone_options :: proc(options: Cook_Options, allocator := context.allocator) -> 
 		cache       = strings.clone(options.cache, allocator),
 		config      = options.config,
 		definitions = strings.clone(options.definitions, allocator),
+		link        = options.link,
 		roots       = make([dynamic]Root, 0, len(options.roots), allocator),
 	}
 	for root in options.roots {

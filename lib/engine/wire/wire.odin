@@ -1,5 +1,9 @@
-package link
+// Package wire is the transport of the editor link and the cook link: the framing, the wire format, and the schema
+// that the editor's C# is generated from (see docs/editor.md#editor-link). Each link gives a union of messages, and a
+// message's kind is its index in the union, from 1. It imports nothing from core or engine.
+package wire
 
+import "base:intrinsics"
 import "base:runtime"
 import "core:encoding/endian"
 import "core:mem"
@@ -34,10 +38,10 @@ read_header :: proc(data: []byte) -> (header: Header, ok: bool) {
 	return header, header.length <= MAX_PAYLOAD
 }
 
-// write_message appends a message, with its header, to buf.
-write_message :: proc(buf: ^[dynamic]byte, message: Message, request: u32 = 0) {
+// write_message appends a message of a link's union, with its header, to buf.
+write_message :: proc(buf: ^[dynamic]byte, message: $M, request: u32 = 0) where intrinsics.type_is_union(M) {
 	message := message
-	assert(message != nil, "link: cannot write an empty message")
+	assert(message != nil, "wire: cannot write an empty message")
 	start := len(buf)
 	resize(buf, start + HEADER_SIZE)
 	variant := reflect.get_union_variant(message)
@@ -50,21 +54,21 @@ write_message :: proc(buf: ^[dynamic]byte, message: Message, request: u32 = 0) {
 	endian.unchecked_put_u32le(header[8:], request)
 }
 
-// kind_of is the kind of a message type: its index in Message, from 1.
-kind_of :: proc($T: typeid) -> u16 {
-	info := runtime.type_info_base(type_info_of(Message)).variant.(runtime.Type_Info_Union)
+// kind_of is the kind of a message type: its index in the link's union of messages, from 1.
+kind_of :: proc($M, $T: typeid) -> u16 where intrinsics.type_is_union(M) {
+	info := runtime.type_info_base(type_info_of(M)).variant.(runtime.Type_Info_Union)
 	for variant, i in info.variants {
 		if variant.id == T {
 			return u16(i + 1)
 		}
 	}
-	panic("link: kind_of a type that is not a message")
+	panic("wire: kind_of a type that is not a message")
 }
 
 // decode_message decodes a payload of the given kind. Strings and slices are allocated with allocator. A payload
 // that does not decode to exactly one message of the kind is refused.
-decode_message :: proc(kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: Message, ok: bool) {
-	info := runtime.type_info_base(type_info_of(Message)).variant.(runtime.Type_Info_Union)
+decode_message :: proc($M: typeid, kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: M, ok: bool) where intrinsics.type_is_union(M) {
+	info := runtime.type_info_base(type_info_of(M)).variant.(runtime.Type_Info_Union)
 	if kind == 0 || int(kind) > len(info.variants) {
 		return
 	}
@@ -108,7 +112,7 @@ encode_value :: proc(buf: ^[dynamic]byte, data: rawptr, ti: ^runtime.Type_Info) 
 		}
 	case:
 		// The schema test walks every message, so an unsupported field fails there first.
-		panic("link: a message has a field type that the wire format does not support")
+		panic("wire: a message has a field type that the wire format does not support")
 	}
 }
 

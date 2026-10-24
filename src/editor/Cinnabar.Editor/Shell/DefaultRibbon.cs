@@ -40,7 +40,11 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode]),
                         new SmallStack([EditorCommands.FreeCamera]),
                     ]),
-                    new RibbonGroup("Host", [new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost])]),
+                    new RibbonGroup("Host",
+                    [
+                        new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost]),
+                        new SmallStack([EditorCommands.RestartCook]),
+                    ]),
                     new RibbonGroup("Window",
                     [
                         new LargeButton(EditorCommands.Palette),

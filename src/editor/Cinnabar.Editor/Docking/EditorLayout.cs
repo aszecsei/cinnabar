@@ -16,6 +16,9 @@ public sealed class EditorLayout
     public const string BottomDock = "dock.bottom";
     const string DocumentDockId = "dock.documents";
 
+    // Panels that a later editor renamed, by their old IDs, so a saved layout keeps them.
+    static readonly Dictionary<string, string> Renamed = new() { ["assetBrowser"] = "contentBrowser" };
+
     readonly IReadOnlyDictionary<string, PanelTool> _panels;
     readonly ViewportDocument _viewport;
 
@@ -57,7 +60,7 @@ public sealed class EditorLayout
             VisibleDockables = Factory.CreateList<IDockable>(
                 NewDocumentDock(0.72),
                 new ProportionalDockSplitter(),
-                Tools(BottomDock, Alignment.Bottom, 0.28, "console", "assetBrowser", "resourceMonitor")),
+                Tools(BottomDock, Alignment.Bottom, 0.28, "console", "contentBrowser", "resourceMonitor")),
         };
         var main = new ProportionalDock
         {
@@ -136,12 +139,14 @@ public sealed class EditorLayout
             return false;
         }
         SetRoot(NewRoot(main));
-        foreach (var id in file.Floating.Where(id => _panels.ContainsKey(id) && !used.Contains(id)))
+        foreach (var id in file.Floating.Select(CurrentId).Where(id => _panels.ContainsKey(id) && !used.Contains(id)))
         {
             Show(id);
         }
         return true;
     }
+
+    static string CurrentId(string id) => Renamed.GetValueOrDefault(id, id);
 
     LayoutNode? SaveNode(IDockable dockable, HashSet<string> docked)
     {
@@ -195,10 +200,10 @@ public sealed class EditorLayout
                 break;
             case ToolsNode tools:
                 // A panel that this editor no longer has, or that is already placed, is left out.
-                var panels = tools.Panels.Where(id => _panels.ContainsKey(id) && used.Add(id)).Select(id => _panels[id]).ToList();
+                var panels = tools.Panels.Select(CurrentId).Where(id => _panels.ContainsKey(id) && used.Add(id)).Select(id => _panels[id]).ToList();
                 dockable = panels.Count == 0 ? null : NewToolDock(tools.Id,
                     Enum.TryParse<Alignment>(tools.Alignment, out var alignment) ? alignment : Alignment.Unset,
-                    double.NaN, panels, tools.Active);
+                    double.NaN, panels, tools.Active == null ? null : CurrentId(tools.Active));
                 break;
             case DocumentsNode when !viewportPlaced:
                 viewportPlaced = true;

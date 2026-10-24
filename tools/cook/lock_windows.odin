@@ -14,11 +14,19 @@ Cache_Lock :: struct {
 	handle: win.HANDLE,
 }
 
-// lock_cache takes the cache's lock, or says which cook holds it.
-lock_cache :: proc(cache: string) -> (lock: Cache_Lock, ok: bool) {
+Lock_Result :: enum {
+	Locked,
+	// Another cook holds the lock.
+	Held,
+	Failed,
+}
+
+// lock_cache takes the cache's lock. It reports a failure, but not that another cook holds it, which each caller
+// says in its own way.
+lock_cache :: proc(cache: string) -> (lock: Cache_Lock, result: Lock_Result) {
 	if err := os.make_directory_all(cache); err != nil && err != .Exist {
 		log.errorf("cook: %s: %v", cache, err)
-		return
+		return {}, .Failed
 	}
 	path := fmt.tprintf("%s/%s", cache, LOCK_FILE)
 	handle := win.CreateFileW(
@@ -31,14 +39,14 @@ lock_cache :: proc(cache: string) -> (lock: Cache_Lock, ok: bool) {
 		nil,
 	)
 	if handle == win.INVALID_HANDLE_VALUE {
-		if error := win.GetLastError(); error == win.ERROR_SHARING_VIOLATION || error == win.ERROR_ACCESS_DENIED {
-			log.errorf("cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.", cache)
-		} else {
-			log.errorf("cook: %s: Windows error %d", path, error)
+		error := win.GetLastError()
+		if error == win.ERROR_SHARING_VIOLATION || error == win.ERROR_ACCESS_DENIED {
+			return {}, .Held
 		}
-		return
+		log.errorf("cook: %s: Windows error %d", path, error)
+		return {}, .Failed
 	}
-	return {handle}, true
+	return {handle}, .Locked
 }
 
 unlock_cache :: proc(lock: ^Cache_Lock) {

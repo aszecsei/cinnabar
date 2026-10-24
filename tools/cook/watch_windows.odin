@@ -3,11 +3,23 @@ package cook
 import "core:log"
 import win "core:sys/windows"
 
-// Watcher waits for changes under a set of directories. It does not say what changed: each pass scans the roots
-// again, and the cache keys find what is dirty, so a change that Windows drops (when its buffer fills) loses nothing.
+// Watcher waits for changes under a set of directories, or for another thread to wake it. It does not say what
+// changed: each pass scans the roots again, and the cache keys find what is dirty, so a change that Windows drops
+// (when its buffer fills) loses nothing.
 Watcher :: struct {
 	dirs:   [dynamic]^Watched_Dir,
+	// The directories' events, then the wake event.
 	events: [dynamic]win.HANDLE,
+	wake:   win.HANDLE,
+}
+
+Wait_Result :: enum {
+	Timeout,
+	Changed,
+	// watcher_wake was called.
+	Woken,
+	// The wait failed, which watcher_wait reports.
+	Failed,
 }
 
 @(private = "file")
@@ -25,6 +37,8 @@ WATCH_FILTER :: win.FILE_NOTIFY_CHANGE_FILE_NAME | win.FILE_NOTIFY_CHANGE_DIR_NA
 // watcher_open watches each directory and everything under it. The watcher keeps the paths, so they must outlive it.
 watcher_open :: proc(w: ^Watcher, dirs: []string) -> bool {
 	w^ = {}
+	// Auto-reset, so one wake wakes one wait.
+	w.wake = win.CreateEventW(nil, false, false, nil)
 	for path in dirs {
 		handle := win.CreateFileW(
 			win.utf8_to_wstring(path),
@@ -51,6 +65,7 @@ watcher_open :: proc(w: ^Watcher, dirs: []string) -> bool {
 			return false
 		}
 	}
+	append(&w.events, w.wake)
 	return true
 }
 
@@ -64,6 +79,9 @@ watcher_close :: proc(w: ^Watcher) {
 		win.CloseHandle(d.handle)
 		free(d)
 	}
+	if w.wake != nil {
+		win.CloseHandle(w.wake)
+	}
 	delete(w.dirs)
 	delete(w.events)
 	w^ = {}
@@ -72,24 +90,31 @@ watcher_close :: proc(w: ^Watcher) {
 // WAIT_FOREVER is watcher_wait's timeout for no limit.
 WAIT_FOREVER :: u32(win.INFINITE)
 
-// watcher_wait waits up to timeout milliseconds for a change under any directory. It returns false if none came, or
-// if the wait failed, which it reports.
-watcher_wait :: proc(w: ^Watcher, timeout: u32) -> bool {
+// watcher_wake wakes the thread that waits, or its next wait. Any thread can call it.
+watcher_wake :: proc(w: ^Watcher) {
+	win.SetEvent(w.wake)
+}
+
+// watcher_wait waits up to timeout milliseconds for a change under any directory, or for watcher_wake.
+watcher_wait :: proc(w: ^Watcher, timeout: u32) -> Wait_Result {
 	result := win.WaitForMultipleObjects(win.DWORD(len(w.events)), raw_data(w.events), false, timeout)
 	if result == win.WAIT_TIMEOUT {
-		return false
+		return .Timeout
 	}
 	index := int(result - win.WAIT_OBJECT_0)
-	if result == win.WAIT_FAILED || index < 0 || index >= len(w.dirs) {
+	if result == win.WAIT_FAILED || index < 0 || index > len(w.dirs) {
 		log.errorf("cook: waiting for changes failed: Windows error %d", win.GetLastError())
-		return false
+		return .Failed
+	}
+	if index == len(w.dirs) {
+		return .Woken
 	}
 	d := w.dirs[index]
 	transferred: win.DWORD
 	win.GetOverlappedResult(d.handle, &d.overlapped, &transferred, false)
 	win.ResetEvent(d.overlapped.hEvent)
 	start_read(d)
-	return true
+	return .Changed
 }
 
 @(private = "file")

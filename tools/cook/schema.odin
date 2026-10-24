@@ -4,7 +4,6 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:hash"
-import "core:log"
 import "core:slice"
 import "core:strings"
 import "core:time"
@@ -43,6 +42,7 @@ Schema_VM :: struct {
 	ctx:      runtime.Context,
 	config:   Script_Config,
 	scripts:  []Script_Source,
+	problems: ^Problems,
 	deadline: time.Tick,
 }
 
@@ -51,12 +51,13 @@ MODULES_KEY :: "cinnabar.modules"
 
 // schema_vm_open makes the VM: the built-in libraries, the prelude with the cook-time natives, and a require that
 // follows the requires that the cooker resolved.
-schema_vm_open :: proc(vm: ^Schema_VM, config: Script_Config, scripts: []Script_Source) -> bool {
+schema_vm_open :: proc(vm: ^Schema_VM, config: Script_Config, scripts: []Script_Source, problems: ^Problems) -> bool {
 	vm^ = {
-		L       = luau.L_newstate(),
-		ctx     = context,
-		config  = config,
-		scripts = scripts,
+		L        = luau.L_newstate(),
+		ctx      = context,
+		config   = config,
+		scripts  = scripts,
+		problems = problems,
 	}
 	L := vm.L
 	callbacks := luau.callbacks(L)
@@ -96,12 +97,12 @@ run_chunk :: proc(vm: ^Schema_VM, chunkname: cstring, source: string, nargs, nre
 	bytecode := compile_source(vm.config, source)
 	defer luau.free_bytecode(raw_data(bytecode))
 	if luau.load(L, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
-		log.errorf("cook: %s", luau.toodinstring(L, -1))
+		report_error(vm.problems, "", 0, 0, "%s", luau.toodinstring(L, -1))
 		return false
 	}
 	luau.insert(L, -1 - nargs)
 	if luau.pcall(L, nargs, nresults, 0) != .OK {
-		log.errorf("cook: %s", luau.toodinstring(L, -1))
+		report_error(vm.problems, "", 0, 0, "%s", luau.toodinstring(L, -1))
 		return false
 	}
 	return true
@@ -119,7 +120,7 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 	bytecode := compile_source(vm.config, string(s.source))
 	defer luau.free_bytecode(raw_data(bytecode))
 	if luau.load(co, fmt.ctprintf("@%s", s.name), raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
-		log.errorf("cook: %s", luau.toodinstring(co, -1))
+		report_error(vm.problems, s.path, 0, 0, "%s", luau.toodinstring(co, -1))
 		return
 	}
 	vm.deadline = time.tick_add(time.tick_now(), SCHEMA_BUDGET)
@@ -127,9 +128,12 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 	vm.deadline = {}
 	if status != .OK {
 		message := status == .YIELD ? "it yields" : luau.toodinstring(co, -1)
-		log.errorf(
-			"cook: %s: a behaviour script's top level runs when it is cooked, so it may only require modules and define classes: %s",
+		report_error(
+			vm.problems,
 			s.path,
+			0,
+			0,
+			"a behaviour script's top level runs when it is cooked, so it may only require modules and define classes: %s",
 			message,
 		)
 		return

@@ -19,6 +19,7 @@ static class EditorCommands
     public const string DeleteEntity = "entity.delete";
     public const string RestartHost = "host.restart";
     public const string StopHost = "host.stop";
+    public const string RestartCook = "cook.restart";
     public const string ResetLayout = "view.resetLayout";
     public const string Stats = "view.stats";
     public const string CollapseRibbon = "view.collapseRibbon";
@@ -224,6 +225,11 @@ static class EditorCommands
             Description = "Stop the host. The viewport goes blank until it starts again.",
             Icon = "stop",
             CanExecuteWhen = () => shell.Host.State == HostState.Running,
+        });
+        commands.Register(new Command(RestartCook, "Restart Cook Daemon", shell.StartCook)
+        {
+            Description = "Stop the cook daemon if it runs, and start it again. It cooks the content roots when they change.",
+            Icon = "restart",
         });
         foreach (var panel in shell.Layout.Panels)
         {

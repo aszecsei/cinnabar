@@ -1,6 +1,42 @@
-// Package link is the editor link's protocol: its messages, their framing and their wire format (see
+// Package link is the editor link's protocol: its messages, which go over the transport in lib/engine/wire (see
 // docs/editor.md#editor-link). The host and the game both use it, so it imports nothing from core or engine.
 package link
+
+import "core:mem"
+
+import "cinnabar:engine/wire"
+
+Header :: wire.Header
+HEADER_SIZE :: wire.HEADER_SIZE
+MAX_PAYLOAD :: wire.MAX_PAYLOAD
+
+read_header :: wire.read_header
+
+// write_message appends a message, with its header, to buf.
+write_message :: proc(buf: ^[dynamic]byte, message: Message, request: u32 = 0) {
+	wire.write_message(buf, message, request)
+}
+
+// kind_of is the kind of a message type: its index in Message, from 1.
+kind_of :: proc($T: typeid) -> u16 {
+	return wire.kind_of(Message, T)
+}
+
+// decode_message decodes a payload of the given kind. Strings and slices are allocated with allocator. A payload
+// that does not decode to exactly one message of the kind is refused.
+decode_message :: proc(kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: Message, ok: bool) {
+	return wire.decode_message(Message, kind, payload, allocator)
+}
+
+// schema describes every message as JSON, for the editor's C# source generator. Its version is the protocol version.
+schema :: proc(allocator := context.allocator) -> string {
+	return wire.schema(Message, allocator)
+}
+
+// protocol_version is a hash of the schema, so any change to a message changes it.
+protocol_version :: proc() -> u64 {
+	return wire.protocol_version(Message)
+}
 
 // A message's kind is its index in this union, from 1. Adding, removing or reordering messages changes the schema,
 // and with it the protocol version, so an editor and a host that disagree refuse each other at the handshake.

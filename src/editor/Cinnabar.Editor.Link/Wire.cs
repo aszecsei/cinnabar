@@ -4,7 +4,10 @@ using System.Text;
 
 namespace Cinnabar.Editor.Link;
 
-/// <summary>A message of the editor link. The generated records in <c>Cinnabar.Editor.Link.Protocol</c> implement it.</summary>
+/// <summary>
+/// A message of a link. The generated records in <c>Cinnabar.Editor.Link.Protocol</c> (the editor link) and
+/// <c>Cinnabar.Editor.Link.Cook</c> (the cook link) implement it.
+/// </summary>
 public interface ILinkMessage
 {
     ushort MessageKind { get; }
@@ -17,8 +20,11 @@ public sealed class LinkProtocolException(string message) : Exception(message);
 
 public delegate T ElementReader<T>(ref LinkReader reader);
 
+/// <summary>Reads a message of one link by its kind: <c>LinkMessages.Read</c> or <c>CookMessages.Read</c>.</summary>
+public delegate ILinkMessage MessageReader(ushort kind, ref LinkReader reader);
+
 /// <summary>
-/// Reads the wire format of <c>lib/engine/editor/link</c>: little-endian numbers, bools as one byte, and strings and
+/// Reads the wire format of <c>lib/engine/wire</c>: little-endian numbers, bools as one byte, and strings and
 /// slices as a <c>u32</c> count followed by their bytes or elements. A fixed array has no count.
 /// </summary>
 public ref struct LinkReader(ReadOnlySpan<byte> data)
@@ -186,11 +192,11 @@ public static class LinkFrame
         return header.Length <= MaxPayload ? header : throw new LinkProtocolException($"a message of {header.Length} bytes is too long");
     }
 
-    /// <summary>Decodes a payload, which must hold exactly one message of its kind.</summary>
-    public static ILinkMessage Decode(ushort kind, ReadOnlySpan<byte> payload)
+    /// <summary>Decodes a payload of a link's message, which must hold exactly one message of its kind.</summary>
+    public static ILinkMessage Decode(ushort kind, ReadOnlySpan<byte> payload, MessageReader read)
     {
         var reader = new LinkReader(payload);
-        var message = Protocol.LinkMessages.Read(kind, ref reader);
+        var message = read(kind, ref reader);
         return reader.AtEnd ? message : throw new LinkProtocolException($"a message of kind {kind} has bytes after its fields");
     }
 }

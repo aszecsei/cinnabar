@@ -1,20 +1,33 @@
+using Cinnabar.Editor.Content;
+
 namespace Cinnabar.Editor;
 
 /// <summary>
-/// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]</c>.
-/// Paths are relative to the working directory, which is also the host's, so <c>just edit</c> runs the editor from
-/// the repository root. Without a scene, the host shows the scene that the game loads itself.
+/// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
+/// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--root &lt;name&gt;=&lt;dir&gt;]...</c>.
+/// Paths are relative to the working directory, which is also the host's and the cook daemon's, so <c>just edit</c>
+/// runs the editor from the repository root. Without a scene, the host shows the scene that the game loads itself.
 /// </summary>
 public sealed record EditorOptions(string HostPath, string GamePath, string? ScenePath = null)
 {
     /// <summary>Where autosaves go (see docs/editor.md#crash-recovery).</summary>
     public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
 
+    /// <summary>How the editor runs the cook daemon (see docs/editor.md#processes). The defaults are the repository's.</summary>
+    public CookOptions Cook { get; init; } = new(
+        Path.GetFullPath(Path.Combine("build", "cook.exe")),
+        Path.GetFullPath(Path.Combine("build", "cache")),
+        Path.GetFullPath(Path.Combine("build", "script-types", "cinnabar.d.luau")),
+        [("game", Path.GetFullPath(Path.Combine("samples", "mygame", "content")))],
+        Environment.CurrentDirectory);
+
     public static EditorOptions Parse(IReadOnlyList<string> args)
     {
         var host = Path.Combine("build", "host.exe");
         var game = Path.Combine("build", "mygame.dll");
         string? scene = null;
+        var cook = new EditorOptions("", "").Cook;
+        List<(string Name, string Dir)> roots = [];
         for (var i = 0; i < args.Count; i++)
         {
             switch (args[i])
@@ -28,10 +41,28 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--scene" when i + 1 < args.Count:
                     scene = Path.GetFullPath(args[++i]);
                     break;
+                case "--cook" when i + 1 < args.Count:
+                    cook = cook with { CookPath = Path.GetFullPath(args[++i]) };
+                    break;
+                case "--cache" when i + 1 < args.Count:
+                    cook = cook with { CachePath = Path.GetFullPath(args[++i]) };
+                    break;
+                case "--definitions" when i + 1 < args.Count:
+                    cook = cook with { DefinitionsPath = Path.GetFullPath(args[++i]) };
+                    break;
+                case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
+                    var root = args[++i];
+                    var equals = root.IndexOf('=');
+                    roots.Add((root[..equals], Path.GetFullPath(root[(equals + 1)..])));
+                    break;
                 default:
                     throw new ArgumentException($"unknown argument {args[i]}");
             }
         }
-        return new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene);
+        if (roots.Count > 0)
+        {
+            cook = cook with { Roots = roots };
+        }
+        return new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook };
     }
 }

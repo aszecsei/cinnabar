@@ -171,7 +171,10 @@ local b = require('@game/b')
 local c = [[require("./long")]]
 return function() return require("./inner") end`,
 	)
-	testing.expect(t, find_requires(&s))
+	problems := Problems {
+		log = true,
+	}
+	testing.expect(t, find_requires(&s, &problems))
 	testing.expect_value(t, len(s.requires), 3)
 	if len(s.requires) == 3 {
 		testing.expect_value(t, s.requires[0], Found_Require{"./a", 2})
@@ -187,14 +190,14 @@ return function() return require("./inner") end`,
 		source   = transmute([]byte)string("local name = './a'\nreturn require(name)"),
 		requires = make([dynamic]Found_Require, context.temp_allocator),
 	}
-	testing.expect(t, !find_requires(&dynamic_require))
+	testing.expect(t, !find_requires(&dynamic_require, &problems))
 	expect_error(t, &errors, "dynamic.luau:2: require takes one string literal")
 	broken := Script_Source {
 		path     = "broken.luau",
 		source   = transmute([]byte)string("local = 1"),
 		requires = make([dynamic]Found_Require, context.temp_allocator),
 	}
-	testing.expect(t, !find_requires(&broken))
+	testing.expect(t, !find_requires(&broken, &problems))
 	expect_error(t, &errors, "broken.luau:1:")
 }
 
@@ -271,7 +274,7 @@ copied_meta_files_are_errors :: proc(t: ^testing.T) {
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
 	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
-	expect_error(t, &errors, "have the same GUID")
+	expect_error(t, &errors, "has the same GUID as")
 }
 
 @(test)

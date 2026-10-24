@@ -22,19 +22,25 @@ Cook_Options :: struct {
 	roots:       [dynamic]Root,
 	// The definition file to type check scripts against, or "" for none.
 	definitions: string,
+	// The daemon's port for the cook link, or 0 for none.
+	link:        int,
 }
 
-// Pass is what one cook did.
+// Pass is what one cook did, and what it found, in the temporary allocator.
 Pass :: struct {
 	ok:         bool,
 	cooked:     [format.Asset_Kind]int,
 	current:    [format.Asset_Kind]int,
 	// The cache's generation after the pass. It changes only when the pass writes a blob.
 	generation: u64,
+	// Every asset in the roots, with what the cook learnt of it, and every folder.
+	assets:     []Asset_Source,
+	folders:    []Folder,
+	problems:   Problems,
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir>...`. The daemon
-// always cooks the dev configuration, so it takes no --config.
+// always cooks the dev configuration, so it takes no --config, and it takes `--link <port>`.
 parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Options, ok: bool) {
 	options.roots = make([dynamic]Root, context.temp_allocator)
 	config_set := daemon
@@ -48,6 +54,12 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 			options.cache = value
 		case "--definitions":
 			options.definitions = value
+		case "--link":
+			port, port_ok := strconv.parse_int(value)
+			if !daemon || !port_ok || port <= 0 || port > 65535 {
+				return
+			}
+			options.link = port
 		case "--config":
 			if daemon {
 				return
@@ -80,15 +92,18 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 }
 
 // cook scans the roots and cooks the assets of the kinds whose keys changed. When it writes a blob, it then writes the
-// cache's generation, so a running game swaps the pass's blobs together (see docs/content-pipeline.md#loading).
-cook :: proc(options: Cook_Options, kinds: Asset_Kinds) -> (pass: Pass) {
-	assets, scanned := scan(options.roots[:])
+// cache's generation, so a running game swaps the pass's blobs together (see docs/content-pipeline.md#loading). It
+// logs each problem as it finds it, unless log_problems is false.
+cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true) -> (pass: Pass) {
+	pass.problems.log = log_problems
+	scanned: bool
+	pass.assets, pass.folders, scanned = scan(options.roots[:], &pass.problems)
 	pass.ok = scanned
 	if .Script in kinds {
-		pass.ok = cook_scripts(options, assets, &pass) && pass.ok
+		pass.ok = cook_scripts(options, pass.assets, &pass) && pass.ok
 	}
 	if .Scene in kinds {
-		pass.ok = cook_scenes(options, assets, &pass) && pass.ok
+		pass.ok = cook_scenes(options, pass.assets, &pass) && pass.ok
 	}
 	written := 0
 	for n in pass.cooked {

@@ -21,23 +21,38 @@ Asset_Kinds :: bit_set[format.Asset_Kind]
 
 ALL_KINDS :: Asset_Kinds{.Script, .Scene}
 
-// Asset_Source is a source asset with its .meta file.
+// Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
+// index.
 Asset_Source :: struct {
-	kind:      format.Asset_Kind,
-	root:      int,
+	kind:         format.Asset_Kind,
+	root:         int,
 	// Absolute, with forward slashes.
-	path:      string,
+	path:         string,
 	// The root's name and the path relative to the root, such as "game/scripts/hello.luau".
-	name:      string,
-	meta_text: string,
-	meta:      format.Meta,
-	source:    []byte,
+	name:         string,
+	meta_text:    string,
+	meta:         format.Meta,
+	source:       []byte,
+	// The cook could not cook it, so it keeps its old blob.
+	failed:       bool,
+	// The assets that it depends on: a script's requires, and the scripts that a scene's behaviours name.
+	dependencies: [dynamic]format.Guid,
+	// For a script that defines a behaviour, the class's name.
+	behaviour:    string,
 }
 
-// scan reads every asset in the roots, with its .meta file, in path order. An asset without a .meta file gets a new
-// GUID, and the cooker writes its .meta file. Files and directories whose names start with a dot are skipped.
-scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
+// Folder is a directory in a root, by the root's index and its path in the root, such as "scripts/ui".
+Folder :: struct {
+	root: int,
+	path: string,
+}
+
+// scan reads every asset in the roots, with its .meta file, in path order, and lists the folders. An asset without a
+// .meta file gets a new GUID, and the cooker writes its .meta file. Files and directories whose names start with a
+// dot are skipped.
+scan :: proc(roots: []Root, problems: ^Problems) -> (assets: []Asset_Source, folders: []Folder, ok: bool) {
 	found := make([dynamic]Asset_Source, context.temp_allocator)
+	found_folders := make([dynamic]Folder, context.temp_allocator)
 	ok = true
 	for root, root_index in roots {
 		walker := os.walker_create(root.dir)
@@ -47,6 +62,11 @@ scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
 				if info.type == .Directory {
 					os.walker_skip_dir(&walker)
 				}
+				continue
+			}
+			if info.type == .Directory {
+				path := forward_slashes(info.fullpath)
+				append(&found_folders, Folder{root_index, strings.clone(strings.trim_prefix(path, fmt.tprintf("%s/", root.dir)), context.temp_allocator)})
 				continue
 			}
 			kind := kind_of(info.name)
@@ -59,15 +79,16 @@ scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
 				root = root_index,
 				path = path,
 				name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
+				dependencies = make([dynamic]format.Guid, context.temp_allocator),
 			}
-			if !read_asset(&a) {
+			if !read_asset(&a, problems) {
 				ok = false
 				continue
 			}
 			append(&found, a)
 		}
 		if path, err := os.walker_error(&walker); err != nil {
-			log.errorf("cook: %s: %v", path, err)
+			report_error(problems, forward_slashes(path), 0, 0, "%v", err)
 			ok = false
 		}
 	}
@@ -77,7 +98,7 @@ scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
 	shared := make(map[format.Guid]bool, context.temp_allocator)
 	for a, i in found {
 		if j, seen := first[a.meta.guid]; seen {
-			log.errorf("cook: %s and %s have the same GUID. Delete the .meta file of the copy.", found[j].path, a.path)
+			report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
 			shared[a.meta.guid] = true
 			ok = false
 			continue
@@ -90,7 +111,8 @@ scan :: proc(roots: []Root) -> (assets: []Asset_Source, ok: bool) {
 			append(&unique, a)
 		}
 	}
-	return unique[:], ok
+	slice.sort_by(found_folders[:], proc(a, b: Folder) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
+	return unique[:], found_folders[:], ok
 }
 
 // kind_of is the kind of asset that a file name is, or .None.
@@ -103,22 +125,22 @@ kind_of :: proc(name: string) -> format.Asset_Kind {
 	return .None
 }
 
-// assets_of is the assets of one kind, in the scan's order.
-assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []Asset_Source {
-	result := make([dynamic]Asset_Source, context.temp_allocator)
-	for a in assets {
+// assets_of is the indices of the assets of one kind, in the scan's order.
+assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []int {
+	result := make([dynamic]int, context.temp_allocator)
+	for a, i in assets {
 		if a.kind == kind {
-			append(&result, a)
+			append(&result, i)
 		}
 	}
 	return result[:]
 }
 
 @(private = "file")
-read_asset :: proc(a: ^Asset_Source) -> bool {
+read_asset :: proc(a: ^Asset_Source, problems: ^Problems) -> bool {
 	source, err := os.read_entire_file(a.path, context.temp_allocator)
 	if err != nil {
-		log.errorf("cook: %s: %v", a.path, err)
+		report_error(problems, a.path, 0, 0, "%v", err)
 		return false
 	}
 	a.source = source
@@ -130,19 +152,19 @@ read_asset :: proc(a: ^Asset_Source) -> bool {
 		buffer: [32]u8
 		text := fmt.tprintf("# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).\nguid = %s\n", format.guid_format(guid, &buffer))
 		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
-			log.errorf("cook: %s: %v", meta_path, write_err)
+			report_error(problems, meta_path, 0, 0, "%v", write_err)
 			return false
 		}
 		log.infof("cook: assigned a GUID to %s", a.name)
 		meta_bytes = transmute([]byte)text
 	} else if meta_err != nil {
-		log.errorf("cook: %s: %v", meta_path, meta_err)
+		report_error(problems, meta_path, 0, 0, "%v", meta_err)
 		return false
 	}
 	a.meta_text = string(meta_bytes)
 	meta, meta_ok := format.meta_parse(a.meta_text, context.temp_allocator)
 	if !meta_ok {
-		log.errorf("cook: %s: needs `guid = <32 hex digits>`, and `key = value` lines", meta_path)
+		report_error(problems, meta_path, 0, 0, "needs `guid = <32 hex digits>`, and `key = value` lines")
 		return false
 	}
 	a.meta = meta

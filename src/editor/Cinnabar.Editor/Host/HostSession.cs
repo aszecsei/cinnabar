@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using Avalonia.Threading;
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 
@@ -28,7 +29,7 @@ public sealed class HostSession : IDisposable
     static readonly TimeSpan ConnectRetry = TimeSpan.FromMilliseconds(100);
 
     readonly EditorOptions _options;
-    HostProcess? _process;
+    ChildProcess? _process;
     LinkClient? _link;
     CancellationTokenSource? _connecting;
     ulong _adapter;
@@ -84,11 +85,11 @@ public sealed class HostSession : IDisposable
         }
         StopProcess();
         var name = $"cinnabar-editor-{Environment.ProcessId}-{++_starts}";
-        var port = FreePort();
-        HostProcess process;
+        var port = LinkClient.FreePort();
+        ChildProcess process;
         try
         {
-            process = HostProcess.Start(_options.HostPath,
+            process = ChildProcess.Start(_options.HostPath,
                 [_options.GamePath, "--shared", name, "--adapter", _adapter.ToString("x16"), "--link", port.ToString()],
                 Environment.CurrentDirectory);
         }
@@ -125,13 +126,13 @@ public sealed class HostSession : IDisposable
         }
     }
 
-    async Task ConnectAsync(HostProcess process, int port, CancellationToken cancel)
+    async Task ConnectAsync(ChildProcess process, int port, CancellationToken cancel)
     {
         while (process == _process)
         {
             try
             {
-                var link = await LinkClient.ConnectAsync(port, cancel);
+                var link = await LinkClient.ConnectAsync(port, LinkMessages.Read, cancel);
                 if (process != _process)
                 {
                     await link.DisposeAsync();
@@ -214,7 +215,7 @@ public sealed class HostSession : IDisposable
         }
     }
 
-    void OnExited(HostProcess process, int code)
+    void OnExited(ChildProcess process, int code)
     {
         // A process that the editor stopped or replaced has already been dealt with.
         if (process != _process)
@@ -248,17 +249,6 @@ public sealed class HostSession : IDisposable
         State = state;
         ExitCode = exitCode;
         StateChanged?.Invoke();
-    }
-
-    // A port that was free a moment ago. Another program could take it before the host listens, and then the editor
-    // reports that the link did not open.
-    static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
     }
 
     public void Dispose() => StopProcess();
