@@ -1,0 +1,320 @@
+# Rendering
+
+The built-in renderer draws the world, a first-person view model, the UI and debug drawing into one frame. It is in `lib/engine/render`, on top of the render graph, and it records everything through `lib/core/gpu` (see [GPU](gpu.md)). A game uses the built-in renderer or builds its own graph. The sample's hand-written frame becomes the second case.
+
+## Goals
+
+- **Layers:** the world, the view model, the UI and debug drawing each have their own target and their own rules, and one output pass combines them.
+- **Shading models:** a new lighting model is one HLSL file and one declaration. Materials pick a shading model, and every pass that draws them works without changes.
+- **Materials from graphs:** a node graph in the editor makes a material. A material instance changes its parameters and needs no new shaders.
+- **Room to grow:** volumetric fog, global illumination, bloom, exposure, tone mapping, ambient occlusion and ray-traced shadows each have a fixed place in the frame and the inputs they need.
+
+## Decisions
+
+| Question | Decision | Why |
+|---|---|---|
+| Shading path | Clustered forward, with a depth and normal prepass | See [Clustered forward](#clustered-forward). |
+| Depth | Reversed infinite Z: depth is `near / z`, test `Greater`, clear 0 | `D32_Float` has its precision near 0. The current `1 - near / z` puts that precision at the near plane, where nothing needs it. |
+| Scene color | `RGBA16_Float`, linear, pre-exposed | Bloom, exposure and tone mapping need HDR. Pre-exposure keeps bright values inside the half-float range. |
+| View model | A second view drawn into the scene's targets, not a separate target | See [View model](#view-model). |
+| UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than they do. |
+| Instance positions | Relative to a render origin that snaps to a 1024 m grid, in a persistent GPU scene | See [GPU scene](#gpu-scene). |
+| Anti-aliasing | Temporal, no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. |
+
+## Frame
+
+```mermaid
+flowchart TB
+    EXTRACT["Extraction<br/>instances, lights, views"]
+    CULL["Culling<br/>frustum + occlusion, per-pipeline bins"]
+    PRE["Prepass<br/>depth, normals, velocity, IDs"]
+    VMPRE["View model prepass<br/>stencil bit"]
+    SHADOW["Shadows<br/>shadow maps, ray-traced masks"]
+    CLUSTER["Light clusters"]
+    AO["Ambient occlusion"]
+    GI["Global illumination"]
+    FOG["Fog volume"]
+    FWD["Forward<br/>opaque, sky"]
+    VMFWD["View model forward"]
+    TRANS["Transparent"]
+    POST["HDR post<br/>temporal AA, bloom, exposure"]
+    TONE["Tone mapping"]
+    UI["UI layer"]
+    DEBUG["Debug layer"]
+    OUT["Output<br/>frame target"]
+
+    EXTRACT --> CULL --> VMPRE --> PRE
+    PRE --> SHADOW & CLUSTER & AO & GI
+    CLUSTER --> FOG
+    SHADOW & CLUSTER & AO & GI & FOG --> FWD
+    FWD --> VMFWD --> TRANS --> POST --> TONE --> OUT
+    UI --> OUT
+    DEBUG --> OUT
+```
+
+- The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
+- Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
+- The renderer owns a `Renderer` in `Game_State`: pipelines, the material table, the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)).
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory. It has the views, the settings for this frame, and optional `Pass_Hook`s for custom passes at named points: `After_Prepass`, `After_Opaque`, `Before_Post`, `After_Tone_Map`. The hooks are procedures in the game DLL, so they are never stored in `Game_State`.
+
+### Views
+
+- A `render.View` is a camera: its pose, its projection, its viewport, and its layers. The editor's camera and the game's camera both give one (see [Editor](editor.md#viewport)).
+- A frame has one main view, and in the editor the [material previews](#material-previews). More views come later: split screen, reflection captures. Each view has its own clusters, history and scene color. Every view uses the same [GPU scene](#gpu-scene), because its poses have no camera rotation (see [World](world.md#render-extraction)).
+- A view's constants hold its offset from the render origin as an `f32` vector, with its rotation and projection.
+
+## GPU scene
+
+The GPU scene holds every instance's record in a persistent buffer: its pose, its last frame's pose, its bounds, its mesh and its material slot.
+
+- **Render origin.** Poses are relative to the render origin, a `World_Position` snapped to a grid of 1024 m. Snapping is an integer mask on the Q39.24 values, so the offset between two origins is exact. Shaders subtract the view's offset from the origin, so their error near the camera is about one `f32` unit at 1024 m, about 0.06 mm.
+- **Rebasing.** The origin moves when the camera is more than 1.5 cells from it, so a camera on a cell's edge does not move it back and forth. A rebase writes every record again, rebuilds the top-level acceleration structure, and moves every world-space history (last frame's poses, cached shadow maps, GI probes) by the exact offset.
+- **Stable slots.** Each rendered entity has a slot for its whole life. A free list gives slots, and a map from entity to slot lives in `Game_State`. A soft restart builds them again. Culling, the acceleration structure's instance IDs and the occlusion culling's visibility from the last frame all index by slot.
+- **Camera-relative records.** The view model and the debug shapes are not in the GPU scene. Extraction writes them relative to the camera every frame, as it does now (see [World](world.md#render-extraction)). The view model is within a meter of the camera, where the render origin's error would show as about a pixel of jitter at the near plane.
+- **Updates.** At first, extraction writes every slot every frame, relative to the render origin. That costs what extraction costs now, about 96 bytes per instance per frame with both poses, but every GPU-side consumer has its final layout. *Later, extraction writes only the slots that changed (see [Future work](#future-work)).*
+
+## Layers
+
+| Layer | Target | Space | Depth | Composited |
+|---|---|---|---|---|
+| World | Scene color, `RGBA16_Float` | Linear HDR | Scene depth | Is the base |
+| View model | The world's targets | Linear HDR | Scene depth, its own projection, a stencil bit | In the forward pass |
+| UI | `RGBA8_Unorm`, premultiplied | sRGB-encoded, blended as encoded | None | In the output pass, over the tone-mapped scene |
+| Debug | `RGBA8_Unorm`, premultiplied | sRGB-encoded | Tested lines read scene depth; overlay lines ignore it | In the output pass, over the UI |
+
+### View model
+
+A first-person view model needs its own field of view, and it must never go into a wall. A separate target that is composited on top does both, but the view model then misses everything that runs on the scene: it receives no shadows from the world and casts none, it has no ambient occlusion or fog, temporal AA and motion blur do not see it, and bloom and exposure treat it apart from the world. The renderer therefore draws the view model into the world's own targets, as a second view:
+
+1. **The view model prepass runs first.** It draws the view model with its own projection and writes depth and stencil bit 0 (`VIEW_MODEL`).
+2. **The world prepass tests stencil bit 0** and draws nowhere that the view model is. A wall that is closer than the arms never covers them.
+3. **The view model's forward pass** shades it with the world's lights, shadows, GI and fog. Its records are relative to the camera, not the render origin (see [GPU scene](#gpu-scene)), but they are still world-space positions with no camera rotation. Only its projection differs, so its lighting matches the world's.
+4. **Post passes check the stencil bit** where they reconstruct positions from depth. Ambient occlusion and fog use the view model's projection for those pixels, and depth of field leaves them sharp.
+
+The view model is a separate list of entities: those with the `View_Model` tag. They cast no shadows into the world by default, because their pose is not their real place in the world.
+
+*Stencil state needs a GPU addition (see [GPU additions](#gpu-additions)).* A game that wants a truly separate target can use a hook at `Before_Post`, which still composites in linear HDR before post.
+
+### UI
+
+- The UI draws into its own target in sRGB-encoded values, and blends them as encoded values, as design tools do. A color that a designer picks is the color on the screen.
+- The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space and later scale the UI to the display's paper white for HDR output.
+- The UI target has the frame target's size. The scene can render at a lower resolution, and the UI stays sharp.
+- The UI renderer itself is not part of this design. It only has to write into the UI target.
+
+### Debug
+
+- `debug` is an immediate API: `debug.line`, `debug.box`, `debug.sphere`, `debug.arrow`, `debug.axes`, and later text. Each takes `World_Position`s, a color, a duration (0 is this frame only) and a mode: `Tested` or `Overlay`.
+- Any job can call it. Each job appends to its own list in frame memory, and extraction merges them into one upload. Shapes with a duration live in `Game_State`.
+- **Tested** shapes read scene depth. The hidden part draws with a lower alpha, so a shape inside a wall still shows where it is. **Overlay** shapes draw over everything.
+- The colors are exactly the colors given: no exposure, no tone mapping, no fog.
+- The editor's selection outline and gizmo move from their own pass on the frame target into the debug layer (see [Editor](editor.md#viewport)). Release builds compile the debug calls out.
+
+### Output
+
+The output pass is one full-screen pass that writes the frame target:
+
+1. Read the tone-mapped scene, upscaled to the frame's size if the scene's resolution is lower.
+2. Encode it to sRGB.
+3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
+4. Write the result. The frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again.
+
+*HDR output* needs a frame target in `RGB10A2_Unorm` (PQ) or `RGBA16_Float` (scRGB) from `core`. The output pass then encodes for the display instead of step 2, and scales the UI and debug layers to paper white. Only this pass changes.
+
+## Clustered forward
+
+Forward shading with a prepass is the default and only path at first.
+
+- **Many shading models cost nothing.** Each material's pixel shader runs its own shading model. A deferred path would have to pack every model's inputs into one G-buffer and branch on a model ID.
+- **Transparent surfaces** use the same light loop as opaque ones.
+- **The prepass gives the screen-space passes their inputs:** depth, a normal and a velocity for each pixel. Ambient occlusion and screen-space GI then run before the forward pass, and the forward pass applies them to indirect light only, which a deferred or a plain forward path gets wrong or gets a frame late.
+- **The clusters serve fog too.** The fog volume's froxels and the light clusters share their depth slices, so fog reads the same light lists.
+- **The prepass removes overdraw.** The forward pass tests depth with `Equal` and shades each pixel once.
+
+### Prepass
+
+- Writes depth, the stencil bits, the normal (octahedral, `RG16_Float`), the velocity (`RG16_Float`) and, while an editor is linked, the entity IDs (see [Editor](editor.md#viewport)). The forward pass no longer writes IDs.
+- The normal is the material's normal, normal maps included. The material compiler keeps only the graph nodes that the normal, the opacity mask and the vertex offset need (see [Permutations](#permutations)).
+- Opaque materials with no vertex offset and no mask share one prepass pipeline for depth, and one with normals for each normal source. Most draws therefore use a few pipelines.
+- **Occlusion culling** is two-phase: draw what was visible last frame, build a depth pyramid, then test everything else against it and draw what passes.
+
+### Lights and clusters
+
+- Light components: `Directional_Light`, `Point_Light`, `Spot_Light`, later area lights. Extraction writes them camera-relative into a light buffer each frame.
+- A compute pass assigns lights to clusters: a grid in screen tiles of 64 pixels and 32 exponential depth slices. Each cluster has an offset and a count into one index list.
+- The directional lights are not clustered. Every pixel loops over them.
+
+### Shadows
+
+| Light | With `Ray_Query` | Without |
+|---|---|---|
+| Directional | A screen-space mask: a compute pass traces from the prepass depth | Cascaded shadow maps |
+| Spot, point | A mask for the few most important; maps for the rest | A shadow atlas |
+
+- A shadow mask is a screen-space texture with one channel for each traced light, at most four. The light records which channel it has, and the forward pass reads it. This is the sample's ray-traced shadow, made general.
+- The forward pass can also trace in the pixel shader with `RayQuery`, for transparent surfaces, which have no prepass depth.
+- The ray-tracing pipeline path stays the sample's alternative (see [GPU](gpu.md#ray-tracing)). Every ray-traced path has the shadow map fallback.
+- The shadow passes use each material's depth pipeline, so masked and offset materials cast the right shadows.
+
+### Transparency
+
+- Transparent and additive draws go after the opaque forward pass and the view model. They test depth and do not write it.
+- They draw sorted back to front by the distance of each instance's bounds from the camera. Sorting is per instance, not per triangle, so a mesh that overlaps itself can show the wrong order. Two-sided transparent materials draw their back faces first, then their front faces.
+- They light with the same template as opaque surfaces: the light clusters, the fog volume and the GI. They have no prepass, so ambient occlusion and screen-space shadow masks do not apply to them, and ray-traced shadows trace in the pixel shader (see [Shadows](#shadows)).
+- Sorting happens on the CPU after culling at first. Sorting on the GPU comes with more transparent instances.
+- *Order-independent transparency comes only when a game needs it (see [Future work](#future-work)).*
+
+## Materials
+
+```mermaid
+flowchart LR
+    SM["Shading model<br/>lit.shading + lit.hlsl"]
+    GRAPH["Material<br/>rock.material (graph)"]
+    INST["Material instance<br/>rock_mossy.material_instance"]
+    COOK["tools/cook<br/>codegen + DXC"]
+    BLOB["Material blob<br/>shaders, parameter layout, defaults"]
+    IBLOB["Instance blob<br/>parent GUID, values"]
+
+    SM --> GRAPH
+    GRAPH --> COOK --> BLOB
+    INST -->|"parent"| GRAPH
+    INST --> COOK --> IBLOB
+```
+
+### Shading models
+
+A shading model is a lighting model: `Unlit`, `Lit` (metallic and roughness), later `Subsurface`, `Cloth`, `Toon`. It is two content files, so a game adds its own in its content root:
+
+- `<name>.shading` declares it: its name, its surface inputs with their types and defaults, and flags such as `No_Lighting` (skip the light loop) or `Needs_Shadow_Mask`.
+- `<name>.hlsl` implements it. The engine generates the `Surface` struct from the declaration, and the file defines:
+
+```hlsl
+float3 shade_direct(Surface s, Shading_Point p, Light light, float shadow);
+float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
+```
+
+- The engine's forward template owns the light loop. For each light in the pixel's cluster and each directional light, it calls `shade_direct`. Then it calls `shade_indirect` with the GI and the ambient occlusion, and adds the emission. `Unlit` has `No_Lighting` and only emits.
+- The material graph's output node has one input for each surface input of its shading model. The cook link sends the shading models to the editor with the importers, so the editor shows the right inputs.
+- Fog, exposure and the shadow mask are applied by the template, not by shading models.
+
+### Material
+
+A material is a `.material` text file that the editor's node graph writes, as it writes scenes. It has:
+
+- **Settings:** the shading model, the blend mode (`Opaque`, `Masked`, `Transparent`, `Additive`), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows.
+- **Parameters:** scalars, vectors, colors, textures and static switches, each with a name, a default and a group for the editor.
+- **The graph:** nodes and links. Nodes include math, texture samples, parameters, time, world position (relative to the camera), vertex attributes, material functions (other graph assets) and a custom HLSL node.
+
+The cooker turns the graph into an HLSL function, `evaluate(Material_Inputs) -> Surface`, and compiles it into each pass's template. A hand-written `.hlsl` material that defines `evaluate` cooks the same way, which is how the built-in materials exist before the graph editor does.
+
+**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs. A later visibility buffer path can then fill the inputs from barycentrics and analytic derivatives without changing a material (see [Open questions](#open-questions)).
+
+### Permutations
+
+The cooker compiles each material for each pass and each vertex path:
+
+| Axis | Values |
+|---|---|
+| Pass | Depth (prepass and shadows), Prepass with normals, Forward |
+| Vertex path | Mesh shader, vertex fallback (see [GPU](gpu.md#mesh-shaders)); skinned later |
+| Static switches | Each combination that the material or an instance uses |
+
+- For each pass, the cooker keeps only the nodes that the pass's outputs need. The depth pass of an opaque material without a vertex offset needs no material code at all, and uses the shared pipeline.
+- The cooker names each shader by the hash of its generated HLSL, so identical permutations compile once and share a pipeline.
+
+### Material instance
+
+A `.material_instance` names its parent (a material or another instance) and overrides parameters. Changing a parameter changes data, never shaders.
+
+- **Static switches** can be overridden in an instance. The override selects another permutation of the parent material. The cooker compiles each permutation that some instance uses, once, under the hash of its generated HLSL, so instances that set the same switches share it.
+- A material's blob holds every permutation that its instances use. A new instance that sets switches no other instance set cooks the material again.
+- A dynamic instance cannot change static switches at runtime, because that would need a permutation that was never cooked.
+- The editor shows how many permutations each material has, so a material whose instances set many combinations of switches is easy to see.
+
+At runtime, `render.material_instance(parent)` makes a dynamic instance whose parameters a game or a script sets every frame.
+
+### Runtime
+
+- **One table.** Every loaded material instance has a slot in a GPU buffer of parameter blocks. A block holds the parameters in the layout that the material's blob gives, with textures as bindless indices. Each draw record holds its slot.
+- **Pipelines by material.** The renderer creates a pipeline for each material permutation that a draw needs. Instances of a material share its pipelines.
+- **Bins.** Culling writes each visible draw into the bin of its pipeline. Each bin is one indirect draw with a count buffer (see [GPU](gpu.md#gpu-driven-rendering)).
+- **Hot reload.** A new material blob updates its pipelines with `update_graphics_pipeline`, so the old shaders draw until the new ones compile. A new instance blob rewrites its parameter block. Both come through `asset.poll` (see [Content pipeline](content-pipeline.md#loading)).
+- **Missing pipelines.** A draw whose pipeline is not compiled yet uses its material's fallback: the default material in the same blend mode. Nothing pops in as a hole.
+
+### Material previews
+
+The editor's material editor shows the material on a mesh. The host renders it, as a second kind of view, into a second shared target. The preview therefore uses the same shaders, shading models and passes as the game.
+
+- **Its own scene.** A preview view does not draw the world. It draws one preview mesh (a sphere, a cube, a plane or a mesh asset) with the material, a directional light and a fixed environment for indirect light. Its records are relative to its camera, as the view model's are. It has no fog, no GI and no temporal passes, so it keeps no history.
+- **Its own shared target.** Each preview has a set of shared textures and a fence, named and paced as the viewport's are (see [GPU](gpu.md#presentation) and [Editor](editor.md#viewport)): `<name>.preview<id>.g<generation>.texture0..2`. The editor sends the size, and the host clamps it to 1024 on each side.
+- **Only when needed.** The host renders a preview when its material, its mesh, its camera or its size changes, or every frame while the material reads time. With several previews open, it renders at most one in each frame, in turn.
+- **Editor link messages:** `Open_Preview` with the material or instance GUID, `Preview_Settings` with the mesh and the orbit camera, `Close_Preview`, and `Preview_Target` from the host with the shared target's name and generation. The editor's side belongs in [Editor](editor.md) when the material editor is designed.
+- **Unsaved changes.** The preview shows a graph that the user has not saved. The editor sends the graph's text to the cook daemon in a `Cook_Preview` message on the cook link. The daemon cooks it under the material's GUID into a separate preview area of the cache, `build/cache/dev/preview/<guid>.blob`, and the host loads the preview's material from there. The game's material changes only when the file is saved.
+- **Thumbnails.** The content browser's thumbnails for materials, meshes and textures can come from the same view: the host renders a preview at a fixed size and reads it back (see [Content pipeline](content-pipeline.md#implementation-phases), phase 4).
+
+## Post-processing
+
+All post passes before tone mapping work in linear HDR at the scene's resolution.
+
+| Pass | Method | Inputs |
+|---|---|---|
+| Temporal AA | Reprojection with velocity, neighborhood clamping; an upscaler later | Scene color, velocity, depth, history |
+| Bloom | A chain of downsamples and upsamples with a 13-tap filter | Scene color |
+| Exposure | A luminance histogram on the compute queue; the result scales the next frame (pre-exposure) | Scene color |
+| Tone mapping | A 3D lookup table that a compute pass bakes when the settings change: the curve (AgX by default; Khronos PBR Neutral, ACES) and color grading | Scene color, bloom, exposure |
+
+## Later features
+
+| Feature | Place in the frame | Inputs | Output read by |
+|---|---|---|---|
+| Ambient occlusion | After the prepass, compute queue. GTAO with a temporal denoiser. | Depth, normals, velocity | `shade_indirect` |
+| Volumetric fog | After light clustering. A froxel volume with the clusters' depth slices: inject density and light, accumulate over time, integrate along each view ray. | Light clusters, shadow maps or masks, history | The forward and transparent templates |
+| Global illumination | After the prepass. Behind one interface: `Indirect` holds diffuse and specular indirect light for a pixel. First radiance cascades in screen space; a world-space probe grid with ray tracing later. | Depth, normals, last frame's lit color, history | `shade_indirect` |
+| Ray-traced shadows | See [Shadows](#shadows). | Depth, the acceleration structure | The forward template |
+| Sky and atmosphere | Lookup tables baked when the sun moves; the sky draws in the forward pass where depth is 0. | The directional light | Forward, fog, GI |
+
+**History textures.** Temporal AA, exposure, fog, GI and the denoisers each keep textures from frame to frame. The render graph gets `history_texture`: a pair of textures that a cache in `Game_State` keeps and swaps every frame, and that it clears when the view's size changes. The pass that writes this frame's texture reads last frame's.
+
+## GPU additions
+
+The design needs these changes in `lib/core/gpu` and the render graph:
+
+- **Stencil state** in `Graphics_Pipeline_Desc`: test, operations, read and write masks, and the reference value in a command. `D32_Float_S8_Uint` exists already.
+- **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
+- **History textures** in the render graph (see [Later features](#later-features)).
+- **An HDR frame target** from `core`, for HDR output.
+- **Reversed Z** in `render.view_projection` and `render.view_depth`, and in the editor's picking.
+
+## Prerequisites
+
+The built-in renderer draws assets that do not exist yet:
+
+- **Shader assets:** the cook daemon cooks shaders as assets with GUIDs, instead of `just shaders` writing them next to their sources (see [Content pipeline](content-pipeline.md#cooking)).
+- **Texture assets:** PNG and others, with mips and BC compression, streamed with `gpu_stream_texture`.
+- **Mesh assets:** glTF, with meshlets for the mesh shader path and index buffers for the fallback.
+- **Components:** `Camera`, `Mesh_Renderer` (a mesh and a material instance for each submesh), the light components and `View_Model`.
+
+## Implementation phases
+
+| Phase | Result |
+|---|---|
+| 0 | Reversed Z. Shader, texture and mesh assets. `Camera` and `Mesh_Renderer`. |
+| 1 | The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
+| 2 | The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
+| 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |
+| 4 | The view model, with the stencil additions. |
+| 5 | The material graph: the `.material` graph format, the cooker's code generation and permutations, the editor's node editor, and material previews with `Cook_Preview`. |
+| 6 | Post: history textures, temporal AA, bloom, exposure, the tone mapping lookup table. |
+| 7 | Ambient occlusion and volumetric fog. |
+| 8 | Global illumination with radiance cascades. |
+| 9 | HDR output. |
+
+## Future work
+
+- **Updates of changed slots only.** The ECS reports the entities whose `Transform` changed, and the spawns and destroys. Extraction then writes only those slots: it puts (slot, record) pairs in the upload ring, and a compute pass copies each record to its slot. The cost then follows what moves, not the size of the scene. Static content gains the most. An entity with a `Previous_Transform` changes every frame, because its interpolated pose does. Edits from the editor and changes of activity take the same path. Do this when scenes pass about 50 000 instances, or when cached shadow maps or world-space GI need static content to stay still.
+- **Spreading a rebase over several frames.** A rebase costs one frame what every frame costs now, so the average cost does not change, but that frame takes longer. To spread it, the renderer keeps a second GPU scene relative to the next origin, and fills it over several frames before the camera reaches the hysteresis limit. Until the switch, it must apply every update to both scenes. Do this only if measurements show a hitch at the rebase.
+- **Order-independent transparency.** Weighted blended transparency for particles and effects, where its approximation is not visible, and per-pixel lists or moment-based transparency for surfaces that intersect. Do this when a game has transparent content that sorting by instance gets wrong.
+
+## Open questions
+
+- **A visibility buffer.** The GPU-driven mesh shader path could write triangle IDs and shade in compute, bin by material, which removes the forward pass's quad overdraw on small triangles. `Material_Inputs` and `cn_sample` keep that path open. Decide after phase 5, with measurements.
