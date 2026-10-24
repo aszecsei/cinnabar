@@ -22,6 +22,11 @@ Message :: union {
 	Load_Scene,
 	Apply_Operations,
 	Edit_Problems,
+	Editor_Camera,
+	Set_Selection,
+	Gizmo_State,
+	Pick_Request,
+	Pick_Result,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -355,4 +360,85 @@ Edit_Problem :: struct {
 Edit_Problems :: struct {
 	snapshot: bool,
 	problems: []Edit_Problem,
+}
+
+// Viewport tools (see docs/editor.md#viewport). The editor owns its camera, its selection and its gizmo, and the game
+// draws them: the frame from the camera, an outline around the selected entities, and the gizmo. The game also
+// renders an entity ID buffer, which answers picks.
+
+// Editor to game: the camera that the game draws from while an editor is linked. The editor sends it when it changes,
+// and when the link connects.
+Editor_Camera :: struct {
+	// A World_Position: units of 2^-24 m.
+	position:     [3]i64,
+	// Camera to world: x, y, z, w. The camera looks down its +z, with +y up and +x right.
+	rotation:     [4]f32,
+	// Vertical, in radians.
+	vertical_fov: f32,
+	// The near plane's distance in meters. The far plane is at infinity.
+	near:         f32,
+}
+
+// Editor to game: the selected entities, which the game outlines with their descendants. The editor sends it when the
+// selection changes, and after each Entity_Snapshot.
+Set_Selection :: struct {
+	entities: []u64,
+}
+
+Gizmo_Kind :: enum u8 {
+	None,
+	Translate,
+	Rotate,
+	Scale,
+}
+
+// A part of a gizmo. View is the handle in the middle for Translate and Scale, which moves in the view's plane or
+// scales evenly, and the outer ring for Rotate, which turns about the view's axis.
+Gizmo_Part :: enum u8 {
+	None,
+	X,
+	Y,
+	Z,
+	XY,
+	YZ,
+	ZX,
+	View,
+}
+
+// Editor to game: the gizmo to draw. The editor does the hit test and the drag math, so the game only draws it.
+Gizmo_State :: struct {
+	kind:     Gizmo_Kind,
+	// A World_Position.
+	position: [3]i64,
+	// The axes: the entity's rotation in local space, or none in world space. x, y, z, w.
+	rotation: [4]f32,
+	// An axis's length in meters, which the editor sets so the gizmo keeps its size on screen.
+	size:     f32,
+	// The part under the mouse, or the part that a drag holds.
+	hot:      Gizmo_Part,
+	dragging: bool,
+}
+
+// Editor to game: which entities are drawn in a rectangle of the frame, in pixels of the current frame target from its
+// top left. A click is a rectangle of one pixel. The game answers each with a Pick_Result, in order.
+Pick_Request :: struct {
+	id:     u32,
+	x:      i32,
+	y:      i32,
+	width:  i32,
+	height: i32,
+}
+
+Pick_Hit :: struct {
+	entity:   u64,
+	// 0 for an entity that the game spawned.
+	scene_id: u64,
+}
+
+// Game to editor: the entities that a Pick_Request found, sorted by entity. For one pixel, depth is the view-space
+// distance of what is drawn there in meters, or 0 where nothing is.
+Pick_Result :: struct {
+	id:    u32,
+	hits:  []Pick_Hit,
+	depth: f32,
 }

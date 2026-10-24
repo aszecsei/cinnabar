@@ -34,6 +34,7 @@ Editor :: struct {
 	watched:     [dynamic]Watched,
 	// The entity of each scene ID, for the editor's operations (see find_scene_entity).
 	by_scene_id: map[u64]ecs.Entity,
+	viewport:    Viewport,
 	last_scan:   f64,
 	last_values: f64,
 }
@@ -64,6 +65,10 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 		known       = make([dynamic]Known, platform.heap_allocator),
 		watched     = make([dynamic]Watched, platform.heap_allocator),
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
+		viewport = {
+			selection = make([dynamic]ecs.Entity, platform.heap_allocator),
+			picks = make([dynamic]link.Pick_Request, platform.heap_allocator),
+		},
 	}
 }
 
@@ -71,12 +76,18 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.platform = platform
 	e.types_sent = false
+	reload_viewport_gpu(e)
 }
 
 destroy :: proc(e: ^Editor) {
 	delete(e.known)
 	delete(e.watched)
 	delete(e.by_scene_id)
+	delete(e.viewport.selection)
+	delete(e.viewport.picks)
+	if e.viewport.gpu_ready {
+		destroy_viewport_gpu(e)
+	}
 	e^ = {}
 }
 
@@ -89,6 +100,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		e.types_sent = false
 		clear(&e.known)
 		clear(&e.watched)
+		reset_viewport(e)
 		snapshot = connection != 0
 	}
 	if connection == 0 {
@@ -110,8 +122,10 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			problems := make([dynamic]scene.Problem, frame)
 			scene.load(w, scripts, scene_of(v, frame), &e.by_scene_id, &problems)
 			link.write_message(out, edit_problems(problems[:], true, frame))
-			// Every entity is new, so the editor gets a snapshot, and its watches are of entities that are gone.
+			// Every entity is new, so the editor gets a snapshot, and its watches and its selection are of entities that
+			// are gone.
 			clear(&e.watched)
+			clear(&e.viewport.selection)
 			snapshot = true
 		case link.Apply_Operations:
 			problems := make([dynamic]scene.Problem, frame)
@@ -120,9 +134,12 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				link.write_message(out, edit_problems(problems[:], false, frame))
 			}
 		case:
-			log.warnf("editor: the game does not handle %v", message)
+			if !handle_viewport_message(e, message) {
+				log.warnf("editor: the game does not handle %v", message)
+			}
 		}
 	}
+	finish_pick(e, w, out, frame)
 	if !e.types_sent {
 		link.write_message(out, component_types(w, frame))
 		e.types_sent = true

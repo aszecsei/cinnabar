@@ -105,6 +105,23 @@ is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {
 	return live_record(w, e) != nil
 }
 
+// slot_count is the number of entity slots, so every entity's index is below it.
+slot_count :: proc "contextless" (w: ^World) -> u32 {
+	return w.entities.count
+}
+
+// slot_entity is the live entity in a slot, for code that keeps only an entity's index, such as an ID buffer.
+slot_entity :: proc "contextless" (w: ^World, index: u32) -> (Entity, bool) {
+	if index >= w.entities.count {
+		return 0, false
+	}
+	record := records(w)[index]
+	if record.archetype == NO_ARCHETYPE {
+		return 0, false
+	}
+	return make_entity(index, record.generation), true
+}
+
 // despawn_one destroys one entity and leaves its children for despawn_orphans.
 @(private)
 despawn_one :: proc(w: ^World, e: Entity) -> bool {

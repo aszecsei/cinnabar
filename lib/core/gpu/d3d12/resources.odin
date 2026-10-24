@@ -10,10 +10,18 @@ import "cinnabar:core/gpu"
 
 @(private)
 Buffer_Entry :: struct {
-	desc:     gpu.Buffer_Desc,
-	resource: ^d3d.IResource,
-	address:  d3d.GPU_VIRTUAL_ADDRESS,
+	desc:        gpu.Buffer_Desc,
+	resource:    ^d3d.IResource,
+	address:     d3d.GPU_VIRTUAL_ADDRESS,
+	// A Readback buffer stays mapped. read_buffer returns its memory once the graphics fence passes ready_value,
+	// which is READBACK_IN_FLIGHT from a copy into it until end_frame stamps the frame's fence value.
+	mapped:      [^]byte,
+	ready_value: u64,
 }
+
+// A Readback buffer's ready_value while a copy into it waits for end_frame.
+@(private)
+READBACK_IN_FLIGHT :: max(u64)
 
 @(private)
 Texture_Entry :: struct {
@@ -68,6 +76,9 @@ Resources :: struct {
 	dsv_size:         u32,
 	releases:         [dynamic]Release,
 	releases_mutex:   sync.Mutex,
+	// The Readback buffers that the frame's command lists copy into, for end_frame to stamp. Guarded by
+	// releases_mutex.
+	readbacks:        [dynamic]gpu.Buffer,
 	// Only debug validation tracks layouts.
 	layouts:          gpu.Layout_Tracker,
 }
@@ -79,6 +90,7 @@ init_resources :: proc() -> bool {
 	gpu.pool_init(&dev.samplers, gpu.MAX_SAMPLERS, dev.allocator)
 	gpu.pool_init(&dev.accels, gpu.MAX_ACCEL_STRUCTS, dev.allocator)
 	dev.releases = make([dynamic]Release, dev.allocator)
+	dev.readbacks = make([dynamic]gpu.Buffer, dev.allocator)
 	gpu.layout_tracker_init(&dev.layouts, dev.allocator)
 
 	dev.resource_heap = create_descriptor_heap(.CBV_SRV_UAV, gpu.RESOURCE_DESCRIPTOR_COUNT, {.SHADER_VISIBLE}) or_return
@@ -103,6 +115,7 @@ shutdown_resources :: proc() {
 		free(r.memory, dev.allocator)
 	}
 	delete(dev.releases)
+	delete(dev.readbacks)
 	// The back buffers are released with the swapchain.
 	if target := gpu.pool_get(&dev.textures, dev.frame_target); target != nil {
 		target.resource = nil
@@ -126,13 +139,21 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		log.errorf("gpu: buffer %q: %v", desc.label, err)
 		return {}
 	}
-	resource, ok := create_buffer_resource(desc, .DEFAULT)
+	readback := .Readback in desc.usage
+	resource, ok := create_buffer_resource(desc, .READBACK if readback else .DEFAULT)
 	if !ok {
 		return {}
 	}
 	buffer := add_buffer(desc, resource)
 	if buffer == {} {
 		return {}
+	}
+	if readback {
+		entry := gpu.pool_get(&dev.buffers, buffer)
+		if !check(resource->Map(0, nil, (^rawptr)(&entry.mapped)), "IResource.Map(readback)") {
+			destroy_buffer(buffer)
+			return {}
+		}
 	}
 	if data != nil {
 		upload_buffer(resource, data)
@@ -150,6 +171,10 @@ add_buffer :: proc(desc: gpu.Buffer_Desc, resource: ^d3d.IResource) -> gpu.Buffe
 		log.errorf("gpu: buffer %q: more than %d buffers", desc.label, gpu.MAX_BUFFERS)
 		resource->Release()
 		return {}
+	}
+	// The GPU only copies into a readback buffer, so it has no views.
+	if .Readback in desc.usage {
+		return buffer
 	}
 
 	srv := d3d.SHADER_RESOURCE_VIEW_DESC {
@@ -339,6 +364,39 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 	}
 	dev.device->CreateSampler(&sampler_desc, sampler_handle(gpu.sampler_index(sampler)))
 	return sampler
+}
+
+// read_buffer returns a Readback buffer's mapped memory, once the GPU has finished every frame that copies into it.
+read_buffer :: proc(buffer: gpu.Buffer) -> ([]byte, bool) {
+	entry := gpu.pool_get(&dev.buffers, buffer)
+	if entry == nil || entry.mapped == nil {
+		return nil, false
+	}
+	if sync.atomic_load(&entry.ready_value) > dev.fence->GetCompletedValue() {
+		return nil, false
+	}
+	return entry.mapped[:entry.desc.size], true
+}
+
+// mark_readback records a copy into a Readback buffer, which is in flight until its frame's fence passes. The
+// translation jobs call it.
+@(private)
+mark_readback :: proc(buffer: gpu.Buffer, entry: ^Buffer_Entry) {
+	sync.atomic_store(&entry.ready_value, READBACK_IN_FLIGHT)
+	sync.guard(&dev.releases_mutex)
+	append(&dev.readbacks, buffer)
+}
+
+// stamp_readbacks gives the frame's Readback buffers the fence value that the frame's work signals.
+@(private)
+stamp_readbacks :: proc(fence_value: u64) {
+	sync.guard(&dev.releases_mutex)
+	for buffer in dev.readbacks {
+		if entry := gpu.pool_get(&dev.buffers, buffer); entry != nil {
+			sync.atomic_store(&entry.ready_value, fence_value)
+		}
+	}
+	clear(&dev.readbacks)
 }
 
 destroy_buffer :: proc(buffer: gpu.Buffer) {

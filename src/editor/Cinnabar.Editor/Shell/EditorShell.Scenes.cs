@@ -3,6 +3,7 @@ using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using ApplyOperations = Cinnabar.Editor.Link.Protocol.ApplyOperations;
 using EditProblems = Cinnabar.Editor.Link.Protocol.EditProblems;
+using PickResult = Cinnabar.Editor.Link.Protocol.PickResult;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -10,10 +11,11 @@ namespace Cinnabar.Editor.Shell;
 public sealed partial class EditorShell
 {
     readonly Dictionary<ulong, List<string>> _problems = [];
-    // The scene ID of the selected entity, so the selection stays across a resync, which gives every entity a new handle.
-    ulong _selectedSceneId;
-    // An entity that an edit created, to select when the host reports it.
-    ulong _selectWhenSeen;
+    // The scene IDs of the selected entities, so the selection stays across a resync, which gives every entity a new
+    // handle.
+    List<ulong> _selectedSceneIds = [];
+    // Entities that an edit created, to select when the host reports them.
+    List<ulong> _selectWhenSeen = [];
 
     /// <summary>The open scene, which the host's world mirrors. Null until one is opened.</summary>
     public SceneDocument? Scene { get; private set; }
@@ -175,7 +177,9 @@ public sealed partial class EditorShell
         }
     }
 
-    public void PreviewEdit(Operation op)
+    public void PreviewEdit(Operation op) => PreviewEdit([op]);
+
+    public void PreviewEdit(IReadOnlyList<Operation> ops)
     {
         if (Scene is not { InTransaction: true })
         {
@@ -183,7 +187,7 @@ public sealed partial class EditorShell
         }
         try
         {
-            Scene.Preview(op);
+            Scene.Preview(ops);
         }
         catch (InvalidOperationException e)
         {
@@ -195,21 +199,28 @@ public sealed partial class EditorShell
 
     public void CancelEdit() => Scene?.Cancel();
 
-    /// <summary>The selected entity as the document has it, or null for none, or for one that the game spawned.</summary>
+    /// <summary>The primary selected entity as the document has it, or null for none, or for one that the game spawned.</summary>
     public SceneEntity? SelectedSceneEntity =>
         World.Find(Selection.Entity) is { SceneId: not 0 } node ? Scene?.Scene.Find(node.SceneId) : null;
 
+    /// <summary>The selected entities that the document has, in the order they were selected.</summary>
+    public IReadOnlyList<SceneEntity> SelectedSceneEntities =>
+        Scene == null ? [] : [.. Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Scene.Find(id)).OfType<SceneEntity>()];
+
     /// <summary>Selects an entity by scene ID, now, or when the host reports it.</summary>
-    public void SelectScene(ulong sceneId)
+    public void SelectScene(ulong sceneId) => SelectScenes([sceneId]);
+
+    /// <summary>Selects entities by scene ID, now, or when the host reports them.</summary>
+    public void SelectScenes(IReadOnlyList<ulong> sceneIds)
     {
-        if (World.FindScene(sceneId) is { } node)
+        if (sceneIds.All(id => World.FindScene(id) != null))
         {
-            Selection.Select(node.Handle);
-            _selectWhenSeen = 0;
+            Selection.Set(sceneIds.Select(id => World.FindScene(id)!.Handle));
+            _selectWhenSeen = [];
         }
         else
         {
-            _selectWhenSeen = sceneId;
+            _selectWhenSeen = [.. sceneIds];
         }
     }
 
@@ -227,26 +238,58 @@ public sealed partial class EditorShell
         }
     }
 
+    /// <summary>Copies the selected entities with their descendants, and selects the copies.</summary>
     public void DuplicateSelected()
     {
-        if (Scene == null || SelectedSceneEntity is not { } selected)
+        var roots = TopmostSelected();
+        if (Scene == null || roots.Count == 0)
         {
             return;
         }
-        var (ops, copy) = SceneEdits.Duplicate(Scene.Scene, selected.Id);
-        if (Edit($"Duplicate {Label(selected)}", ops))
+        var ops = new List<Operation>();
+        var copies = new List<ulong>();
+        foreach (var entity in roots)
         {
-            SelectScene(copy);
+            var (duplicate, copy) = SceneEdits.Duplicate(Scene.Scene, entity.Id);
+            ops.AddRange(duplicate);
+            copies.Add(copy);
+        }
+        if (Edit(roots.Count == 1 ? $"Duplicate {Label(roots[0])}" : $"Duplicate {roots.Count} Entities", [.. ops]))
+        {
+            SelectScenes(copies);
         }
     }
 
+    /// <summary>Deletes the selected entities with their descendants.</summary>
     public void DeleteSelected()
     {
-        if (Scene == null || SelectedSceneEntity is not { } selected)
+        var roots = TopmostSelected();
+        if (Scene == null || roots.Count == 0)
         {
             return;
         }
-        Edit($"Delete {Label(selected)}", SceneEdits.DestroyTree(Scene.Scene, selected.Id));
+        Edit(roots.Count == 1 ? $"Delete {Label(roots[0])}" : $"Delete {roots.Count} Entities",
+            [.. roots.SelectMany(e => SceneEdits.DestroyTree(Scene.Scene, e.Id))]);
+    }
+
+    // The selected entities without those under another selected entity, which an edit of that one includes.
+    List<SceneEntity> TopmostSelected()
+    {
+        var selected = SelectedSceneEntities;
+        var ids = selected.Select(e => e.Id).ToHashSet();
+        return [.. selected.Where(e =>
+        {
+            var parent = e.Parent;
+            for (var depth = 0; parent != 0 && depth < 64; depth++)
+            {
+                if (ids.Contains(parent))
+                {
+                    return false;
+                }
+                parent = Scene!.Scene.Find(parent)?.Parent ?? 0;
+            }
+            return true;
+        })];
     }
 
     /// <summary>Moves an entity under another, or to the root with 0, keeping where it is in the world.</summary>
@@ -284,14 +327,21 @@ public sealed partial class EditorShell
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
         SendScene();
+        FrameScene();
     }
 
-    void SendOperations(IReadOnlyList<Operation> operations) => Host.Send(new ApplyOperations([.. operations.Select(o => o.ToWire())]));
+    void SendOperations(IReadOnlyList<Operation> operations)
+    {
+        Host.Send(new ApplyOperations([.. operations.Select(o => o.ToWire())]));
+        // The gizmo sits on the primary entity, which an edit can move.
+        SendGizmo();
+    }
 
     void OnDocumentChanged()
     {
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
+        SendGizmo();
         // Undo back to the file's state leaves nothing to restore, so its autosave goes.
         if (Scene is { IsDirty: false })
         {
@@ -312,6 +362,11 @@ public sealed partial class EditorShell
 
     internal void OnGameMessage(Link.ILinkMessage message)
     {
+        if (message is PickResult picked)
+        {
+            OnPickResult(picked);
+            return;
+        }
         if (message is not EditProblems problems)
         {
             World.Apply(message);
@@ -341,23 +396,21 @@ public sealed partial class EditorShell
 
     void OnEntitiesChanged()
     {
-        if (_selectWhenSeen != 0 && World.FindScene(_selectWhenSeen) is { } created)
+        if (_selectWhenSeen.Count > 0 && _selectWhenSeen.All(id => World.FindScene(id) != null))
         {
-            _selectWhenSeen = 0;
-            Selection.Select(created.Handle);
+            var created = _selectWhenSeen;
+            _selectWhenSeen = [];
+            Selection.Set(created.Select(id => World.FindScene(id)!.Handle));
             return;
         }
-        if (Selection.IsEmpty || World.Find(Selection.Entity) != null)
+        if (Selection.Entities.All(e => World.Find(e) != null))
         {
             return;
         }
-        // A resync gives the selected entity a new handle.
-        if (_selectedSceneId != 0 && World.FindScene(_selectedSceneId) is { } same)
-        {
-            Selection.Select(same.Handle);
-            return;
-        }
-        Selection.Clear();
+        // A resync gives the selected entities new handles. Those that are gone leave the selection.
+        var sceneIds = _selectedSceneIds;
+        var kept = Selection.Entities.Where(e => World.Find(e) is { SceneId: 0 }).ToList();
+        Selection.Set([.. kept, .. sceneIds.Select(id => World.FindScene(id)?.Handle ?? 0).Where(h => h != 0)]);
     }
 
     void Report(string path, IReadOnlyList<SceneProblem> problems)

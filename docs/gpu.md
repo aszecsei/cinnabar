@@ -39,7 +39,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
-**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference`, `destroy_scope`, `stream_buffer`, `stream_texture` and `transfer_done`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
+**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference`, `destroy_scope`, `stream_buffer`, `stream_texture`, `transfer_done` and `read_buffer`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
 The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 
@@ -64,7 +64,7 @@ A bindless index is a fixed function of the handle's pool index: `gpu.read_index
 
 The resource heap has five ranges, in order: buffer reads, buffer writes, texture reads, texture writes and acceleration structures. Each range has the capacity of its pool (`MAX_BUFFERS`, `MAX_TEXTURES`, `MAX_ACCEL_STRUCTS`). Only top-level acceleration structures have a view. Samplers use their pool index in the sampler heap. Vulkan descriptor arrays and Metal argument buffers can use the same fixed indices.
 
-- Every buffer has a read view. Buffers with the `Storage` usage also have a write view.
+- Every buffer but a `Readback` buffer has a read view (see [Readback](#readback)). Buffers with the `Storage` usage also have a write view.
 - Textures with the `Sampled` usage have a read view. Textures with the `Storage` usage have a write view.
 - Porting: DXC compiles `ResourceDescriptorHeap` to SPIR-V with descriptor indexing. `metal-shaderconverter` compiles DXIL to a metallib and implements the root signature as a top-level argument buffer.
 
@@ -181,6 +181,14 @@ Streaming copies data into resources on the copy queue, beside the frame's work.
 - **D3D12:** each stream call records into the open copy batch with its own staging buffer, and `end_frame` executes the batch and signals the copy fence. A transfer's ID is its batch's fence value. A destroyed resource or a staging buffer is released only after both the frame fence and the copy fence pass, because a copy batch can outlive the frame.
 - **Copies in command buffers:** `cmd_copy_buffer` copies between two different buffers, outside render passes, with the `Copy` sync and the `Copy_Source` and `Copy_Dest` accesses. The source can be the upload ring, which makes it the way to update or clear a default-heap buffer. The sample zeroes its draw count this way.
 
+## Readback
+
+- A buffer with the `Readback` usage is in CPU-readable memory. It has no views and no other usage, and takes no initial data. The GPU only writes it, as the destination of `cmd_copy_buffer`, so a shader writes a storage buffer and a copy moves the result.
+- `gpu_read_buffer(buffer)` returns the buffer's memory once the GPU has finished every frame that copies into it, and false while one is in flight. The memory is the backend's: read it during the frame, and keep no pointer into it. Copy into a readback buffer again only after reading it.
+- A buffer that nothing has copied into reads as ready. A caller that must know its copy ran, such as the editor's picks, writes a ticket into the data.
+- **D3D12:** a readback buffer is a committed resource in a readback heap, mapped for its whole life. Translating a copy into one marks it in flight, `end_frame` stamps it with the frame's fence value, and `gpu_read_buffer` compares that with the fence's completed value.
+- **Null backend:** a readback buffer is zeroed memory, always ready.
+
 ## Mesh shaders
 
 - Mesh and amplification shaders are HLSL and compile with the other shaders. They map to `VK_EXT_mesh_shader` and to Metal object and mesh shaders.
@@ -220,12 +228,12 @@ Streaming copies data into resources on the copy queue, beside the frame's work.
 ## Shaders
 
 - Shaders are HLSL. `tools/cook` compiles each shader to DXIL with DXC. A Vulkan port adds SPIR-V from DXC. A Metal port adds a metallib from `metal-shaderconverter`.
-- `tools/cook shaders` compiles shaders, and `just shaders` runs it on the game's `shaders/` directory with the DXC release that the justfile pins. Each `<name>.hlsl` compiles its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points to `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`. A file with `[shader("...")]` attributes is a ray tracing library and becomes `<name>.lib.dxil`.
+- `tools/cook shaders` compiles shaders, and `just shaders` runs it on the game's `shaders/` directory and on `lib/engine/editor/shaders`, the editor tools' shaders, with the DXC release that the justfile pins. Each `<name>.hlsl` compiles its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points to `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`. A file with `[shader("...")]` attributes is a ray tracing library and becomes `<name>.lib.dxil`.
 - The cooker attaches the fixed root signature, `CN_ROOT_SIGNATURE` in `cinnabar.hlsli`, to every shader stage. So DXC rejects a shader that binds anything outside it, and the runtime never compiles or reflects shaders. A library gets its global root signature from the pipeline instead.
 - A pipeline passes its root signature to D3D12, which then ignores the embedded one. So debug builds compare each shader's embedded root signature with the backend's, and refuse a pipeline whose shaders differ. That catches `CN_ROOT_SIGNATURE` drifting from the backend.
 - An output recompiles only when its cache key changes: a hash of the cooker version, the DXC version, the profile, the entry point, and the source with every file it includes. The key is stored in `<output>.key`.
 - Pipeline descriptions stay in game code until the asset runtime can load cooked pipeline assets.
-- The game embeds the DXIL with `#load`. A hot reload therefore brings new shaders, and the game recreates its pipelines in `on_reload`.
+- The game embeds the DXIL with `#load`, and so does `lib/engine/editor`, so its tests need `just shaders` too. A hot reload therefore brings new shaders, and the game recreates its pipelines in `on_reload`.
 
 ## Debugging
 

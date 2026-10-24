@@ -27,6 +27,12 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.CreateEntity),
                         new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
                     ]),
+                    new RibbonGroup("Tools",
+                    [
+                        new SmallStack([EditorCommands.SelectTool, EditorCommands.MoveTool]),
+                        new SmallStack([EditorCommands.RotateTool, EditorCommands.ScaleTool]),
+                        new SmallStack([EditorCommands.LocalSpace, EditorCommands.Snap]),
+                    ]),
                     new RibbonGroup("Host", [new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost])]),
                     new RibbonGroup("Window",
                     [
@@ -37,7 +43,12 @@ static class DefaultRibbon
                 new RibbonTab("view", "View",
                 [
                     new RibbonGroup("Panels", panelCommands.Chunk(SmallStack.MaxCommands).Select(c => (RibbonItem)new SmallStack(c)).ToList()),
-                    new RibbonGroup("Viewport", [new LargeButton(EditorCommands.Stats), new ComboBox(EditorCommands.ViewportScale)]),
+                    new RibbonGroup("Viewport",
+                    [
+                        new LargeButton(EditorCommands.Stats),
+                        new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene]),
+                        new ComboBox(EditorCommands.ViewportScale),
+                    ]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
             ]);

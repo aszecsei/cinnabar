@@ -67,6 +67,10 @@ Platform_API :: struct {
 	gpu_stream_buffer:  proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer,
 	gpu_stream_texture: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer,
 	gpu_transfer_done:  proc(transfer: gpu.Transfer) -> bool,
+	// gpu_read_buffer returns a Readback buffer's memory, or false while the GPU has not finished a frame that copies
+	// into it. The memory is the backend's: read it during the frame, and keep no pointer into it. See
+	// docs/gpu.md#readback.
+	gpu_read_buffer:    proc(buffer: gpu.Buffer) -> ([]byte, bool),
 
 	// Creation returns the nil handle on failure. data may be nil. The backend copies the description and the data.
 	gpu_create_buffer:            proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer,

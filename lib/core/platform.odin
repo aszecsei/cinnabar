@@ -103,6 +103,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		gpu_stream_buffer            = backend.stream_buffer,
 		gpu_stream_texture           = backend.stream_texture,
 		gpu_transfer_done            = backend.transfer_done,
+		gpu_read_buffer              = backend.read_buffer,
 		gpu_create_buffer            = backend.create_buffer,
 		gpu_create_texture           = backend.create_texture,
 		gpu_create_sampler           = backend.create_sampler,

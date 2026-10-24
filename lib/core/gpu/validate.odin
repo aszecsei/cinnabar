@@ -291,7 +291,7 @@ validate :: proc(
 			}
 			aligned := c.source_offset % 4 == 0 && c.dest_offset % 4 == 0 && c.size % 4 == 0
 			in_range := int(c.source_offset) + int(c.size) <= int(source.size) && int(c.dest_offset) + int(c.size) <= int(dest.size)
-			if c.source == c.dest || !aligned || !in_range {
+			if c.source == c.dest || !aligned || !in_range || .Readback in source.usage {
 				return .Bad_Copy, packet
 			}
 		case .Dispatch_Rays:
@@ -667,6 +667,9 @@ validate_buffer_desc :: proc(desc: Buffer_Desc, data: []byte) -> Desc_Error {
 	}
 	if len(data) > int(desc.size) {
 		return .Bad_Data_Size
+	}
+	if .Readback in desc.usage && (desc.usage != {.Readback} || data != nil) {
+		return .Bad_Usage
 	}
 	return .None
 }

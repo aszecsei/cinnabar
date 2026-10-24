@@ -30,6 +30,8 @@ ConstantBuffer<CnDraw> cn_draw : register(b2, space0);
 ByteAddressBuffer cn_buffer(uint index) { return ResourceDescriptorHeap[index]; }
 RWByteAddressBuffer cn_rw_buffer(uint index) { return ResourceDescriptorHeap[index]; }
 Texture2D<float4> cn_texture(uint index) { return ResourceDescriptorHeap[index]; }
+// A texture of an unsigned integer format, such as R32_Uint.
+Texture2D<uint> cn_uint_texture(uint index) { return ResourceDescriptorHeap[index]; }
 RWTexture2D<float4> cn_rw_texture(uint index) { return ResourceDescriptorHeap[index]; }
 SamplerState cn_sampler(uint index) { return SamplerDescriptorHeap[index]; }
 // A top-level acceleration structure, from gpu.read_index(accel).

@@ -28,5 +28,6 @@
     <ProjectReference Include="..\Cinnabar.Editor.Document\Cinnabar.Editor.Document.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Model\Cinnabar.Editor.Model.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Tools\Cinnabar.Editor.Tools.csproj" />
   </ItemGroup>
 </Project>

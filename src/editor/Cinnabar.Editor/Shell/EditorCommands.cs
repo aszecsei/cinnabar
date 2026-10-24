@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
 
 namespace Cinnabar.Editor.Shell;
@@ -22,6 +23,15 @@ static class EditorCommands
     public const string Stats = "view.stats";
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
+    public const string SelectAll = "edit.selectAll";
+    public const string SelectTool = "tool.select";
+    public const string MoveTool = "tool.move";
+    public const string RotateTool = "tool.rotate";
+    public const string ScaleTool = "tool.scale";
+    public const string LocalSpace = "tool.localSpace";
+    public const string Snap = "tool.snap";
+    public const string FrameSelected = "viewport.frameSelected";
+    public const string FrameScene = "viewport.frameScene";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -78,17 +88,60 @@ static class EditorCommands
         });
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
         {
-            Description = "Copy the selected entity and its children.",
+            Description = "Copy the selected entities and their children.",
             Icon = "copy",
             Shortcut = "Ctrl+D",
-            CanExecuteWhen = () => shell.SelectedSceneEntity != null,
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
         });
         commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
         {
-            Description = "Delete the selected entity and its children.",
+            Description = "Delete the selected entities and their children.",
             Icon = "delete",
             Shortcut = "Delete",
-            CanExecuteWhen = () => shell.SelectedSceneEntity != null,
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(SelectAll, "Select All", () => shell.Selection.Set(shell.World.Entities.Select(e => e.Handle)))
+        {
+            Description = "Select every entity.",
+            Shortcut = "Ctrl+A",
+            CanExecuteWhen = () => shell.World.HasWorld,
+        });
+        // The viewport's tools have keys of their own, which work while the viewport has focus, so typing in a box
+        // does not change tools.
+        void ToolCommand(string id, Tool tool, string label, string icon, string description) =>
+            commands.Register(new Command(id, label, () => shell.SetTool(tool))
+            {
+                Description = description,
+                Icon = icon,
+                IsCheckedWhen = () => shell.Tool == tool,
+            });
+        ToolCommand(SelectTool, Tool.Select, "Select", "select", "Click or drag a box in the viewport to select. Q in the viewport.");
+        ToolCommand(MoveTool, Tool.Move, "Move", "move", "Move the selection along an axis or a plane. W in the viewport.");
+        ToolCommand(RotateTool, Tool.Rotate, "Rotate", "rotate", "Turn the selection about an axis. E in the viewport.");
+        ToolCommand(ScaleTool, Tool.Scale, "Scale", "scale-tool", "Scale the selection along its own axes. R in the viewport.");
+        commands.Register(new Command(LocalSpace, "Local Axes", shell.ToggleSpace)
+        {
+            Description = "Move and turn along the entity's axes, not the world's. X in the viewport.",
+            Icon = "local",
+            IsCheckedWhen = () => shell.Space == Space.Local,
+        });
+        commands.Register(new Command(Snap, "Snap", shell.ToggleSnap)
+        {
+            Description = "Round gizmo drags to steps: 0.25 m, 15° and 0.1 of scale. Ctrl during a drag does the opposite.",
+            Icon = "snap",
+            IsCheckedWhen = () => shell.Snap,
+        });
+        commands.Register(new Command(FrameSelected, "Frame Selected", shell.FrameSelected)
+        {
+            Description = "Move the camera to the selected entities. F in the viewport.",
+            Icon = "frame",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(FrameScene, "Frame Scene", shell.FrameScene)
+        {
+            Description = "Move the camera so the whole scene is in view.",
+            Icon = "viewport",
+            CanExecuteWhen = () => shell.Scene != null,
         });
         commands.Register(new Command(RestartHost, "Restart Host", shell.Host.Restart)
         {

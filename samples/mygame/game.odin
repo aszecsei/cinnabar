@@ -63,6 +63,11 @@ Shadow_Mode :: enum u8 {
 // are small. The acceleration structure holds at most this many.
 MAX_TRIANGLES :: 2
 
+// The scene's camera: its vertical field of view, in radians, and its near plane in meters. In the editor, the
+// editor's camera is used instead (see docs/editor.md#viewport).
+CAMERA_FOV :: 70 * math.PI / 180
+CAMERA_NEAR :: 0.05
+
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
 // and an indexed indirect draw draws: the vertex fallback. CINNABAR_DISABLE_FEATURES=Mesh_Shaders forces it.
@@ -105,7 +110,9 @@ Scene_Constants :: struct {
 Triangle_Instance :: struct {
 	rows:       [3][4]f32,
 	brightness: f32,
-	_:          [3]f32,
+	// The entity's value in the editor's ID buffer.
+	id:         u32,
+	_:          [2]f32,
 }
 
 // The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
@@ -167,10 +174,16 @@ Composite_Constants :: struct {
 	sampler: u32,
 }
 
-// Matches Pass in shaders/triangle.hlsl, shaders/objects.hlsl and shaders/cull.hlsl.
+// Matches Pass in shaders/pass.hlsli.
 Pass_Constants :: struct {
-	time:   f32,
-	aspect: f32,
+	view_projection: matrix[4, 4]f32,
+	right:           [4]f32,
+	up:              [4]f32,
+	forward:         [4]f32,
+	time:            f32,
+	aspect:          f32,
+	tan_half_fov:    f32,
+	near:            f32,
 }
 
 // Game_State is the root of all persistent game-side state. The host owns its memory.
@@ -232,6 +245,7 @@ Pipelines :: struct {
 Frame :: struct {
 	state:          ^Game_State,
 	size:           [2]u32,
+	view:           render.View,
 	pass_constants: gpu.Upload,
 	vertices:       render.Buffer,
 	indices:        render.Buffer,
@@ -248,6 +262,9 @@ Frame :: struct {
 	triangle_count: int,
 	checker:        render.Texture,
 	scene:          render.Texture,
+	// The editor's entity ID buffer (see editor.ID_FORMAT).
+	ids:            render.Texture,
+	depth:          render.Texture,
 	shadows:        render.Texture,
 	post:           render.Texture,
 }
@@ -435,12 +452,33 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if !ok {
 		return true
 	}
+	view := camera_view(s)
+	aspect := f32(size.x) / f32(size.y)
+	right, up, forward := render.view_axes(view)
 	(^Pass_Constants)(raw_data(pass.data))^ = {
-		time   = f32(time.duration_seconds(s.elapsed)),
-		aspect = f32(size.x) / f32(size.y),
+		view_projection = render.view_projection(view, aspect),
+		right           = {right.x, right.y, right.z, 0},
+		up              = {up.x, up.y, up.z, 0},
+		forward         = {forward.x, forward.y, forward.z, 0},
+		time            = f32(time.duration_seconds(s.elapsed)),
+		aspect          = aspect,
+		tan_half_fov    = math.tan(view.vertical_fov * 0.5),
+		near            = view.near,
 	}
-	render_frame(s, {u32(size.x), u32(size.y)}, pass)
+	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
 	return true
+}
+
+// camera_view is the editor's camera while an editor is linked, and the scene's camera otherwise.
+camera_view :: proc(s: ^Game_State) -> render.View {
+	if view, ok := editor.view(&s.editor); ok {
+		return view
+	}
+	camera, ok := ecs.presented(&s.world, s.camera)
+	if !ok {
+		camera = ecs.TRANSFORM_IDENTITY
+	}
+	return {position = camera.position, rotation = camera.rotation, vertical_fov = CAMERA_FOV, near = CAMERA_NEAR}
 }
 
 // end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
@@ -474,14 +512,17 @@ stream_rings :: proc(s: ^Game_State) {
 
 // render_frame culls the objects on the compute queue, draws the scene into an HDR target with depth,
 // post-processes it in a compute pass, and tone maps it into the frame target. The render graph places the
-// barriers between the passes and the waits between the queues.
-render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
+// barriers between the passes and the waits between the queues. While an editor is linked, the editor's tools draw
+// over the frame and pick from its entity IDs.
+render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
 	frame := new(Frame, s.platform.frame_allocator)
 	frame^ = {
 		state          = s,
 		size           = size,
+		view           = view,
 		pass_constants = pass_constants,
 	}
+	editing := editor.active(&s.editor)
 
 	g := render.begin(s.platform, &s.textures)
 	target := render.import_texture(&g, s.platform.gpu_frame_target(), .Color)
@@ -496,7 +537,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 		frame.mesh_draw = render.import_buffer(&g, s.mesh_draw)
 	}
 	frame.scene = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
-	depth := render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
+	frame.ids = render.create_texture(&g, {size = size, format = editor.ID_FORMAT, label = "entity ids"})
+	frame.depth = render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
 	extract_triangles(frame)
 
@@ -513,7 +555,9 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 
 	p := render.add_render_pass(&g, "scene", draw_scene, frame, pieces = SCENE_PIECES)
 	render.color(&g, p, frame.scene, .Clear, {0.02, 0.02, 0.035, 1})
-	render.depth(&g, p, depth, .Clear, store = .Discard)
+	// The editor picks from the IDs and the depth. Without one, nothing reads them.
+	render.color(&g, p, frame.ids, .Clear, store = editing ? .Store : .Discard)
+	render.depth(&g, p, frame.depth, .Clear, store = editing ? .Store : .Discard)
 	render.read(&g, p, frame.checker)
 	render.read(&g, p, frame.vertices)
 	render.index_buffer(&g, p, frame.indices)
@@ -541,13 +585,17 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	render.read(&g, p, frame.post)
 	render.color(&g, p, target, .Discard)
 
+	if editing {
+		editor.add_viewport_passes(&s.editor, &g, &s.world, {view = view, size = size, target = target, ids = frame.ids, depth = frame.depth})
+	}
+
 	if render.execute(&g) && building_blas {
 		s.blas_built = true
 	}
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
-// their poses relative to the camera, interpolated between the last two ticks, and their brightness.
+// their poses relative to the camera, interpolated between the last two ticks, their brightness and their IDs.
 extract_triangles :: proc(frame: ^Frame) {
 	s := frame.state
 	w := &s.world
@@ -556,12 +604,13 @@ extract_triangles :: proc(frame: ^Frame) {
 	if !ok || count == 0 {
 		return
 	}
-	camera, _ := ecs.presented(w, s.camera)
-	chunks := render.extract(w, s.triangles, camera.position, triangles.data, size_of(Triangle_Instance))
+	chunks := render.extract(w, s.triangles, frame.view.position, triangles.data, size_of(Triangle_Instance))
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
 	for c in chunks {
+		entities := ecs.entities(c.view)
 		for t, i in ecs.column(c.view, render.EXTRACT_TERMS, Triangle) {
 			instances[c.first + i].brightness = t.brightness
+			instances[c.first + i].id = editor.entity_id(entities[i])
 		}
 	}
 	frame.triangles = triangles
@@ -834,10 +883,13 @@ create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_m
 	}
 }
 
+// The scene pass's targets: the HDR colors, and the editor's entity IDs.
+SCENE_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT}, {format = editor.ID_FORMAT}}
+
 SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	vertex        = TRIANGLE_VS,
 	pixel         = TRIANGLE_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,
@@ -847,7 +899,7 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	vertex        = OBJECTS_VS,
 	pixel         = OBJECTS_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,
@@ -858,7 +910,7 @@ OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	amplification = OBJECTS_AS,
 	mesh          = OBJECTS_MS,
 	pixel         = OBJECTS_PS,
-	colors        = {{format = SCENE_FORMAT}},
+	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Less,
 	depth_write   = true,

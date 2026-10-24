@@ -44,6 +44,8 @@ state: struct {
 	// Textures that have been streamed. Each is streamed once.
 	streamed:      map[gpu.Texture]bool,
 	transfers:     u64,
+	// The memory of each Readback buffer. Nothing copies into it, so it stays zero.
+	readbacks:     map[gpu.Buffer][]byte,
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
@@ -68,6 +70,10 @@ shutdown :: proc() {
 	delete(state.upload_memory)
 	gpu.layout_tracker_destroy(&state.layouts)
 	delete(state.streamed)
+	for _, memory in state.readbacks {
+		delete(memory)
+	}
+	delete(state.readbacks)
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
@@ -127,7 +133,11 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		log.errorf("gpu: buffer %q: %v", desc.label, err)
 		return {}
 	}
-	return gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
+	buffer := gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
+	if buffer != {} && .Readback in desc.usage {
+		state.readbacks[buffer] = make([]byte, desc.size)
+	}
+	return buffer
 }
 
 create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
@@ -222,6 +232,10 @@ update_pipeline :: proc(pipeline: gpu.Pipeline, info: gpu.Pipeline_Info, label: 
 destroy_buffer :: proc(buffer: gpu.Buffer) {
 	if _, ok := gpu.pool_remove(&state.buffers, buffer); ok {
 		gpu.pool_free(&state.buffers, buffer.index)
+		if memory, readback := state.readbacks[buffer]; readback {
+			delete(memory)
+			delete_key(&state.readbacks, buffer)
+		}
 	}
 }
 
@@ -346,6 +360,12 @@ stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
 
 transfer_done :: proc(transfer: gpu.Transfer) -> bool {
 	return true
+}
+
+// read_buffer returns a Readback buffer's memory, which is always ready.
+read_buffer :: proc(buffer: gpu.Buffer) -> ([]byte, bool) {
+	memory, ok := state.readbacks[buffer]
+	return memory, ok
 }
 
 // upload returns false when the frame's upload ring is full.

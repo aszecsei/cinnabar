@@ -72,10 +72,7 @@ public sealed class SceneDocument(string path, Scene scene)
         Begin(label);
         try
         {
-            foreach (var op in operations)
-            {
-                Preview(op);
-            }
+            Preview(operations);
         }
         catch
         {
@@ -98,26 +95,63 @@ public sealed class SceneDocument(string path, Scene scene)
     }
 
     /// <summary>
-    /// Applies an operation of the open entry at once, and sends it. An operation that replaces the one before it,
-    /// such as the next step of a drag, takes its place, so the entry keeps the last value and the first inverse.
+    /// Applies an operation of the open entry at once, and sends it. An operation that replaces an earlier one, such
+    /// as the next step of a drag, takes its place, so the entry keeps the last value and the first inverse.
     /// </summary>
-    public void Preview(Operation op)
+    public void Preview(Operation op) => Preview([op]);
+
+    /// <summary>Applies operations of the open entry in order, as <see cref="Preview(Operation)"/>, and sends them together.</summary>
+    public void Preview(IReadOnlyList<Operation> ops)
     {
         if (_label == null)
         {
             throw new InvalidOperationException("no undo entry is open");
         }
-        var inverse = op.Apply(Scene);
-        if (_pending.Count > 0 && _pending[^1].IsReplacedBy(op))
+        var applied = new List<Operation>();
+        try
         {
-            _pending[^1] = op;
+            foreach (var op in ops)
+            {
+                var inverse = op.Apply(Scene);
+                applied.Add(op);
+                if (Replaced(op) is var at and >= 0)
+                {
+                    _pending[at] = op;
+                }
+                else
+                {
+                    _pending.Add(op);
+                    _pendingInverses.Add(inverse);
+                }
+            }
         }
-        else
+        finally
         {
-            _pending.Add(op);
-            _pendingInverses.Add(inverse);
+            // What applied is in the document, so the host gets it even when a later operation does not fit.
+            if (applied.Count > 0)
+            {
+                Applied?.Invoke(applied);
+            }
         }
-        Applied?.Invoke([op]);
+    }
+
+    // The pending operation that a new one replaces. A drag step of several fields, or of several entities, sets each
+    // field in turn, so the search goes back over field sets, which do not depend on each other, and stops at anything
+    // else.
+    int Replaced(Operation op)
+    {
+        for (var k = _pending.Count - 1; k >= 0; k--)
+        {
+            if (_pending[k].IsReplacedBy(op))
+            {
+                return k;
+            }
+            if (_pending[k] is not (SetField or SetBehaviourField))
+            {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     /// <summary>Ends the open entry. An entry without operations leaves no entry.</summary>

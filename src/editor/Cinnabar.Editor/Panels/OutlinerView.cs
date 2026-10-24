@@ -15,7 +15,7 @@ namespace Cinnabar.Editor.Panels;
 /// The outliner (see docs/editor.md#outliner): the entity hierarchy as a virtualized list of the visible rows,
 /// indented by depth. A tree control with one item per entity would not scale to a large world. Dragging a row onto
 /// another reparents it, and onto the empty space below the rows makes it a root. A row also drags onto an entity
-/// field in the properties panel.
+/// field in the properties panel. Ctrl and Shift select more than one row.
 /// </summary>
 public sealed class OutlinerView : DockPanel
 {
@@ -30,7 +30,7 @@ public sealed class OutlinerView : DockPanel
     readonly WorldModel _world;
     readonly Selection _selection;
     readonly TextBox _filter = new() { PlaceholderText = "Filter by name, entity or component", Classes = { "outliner-filter" } };
-    readonly ListBox _list = new() { Classes = { "outliner" } };
+    readonly ListBox _list = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
     readonly TextBlock _empty;
     // Rows start expanded. The set holds the ones that the user collapsed.
     readonly HashSet<ulong> _collapsed = [];
@@ -64,12 +64,17 @@ public sealed class OutlinerView : DockPanel
         _list.AddHandler(DragDrop.DropEvent, (_, e) => Drop(e, 0));
 
         _list.ItemTemplate = new FuncDataTemplate<OutlinerRow>((row, _) => row == null ? new Control() : RowView(row));
-        _list.SelectionChanged += (_, _) =>
+        // The rows that a click adds come last, so the one clicked is the primary entity. Entities that the filter hides
+        // stay selected.
+        _list.SelectionChanged += (_, e) =>
         {
-            if (!_syncing && _list.SelectedItem is OutlinerRow row)
+            if (_syncing)
             {
-                _selection.Select(row.Node.Handle);
+                return;
             }
+            var removed = e.RemovedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
+            var added = e.AddedItems.OfType<OutlinerRow>().Select(r => r.Node.Handle).ToList();
+            _selection.Set([.. _selection.Entities.Except(removed).Except(added), .. added]);
         };
         _filter.TextChanged += (_, _) => Rebuild();
 
@@ -101,8 +106,27 @@ public sealed class OutlinerView : DockPanel
         }
         _syncing = true;
         _list.ItemsSource = rows;
-        _list.SelectedItem = rows.FirstOrDefault(r => r.Node.Handle == _selection.Entity);
         _syncing = false;
+        ShowSelection(false);
+    }
+
+    void ShowSelection(bool scroll)
+    {
+        if (_list.ItemsSource is not List<OutlinerRow> rows || _list.SelectedItems is not { } selected)
+        {
+            return;
+        }
+        _syncing = true;
+        selected.Clear();
+        foreach (var row in rows.Where(r => _selection.Contains(r.Node.Handle)))
+        {
+            selected.Add(row);
+        }
+        _syncing = false;
+        if (scroll && rows.FirstOrDefault(r => r.Node.Handle == _selection.Entity) is { } primary)
+        {
+            _list.ScrollIntoView(primary);
+        }
     }
 
     // Adds a node and its visible descendants, and returns whether the node or one of them matches the filter. With a
@@ -133,16 +157,7 @@ public sealed class OutlinerView : DockPanel
         return matches || childMatches;
     }
 
-    void OnSelectionChanged(ulong old, ulong entity)
-    {
-        _syncing = true;
-        _list.SelectedItem = (_list.ItemsSource as List<OutlinerRow>)?.FirstOrDefault(r => r.Node.Handle == entity);
-        if (_list.SelectedItem != null)
-        {
-            _list.ScrollIntoView(_list.SelectedItem);
-        }
-        _syncing = false;
-    }
+    void OnSelectionChanged(IReadOnlyList<ulong> old, IReadOnlyList<ulong> entities) => ShowSelection(true);
 
     Control RowView(OutlinerRow row)
     {
@@ -262,7 +277,11 @@ public sealed class OutlinerView : DockPanel
             Header = header,
             Command = new RelayCommand(() =>
             {
-                _selection.Select(row.Node.Handle);
+                // A row's menu acts on the selection when the row is in it, and on the row alone otherwise.
+                if (!_selection.Contains(row.Node.Handle))
+                {
+                    _selection.Select(row.Node.Handle);
+                }
                 _shell.Commands.Get(command).Execute();
             }),
         };

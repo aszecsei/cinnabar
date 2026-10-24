@@ -195,6 +195,21 @@ public sealed class ViewportControl : Control
         Session?.RequestSize(new PixelSize((int)Math.Round(Bounds.Width * scaling), (int)Math.Round(Bounds.Height * scaling)));
     }
 
+    /// <summary>A point of the control in pixels of the host's frame, from its top left, or null before the first frame.</summary>
+    public Tools.Vec2? FramePoint(Point point)
+    {
+        if (_visual == null || Session is not { FrameSize: { Width: > 0, Height: > 0 } frame } || _visual.Size.X <= 0 || _visual.Size.Y <= 0)
+        {
+            return null;
+        }
+        return new Tools.Vec2(
+            (point.X - _visual.Offset.X) * frame.Width / _visual.Size.X,
+            (point.Y - _visual.Offset.Y) * frame.Height / _visual.Size.Y);
+    }
+
+    /// <summary>How many frame pixels a unit of the control's length covers.</summary>
+    public double FrameScale => _visual is { Size.Y: > 0 } && Session is { FrameSize.Height: > 0 } ? Session.FrameSize.Height / _visual.Size.Y : 1;
+
     void LayoutVisual()
     {
         if (_visual == null || Session == null)

@@ -37,8 +37,11 @@ public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
 {
     public const string PanelId = "viewport";
 
-    public ViewportDocument(ViewportSession session)
+    readonly Func<Control> _createView;
+
+    public ViewportDocument(ViewportSession session, Func<Control> createView)
     {
+        _createView = createView;
         Id = PanelId;
         Title = "Viewport";
         Session = session;
@@ -49,4 +52,7 @@ public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
     }
 
     public ViewportSession Session { get; }
+
+    /// <summary>Docking can template the viewport more than once, so each call makes a new view over the same session.</summary>
+    public Control CreateView() => _createView();
 }

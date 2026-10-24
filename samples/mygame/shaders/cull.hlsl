@@ -1,4 +1,5 @@
 #include "cinnabar.hlsli"
+#include "pass.hlsli"
 #include "objects.hlsli"
 
 // Matches Cull_Constants in game.odin.
@@ -11,12 +12,6 @@ struct Push {
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Matches Pass_Constants in game.odin.
-struct Pass {
-	float time;
-	float aspect;
-};
-CN_PASS_CONSTANTS(Pass, pass);
 
 // Matches gpu.Draw_Indexed_Indirect_Args.
 static const uint DRAW_RECORD_SIZE = 24;

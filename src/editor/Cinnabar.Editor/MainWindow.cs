@@ -215,7 +215,12 @@ public sealed class MainWindow : Window
     void UpdateWorldStatus()
     {
         var count = _shell.World.Entities.Count;
-        var selected = _shell.Selection.IsEmpty ? "" : $"  ·  {_shell.World.Find(_shell.Selection.Entity)?.Label ?? Model.EntityNode.Format(_shell.Selection.Entity)} selected";
+        var selected = _shell.Selection.Count switch
+        {
+            0 => "",
+            1 => $"  ·  {_shell.World.Find(_shell.Selection.Entity)?.Label ?? Model.EntityNode.Format(_shell.Selection.Entity)} selected",
+            var n => $"  ·  {n} selected",
+        };
         _worldStatus.Text = _shell.World.HasWorld ? $"{count} {(count == 1 ? "entity" : "entities")}{selected}" : "";
     }
 

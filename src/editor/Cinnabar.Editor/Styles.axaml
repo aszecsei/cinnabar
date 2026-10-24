@@ -340,4 +340,15 @@
     <Style Selector="Border.status TextBlock">
         <Setter Property="FontSize" Value="12" />
     </Style>
+    <!-- The viewport: a box selection being dragged, and the buttons of the tool palette. -->
+    <Style Selector="Border.selection-box">
+        <Setter Property="Background" Value="#22E34234" />
+        <Setter Property="BorderBrush" Value="#E34234" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <Style Selector="ToggleButton.viewport-tool">
+        <Setter Property="Padding" Value="5" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
 </Styles>

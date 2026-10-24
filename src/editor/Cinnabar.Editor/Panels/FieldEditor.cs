@@ -28,9 +28,9 @@ enum EditKind
 }
 
 /// <summary>
-/// Edits one field of the selected entity: each edit becomes an operation that sets the field in the document and
-/// on the host (see docs/editor.md#properties). The value to change comes from the host's values, which the panel
-/// passes in as it gets them, so an axis edit keeps the other axes exactly.
+/// Edits one field of the selected entities: each edit becomes an operation for each entity that sets the field in the
+/// document and on the host, in one undo entry (see docs/editor.md#properties). The value to change comes from the
+/// host's values, which the panel passes in as it gets them, so an axis edit keeps each entity's other axes exactly.
 /// </summary>
 sealed class FieldEditor : IFieldEditor
 {
@@ -43,14 +43,18 @@ sealed class FieldEditor : IFieldEditor
     readonly EditorShell _shell;
     readonly string _label;
     readonly EditKind _kind;
-    readonly Func<SceneValue?, Operation> _operation;
+    readonly Func<ulong, SceneValue?, Operation> _operation;
+    readonly ulong[] _entities;
+    readonly SceneValue?[] _currents;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
-    SceneValue? _start;
+    SceneValue?[]? _starts;
 
-    FieldEditor(EditorShell shell, string label, EditKind kind, Func<SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null)
+    FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null)
     {
         _shell = shell;
+        _entities = entities;
+        _currents = new SceneValue?[entities.Length];
         _label = label;
         _kind = kind;
         _operation = operation;
@@ -59,38 +63,52 @@ sealed class FieldEditor : IFieldEditor
         Options = [.. _enum.Select(v => FieldValues.Humanize(v.Name))];
     }
 
-    /// <summary>The field's value as the host last sent it, or null before the first.</summary>
-    public SceneValue? Current { get; set; }
+    /// <summary>The scene IDs of the entities that an edit sets, the primary one last.</summary>
+    public IReadOnlyList<ulong> Entities => _entities;
+
+    /// <summary>The primary entity's value as the host last sent it, or null before the first.</summary>
+    public SceneValue? Current
+    {
+        get => _currents[^1];
+        set => _currents[^1] = value;
+    }
+
+    /// <summary>Sets an entity's value as the host sent it, by its index in <see cref="Entities"/>.</summary>
+    public void SetCurrent(int index, SceneValue? value) => _currents[index] = value;
 
     public IReadOnlyList<string> Options { get; }
 
     /// <summary>An editor for a component's field, or null for a field that the editor cannot set.</summary>
-    public static FieldEditor? ForComponent(EditorShell shell, ulong sceneId, ulong component, FieldInfo field)
+    public static FieldEditor? ForComponent(EditorShell shell, ulong sceneId, ulong component, FieldInfo field) =>
+        ForComponent(shell, [sceneId], component, field);
+
+    /// <summary>An editor for a component's field of several entities, the primary one last.</summary>
+    public static FieldEditor? ForComponent(EditorShell shell, ulong[] sceneIds, ulong component, FieldInfo field)
     {
         if (field.ReadOnly)
         {
             return null;
         }
-        Operation Set(SceneValue? v) => new SetField(sceneId, component, field.Name, v);
+        Operation Set(ulong id, SceneValue? v) => new SetField(id, component, field.Name, v);
         var label = $"Set {FieldValues.Humanize(field.Name)}";
         return field.Kind switch
         {
-            FieldKind.Bool => new FieldEditor(shell, label, EditKind.Bool, Set),
-            FieldKind.F32 => new FieldEditor(shell, label, EditKind.F32, Set),
-            FieldKind.F64 => new FieldEditor(shell, label, EditKind.F64, Set),
-            FieldKind.Enum => new FieldEditor(shell, label, EditKind.Enum, Set, Range(field.EnumBase), field.EnumValues),
-            FieldKind.Vector3 => new FieldEditor(shell, label, EditKind.Vector3, Set),
-            FieldKind.Quaternion => new FieldEditor(shell, label, EditKind.Quaternion, Set),
-            FieldKind.Position => new FieldEditor(shell, label, EditKind.Position, Set),
-            FieldKind.Entity => new FieldEditor(shell, label, EditKind.Entity, Set),
-            _ => new FieldEditor(shell, label, EditKind.Integer, Set, Range(field.Kind)),
+            FieldKind.Bool => new FieldEditor(shell, sceneIds, label, EditKind.Bool, Set),
+            FieldKind.F32 => new FieldEditor(shell, sceneIds, label, EditKind.F32, Set),
+            FieldKind.F64 => new FieldEditor(shell, sceneIds, label, EditKind.F64, Set),
+            FieldKind.Enum => new FieldEditor(shell, sceneIds, label, EditKind.Enum, Set, Range(field.EnumBase), field.EnumValues),
+            FieldKind.Vector3 => new FieldEditor(shell, sceneIds, label, EditKind.Vector3, Set),
+            FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set),
+            FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set),
+            FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set),
+            _ => new FieldEditor(shell, sceneIds, label, EditKind.Integer, Set, Range(field.Kind)),
         };
     }
 
     /// <summary>An editor for a behaviour's field, or null for a kind that the editor cannot set.</summary>
     public static FieldEditor? ForBehaviour(EditorShell shell, ulong sceneId, string script, BehaviourField field)
     {
-        Operation Set(SceneValue? v) => new SetBehaviourField(sceneId, script, field.Name, v);
+        Operation Set(ulong id, SceneValue? v) => new SetBehaviourField(id, script, field.Name, v);
         var label = $"Set {FieldValues.Humanize(field.Name)}";
         EditKind? kind = field.Kind switch
         {
@@ -101,8 +119,17 @@ sealed class FieldEditor : IFieldEditor
             BehaviourFieldKind.Entity or BehaviourFieldKind.Nil => EditKind.Entity,
             _ => null,
         };
-        return kind is { } k ? new FieldEditor(shell, label, k, Set) : null;
+        return kind is { } k ? new FieldEditor(shell, [sceneId], label, k, Set) : null;
     }
+
+    // One operation for each entity, with the value that each gets.
+    Operation[] Operations(Func<SceneValue?, SceneValue?> value) =>
+        [.. _entities.Select((id, i) => (id, v: value(_currents[i]))).Where(x => x.v != null).Select(x => _operation(x.id, x.v))];
+
+    Operation[] Operations(SceneValue value) => [.. _entities.Select(id => _operation(id, value))];
+
+    /// <summary>Resets the field of every entity, so the scene no longer sets it.</summary>
+    public void Reset() => _shell.Edit($"Reset {_label["Set ".Length..]}", [.. _entities.Select(id => _operation(id, null))]);
 
     static (Int128, Int128) Range(FieldKind kind) => kind switch
     {
@@ -195,16 +222,15 @@ sealed class FieldEditor : IFieldEditor
 
     public bool Commit(int axis, string text)
     {
-        var value = Parse(axis, text, out var error);
-        if (value == null)
+        if (Parse(axis, text, out var error) == null)
         {
             _shell.Console.Add(LogLevel.Warning, $"edit: {error}");
             return false;
         }
-        return _shell.Edit(_label, _operation(value));
+        return _shell.Edit(_label, Operations(current => Parse(axis, text, current, out _)));
     }
 
-    public void SetFlag(bool value) => _shell.Edit(_label, _operation(SceneValue.Of(value)));
+    public void SetFlag(bool value) => _shell.Edit(_label, Operations(SceneValue.Of(value)));
 
     public void SetEntity(ulong handle)
     {
@@ -214,7 +240,7 @@ sealed class FieldEditor : IFieldEditor
             _shell.Console.Add(LogLevel.Warning, $"edit: {EntityNode.Format(handle)} is not in the scene, so a field cannot refer to it");
             return;
         }
-        _shell.Edit(_label, _operation(SceneValue.EntityRef(sceneId)));
+        _shell.Edit(_label, Operations(SceneValue.EntityRef(sceneId)));
     }
 
     public void Choose(string option)
@@ -222,28 +248,29 @@ sealed class FieldEditor : IFieldEditor
         var index = Options.ToList().IndexOf(option);
         if (index >= 0)
         {
-            _shell.Edit(_label, _operation(SceneValue.Name(_enum[index].Name)));
+            _shell.Edit(_label, Operations(SceneValue.Name(_enum[index].Name)));
         }
     }
 
     public void BeginScrub(int axis)
     {
-        if (Current == null || _kind is EditKind.Bool or EditKind.Enum or EditKind.Entity or EditKind.Text)
+        if (_currents.Any(c => c == null) || _kind is EditKind.Bool or EditKind.Enum or EditKind.Entity or EditKind.Text)
         {
             return;
         }
-        _start = Current;
+        _starts = [.. _currents];
         _shell.BeginEdit($"Drag {_label["Set ".Length..]}");
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (_start is not { } start)
+        if (_starts is not { } starts)
         {
             return;
         }
         var scale = modifiers.HasFlag(KeyModifiers.Shift) ? 10 : modifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
-        SceneValue? value = _kind switch
+        // Each entity changes by the same amount from its own value.
+        SceneValue? Value(SceneValue start) => _kind switch
         {
             EditKind.Integer => Clamp(start.Numbers[0].Integer!.Value + (Int128)Math.Round(pixels / PixelsPerInteger * scale)),
             EditKind.F32 => SceneEdits.Floats(start.Numbers[0].Float + pixels * FloatStep * scale),
@@ -253,23 +280,27 @@ sealed class FieldEditor : IFieldEditor
             EditKind.Position => Moved(start, axis, m => m + pixels * MeterStep * scale),
             _ => null,
         };
-        if (value != null)
+        var ops = _entities.Select((id, i) => Value(starts[i]!) is { } v ? _operation(id, v) : null).OfType<Operation>().ToList();
+        if (ops.Count > 0)
         {
-            _shell.PreviewEdit(_operation(value));
+            _shell.PreviewEdit(ops);
         }
     }
 
     public void EndScrub()
     {
-        if (_start != null)
+        if (_starts != null)
         {
-            _start = null;
+            _starts = null;
             _shell.CommitEdit();
         }
     }
 
-    /// <summary>The value that typed text gives, or null with the reason.</summary>
-    public SceneValue? Parse(int axis, string text, out string? error)
+    /// <summary>The value that typed text gives the primary entity, or null with the reason.</summary>
+    public SceneValue? Parse(int axis, string text, out string? error) => Parse(axis, text, Current, out error);
+
+    // An axis takes the typed value, and keeps the entity's own other axes.
+    SceneValue? Parse(int axis, string text, SceneValue? current, out string? error)
     {
         error = null;
         var trimmed = text.Trim();
@@ -299,7 +330,7 @@ sealed class FieldEditor : IFieldEditor
                 {
                     EditKind.F32 => SceneEdits.Floats(number),
                     EditKind.F64 => SceneValue.Of(SceneNumber.Of(number)),
-                    _ => Current is { } v ? WithAxis(v, axis, number) : null,
+                    _ => current is { } v ? WithAxis(v, axis, number) : null,
                 };
             case EditKind.Quaternion:
                 if (!TryNumber(trimmed.TrimEnd('°').Replace("deg", ""), out var degrees))
@@ -307,14 +338,14 @@ sealed class FieldEditor : IFieldEditor
                     error = $"\"{text}\" is not an angle in degrees";
                     return null;
                 }
-                return Current is { } q ? Turned(q, axis, _ => degrees) : null;
+                return current is { } q ? Turned(q, axis, _ => degrees) : null;
             case EditKind.Position:
                 if (!TryDistance(trimmed, out var meters))
                 {
                     error = $"\"{text}\" is not a distance, such as 12.5 or 3 km";
                     return null;
                 }
-                return Current is { } p ? Moved(p, axis, _ => meters) : null;
+                return current is { } p ? Moved(p, axis, _ => meters) : null;
             default:
                 error = "this field takes no typed value";
                 return null;

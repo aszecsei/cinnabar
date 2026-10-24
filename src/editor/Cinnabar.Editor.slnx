@@ -5,5 +5,6 @@
   <Project Path="Cinnabar.Editor.Link/Cinnabar.Editor.Link.csproj" />
   <Project Path="Cinnabar.Editor.Model/Cinnabar.Editor.Model.csproj" />
   <Project Path="Cinnabar.Editor.Tests/Cinnabar.Editor.Tests.csproj" />
+  <Project Path="Cinnabar.Editor.Tools/Cinnabar.Editor.Tools.csproj" />
   <Project Path="Cinnabar.Editor/Cinnabar.Editor.csproj" />
 </Solution>

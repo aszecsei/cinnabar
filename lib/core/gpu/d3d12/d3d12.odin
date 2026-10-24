@@ -379,6 +379,7 @@ end_frame :: proc() {
 	if !dev.recording {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
+		stamp_readbacks(dev.fence_value)
 		return
 	}
 	when ODIN_DEBUG {
@@ -423,6 +424,7 @@ end_frame :: proc() {
 	signal()
 	frame.fence_value = dev.fence_value
 	stamp_releases(dev.fence_value)
+	stamp_readbacks(dev.fence_value)
 	dev.frame_index += 1
 }
 

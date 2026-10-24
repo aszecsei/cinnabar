@@ -153,11 +153,14 @@ Buffer_Usage :: enum u8 {
 	// The buffer has a write view.
 	Storage,
 	Indirect,
+	// The CPU reads the buffer with gpu_read_buffer, and the GPU only copies into it with cmd_copy_buffer. It has no
+	// views and no other usage, and no initial data (see docs/gpu.md#readback).
+	Readback,
 }
 
 Buffer_Usages :: bit_set[Buffer_Usage;u8]
 
-// Every buffer has a read view. Shaders read buffers as ByteAddressBuffer.
+// Every buffer but a Readback buffer has a read view. Shaders read buffers as ByteAddressBuffer.
 // size must be a multiple of 4.
 Buffer_Desc :: struct {
 	size:  u32,

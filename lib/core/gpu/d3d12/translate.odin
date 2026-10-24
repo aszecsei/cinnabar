@@ -130,6 +130,9 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			c := gpu.payload(p, gpu.Copy_Buffer)
 			dest, source := buffer_entry(c.dest), buffer_entry(c.source)
 			list->CopyBufferRegion(dest.resource, u64(c.dest_offset), source.resource, u64(c.source_offset), u64(c.size))
+			if dest.mapped != nil {
+				mark_readback(c.dest, dest)
+			}
 		case .Dispatch_Rays:
 			if !pipeline_ready {
 				continue

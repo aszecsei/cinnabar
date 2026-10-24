@@ -20,6 +20,8 @@ PLAIN :: Buffer{index = 1, generation = 1}
 @(private = "file")
 INDIRECT :: Buffer{index = 2, generation = 1}
 @(private = "file")
+READBACK :: Buffer{index = 3, generation = 1}
+@(private = "file")
 COLOR_PIPELINE :: Pipeline{index = 0, generation = 1}
 @(private = "file")
 DEPTH_PIPELINE :: Pipeline{index = 1, generation = 1}
@@ -63,6 +65,8 @@ RESOURCES :: Resources {
 			return {size = 64}, true
 		case INDIRECT:
 			return {size = 96, usage = {.Storage, .Indirect}}, true
+		case READBACK:
+			return {size = 64, usage = {.Readback}}, true
 		}
 		return {}, false
 	},
@@ -828,6 +832,9 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, PLAIN, 0, PLAIN, 32, 16)}, .Graphics, .Bad_Copy},
 		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 68)}, .Graphics, .Bad_Copy},
 		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 2, PLAIN, 0, 4)}, .Graphics, .Bad_Copy},
+		// A readback buffer is only a copy's destination.
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, READBACK, 0, 64)}, .Compute, .None},
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, READBACK, 0, PLAIN, 0, 4)}, .Graphics, .Bad_Copy},
 		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, {index = 9, generation = 1}, 0, PLAIN, 0, 4)}, .Graphics, .Invalid_Buffer},
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 4)}, .Graphics, .Copy_Inside_Pass},
 		{
@@ -865,6 +872,10 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	plain := streamed
 	plain.usage = {.Sampled}
 	testing.expect_value(t, validate_stream_texture(plain, false, data), Desc_Error.Bad_Usage)
+
+	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback}}, nil), Desc_Error.None)
+	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback, .Storage}}, nil), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_buffer_desc({size = 64, usage = {.Readback}}, data[:4]), Desc_Error.Bad_Usage)
 
 	buffer := Buffer_Desc{size = 64}
 	testing.expect_value(t, validate_stream_buffer(buffer, 32, data[:32]), Desc_Error.None)

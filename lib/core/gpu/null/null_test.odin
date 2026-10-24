@@ -241,3 +241,20 @@ streams_are_checked :: proc(t: ^testing.T) {
 	testing.expect_value(t, stream_buffer(buffer, 4, data), gpu.Transfer(0))
 	testing.expect_value(t, stream_buffer({index = 99, generation = 1}, 0, data[:4]), gpu.Transfer(0))
 }
+
+@(test)
+readback_buffers_are_readable :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 64}))
+	defer shutdown()
+
+	readback := create_buffer({size = 16, usage = {.Readback}}, nil)
+	data, ok := read_buffer(readback)
+	testing.expect(t, ok && len(data) == 16)
+	plain := create_buffer({size = 16}, nil)
+	_, ok = read_buffer(plain)
+	testing.expect(t, !ok)
+	destroy_buffer(readback)
+	_, ok = read_buffer(readback)
+	testing.expect(t, !ok)
+}

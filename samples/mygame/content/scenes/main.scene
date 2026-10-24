@@ -6,7 +6,7 @@ scene 1
 entity 1ce040845e87f2d4
 name = "Camera"
 component 1 Transform
-	position = [2516582400000000000, 0, 0]
+	position = [2516582400000000000, 0, -16777216]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 1003 Camera

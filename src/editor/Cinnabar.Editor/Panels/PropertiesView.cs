@@ -15,6 +15,8 @@ namespace Cinnabar.Editor.Panels;
 /// editor for each field that the scene can set. The editor watches the selected entity, and when only values change,
 /// each field's view shows the new value, so the panel keeps its expanders, its scroll position and the box being
 /// typed in at twenty updates a second. Values come from the host; edits go to the document, which sends them on.
+/// With more than one entity selected, it shows the components that all of them have, a field whose values differ as
+/// mixed, and an edit sets the field of each.
 /// </summary>
 public sealed class PropertiesView : ScrollViewer
 {
@@ -66,11 +68,11 @@ public sealed class PropertiesView : ScrollViewer
         };
     }
 
-    void OnSelectionChanged(ulong old, ulong entity) => Rebuild();
+    void OnSelectionChanged(IReadOnlyList<ulong> old, IReadOnlyList<ulong> entities) => Rebuild();
 
     void OnValuesChanged(ulong entity)
     {
-        if (entity != _selection.Entity)
+        if (!_selection.Contains(entity))
         {
             return;
         }
@@ -105,6 +107,11 @@ public sealed class PropertiesView : ScrollViewer
         _resets.Clear();
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
+        if (node != null && _selection.Count > 1)
+        {
+            RebuildMany();
+            return;
+        }
         if (node == null)
         {
             _content.Children.Add(Empty(_world.HasWorld
@@ -171,6 +178,11 @@ public sealed class PropertiesView : ScrollViewer
 
     void ShowValues()
     {
+        if (_selection.Count > 1)
+        {
+            ShowManyValues();
+            return;
+        }
         var values = _world.Values(_selection.Entity);
         if (values == null)
         {
@@ -218,6 +230,12 @@ public sealed class PropertiesView : ScrollViewer
         {
             return "";
         }
+        if (_selection.Count > 1)
+        {
+            var documents = _shell.SelectedSceneEntities;
+            return string.Join(";", _selection.Entities.Select(e => _world.Find(e) is { } n ? $"{n.Handle}|{n.Active}|{n.Parent}|{string.Join(",", n.Components)}" : "-")) +
+                $"|{_world.Types.Count}|" + string.Join(";", documents.Select(d => $"{d.Id}:{string.Join(",", d.Components.Select(c => c.Id))}"));
+        }
         var behaviours = _world.Values(node.Handle)?.Behaviours ?? [];
         var document = _shell.SelectedSceneEntity;
         var inDocument = document == null
@@ -227,6 +245,147 @@ public sealed class PropertiesView : ScrollViewer
             $"{_shell.ProblemsOf(node.SceneId).Count}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
+    }
+
+    // The components that every selected entity has, with an editor for each field when the document has all of them.
+    void RebuildMany()
+    {
+        var nodes = _selection.Entities.Select(_world.Find).OfType<EntityNode>().ToList();
+        var documents = _shell.SelectedSceneEntities;
+        // Only when the document has every selected entity can an edit set them all.
+        var all = documents.Count == nodes.Count ? documents : null;
+        var ids = all?.Select(d => d.Id).ToArray();
+        _content.Children.Add(ManyHeader(nodes, all));
+        var common = nodes.Skip(1).Aggregate(nodes[0].Components.AsEnumerable(), (shared, n) => shared.Intersect(n.Components))
+            .Where(id => !Derived.Contains(id)).ToList();
+        var tags = new List<(string Title, Action? Remove)>();
+        foreach (var id in common)
+        {
+            var type = _world.Type(id);
+            var title = FieldValues.Humanize(_world.TypeName(id));
+            var inDocument = all?.Select(d => d.Components.Find(c => c.Id == id)).ToList();
+            var everywhere = inDocument != null && inDocument.All(c => c != null);
+            Action? remove = everywhere ? () => _shell.Edit($"Remove {title}", [.. ids!.Select(e => new RemoveComponent(e, id))]) : null;
+            if (type == null || type.Fields.Length == 0)
+            {
+                tags.Add((title, remove));
+                continue;
+            }
+            var editable = everywhere && !WorldWritten.Contains(id) && !(id == SceneEdits.TransformId && nodes.Any(n => n.Parent != 0));
+            var owner = id.ToString("x16");
+            var fields = type.Fields.Select(f =>
+            {
+                var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
+                return new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), f.Kind == Link.Protocol.FieldKind.Enum, editor,
+                    editor != null ? () => inDocument!.Any(c => c!.Fields.Any(x => x.Name == f.Name)) : null,
+                    () => editor?.Reset());
+            });
+            _content.Children.Add(Group(title, fields, remove: remove));
+        }
+        if (tags.Count > 0)
+        {
+            _content.Children.Add(Tags(tags));
+        }
+        if (all != null)
+        {
+            _content.Children.Add(AddComponentToMany(nodes, all));
+        }
+        ShowValues();
+    }
+
+    void ShowManyValues()
+    {
+        var values = _selection.Entities.Select(_world.Values).ToList();
+        if (values.Any(v => v == null))
+        {
+            return;
+        }
+        ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
+        foreach (var (key, view) in _views)
+        {
+            if (key.Owner.StartsWith("behaviour:", StringComparison.Ordinal) || !ulong.TryParse(key.Owner, System.Globalization.NumberStyles.HexNumber, null, out var id)
+                || _world.Type(id)?.Fields.FirstOrDefault(f => f.Name == key.Field) is not { } field)
+            {
+                continue;
+            }
+            var data = values.Select(v => v!.Components.FirstOrDefault(c => c.Id == id)?.Data).ToList();
+            if (data.Any(d => d == null))
+            {
+                continue;
+            }
+            if (_editors.TryGetValue(key, out var editor))
+            {
+                for (var i = 0; i < data.Count; i++)
+                {
+                    editor.SetCurrent(i, FieldEditor.Read(field, data[i], SceneIdOf));
+                }
+            }
+            view.Show(Mixed([.. data.Select(d => FieldValues.Display(field, d))]));
+        }
+    }
+
+    // The primary entity's display, with "—" where the entities differ.
+    static FieldDisplay Mixed(List<FieldDisplay> displays)
+    {
+        var first = displays[^1];
+        if (displays.All(d => d.Text == first.Text))
+        {
+            return first;
+        }
+        var axes = first.Axes.Select((a, i) => displays.All(d => i < d.Axes.Length && d.Axes[i] == a) ? a : "—").ToArray();
+        return first with { Text = "—", Axes = axes, Tooltip = "The selected entities differ." };
+    }
+
+    Control ManyHeader(List<EntityNode> nodes, IReadOnlyList<SceneEntity>? documents)
+    {
+        var title = new TextBlock { Text = $"{nodes.Count} entities", Classes = { "title" } };
+        ToolTip.SetTip(title, string.Join("\n", nodes.Select(n => n.Label)));
+        var active = nodes.All(n => n.Active);
+        var mixed = !active && nodes.Any(n => n.Active);
+        var stateText = new TextBlock { Text = mixed ? "Mixed" : active ? "Active" : "Inactive" };
+        Control state;
+        if (documents != null)
+        {
+            var toggle = new Button { Classes = { "badge-button", active ? "active" : "inactive" }, Content = stateText, VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(toggle, active ? "Deactivate the entities" : "Activate the entities");
+            toggle.Click += (_, _) => _shell.Edit(active ? "Deactivate" : "Activate", [.. documents.Select(d => new SetActive(d.Id, !active))]);
+            state = toggle;
+        }
+        else
+        {
+            state = new Border { Classes = { "badge", active ? "active" : "inactive" }, Child = stateText, VerticalAlignment = VerticalAlignment.Center };
+        }
+        var top = new DockPanel { Children = { state, title } };
+        DockPanel.SetDock(state, Avalonia.Controls.Dock.Right);
+        var header = new StackPanel { Classes = { "properties-header" }, Spacing = 4, Children = { top } };
+        if (documents == null)
+        {
+            header.Children.Add(new TextBlock { Text = "The game spawned some of these entities, so the scene cannot edit them.", Classes = { "dim" }, TextWrapping = TextWrapping.Wrap });
+        }
+        return header;
+    }
+
+    // The component types that some selected entity lacks. Adding one gives it to each entity that lacks it.
+    Control AddComponentToMany(List<EntityNode> nodes, IReadOnlyList<SceneEntity> documents)
+    {
+        var menu = new MenuFlyout();
+        foreach (var type in _world.Types.Values.Where(t => nodes.Any(n => !n.Components.Contains(t.Id)) && !Derived.Contains(t.Id)).OrderBy(t => FieldValues.Humanize(t.Name)))
+        {
+            var item = new MenuItem { Header = FieldValues.Humanize(type.Name) };
+            item.Click += (_, _) => _shell.Edit($"Add {FieldValues.Humanize(type.Name)}",
+                [.. documents.Where((d, i) => !nodes[i].Components.Contains(type.Id))
+                    .Select(d => new AddComponent(d.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))))]);
+            menu.Items.Add(item);
+        }
+        return new Button
+        {
+            Content = "Add Component",
+            Flyout = menu,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Classes = { "add-component" },
+            IsEnabled = menu.Items.Count > 0,
+        };
     }
 
     // An entity that the world does not know shows as the engine prints it.

@@ -1,52 +1,386 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Cinnabar.Editor.Ribbon;
+using Cinnabar.Editor.Shell;
+using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Viewport;
 
-/// <summary>The viewport panel: the frames, and the stats overlay over them.</summary>
+/// <summary>
+/// The viewport panel: the frames, the tool palette, the camera's speed and the stats over them, and the input that
+/// drives the editor's tools (see docs/editor.md#viewport). The right button flies with WASD, Q and E; Alt with the
+/// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
+/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, and F frames the selection.
+/// </summary>
 public sealed class ViewportView : Grid
 {
+    // A press that moves less than this, in control units, is a click.
+    const double ClickSlop = 4;
+    // Wheel notches per pixel of an Alt and right button drag.
+    const double DollyPerPixel = 1.0 / 40;
+
+    enum Gesture
+    {
+        None,
+        Click,
+        Box,
+        Gizmo,
+        Fly,
+        Orbit,
+        Pan,
+        Dolly,
+    }
+
+    readonly EditorShell _shell;
     readonly ViewportSession _session;
+    readonly ViewportControl _control;
     readonly Border _overlay;
     readonly TextBlock _stats;
+    readonly Border _box;
+    readonly TextBlock _speed;
+    readonly List<(ToggleButton Button, string Command)> _tools = [];
     readonly DispatcherTimer _timer;
+    readonly DispatcherTimer _flyTimer;
+    readonly HashSet<Key> _held = [];
+    Gesture _gesture;
+    Point _start;
+    Point _last;
+    long _lastFly;
     ulong _lastPresented;
     ulong _lastShown;
     long _lastTick = Environment.TickCount64;
 
-    public ViewportView(ViewportSession session)
+    public ViewportView(EditorShell shell)
     {
-        _session = session;
+        _shell = shell;
+        _session = shell.Viewport;
         Background = Brushes.Black;
-        Children.Add(new ViewportControl { Session = session });
-        _stats = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
-        _overlay = new Border
+        Focusable = true;
+        ClipToBounds = true;
+        _control = new ViewportControl { Session = _session };
+        Children.Add(_control);
+
+        _box = new Border
         {
-            Child = _stats,
-            HorizontalAlignment = HorizontalAlignment.Right,
+            Classes = { "selection-box" },
+            HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
-            Margin = new Thickness(8),
-            Padding = new Thickness(8, 4),
-            CornerRadius = new CornerRadius(3),
-            Background = new SolidColorBrush(Color.FromArgb(0xc0, 0x20, 0x20, 0x24)),
+            IsVisible = false,
             IsHitTestVisible = false,
         };
+        Children.Add(_box);
+
+        _stats = new TextBlock { FontFamily = new FontFamily("Consolas"), FontSize = 12 };
+        _overlay = Overlay(_stats, HorizontalAlignment.Right, VerticalAlignment.Top);
+        _overlay.IsHitTestVisible = false;
         Children.Add(_overlay);
+
+        _speed = new TextBlock { FontSize = 11 };
+        var speed = Overlay(_speed, HorizontalAlignment.Left, VerticalAlignment.Bottom);
+        speed.IsHitTestVisible = false;
+        Children.Add(speed);
+        Children.Add(Palette());
+
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => UpdateStats());
+        _flyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => FlyStep());
+        // Keys that are released elsewhere would keep the camera flying.
+        LostFocus += (_, _) => _held.Clear();
         AttachedToVisualTree += (_, _) =>
         {
             _session.ViewChanged += ShowOverlay;
+            _shell.ToolsChanged += ShowTools;
+            _shell.Camera.Changed += ShowSpeed;
             _timer.Start();
+            ShowTools();
+            ShowSpeed();
         };
         DetachedFromVisualTree += (_, _) =>
         {
             _session.ViewChanged -= ShowOverlay;
+            _shell.ToolsChanged -= ShowTools;
+            _shell.Camera.Changed -= ShowSpeed;
             _timer.Stop();
+            _flyTimer.Stop();
         };
         UpdateStats();
+    }
+
+    static Border Overlay(Control child, HorizontalAlignment horizontal, VerticalAlignment vertical) => new()
+    {
+        Child = child,
+        HorizontalAlignment = horizontal,
+        VerticalAlignment = vertical,
+        Margin = new Thickness(8),
+        Padding = new Thickness(8, 4),
+        CornerRadius = new CornerRadius(3),
+        Background = new SolidColorBrush(Color.FromArgb(0xc0, 0x20, 0x20, 0x24)),
+    };
+
+    // The tools, the gizmo's space and snapping, as buttons for their commands.
+    Control Palette()
+    {
+        var panel = new StackPanel { Spacing = 2 };
+        void Add(string command)
+        {
+            var c = _shell.Commands.Get(command);
+            var button = new ToggleButton
+            {
+                Content = CommandViews.Icon(c.Icon, 16),
+                Classes = { "viewport-tool" },
+                Focusable = false,
+            };
+            ToolTip.SetTip(button, c.Description is { } d ? $"{c.Label}\n{d}" : c.Label);
+            button.Click += (_, _) =>
+            {
+                c.Execute();
+                ShowTools();
+            };
+            panel.Children.Add(button);
+            _tools.Add((button, command));
+        }
+        Add(EditorCommands.SelectTool);
+        Add(EditorCommands.MoveTool);
+        Add(EditorCommands.RotateTool);
+        Add(EditorCommands.ScaleTool);
+        panel.Children.Add(new Border { Height = 6 });
+        Add(EditorCommands.LocalSpace);
+        Add(EditorCommands.Snap);
+        var palette = Overlay(panel, HorizontalAlignment.Left, VerticalAlignment.Top);
+        palette.Padding = new Thickness(3);
+        return palette;
+    }
+
+    void ShowTools()
+    {
+        ShowSpeed();
+        foreach (var (button, command) in _tools)
+        {
+            button.IsChecked = _shell.Commands.Get(command).IsChecked;
+        }
+    }
+
+    void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}";
+
+    static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
+
+    static SelectMode ModeOf(KeyModifiers modifiers) =>
+        modifiers.HasFlag(KeyModifiers.Shift) ? SelectMode.Add : modifiers.HasFlag(KeyModifiers.Control) ? SelectMode.Toggle : SelectMode.Replace;
+
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        if (_gesture != Gesture.None)
+        {
+            return;
+        }
+        Focus();
+        var point = e.GetCurrentPoint(this);
+        var alt = e.KeyModifiers.HasFlag(KeyModifiers.Alt);
+        _start = _last = point.Position;
+        if (point.Properties.IsRightButtonPressed)
+        {
+            _gesture = alt ? Gesture.Dolly : Gesture.Fly;
+            if (_gesture == Gesture.Fly)
+            {
+                _lastFly = Environment.TickCount64;
+                _flyTimer.Start();
+            }
+        }
+        else if (point.Properties.IsMiddleButtonPressed)
+        {
+            _gesture = Gesture.Pan;
+        }
+        else if (point.Properties.IsLeftButtonPressed)
+        {
+            if (alt)
+            {
+                _gesture = Gesture.Orbit;
+            }
+            else if (_control.FramePoint(point.Position) is { } pixel && _shell.PressGizmo(pixel))
+            {
+                _gesture = Gesture.Gizmo;
+            }
+            else
+            {
+                _gesture = Gesture.Click;
+            }
+        }
+        if (_gesture != Gesture.None)
+        {
+            e.Pointer.Capture(this);
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+        var position = e.GetPosition(this);
+        // Looking and orbiting turn by frame pixels, so they feel the same at any window scale.
+        var delta = (position - _last) * _control.FrameScale;
+        _last = position;
+        switch (_gesture)
+        {
+            case Gesture.None:
+                if (_control.FramePoint(position) is { } hover)
+                {
+                    _shell.HoverGizmo(hover);
+                }
+                break;
+            case Gesture.Fly:
+                _shell.Camera.Look(delta.X, delta.Y);
+                break;
+            case Gesture.Orbit:
+                _shell.Camera.Orbit(delta.X, delta.Y);
+                break;
+            case Gesture.Pan:
+                _shell.Camera.Pan(delta.X, delta.Y, _shell.FrameSize.Height);
+                break;
+            case Gesture.Dolly:
+                _shell.Camera.Dolly(-delta.Y * DollyPerPixel);
+                break;
+            case Gesture.Gizmo:
+                if (_control.FramePoint(position) is { } drag)
+                {
+                    _shell.DragGizmo(drag, e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                }
+                break;
+            case Gesture.Click:
+                if ((position - _start) is var moved && Math.Sqrt(moved.X * moved.X + moved.Y * moved.Y) > ClickSlop)
+                {
+                    _gesture = Gesture.Box;
+                    ShowBox(position);
+                }
+                break;
+            case Gesture.Box:
+                ShowBox(position);
+                break;
+        }
+    }
+
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+        var position = e.GetPosition(this);
+        var mode = ModeOf(e.KeyModifiers);
+        switch (_gesture)
+        {
+            case Gesture.Gizmo:
+                _shell.ReleaseGizmo();
+                break;
+            case Gesture.Click:
+                if (_control.FramePoint(position) is { } pixel)
+                {
+                    _shell.PickAt(pixel, mode);
+                }
+                break;
+            case Gesture.Box:
+                if (_control.FramePoint(_start) is { } a && _control.FramePoint(position) is { } b)
+                {
+                    _shell.PickBox(a, b, mode);
+                }
+                break;
+        }
+        EndGesture();
+        e.Pointer.Capture(null);
+    }
+
+    protected override void OnPointerCaptureLost(PointerCaptureLostEventArgs e)
+    {
+        base.OnPointerCaptureLost(e);
+        if (_gesture == Gesture.Gizmo)
+        {
+            _shell.ReleaseGizmo();
+        }
+        EndGesture();
+    }
+
+    void EndGesture()
+    {
+        _gesture = Gesture.None;
+        _box.IsVisible = false;
+        _flyTimer.Stop();
+    }
+
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+        if (_gesture == Gesture.Fly)
+        {
+            _shell.Camera.ChangeSpeed(e.Delta.Y);
+        }
+        else
+        {
+            _shell.Camera.Dolly(e.Delta.Y);
+        }
+        e.Handled = true;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+        if (_gesture == Gesture.Fly)
+        {
+            _held.Add(e.Key);
+            e.Handled = true;
+            return;
+        }
+        if (e.KeyModifiers != KeyModifiers.None)
+        {
+            return;
+        }
+        var command = e.Key switch
+        {
+            Key.Q => EditorCommands.SelectTool,
+            Key.W => EditorCommands.MoveTool,
+            Key.E => EditorCommands.RotateTool,
+            Key.R => EditorCommands.ScaleTool,
+            Key.X => EditorCommands.LocalSpace,
+            Key.F => EditorCommands.FrameSelected,
+            _ => null,
+        };
+        if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
+        {
+            _shell.CancelGizmo();
+            _gesture = Gesture.None;
+            e.Handled = true;
+        }
+        else if (command != null)
+        {
+            _shell.Commands.Get(command).Execute();
+            e.Handled = true;
+        }
+    }
+
+    protected override void OnKeyUp(KeyEventArgs e)
+    {
+        base.OnKeyUp(e);
+        _held.Remove(e.Key);
+    }
+
+    // Each tick of a flight moves the camera by the keys that are held, for the time since the last tick.
+    void FlyStep()
+    {
+        var now = Environment.TickCount64;
+        var seconds = Math.Min((now - _lastFly) / 1000.0, 0.1);
+        _lastFly = now;
+        double Axis(Key positive, Key negative) => (_held.Contains(positive) ? 1 : 0) - (_held.Contains(negative) ? 1 : 0);
+        var direction = new Vec3(Axis(Key.D, Key.A), Axis(Key.E, Key.Q), Axis(Key.W, Key.S));
+        var boost = _held.Contains(Key.LeftShift) || _held.Contains(Key.RightShift) ? 4 : 1;
+        _shell.Camera.Fly(direction, seconds, boost);
+    }
+
+    void ShowBox(Point to)
+    {
+        _box.IsVisible = true;
+        _box.Margin = new Thickness(Math.Min(_start.X, to.X), Math.Min(_start.Y, to.Y), 0, 0);
+        _box.Width = Math.Abs(to.X - _start.X);
+        _box.Height = Math.Abs(to.Y - _start.Y);
     }
 
     void ShowOverlay() => _overlay.IsVisible = _session.ShowStats;

@@ -55,6 +55,9 @@ sealed class ViewportImage : IAsyncDisposable
                 Width = size.Width,
                 Height = size.Height,
                 Format = PlatformGraphicsExternalImageFormat.R8G8B8A8UNorm,
+                // D3D's rows start at the top. Without this, the compositor takes the first row as the bottom one, as
+                // OpenGL does, and shows the frame upside down.
+                TopLeftOrigin = true,
             });
     }
 

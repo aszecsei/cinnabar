@@ -57,7 +57,7 @@ public sealed partial class EditorShell : IDisposable
         Settings = settings;
         Host = new HostSession(options);
         Autosave = new Autosave(options.AutosaveDirectory);
-        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport));
+        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport, () => new ViewportView(this)));
         RestoreLayout();
 
         Viewport.AdapterFound += Host.Start;
@@ -66,7 +66,12 @@ public sealed partial class EditorShell : IDisposable
         Viewport.FrameCopied += (generation, frame) => Host.Send(new FrameAcknowledged(generation, frame));
         Host.Output += Console.Add;
         Host.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
-        Host.FrameTargetChanged += target => Viewport.Connect(target.Prefix, target.Generation);
+        Host.FrameTargetChanged += target =>
+        {
+            Viewport.Connect(target.Prefix, target.Generation);
+            // The gizmo keeps its size on screen, so a new frame size changes it.
+            SendGizmo();
+        };
         // A soft restart starts the game with its own scene, so the editor sends the document again.
         Host.GameReloaded += kind =>
         {
@@ -77,31 +82,36 @@ public sealed partial class EditorShell : IDisposable
         };
         Host.GameMessage += OnGameMessage;
         Host.StateChanged += OnHostStateChanged;
-        // The editor watches the selected entity, so the properties panel has its values.
-        Selection.Changed += (old, entity) =>
+        // The editor watches the selected entities, so the properties panel has their values, and the game outlines them.
+        Selection.Changed += (old, entities) =>
         {
-            _selectedSceneId = World.Find(entity)?.SceneId ?? 0;
-            if (old != 0)
+            _selectedSceneIds = [.. entities.Select(e => World.Find(e)?.SceneId ?? 0).Where(id => id != 0)];
+            foreach (var gone in old.Except(entities))
             {
-                Host.Send(new UnwatchEntity(old));
+                Host.Send(new UnwatchEntity(gone));
             }
-            if (entity != 0)
+            foreach (var added in entities.Except(old))
+            {
+                Host.Send(new WatchEntity(added));
+            }
+            SendSelection();
+            CancelGizmo();
+            SendGizmo();
+        };
+        // A snapshot means a new stream from the game, which knows no watches and no selection yet.
+        World.Reset += () =>
+        {
+            foreach (var entity in Selection.Entities)
             {
                 Host.Send(new WatchEntity(entity));
             }
-        };
-        // A snapshot means a new stream from the game, which knows no watches yet.
-        World.Reset += () =>
-        {
-            if (!Selection.IsEmpty)
-            {
-                Host.Send(new WatchEntity(Selection.Entity));
-            }
+            SendSelection();
         };
         World.EntitiesChanged += OnEntitiesChanged;
         Layout.Changed += Commands.InvalidateAll;
-        // Commands such as Delete act on the selected entity.
+        // Commands such as Delete act on the selected entities.
         Selection.Changed += (_, _) => Commands.InvalidateAll();
+        Camera.Changed += SendCamera;
 
         EditorCommands.Register(this);
         Ribbon = DefaultRibbon.Create(Layout.Panels);
@@ -148,6 +158,7 @@ public sealed partial class EditorShell : IDisposable
         if (Host.Linked && !_linked)
         {
             SendScene();
+            SendViewportTools();
         }
         _linked = Host.Linked;
         if (!Host.Linked)

@@ -17,7 +17,7 @@ public partial class App : Application
         AvaloniaXamlLoader.Load(this);
         // Docking templates each panel through these. A panel's state is in the panel, so a new view loses nothing.
         DataTemplates.Add(new FuncDataTemplate<PanelTool>((panel, _) => panel?.CreateView()));
-        DataTemplates.Add(new FuncDataTemplate<ViewportDocument>((document, _) => document == null ? null : new ViewportView(document.Session)));
+        DataTemplates.Add(new FuncDataTemplate<ViewportDocument>((document, _) => document == null ? null : document.CreateView()));
     }
 
     public override void OnFrameworkInitializationCompleted()

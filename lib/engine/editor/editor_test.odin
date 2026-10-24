@@ -8,6 +8,7 @@ import "core:testing"
 import "cinnabar:core"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 
 Mode :: enum u8 {
@@ -395,4 +396,112 @@ the_games_own_scene_is_found_by_scene_id :: proc(t: ^testing.T) {
 	step(f, 1, link.Apply_Operations{operations = {{kind = .Rename, entity = 0x51, name = "Found"}}})
 
 	testing.expect_value(t, ecs.name_of(&f.world, e), "Found")
+}
+
+@(test)
+the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	a := spawn(f, {})
+	step(f)
+	_, has_view := view(&f.editor)
+	testing.expect(t, !has_view)
+
+	camera := link.Editor_Camera {
+		position     = {1 << 24, 0, -(2 << 24)},
+		rotation     = {0, 0, 0, 1},
+		vertical_fov = 1,
+		near         = 0.05,
+	}
+	step(f, 1, camera, link.Set_Selection{entities = {u64(a)}})
+	v, ok := view(&f.editor)
+	testing.expect(t, ok)
+	testing.expect_value(t, v.position.raw, [3]i64{1 << 24, 0, -(2 << 24)})
+	testing.expect_value(t, v.near, 0.05)
+	testing.expect_value(t, len(f.editor.viewport.selection), 1)
+
+	// Another editor has its own camera and selection.
+	step(f, 2)
+	_, has_view = view(&f.editor)
+	testing.expect(t, !has_view)
+	testing.expect_value(t, len(f.editor.viewport.selection), 0)
+}
+
+@(test)
+picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	a := spawn(f, {})
+	ecs.spawn(w)
+	c := spawn(f, {})
+	ecs.add(w, c, scene.Scene_Entity{id = 0x77})
+	gone := ecs.spawn(w)
+	ecs.despawn(w, gone)
+
+	words := []u32{9, entity_id(c), transmute(u32)f32(0.5), 0, 0}
+	for e in ([]ecs.Entity{c, a, gone}) {
+		index := ecs.entity_index(e)
+		words[4 + index / 32] |= 1 << (index % 32)
+	}
+	result := pick_result(w, {id = 3, width = 1, height = 1}, words, 0.1, context.temp_allocator)
+	testing.expect_value(t, result.id, 3)
+	// The dead entity's slot finds nothing, and the others come in slot order.
+	testing.expect_value(t, len(result.hits), 2)
+	testing.expect_value(t, result.hits[0].entity, u64(a))
+	testing.expect_value(t, result.hits[1], link.Pick_Hit{entity = u64(c), scene_id = 0x77})
+	// A depth of 0.5 is twice the near plane.
+	testing.expect(t, abs(result.depth - 0.2) < 1e-6)
+
+	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, context.temp_allocator)
+	testing.expect_value(t, rect.depth, 0)
+}
+
+@(test)
+selected_parents_outline_their_children :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	parent := spawn(f, {})
+	child := spawn(f, {})
+	grandchild := spawn(f, {})
+	other := spawn(f, {})
+	ecs.add(w, child, ecs.Parent{parent})
+	ecs.add(w, grandchild, ecs.Parent{child})
+
+	bits := make([]u32, (ecs.slot_count(w) + 31) / 32, context.temp_allocator)
+	outlined(w, {parent}, bits)
+	is_set :: proc(bits: []u32, e: ecs.Entity) -> bool {
+		i := ecs.entity_index(e)
+		return bits[i / 32] & (1 << (i % 32)) != 0
+	}
+	testing.expect(t, is_set(bits, parent) && is_set(bits, child) && is_set(bits, grandchild))
+	testing.expect(t, !is_set(bits, other))
+	outlined(w, {child}, bits)
+	testing.expect(t, !is_set(bits, parent) && is_set(bits, grandchild))
+}
+
+@(test)
+gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
+	v := render.View {
+		rotation     = 1,
+		vertical_fov = 1,
+		near         = 0.05,
+	}
+	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
+	for kind in ([]link.Gizmo_Kind{.Translate, .Rotate, .Scale}) {
+		vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
+		gizmo_vertices({kind = kind, position = {0, 0, 5 << 24}, rotation = {0, 0, 0, 1}, size = 1, hot = .Y}, v, &vertices)
+		testing.expect(t, len(vertices) > 0 && len(vertices) % 3 == 0)
+		highlighted := 0
+		for vertex in vertices {
+			highlighted += int(vertex.color == hot)
+			// Everything is near the gizmo, 5 m ahead of the view.
+			testing.expect(t, abs(vertex.position.z - 5) < 1.5)
+		}
+		testing.expectf(t, highlighted > 0, "%v has no highlighted part", kind)
+	}
+	none := make([dynamic]Gizmo_Vertex, context.temp_allocator)
+	gizmo_vertices({}, v, &none)
+	testing.expect_value(t, len(none), 0)
 }

@@ -138,10 +138,10 @@ scenes config="dev": cook
 script-types: host game-dll
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
 
-# Cook the game's shaders: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray tracing library.
-# Only changed shaders recompile (see tools/cook).
+# Cook the game's shaders and the engine's: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray
+# tracing library. Only changed shaders recompile (see tools/cook).
 shaders: install-dxc cook
-    "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
+    for dir in lib/engine/editor/shaders "samples/{{game}}/shaders"; do "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "$dir" || exit 1; done
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
 game-dll: shaders luau
@@ -219,7 +219,8 @@ fmt:
 # Testing
 # =================================
 
-test: luau link-schema
+# lib/engine/editor embeds its compiled shaders, so its tests need them.
+test: luau link-schema shaders
     for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true

@@ -190,6 +190,33 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheGameDrawsFromTheEditorsCameraAndAnswersPicks()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        // The game's world comes before the frame target, in the same poll.
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+
+        // The scene's camera: 1 m in front of the front triangle, which is 0.2 m in front of the back one.
+        editor.Link.Send(new EditorCamera([2516582400000000000, 0, -16777216], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        var center = await editor.Next<PickResult>(r => r.Id == 7);
+        var hit = Assert.Single(center.Hits);
+        Assert.Equal(0x37e9612990eb05d0UL, hit.SceneId);
+        Assert.InRange(center.Depth, 1.35f, 1.45f);
+
+        // A box over the whole frame finds both triangles, and nothing at the edge finds nothing.
+        editor.Link.Send(new PickRequest(8, 0, 0, target.Width, target.Height));
+        editor.Link.Send(new PickRequest(9, 0, 0, 1, 1));
+        var all = await editor.Next<PickResult>(r => r.Id == 8);
+        Assert.Equal([0x37e9612990eb05d0UL, 0x8c15900f0aab4d79UL], all.Hits.Select(h => h.SceneId).Order());
+        var corner = await editor.Next<PickResult>(r => r.Id == 9);
+        Assert.Empty(corner.Hits);
+        Assert.Equal(0, corner.Depth);
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();

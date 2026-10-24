@@ -1,27 +1,59 @@
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The selected entity, by handle. One entity for now; multi-select comes with editing. Selection moves to the
-/// document with scenes (see docs/editor.md#document-model).
+/// The selected entities, by handle, in the order they were selected. The last is the primary one, which the gizmo
+/// sits on and the properties panel names. The shell keeps their scene IDs, so a resync, which gives every entity a
+/// new handle, keeps the selection (see docs/editor.md#document-model).
 /// </summary>
 public sealed class Selection
 {
-    public ulong Entity { get; private set; }
+    List<ulong> _entities = [];
 
-    public bool IsEmpty => Entity == 0;
+    public IReadOnlyList<ulong> Entities => _entities;
 
-    /// <summary>The old and the new entity.</summary>
-    public event Action<ulong, ulong>? Changed;
+    /// <summary>The primary entity, or 0 for none.</summary>
+    public ulong Entity => _entities.Count > 0 ? _entities[^1] : 0;
 
-    public void Select(ulong entity)
+    public int Count => _entities.Count;
+
+    public bool IsEmpty => _entities.Count == 0;
+
+    /// <summary>The old and the new entities.</summary>
+    public event Action<IReadOnlyList<ulong>, IReadOnlyList<ulong>>? Changed;
+
+    public bool Contains(ulong entity) => _entities.Contains(entity);
+
+    /// <summary>Selects one entity, or none with 0.</summary>
+    public void Select(ulong entity) => Set(entity == 0 ? [] : [entity]);
+
+    /// <summary>Selects these entities, the last as the primary one.</summary>
+    public void Set(IEnumerable<ulong> entities)
     {
-        if (entity != Entity)
+        var next = entities.Where(e => e != 0).Distinct().ToList();
+        if (next.SequenceEqual(_entities))
         {
-            var old = Entity;
-            Entity = entity;
-            Changed?.Invoke(old, entity);
+            return;
         }
+        var old = _entities;
+        _entities = next;
+        Changed?.Invoke(old, next);
     }
 
-    public void Clear() => Select(0);
+    /// <summary>Adds entities, as Shift does. One that is selected already becomes the primary one.</summary>
+    public void Add(IEnumerable<ulong> entities)
+    {
+        var added = entities.ToList();
+        Set([.. _entities.Where(e => !added.Contains(e)), .. added]);
+    }
+
+    /// <summary>Selects an entity that is not selected, and deselects one that is, as Ctrl does.</summary>
+    public void Toggle(ulong entity) => Set(Contains(entity) ? _entities.Where(e => e != entity) : [.. _entities, entity]);
+
+    public void Remove(IEnumerable<ulong> entities)
+    {
+        var removed = entities.ToHashSet();
+        Set(_entities.Where(e => !removed.Contains(e)));
+    }
+
+    public void Clear() => Set([]);
 }

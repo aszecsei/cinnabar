@@ -50,3 +50,23 @@ commands_for_dead_entities_do_nothing :: proc(t: ^testing.T) {
 	testing.expect(t, !is_alive(w, e))
 	testing.expect_value(t, archetype(w, EMPTY_ARCHETYPE).count, 0)
 }
+
+@(test)
+slots_give_their_live_entity :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	a := spawn(w)
+	b := spawn(w)
+	testing.expect(t, slot_count(w) >= 2)
+	found, ok := slot_entity(w, entity_index(b))
+	testing.expect(t, ok && found == b)
+	despawn(w, b)
+	_, ok = slot_entity(w, entity_index(b))
+	testing.expect(t, !ok)
+	found, ok = slot_entity(w, entity_index(a))
+	testing.expect(t, ok && found == a)
+	_, ok = slot_entity(w, slot_count(w))
+	testing.expect(t, !ok)
+}
