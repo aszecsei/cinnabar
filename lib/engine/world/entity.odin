@@ -69,13 +69,33 @@ spawn :: proc(w: ^World) -> Entity {
 	return e
 }
 
-// despawn destroys an entity and its components. It returns false if the entity is not alive.
+// despawn destroys an entity, its components and its descendants. It returns false if the entity is not alive.
+// To keep a child, remove its Parent first.
+//
+// Finding the descendants scans every child in the world, so despawn many entities with commands instead: apply
+// scans once for all of them.
 despawn :: proc(w: ^World, e: Entity) -> bool {
 	flush_reserved(w)
+	if !despawn_one(w, e) {
+		return false
+	}
+	despawn_orphans(w)
+	return true
+}
+
+is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {
+	return live_record(w, e) != nil
+}
+
+// despawn_one destroys one entity and leaves its children for despawn_orphans.
+@(private)
+despawn_one :: proc(w: ^World, e: Entity) -> bool {
 	record := live_record(w, e)
 	if record == nil {
 		return false
 	}
+	// Any entity may be a parent.
+	w.orphans_pending = true
 	if _, child := column_index(archetype(w, record.archetype), PARENT_ID); child {
 		w.hierarchy_dirty = true
 	}
@@ -96,8 +116,30 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	return true
 }
 
-is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {
-	return live_record(w, e) != nil
+// despawn_orphans despawns every child whose parent is not alive, until none is left. Each pass removes at least
+// one level of a despawned subtree.
+@(private)
+despawn_orphans :: proc(w: ^World) {
+	if !w.orphans_pending {
+		return
+	}
+	for despawned := true; despawned; {
+		despawned = false
+		for index in 0 ..< w.archetype_count {
+			a := archetype(w, index)
+			column := column_index(a, PARENT_ID) or_continue
+			// Backward, because despawning a row moves the last row into it, and that row was already checked.
+			for row := int(a.count) - 1; row >= 0; row -= 1 {
+				parent := (^Parent)(component_at(w, index, column, u32(row)))
+				if !is_alive(w, parent.entity) {
+					despawn_one(w, entity_at(w, index, u32(row))^)
+					despawned = true
+				}
+			}
+		}
+	}
+	// despawn_one set it again for the orphans, whose children the passes above already handled.
+	w.orphans_pending = false
 }
 
 @(private)

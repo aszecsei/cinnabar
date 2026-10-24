@@ -33,6 +33,8 @@ World :: struct {
 	levels:          [MAX_HIERARCHY_DEPTH + 1]u32,
 	// Set when a Parent is added or removed, or a child is despawned.
 	hierarchy_dirty: bool,
+	// Set when an entity is despawned, so its children may need to be despawned too.
+	orphans_pending: bool,
 }
 
 // init reserves the world's storage and creates the empty archetype. Register the components after it.

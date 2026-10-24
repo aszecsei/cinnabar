@@ -29,7 +29,7 @@ Local_Transform :: struct {
 }
 
 // Parent makes an entity a child. Change it only with add or command_add, so the world sees the new hierarchy.
-// A child whose parent is not alive keeps its last Transform.
+// Despawning a parent despawns its children (see despawn).
 Parent :: struct {
 	entity: Entity,
 }
@@ -199,7 +199,8 @@ rebuild_hierarchy :: proc(w: ^World) {
 			if depth < 0 {
 				log.errorf("world: the hierarchy above entity %x is a cycle or deeper than %d", u64(e), MAX_HIERARCHY_DEPTH)
 			}
-			// A child whose parent is not alive has depth 0, and propagation leaves it alone.
+			// A child whose parent is not alive has depth 0. It is despawned at the next apply, and until then
+			// propagation leaves it alone.
 			if depth <= 0 {
 				continue
 			}

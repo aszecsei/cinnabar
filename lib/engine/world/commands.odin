@@ -64,7 +64,8 @@ command_teleport :: proc(cb: ^Commands, e: Entity, pose: Transform) {
 }
 
 // apply creates the reserved entities and applies the buffers in order. Run it only while no job uses the world.
-// A command for an entity that is no longer alive does nothing.
+// A command for an entity that is no longer alive does nothing. The descendants of despawned entities are despawned
+// at the end, so commands for them in the same apply still run first.
 apply :: proc(w: ^World, buffers: []Commands) {
 	flush_reserved(w)
 	for cb in buffers {
@@ -76,7 +77,7 @@ apply :: proc(w: ^World, buffers: []Commands) {
 			offset += size_of(Command_Header)
 			switch header.op {
 			case .Despawn:
-				despawn(w, header.entity)
+				despawn_one(w, header.entity)
 			case .Add:
 				data := header.size > 0 ? cb.data[offset:][:header.size] : nil
 				add_raw(w, header.entity, header.id, data)
@@ -91,6 +92,7 @@ apply :: proc(w: ^World, buffers: []Commands) {
 			}
 		}
 	}
+	despawn_orphans(w)
 }
 
 @(private = "file")

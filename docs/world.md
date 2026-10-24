@@ -90,7 +90,8 @@ World positions are fixed-point: `World_Position` holds three `i64` values in un
 - `Transform` is the world-space pose: a `World_Position`, a rotation and a scale. Every placed entity has one.
 - For a root entity, `Transform` is the source of truth. A child has `Parent` and `Local_Transform`. Its `Local_Transform` holds an `f32` offset, a rotation and a scale relative to the parent, and it is the source of truth. Transform propagation writes the child's `Transform`.
 - Engine components have small explicit IDs (`TRANSFORM_ID` and others). The game registers them with `register_engine_components` in its registration procedure.
-- Change `Parent` only with `add` or `command_add`, so the world knows that the hierarchy changed. A child whose parent is no longer alive keeps its last `Transform`. The world logs a cycle, or a hierarchy deeper than 64 levels, and does not propagate it.
+- Change `Parent` only with `add` or `command_add`, so the world knows that the hierarchy changed. The world logs a cycle, or a hierarchy deeper than 64 levels, and does not propagate it.
+- **Despawning a parent despawns its descendants.** To keep a child, remove its `Parent` first. Entities do not store their children, so finding them scans every child in the world. `apply` scans once, at the end, for every despawn in its buffers, and commands for the children in the same `apply` still run first. The immediate `despawn` scans at once, so use commands to despawn many entities.
 - The world keeps every child sorted by depth, and sorts again only when the hierarchy changes. Propagation runs one level at a time. The entities in one level are processed in parallel.
 - Propagation runs after each fixed tick and again after the `Late` stage.
 

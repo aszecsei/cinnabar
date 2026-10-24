@@ -64,10 +64,52 @@ propagation_reaches_every_level :: proc(t: ^testing.T) {
 	run_stage(w, .Late, time.Millisecond, nil)
 	expect_near(t, position_sub(get(w, grandchild, Transform).position, origin), {5, 0, 1})
 
-	// An orphan keeps its last pose.
-	despawn(w, root)
-	run_stage(w, .Late, time.Millisecond, nil)
-	expect_near(t, position_sub(get(w, child, Transform).position, origin), {5, 1, 0})
+}
+
+@(test)
+despawn_takes_the_subtree :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	root := spawn(w)
+	add(w, root, TRANSFORM_IDENTITY)
+	child := spawn_child(w, root, {})
+	grandchild := spawn_child(w, child, {})
+	kept := spawn_child(w, root, {})
+	other := spawn_child(w, spawn(w), {})
+
+	// A child without its Parent survives.
+	remove(w, kept, Parent)
+	testing.expect(t, despawn(w, root))
+	testing.expect(t, !is_alive(w, child))
+	testing.expect(t, !is_alive(w, grandchild))
+	testing.expect(t, is_alive(w, kept))
+	testing.expect(t, is_alive(w, other))
+}
+
+@(test)
+apply_despawns_the_subtree_at_the_end :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	root := spawn(w)
+	add(w, root, TRANSFORM_IDENTITY)
+	child := spawn_child(w, root, {})
+	grandchild := spawn_child(w, child, {})
+
+	cb := commands(context.allocator)
+	defer delete(cb.data)
+	// Spawned under the root in the same apply, so it goes too.
+	late := reserve(w)
+	command_despawn(&cb, root)
+	command_add(&cb, w, late, Parent{child})
+	apply(w, {cb})
+	for e in ([]Entity{root, child, grandchild, late}) {
+		testing.expect(t, !is_alive(w, e))
+	}
+	testing.expect_value(t, w.entities.free_count, 4)
 }
 
 @(private = "file")
