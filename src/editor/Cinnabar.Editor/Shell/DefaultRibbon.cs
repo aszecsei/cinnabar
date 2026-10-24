@@ -53,7 +53,7 @@ static class DefaultRibbon
                     new RibbonGroup("Viewport",
                     [
                         new LargeButton(EditorCommands.Stats),
-                        new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene]),
+                        new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection]),
                         new ComboBox(EditorCommands.ViewportScale),
                     ]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),

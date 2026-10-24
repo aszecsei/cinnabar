@@ -40,6 +40,7 @@ static class EditorCommands
     public const string Snap = "tool.snap";
     public const string FrameSelected = "viewport.frameSelected";
     public const string FrameScene = "viewport.frameScene";
+    public const string OrbitSelection = "viewport.orbitSelection";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -198,6 +199,12 @@ static class EditorCommands
             Description = "Move the camera to the selected entities. F in the viewport.",
             Icon = "frame",
             CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(OrbitSelection, "Orbit Selection", shell.ToggleOrbitSelection)
+        {
+            Description = "Alt and the left button orbit about the selected entities' middle, not the point ahead of the camera.",
+            Icon = "rotate",
+            IsCheckedWhen = () => shell.OrbitSelection,
         });
         commands.Register(new Command(FrameScene, "Frame Scene", shell.FrameScene)
         {

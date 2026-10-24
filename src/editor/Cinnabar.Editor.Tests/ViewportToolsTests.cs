@@ -162,6 +162,27 @@ public sealed class ViewportToolsTests : IDisposable
     }
 
     [Fact]
+    public void OrbitSelectionTurnsAboutTheSelection()
+    {
+        using var shell = NewShell();
+        shell.Selection.Set([Handle(1)]);
+        var (width, height) = shell.FrameSize;
+        long[] right = [16777216, 0, 83886080];
+        var before = shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value;
+
+        // Without the option, Alt-orbit turns about the pivot ahead, and the entity moves on screen.
+        shell.Orbit(100, 0);
+        Assert.NotEqual(before, shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value);
+
+        shell.Camera.Place([0, 0, 0], 0, 0);
+        Assert.True(shell.Commands.Get(EditorCommands.OrbitSelection).Execute());
+        shell.Orbit(100, 30);
+        var after = shell.Camera.Project(shell.Camera.RelativeTo(right), width, height)!.Value;
+        Assert.InRange(after.X - before.X, -0.01, 0.01);
+        Assert.InRange(after.Y - before.Y, -0.01, 0.01);
+    }
+
+    [Fact]
     public void TheSelectToolHasNoGizmo()
     {
         using var shell = NewShell();

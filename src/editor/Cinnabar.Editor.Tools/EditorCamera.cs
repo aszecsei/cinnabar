@@ -86,6 +86,24 @@ public sealed class EditorCamera
         Changed?.Invoke();
     }
 
+    /// <summary>
+    /// Turns about a point, by pixels of mouse movement, so the point stays where it is on screen, as orbiting about
+    /// the selection does. The pivot ahead goes to the point's distance along the view's axis.
+    /// </summary>
+    public void OrbitAround(long[] point, double dx, double dy)
+    {
+        var offset = Vec3.Between(point, Position);
+        var (yaw, pitch) = (Yaw, Pitch);
+        var right = Right;
+        Turn(dx * TurnRate, dy * TurnRate);
+        // The heading turns about the world's +y and the pitch about the camera's right axis, so the camera's
+        // offset from the point turns by the same rotation, pitch first.
+        var turn = Rotations.AxisAngle(Vec3.UnitY, Yaw - yaw) * Rotations.AxisAngle(right, Pitch - pitch);
+        Position = turn.Rotate(offset).Offset(point);
+        PivotDistance = Math.Max(Vec3.Dot(Vec3.Between(Position, point), Forward), MinPivotDistance);
+        Changed?.Invoke();
+    }
+
     /// <summary>Moves in the view's plane so the pivot's plane follows the mouse, by pixels of a frame this tall.</summary>
     public void Pan(double dx, double dy, double height)
     {
@@ -109,12 +127,6 @@ public sealed class EditorCamera
         PivotDistance = Math.Max(radius, MinPivotDistance) / Math.Sin(VerticalFov / 2) * 1.1;
         Position = (-Forward * PivotDistance).Offset(center);
         Changed?.Invoke();
-    }
-
-    /// <summary>Puts the pivot this far ahead, as a pick finds what is under the mouse.</summary>
-    public void SetPivotDistance(double meters)
-    {
-        PivotDistance = Math.Max(meters, MinPivotDistance);
     }
 
     /// <summary>Places the camera, for a restored view or a test.</summary>

@@ -51,6 +51,25 @@ public sealed class ToolsTests
     }
 
     [Fact]
+    public void OrbitingAroundAPointKeepsItWhereItIsOnScreen()
+    {
+        var camera = new EditorCamera();
+        camera.Place([0, 0, 0], 0, 0);
+        // A point off to the side, not on the view's axis.
+        long[] point = [2L << 24, 1L << 24, 6L << 24];
+        var before = camera.Project(camera.RelativeTo(point), Width, Height)!.Value;
+
+        camera.OrbitAround(point, 120, 35);
+
+        var after = camera.Project(camera.RelativeTo(point), Width, Height)!.Value;
+        Near(before.X, after.X, 1e-3);
+        Near(before.Y, after.Y, 1e-3);
+        Assert.NotEqual([0L, 0L, 0L], camera.Position);
+        // The camera keeps its distance from the point.
+        Near(Vec3.Between(point, [0, 0, 0]).Length, Vec3.Between(point, camera.Position).Length, 1e-4);
+    }
+
+    [Fact]
     public void FramingPutsThePointAheadAtThePivot()
     {
         var camera = new EditorCamera();

@@ -247,6 +247,17 @@ public sealed class OutlinerView : DockPanel
             await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Move | DragDropEffects.Link);
         };
         view.PointerReleased += (_, _) => _press = null;
+        // A double click frames the entity in the viewport. The first click selected it.
+        view.DoubleTapped += (_, e) =>
+        {
+            _press = null;
+            if (!_selection.Contains(row.Node.Handle))
+            {
+                _selection.Select(row.Node.Handle);
+            }
+            _shell.Commands.Get(EditorCommands.FrameSelected).Execute();
+            e.Handled = true;
+        };
         DragDrop.SetAllowDrop(view, true);
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
@@ -321,6 +332,8 @@ public sealed class OutlinerView : DockPanel
         {
             menu.Items.Add(new MenuItem { Header = "Move to Root", Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)) });
         }
+        menu.Items.Insert(0, Item("Focus", EditorCommands.FrameSelected));
+        menu.Items.Insert(1, new Separator());
         menu.Items.Add(new Separator());
         menu.Items.Add(Item("Hide or Show", EditorCommands.HideSelected));
         menu.Items.Add(Item("Lock or Unlock", EditorCommands.LockSelected));

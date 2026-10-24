@@ -115,13 +115,9 @@ public sealed partial class EditorShell
 
     void OnPicked(PickResult result, SelectMode mode, bool click)
     {
-        // Locked entities are drawn but not picked.
+        // Locked entities are drawn but not picked. A pick leaves the camera's pivot where it is: it is ahead of the
+        // camera, and what was clicked usually is not.
         var hits = result.Hits.Select(h => h.Entity).Where(Pickable).ToList();
-        if (click && hits.Count == 1 && result.Depth > 0)
-        {
-            // Orbiting then turns about what was clicked.
-            Camera.SetPivotDistance(result.Depth);
-        }
         switch (mode)
         {
             case SelectMode.Replace:
@@ -266,20 +262,50 @@ public sealed partial class EditorShell
 
     void Frame(IEnumerable<SceneEntity> entities)
     {
-        var poses = entities.Select(e => SceneEdits.WorldPose(Scene!.Scene, e)).OfType<Pose>().ToList();
+        if (Bounds(entities) is var (center, radius))
+        {
+            Camera.Frame(center, radius);
+        }
+    }
+
+    // The middle of the box around the entities' positions, and a radius that takes in each one with half a meter of
+    // its scale around it, or null for entities without a pose.
+    (long[] Center, double Radius)? Bounds(IEnumerable<SceneEntity> entities)
+    {
+        var poses = Scene == null ? [] : entities.Select(e => SceneEdits.WorldPose(Scene.Scene, e)).OfType<Pose>().ToList();
         if (poses.Count == 0)
         {
-            return;
+            return null;
         }
-        // The middle of the box around the entities, and a radius that takes in each one with half a meter of its
-        // scale around it.
         var origin = poses[0].Position;
         var offsets = poses.Select(p => Vec3.Between(origin, p.Position)).ToList();
         var min = new Vec3(offsets.Min(o => o.X), offsets.Min(o => o.Y), offsets.Min(o => o.Z));
         var max = new Vec3(offsets.Max(o => o.X), offsets.Max(o => o.Y), offsets.Max(o => o.Z));
         var middle = (min + max) * 0.5;
         var radius = poses.Select((p, i) => (offsets[i] - middle).Length + Math.Max(p.Scale.Max(Math.Abs), 0.1) * 0.5).Max();
-        Camera.Frame(middle.Offset(origin), radius);
+        return (middle.Offset(origin), radius);
+    }
+
+    /// <summary>Alt-orbit turns about the selection's middle instead of the pivot ahead, as Unreal's option does.</summary>
+    public bool OrbitSelection { get; private set; }
+
+    public void ToggleOrbitSelection()
+    {
+        OrbitSelection = !OrbitSelection;
+        OnToolsChanged();
+    }
+
+    /// <summary>Orbits by pixels of mouse movement: about the selection with <see cref="OrbitSelection"/>, and otherwise about the pivot ahead.</summary>
+    public void Orbit(double dx, double dy)
+    {
+        if (OrbitSelection && Bounds(SelectedSceneEntities) is var (center, _))
+        {
+            Camera.OrbitAround(center, dx, dy);
+        }
+        else
+        {
+            Camera.Orbit(dx, dy);
+        }
     }
 
     void SendCamera()

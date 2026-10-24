@@ -275,7 +275,7 @@ public sealed class ViewportView : Grid
                 _shell.Camera.Look(delta.X, delta.Y);
                 break;
             case Gesture.Orbit:
-                _shell.Camera.Orbit(delta.X, delta.Y);
+                _shell.Orbit(delta.X, delta.Y);
                 break;
             case Gesture.Pan:
                 _shell.Camera.Pan(delta.X, delta.Y, _shell.FrameSize.Height);
