@@ -15,7 +15,12 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render lib/engine/ecs src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+# The development host and game DLL share luau.dll (see docs/scripting.md#embedding). Everything else links Luau statically.
+dev_defines := "-define:LUAU_SHARED=true"
+# lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
+luau_dir := build_dir + "/luau"
+cmake_generator := "Visual Studio 17 2022"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -85,9 +90,23 @@ alias b := build
 build: host game-dll
 
 # Build the development host
-host: agility-runtime
+host: agility-runtime luau
     mkdir -p "{{build_dir}}"
-    odin build src/host {{collections}} -out:"{{build_dir}}/host.exe" -debug
+    odin build src/host {{collections}} {{dev_defines}} -out:"{{build_dir}}/host.exe" -debug
+
+# Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
+luau:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for kind in static shared; do
+        dir="{{luau_dir}}/$kind"
+        shared=$([ "$kind" = shared ] && echo ON || echo OFF)
+        [ -f "$dir/CMakeCache.txt" ] || cmake -S lib/core/luau -B "$dir" -G "{{cmake_generator}}" -A x64 -DCINNABAR_LUAU_SHARED=$shared > /dev/null
+        target=$([ "$kind" = shared ] && echo luau || echo luau_shim)
+        cmake --build "$dir" --config Release --target "$target" -- -m -nologo -v:quiet
+    done
+    # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
+    cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
 
 # Build the cooker
 cook:
@@ -100,9 +119,9 @@ shaders: install-dxc cook
     "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: shaders
+game-dll: shaders luau
     mkdir -p "{{build_dir}}/pdb"
-    odin build "samples/{{game}}" {{collections}} -build-mode:dll \
+    odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{build_dir}}/{{game}}.dll" \
         -pdb-name:"{{build_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
         -debug
@@ -134,7 +153,7 @@ dev-shared name="cinnabar": build viewer
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Build the statically linked release executable
-release: agility-runtime shaders
+release: agility-runtime shaders luau
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
@@ -163,8 +182,8 @@ fmt:
 # Testing
 # =================================
 
-test:
-    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render lib/engine/ecs tools/cook; do odin test "$p" {{collections}} || exit 1; done
+test: luau
+    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} || exit 1; done
 
 # =================================
 # Cleanup

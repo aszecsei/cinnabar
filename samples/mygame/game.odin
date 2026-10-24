@@ -1,5 +1,6 @@
 package mygame
 
+import "core:c"
 import "core:fmt"
 import "core:hash"
 import "core:log"
@@ -11,8 +12,10 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
-import "cinnabar:engine/render"
+import "cinnabar:core/luau"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/render"
+import "cinnabar:engine/script"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
 TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
@@ -26,6 +29,8 @@ SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
 SHADOWS_RT_LIB :: #load("shaders/shadows_rt.lib.dxil")
 COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
+// Scripts are embedded until script assets exist (see docs/scripting.md#implementation-phases).
+HELLO_SCRIPT :: #load("scripts/hello.luau", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -194,6 +199,10 @@ Game_State :: struct {
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
+	scripts:     script.Runtime,
+	// The coroutine of scripts/hello.luau, while it runs.
+	hello:       script.Thread,
+	hello_running: bool,
 }
 
 Pipelines :: struct {
@@ -306,6 +315,10 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	register_world(s)
 	spawn_scene(s)
+	if !script.init(&s.scripts, platform, register_scripts) {
+		log.panic("mygame: cannot open the script VM")
+	}
+	s.hello, s.hello_running = script.spawn(&s.scripts, "=scripts/hello.luau", HELLO_SCRIPT)
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
 
@@ -345,6 +358,23 @@ spawn_scene :: proc(s: ^Game_State) {
 	}
 }
 
+// register_scripts defines the game's script bindings. init and on_reload call it.
+register_scripts :: proc(r: ^script.Runtime) {
+	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
+		luau.pushnumber(L, f64(game_of(L).frame_count))
+		return 1
+	})
+	script.define(r, "Game.greeting", proc(L: ^luau.State) -> c.int {
+		luau.pushstring(L, "hello from Luau")
+		return 1
+	})
+}
+
+// game_of is the Game_State of a script binding.
+game_of :: proc "contextless" (L: ^luau.State) -> ^Game_State {
+	return container_of(script.runtime_of(L), Game_State, "scripts")
+}
+
 spin :: proc(ctx: ^ecs.System_Context) {
 	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
 	for view in ecs.query_next(&it) {
@@ -363,7 +393,12 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 
 	ecs.run_fixed(&s.world, dt, s)
 	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase and its apply go here once scripts exist.
+	// The script phase. Until behaviours exist, it resumes the one script coroutine.
+	if s.hello_running && script.resume(&s.scripts, s.hello) != .Yielded {
+		script.release(&s.scripts, s.hello)
+		s.hello_running = false
+	}
+	script.step(&s.scripts)
 	ecs.run_stage(&s.world, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {
@@ -697,6 +732,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
+	script.destroy(&s.scripts)
 	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
 	destroy_pipelines(s.platform, s.pipelines)
@@ -722,6 +758,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s.platform = platform
 	ecs.reload(&s.world, platform)
 	register_world(s)
+	script.reload(&s.scripts, platform, register_scripts)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {

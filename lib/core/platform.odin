@@ -11,6 +11,7 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import script_host "cinnabar:core/script"
 
 // A comma-separated list of gpu.Feature names that core hides from the game, to test fallback paths on hardware
 // that has the features. For example: CINNABAR_DISABLE_FEATURES=Mesh_Shaders.
@@ -111,6 +112,10 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		gpu_destroy_pipeline         = backend.destroy_pipeline,
 		gpu_destroy_accel            = backend.destroy_accel,
 		gpu_destroy_scope            = backend.destroy_scope,
+		script_open                  = script_host.open,
+		script_close                 = script_host.close,
+		script_push_binding          = script_host.push_binding,
+		script_atom                  = script_host.atom,
 	}
 	return true
 }
@@ -167,9 +172,12 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope and the virtual memory reservations, which the old game may have left, and frees all permanent
-// allocations.
+// Game scope, the virtual memory reservations and the script VMs, which the old game may have left, and frees all
+// permanent allocations.
 soft_restart :: proc() {
+	if count := script_host.close_all(); count > 0 {
+		log.debugf("core: closed %d script VMs that the game left open", count)
+	}
 	if count := backend.destroy_scope(.Game); count > 0 {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)
 	}

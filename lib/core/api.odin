@@ -5,6 +5,8 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/luau"
+import script_host "cinnabar:core/script"
 
 // Platform_API is everything core provides to the game side (host -> game).
 // It is the complete porting surface.
@@ -78,6 +80,17 @@ Platform_API :: struct {
 	gpu_destroy_accel:            proc(accel: gpu.Accel_Struct),
 	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
 	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
+
+	// The script VM lives in host memory, and every function pointer that it stores is host code (see
+	// docs/scripting.md#host-trampolines). bindings must stay at the same address until script_close, and on_reload
+	// must register every binding again. The VM opens with the built-in libraries. A soft restart closes the VMs
+	// that the game left open.
+	script_open:         proc(bindings: ^script_host.Bindings) -> ^luau.State,
+	script_close:        proc(L: ^luau.State),
+	// Pushes a closure that calls the binding with this name. It stays valid across code reloads.
+	script_push_binding: proc(L: ^luau.State, name: string),
+	// Interns a method or field name and returns its atom, or -1 if the interner is full. Atoms never change meaning.
+	script_atom:         proc(name: string) -> i16,
 }
 
 // Game_API is what the game side provides to the host (game -> host).

@@ -8,8 +8,8 @@ The reference API is Unity's. A scripter who knows `GameObject`, `MonoBehaviour`
 
 | Package | Side | Responsibility |
 |---|---|---|
-| `lib/core/luau` | Shared | Odin bindings to the Luau C API: VM, compiler and code generator. The `LUAU_SHARED` config selects `luau.dll` or the static libraries. |
-| `lib/core/script` | Host | The VM's host-side parts: the allocator over the script heap, and every function pointer that Luau stores (see [Host trampolines](#host-trampolines)). |
+| `lib/core/luau` | Shared | Odin bindings to the Luau C API: VM, compiler and code generator. Its `CMakeLists.txt` builds Luau. The `LUAU_SHARED` config selects `luau.dll` or the static libraries. |
+| `lib/core/script` | Host | Package `script_host`: the VM's heap, and every function pointer that Luau stores (see [Host trampolines](#host-trampolines)). The game uses its types, and calls it only through `Platform_API`. |
 | `lib/engine/script` | Game | Binding registration, the entity and component view, behaviours, the scheduler, events, module loading and script hot reload. |
 | `lib/engine/script/luau` | Content | The engine prelude: the parts of the API that are written in Luau, such as `Behaviour.define`. It is content with fixed GUIDs, and scripts reach it as `@engine/...`. |
 
@@ -17,9 +17,10 @@ The reference API is Unity's. A scripter who knows `GameObject`, `MonoBehaviour`
 
 ## Embedding
 
-- **One copy of Luau.** Luau has internal static state, and its VM heap holds pointers to Luau's own built-in functions. The host and the game DLL must therefore share one copy. In development, Luau is built as `luau.dll` (with `LUA_API` defined as an export), and both modules load it. In release, it is linked statically. `tools/cook` links the compiler and the analyzer statically. It runs in its own process, so it does not share the VM.
+- **One copy of Luau.** Luau has internal static state, and its VM heap holds pointers to Luau's own built-in functions. The host and the game DLL must therefore share one copy. In development, Luau is built as `luau.dll`, and both modules load it. In release, it is linked statically. `tools/cook` links the compiler and the analyzer statically. It runs in its own process, so it does not share the VM.
+- **Build:** `just luau` builds `lib/core/luau/CMakeLists.txt` twice, into `build/luau/shared` (`luau.dll` with the VM, the compiler and the code generator) and `build/luau/static`. Both builds export the C API with `extern "C"` and use the static CRT, like Odin. `luau_compile` returns memory from Luau's CRT, so the bindings release it with `luau.free_bytecode`. A running host keeps `luau.dll` locked, and a changed `luau.dll` needs a host restart.
 - **One VM per `Game_State`.** The game creates the VM in `init` with `script_open` in `Platform_API`, and destroys it in `shutdown`. A code reload keeps the VM. A soft restart destroys it with the rest of the game state, because the world holds references into it.
-- **Heap:** the VM is created with `lua_newstate` and the host-side allocator over the script heap reservation. Luau places small objects in its own size-class pages, so the allocator mostly sees page-sized and large requests. The heap, including suspended script coroutines, survives code reload.
+- **Heap:** the VM is created with `lua_newstate` and a host-side allocator. Luau places small objects in its own size-class pages, so the allocator mostly sees page-sized and large requests. Blocks up to 1 MiB come from TLSF, in 8 MiB pools in one 4 GiB reservation of each VM. A larger block gets its own virtual memory. `script_close`, or a soft restart, releases all of it. The heap, including suspended script coroutines, survives code reload.
 - **Errors:** Luau is built with `LUA_USE_LONGJMP`. An error raised in a binding jumps over Odin frames and skips their `defer` statements. Bindings therefore raise errors only before they do work that needs a `defer`.
 - **Sandboxing:** the host calls `luaL_sandbox` on the main state and `luaL_sandboxthread` on each module's thread. Scripts have no `os`, `io`, `debug` or `loadstring`, and they cannot change the engine globals.
 - **Threading:** a Luau state is not thread-safe. Scripts run only in the serial script phase of the frame (see [Frame](#frame)).
@@ -32,15 +33,15 @@ Luau stores function pointers in the VM heap and in its global state. A pointer 
 |---|---|---|
 | `lua_Alloc` | Script heap allocator | Nothing. It is host code. |
 | Every `lua_CFunction` binding | One dispatcher | The game's binding table, by binding ID |
-| `__index`, `__newindex`, `__namecall`, `__eq`, `__tostring` | One trampoline per metamethod | The game's per-type tables, by userdata tag and atom |
+| Metamethods (`__index`, `__namecall`, `__eq` and others) | The same dispatcher: each metamethod is a binding | The game's binding, which finds the method or field in its per-type tables by userdata tag and atom |
 | `useratom` | The atom interner | Nothing. It is host code. |
 | `interrupt` | The watchdog | Nothing. It is host code. |
 | `panic` | Logs and aborts | Nothing. It is host code. |
 
-`script_open` stores a pointer to the game's `Script_Bindings` in `lua_Callbacks.userdata`. `Script_Bindings` lives in `Game_State`, so its address does not change across a reload, and `on_reload` fills it again.
+The game reaches these through `Platform_API`: `script_open`, `script_close`, `script_push_binding` (a dispatcher closure for a binding name) and `script_atom` (interns a name). `script_open` stores a pointer to the game's `script_host.Bindings` in `lua_Callbacks.userdata`. The table lives in `Game_State`, so its address does not change across a reload, and `on_reload` fills it again. Bindings run with the context in `Bindings.ctx`, which the game sets each time before it runs scripts.
 
 - **Bindings have stable IDs.** A binding's ID is the hash of its qualified name, such as `Entity.get`. The dispatcher closure holds the ID as its upvalue, not an index. Scripts can therefore keep binding functions in locals across a reload, even when the new DLL registers bindings in a different order. A call to a binding that the new DLL no longer registers raises an error that names it.
-- **Atoms are stable.** The host interns every name that the game registers as a method or field, and the `useratom` callback gives a string the index of its name. The interner is append-only and host-owned, so an atom never changes meaning. The trampolines use `lua_namecallatom` and `lua_tostringatom` to find a method or field without a string compare. A string created before its name was registered has no atom, and the trampoline then falls back to a lookup by name.
+- **Atoms are stable.** The host interns every name that the game registers as a method or field, and the `useratom` callback gives a string the index of its name. The interner is append-only and host-owned, so an atom never changes meaning. Bindings use `lua_namecallatom` and `lua_tostringatom` to find a method or field without a string compare. Luau asks for a string's atom once, the first time that code needs it, and keeps the answer. A string whose atom was asked for before its name was interned therefore has none, and the binding falls back to a lookup by name.
 - **No userdata destructors.** `lua_newuserdatadtor` and `lua_setuserdatadtor` store function pointers, so engine userdata are plain data with no destructor. A userdata never owns a native resource. It holds handles.
 - **Bindings can yield.** A binding that waits (such as `wait`) returns a yield request, and the dispatcher calls `lua_yield`.
 
@@ -48,7 +49,7 @@ Luau stores function pointers in the VM heap and in its global state. A pointer 
 
 Luau's experimental `lua_registeruserdatadirectaccess` lets the VM call a get, set or namecall callback for a tagged userdata without a Luau call frame. It is an optional feature, selected by the `LUAU_DIRECT_ACCESS` config in `lib/core/script`. It is off by default.
 
-- **Same tables, different entry.** The direct access callbacks are host functions, like the trampolines, and they look up the same per-type tables by tag and atom. Scripts see the same behaviour with the feature on or off. Tests run both ways.
+- **Same tables, different entry.** The direct access callbacks are host functions, like the dispatcher, and they look up the same per-type tables by tag and atom. Scripts see the same behaviour with the feature on or off. Tests run both ways.
 - **The cached slot is a hint.** Luau gives the callback a `cachedslot` that it shares between all userdata tags. The callback stores the field's index in it, and checks that the field at that index has the same tag and atom before it uses it. Otherwise it looks up the field again.
 - **Why optional:** the API is experimental and can change in a Luau update. With the feature off, nothing depends on it, so a Luau update never blocks on it.
 
