@@ -51,10 +51,10 @@ All world data lives in a native ECS in `lib/engine/world`. Scripts see an objec
 - The game drives the stages from its frame code:
 
   ```odin
-  world.run_fixed(&s.world, dt, s)          // phase 2: the ticks that are due
-  world.run_stage(&s.world, .Update, dt, s) // phases 3 and 4
+  world.run_fixed(&s.scene, dt, s)          // phase 2: the ticks that are due
+  world.run_stage(&s.scene, .Update, dt, s) // phases 3 and 4
   // phase 5: scripts, then world.apply with their buffers (phase 6)
-  world.run_stage(&s.world, .Late, dt, s)   // phase 7, then transform propagation
+  world.run_stage(&s.scene, .Late, dt, s)   // phase 7, then transform propagation
   ```
 
 ### Command buffers

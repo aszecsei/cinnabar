@@ -7,11 +7,21 @@ struct Vertex {
 	float4 color;
 };
 
+// Matches Triangle_Instance in game.odin: a camera-relative transform, as the rows of a 3x4 matrix, and an HDR
+// brightness. The ray tracing instances use the same rows.
+struct Instance {
+	float4 rows[3];
+	float brightness;
+	float3 padding;
+};
+
 // Matches Scene_Constants in game.odin.
 struct Push {
 	uint vertices;
 	uint texture;
 	uint sampler_index;
+	uint instances;
+	uint instance_offset;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -28,24 +38,18 @@ struct Varyings {
 	float4 color : COLOR0;
 };
 
-float2 rotate(float2 p, float angle) {
-	float s, c;
-	sincos(angle, s, c);
-	return float2(p.x * c - p.y * s, p.x * s + p.y * c);
-}
-
-// Instance 0 is a bright triangle in front. Instance 1 is a larger, dimmer triangle behind it that turns the
-// other way, so the depth test hides the part of it that the first one covers.
-Varyings vs_main(uint vertex_id : SV_VertexID, uint instance : SV_InstanceID) {
+// The world places the triangles. The camera looks down +z, and a view-space z is the depth.
+Varyings vs_main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
 	Vertex v = cn_buffer(push.vertices).Load<Vertex>(vertex_id * sizeof(Vertex));
-	bool front = instance == 0;
-	float2 p = rotate(v.position, front ? pass.time : -0.7 * pass.time) * (front ? 1.0 : 1.5);
+	Instance instance = cn_buffer(push.instances).Load<Instance>(push.instance_offset + instance_id * sizeof(Instance));
+	float4 local = float4(v.position, 0, 1);
+	float3 p = float3(dot(instance.rows[0], local), dot(instance.rows[1], local), dot(instance.rows[2], local));
 
 	Varyings o;
-	o.position = float4(p.x / pass.aspect, p.y, front ? 0.4 : 0.6, 1);
+	o.position = float4(p.x / pass.aspect, p.y, p.z, 1);
 	o.uv = v.uv;
 	// The scene is HDR. The composite pass tone maps it.
-	o.color = v.color * (front ? 3.0 : 0.6);
+	o.color = v.color * instance.brightness;
 	return o;
 }
 

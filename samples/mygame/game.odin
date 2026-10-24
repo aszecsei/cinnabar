@@ -1,14 +1,18 @@
 package mygame
 
 import "core:fmt"
+import "core:hash"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
+import "core:slice"
 import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
 import "cinnabar:engine/render"
+import "cinnabar:engine/world"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
 TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
@@ -40,13 +44,19 @@ Shadow_Mode :: enum u8 {
 	Pipeline,
 }
 
-// The large triangles, as triangle.hlsl places them: rotation speed, scale and depth. Instance 0 is in front.
+// The large triangles: rotation speed in radians per second, scale, depth in front of the camera and HDR
+// brightness. Instance 0 is a bright triangle in front. Instance 1 is a larger, dimmer triangle behind it that turns
+// the other way, so the depth test hides the part of it that the first one covers.
 TRIANGLE_INSTANCES :: [2]struct {
-	speed, scale, depth: f32,
+	speed, scale, depth, brightness: f32,
 } {
-	{1, 1, 0.4},
-	{-0.7, 1.5, 0.6},
+	{1, 1, 0.4, 3},
+	{-0.7, 1.5, 0.6, 0.6},
 }
+
+// The scene is about 1 AU from the world origin. Fixed-point positions keep it exact there: the camera-relative
+// transforms that the GPU sees are small.
+SCENE_ORIGIN :: [3]f64{1.5e11, 0, 0}
 
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
@@ -79,9 +89,29 @@ Vertex :: struct {
 
 // Matches Push in shaders/triangle.hlsl.
 Scene_Constants :: struct {
-	vertices: u32,
-	texture:  u32,
-	sampler:  u32,
+	vertices:        u32,
+	texture:         u32,
+	sampler:         u32,
+	instances:       u32,
+	instance_offset: u32,
+}
+
+// Matches Instance in shaders/triangle.hlsl.
+Triangle_Instance :: struct {
+	rows:       [3][4]f32,
+	brightness: f32,
+	_:          [3]f32,
+}
+
+// Spin turns an entity about the view axis, in radians per second.
+Spin :: struct {
+	speed: f32,
+}
+
+// Triangle is one of the large triangles: its instance index in the draw and the acceleration structure.
+Triangle :: struct {
+	instance:   u32,
+	brightness: f32,
 }
 
 // Matches Push in shaders/objects.hlsl.
@@ -161,6 +191,10 @@ Game_State :: struct {
 	nearest:     gpu.Sampler,
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
+	scene:       world.World,
+	camera:      world.Entity,
+	// A registration, created again in on_reload.
+	triangles:   world.Query,
 }
 
 Pipelines :: struct {
@@ -188,7 +222,9 @@ Frame :: struct {
 	mesh_draw:      render.Buffer,
 	blas:           render.Accel,
 	tlas:           render.Accel,
+	// The accel instances, and the triangle instances that the scene pass draws.
 	instances:      gpu.Upload,
+	triangles:      gpu.Upload,
 	checker:        render.Texture,
 	scene:          render.Texture,
 	shadows:        render.Texture,
@@ -263,13 +299,78 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = len(TRIANGLE_INSTANCES), label = "scene"})
 	}
 	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
+
+	if !world.init(&s.scene, platform) {
+		log.panic("mygame: cannot create the world")
+	}
+	register_world(s)
+	spawn_scene(s)
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
+}
+
+// register_components registers every component type. init and on_reload call it on the world's registry, and
+// layout_hash on its own, so a component change restarts the game.
+register_components :: proc(r: ^world.Registry) {
+	world.register_engine_components(r)
+	world.register_component(r, Spin)
+	world.register_component(r, Triangle)
+}
+
+// register_world makes the world's registrations: components, systems and queries.
+register_world :: proc(s: ^Game_State) {
+	w := &s.scene
+	register_components(&w.registry)
+	world.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {world.write(w, world.Transform), world.read(w, Spin)}})
+	s.triangles = world.query(
+		w,
+		{
+			world.read(w, world.Transform),
+			world.optional(world.read(w, world.Previous_Transform)),
+			world.read(w, Triangle),
+		},
+	)
+}
+
+// spawn_scene places the camera and the large triangles at SCENE_ORIGIN.
+spawn_scene :: proc(s: ^Game_State) {
+	w := &s.scene
+	origin := world.position_from_meters(SCENE_ORIGIN)
+	s.camera = world.spawn(w)
+	world.add(w, s.camera, world.Transform{position = origin, rotation = 1, scale = 1})
+	for t, i in TRIANGLE_INSTANCES {
+		pose := world.Transform {
+			position = world.position_offset(origin, {0, 0, t.depth}),
+			rotation = 1,
+			scale    = t.scale,
+		}
+		e := world.spawn(w)
+		world.add(w, e, pose)
+		world.add(w, e, world.Previous_Transform(pose))
+		world.add(w, e, Spin{t.speed})
+		world.add(w, e, Triangle{u32(i), t.brightness})
+	}
+}
+
+spin :: proc(ctx: ^world.System_Context) {
+	it := world.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
+	for view in world.query_next(&it) {
+		spins := world.column(view, 1, Spin)
+		for &pose, i in world.column(view, 0, world.Transform) {
+			turn := linalg.quaternion_angle_axis_f32(spins[i].speed * ctx.dt, {0, 0, 1})
+			pose.rotation = linalg.normalize(turn * pose.rotation)
+		}
+	}
 }
 
 update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
 	s.frame_count += 1
 	s.elapsed += dt
+
+	world.run_fixed(&s.scene, dt, s)
+	world.run_stage(&s.scene, .Update, dt, s)
+	// The script phase and its apply go here once scripts exist.
+	world.run_stage(&s.scene, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {
 		s.next_report += time.Second
@@ -352,6 +453,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	frame.scene = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
 	depth := render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
+	extract_triangles(frame)
 
 	// The mesh path culls in its amplification shaders, so only the vertex fallback has the compute passes.
 	if !s.mesh_path {
@@ -399,6 +501,47 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	}
 }
 
+// extract_triangles writes the large triangles' camera-relative transforms, interpolated between the last two ticks,
+// for the scene pass and the acceleration structure.
+extract_triangles :: proc(frame: ^Frame) {
+	s := frame.state
+	w := &s.scene
+	triangles, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(Triangle_Instance), 16)
+	if !ok {
+		return
+	}
+	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:len(TRIANGLE_INSTANCES)]
+	camera, _ := world.presented(w, s.camera)
+
+	it := world.query_iter(w, s.triangles)
+	for view in world.query_next(&it) {
+		previous := world.column(view, 1, world.Previous_Transform)
+		info := world.column(view, 2, Triangle)
+		for current, i in world.column(view, 0, world.Transform) {
+			pose := current
+			if previous != nil {
+				pose = world.interpolate(world.Transform(previous[i]), current, w.clock.alpha)
+			}
+			instances[info[i].instance] = {
+				rows       = camera_relative(pose, camera.position),
+				brightness = info[i].brightness,
+			}
+		}
+	}
+	frame.triangles = triangles
+}
+
+// camera_relative is a pose as the rows of a 3x4 matrix, relative to the camera's position. Only the difference of
+// two world positions reaches the GPU, so it is small and precise however far the scene is from the origin.
+camera_relative :: proc(pose: world.Transform, camera: world.World_Position) -> (rows: [3][4]f32) {
+	m := linalg.matrix3_from_quaternion_f32(pose.rotation)
+	offset := world.position_sub(pose.position, camera)
+	for r in 0 ..< 3 {
+		rows[r] = {m[r, 0] * pose.scale.x, m[r, 1] * pose.scale.y, m[r, 2] * pose.scale.z, offset[r]}
+	}
+	return
+}
+
 // add_shadow_passes builds the acceleration structures and traces the shadow mask. The triangle's bottom-level
 // structure is built in the first frame, and the top-level structure every frame from the instances' transforms.
 // It returns true if it builds the bottom-level structure this frame.
@@ -415,17 +558,14 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 	}
 
 	instances, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(gpu.Accel_Instance), 16)
-	if !ok {
+	if !ok || frame.triangles.data == nil {
 		return
 	}
-	time := (^Pass_Constants)(raw_data(frame.pass_constants.data)).time
 	records := ([^]gpu.Accel_Instance)(raw_data(instances.data))[:len(TRIANGLE_INSTANCES)]
+	triangles := ([^]Triangle_Instance)(raw_data(frame.triangles.data))[:len(TRIANGLE_INSTANCES)]
 	blas := s.platform.gpu_accel_reference(s.blas)
-	for t, i in TRIANGLE_INSTANCES {
-		// triangle.hlsl rotates by speed * time, scales and places at depth, in the same world units.
-		sin, cos := math.sincos(t.speed * time)
-		transform := [3][4]f32{{cos * t.scale, -sin * t.scale, 0, 0}, {sin * t.scale, cos * t.scale, 0, 0}, {0, 0, 1, t.depth}}
-		records[i] = gpu.accel_instance(transform, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
+	for t, i in triangles {
+		records[i] = gpu.accel_instance(t.rows, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
 	}
 	frame.instances = instances
 
@@ -509,7 +649,16 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 	checker := gpu.read_index(render.gpu_texture(g, frame.checker))
 	switch ctx.piece {
 	case 0:
-		constants := Scene_Constants{vertices, checker, gpu.sampler_index(frame.state.nearest)}
+		if frame.triangles.data == nil {
+			return
+		}
+		constants := Scene_Constants {
+			vertices        = vertices,
+			texture         = checker,
+			sampler         = gpu.sampler_index(frame.state.nearest),
+			instances       = gpu.read_index(frame.triangles.buffer),
+			instance_offset = frame.triangles.offset,
+		}
 		gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene)
 		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 		gpu.cmd_push_constants(cb, &constants)
@@ -571,6 +720,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
+	world.destroy(&s.scene)
 	render.cache_destroy(&s.textures, s.platform)
 	destroy_pipelines(s.platform, s.pipelines)
 	s.platform.gpu_destroy_sampler(s.linear)
@@ -593,6 +743,8 @@ shutdown :: proc(state: rawptr) {
 on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
+	world.reload(&s.scene, platform)
+	register_world(s)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {
@@ -728,8 +880,13 @@ state_size :: proc() -> int {
 	return size_of(Game_State)
 }
 
+// layout_hash covers the component layouts too: the world stores components as bytes, so Game_State's own layout
+// does not show them.
 layout_hash :: proc() -> u64 {
-	return layout.hash(Game_State)
+	components: world.Registry
+	register_components(&components)
+	hashes := [2]u64{layout.hash(Game_State), world.registry_layout_hash(&components)}
+	return hash.fnv64a(slice.to_bytes(hashes[:]))
 }
 
 @(export)
