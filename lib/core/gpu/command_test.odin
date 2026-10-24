@@ -25,6 +25,8 @@ COLOR_PIPELINE :: Pipeline{index = 0, generation = 1}
 DEPTH_PIPELINE :: Pipeline{index = 1, generation = 1}
 @(private = "file")
 COMPUTE_PIPELINE :: Pipeline{index = 2, generation = 1}
+@(private = "file")
+MESH_PIPELINE :: Pipeline{index = 3, generation = 1}
 
 @(private = "file")
 RESOURCES :: Resources {
@@ -62,6 +64,8 @@ RESOURCES :: Resources {
 			return pipeline_info({colors = {{format = FRAME_TARGET_FORMAT}}, depth_format = .D32_Float}), true
 		case COMPUTE_PIPELINE:
 			return {kind = .Compute}, true
+		case MESH_PIPELINE:
+			return pipeline_info({mesh = {0}, colors = {{format = FRAME_TARGET_FORMAT}}}), true
 		}
 		return {}, false
 	},
@@ -602,4 +606,57 @@ validate_indirect_and_queues :: proc(t: ^testing.T) {
 		err, _ := validate(cb, RESOURCES, queue = c.queue)
 		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
 	}
+}
+
+@(test)
+validate_mesh_draws :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		// INDIRECT holds 96 bytes: six mesh records.
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_begin_pass(cb, {{texture = TARGET}})
+				cmd_set_pipeline(cb, MESH_PIPELINE)
+				cmd_draw_mesh(cb, {4, 1, 1})
+				cmd_draw_mesh_indirect(cb, INDIRECT, 0, 5, INDIRECT, 92)
+				cmd_set_pipeline(cb, COLOR_PIPELINE)
+				cmd_draw(cb, 3)
+				cmd_end_pass(cb)
+			},
+			.None,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, MESH_PIPELINE); cmd_draw(cb, 3)}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_mesh(cb, {1, 1, 1})}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_draw_mesh(cb, {1, 1, 1})}, .No_Pipeline},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, MESH_PIPELINE)}, .Wrong_Pipeline_Kind},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, {texture = DEPTH}); cmd_set_pipeline(cb, MESH_PIPELINE)}, .Pipeline_Pass_Mismatch},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, MESH_PIPELINE); cmd_draw_mesh_indirect(cb, INDIRECT, 0, 7)},
+			.Bad_Indirect,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_mesh(cb, {1, 1, 1})}, .Draw_Outside_Pass},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	shader := []byte{0}
+	colors := []Color_Target{{format = FRAME_TARGET_FORMAT}}
+	testing.expect_value(t, validate_graphics_pipeline_desc({mesh = shader, pixel = shader, colors = colors}), Desc_Error.None)
+	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, mesh = shader, pixel = shader, colors = colors}), Desc_Error.None)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, mesh = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, amplification = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
+	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}), Desc_Error.Missing_Shader)
+	testing.expect_value(t, pipeline_info({mesh = shader}).kind, Pipeline_Kind.Mesh)
 }

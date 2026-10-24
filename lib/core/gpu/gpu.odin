@@ -335,8 +335,12 @@ Color_Target :: struct {
 }
 
 // Shaders are DXIL blobs. Pipelines have no vertex input layout: vertex shaders pull their vertices.
+// A graphics pipeline has a vertex shader, or a mesh shader with an optional amplification shader. Mesh pipelines
+// need Features.Mesh_Shaders. The mesh shader declares its topology, so topology applies only to vertex pipelines.
 Graphics_Pipeline_Desc :: struct {
 	vertex:        []byte,
+	amplification: []byte,
+	mesh:          []byte,
 	pixel:         []byte,
 	colors:        []Color_Target,
 	depth_format:  Format,
@@ -355,8 +359,10 @@ Compute_Pipeline_Desc :: struct {
 	label:   string,
 }
 
+// Graphics is a vertex pipeline, and Mesh a mesh pipeline. Both run in render passes.
 Pipeline_Kind :: enum u8 {
 	Graphics,
+	Mesh,
 	Compute,
 }
 
@@ -370,7 +376,7 @@ Pipeline_Info :: struct {
 
 pipeline_info :: proc(desc: Graphics_Pipeline_Desc) -> Pipeline_Info {
 	info := Pipeline_Info {
-		kind         = .Graphics,
+		kind         = len(desc.mesh) > 0 ? .Mesh : .Graphics,
 		color_count  = u32(len(desc.colors)),
 		depth_format = desc.depth_format,
 	}
@@ -413,4 +419,10 @@ Draw_Indexed_Indirect_Args :: struct {
 
 Dispatch_Indirect_Args :: struct {
 	groups: [3]u32,
+}
+
+// groups is the mesh or amplification shader group count.
+Draw_Mesh_Indirect_Args :: struct {
+	draw_id: u32,
+	groups:  [3]u32,
 }

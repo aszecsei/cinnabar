@@ -37,6 +37,8 @@ Packet_Kind :: enum u16 {
 	Draw_Indirect,
 	Draw_Indexed_Indirect,
 	Dispatch_Indirect,
+	Draw_Mesh,
+	Draw_Mesh_Indirect,
 }
 
 // size includes the header and the padding after the payload.
@@ -169,6 +171,12 @@ Draw_Indirect :: struct {
 	count_offset: u32,
 }
 
+// Draw_Mesh launches mesh shader groups, or amplification shader groups if the pipeline has an amplification shader.
+// Draw_Mesh_Indirect uses the Draw_Indirect payload with Draw_Mesh_Indirect_Args records.
+Draw_Mesh :: struct {
+	groups: [3]u32,
+}
+
 // The record at offset is a Dispatch_Indirect_Args.
 Dispatch_Indirect :: struct {
 	arguments: Buffer,
@@ -226,6 +234,8 @@ Packet_Format :: struct {
 	draw_args:          Draw_Indirect_Args,
 	draw_indexed_args:  Draw_Indexed_Indirect_Args,
 	dispatch_args:      Dispatch_Indirect_Args,
+	draw_mesh:          Draw_Mesh,
+	draw_mesh_args:     Draw_Mesh_Indirect_Args,
 }
 
 #assert(size_of(Packet_Header) + size_of(Begin_Pass) <= MAX_PACKET_SIZE)
@@ -348,6 +358,16 @@ cmd_draw_indexed_indirect :: proc(
 	count_offset: u32 = 0,
 ) {
 	push(cb, .Draw_Indexed_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
+}
+
+// cmd_draw_mesh needs a mesh pipeline.
+cmd_draw_mesh :: proc(cb: ^Command_Buffer, groups: [3]u32) {
+	push(cb, .Draw_Mesh, Draw_Mesh{groups})
+}
+
+// cmd_draw_mesh_indirect runs Draw_Mesh_Indirect_Args records with a mesh pipeline.
+cmd_draw_mesh_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset, max_count: u32, count: Buffer = {}, count_offset: u32 = 0) {
+	push(cb, .Draw_Mesh_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
 }
 
 cmd_dispatch_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset: u32 = 0) {

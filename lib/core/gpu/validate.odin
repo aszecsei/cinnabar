@@ -105,6 +105,7 @@ validate :: proc(
 	pass_flags: Pass_Flags
 	// Bindings reset at every pass boundary.
 	graphics_bound := false
+	mesh_bound := false
 	compute_bound := false
 	index_buffer_set := false
 
@@ -136,7 +137,7 @@ validate :: proc(
 			}
 			in_pass = true
 			pass_marker_depth = marker_depth
-			graphics_bound, compute_bound = false, false
+			graphics_bound, mesh_bound, compute_bound = false, false, false
 			index_buffer_set = false
 		case .End_Pass:
 			if !in_pass {
@@ -149,7 +150,7 @@ validate :: proc(
 				suspended_at = packet
 			}
 			in_pass = false
-			graphics_bound, compute_bound = false, false
+			graphics_bound, mesh_bound, compute_bound = false, false, false
 			index_buffer_set = false
 		case .Begin_Marker:
 			marker_depth += 1
@@ -166,13 +167,13 @@ validate :: proc(
 			if !ok {
 				return .Invalid_Pipeline, packet
 			}
-			if (info.kind == .Graphics) != in_pass {
+			if (info.kind != .Compute) != in_pass {
 				return .Wrong_Pipeline_Kind, packet
 			}
-			if info.kind == .Graphics && info != pass_formats {
+			if info.kind != .Compute && !same_formats(info, pass_formats) {
 				return .Pipeline_Pass_Mismatch, packet
 			}
-			graphics_bound, compute_bound = info.kind == .Graphics, info.kind == .Compute
+			graphics_bound, mesh_bound, compute_bound = info.kind == .Graphics, info.kind == .Mesh, info.kind == .Compute
 		case .Push_Constants:
 		case .Set_Pass_Constants:
 			if _, ok := resources.buffer(payload(p, Set_Pass_Constants).buffer); !ok {
@@ -198,6 +199,9 @@ validate :: proc(
 			if !in_pass {
 				return .Draw_Outside_Pass, packet
 			}
+			if mesh_bound {
+				return .Wrong_Pipeline_Kind, packet
+			}
 			if !graphics_bound {
 				return .No_Pipeline, packet
 			}
@@ -211,9 +215,41 @@ validate :: proc(
 			if !compute_bound {
 				return .No_Pipeline, packet
 			}
+		case .Draw_Mesh:
+			if !in_pass {
+				return .Draw_Outside_Pass, packet
+			}
+			if graphics_bound {
+				return .Wrong_Pipeline_Kind, packet
+			}
+			if !mesh_bound {
+				return .No_Pipeline, packet
+			}
+		case .Draw_Mesh_Indirect:
+			if !in_pass {
+				return .Draw_Outside_Pass, packet
+			}
+			if graphics_bound {
+				return .Wrong_Pipeline_Kind, packet
+			}
+			if !mesh_bound {
+				return .No_Pipeline, packet
+			}
+			d := payload(p, Draw_Indirect)
+			if err = validate_indirect(resources, d.arguments, d.offset, int(d.max_count) * size_of(Draw_Mesh_Indirect_Args)); err != .None {
+				return err, packet
+			}
+			if d.count != {} {
+				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32)); err != .None {
+					return err, packet
+				}
+			}
 		case .Draw_Indirect, .Draw_Indexed_Indirect:
 			if !in_pass {
 				return .Draw_Outside_Pass, packet
+			}
+			if mesh_bound {
+				return .Wrong_Pipeline_Kind, packet
 			}
 			if !graphics_bound {
 				return .No_Pipeline, packet
@@ -447,6 +483,12 @@ valid_sync :: proc(sync: Syncs, access: Accesses) -> bool {
 	return sync != {} || access == {}
 }
 
+// same_formats compares the attachment formats of a pipeline with those of a pass.
+@(private = "file")
+same_formats :: proc(a, b: Pipeline_Info) -> bool {
+	return a.color_count == b.color_count && a.color_formats == b.color_formats && a.depth_format == b.depth_format
+}
+
 // validate_indirect checks an indirect argument or count buffer: the Indirect usage, a 4-byte aligned offset, and
 // size bytes in range.
 @(private = "file")
@@ -521,6 +563,8 @@ Desc_Error :: enum u8 {
 	Bad_Data_Size,
 	Missing_Shader,
 	Bad_Color_Count,
+	// A graphics pipeline has a vertex shader or a mesh shader, not both, and an amplification shader needs a mesh shader.
+	Bad_Stages,
 }
 
 // Backends check descriptions with these procedures before they create a resource.
@@ -560,7 +604,11 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 }
 
 validate_graphics_pipeline_desc :: proc(desc: Graphics_Pipeline_Desc) -> Desc_Error {
-	if len(desc.vertex) == 0 || (len(desc.colors) > 0 && len(desc.pixel) == 0) {
+	has_vertex, has_mesh := len(desc.vertex) > 0, len(desc.mesh) > 0
+	if has_vertex && (has_mesh || len(desc.amplification) > 0) {
+		return .Bad_Stages
+	}
+	if (!has_vertex && !has_mesh) || (len(desc.colors) > 0 && len(desc.pixel) == 0) {
 		return .Missing_Shader
 	}
 	if len(desc.colors) > MAX_COLOR_ATTACHMENTS || (len(desc.colors) == 0 && desc.depth_format == .Unknown) {

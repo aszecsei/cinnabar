@@ -6,6 +6,7 @@ import "core:strings"
 import "core:sync"
 
 import d3d "vendor:directx/d3d12"
+import "vendor:directx/dxgi"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
@@ -43,6 +44,8 @@ Pipelines :: struct {
 	draw_signature:     ^d3d.ICommandSignature,
 	indexed_signature:  ^d3d.ICommandSignature,
 	dispatch_signature: ^d3d.ICommandSignature,
+	// Nil without Features.Mesh_Shaders.
+	mesh_signature:     ^d3d.ICommandSignature,
 }
 
 @(private)
@@ -102,6 +105,10 @@ init_pipelines :: proc() -> bool {
 	dev.indexed_signature = create_signature(indexed[:], size_of(gpu.Draw_Indexed_Indirect_Args), dev.root_signature) or_return
 	// A signature that sets no root arguments takes no root signature.
 	dev.dispatch_signature = create_signature(dispatch[:], size_of(gpu.Dispatch_Indirect_Args), nil) or_return
+	if .Mesh_Shaders in dev.features {
+		mesh := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DISPATCH_MESH}}
+		dev.mesh_signature = create_signature(mesh[:], size_of(gpu.Draw_Mesh_Indirect_Args), dev.root_signature) or_return
+	}
 	return true
 }
 
@@ -137,6 +144,7 @@ shutdown_pipelines :: proc() {
 	release(&dev.draw_signature)
 	release(&dev.indexed_signature)
 	release(&dev.dispatch_signature)
+	release(&dev.mesh_signature)
 	release(&dev.root_signature)
 }
 
@@ -194,12 +202,24 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 		return
 	}
 
+	is_mesh := len(desc.mesh) > 0
+	if is_mesh && .Mesh_Shaders not_in dev.features {
+		log.errorf("gpu: pipeline %q: the device has no mesh shaders. Check gpu_features and use a vertex pipeline.", desc.label)
+		return
+	}
+
 	// The job outlives the call, and the blobs may be in the game DLL's image, so they are copied.
-	task = new_task(desc.label, desc.vertex, desc.pixel)
+	// A mesh pipeline keeps its fixed-function state in task.graphics too, and compiles through a stream.
+	if is_mesh {
+		task = new_task(desc.label, desc.pixel, desc.amplification, desc.mesh)
+		task.is_mesh = true
+	} else {
+		task = new_task(desc.label, desc.pixel, desc.vertex)
+	}
 	task.graphics = {
 		pRootSignature = dev.root_signature,
-		VS = bytecode(task.blobs[0]),
-		PS = bytecode(task.blobs[1]),
+		VS = is_mesh ? {} : bytecode(task.blobs[1]),
+		PS = bytecode(task.blobs[0]),
 		SampleMask = max(u32),
 		RasterizerState = {
 			FillMode = .SOLID,
@@ -253,6 +273,8 @@ Compile_Task :: struct {
 	label:      string,
 	blobs:      [][]byte,
 	is_compute: bool,
+	// blobs holds the pixel, amplification and mesh shaders.
+	is_mesh:    bool,
 	graphics:   d3d.GRAPHICS_PIPELINE_STATE_DESC,
 	compute:    d3d.COMPUTE_PIPELINE_STATE_DESC,
 }
@@ -322,6 +344,13 @@ compile_job :: proc(data: rawptr) {
 	hr: d3d.HRESULT
 	if task.is_compute {
 		hr = dev.device->CreateComputePipelineState(&task.compute, d3d.IPipelineState_UUID, (^rawptr)(&pso))
+	} else if task.is_mesh {
+		stream := mesh_stream(task)
+		stream_desc := d3d.PIPELINE_STATE_STREAM_DESC {
+			SizeInBytes                   = size_of(stream),
+			pPipelineStateSubobjectStream = &stream,
+		}
+		hr = dev.device->CreatePipelineState(&stream_desc, d3d.IPipelineState_UUID, (^rawptr)(&pso))
 	} else {
 		hr = dev.device->CreateGraphicsPipelineState(&task.graphics, d3d.IPipelineState_UUID, (^rawptr)(&pso))
 	}
@@ -352,6 +381,53 @@ compile_job :: proc(data: rawptr) {
 	// Command lists of the frames in flight may still use the previous version.
 	if previous := sync.atomic_exchange(&entry.pso, pso); previous != nil {
 		defer_release(previous, .None, 0)
+	}
+}
+
+// A pipeline state stream subobject. Like CD3DX12_PIPELINE_STATE_STREAM_SUBOBJECT, each one is aligned to a pointer.
+@(private = "file")
+Subobject :: struct($T: typeid) #align(8) {
+	type:  d3d.PIPELINE_STATE_SUBOBJECT_TYPE,
+	value: T,
+}
+
+#assert(size_of(Subobject(u32)) == 8 && offset_of(Subobject(u32), value) == 4)
+#assert(size_of(Subobject(d3d.SHADER_BYTECODE)) == 24 && offset_of(Subobject(d3d.SHADER_BYTECODE), value) == 8)
+
+@(private = "file")
+Mesh_Stream :: struct {
+	root_signature: Subobject(^d3d.IRootSignature),
+	amplification:  Subobject(d3d.SHADER_BYTECODE),
+	mesh:           Subobject(d3d.SHADER_BYTECODE),
+	pixel:          Subobject(d3d.SHADER_BYTECODE),
+	blend:          Subobject(d3d.BLEND_DESC),
+	sample_mask:    Subobject(u32),
+	rasterizer:     Subobject(d3d.RASTERIZER_DESC),
+	depth_stencil:  Subobject(d3d.DEPTH_STENCIL_DESC),
+	topology:       Subobject(d3d.PRIMITIVE_TOPOLOGY_TYPE),
+	rt_formats:     Subobject(d3d.RT_FORMAT_ARRAY),
+	dsv_format:     Subobject(dxgi.FORMAT),
+	sample_desc:    Subobject(dxgi.SAMPLE_DESC),
+}
+
+// mesh_stream builds a mesh pipeline's stream from the fixed-function state in task.graphics. An empty
+// amplification blob means no amplification shader.
+@(private = "file")
+mesh_stream :: proc(task: ^Compile_Task) -> Mesh_Stream {
+	g := &task.graphics
+	return {
+		root_signature = {.ROOT_SIGNATURE, g.pRootSignature},
+		amplification = {.AS, bytecode(task.blobs[1])},
+		mesh = {.MS, bytecode(task.blobs[2])},
+		pixel = {.PS, g.PS},
+		blend = {.BLEND, g.BlendState},
+		sample_mask = {.SAMPLE_MASK, g.SampleMask},
+		rasterizer = {.RASTERIZER, g.RasterizerState},
+		depth_stencil = {.DEPTH_STENCIL, g.DepthStencilState},
+		topology = {.PRIMITIVE_TOPOLOGY, g.PrimitiveTopologyType},
+		rt_formats = {.RENDER_TARGET_FORMATS, {RTFormats = g.RTVFormats, NumRenderTargets = g.NumRenderTargets}},
+		dsv_format = {.DEPTH_STENCIL_FORMAT, g.DSVFormat},
+		sample_desc = {.SAMPLE_DESC, g.SampleDesc},
 	}
 }
 

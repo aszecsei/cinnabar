@@ -101,6 +101,19 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			execute_indirect(list, signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
 			// The draws set the draw ID, and ExecuteIndirect leaves it undefined afterward.
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
+		case .Draw_Mesh:
+			if !pipeline_ready {
+				continue
+			}
+			d := gpu.payload(p, gpu.Draw_Mesh)
+			list->DispatchMesh(d.groups.x, d.groups.y, d.groups.z)
+		case .Draw_Mesh_Indirect:
+			if !pipeline_ready {
+				continue
+			}
+			d := gpu.payload(p, gpu.Draw_Indirect)
+			execute_indirect(list, dev.mesh_signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
+			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 		case .Dispatch_Indirect:
 			if !pipeline_ready {
 				continue

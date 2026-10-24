@@ -89,12 +89,13 @@ host: agility-runtime
     mkdir -p "{{build_dir}}"
     odin build src/host {{collections}} -out:"{{build_dir}}/host.exe" -debug
 
-# Compile the game's shaders. Each <name>.hlsl compiles its vs_main, ps_main and cs_main entry points to <name>.<stage>.dxil.
+# Compile the game's shaders. Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points
+# to <name>.<stage>.dxil.
 shaders: install-dxc
     #!/usr/bin/env bash
     set -euo pipefail
     for src in samples/{{game}}/shaders/*.hlsl; do
-        for stage in vs ps cs; do
+        for stage in vs ps cs as ms; do
             grep -q "\b${stage}_main\b" "$src" || continue
             "{{dxc}}" -nologo -HV 2021 -T "${stage}_6_6" -E "${stage}_main" -I lib/core/gpu/shaders -Zi -Qembed_debug \
                 -Fo "${src%.hlsl}.${stage}.dxil" "$src"

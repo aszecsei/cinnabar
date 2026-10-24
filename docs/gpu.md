@@ -26,6 +26,8 @@ Some features are above the floor. The backend reports them at device creation i
 
 The engine checks `Features` before it uses a capability. Every capability must have a fallback path in the engine, or the engine must report that the device is not supported.
 
+To test a fallback path on hardware that has the capability, set `CINNABAR_DISABLE_FEATURES` to a comma-separated list of `Feature` names, for example `CINNABAR_DISABLE_FEATURES=Mesh_Shaders`. `core` then hides those features from `gpu_features`. The null backend reports `Mesh_Shaders`, so it validates mesh pipelines and mesh draws.
+
 ## Packages
 
 | Package | Side | Responsibility |
@@ -85,7 +87,7 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 ## Pipelines
 
 - A pipeline description contains shader blobs, fixed-function state and attachment formats. D3D12 PSOs and Vulkan dynamic rendering both require the attachment formats.
-- Pipeline kinds: graphics (vertex), graphics (mesh), compute and ray tracing.
+- Pipeline kinds: graphics (vertex), mesh, compute, and later ray tracing. `Graphics_Pipeline_Desc` makes a mesh pipeline when it has a mesh shader instead of a vertex shader.
 - Pipelines compile on background jobs. A pipeline handle is valid immediately. Draws and dispatches with a pipeline that is not ready are skipped, and so are those with a pipeline that failed to compile. The backend copies the shader blobs and the label, because the compile job can outlive the call and the blobs can be in the game DLL's image.
 - `update_graphics_pipeline` and `update_compute_pipeline` compile a new version of a pipeline. The handle stays the same, and the current version keeps drawing until the new one is ready. If the new version fails to compile, the current one stays. The latest update wins if several are compiling at once.
 - An update must keep the attachment formats, the topology and the pipeline kind, because validation and translation use them before the new version is ready. Such an update returns false and changes nothing, and the game creates a new pipeline instead.
@@ -154,7 +156,7 @@ The game builds a `render.Graph` every frame in frame memory. Passes declare how
 
 The engine culls and builds draws on the GPU.
 
-- **Indirect commands:** `cmd_draw_indirect`, `cmd_draw_indexed_indirect` and `cmd_dispatch_indirect`. A draw takes an argument buffer, an offset, a maximum draw count and an optional count buffer: the `u32` at the count offset caps the draws. `draw_mesh_indirect` comes with mesh shaders (phase 5).
+- **Indirect commands:** `cmd_draw_indirect`, `cmd_draw_indexed_indirect` and `cmd_dispatch_indirect`. A draw takes an argument buffer, an offset, a maximum draw count and an optional count buffer: the `u32` at the count offset caps the draws. `cmd_draw_mesh_indirect` is the mesh version (see [Mesh shaders](#mesh-shaders)).
 - **Records:** `Draw_Indirect_Args`, `Draw_Indexed_Indirect_Args` and `Dispatch_Indirect_Args` define the argument layouts. Argument and count buffers need the `Indirect` usage, and offsets are multiples of 4. Validation checks that the records are in range.
 - **Draw ID:** each draw record starts with a `u32` draw ID, followed by the standard arguments. Shaders read it with the `CN_DRAW_ID` macro. The D3D12 backend delivers it as a root constant through the command signature. A Vulkan backend delivers the `DrawIndex` built-in, which is the record's index from the command's offset. So portable code stores each record's index as its draw ID, and keeps per-draw data in a buffer indexed by it.
 - **Instance IDs:** `SV_InstanceID` does not include the first instance on D3D12, but does on Vulkan. Shaders that need the first instance read it from their own data.
@@ -172,8 +174,11 @@ The engine culls and builds draws on the GPU.
 ## Mesh shaders
 
 - Mesh and amplification shaders are HLSL and compile with the other shaders. They map to `VK_EXT_mesh_shader` and to Metal object and mesh shaders.
-- A mesh pipeline replaces the vertex stage. All other pipeline state is the same.
-- Fallback: the engine keeps a vertex-pulling path for devices without mesh shaders.
+- A mesh pipeline replaces the vertex stage with a mesh shader and an optional amplification shader. All other pipeline state is the same, except that the mesh shader declares its topology. A pipeline has a vertex shader or a mesh shader, not both, and creating a mesh pipeline without `Features.Mesh_Shaders` fails.
+- `cmd_draw_mesh(groups)` launches amplification groups, or mesh groups if there is no amplification shader. `cmd_draw_mesh_indirect` reads `Draw_Mesh_Indirect_Args` records, which start with a draw ID like the other draw records. Validation checks that each draw matches the bound pipeline's kind, and mesh draws need no index buffer.
+- An update cannot turn a vertex pipeline into a mesh pipeline or back, because validation uses the kind before the new version is ready.
+- **D3D12:** mesh pipelines compile from a pipeline state stream on the same background jobs, and draws use `DispatchMesh` and a command signature with the draw ID.
+- **Fallback:** the engine keeps a vertex-pulling path for devices without mesh shaders. The sample shows both: with mesh shaders, amplification shaders cull the objects and mesh shaders draw them; without, a compute pass culls on the compute queue and an indexed indirect draw draws them. Both paths place vertices with the same shader function.
 
 ## Ray tracing
 
@@ -199,7 +204,7 @@ The engine culls and builds draws on the GPU.
 
 - Shaders are HLSL. `tools/cook` compiles each shader to DXIL with DXC. A Vulkan port adds SPIR-V from DXC. A Metal port adds a metallib from `metal-shaderconverter`.
 - The cooker checks that each shader fits the fixed root signature. The runtime never compiles or reflects shaders.
-- Until `tools/cook` exists, the build compiles shaders with DXC directly. `just install` downloads the DXC release that the justfile pins. `just shaders` compiles each `<name>.hlsl` in the game's `shaders/` directory: its `vs_main`, `ps_main` and `cs_main` entry points become `<name>.vs.dxil`, `<name>.ps.dxil` and `<name>.cs.dxil`.
+- Until `tools/cook` exists, the build compiles shaders with DXC directly. `just install` downloads the DXC release that the justfile pins. `just shaders` compiles each `<name>.hlsl` in the game's `shaders/` directory: its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points become `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`.
 - The game embeds the DXIL with `#load`. A hot reload therefore brings new shaders, and the game recreates its pipelines in `on_reload`.
 
 ## Debugging

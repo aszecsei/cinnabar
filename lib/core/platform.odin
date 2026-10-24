@@ -3,9 +3,17 @@ package core
 import "core:log"
 import "core:mem"
 import "core:mem/virtual"
+import "core:os"
+import "core:reflect"
+import "core:strings"
 import "core:time"
 
+import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+
+// A comma-separated list of gpu.Feature names that core hides from the game, to test fallback paths on hardware
+// that has the features. For example: CINNABAR_DISABLE_FEATURES=Mesh_Shaders.
+DISABLE_FEATURES_VARIABLE :: "CINNABAR_DISABLE_FEATURES"
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
@@ -22,6 +30,7 @@ Platform :: struct {
 	last_frame:  time.Tick,
 	// Read once per frame, so the game and the GPU backend agree on it.
 	window_size: [2]i32,
+	disabled_features: gpu.Features,
 	api:         Platform_API,
 }
 
@@ -53,6 +62,8 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		return false
 	}
 
+	platform.disabled_features = read_disabled_features()
+
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
 	platform.api = {
@@ -66,7 +77,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		jobs_lock                    = jobs.lock,
 		jobs_unlock                  = jobs.unlock,
 		jobs_worker_count            = jobs.worker_count,
-		gpu_features                 = backend.features,
+		gpu_features                 = gpu_features,
 		gpu_frame_target             = backend.frame_target,
 		gpu_submit                   = backend.submit,
 		gpu_upload                   = backend.upload,
@@ -142,6 +153,28 @@ soft_restart :: proc() {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)
 	}
 	virtual.arena_free_all(&platform.permanent)
+}
+
+// gpu_features is the backend's optional features without those that CINNABAR_DISABLE_FEATURES hides.
+gpu_features :: proc() -> gpu.Features {
+	return backend.features() - platform.disabled_features
+}
+
+@(private = "file")
+read_disabled_features :: proc() -> (disabled: gpu.Features) {
+	value := os.get_env(DISABLE_FEATURES_VARIABLE, context.temp_allocator)
+	for name in strings.split_iterator(&value, ",") {
+		trimmed := strings.trim_space(name)
+		if feature, ok := reflect.enum_from_name(gpu.Feature, trimmed); ok {
+			disabled += {feature}
+		} else if trimmed != "" {
+			log.warnf("core: %s: unknown feature %q", DISABLE_FEATURES_VARIABLE, trimmed)
+		}
+	}
+	if disabled != {} {
+		log.infof("core: hiding GPU features %v", disabled)
+	}
+	return
 }
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.

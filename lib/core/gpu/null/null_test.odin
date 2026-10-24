@@ -166,3 +166,25 @@ updates_keep_the_attachment_formats :: proc(t: ^testing.T) {
 	destroy_pipeline(compute)
 	testing.expect(t, !update_compute_pipeline(compute, {compute = shader}), "an update of a destroyed pipeline")
 }
+
+@(test)
+mesh_updates_keep_the_kind :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	shader := []byte{0}
+	mesh := gpu.Graphics_Pipeline_Desc {
+		mesh   = shader,
+		pixel  = shader,
+		colors = {{format = gpu.FRAME_TARGET_FORMAT}},
+	}
+	pipeline := create_graphics_pipeline(mesh)
+	testing.expect(t, pipeline != {})
+	testing.expect(t, update_graphics_pipeline(pipeline, mesh))
+
+	context.logger = log.nil_logger()
+	vertex := mesh
+	vertex.mesh, vertex.vertex = nil, shader
+	testing.expect(t, !update_graphics_pipeline(pipeline, vertex), "an update turned a mesh pipeline into a vertex pipeline")
+}

@@ -8,13 +8,14 @@ struct Vertex {
 	float4 color;
 };
 
-// Matches Object_Constants in game.odin.
+// Matches Object_Constants in game.odin. The vertex path reads visible, and the mesh path object_count.
 struct Push {
 	uint vertices;
 	uint visible;
 	uint texture;
 	uint sampler_index;
 	uint2 grid;
+	uint object_count;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -31,10 +32,9 @@ struct Varyings {
 	float4 color : COLOR0;
 };
 
-// Each indirect draw is one visible object. The draw ID indexes the visible list that the cull pass wrote.
-Varyings vs_main(uint vertex_id : SV_VertexID) {
+// Both paths place an object's vertices with this, so they draw the same image.
+Varyings object_vertex(uint object, uint vertex_id) {
 	Vertex v = cn_buffer(push.vertices).Load<Vertex>(vertex_id * sizeof(Vertex));
-	uint object = cn_buffer(push.visible).Load(CN_DRAW_ID * 4);
 	float s, c;
 	sincos(1.5 * pass.time + 0.37 * object, s, c);
 	float2 p = object_center(object, push.grid, pass.time, pass.aspect);
@@ -45,6 +45,67 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	o.uv = v.uv;
 	o.color = v.color * 0.8;
 	return o;
+}
+
+// The vertex path: the compute queue culled the objects, and each indirect draw is one visible object. The draw ID
+// indexes the visible list that the cull pass wrote.
+Varyings vs_main(uint vertex_id : SV_VertexID) {
+	return object_vertex(cn_buffer(push.visible).Load(CN_DRAW_ID * 4), vertex_id);
+}
+
+// The mesh path: each amplification group culls OBJECTS_PER_GROUP objects and launches one mesh group for the
+// visible ones. Matches OBJECTS_PER_GROUP in game.odin.
+#define OBJECTS_PER_GROUP 32
+
+struct Payload {
+	uint count;
+	uint objects[OBJECTS_PER_GROUP];
+};
+
+groupshared Payload payload;
+groupshared uint visible_count;
+
+[numthreads(OBJECTS_PER_GROUP, 1, 1)]
+void as_main(uint group : SV_GroupID, uint thread : SV_GroupIndex) {
+	if (thread == 0) {
+		visible_count = 0;
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	uint object = group * OBJECTS_PER_GROUP + thread;
+	if (object < push.object_count) {
+		float2 center = object_center(object, push.grid, pass.time, pass.aspect);
+		if (length(center) - OBJECT_RADIUS <= cull_radius(pass.time)) {
+			uint slot;
+			InterlockedAdd(visible_count, 1, slot);
+			payload.objects[slot] = object;
+		}
+	}
+	GroupMemoryBarrierWithGroupSync();
+
+	if (thread == 0) {
+		payload.count = visible_count;
+	}
+	GroupMemoryBarrierWithGroupSync();
+	DispatchMesh(payload.count > 0 ? 1 : 0, 1, 1, payload);
+}
+
+[outputtopology("triangle")]
+[numthreads(OBJECTS_PER_GROUP, 1, 1)]
+void ms_main(
+	uint thread : SV_GroupIndex,
+	in payload Payload objects,
+	out vertices Varyings vertices[OBJECTS_PER_GROUP * 3],
+	out indices uint3 triangles[OBJECTS_PER_GROUP]
+) {
+	SetMeshOutputCounts(objects.count * 3, objects.count);
+	if (thread < objects.count) {
+		uint object = objects.objects[thread];
+		for (uint corner = 0; corner < 3; corner++) {
+			vertices[thread * 3 + corner] = object_vertex(object, corner);
+		}
+		triangles[thread] = uint3(thread * 3, thread * 3 + 1, thread * 3 + 2);
+	}
 }
 
 float4 ps_main(Varyings i) : SV_Target {

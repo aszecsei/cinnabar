@@ -58,8 +58,11 @@ shutdown :: proc() {
 	gpu.pool_destroy(&state.pipelines)
 }
 
+// The null backend validates mesh pipelines and draws, so it reports mesh shaders. Ray tracing does not exist yet.
+FEATURES :: gpu.Features{.Mesh_Shaders}
+
 features :: proc() -> gpu.Features {
-	return {}
+	return FEATURES
 }
 
 frame_target :: proc() -> gpu.Texture {
@@ -124,6 +127,10 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 create_graphics_pipeline :: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline {
 	if err := gpu.validate_graphics_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return {}
+	}
+	if len(desc.mesh) > 0 && .Mesh_Shaders not_in FEATURES {
+		log.errorf("gpu: pipeline %q: mesh shaders are not supported", desc.label)
 		return {}
 	}
 	return gpu.pool_add(&state.pipelines, Pipeline_Entry{gpu.pipeline_info(desc), desc.scope})
