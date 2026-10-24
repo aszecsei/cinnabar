@@ -206,7 +206,10 @@ The script phase (phase 5 in [Frame](architecture.md#frame)) runs in Unity's ord
 
 - A module is one script asset. `require` takes a path relative to the requiring file (`"./util"`), or an alias from `.luaurc` (`"@game/ai/brain"`, `"@engine/Behaviour"`). These are the conventions that `luau-lsp` understands.
 - **The cooker resolves every `require`.** The blob stores a map from each require string to the target's GUID. The runtime never searches a path. A missing module or a require cycle is a cook error.
-- Each module runs once, on its first require, in its own sandboxed thread. Its environment has a `require` closure that knows the module's asset handle, so the runtime finds the right map. The result is cached by GUID.
+- **Luau's rules:** a file `a/b.luau` is the module `a/b`, and `a/init.luau` is the module `a`. `./` and `../` start at the module's parent, so in `a/init.luau`, `./x` is a sibling of `a`. `@self/` starts at the module itself. Any other `@alias/` starts at the directory that the nearest `.luaurc` names for the alias, relative to that `.luaurc`. Alias names are not case-sensitive.
+- `script.spawn_script` runs a script asset on its own sandboxed thread. Its chunk name is `@` and its source path, such as `@game/scripts/hello.luau`.
+- `require` is one global binding. It finds the calling module from the caller's chunk name, and looks the path up in that module's map, so a module's functions resolve requires against their own module, wherever they are called from.
+- Each module runs once, on its first require, on the requiring thread, in its own environment that reads through to the shared globals. A module must not yield at its top level. Its result is cached by GUID, and a module that returns nothing gives `true`. A module that raises an error at its top level is not cached, so a later require runs it again.
 
 ## Types and tooling
 

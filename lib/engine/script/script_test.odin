@@ -63,7 +63,7 @@ setup :: proc(t: ^testing.T, register: Register_Proc) -> ^Fixture {
 	}
 	f.reports = make([dynamic]f64)
 	f.errors = make([dynamic]string)
-	testing.expect(t, init(&f.runtime, &f.platform, register))
+	testing.expect(t, init(&f.runtime, &f.platform, nil, register))
 	return f
 }
 
@@ -122,7 +122,7 @@ a_suspended_coroutine_survives_a_code_reload :: proc(t: ^testing.T) {
 	f := setup(t, register_first_build)
 	defer teardown(f)
 	context.user_ptr = f
-	thread, ok := spawn(&f.runtime, "=coroutine", COROUTINE_SCRIPT)
+	thread, ok := spawn_source(&f.runtime, "=coroutine", COROUTINE_SCRIPT)
 	testing.expect(t, ok)
 
 	reload(&f.runtime, &f.platform, register_second_build)
@@ -142,15 +142,15 @@ scripts_cannot_replace_the_globals :: proc(t: ^testing.T) {
 	defer teardown(f)
 	context.user_ptr = f
 	context.logger = capture_errors(f)
-	_, ok := spawn(&f.runtime, "=replace", "Debug.log = nil")
+	_, ok := spawn_source(&f.runtime, "=replace", "Debug.log = nil")
 	testing.expect(t, !ok)
-	_, ok = spawn(&f.runtime, "=replace", "Test.report = nil")
+	_, ok = spawn_source(&f.runtime, "=replace", "Test.report = nil")
 	testing.expect(t, !ok)
 	expect_error(t, f, "attempt to modify a readonly table")
 	// A script's own globals go to its thread's table, and shadow the shared ones only there.
-	_, ok = spawn(&f.runtime, "=own", "Test = nil; mine = 1")
+	_, ok = spawn_source(&f.runtime, "=own", "Test = nil; mine = 1")
 	testing.expect(t, ok)
-	_, ok = spawn(&f.runtime, "=other", "Test.report(mine == nil and 1 or 0)")
+	_, ok = spawn_source(&f.runtime, "=other", "Test.report(mine == nil and 1 or 0)")
 	testing.expect(t, ok)
 	testing.expect_value(t, len(f.reports), 1)
 	if len(f.reports) == 1 {
@@ -171,9 +171,9 @@ a_library_added_by_a_reload_is_read_only :: proc(t: ^testing.T) {
 			return 1
 		})
 	})
-	_, ok := spawn(&f.runtime, "=added", "Test.report(Added.value())")
+	_, ok := spawn_source(&f.runtime, "=added", "Test.report(Added.value())")
 	testing.expect(t, ok)
-	_, ok = spawn(&f.runtime, "=replace", "Added.value = nil")
+	_, ok = spawn_source(&f.runtime, "=replace", "Added.value = nil")
 	testing.expect(t, !ok)
 	expect_error(t, f, "attempt to modify a readonly table")
 }
@@ -185,11 +185,11 @@ the_watchdog_fails_a_runaway_resume :: proc(t: ^testing.T) {
 	context.user_ptr = f
 	context.logger = capture_errors(f)
 	f.runtime.budget = 10 * time.Millisecond
-	_, ok := spawn(&f.runtime, "=runaway", "while true do end")
+	_, ok := spawn_source(&f.runtime, "=runaway", "while true do end")
 	testing.expect(t, !ok)
 	expect_error(t, f, "runaway:1: script ran past its time budget")
 	// The VM is still usable.
-	_, ok = spawn(&f.runtime, "=after", "Test.report(1)")
+	_, ok = spawn_source(&f.runtime, "=after", "Test.report(1)")
 	testing.expect(t, ok)
 }
 
@@ -199,7 +199,7 @@ a_syntax_error_fails_spawn :: proc(t: ^testing.T) {
 	defer teardown(f)
 	context.user_ptr = f
 	context.logger = capture_errors(f)
-	_, ok := spawn(&f.runtime, "=broken", "local = 1")
+	_, ok := spawn_source(&f.runtime, "=broken", "local = 1")
 	testing.expect(t, !ok)
 	expect_error(t, f, "broken:1: Expected identifier")
 }
@@ -209,6 +209,6 @@ debug_log_accepts_any_values :: proc(t: ^testing.T) {
 	f := setup(t, register_first_build)
 	defer teardown(f)
 	context.user_ptr = f
-	_, ok := spawn(&f.runtime, "=log", "Debug.log('frame', 1, true, nil, vector.create(1, 2, 3))")
+	_, ok := spawn_source(&f.runtime, "=log", "Debug.log('frame', 1, true, nil, vector.create(1, 2, 3))")
 	testing.expect(t, ok)
 }

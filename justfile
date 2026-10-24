@@ -20,7 +20,11 @@ dev_defines := "-define:LUAU_SHARED=true"
 # lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
 luau_dir := build_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+# The cooker puts this in every script's cache key, so a Luau update cooks every script again.
+luau_version := `git -C vendor/luau describe --tags --always`
+content_root := "samples/" + game + "/content"
+cache_dir := build_dir + "/cache"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -86,7 +90,7 @@ update-luau tag="":
 
 alias b := build
 
-# Build the host and the game DLL
+# Build the host and the game DLL, and cook the game's scripts
 build: host game-dll
 
 # Build the development host
@@ -109,9 +113,13 @@ luau:
     cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
 
 # Build the cooker
-cook:
+cook: luau
     mkdir -p "{{build_dir}}"
-    odin build tools/cook -out:"{{build_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
+
+# Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
+scripts config="dev": cook
+    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
 
 # Cook the game's shaders: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray tracing library.
 # Only changed shaders recompile (see tools/cook).
@@ -119,7 +127,7 @@ shaders: install-dxc cook
     "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: shaders luau
+game-dll: shaders luau scripts
     mkdir -p "{{build_dir}}/pdb"
     odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{build_dir}}/{{game}}.dll" \
@@ -153,9 +161,9 @@ dev-shared name="cinnabar": build viewer
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Build the statically linked release executable
-release: agility-runtime shaders luau
+release: agility-runtime shaders luau (scripts "release")
     mkdir -p "{{build_dir}}"
-    odin build "samples/{{game}}/main_release" {{collections}} -out:"{{build_dir}}/{{game}}.exe" -o:speed
+    odin build "samples/{{game}}/main_release" {{collections}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
@@ -183,7 +191,7 @@ fmt:
 # =================================
 
 test: luau
-    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} || exit 1; done
+    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
 
 # =================================
 # Cleanup

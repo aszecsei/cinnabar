@@ -57,7 +57,8 @@ flowchart TB
 | `lib/core/gpu/null` | Host | A backend that validates command lists and executes nothing. Used for headless tests. |
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
-| `lib/engine/asset` | Game | The asset runtime: GUIDs, handles and the `Asset_Source` backends. |
+| `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
+| `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
 | `src/editor` | — | The C# editor application. It runs `host.exe` as a child process. |
@@ -174,7 +175,7 @@ Details: [Editor](editor.md).
 ```mermaid
 flowchart TB
     SOURCE[("source/<br/>png, gltf, wav, hlsl, scripts, scenes<br/>+ .meta sidecars")]
-    CACHE[("cache/<br/>content-addressed,<br/>one blob per compiled asset")]
+    CACHE[("build/cache/<br/>one blob per asset<br/>and configuration")]
     BUNDLES[("bundles/*.cbb")]
     DEVRT["Development runtime"]
     RELRT["Release runtime"]

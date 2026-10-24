@@ -1,5 +1,6 @@
 package core
 
+import "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:mem/virtual"
@@ -77,10 +78,13 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 	platform.api = {
 		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
+		asset_allocator              = runtime.heap_allocator(),
 		memory_reserve               = memory_reserve,
 		memory_commit                = memory_commit,
 		memory_release               = memory_release,
 		time_seconds                 = time_seconds,
+		file_read                    = file_read,
+		file_modified                = file_modified,
 		window_size                  = window_size,
 		set_window_title             = _window_set_title,
 		jobs_run                     = jobs.run,

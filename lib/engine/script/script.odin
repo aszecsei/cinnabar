@@ -10,6 +10,7 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
+import "cinnabar:engine/asset"
 
 // The watchdog's limit for one resume (see docs/scripting.md#watchdog).
 DEFAULT_BUDGET :: 100 * time.Millisecond
@@ -18,10 +19,16 @@ GC_STEP_KB :: 64
 
 // Runtime is the script VM of one Game_State. It must not move after init: the VM keeps a pointer to its bindings.
 Runtime :: struct {
-	platform: ^core.Platform_API,
-	bindings: script_host.Bindings,
-	L:        ^luau.State,
-	budget:   time.Duration,
+	platform:     ^core.Platform_API,
+	bindings:     script_host.Bindings,
+	L:            ^luau.State,
+	budget:       time.Duration,
+	// Where script assets come from. It lives in Game_State too, so the pointer stays valid across reloads.
+	assets:       ^asset.Assets,
+	// A registry reference to the shared global table, which module environments read through to.
+	globals:      c.int,
+	modules:      [MAX_MODULES]Module,
+	module_count: int,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -43,10 +50,13 @@ Resume_Result :: enum u8 {
 	Failed,
 }
 
-// init opens the VM, defines the engine's and the game's bindings, and sandboxes the globals.
-init :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Proc) -> bool {
+// init opens the VM, defines the engine's and the game's bindings, and sandboxes the globals. Scripts load from
+// assets.
+init :: proc(r: ^Runtime, platform: ^core.Platform_API, assets: ^asset.Assets, register: Register_Proc) -> bool {
 	r.platform = platform
+	r.assets = assets
 	r.budget = DEFAULT_BUDGET
+	r.module_count = 0
 	r.bindings.ctx = context
 	r.L = platform.script_open(&r.bindings)
 	if r.L == nil {
@@ -56,6 +66,9 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Proc)
 	register_engine(r)
 	register(r)
 	luau.L_sandbox(r.L)
+	luau.pushvalue(r.L, luau.GLOBALSINDEX)
+	r.globals = luau.ref(r.L, -1)
+	luau.pop(r.L, 1)
 	return true
 }
 
@@ -117,9 +130,9 @@ cstring_of :: proc(r: ^Runtime, s: string) -> cstring {
 	return strings.clone_to_cstring(s, r.platform.frame_allocator)
 }
 
-// spawn compiles source and starts it on a new sandboxed thread, which runs until its first yield. chunkname names
-// the script in errors and tracebacks.
-spawn :: proc(r: ^Runtime, chunkname, source: string) -> (thread: Thread, ok: bool) {
+// spawn_source compiles source and starts it on a new sandboxed thread, which runs until its first yield. chunkname
+// names the script in errors and tracebacks. Source scripts cannot require: use spawn_script for script assets.
+spawn_source :: proc(r: ^Runtime, chunkname, source: string) -> (thread: Thread, ok: bool) {
 	L := r.L
 	co := luau.newthread(L)
 	thread = Thread(luau.ref(L, -1))
@@ -181,6 +194,7 @@ step :: proc(r: ^Runtime) {
 
 @(private = "file")
 register_engine :: proc(r: ^Runtime) {
+	define(r, "require", require_binding)
 	define(r, "Debug.log", proc(L: ^luau.State) -> c.int {return log_binding(L, .Info)})
 	define(r, "Debug.warn", proc(L: ^luau.State) -> c.int {return log_binding(L, .Warning)})
 	define(r, "Debug.error", proc(L: ^luau.State) -> c.int {return log_binding(L, .Error)})

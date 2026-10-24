@@ -14,6 +14,8 @@ Platform_API :: struct {
 	// Allocators are built by the host, so their procedures stay valid across reloads.
 	permanent_allocator: runtime.Allocator,
 	frame_allocator:     runtime.Allocator,
+	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
+	asset_allocator:     runtime.Allocator,
 
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
@@ -23,6 +25,11 @@ Platform_API :: struct {
 	memory_release: proc(ptr: rawptr, size: int),
 
 	time_seconds:     proc() -> f64,
+	// File I/O for the asset runtime. Paths are relative to the working directory. file_read reads a whole file into
+	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
+	// or 0 if it does not exist.
+	file_read:        proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool),
+	file_modified:    proc(path: string) -> i64,
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),

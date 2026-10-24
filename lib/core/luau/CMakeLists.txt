@@ -2,7 +2,8 @@
 #
 # The justfile configures this project twice:
 # - CINNABAR_LUAU_SHARED=ON builds luau.dll, which the development host and the game DLL share.
-# - CINNABAR_LUAU_SHARED=OFF builds static libraries for release executables, tests and tools/cook.
+# - CINNABAR_LUAU_SHARED=OFF builds static libraries for release executables, tests and tools/cook, and luau_tools,
+#   the helpers that only tools/cook uses.
 #
 # Both put their outputs in <build dir>/out, where lib/core/luau/luau.odin looks for them.
 cmake_minimum_required(VERSION 3.24)
@@ -41,4 +42,9 @@ else()
     add_library(luau_shim STATIC luau_shim.cpp)
     target_compile_definitions(luau_shim PRIVATE "CN_LUAU_API=extern \"C\"")
     add_dependencies(luau_shim Luau.VM Luau.CodeGen Luau.Compiler Luau.Ast Luau.Bytecode Luau.Common)
+
+    # Helpers for tools/cook over Luau's C++ libraries.
+    add_library(luau_tools STATIC luau_tools.cpp)
+    target_compile_definitions(luau_tools PRIVATE "CN_LUAU_API=extern \"C\"")
+    target_link_libraries(luau_tools PRIVATE Luau.Ast)
 endif()

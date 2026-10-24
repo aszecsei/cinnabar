@@ -13,6 +13,8 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
 import "cinnabar:core/luau"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/render"
 import "cinnabar:engine/script"
@@ -29,8 +31,10 @@ SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
 SHADOWS_RT_LIB :: #load("shaders/shadows_rt.lib.dxil")
 COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
-// Scripts are embedded until script assets exist (see docs/scripting.md#implementation-phases).
-HELLO_SCRIPT :: #load("scripts/hello.luau", string)
+// The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
+CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
+// Content refers to content by GUID. Until scenes exist, the game reads its one script's GUID from the .meta file.
+HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -199,8 +203,9 @@ Game_State :: struct {
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
+	assets:      asset.Assets,
 	scripts:     script.Runtime,
-	// The coroutine of scripts/hello.luau, while it runs.
+	// The coroutine of content/scripts/hello.luau, while it runs.
 	hello:       script.Thread,
 	hello_running: bool,
 }
@@ -315,10 +320,13 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	register_world(s)
 	spawn_scene(s)
-	if !script.init(&s.scripts, platform, register_scripts) {
+	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
+	if !script.init(&s.scripts, platform, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
 	}
-	s.hello, s.hello_running = script.spawn(&s.scripts, "=scripts/hello.luau", HELLO_SCRIPT)
+	if hello, ok := format.meta_guid(HELLO_META); ok {
+		s.hello, s.hello_running = script.spawn_script(&s.scripts, hello)
+	}
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
 
@@ -388,6 +396,7 @@ spin :: proc(ctx: ^ecs.System_Context) {
 
 update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
+	defer end_frame(s)
 	s.frame_count += 1
 	s.elapsed += dt
 
@@ -430,6 +439,13 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 	render_frame(s, {u32(size.x), u32(size.y)}, pass)
 	return true
+}
+
+// end_frame swaps the blobs that the cooker rewrote. Scripts take up a new version once script hot reload exists.
+end_frame :: proc(s: ^Game_State) {
+	if changed := asset.poll(&s.assets); len(changed) > 0 {
+		log.infof("mygame: %d assets changed", len(changed))
+	}
 }
 
 // stream_rings generates the rings' mip chain and streams it. The backend copies the data before the call returns.
@@ -733,6 +749,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
 	script.destroy(&s.scripts)
+	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
 	destroy_pipelines(s.platform, s.pipelines)
@@ -758,6 +775,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s.platform = platform
 	ecs.reload(&s.world, platform)
 	register_world(s)
+	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)

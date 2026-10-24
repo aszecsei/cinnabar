@@ -31,7 +31,7 @@ The job system in `lib/core/jobs` has one worker thread per core and a pool of f
 | Permanent | Process | Yes |
 | Level | Until the level unloads | Yes |
 | Frame | One frame, double-buffered | Not applicable |
-| Asset | Managed by the asset runtime | Yes |
+| Asset | Managed by the asset runtime, which allocates from `asset_allocator` (the host's heap) | Yes |
 | Script heap | Managed by the script VM | Yes |
 
 All arenas belong to the host. Game-side code allocates from them through allocators passed in `context` or held in `Game_State`.
