@@ -67,6 +67,7 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
 		viewport = {
 			selection = make([dynamic]ecs.Entity, platform.heap_allocator),
+			hidden = make([dynamic]ecs.Entity, platform.heap_allocator),
 			picks = make([dynamic]link.Pick_Request, platform.heap_allocator),
 		},
 	}
@@ -84,6 +85,7 @@ destroy :: proc(e: ^Editor) {
 	delete(e.watched)
 	delete(e.by_scene_id)
 	delete(e.viewport.selection)
+	delete(e.viewport.hidden)
 	delete(e.viewport.picks)
 	if e.viewport.gpu_ready {
 		destroy_viewport_gpu(e)
@@ -122,10 +124,11 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			problems := make([dynamic]scene.Problem, frame)
 			scene.load(w, scripts, scene_of(v, frame), &e.by_scene_id, &problems)
 			link.write_message(out, edit_problems(problems[:], true, frame))
-			// Every entity is new, so the editor gets a snapshot, and its watches and its selection are of entities that
-			// are gone.
+			// Every entity is new, so the editor gets a snapshot, and its watches, its selection and what it hides are
+			// of entities that are gone.
 			clear(&e.watched)
 			clear(&e.viewport.selection)
+			clear(&e.viewport.hidden)
 			snapshot = true
 		case link.Apply_Operations:
 			problems := make([dynamic]scene.Problem, frame)

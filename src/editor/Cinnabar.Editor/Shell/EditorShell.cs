@@ -106,8 +106,11 @@ public sealed partial class EditorShell : IDisposable
                 Host.Send(new WatchEntity(entity));
             }
             SendSelection();
+            ResendHidden();
         };
         World.EntitiesChanged += OnEntitiesChanged;
+        // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
+        World.EntitiesChanged += SendHidden;
         Layout.Changed += Commands.InvalidateAll;
         // Commands such as Delete act on the selected entities.
         Selection.Changed += (_, _) => Commands.InvalidateAll();

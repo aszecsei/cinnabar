@@ -119,6 +119,11 @@ public sealed partial class EditorShell
         }
         Autosave.Delete(old);
         Autosave.Delete(Scene.Path);
+        // Save As keeps what the user hid and locked for the new file.
+        if (Scene.Path != old)
+        {
+            SaveSceneView();
+        }
         Console.Add(LogLevel.Info, $"scene: saved {Scene.Path}");
         return true;
     }
@@ -326,6 +331,7 @@ public sealed partial class EditorShell
         ProblemsChanged?.Invoke();
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
+        LoadSceneView();
         SendScene();
         FrameScene();
     }

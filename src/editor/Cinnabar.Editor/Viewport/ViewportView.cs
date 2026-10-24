@@ -15,7 +15,7 @@ namespace Cinnabar.Editor.Viewport;
 /// The viewport panel: the frames, the tool palette, the camera's speed and the stats over them, and the input that
 /// drives the editor's tools (see docs/editor.md#viewport). The right button flies with WASD, Q and E; Alt with the
 /// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
-/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, and F frames the selection.
+/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it.
 /// </summary>
 public sealed class ViewportView : Grid
 {
@@ -342,6 +342,7 @@ public sealed class ViewportView : Grid
             Key.R => EditorCommands.ScaleTool,
             Key.X => EditorCommands.LocalSpace,
             Key.F => EditorCommands.FrameSelected,
+            Key.H => EditorCommands.HideSelected,
             _ => null,
         };
         if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)

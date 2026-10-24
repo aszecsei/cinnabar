@@ -24,6 +24,9 @@ static class EditorCommands
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SelectAll = "edit.selectAll";
+    public const string HideSelected = "entity.hide";
+    public const string ShowAll = "entity.showAll";
+    public const string LockSelected = "entity.lock";
     public const string SelectTool = "tool.select";
     public const string MoveTool = "tool.move";
     public const string RotateTool = "tool.rotate";
@@ -105,6 +108,24 @@ static class EditorCommands
             Description = "Select every entity.",
             Shortcut = "Ctrl+A",
             CanExecuteWhen = () => shell.World.HasWorld,
+        });
+        commands.Register(new Command(HideSelected, "Hide", shell.ToggleHideSelected)
+        {
+            Description = "Hide the selected entities and their children in the viewport, or show them again. The scene does not change. H in the viewport.",
+            Icon = "hidden",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(ShowAll, "Show All", shell.ShowAll)
+        {
+            Description = "Show every hidden entity in the viewport.",
+            Icon = "visible",
+            CanExecuteWhen = () => shell.HasHidden,
+        });
+        commands.Register(new Command(LockSelected, "Lock", shell.ToggleLockSelected)
+        {
+            Description = "Stop the viewport from selecting the selected entities and their children, or let it again.",
+            Icon = "locked",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
         });
         // The viewport's tools have keys of their own, which work while the viewport has focus, so typing in a box
         // does not change tools.

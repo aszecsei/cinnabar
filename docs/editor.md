@@ -130,7 +130,7 @@ The editor link is a message connection between the editor and the host. It uses
 | Types | Component types with their fields, behaviour classes with their fields, game commands |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Gizmo_State`, `Pick_Request`, `Pick_Result`; later input |
+| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result`; later input |
 | Mode | Play, pause, step, stop |
 | Stats | Frame times, memory, counters, script memory by module |
 
@@ -167,7 +167,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 - **Selection and box selection:** in the viewport, a click selects what is under it, and a click on nothing clears the selection. A drag from empty space draws a box and selects what it shows. Shift adds and Ctrl toggles, as in the outliner. The editor sends `Set_Selection` with the entities' handles when the selection changes and after each snapshot, and the overlay pass draws an outline in the accent color where the selection's edge is, two pixels wide, around the selected entities and their descendants.
 - **Gizmos:** the gizmo's interaction is in C#. The editor knows the camera and the selected entities' poses from the document, does the hit test and the drag math, and makes field operations: a root's `Transform`, or a child's `Local_Transform` relative to its parent. The game only draws the gizmo from `Gizmo_State` (kind, pose, axes, size, the part under the mouse, and whether a drag holds it), over everything, in the same overlay pass. The editor sets the size so an axis is 110 frame pixels long. Move has arrows, plane squares and a square in the middle that moves in the view's plane; Rotate has a ring about each axis and an outer ring about the view's axis; Scale has an axis with a cube for each axis, and a cube in the middle that scales evenly. Only the near half of each rotation ring takes the mouse, and a plane seen edge on takes none.
 - **Several entities:** a drag moves the selected entities that have no selected ancestor, about the primary entity: a move moves each by the same amount, a turn turns each about the primary entity, and a scale scales each and its distance from it along the gizmo's axes. Each step of a drag replaces the one before for each field, so a drag of any number of entities is one undo entry. Escape cancels a drag.
-- **Tools and space:** Q, W, E and R pick Select, Move, Rotate and Scale while the viewport has focus, X switches between the world's axes and the entity's, and F frames the selection. These keys belong to the viewport, so typing in a box never changes tools. The tools are also commands, on the ribbon's Home tab and in the tool palette. Select has no gizmo. Scale always uses the entity's axes.
+- **Tools and space:** Q, W, E and R pick Select, Move, Rotate and Scale while the viewport has focus, X switches between the world's axes and the entity's, F frames the selection, and H hides it. These keys belong to the viewport, so typing in a box never changes tools. The tools are also commands, on the ribbon's Home tab and in the tool palette. Select has no gizmo. Scale always uses the entity's axes.
 - **Snapping** rounds a drag's change to 0.25 m, 15° or 0.1 of scale. The Snap command turns it on, and Ctrl during a drag does the opposite of the setting.
 - **Overlays:** the tool palette, the camera's speed with the tool and space, the box of a box selection and the stats overlay are Avalonia controls over the viewport.
 - **Input:** while the viewport has focus in play mode, the editor sends keyboard and mouse input, and the host gives it to the game as `core.Input` (see [Core](core.md#input)).
@@ -208,7 +208,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 | Panel | Contents |
 |---|---|
-| Outliner | The entity hierarchy, with a filter, drag to reparent, and multi-select. Later, visibility and lock toggles. |
+| Outliner | The entity hierarchy, with a filter, visibility and lock toggles, drag to reparent, and multi-select |
 | Properties | The components and behaviours of the selection |
 | Viewport | The frames, the overlays, the gizmo and the camera |
 | Asset Browser | The content roots, through the cook daemon |
@@ -224,7 +224,8 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - **Filter:** a filter shows the rows whose name, entity or components match, with their ancestors.
 - **Dragging** a row onto another row reparents its entity, and onto the space below the rows makes it a root, without moving it in the world. A row cannot go under itself or its descendants. A row also drags onto an entity field in the properties panel.
 - A row's menu duplicates, deletes and moves to the root, and makes a new entity. A row whose entity the game could not apply all of has a warning mark, with the problems in its tooltip.
-- **Visibility and lock are editor state.** Hidden entities are not drawn in the viewport, and locked entities cannot be picked. Neither changes the game's `Disabled` state, and neither is saved in the scene. The editor saves them for each user.
+- **Visibility and lock are editor state.** Each row of a scene entity has an eye that hides it in the viewport and a lock that stops the viewport from picking it, and each applies to the entity's descendants too. A hidden row is dimmed, and a toggle that is on is bright. Hide (H in the viewport), Show All and Lock act on the selection, from the ribbon or a row's menu. Neither changes the game's `Disabled` state, and neither is saved in the scene: the editor keeps them by scene ID for each user and each scene file, in `scene-views.json` in the editor's settings.
+- **Hidden entities are not drawn.** The editor sends their handles in `Set_Hidden` when they change, when their handles change, and after each snapshot. `editor.visibility` gives the game the hidden entities with their descendants for the frame, and the game leaves out those that `editor.is_visible` rejects, so they are neither drawn nor picked, and they cast no shadow in the sample. A locked entity is drawn and picked, and the editor drops it from the pick's result. The outliner still selects both.
 
 ### Properties
 

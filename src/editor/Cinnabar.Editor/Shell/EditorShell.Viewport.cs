@@ -115,7 +115,8 @@ public sealed partial class EditorShell
 
     void OnPicked(PickResult result, SelectMode mode, bool click)
     {
-        var hits = result.Hits.Select(h => h.Entity).Where(h => World.Find(h) != null).ToList();
+        // Locked entities are drawn but not picked.
+        var hits = result.Hits.Select(h => h.Entity).Where(Pickable).ToList();
         if (click && hits.Count == 1 && result.Depth > 0)
         {
             // Orbiting then turns about what was clicked.
@@ -313,6 +314,7 @@ public sealed partial class EditorShell
         _picks.Clear();
         SendCamera();
         SendSelection();
+        ResendHidden();
     }
 
     void OnPickResult(PickResult result)

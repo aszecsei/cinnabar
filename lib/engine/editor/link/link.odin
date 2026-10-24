@@ -27,6 +27,7 @@ Message :: union {
 	Gizmo_State,
 	Pick_Request,
 	Pick_Result,
+	Set_Hidden,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -441,4 +442,11 @@ Pick_Result :: struct {
 	id:    u32,
 	hits:  []Pick_Hit,
 	depth: f32,
+}
+
+// Editor to game: the entities that the editor hides, which the game does not draw, with their descendants. Hiding is
+// the editor's own state: it changes neither the game's Disabled nor the scene. The editor sends it when it changes,
+// and after each Entity_Snapshot.
+Set_Hidden :: struct {
+	entities: []u64,
 }

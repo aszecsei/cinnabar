@@ -470,14 +470,14 @@ selected_parents_outline_their_children :: proc(t: ^testing.T) {
 	ecs.add(w, grandchild, ecs.Parent{child})
 
 	bits := make([]u32, (ecs.slot_count(w) + 31) / 32, context.temp_allocator)
-	outlined(w, {parent}, bits)
+	with_descendants(w, {parent}, bits)
 	is_set :: proc(bits: []u32, e: ecs.Entity) -> bool {
 		i := ecs.entity_index(e)
 		return bits[i / 32] & (1 << (i % 32)) != 0
 	}
 	testing.expect(t, is_set(bits, parent) && is_set(bits, child) && is_set(bits, grandchild))
 	testing.expect(t, !is_set(bits, other))
-	outlined(w, {child}, bits)
+	with_descendants(w, {child}, bits)
 	testing.expect(t, !is_set(bits, parent) && is_set(bits, grandchild))
 }
 
@@ -504,4 +504,29 @@ gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 	none := make([dynamic]Gizmo_Vertex, context.temp_allocator)
 	gizmo_vertices({}, v, &none)
 	testing.expect_value(t, len(none), 0)
+}
+
+@(test)
+hidden_entities_hide_their_descendants :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	parent := spawn(f, {})
+	child := spawn(f, {})
+	other := spawn(f, {})
+	ecs.add(w, child, ecs.Parent{parent})
+
+	step(f)
+	testing.expect(t, editor_visible(f, other) && editor_visible(f, child))
+	step(f, 1, link.Set_Hidden{entities = {u64(parent)}})
+	testing.expect(t, !editor_visible(f, parent) && !editor_visible(f, child))
+	testing.expect(t, editor_visible(f, other))
+	// Without an editor, nothing is hidden.
+	step(f, 0)
+	testing.expect(t, editor_visible(f, child))
+}
+
+@(private = "file")
+editor_visible :: proc(f: ^Fixture, entity: ecs.Entity) -> bool {
+	return is_visible(visibility(&f.editor, &f.world), entity)
 }

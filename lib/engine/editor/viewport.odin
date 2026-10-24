@@ -40,6 +40,8 @@ Viewport :: struct {
 	camera:           link.Editor_Camera,
 	has_camera:       bool,
 	selection:        [dynamic]ecs.Entity,
+	// The entities that the editor hides, with their descendants. The game does not draw them.
+	hidden:           [dynamic]ecs.Entity,
 	gizmo:            link.Gizmo_State,
 	picks:            [dynamic]link.Pick_Request,
 	// picks[0] was rendered with this ticket, and its results come back through the readback buffer.
@@ -154,7 +156,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	}
 	if len(v.selection) > 0 {
 		if upload, ok := platform.gpu_upload(int(max(words, 1)) * 4, 4); ok {
-			outlined(w, v.selection[:], ([^]u32)(raw_data(upload.data))[:max(words, 1)])
+			with_descendants(w, v.selection[:], ([^]u32)(raw_data(upload.data))[:max(words, 1)])
 			overlay.selection = upload
 			overlay.outline = true
 		}
@@ -277,9 +279,32 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 	}
 }
 
-// outlined sets a bit for each slot whose entity is selected or has a selected ancestor, as the outline shows them.
+// Visibility is the entities that the editor hides, with their descendants, as a bit for each entity slot. It is in
+// frame memory, for one frame.
+Visibility :: struct {
+	hidden: []u32,
+}
+
+// visibility is what the editor hides this frame. A game that draws entities skips those that is_visible rejects, so
+// they are neither drawn nor picked. Without an editor, or with nothing hidden, it hides nothing.
+visibility :: proc(e: ^Editor, w: ^ecs.World) -> Visibility {
+	if !active(e) || len(e.viewport.hidden) == 0 {
+		return {}
+	}
+	bits := make([]u32, (ecs.slot_count(w) + 31) / 32, e.platform.frame_allocator)
+	with_descendants(w, e.viewport.hidden[:], bits)
+	return {bits}
+}
+
+is_visible :: proc "contextless" (v: Visibility, entity: ecs.Entity) -> bool {
+	index := ecs.entity_index(entity)
+	return int(index / 32) >= len(v.hidden) || v.hidden[index / 32] & (1 << (index % 32)) == 0
+}
+
+// with_descendants sets a bit for each slot whose entity is in the list or has an ancestor in it: the outline's
+// selection, and the hidden entities.
 @(private)
-outlined :: proc(w: ^ecs.World, selection: []ecs.Entity, bits: []u32) {
+with_descendants :: proc(w: ^ecs.World, selection: []ecs.Entity, bits: []u32) {
 	for &b in bits {
 		b = 0
 	}
@@ -398,6 +423,11 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		for entity in m.entities {
 			append(&v.selection, ecs.Entity(entity))
 		}
+	case link.Set_Hidden:
+		clear(&v.hidden)
+		for entity in m.entities {
+			append(&v.hidden, ecs.Entity(entity))
+		}
 	case link.Gizmo_State:
 		v.gizmo = m
 	case link.Pick_Request:
@@ -419,6 +449,7 @@ reset_viewport :: proc(e: ^Editor) {
 	v := &e.viewport
 	v.camera, v.has_camera, v.gizmo, v.picking = {}, false, {}, false
 	clear(&v.selection)
+	clear(&v.hidden)
 	clear(&v.picks)
 }
 

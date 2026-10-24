@@ -172,6 +172,45 @@ public sealed class ViewportToolsTests : IDisposable
         Assert.False(shell.PressGizmo(new Vec2(800, 450)));
     }
 
+    [Fact]
+    public void HiddenAndLockedEntitiesAreKeptForTheUserAndTheScene()
+    {
+        using (var shell = NewShell())
+        {
+            shell.Selection.Set([Handle(0)]);
+            Assert.True(shell.Commands.Get(EditorCommands.HideSelected).Execute());
+            shell.SetLocked([2], true);
+
+            Assert.True(shell.IsHidden(1) && shell.IsHiddenInTree(Handle(0)));
+            Assert.False(shell.IsHiddenInTree(Handle(1)));
+            Assert.True(shell.IsLockedInTree(Handle(1)));
+            // Neither changes the scene.
+            Assert.Empty(shell.Scene!.History);
+        }
+
+        // The next session has them back, from the user's settings.
+        using var again = NewShell();
+        Assert.True(again.IsHidden(1));
+        Assert.True(again.IsLocked(2));
+        Assert.True(again.Commands.Get(EditorCommands.ShowAll).Execute());
+        Assert.False(again.IsHidden(1));
+        Assert.False(again.Commands.Get(EditorCommands.ShowAll).CanExecute);
+    }
+
+    [Fact]
+    public void HidingAParentHidesItsChildren()
+    {
+        using var shell = NewShell();
+        shell.OnGameMessage(new EntitySnapshot(
+        [
+            new EntityInfo(Handle(0), "Left", 1, 0, true, [1]),
+            new EntityInfo(Handle(1), "Right", 2, Handle(0), true, [1]),
+        ]));
+        shell.SetHidden([1], true);
+        Assert.True(shell.IsHiddenInTree(Handle(1)));
+        Assert.False(shell.IsHidden(2));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

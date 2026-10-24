@@ -606,13 +606,23 @@ extract_triangles :: proc(frame: ^Frame) {
 	}
 	chunks := render.extract(w, s.triangles, frame.view.position, triangles.data, size_of(Triangle_Instance))
 	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
+	// The triangles that the editor hides are left out, and the others close up behind them.
+	visibility := editor.visibility(&s.editor, w)
+	kept := 0
 	for c in chunks {
 		entities := ecs.entities(c.view)
 		for t, i in ecs.column(c.view, render.EXTRACT_TERMS, Triangle) {
-			instances[c.first + i].brightness = t.brightness
-			instances[c.first + i].id = editor.entity_id(entities[i])
+			if !editor.is_visible(visibility, entities[i]) {
+				continue
+			}
+			instance := instances[c.first + i]
+			instance.brightness = t.brightness
+			instance.id = editor.entity_id(entities[i])
+			instances[kept] = instance
+			kept += 1
 		}
 	}
+	count = kept
 	frame.triangles = triangles
 	frame.triangle_count = count
 }

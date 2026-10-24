@@ -214,6 +214,13 @@ public sealed class HostLinkTests : IAsyncDisposable
         var corner = await editor.Next<PickResult>(r => r.Id == 9);
         Assert.Empty(corner.Hits);
         Assert.Equal(0, corner.Depth);
+
+        // A hidden entity is not drawn, so the pick sees through it to the back triangle.
+        editor.Link.Send(new SetHidden([hit.Entity]));
+        editor.Link.Send(new PickRequest(10, target.Width / 2, target.Height / 2, 1, 1));
+        var behind = await editor.Next<PickResult>(r => r.Id == 10);
+        Assert.Equal(0x8c15900f0aab4d79UL, Assert.Single(behind.Hits).SceneId);
+        Assert.InRange(behind.Depth, 1.55f, 1.65f);
     }
 
     [Fact]
