@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="Cinnabar.Editor.Commands/Cinnabar.Editor.Commands.csproj" />
+  <Project Path="Cinnabar.Editor.Tests/Cinnabar.Editor.Tests.csproj" />
   <Project Path="Cinnabar.Editor/Cinnabar.Editor.csproj" />
 </Solution>

@@ -13,6 +13,8 @@ sealed partial class HostProcess : IDisposable
 {
     readonly Process _process;
     readonly SafeFileHandle _job;
+    // Set by Dispose. The process's events can still arrive afterwards, on a thread-pool thread.
+    volatile bool _disposed;
 
     /// <summary>A line of the host's log, without terminal colors. Raised on a thread-pool thread.</summary>
     public event Action<string>? Output;
@@ -26,7 +28,7 @@ sealed partial class HostProcess : IDisposable
         _job = job;
         _process.OutputDataReceived += (_, e) => OnLine(e.Data);
         _process.ErrorDataReceived += (_, e) => OnLine(e.Data);
-        _process.Exited += (_, _) => Exited?.Invoke(_process.ExitCode);
+        _process.Exited += (_, _) => OnExited();
     }
 
     public static HostProcess Start(string hostPath, IEnumerable<string> args, string workingDirectory)
@@ -56,14 +58,33 @@ sealed partial class HostProcess : IDisposable
 
     void OnLine(string? line)
     {
-        if (line != null)
+        if (line != null && !_disposed)
         {
             Output?.Invoke(TerminalColor().Replace(line, ""));
         }
     }
 
+    void OnExited()
+    {
+        int code;
+        try
+        {
+            code = _process.ExitCode;
+        }
+        catch (InvalidOperationException)
+        {
+            // Disposed while this event was on its way: the editor stopped the host on purpose.
+            return;
+        }
+        if (!_disposed)
+        {
+            Exited?.Invoke(code);
+        }
+    }
+
     public void Dispose()
     {
+        _disposed = true;
         _job.Dispose();
         _process.Dispose();
     }

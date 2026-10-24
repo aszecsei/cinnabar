@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- The shell tests use the editor itself, which is a Windows application. -->
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Cinnabar.Editor.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinnabar.Editor.Commands\Cinnabar.Editor.Commands.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor\Cinnabar.Editor.csproj" />
+  </ItemGroup>
+</Project>

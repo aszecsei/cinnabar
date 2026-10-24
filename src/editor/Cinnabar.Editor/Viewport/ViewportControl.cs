@@ -6,14 +6,13 @@ using Avalonia.Rendering.Composition;
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
-/// Shows the host's frames (see docs/editor.md#viewport). On each composition update, it copies the newest finished
-/// frame into a <see cref="ViewportImage"/> and gives that to its surface, scaled to fit with its aspect ratio kept.
+/// Shows the frames of its <see cref="Session"/> (see docs/editor.md#viewport). On each composition update, it copies
+/// the newest finished frame into a <see cref="ViewportImage"/> and gives that to its surface.
 /// </summary>
 public sealed class ViewportControl : Control
 {
     // One image on screen, one queued, and one to copy into.
     const int MaxImages = 3;
-    const long OpenRetryMilliseconds = 100;
 
     readonly Action _update;
     readonly List<ViewportImage> _images = [];
@@ -21,59 +20,32 @@ public sealed class ViewportControl : Control
     CompositionDrawingSurface? _surface;
     CompositionSurfaceVisual? _visual;
     ICompositionGpuInterop? _interop;
-    ViewportDevice? _device;
-    SharedFrames? _frames;
-    string? _sharedName;
-    long _lastOpen;
+    bool _attached;
     bool _updateQueued;
 
-    /// <summary>The LUID of the adapter that composites the window. The host must render on it.</summary>
-    public event Action<ulong>? Ready;
+    public ViewportSession? Session { get; init; }
 
-    /// <summary>The viewport cannot show frames, and why.</summary>
-    public event Action<string>? Failed;
-
-    public string AdapterName => _device?.AdapterName ?? "";
-
-    /// <summary>What the compositor's GPU interop supports, for the status bar.</summary>
-    public string Interop { get; private set; } = "";
-
-    public ulong FrameShown { get; private set; }
-    public ulong FramesPresented { get; private set; }
-    public PixelSize FrameSize => _frames?.Size ?? default;
-
-    public ViewportControl() => _update = Update;
-
-    /// <summary>Shows the frames of the host that renders into the shared target <paramref name="name"/>.</summary>
-    public void Connect(string name)
+    public ViewportControl()
     {
-        Disconnect();
-        _sharedName = name;
-        QueueUpdate();
-    }
-
-    public void Disconnect()
-    {
-        _sharedName = null;
-        _frames?.Dispose();
-        _frames = null;
-        FrameShown = 0;
-        ReleaseImages();
+        _update = Update;
+        ClipToBounds = true;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        _attached = true;
         _ = InitializeAsync();
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        Disconnect();
+        _attached = false;
+        ReleaseImages();
         _surface?.Dispose();
         _surface = null;
-        _device?.Dispose();
-        _device = null;
+        _visual = null;
+        _interop = null;
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -88,81 +60,86 @@ public sealed class ViewportControl : Control
 
     async Task InitializeAsync()
     {
+        if (Session == null)
+        {
+            return;
+        }
         try
         {
-            _compositor = ElementComposition.GetElementVisual(this)!.Compositor;
-            _interop = await _compositor.TryGetCompositionGpuInterop();
-            if (_interop == null)
+            var compositor = ElementComposition.GetElementVisual(this)!.Compositor;
+            var interop = await compositor.TryGetCompositionGpuInterop();
+            if (!_attached)
             {
-                Failed?.Invoke("viewport: the compositor has no GPU interop for its rendering backend");
                 return;
             }
-            Interop = Describe(_interop);
-            if (!_interop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle))
+            if (interop == null)
             {
-                Failed?.Invoke($"viewport: the compositor cannot import D3D11 textures ({Interop})");
+                Session.Fail("viewport: the compositor has no GPU interop for its rendering backend");
                 return;
             }
-            if (_interop.DeviceLuid is not { Length: 8 } luid)
+            var description = Describe(interop);
+            if (!interop.SupportedImageHandleTypes.Contains(KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle))
             {
-                Failed?.Invoke("viewport: the compositor does not report its adapter's LUID");
+                Session.Fail($"viewport: the compositor cannot import D3D11 textures ({description})");
                 return;
             }
-            var adapter = BitConverter.ToUInt64(luid);
-            _device = new ViewportDevice(adapter);
-            _surface = _compositor.CreateDrawingSurface();
-            _visual = _compositor.CreateSurfaceVisual();
+            if (interop.DeviceLuid is not { Length: 8 } luid)
+            {
+                Session.Fail("viewport: the compositor does not report its adapter's LUID");
+                return;
+            }
+            _compositor = compositor;
+            _interop = interop;
+            _surface = compositor.CreateDrawingSurface();
+            _visual = compositor.CreateSurfaceVisual();
             _visual.Surface = _surface;
             ElementComposition.SetElementChildVisual(this, _visual);
             LayoutVisual();
-            Ready?.Invoke(adapter);
+            Session.Attach(BitConverter.ToUInt64(luid), description);
+            QueueUpdate();
         }
         catch (Exception e)
         {
-            Failed?.Invoke($"viewport: {e.Message}");
+            Session.Fail($"viewport: {e.Message}");
         }
     }
 
     void QueueUpdate()
     {
-        if (!_updateQueued && _compositor != null)
+        if (!_updateQueued && _attached && _compositor != null)
         {
             _updateQueued = true;
             _compositor.RequestCompositionUpdate(_update);
         }
     }
 
+    // Runs once per composition frame while the control is attached, so it polls the host's fence at display rate.
     void Update()
     {
         _updateQueued = false;
-        if (_device == null || _sharedName == null)
+        if (!_attached || Session?.Device is not { } device || _surface == null)
         {
             return;
         }
-        if (_frames == null && Environment.TickCount64 - _lastOpen >= OpenRetryMilliseconds)
+        var frames = Session.Poll();
+        // Without a host, the last frame would stay on screen as if the game were frozen.
+        _visual!.Visible = frames != null && Session.FrameShown != 0;
+        if (frames == null)
         {
-            _lastOpen = Environment.TickCount64;
-            try
-            {
-                _frames = SharedFrames.TryOpen(_device, _sharedName);
-            }
-            catch (Exception e)
-            {
-                Failed?.Invoke($"viewport: cannot open {_sharedName}: {e.Message}");
-            }
-            LayoutVisual();
+            ReleaseImages();
         }
-        if (_frames != null)
+        else
         {
-            PresentLatest(_frames, _device);
+            PresentLatest(frames, device);
         }
+        LayoutVisual();
         QueueUpdate();
     }
 
     void PresentLatest(SharedFrames frames, ViewportDevice device)
     {
         var latest = frames.Completed;
-        if (latest == 0 || latest == FrameShown)
+        if (latest == 0 || latest == Session!.FrameShown)
         {
             return;
         }
@@ -181,28 +158,29 @@ public sealed class ViewportControl : Control
         // texture again only two frames later, and the copy is queued now. The editor link's frame acknowledgements
         // will make that a guarantee.
         image.Present(device.Context, frames.Texture(latest), _surface!);
-        FrameShown = latest;
-        FramesPresented++;
+        Session.Presented(latest);
     }
 
     void LayoutVisual()
     {
-        if (_visual == null)
+        if (_visual == null || Session == null)
         {
             return;
         }
         var bounds = Bounds.Size;
-        var frame = FrameSize;
+        var frame = Session.FrameSize;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
             _visual.Size = new Vector(bounds.Width, bounds.Height);
             _visual.Offset = default;
             return;
         }
-        var scale = Math.Min(bounds.Width / frame.Width, bounds.Height / frame.Height);
+        var scale = Session.Scale == ViewportScale.Fit
+            ? Math.Min(bounds.Width / frame.Width, bounds.Height / frame.Height)
+            : 1 / (TopLevel.GetTopLevel(this)?.RenderScaling ?? 1);
         var size = new Vector(frame.Width * scale, frame.Height * scale);
         _visual.Size = size;
-        _visual.Offset = new Vector3D((bounds.Width - size.X) / 2, (bounds.Height - size.Y) / 2, 0);
+        _visual.Offset = new Vector3D(Math.Round((bounds.Width - size.X) / 2), Math.Round((bounds.Height - size.Y) / 2), 0);
     }
 
     void ReleaseImages()

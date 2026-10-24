@@ -1,8 +1,38 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:dock="using:Dock.Avalonia.Themes.Fluent"
              x:Class="Cinnabar.Editor.App"
              RequestedThemeVariant="Dark">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://editor/Icons/Icons.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- Dock's accent is a fixed blue. Its theme derives most brushes from these with StaticResource, so the
+                 derived ones are set here too. -->
+            <SolidColorBrush x:Key="DockApplicationAccentBrushLow" Color="#B8352A" />
+            <SolidColorBrush x:Key="DockApplicationAccentBrushMed" Color="#E34234" />
+            <SolidColorBrush x:Key="DockApplicationAccentBrushHigh" Color="#EC6A5E" />
+            <SolidColorBrush x:Key="DockApplicationAccentBrushIndicator" Color="#E34234" />
+            <SolidColorBrush x:Key="DockTabHoverBackgroundBrush" Color="#33FFFFFF" />
+            <SolidColorBrush x:Key="DockTabActiveBackgroundBrush" Color="#B8352A" />
+            <SolidColorBrush x:Key="DockTabActiveIndicatorBrush" Color="#E34234" />
+            <SolidColorBrush x:Key="DockTabSelectedForegroundBrush" Color="#F0F0F0" />
+            <SolidColorBrush x:Key="DockTabCloseHoverBackgroundBrush" Color="#EC6A5E" />
+            <SolidColorBrush x:Key="DockSplitterHoverBrush" Color="#B8352A" />
+            <SolidColorBrush x:Key="DockSplitterDragBrush" Color="#E34234" />
+            <SolidColorBrush x:Key="DockTargetIndicatorBrush" Color="#E34234" />
+            <SolidColorBrush x:Key="DockChromeButtonDangerHoverBrush" Color="#EC6A5E" />
+        </ResourceDictionary>
+    </Application.Resources>
     <Application.Styles>
-        <FluentTheme />
+        <FluentTheme>
+            <FluentTheme.Palettes>
+                <!-- One accent color: cinnabar. -->
+                <ColorPaletteResources x:Key="Dark" Accent="#E34234" RegionColor="#1B1B1D" />
+            </FluentTheme.Palettes>
+        </FluentTheme>
+        <dock:DockFluentTheme />
+        <StyleInclude Source="avares://editor/Styles.axaml" />
     </Application.Styles>
 </Application>

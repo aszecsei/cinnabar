@@ -22,7 +22,7 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`.
 
 | Project | Responsibility |
 |---|---|
@@ -31,9 +31,9 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 | `Cinnabar.Editor.Document` | Scenes, operations, the undo stack, selection, save, and autosave. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
-| `Cinnabar.Editor.Tests` | Tests for the libraries, including tests against a real host with the null backend. |
+| `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. Later, tests against a real host with the null backend. |
 
-`just editor` builds the solution with `dotnet build`, and `just edit` builds everything and starts the editor.
+`just editor` builds the solution with `dotnet build`, `just edit` builds everything and starts the editor, and `just test` runs the editor's tests with the engine's. Build output goes to `build/dotnet`. The editor's settings are in `%LOCALAPPDATA%\cinnabar\editor`.
 
 ## Document model
 
@@ -139,27 +139,34 @@ The outliner needs every entity, but only a few entities need their field values
 
 ## Shell
 
-- **Docking:** the Dock library for Avalonia. Each user's layout is saved in their editor settings. The default layout is the outliner on the left, the viewport in the middle, the properties on the right, and the console and resource monitor at the bottom.
-- **Status bar:** the selection count, the host's state (connected, reloading, crashed) and the mode.
-- **Theme:** dark, with one accent color. Play mode tints the shell.
+- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties and undo history on the right, and the console, asset browser and resource monitor at the bottom.
+- **One instance of each panel.** Closing a panel takes it out of the layout, and showing it again puts the same panel back in its default dock, so its state survives. Docking can rebuild a panel's view at any time, so a view holds no state: the console's lines are in a `ConsoleLog`, and the viewport's device and frames are in a `ViewportSession`.
+- **The layout file:** the editor saves the layout to `layout.json` when it closes. The file is the editor's own: the tree of splits, tool docks and the document dock, with proportions and panel IDs. Dock's serializer would store Dock's types, and need metadata for each. A panel that floats docks again in its default dock at the next start, and panels cannot be pinned. A layout that has no viewport, or that does not parse, is replaced by the default with a warning in the console.
+- **The viewport is the only document.** It cannot close, float or move into a tool dock.
+- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code) and the mode. The selection count comes with selection.
+- **Theme:** dark, with one accent color, cinnabar (`#E34234`), also in Dock's brushes. Play mode tints the shell. Icons are Fluent UI System Icons (MIT), as path data in `Icons/Icons.axaml`, so the editor depends on no icon package.
+- **Errors:** an exception that no code handles on the UI thread goes to the console, and the editor keeps running. A bug in one panel must not close the editor and lose unsaved work.
 
 ### Ribbon
 
 The editor has its own ribbon control. The Avalonia ribbon libraries are small and not maintained much, and a ribbon that reads the command registry is not much work.
 
 - **The ribbon is data.** A layout gives tabs, groups in each tab, and items in each group. Every item names a command ID. The ribbon has no logic of its own.
-- **Item kinds:** large button, a stack of up to three small buttons, toggle, split button, dropdown, and combo box. A gallery comes later.
-- **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs.
-- **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true.
+- **Item kinds:** large button, a stack of up to three small buttons, split button, dropdown, and combo box. A toggle command shows as a toggle in any of them, with a check in menus. A combo box needs a choice command, which has a list of options. A gallery comes later.
+- **Validation:** `RibbonLayout.Validate` finds unknown commands, unknown categories, repeated tabs and items of the wrong shape. The shell reports them in the console, and a test checks the default ribbon.
+- **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs, with its name over the first tab of each run. The editor's tabs have no categories yet, so no band shows.
+- **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true. A condition is a named context, such as `host.running`, that the editor sets.
 - **Game commands** that the DLL describes can name a tab and a group. They appear in the ribbon, and they come and go with a code reload.
-- Double-clicking a tab collapses the ribbon to its tabs. When the window is too narrow, the ribbon scrolls.
+- Double-clicking a tab, or Ctrl+F1, collapses the ribbon to its tabs, and clicking a tab opens it again. When the window is too narrow, the ribbon scrolls.
 - *Later:* groups that shrink as the window narrows, key tips, and a quick access toolbar.
 
 ### Commands
 
 - A command has an ID such as `edit.undo`, a label, an icon, a default shortcut, a can-execute check and an execute procedure.
 - **Editor commands** are C#. **Game commands** are described by the DLL and run in the host through `Game_API.editor_message`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
-- Shortcuts can be changed in the editor settings. The command palette (Ctrl+Shift+P) searches every command.
+- **Toggles and choices:** a command with a checked state is a toggle. A choice command picks one of a list of options. A command raises `Changed` when it runs, and owners of shared state, such as the host session, invalidate every command, so views update without polling.
+- **Key bindings:** `keybindings.json` in the editor settings is an object from command ID to key gesture, such as `{ "view.stats": "F3" }`. An empty gesture removes a shortcut. When two commands get the same gesture, the first by ID keeps it, and the console says so.
+- **The command palette** (Ctrl+Shift+P) searches every command by label and ID. Every word of the query must match. A label that starts with the query ranks first, then a label with a word that starts with it.
 
 ## Panels
 

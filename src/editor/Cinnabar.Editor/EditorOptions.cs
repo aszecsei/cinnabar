@@ -4,7 +4,7 @@ namespace Cinnabar.Editor;
 /// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;]</c>. Paths are relative to the
 /// working directory, which is also the host's, so <c>just edit</c> runs the editor from the repository root.
 /// </summary>
-sealed record EditorOptions(string HostPath, string GamePath)
+public sealed record EditorOptions(string HostPath, string GamePath)
 {
     public static EditorOptions Parse(IReadOnlyList<string> args)
     {
