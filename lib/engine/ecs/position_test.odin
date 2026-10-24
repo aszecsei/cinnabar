@@ -64,7 +64,8 @@ meters_round_trip :: proc(t: ^testing.T) {
 
 @(test)
 long_steps_convert_exactly :: proc(t: ^testing.T) {
-	// 128 m is 2^31 units, past the range of an i32.
+	// 128 m is 2^31 units, past the range of an i32. Odin dev-2026-08 converted an f32 this large to i64 wrongly,
+	// which moved these positions to the wrong place. dev-2026-10 fixed it.
 	origin: World_Position
 	for meters in ([]f32{128, 129, -129, 1e6, -3e9}) {
 		p := position_offset(origin, {meters, 0, 0})
