@@ -99,17 +99,18 @@ Details: [Core](core.md).
 One frame runs these phases in order:
 
 1. Poll platform events and input.
-2. Run native simulation systems (parallel jobs).
-3. Apply queued structural changes to the world.
-4. Run the script phase (serial): deliver events and resume coroutines.
-5. Apply queued structural changes to the world.
-6. Run late native systems, such as transform propagation (parallel jobs).
-7. Record render command lists.
-8. Drain the job system. This is the hot-reload point.
+2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs), applies their structural changes and propagates transforms.
+3. Run the `Update` systems (parallel jobs).
+4. Apply queued structural changes to the world.
+5. Run the script phase (serial): deliver events and resume coroutines.
+6. Apply queued structural changes to the world.
+7. Run the `Late` systems, then transform propagation (parallel jobs).
+8. Record render command lists. Render extraction interpolates between the last two ticks.
+9. Drain the job system. This is the hot-reload point.
 
 ## World model
 
-All world data lives in a native ECS in `lib/engine`. Native systems run on the job system. Scripts see an object-style API on top of the ECS: entity handles, component access through those handles, and behaviour components that hold script objects.
+All world data lives in a native ECS in `lib/engine/ecs`. Native systems run on the job system, at a fixed tick rate or once per frame. World positions are fixed-point. Scripts see an object-style API on top of the ECS: entity handles, component access through those handles, and behaviour components that hold script objects.
 
 Component types have stable IDs. Cooked scenes, the editor link and scripts all identify component types by these IDs.
 

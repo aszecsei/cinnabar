@@ -13,8 +13,9 @@ import "cinnabar:core/jobs"
 // Engine code itself never imports a backend.
 import null "cinnabar:core/gpu/null"
 
-// The null backend and the job system are singletons, and the test runner runs tests on several threads.
-@(private = "file")
+// The null backend and the job system are singletons, and the test runner runs tests on several threads. Every test
+// in the package that starts either holds this lock.
+@(private)
 backend_lock: sync.Mutex
 
 @(private = "file")

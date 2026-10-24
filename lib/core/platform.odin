@@ -6,6 +6,7 @@ import "core:mem/virtual"
 import "core:os"
 import "core:reflect"
 import "core:strings"
+import "core:sync"
 import "core:time"
 
 import "cinnabar:core/gpu"
@@ -31,6 +32,9 @@ Platform :: struct {
 	// Read once per frame, so the game and the GPU backend agree on it.
 	window_size: [2]i32,
 	disabled_features: gpu.Features,
+	// The game's virtual memory reservations, released at a soft restart.
+	reservations: [dynamic][]byte,
+	reservations_mutex: sync.Mutex,
 	api:         Platform_API,
 }
 
@@ -65,12 +69,16 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 	}
 
 	platform.disabled_features = read_disabled_features()
+	platform.reservations = make([dynamic][]byte)
 
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
 	platform.api = {
 		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
+		memory_reserve               = memory_reserve,
+		memory_commit                = memory_commit,
+		memory_release               = memory_release,
 		time_seconds                 = time_seconds,
 		window_size                  = window_size,
 		set_window_title             = _window_set_title,
@@ -111,6 +119,8 @@ shutdown :: proc() {
 	backend.shutdown()
 	_window_close()
 	jobs.shutdown()
+	release_reservations()
+	delete(platform.reservations)
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
@@ -157,10 +167,14 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, which the old game may have left, and frees all permanent allocations.
+// Game scope and the virtual memory reservations, which the old game may have left, and frees all permanent
+// allocations.
 soft_restart :: proc() {
 	if count := backend.destroy_scope(.Game); count > 0 {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)
+	}
+	if count := release_reservations(); count > 0 {
+		log.debugf("core: released %d memory reservations that the game left", count)
 	}
 	virtual.arena_free_all(&platform.permanent)
 }
@@ -194,4 +208,50 @@ window_size :: proc() -> [2]i32 {
 
 time_seconds :: proc() -> f64 {
 	return time.duration_seconds(time.tick_since(platform.start))
+}
+
+@(private = "file")
+memory_reserve :: proc(size: int) -> rawptr {
+	data, err := virtual.reserve(uint(size))
+	if err != nil {
+		log.errorf("core: cannot reserve %d bytes: %v", size, err)
+		return nil
+	}
+	sync.guard(&platform.reservations_mutex)
+	append(&platform.reservations, data)
+	return raw_data(data)
+}
+
+@(private = "file")
+memory_commit :: proc(ptr: rawptr, size: int) -> bool {
+	if err := virtual.commit(ptr, uint(size)); err != nil {
+		log.errorf("core: cannot commit %d bytes: %v", size, err)
+		return false
+	}
+	return true
+}
+
+@(private = "file")
+memory_release :: proc(ptr: rawptr, size: int) {
+	sync.guard(&platform.reservations_mutex)
+	for r, i in platform.reservations {
+		if raw_data(r) == ptr {
+			assert(len(r) == size, "core: released size differs from the reserved size")
+			virtual.release(ptr, uint(size))
+			unordered_remove(&platform.reservations, i)
+			return
+		}
+	}
+	log.error("core: released memory that was not reserved")
+}
+
+@(private = "file")
+release_reservations :: proc() -> int {
+	sync.guard(&platform.reservations_mutex)
+	count := len(platform.reservations)
+	for r in platform.reservations {
+		virtual.release(raw_data(r), uint(len(r)))
+	}
+	clear(&platform.reservations)
+	return count
 }
