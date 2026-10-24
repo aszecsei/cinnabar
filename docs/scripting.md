@@ -252,7 +252,20 @@ The game runs the script phase with one call, `script.run_phase(r, dt, platform.
   - Each exposed component: `HealthType` for the global `Health`, and `HealthRef` with the fields' types. An enum field is a union of its value names, so a typo is a type error.
   - The game's bindings, with the signature that the game passes to `define`, such as `script.define(r, "Game.frame", procedure, "() -> number")`. A binding without a signature takes and returns `any`.
 - **Behaviours are loosely typed for now.** `Behaviour.define` returns `{ [any]: any }`, so methods can be defined on the class, and `self` and instances are untyped.
-- `luau-lsp` reads the definition file and `.luaurc`, so editors get completion and type errors. `.vscode/settings.json` sets the standard platform and the definition file, and pins the old type solver.
+- `luau-lsp` reads the definition file and `.luaurc`, so editors get completion and type errors. The repository does not keep editor settings, so set it up yourself. It needs the standard platform, the definition file, the old type solver (see below), and no Rojo sourcemap. In VS Code, add this to `.vscode/settings.json`:
+
+  ```jsonc
+  {
+  	"luau-lsp.platform.type": "standard",
+  	"luau-lsp.types.definitionFiles": {
+  		"@cinnabar": "build/script-types/cinnabar.d.luau"
+  	},
+  	"luau-lsp.fflags.override": {
+  		"LuauSolverV2": "false"
+  	},
+  	"luau-lsp.sourcemap.enabled": false
+  }
+  ```
 - **`tools/cook` type checks** each script that it cooks against the same file (see [Content pipeline](content-pipeline.md#scripts)). A type error is a cook error, so the script keeps its old blob, and the running game keeps the previous version. Each file's `--!strict`, `--!nonstrict` or `--!nocheck` applies, and the nearest `.luaurc`'s `languageMode` sets the default, which is nonstrict without one. Without the definition file, as on the first build, the cooker warns and does not type check. The file's hash is in each script's cache key, so the scripts are checked once it exists.
 - **The old type solver.** Under the new solver, `self` in `function Door:update()` gets a type inferred from the method's body, with read-only fields, so `self.phase += 1` is an error, and every behaviour would need annotations. The old solver gives `self` the class's type. The cooker uses the old solver, and the editor setting matches it. Revisit when behaviours get real class types.
 - **The build order:** `just build` builds the host and the game DLL, writes the definitions from the DLL, and then cooks the scripts. The DLL embeds only committed `.meta` files, so it does not wait for the cook.
