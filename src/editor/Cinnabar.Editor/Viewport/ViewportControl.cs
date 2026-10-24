@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
+using Avalonia.Threading;
 
 namespace Cinnabar.Editor.Viewport;
 
@@ -14,8 +15,12 @@ public sealed class ViewportControl : Control
     // One image on screen, one queued, and one to copy into.
     const int MaxImages = 3;
 
+    // Each size that the host renders at is a new generation of its target, so a drag sends only the size it ends at.
+    static readonly TimeSpan ResizeSettle = TimeSpan.FromMilliseconds(120);
+
     readonly Action _update;
     readonly List<ViewportImage> _images = [];
+    readonly DispatcherTimer _resize;
     Compositor? _compositor;
     CompositionDrawingSurface? _surface;
     CompositionSurfaceVisual? _visual;
@@ -29,6 +34,12 @@ public sealed class ViewportControl : Control
     {
         _update = Update;
         ClipToBounds = true;
+        _resize = new DispatcherTimer { Interval = ResizeSettle };
+        _resize.Tick += (_, _) =>
+        {
+            _resize.Stop();
+            RequestSize();
+        };
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -41,6 +52,7 @@ public sealed class ViewportControl : Control
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _attached = false;
+        _resize.Stop();
         ReleaseImages();
         _surface?.Dispose();
         _surface = null;
@@ -55,6 +67,8 @@ public sealed class ViewportControl : Control
         if (change.Property == BoundsProperty)
         {
             LayoutVisual();
+            _resize.Stop();
+            _resize.Start();
         }
     }
 
@@ -96,6 +110,7 @@ public sealed class ViewportControl : Control
             ElementComposition.SetElementChildVisual(this, _visual);
             LayoutVisual();
             Session.Attach(BitConverter.ToUInt64(luid), description);
+            RequestSize();
             QueueUpdate();
         }
         catch (Exception e)
@@ -123,12 +138,19 @@ public sealed class ViewportControl : Control
         }
         var frames = Session.Poll();
         // Without a host, the last frame would stay on screen as if the game were frozen.
-        _visual!.Visible = frames != null && Session.FrameShown != 0;
-        if (frames == null)
+        _visual!.Visible = Session.HasPicture;
+        if (!Session.HasPicture)
         {
             ReleaseImages();
         }
-        else
+        foreach (var image in _images)
+        {
+            if (image.TakeCopied(device.Context) is var copied and > 0)
+            {
+                Session.Copied(copied);
+            }
+        }
+        if (frames != null)
         {
             PresentLatest(frames, device);
         }
@@ -143,6 +165,12 @@ public sealed class ViewportControl : Control
         {
             return;
         }
+        // A resize leaves images of the old size, which the compositor no longer needs once they are ready.
+        foreach (var old in _images.Where(i => i.Ready && i.Size != frames.Size).ToList())
+        {
+            _images.Remove(old);
+            _ = old.DisposeAsync();
+        }
         var image = _images.FirstOrDefault(i => i.Ready && i.Size == frames.Size);
         if (image == null)
         {
@@ -154,11 +182,17 @@ public sealed class ViewportControl : Control
             image = new ViewportImage(device.Device, _interop!, frames.Size);
             _images.Add(image);
         }
-        // The fence says the frame is finished, so the copy reads a complete frame. The host draws into this
-        // texture again only two frames later, and the copy is queued now. The editor link's frame acknowledgements
-        // will make that a guarantee.
-        image.Present(device.Context, frames.Texture(latest), _surface!);
+        // The fence says the frame is finished, so the copy reads a complete frame. The host draws into this texture
+        // again only after the editor acknowledges the copy (see docs/editor.md#viewport).
+        image.Present(device.Context, frames.Texture(latest), latest, _surface!);
         Session.Presented(latest);
+    }
+
+    // The host renders at the viewport's size in physical pixels.
+    void RequestSize()
+    {
+        var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
+        Session?.RequestSize(new PixelSize((int)Math.Round(Bounds.Width * scaling), (int)Math.Round(Bounds.Height * scaling)));
     }
 
     void LayoutVisual()

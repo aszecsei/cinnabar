@@ -4,6 +4,8 @@ using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Viewport;
+using FrameAcknowledged = Cinnabar.Editor.Link.Protocol.FrameAcknowledged;
+using ViewportSize = Cinnabar.Editor.Link.Protocol.ViewportSize;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -51,7 +53,11 @@ public sealed class EditorShell : IDisposable
 
         Viewport.AdapterFound += Host.Start;
         Viewport.Failed += message => Console.Add(LogLevel.Error, message);
+        Viewport.SizeRequested += size => Host.Send(new ViewportSize(size.Width, size.Height));
+        Viewport.FrameCopied += (generation, frame) => Host.Send(new FrameAcknowledged(generation, frame));
         Host.Output += Console.Add;
+        Host.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
+        Host.FrameTargetChanged += target => Viewport.Connect(target.Prefix, target.Generation);
         Host.StateChanged += OnHostStateChanged;
         Layout.Changed += Commands.InvalidateAll;
 
@@ -95,13 +101,14 @@ public sealed class EditorShell : IDisposable
 
     void OnHostStateChanged()
     {
-        if (Host is { State: HostState.Running, SharedName: { } name })
-        {
-            Viewport.Connect(name);
-        }
-        else
+        if (!Host.Linked)
         {
             Viewport.Disconnect();
+        }
+        else if (Viewport.RequestedSize is { Width: > 0, Height: > 0 } size)
+        {
+            // The viewport asked before the host could hear it.
+            Host.Send(new ViewportSize(size.Width, size.Height));
         }
         Context.Set("host.running", Host.State == HostState.Running);
         Commands.InvalidateAll();

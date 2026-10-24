@@ -22,11 +22,12 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, and phase 3 added `Link` and its generator.
 
 | Project | Responsibility |
 |---|---|
-| `Cinnabar.Editor.Link` | The editor link client: the connection, framing, the message codecs, requests and event streams. |
+| `Cinnabar.Editor.Link` | The editor link client: the connection, framing, the wire format, and the messages that the generator writes from the schema. |
+| `Cinnabar.Editor.Link.Generator` | The Roslyn source generator that turns the link's schema into C# records with their readers and writers. |
 | `Cinnabar.Editor.Model` | The type registry and the mirror of the host's world: entities, hierarchy, and the watched field values. It is updated only from link events. |
 | `Cinnabar.Editor.Document` | Scenes, operations, the undo stack, selection, save, and autosave. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
@@ -91,22 +92,24 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 
 The editor link is a message connection between the editor and the host. It uses TCP. Locally it runs over loopback. Later, the same protocol connects to a host on another machine or a console.
 
-- **The host is the server.** It listens on the port that `--link` gives. The editor connects, and connects again after a host restart.
-- **Framing:** each message is a little-endian header (length, kind, request ID) and a payload. A response has the request ID of its request. An event has request ID 0.
-- **Handshake:** the first messages give the protocol version, the game's name and the DLL's layout hash. A version mismatch closes the link with an error that names both versions.
-- **Two handlers.** The host handles the messages that need no game state: input, viewport size, frame acknowledgements, mode changes and stats from `core`. It passes every other message to `Game_API.editor_message`, which `lib/engine/editor` implements. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
-- **When messages run:** a host thread reads the socket and queues messages. The host runs them at the start of the frame, after it polls input and before the fixed ticks, while no system runs. Events are sent at the end of the frame.
-- **One schema:** the messages are Odin structs in `lib/engine/editor`. `host --emit-link-schema <file>` writes a JSON description of them, like `--emit-script-types`, and a C# source generator in `Cinnabar.Editor.Link` reads it. A changed message is therefore a build error in the editor, not a decode error at run time.
+- **The host is the server.** It listens on `127.0.0.1` at the port that `--link` gives, so only the local machine can connect. It serves one editor at a time and refuses a second connection. The editor picks a free port, starts the host with it, and connects, retrying while the host starts. It connects again after a host restart.
+- **Framing:** each message is a 12-byte little-endian header (payload length, kind, flags, request ID) and a payload of at most 64 MiB. A response has the request ID of its request. An event has request ID 0.
+- **Wire format:** numbers are little-endian as they are in memory, a `bool` is one byte, enums are their backing integer, and strings and slices are a `u32` count followed by their bytes or elements. A fixed array has no count, and a struct is its fields in order. A payload that does not decode to exactly one message is refused.
+- **Handshake:** the editor sends `Hello` with its protocol version. The host answers `Welcome` with the game's name and the DLL's layout hash, or `Refused` with both versions, and the editor shows the reason.
+- **Two handlers.** The host handles the messages that need no game state: viewport size and frame acknowledgements now, and input, mode changes and stats later. From phase 4 it passes every other message to `Game_API.editor_message`, which `lib/engine/editor` implements. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
+- **Threads:** in the host, an accept thread waits for the editor, a reader thread queues its messages, and a writer thread sends the outbox. The main thread handles the queued messages between frames, after the reload point, while no job runs. Events of a frame go out at the end of it.
+- **The log:** while an editor is linked, the host's logger sends every line, the game's and the jobs' included, over the link instead of to the host's console. A line carries its level, time, location and text. If more than 16 MiB is waiting to be sent, log lines are dropped and counted. The editor's console also shows the host's own console output, which has the lines before the link and anything that does not go through the logger, such as a crash.
+- **One schema:** the messages are Odin structs in `lib/engine/editor/link`, a package that imports nothing from core or engine, so the host and the game both use it. `just link-schema` runs `host --emit-link-schema`, which writes `build/link/link-schema.json`, and a C# source generator for `Cinnabar.Editor.Link` reads it. A message's kind is its index in the `Message` union, and the protocol version is a hash of the schema, so any change to a message changes the version. A changed message is a build error in the editor, not a decode error at run time. Odin's `Snake_Case` names become `PascalCase` in C#.
 
 ### Messages
 
 | Group | Messages |
 |---|---|
-| Session | Hello, log lines, soft-restart and reload events |
+| Session | `Hello`, `Welcome`, `Refused`, `Log`, `Game_Reloaded` |
 | Types | Component types with their fields, behaviour classes with their fields, game commands |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | Apply operations, load a scene snapshot, refused operations |
-| Viewport | Size, camera, selection, gizmo state, input, pick request and result, frame acknowledgement |
+| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`; later camera, selection, gizmo state, input, pick request and result |
 | Mode | Play, pause, step, stop |
 | Stats | Frame times, memory, counters, script memory by module |
 
@@ -128,8 +131,8 @@ The outliner needs every entity, but only a few entities need their field values
 - **One copy per frame.** Avalonia's Windows backend, ANGLE on D3D11, imports only D3D11 textures with a keyed mutex, in `R8G8B8A8_UNORM`, and it imports no semaphores. Its Vulkan backend imports only Vulkan's own handles. The `Direct3D12FenceNtHandle` semaphore type exists only for macOS. So the editor has its own D3D11 device, which opens the host's textures. On each composition update, if the host's fence shows a newer finished frame, the editor copies that frame into one of three keyed-mutex textures of its own, and gives that texture to the compositor. The fence is read on the CPU, so the copy never waits on the GPU.
 - **Opening the host's objects:** D3D11 cannot open a named shared object, so a D3D12 device on the same adapter turns the names into handles. D3D11 refuses a shared typeless texture from D3D12 unless it allows simultaneous access, so the host's shared textures have the frame target's typed sRGB format.
 - **Same adapter:** shared objects open only on the adapter that created them. The editor reads the LUID of Avalonia's composition adapter and starts the host with `--adapter <luid>`.
-- **Back-pressure:** the editor reads a host texture only while it copies it. It acknowledges each frame that it copies, and the host renders frame k into a shared texture only if k ≤ acknowledged + 2, so it never draws into a texture that the editor is copying. Otherwise `core` gives the frame a scratch target that nothing reads. A slow editor drops frames from the viewport. It never stalls the simulation.
-- **Resizing:** the editor sends the viewport size, in physical pixels. The host makes new shared textures with a generation in their names, `<name>.g<gen>.textureN`, and reports the generation. The editor opens the new set and releases the old one.
+- **Back-pressure:** the editor reads a host texture only while it copies it. After each copy it ends a D3D11 event query, and when the GPU has passed it, the editor sends `Frame_Acknowledged` with the generation and the frame. The host renders frame k into a shared texture only if k ≤ acknowledged + 2, so it never draws into a texture that the editor is still copying. Otherwise `core` gives the frame a scratch target that nothing reads. A slow editor drops frames from the viewport. It never stalls the simulation. The host paces frames from the editor's `Hello` until the link closes.
+- **Resizing:** the viewport sends its size in physical pixels, once it has not changed for 120 ms, so a drag makes one resize. The host renders at that size from a following frame, clamped to 8192 on each side, and sends `Frame_Target` with the new generation's name prefix, number and size. The editor opens the new set and releases the old one, and keeps the last picture on screen until the new generation's first frame. The host sends `Frame_Target` for the first generation right after the `Welcome`.
 - **Camera:** in edit mode, the editor owns the camera. The fly and orbit controls are in C#, and the editor sends the pose (a `World_Position`, a rotation and the projection) each frame. A host restart therefore keeps the view. In play mode, the game's camera is used, unless the editor turns on its free camera.
 - **Input:** while the viewport has focus in play mode, the editor sends keyboard and mouse input, and the host gives it to the game as `core.Input` (see [Core](core.md#input)).
 - **Selection and picking:** the host renders an entity ID buffer in edit mode. A pick request gives a pixel, and the result gives the scene ID and the depth. A box selection gives a rectangle and gets a list. The host draws the selection outline.
@@ -209,7 +212,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
 2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
-3. **Link:** the server in `src/host`, the handshake, the schema and the C# generator, back-pressure, resizing, and the console.
+3. **Link:** the server in `src/host`, the handshake, the schema and the C# generator, back-pressure, resizing, and the console. Tests in `Cinnabar.Editor.Tests` run the real host when it is built: the handshake, a refused version, a resize, and back-pressure measured on the shared fence.
 4. **Read-only world:** types, the entity list and deltas, the outliner, and the properties panel for watched entities.
 5. **Scenes:** the `Name` component, the scene format, the loader, `cook scenes`, and snapshots over the link.
 6. **Editing:** operations, transactions, undo history, save and autosave, and field editors.

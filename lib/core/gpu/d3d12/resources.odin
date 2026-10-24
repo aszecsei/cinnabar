@@ -83,7 +83,8 @@ init_resources :: proc() -> bool {
 
 	dev.resource_heap = create_descriptor_heap(.CBV_SRV_UAV, gpu.RESOURCE_DESCRIPTOR_COUNT, {.SHADER_VISIBLE}) or_return
 	dev.sampler_heap = create_descriptor_heap(.SAMPLER, gpu.MAX_SAMPLERS, {.SHADER_VISIBLE}) or_return
-	dev.rtv_heap = create_descriptor_heap(.RTV, gpu.MAX_TEXTURES + BACK_BUFFER_COUNT, {}) or_return
+	// After the bindless textures: the back buffers, or in shared mode the shared textures and the scratch target.
+	dev.rtv_heap = create_descriptor_heap(.RTV, gpu.MAX_TEXTURES + max(BACK_BUFFER_COUNT, SHARED_RTV_COUNT), {}) or_return
 	dev.dsv_heap = create_descriptor_heap(.DSV, gpu.MAX_TEXTURES, {}) or_return
 	dev.resource_size = dev.device->GetDescriptorHandleIncrementSize(.CBV_SRV_UAV)
 	dev.sampler_size = dev.device->GetDescriptorHandleIncrementSize(.SAMPLER)

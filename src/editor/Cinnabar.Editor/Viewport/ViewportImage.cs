@@ -16,12 +16,17 @@ sealed class ViewportImage : IAsyncDisposable
     readonly ID3D11Texture2D _texture;
     readonly IDXGIKeyedMutex _mutex;
     readonly ICompositionImportedGpuImage _imported;
+    // Signals when the GPU has finished the copy, so the host may draw into its texture again.
+    readonly ID3D11Query _copied;
     Task _lastPresent = Task.CompletedTask;
 
     public PixelSize Size { get; }
 
     /// <summary>True when the compositor is done with the previous frame, so the image can take the next.</summary>
     public bool Ready => _lastPresent.IsCompleted;
+
+    /// <summary>The frame whose copy the GPU may not have finished yet, or 0.</summary>
+    public ulong Copying { get; private set; }
 
     public ViewportImage(ID3D11Device device, ICompositionGpuInterop interop, PixelSize size)
     {
@@ -41,6 +46,7 @@ sealed class ViewportImage : IAsyncDisposable
             MiscFlags = ResourceOptionFlags.SharedKeyedMutex,
         });
         _mutex = _texture.QueryInterface<IDXGIKeyedMutex>();
+        _copied = device.CreateQuery(new QueryDescription(QueryType.Event));
         using var resource = _texture.QueryInterface<IDXGIResource>();
         _imported = interop.ImportImage(
             new PlatformHandle(resource.SharedHandle, KnownPlatformGraphicsExternalImageHandleTypes.D3D11TextureGlobalSharedHandle),
@@ -53,13 +59,28 @@ sealed class ViewportImage : IAsyncDisposable
     }
 
     /// <summary>Copies a frame into the image and gives it to the surface. Call only when <see cref="Ready"/>.</summary>
-    public void Present(ID3D11DeviceContext context, ID3D11Texture2D frame, CompositionDrawingSurface surface)
+    public void Present(ID3D11DeviceContext context, ID3D11Texture2D frame, ulong number, CompositionDrawingSurface surface)
     {
         _mutex.AcquireSync(0, int.MaxValue);
         context.CopyResource(_texture, frame);
+        context.End(_copied);
+        Copying = number;
         context.Flush();
         _mutex.ReleaseSync(1);
         _lastPresent = surface.UpdateWithKeyedMutexAsync(_imported, acquireIndex: 1, releaseIndex: 0);
+    }
+
+    /// <summary>The frame whose copy the GPU has just finished, or 0. It reports each frame once.</summary>
+    public ulong TakeCopied(ID3D11DeviceContext context)
+    {
+        // S_OK once the query's point in the command stream has passed, and S_FALSE before.
+        if (Copying == 0 || context.GetData(_copied, IntPtr.Zero, 0, AsyncGetDataFlags.DoNotFlush).Code != 0)
+        {
+            return 0;
+        }
+        var frame = Copying;
+        Copying = 0;
+        return frame;
     }
 
     public async ValueTask DisposeAsync()
@@ -73,6 +94,7 @@ sealed class ViewportImage : IAsyncDisposable
             // The surface is going away with the image. Nothing waits for this frame.
         }
         await _imported.DisposeAsync();
+        _copied.Dispose();
         _mutex.Dispose();
         _texture.Dispose();
     }

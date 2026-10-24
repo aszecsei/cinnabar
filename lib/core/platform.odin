@@ -33,6 +33,8 @@ Platform :: struct {
 	last_frame:  time.Tick,
 	// Read once per frame, so the game and the GPU backend agree on it.
 	window_size: [2]i32,
+	// In shared mode, the size that the reader asked for, which replaces the hidden window's. Zero until it asks.
+	shared_size: [2]i32,
 	disabled_features: gpu.Features,
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
@@ -146,7 +148,7 @@ platform_api :: proc() -> ^Platform_API {
 // and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 	keep_running = _window_poll()
-	platform.window_size = _window_size()
+	platform.window_size = platform.shared_size if platform.shared_size != {} else _window_size()
 	backend.begin_frame(platform.window_size)
 
 	now := time.tick_now()
@@ -214,6 +216,25 @@ read_disabled_features :: proc() -> (disabled: gpu.Features) {
 	}
 	return
 }
+
+// The largest shared target side. A reader that asks for more gets this.
+MAX_SHARED_SIZE :: 8192
+
+// resize_shared_target sets the size of the shared target from the next frame (see docs/editor.md#viewport). The
+// game sees it as the window size.
+resize_shared_target :: proc(size: [2]i32) {
+	platform.shared_size = {clamp(size.x, 1, MAX_SHARED_SIZE), clamp(size.y, 1, MAX_SHARED_SIZE)}
+}
+
+// shared_target is the shared target's current generation: its object name prefix, in temporary memory, its
+// generation number and its size. It is empty outside shared mode.
+shared_target :: backend.shared_target
+
+// pace_shared_frames turns the reader's back-pressure on or off (see docs/editor.md#viewport).
+pace_shared_frames :: backend.pace_shared_frames
+
+// acknowledge_shared_frame records that the reader has finished with a frame of a generation.
+acknowledge_shared_frame :: backend.acknowledge_shared_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

@@ -84,10 +84,11 @@ open_shared :: proc(name: string) -> bool {
 			continue
 		}
 		state.device = device
-		if open_object(fmt.tprintf("%s.fence", name), d3d.IFence_UUID, (^rawptr)(&state.shared_fence)) {
+		// Only an editor resizes the target, so without one it stays at generation 0.
+		if open_object(fmt.tprintf("%s.g0.fence", name), d3d.IFence_UUID, (^rawptr)(&state.shared_fence)) {
 			ok := true
 			for &texture, t in state.textures {
-				ok &&= open_object(fmt.tprintf("%s.texture%d", name, t), d3d.IResource_UUID, (^rawptr)(&texture))
+				ok &&= open_object(fmt.tprintf("%s.g0.texture%d", name, t), d3d.IResource_UUID, (^rawptr)(&texture))
 			}
 			if ok {
 				desc: d3d.RESOURCE_DESC

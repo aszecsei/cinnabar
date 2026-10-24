@@ -33,7 +33,7 @@ content_root := "samples/" + game + "/content"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -173,8 +173,12 @@ dev-shared name="cinnabar": build viewer
     sleep 2
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
+# Write the editor link's schema, which the editor's source generator reads (see docs/editor.md#editor-link)
+link-schema: host
+    "./{{build_dir}}/host.exe" --emit-link-schema "{{build_dir}}/link/link-schema.json"
+
 # Build the editor (see docs/editor.md#projects)
-editor:
+editor: link-schema
     dotnet build src/editor -nologo -v:quiet
 
 # Build everything and run the game in the editor
@@ -211,8 +215,8 @@ fmt:
 # Testing
 # =================================
 
-test: luau
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+test: luau link-schema
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor

@@ -58,7 +58,8 @@ flowchart TB
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
-| `lib/engine/editor` | Game | The game side of the editor link: link messages, type descriptors, scene snapshots and edit operations. |
+| `lib/engine/editor` | Game | The game side of the editor link: type descriptors, scene snapshots and edit operations. |
+| `lib/engine/editor/link` | Shared | The editor link's messages, their wire format and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |

@@ -86,6 +86,15 @@ frame_target :: proc() -> gpu.Texture {
 	return state.frame_target
 }
 
+// The null backend has no shared target, so these do nothing.
+shared_target :: proc() -> (prefix: string, generation: u32, size: [2]i32) {
+	return
+}
+
+pace_shared_frames :: proc(paced: bool) {}
+
+acknowledge_shared_frame :: proc(generation: u32, frame: u64) {}
+
 begin_frame :: proc(size: [2]i32) {
 	if elapsed := time.tick_since(state.frame_start); elapsed < FRAME_TIME {
 		time.sleep(FRAME_TIME - elapsed)

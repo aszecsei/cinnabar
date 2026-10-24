@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Panels;
 
@@ -47,6 +48,29 @@ public sealed partial class ConsoleLog
     }
 
     public void Clear() => Lines.Clear();
+
+    public static LogLevel Level(Link.Protocol.LogLevel level) => level switch
+    {
+        Link.Protocol.LogLevel.Debug => LogLevel.Debug,
+        Link.Protocol.LogLevel.Info => LogLevel.Info,
+        Link.Protocol.LogLevel.Warning => LogLevel.Warning,
+        _ => LogLevel.Error,
+    };
+
+    /// <summary>A line of the host's log as the host's own console shows it, in local time.</summary>
+    public static string Format(Log log)
+    {
+        var level = log.Level switch
+        {
+            Link.Protocol.LogLevel.Debug => "DEBUG",
+            Link.Protocol.LogLevel.Info => "INFO ",
+            Link.Protocol.LogLevel.Warning => "WARN ",
+            Link.Protocol.LogLevel.Error => "ERROR",
+            _ => "FATAL",
+        };
+        var time = DateTimeOffset.FromUnixTimeMilliseconds(log.Time / 1_000_000).ToLocalTime();
+        return $"[{level}] --- [{time:yyyy-MM-dd HH:mm:ss}] [{log.Location}] {log.Text}";
+    }
 
     [GeneratedRegex(@"^\[(DEBUG|INFO|WARN|ERROR|FATAL) *\]")]
     private static partial Regex LevelPrefix();

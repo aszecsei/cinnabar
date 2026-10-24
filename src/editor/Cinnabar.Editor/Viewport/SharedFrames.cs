@@ -59,7 +59,8 @@ sealed class ViewportDevice : IDisposable
 }
 
 /// <summary>
-/// The host's frames: the named textures <c>&lt;name&gt;.texture0..2</c> and the fence <c>&lt;name&gt;.fence</c> (see
+/// One generation of the host's frames: the named textures <c>&lt;prefix&gt;.texture0..2</c> and the fence
+/// <c>&lt;prefix&gt;.fence</c>, where the prefix comes from the host's <c>Frame_Target</c> message (see
 /// docs/gpu.md#presentation). Fence value v means that texture v % 3 holds frame v, finished.
 /// </summary>
 sealed class SharedFrames : IDisposable
@@ -84,10 +85,10 @@ sealed class SharedFrames : IDisposable
     }
 
     /// <summary>Opens the host's frames, or returns null if the host has not made them yet.</summary>
-    public static SharedFrames? TryOpen(ViewportDevice device, string name)
+    public static SharedFrames? TryOpen(ViewportDevice device, string prefix)
     {
         // The host makes the textures before the fence, so an open fence means the textures exist.
-        using var fenceHandle = device.OpenByName($"{name}.fence");
+        using var fenceHandle = device.OpenByName($"{prefix}.fence");
         if (fenceHandle == null)
         {
             return null;
@@ -96,8 +97,8 @@ sealed class SharedFrames : IDisposable
         var textures = new ID3D11Texture2D[TextureCount];
         for (var i = 0; i < TextureCount; i++)
         {
-            using var handle = device.OpenByName($"{name}.texture{i}")
-                ?? throw new InvalidOperationException($"{name}.fence exists but {name}.texture{i} does not");
+            using var handle = device.OpenByName($"{prefix}.texture{i}")
+                ?? throw new InvalidOperationException($"{prefix}.fence exists but {prefix}.texture{i} does not");
             textures[i] = device.Device.OpenSharedResource1<ID3D11Texture2D>(handle.DangerousGetHandle());
         }
         return new SharedFrames(fence, textures);

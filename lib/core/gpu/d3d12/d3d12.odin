@@ -246,7 +246,7 @@ begin_frame :: proc(size: [2]i32) {
 	reset_scratch_pool(&frame.scratch)
 	collect_releases()
 
-	// In shared mode the window is hidden and the frame target keeps its size.
+	// In shared mode the window is hidden, and the frame target has the size that the reader asks for.
 	dev.recording = dev.shared_mode || (size.x > 0 && size.y > 0)
 	if !dev.recording {
 		time.sleep(MINIMIZED_FRAME_TIME)
@@ -258,7 +258,7 @@ begin_frame :: proc(size: [2]i32) {
 
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	if dev.shared_mode {
-		target.resource, target.rtv = begin_shared_frame()
+		target.resource, target.rtv = begin_shared_frame(size)
 	} else {
 		win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
 		dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()

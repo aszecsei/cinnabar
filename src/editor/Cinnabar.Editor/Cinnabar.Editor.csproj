@@ -25,5 +25,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinnabar.Editor.Commands\Cinnabar.Editor.Commands.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
   </ItemGroup>
 </Project>

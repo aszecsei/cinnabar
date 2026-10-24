@@ -83,7 +83,8 @@ public sealed class MainWindow : Window
         (_hostStatus.Text, _hostDot.Fill) = host.State switch
         {
             HostState.Waiting => ("Host: waiting for the viewport", Brushes.Gray),
-            HostState.Running => ($"Host: running ({host.SharedName})", Brush.Parse("#4caf50")),
+            HostState.Running when host.Linked => ($"Host: running {host.Game}, linked", Brush.Parse("#4caf50")),
+            HostState.Running => ("Host: starting, linking", Brush.Parse("#e8b04a")),
             HostState.Stopped => ("Host: stopped", Brushes.Gray),
             _ => ($"Host: exited with code {host.ExitCode}", Brush.Parse("#f0605a")),
         };
