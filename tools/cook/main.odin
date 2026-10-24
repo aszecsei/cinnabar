@@ -1,7 +1,8 @@
 // tools/cook compiles source assets. See docs/content-pipeline.md#cooking.
 //
 // `cook shaders --dxc <dxc.exe> --include <dir> <dir>` cooks shaders, `cook scripts` cooks scripts (see
-// scripts.odin), and `cook scenes` cooks scenes (see scenes.odin).
+// scripts.odin), `cook scenes` cooks scenes (see scenes.odin), and `cook daemon` cooks both whenever they change (see
+// daemon.odin).
 //
 // Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points to <name>.<stage>.dxil,
 // with the fixed root signature attached, so DXC rejects a shader that does not fit it. A file with [shader("...")]
@@ -17,6 +18,9 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
+import cook_link "cinnabar:engine/asset/cook_link"
+import format "cinnabar:engine/asset/format"
+
 // Changing how the cooker compiles changes this, which invalidates every cached output.
 COOK_VERSION :: "shaders 1"
 SHADER_MODEL :: "6_6"
@@ -30,7 +34,9 @@ Options :: struct {
 
 USAGE :: `usage: cook shaders --dxc <dxc.exe> [--include <dir>]... <shader dir>
        cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...
-       cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...`
+       cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
+       cook --emit-link-schema <file>`
 
 main :: proc() {
 	context.logger = log.create_console_logger(.Info)
@@ -43,14 +49,24 @@ main :: proc() {
 			ok = cook_shaders(options)
 		}
 	case "scripts":
-		options: Script_Options
-		if options, parsed = parse_script_args(os.args[2:]); parsed {
-			ok = cook_scripts(options)
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Script)
 		}
 	case "scenes":
-		options: Script_Options
-		if options, parsed = parse_script_args(os.args[2:]); parsed {
-			ok = cook_scenes(options)
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Scene)
+		}
+	case "daemon":
+		options: Cook_Options
+		if options, parsed = parse_cook_args(os.args[2:], daemon = true); parsed {
+			ok = run_daemon(options)
+		}
+	case "--emit-link-schema":
+		// The editor's source generator reads the cook link's schema (see docs/content-pipeline.md#cook-link).
+		if parsed = len(os.args) == 3; parsed {
+			ok = write_schema(os.args[2])
 		}
 	}
 	if !parsed {
@@ -60,6 +76,46 @@ main :: proc() {
 	if !ok {
 		os.exit(1)
 	}
+}
+
+write_schema :: proc(path: string) -> bool {
+	if err := os.make_directory_all(filepath.dir(path)); err != nil && err != .Exist {
+		log.errorf("cook: %s: %v", path, err)
+		return false
+	}
+	if err := os.write_entire_file(path, transmute([]byte)cook_link.schema(context.temp_allocator)); err != nil {
+		log.errorf("cook: %s: %v", path, err)
+		return false
+	}
+	log.infof("cook: wrote the cook link's schema to %s", path)
+	return true
+}
+
+// cook_batch cooks one kind of asset once, while it holds the cache's lock. While the cook daemon runs, it keeps the
+// dev configuration up to date itself, so a dev cook leaves it to the daemon, and `just build` works while the editor
+// is open.
+cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
+	lock, locked := lock_cache(options.cache)
+	switch locked {
+	case .Locked:
+	case .Held:
+		if options.config == .Dev {
+			log.infof("cook: the cook daemon is running, and keeps %s up to date", config_dir(options))
+			return true
+		}
+		log.errorf("cook: another cook is using %s. Stop the cook daemon (`just watch` or the editor) and cook again.", options.cache)
+		return false
+	case .Failed:
+		return false
+	}
+	defer unlock_cache(&lock)
+	pass := cook(options, {kind})
+	if kind == .Script {
+		log.infof("cook: %d scripts compiled, %d up to date", pass.cooked[kind], pass.current[kind])
+	} else {
+		log.infof("cook: %d scenes cooked, %d up to date", pass.cooked[kind], pass.current[kind])
+	}
+	return pass.ok
 }
 
 parse_args :: proc(args: []string) -> (options: Options, ok: bool) {

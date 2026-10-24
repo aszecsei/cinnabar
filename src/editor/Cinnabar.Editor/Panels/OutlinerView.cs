@@ -16,7 +16,7 @@ namespace Cinnabar.Editor.Panels;
 /// The outliner (see docs/editor.md#outliner): the entity hierarchy as a virtualized list of the visible rows,
 /// indented by depth. A tree control with one item per entity would not scale to a large world. Dragging a row onto
 /// another reparents it, and onto the empty space below the rows makes it a root. A row also drags onto an entity
-/// field in the properties panel. Ctrl and Shift select more than one row. Each row of a scene entity has a toggle that
+/// field in the properties panel, and a script from the content browser drags onto a row to add its behaviour. Ctrl and Shift select more than one row. Each row of a scene entity has a toggle that
 /// hides it in the viewport and one that locks it against picking, which apply to its descendants too.
 /// </summary>
 public sealed class OutlinerView : DockPanel
@@ -261,12 +261,27 @@ public sealed class OutlinerView : DockPanel
         DragDrop.SetAllowDrop(view, true);
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
-            e.DragEffects = CanDrop(e, row.Node.SceneId) ? DragDropEffects.Move : DragDropEffects.None;
+            // A script from the content browser adds its behaviour to the entity.
+            if (ContentBrowserView.Dropped(e) is { } script)
+            {
+                e.DragEffects = _shell.CanAddBehaviour([row.Node.SceneId], script) ? DragDropEffects.Link : DragDropEffects.None;
+            }
+            else
+            {
+                e.DragEffects = CanDrop(e, row.Node.SceneId) ? DragDropEffects.Move : DragDropEffects.None;
+            }
             e.Handled = true;
         });
         view.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            Drop(e, row.Node.SceneId);
+            if (ContentBrowserView.Dropped(e) is { } script)
+            {
+                _shell.AddBehaviour([row.Node.SceneId], script);
+            }
+            else
+            {
+                Drop(e, row.Node.SceneId);
+            }
             e.Handled = true;
         });
         view.ContextMenu = RowMenu(row);

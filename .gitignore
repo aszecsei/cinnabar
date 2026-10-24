@@ -4,3 +4,5 @@ vendor/agility
 vendor/dxc
 *.dxil
 *.dxil.key
+.vscode
+obj/

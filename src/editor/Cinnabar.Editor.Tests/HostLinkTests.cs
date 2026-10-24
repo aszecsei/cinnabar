@@ -330,7 +330,7 @@ public sealed class HostLinkTests : IAsyncDisposable
             }
             try
             {
-                var link = await LinkClient.ConnectAsync(_port, TestContext.Current.CancellationToken);
+                var link = await LinkClient.ConnectAsync(_port, LinkMessages.Read, TestContext.Current.CancellationToken);
                 return new Editor(link);
             }
             catch (SocketException) when (DateTime.UtcNow < deadline)

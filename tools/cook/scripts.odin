@@ -8,10 +8,11 @@ import "core:c"
 import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
-import "core:log"
+import "core:mem"
 import "core:os"
 import "core:path/slashpath"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 
 import "cinnabar:core/luau"
@@ -29,21 +30,9 @@ Script_Config :: enum {
 	Release,
 }
 
-Root :: struct {
-	name: string,
-	// Absolute, with forward slashes.
-	dir:  string,
-}
-
-Script_Options :: struct {
-	cache:       string,
-	config:      Script_Config,
-	roots:       [dynamic]Root,
-	// The definition file to type check against, or "" for none.
-	definitions: string,
-}
-
 Script_Source :: struct {
+	// Its index in the scan's assets.
+	asset:     int,
 	root:      int,
 	// Absolute, with forward slashes.
 	path:      string,
@@ -59,6 +48,10 @@ Script_Source :: struct {
 	native_comment:    bool,
 	// The resolved requires, sorted by path.
 	resolved:  [dynamic]Resolved_Require,
+	// The script cannot cook: it has an error, or it requires a script that has one.
+	failed:    bool,
+	// The class that it defines, if it is a behaviour.
+	behaviour: string,
 }
 
 Resolved_Require :: struct {
@@ -72,131 +65,114 @@ Found_Require :: struct {
 	line: int,
 }
 
-parse_script_args :: proc(args: []string) -> (options: Script_Options, ok: bool) {
-	options.roots = make([dynamic]Root, context.temp_allocator)
-	config_set := false
-	for i := 0; i < len(args); i += 1 {
-		if i + 1 >= len(args) {
-			return
+// cook_scripts cooks the scripts among the assets whose keys changed. A script that fails keeps its old blob, so the
+// running game keeps the last good version, and so does every script that requires it, directly or not. The other
+// scripts still cook. It reports every failure, and returns false if any.
+cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
+	problems := &pass.problems
+	scripts := collect_scripts(assets, problems)
+	// The index learns what each script depends on, whether it cooked, and its behaviour class.
+	defer for s in scripts {
+		a := &assets[s.asset]
+		a.failed = s.failed
+		for r in s.resolved {
+			append(&a.dependencies, r.entry.target)
 		}
-		value := args[i + 1]
-		switch args[i] {
-		case "--cache":
-			options.cache = value
-		case "--definitions":
-			options.definitions = value
-		case "--config":
-			switch value {
-			case "dev":
-				options.config = .Dev
-			case "release":
-				options.config = .Release
-			case:
-				return
-			}
-			config_set = true
-		case "--root":
-			equals := strings.index_byte(value, '=')
-			if equals <= 0 {
-				return
-			}
-			dir, err := os.get_absolute_path(value[equals + 1:], context.temp_allocator)
-			if err != nil {
-				return
-			}
-			append(&options.roots, Root{value[:equals], forward_slashes(dir)})
-		case:
-			return
-		}
-		i += 1
+		a.behaviour = s.behaviour
 	}
-	return options, options.cache != "" && config_set && len(options.roots) > 0
-}
-
-// cook_scripts cooks every script in the roots. It reports every failure, and returns false if any.
-cook_scripts :: proc(options: Script_Options) -> bool {
-	scripts, collected := collect_scripts(options.roots[:])
-	ok := collected
 	by_path := make(map[string]int, len(scripts), context.temp_allocator)
 	for s, i in scripts {
 		by_path[s.path] = i
 	}
 	for &s in scripts {
-		if !find_requires(&s) {
-			ok = false
+		if s.failed || !find_requires(&s, problems) {
+			s.failed = true
 			continue
 		}
-		if !resolve_requires(scripts, by_path, &s) {
-			ok = false
+		if !resolve_requires(scripts, by_path, &s, problems) {
+			s.failed = true
 		}
 	}
-	if !ok || !check_cycles(scripts) {
-		return false
+	check_cycles(scripts, problems)
+	fail_dependents(scripts, problems)
+	ok := true
+	for s in scripts {
+		ok &&= !s.failed
 	}
 
-	out_dir := fmt.tprintf("%s/%s", options.cache, options.config == .Dev ? "dev" : "release")
+	out_dir := config_dir(options)
 	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-		log.errorf("cook: %s: %v", out_dir, err)
+		report_error(problems, out_dir, 0, 0, "%v", err)
 		return false
 	}
+	definitions := definitions_hash(options.definitions)
+	// The type checker and the VM that reads behaviours' fields open on the first script that needs them, so a cook
+	// that finds everything up to date stays quick.
 	checker: Type_Checker
-	if !type_checker_open(&checker, options.definitions, scripts) {
-		return false
-	}
+	checker_open := false
 	defer type_checker_close(&checker)
-	compiled, current := 0, 0
-	// The VM that reads behaviours' fields opens on the first behaviour that needs cooking.
 	vm: Schema_VM
 	defer schema_vm_close(&vm)
 	for &s, index in scripts {
-		key := script_key(options.config, s, dependency_hash(scripts, index) ~ checker.definitions)
-		buffer: [32]u8
-		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
-		if cooked_script_key(output) == key {
-			current += 1
+		if s.failed {
 			continue
 		}
-		// A script with type errors keeps its old blob, so the running game keeps the last good version.
-		if !type_check(&checker, s) {
+		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
+		buffer: [32]u8
+		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
+		if cooked, behaviour := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
+			s.behaviour = behaviour
+			pass.current[.Script] += 1
+			continue
+		}
+		if !checker_open {
+			if !type_checker_open(&checker, options.definitions, scripts, problems) {
+				s.failed = true
+				return false
+			}
+			checker_open = true
+		}
+		if !type_check(&checker, s, problems) {
+			s.failed = true
 			ok = false
 			continue
 		}
 		class_name: string
 		fields: []format.Field_Entry
 		if s.defines_behaviour {
-			if vm.L == nil && !schema_vm_open(&vm, options.config, scripts) {
+			if vm.L == nil && !schema_vm_open(&vm, options.config, scripts, problems) {
+				s.failed = true
 				return false
 			}
 			schema_ok: bool
 			class_name, fields, schema_ok = read_schema(&vm, index)
 			if !schema_ok {
+				s.failed = true
 				ok = false
 				continue
 			}
 		}
-		if !compile_script(options.config, s, key, output, class_name, fields) {
+		if !compile_script(options.config, s, key, output, class_name, fields, problems) {
+			s.failed = true
 			ok = false
 			continue
 		}
-		compiled += 1
+		s.behaviour = class_name
+		pass.cooked[.Script] += 1
 	}
-	log.infof("cook: %d scripts compiled, %d up to date", compiled, current)
 	return ok
 }
 
-// collect_scripts reads every script in the roots with its .meta file, in path order, and checks its settings.
-collect_scripts :: proc(roots: []Root) -> (scripts: []Script_Source, ok: bool) {
-	assets: []Asset_Source
-	assets, ok = collect_assets(roots, SCRIPT_EXTENSION)
+// collect_scripts gives the scripts among the assets, and checks their settings. A script with a bad setting is
+// marked failed.
+collect_scripts :: proc(assets: []Asset_Source, problems: ^Problems) -> []Script_Source {
 	found := make([dynamic]Script_Source, 0, len(assets), context.temp_allocator)
-	for a in assets {
-		if !check_script_settings(a) {
-			ok = false
-			continue
-		}
+	for i in assets_of(assets, .Script) {
+		a := assets[i]
 		append(
 			&found,
 			Script_Source {
+				asset = i,
 				root = a.root,
 				path = a.path,
 				name = a.name,
@@ -205,37 +181,43 @@ collect_scripts :: proc(roots: []Root) -> (scripts: []Script_Source, ok: bool) {
 				source = a.source,
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
+				failed = !check_settings(a, problems),
 			},
 		)
 	}
-	return found[:], ok
+	return found[:]
 }
 
-@(private = "file")
-check_script_settings :: proc(a: Asset_Source) -> bool {
-	for setting in a.meta.settings {
-		switch setting.key {
-		case "native":
-			if setting.value != "true" && setting.value != "false" {
-				log.errorf("cook: %s%s: native must be true or false", a.path, format.META_EXTENSION)
-				return false
+// fail_dependents marks every script that requires a failed script, directly or not, as failed, and says why.
+fail_dependents :: proc(scripts: []Script_Source, problems: ^Problems) {
+	for changed := true; changed; {
+		changed = false
+		for &s in scripts {
+			if s.failed {
+				continue
 			}
-		case:
-			log.warnf("cook: %s%s: unknown setting %q", a.path, format.META_EXTENSION, setting.key)
+			for r in s.resolved {
+				if scripts[r.target].failed {
+					report_error(problems, s.path, 0, 0, "not cooked, because it requires %s, which did not cook", scripts[r.target].name)
+					s.failed = true
+					changed = true
+					break
+				}
+			}
 		}
 	}
-	return true
 }
 
 @(private = "file")
 Find_Context :: struct {
-	ctx:    runtime.Context,
-	script: ^Script_Source,
-	failed: bool,
+	ctx:      runtime.Context,
+	script:   ^Script_Source,
+	problems: ^Problems,
+	failed:   bool,
 }
 
 // find_requires lists the script's require calls. A parse error or a require without a string literal is an error.
-find_requires :: proc(s: ^Script_Source) -> bool {
+find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 	on_require :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
 		f := (^Find_Context)(ud)
 		context = f.ctx
@@ -244,22 +226,22 @@ find_requires :: proc(s: ^Script_Source) -> bool {
 	on_error :: proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.int) {
 		f := (^Find_Context)(ud)
 		context = f.ctx
-		log.errorf("cook: %s:%d: %s", f.script.path, line, string(text[:size]))
+		report_error(f.problems, f.script.path, int(line), 0, "%s", string(text[:size]))
 		f.failed = true
 	}
-	f := Find_Context{ctx = context, script = s}
+	f := Find_Context{ctx = context, script = s, problems = problems}
 	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_behaviour, &s.native_comment)
 	return !f.failed
 }
 
 // resolve_requires resolves each require of a script to a script in the roots, as Luau's require does (see
 // docs/scripting.md#modules-and-require).
-resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^Script_Source) -> bool {
+resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^Script_Source, problems: ^Problems) -> bool {
 	ok := true
 	for r in s.requires {
 		target, message := resolve_require(by_path, s.path, r.path)
 		if message != "" {
-			log.errorf("cook: %s:%d: cannot require %q: %s", s.path, r.line, r.path, message)
+			report_error(problems, s.path, r.line, 0, "cannot require %q: %s", r.path, message)
 			ok = false
 			continue
 		}
@@ -357,8 +339,8 @@ find_alias :: proc(dir, alias: string) -> (target: string, found: bool, message:
 	}
 }
 
-// check_cycles reports each require cycle once.
-check_cycles :: proc(scripts: []Script_Source) -> bool {
+// check_cycles reports each require cycle in each of its scripts, and marks them failed.
+check_cycles :: proc(scripts: []Script_Source, problems: ^Problems) {
 	State :: enum u8 {
 		New,
 		Visiting,
@@ -366,15 +348,14 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 	}
 	states := make([]State, len(scripts), context.temp_allocator)
 	stack := make([dynamic]int, context.temp_allocator)
-	ok := true
-	visit :: proc(scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int, ok: ^bool) {
+	visit :: proc(scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int, problems: ^Problems) {
 		states[i] = .Visiting
 		append(stack, i)
 		for r in scripts[i].resolved {
 			t := r.target
 			switch states[t] {
 			case .New:
-				visit(scripts, states, stack, t, ok)
+				visit(scripts, states, stack, t, problems)
 			case .Visiting:
 				builder := strings.builder_make(context.temp_allocator)
 				start, _ := slice.linear_search(stack[:], t)
@@ -382,8 +363,10 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 					fmt.sbprintf(&builder, "%s -> ", scripts[s].name)
 				}
 				strings.write_string(&builder, scripts[t].name)
-				log.errorf("cook: require cycle: %s", strings.to_string(builder))
-				ok^ = false
+				for s in stack[start:] {
+					report_error(problems, scripts[s].path, 0, 0, "require cycle: %s", strings.to_string(builder))
+					scripts[s].failed = true
+				}
 			case .Done:
 			}
 		}
@@ -392,10 +375,9 @@ check_cycles :: proc(scripts: []Script_Source) -> bool {
 	}
 	for i in 0 ..< len(scripts) {
 		if states[i] == .New {
-			visit(scripts, states, &stack, i, &ok)
+			visit(scripts, states, &stack, i, problems)
 		}
 	}
-	return ok
 }
 
 // script_key covers everything that the blob depends on: the cooker, Luau, the configuration, the source, the
@@ -418,13 +400,44 @@ cooked_script_key :: proc(output: string) -> u64 {
 	return cooked_key(output, .Script, format.script_layout())
 }
 
+// cooked_script reads the key of a cooked script, as cooked_script_key does, and its behaviour class, if any.
+cooked_script :: proc(output: string) -> (key: u64, behaviour: string) {
+	key = cooked_script_key(output)
+	if key == 0 {
+		return
+	}
+	data, err := os.read_entire_file(output, context.temp_allocator)
+	if err != nil {
+		return 0, ""
+	}
+	// The blob's offsets assume the runtime's alignment.
+	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
+	copy(aligned, data)
+	if blob, ok := format.script_view(aligned); ok && .Behaviour in blob.flags {
+		behaviour = format.blob_string(aligned, blob.class_name)
+	}
+	return
+}
+
 // compile_script compiles a script and writes its blob.
-compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string, class_name: string, fields: []format.Field_Entry) -> bool {
+compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string, class_name: string, fields: []format.Field_Entry, problems: ^Problems) -> bool {
 	bytecode := compile_source(config, string(s.source))
 	defer luau.free_bytecode(raw_data(bytecode))
 	// Failed compilation gives a zero byte and the message.
 	if len(bytecode) == 0 || bytecode[0] == 0 {
-		log.errorf("cook: %s%s", s.path, len(bytecode) > 1 ? string(bytecode[1:]) : ": cannot compile")
+		// The message starts with the line, as ":3: ...".
+		message, line := "cannot compile", 0
+		if len(bytecode) > 1 {
+			message = string(bytecode[1:])
+			if rest := strings.trim_prefix(message, ":"); len(rest) < len(message) {
+				if colon := strings.index_byte(rest, ':'); colon > 0 {
+					if n, n_ok := strconv.parse_int(rest[:colon]); n_ok {
+						line, message = n, strings.trim_space(rest[colon + 1:])
+					}
+				}
+			}
+		}
+		report_error(problems, s.path, line, 0, "%s", message)
 		return false
 	}
 	requires := make([]format.Require_Entry, len(s.resolved), context.temp_allocator)

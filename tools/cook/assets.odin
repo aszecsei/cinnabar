@@ -9,99 +9,297 @@ import "core:strings"
 
 import format "cinnabar:engine/asset/format"
 
-// Asset_Source is a source asset with its .meta file.
-Asset_Source :: struct {
-	root:      int,
-	// Absolute, with forward slashes.
-	path:      string,
-	// The root's name and the path relative to the root, such as "game/scripts/hello.luau".
-	name:      string,
-	meta_text: string,
-	meta:      format.Meta,
-	source:    []byte,
+// IMPORTERS gives the extension of each kind of asset that the cooker cooks. Other files in the content roots are not
+// assets.
+IMPORTERS :: [format.Asset_Kind]string {
+	.None   = "",
+	.Script = SCRIPT_EXTENSION,
+	.Scene  = format.SCENE_EXTENSION,
 }
 
-// collect_assets reads every file with the extension in the roots, with its .meta file, in path order. An asset
-// without a .meta file gets a new GUID, and the cooker writes its .meta file. Files and directories whose names
-// start with a dot are skipped.
-collect_assets :: proc(roots: []Root, extension: string) -> (assets: []Asset_Source, ok: bool) {
-	found := make([dynamic]Asset_Source, context.temp_allocator)
-	ok = true
-	for root, root_index in roots {
-		walker := os.walker_create(root.dir)
-		defer os.walker_destroy(&walker)
-		for info in os.walker_walk(&walker) {
-			if strings.has_prefix(info.name, ".") {
-				if info.type == .Directory {
-					os.walker_skip_dir(&walker)
-				}
-				continue
-			}
-			if info.type != .Regular || !strings.has_suffix(info.name, extension) {
-				continue
-			}
-			path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
-			a := Asset_Source {
-				root = root_index,
-				path = path,
-				name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
-			}
-			if !read_asset(&a) {
-				ok = false
-				continue
-			}
-			append(&found, a)
+// Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
+// does not set it. The cooker checks .meta files with it, and the editor shows it (see cook_link.Setting_Info).
+Setting_Info :: struct {
+	key:         string,
+	values:      []string,
+	default:     string,
+	description: string,
+}
+
+SCRIPT_SETTINGS := []Setting_Info {
+	{
+		key = "native",
+		values = {"true", "false"},
+		default = "false",
+		description = "Compile the module to machine code at load, like a --!native comment at the top of the source.",
+	},
+}
+
+// import_settings is the import settings that a kind of asset takes.
+import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
+	#partial switch kind {
+	case .Script:
+		return SCRIPT_SETTINGS
+	}
+	return nil
+}
+
+find_setting :: proc(settings: []Setting_Info, key: string) -> (Setting_Info, bool) {
+	for s in settings {
+		if s.key == key {
+			return s, true
 		}
-		if path, err := os.walker_error(&walker); err != nil {
-			log.errorf("cook: %s: %v", path, err)
+	}
+	return {}, false
+}
+
+// check_settings checks an asset's import settings with its importer. An unknown setting is a warning, and a value
+// that the setting does not take is an error.
+check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
+	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
+	ok := true
+	for setting in a.meta.settings {
+		info, known := find_setting(import_settings(a.kind), setting.key)
+		if !known {
+			report_warning(problems, meta_path, 0, 0, "unknown setting %q", setting.key)
+		} else if !slice.contains(info.values, setting.value) {
+			report_error(problems, meta_path, 0, 0, "%s must be %s", setting.key, strings.join(info.values, " or ", context.temp_allocator))
 			ok = false
 		}
 	}
-	slice.sort_by(found[:], proc(a, b: Asset_Source) -> bool {return a.path < b.path})
-	for i in 1 ..< len(found) {
-		for j in 0 ..< i {
-			if found[i].meta.guid == found[j].meta.guid {
-				log.errorf("cook: %s and %s have the same GUID. Delete the .meta file of the copy.", found[j].path, found[i].path)
+	return ok
+}
+
+Asset_Kinds :: bit_set[format.Asset_Kind]
+
+ALL_KINDS :: Asset_Kinds{.Script, .Scene}
+
+// Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
+// index.
+Asset_Source :: struct {
+	kind:         format.Asset_Kind,
+	root:         int,
+	// Absolute, with forward slashes.
+	path:         string,
+	// The root's name and the path relative to the root, such as "game/scripts/hello.luau".
+	name:         string,
+	meta_text:    string,
+	meta:         format.Meta,
+	source:       []byte,
+	// The cook could not cook it, so it keeps its old blob.
+	failed:       bool,
+	// The assets that it depends on: a script's requires, and the scripts that a scene's behaviours name.
+	dependencies: [dynamic]format.Guid,
+	// For a script that defines a behaviour, the class's name.
+	behaviour:    string,
+}
+
+// Folder is a directory in a root, by the root's index and its path in the root, such as "scripts/ui".
+Folder :: struct {
+	root: int,
+	path: string,
+}
+
+// scan reads every asset in the roots, with its .meta file, in path order, and lists the folders. An asset without a
+// .meta file gets a new GUID, and the cooker writes its .meta file. A .meta file without its asset, as when Explorer
+// or git moves a source without it, is a warning. Files and directories whose names start with a dot are skipped.
+scan :: proc(roots: []Root, problems: ^Problems) -> (assets: []Asset_Source, folders: []Folder, shared: []format.Guid, ok: bool) {
+	found := make([dynamic]Asset_Source, context.temp_allocator)
+	found_folders := make([dynamic]Folder, context.temp_allocator)
+	ok = true
+	for root, root_index in roots {
+		// os.walker leaves the last directory that it reads open, which stops a rename or a delete of it, so the scan
+		// reads each directory itself.
+		todo := make([dynamic]string, context.temp_allocator)
+		append(&todo, root.dir)
+		for len(todo) > 0 {
+			dir := pop(&todo)
+			infos, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+			if err != nil {
+				report_error(problems, forward_slashes(dir), 0, 0, "%v", err)
 				ok = false
+				continue
+			}
+			for info in infos {
+				if strings.has_prefix(info.name, ".") {
+					continue
+				}
+				if info.type == .Directory {
+					append(&todo, info.fullpath)
+				}
+				if !found_entry(root, root_index, info, &found, &found_folders, problems) {
+					ok = false
+				}
 			}
 		}
 	}
-	return found[:], ok
+	return found_assets(found[:], found_folders[:], problems, ok)
+}
+
+// found_assets sorts what the scan found, and leaves out the assets that share a GUID, which it also gives.
+
+// found_entry adds a file or a directory that the scan found to what it found.
+@(private = "file")
+found_entry :: proc(
+	root: Root,
+	root_index: int,
+	info: os.File_Info,
+	found: ^[dynamic]Asset_Source,
+	found_folders: ^[dynamic]Folder,
+	problems: ^Problems,
+) -> bool {
+	if info.type == .Directory {
+		path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
+		append(found_folders, Folder{root_index, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))})
+		return true
+	}
+	kind := kind_of(info.name)
+	if info.type == .Regular && strings.has_suffix(info.name, format.META_EXTENSION) {
+		meta_path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
+		if !os.exists(strings.trim_suffix(meta_path, format.META_EXTENSION)) {
+			report_warning(problems, meta_path, 0, 0, "has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.")
+		}
+		return true
+	}
+	if info.type != .Regular || kind == .None {
+		return true
+	}
+	path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
+	a := Asset_Source {
+		kind = kind,
+		root = root_index,
+		path = path,
+		name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
+		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+	}
+	if !read_asset(&a, problems) {
+		return false
+	}
+	append(found, a)
+	return true
 }
 
 @(private = "file")
-read_asset :: proc(a: ^Asset_Source) -> bool {
+found_assets :: proc(
+	found: []Asset_Source,
+	found_folders: []Folder,
+	problems: ^Problems,
+	scanned: bool,
+) -> (
+	assets: []Asset_Source,
+	folders: []Folder,
+	shared_guids: []format.Guid,
+	ok: bool,
+) {
+	ok = scanned
+	slice.sort_by(found[:], proc(a, b: Asset_Source) -> bool {return a.path < b.path})
+	// Assets that share a GUID would write the same blob, so none of them cooks.
+	first := make(map[format.Guid]int, len(found), context.temp_allocator)
+	shared := make(map[format.Guid]bool, context.temp_allocator)
+	for a, i in found {
+		if j, seen := first[a.meta.guid]; seen {
+			report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
+			shared[a.meta.guid] = true
+			ok = false
+			continue
+		}
+		first[a.meta.guid] = i
+	}
+	unique := make([dynamic]Asset_Source, 0, len(found), context.temp_allocator)
+	for a in found {
+		if !shared[a.meta.guid] {
+			append(&unique, a)
+		}
+	}
+	slice.sort_by(found_folders[:], proc(a, b: Folder) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
+	keys, _ := slice.map_keys(shared, context.temp_allocator)
+	return unique[:], found_folders[:], keys, ok
+}
+
+// kind_of is the kind of asset that a file name is, or .None.
+kind_of :: proc(name: string) -> format.Asset_Kind {
+	for extension, kind in IMPORTERS {
+		if kind != .None && strings.has_suffix(name, extension) {
+			return kind
+		}
+	}
+	return .None
+}
+
+// extension_of is the extension of a kind of asset's sources, such as ".luau".
+extension_of :: proc(kind: format.Asset_Kind) -> string {
+	importers := IMPORTERS
+	return importers[kind]
+}
+
+// assets_of is the indices of the assets of one kind, in the scan's order.
+assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []int {
+	result := make([dynamic]int, context.temp_allocator)
+	for a, i in assets {
+		if a.kind == kind {
+			append(&result, i)
+		}
+	}
+	return result[:]
+}
+
+@(private = "file")
+read_asset :: proc(a: ^Asset_Source, problems: ^Problems) -> bool {
 	source, err := os.read_entire_file(a.path, context.temp_allocator)
 	if err != nil {
-		log.errorf("cook: %s: %v", a.path, err)
+		report_error(problems, a.path, 0, 0, "%v", err)
 		return false
 	}
 	a.source = source
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
 	if meta_err == .Not_Exist {
-		guid: format.Guid
-		crypto.rand_bytes(guid[:])
-		buffer: [32]u8
-		text := fmt.tprintf("# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).\nguid = %s\n", format.guid_format(guid, &buffer))
+		text, _ := new_meta(nil)
 		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
-			log.errorf("cook: %s: %v", meta_path, write_err)
+			report_error(problems, meta_path, 0, 0, "%v", write_err)
 			return false
 		}
 		log.infof("cook: assigned a GUID to %s", a.name)
 		meta_bytes = transmute([]byte)text
 	} else if meta_err != nil {
-		log.errorf("cook: %s: %v", meta_path, meta_err)
+		report_error(problems, meta_path, 0, 0, "%v", meta_err)
 		return false
 	}
 	a.meta_text = string(meta_bytes)
 	meta, meta_ok := format.meta_parse(a.meta_text, context.temp_allocator)
 	if !meta_ok {
-		log.errorf("cook: %s: needs `guid = <32 hex digits>`, and `key = value` lines", meta_path)
+		report_error(problems, meta_path, 0, 0, "needs `guid = <32 hex digits>`, and `key = value` lines")
 		return false
 	}
 	a.meta = meta
 	return true
+}
+
+// new_meta is the text of a .meta file with a new GUID and import settings.
+new_meta :: proc(settings: []format.Meta_Setting) -> (text: string, guid: format.Guid) {
+	crypto.rand_bytes(guid[:])
+	return meta_with(guid, "", settings), guid
+}
+
+// meta_with is the text of a .meta file with a GUID and import settings. It keeps the comments of an old .meta file,
+// or starts with one that says what the file is.
+meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	rest := old_text
+	for line in strings.split_lines_iterator(&rest) {
+		if trimmed := strings.trim_space(line); strings.has_prefix(trimmed, "#") {
+			fmt.sbprintln(&b, trimmed)
+		}
+	}
+	if strings.builder_len(b) == 0 {
+		fmt.sbprintln(&b, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).")
+	}
+	buffer: [32]u8
+	fmt.sbprintfln(&b, "guid = %s", format.guid_format(guid, &buffer))
+	for s in settings {
+		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
+	}
+	return strings.to_string(b)
 }
 
 // cooked_key reads the key of a cooked blob. It returns 0 if there is none, or if the blob is of another kind or from

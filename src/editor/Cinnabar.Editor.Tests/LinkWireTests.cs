@@ -28,7 +28,7 @@ public class LinkWireTests
         Assert.Equal((uint)(frame.Length - LinkFrame.HeaderSize), header.Length);
         Assert.Equal(message.MessageKind, header.Kind);
         Assert.Equal(7u, header.Request);
-        Assert.Equal(message, LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize)));
+        Assert.Equal(message, LinkFrame.Decode(header.Kind, frame.AsSpan(LinkFrame.HeaderSize), LinkMessages.Read));
     }
 
     [Fact]
@@ -47,17 +47,17 @@ public class LinkWireTests
     {
         var payload = LinkFrame.Encode(new Hello(1, "editor")).AsSpan(LinkFrame.HeaderSize).ToArray();
 
-        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, payload[..^1]));
-        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, [.. payload, 0]));
+        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, payload[..^1], LinkMessages.Read));
+        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Hello.KindId, [.. payload, 0], LinkMessages.Read));
     }
 
     [Fact]
     public void AnUnknownKindIsRefused() =>
-        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(200, []));
+        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(200, [], LinkMessages.Read));
 
     [Fact]
     public void AStringLongerThanThePayloadIsRefused() =>
-        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Refused.KindId, [0, 0, 0, 0x40]));
+        Assert.Throws<LinkProtocolException>(() => LinkFrame.Decode(Refused.KindId, [0, 0, 0, 0x40], LinkMessages.Read));
 
     [Fact]
     public void AHeaderWithAHugePayloadIsRefused() =>

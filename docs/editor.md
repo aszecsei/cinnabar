@@ -7,9 +7,10 @@ The model for the layout is a dense production tool: a ribbon of commands, a doc
 ## Processes
 
 - **Host:** the editor starts the host inside a Windows Job Object, so the host exits when the editor exits. If the host crashes, the editor stays up, reports the crash and offers to restart the host (see [Crash recovery](#crash-recovery)).
-- **Cook daemon:** the editor also starts the cook daemon. It asks the daemon to create, move and re-import assets, and the daemon keeps each asset's `.meta` file with it.
+- **Cook daemon:** when its window opens, the editor also starts the cook daemon in a Job Object, with `--link <port>` for the cook link, and the cache, the definition file and the content roots that its own command line names (see [Content pipeline](content-pipeline.md#cook-daemon)). The daemon cooks what changes, sends its index and problems to the editor, and does the content browser's asset operations. It keeps each asset's `.meta` file with it. The Restart Cook Daemon command starts it again. `ChildProcess` in `Cinnabar.Editor.Content` runs both children in their Job Objects.
 - **Standalone:** `host.exe` also runs without the editor, in its own window.
 - **Arguments:** the editor starts the host with `--shared <name>` for the viewport (see [GPU](gpu.md#presentation)), `--link <port>` for the editor link, and `--adapter <luid>` (see [Viewport](#viewport)).
+- **The editor's command line:** `--host`, `--game` and `--scene`, and for the cook daemon `--cook <cook.exe>`, `--cache <dir>`, `--definitions <file>` and `--root <name>=<dir>`, which can repeat. Each has the repository's default, and `just edit` passes them all.
 
 ## UI framework
 
@@ -22,14 +23,15 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, phase 4 added `Model`, phase 5 added `Document`, and phase 7 added `Tools`.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, phase 4 added `Model`, phase 5 added `Document`, phase 7 added `Tools`, and phase 10 adds `Content`.
 
 | Project | Responsibility |
 |---|---|
-| `Cinnabar.Editor.Link` | The editor link client: the connection, framing, the wire format, and the messages that the generator writes from the schema. |
-| `Cinnabar.Editor.Link.Generator` | The Roslyn source generator that turns the link's schema into C# records with their readers and writers. |
+| `Cinnabar.Editor.Link` | The link client: the connection, framing, the wire format, and the messages that the generator writes from the editor link's and the cook link's schemas. |
+| `Cinnabar.Editor.Link.Generator` | The Roslyn source generator that turns each link's schema into C# records with their readers and writers, each link in its own namespace. |
 | `Cinnabar.Editor.Model` | The type registry and the mirror of the host's world: entities, hierarchy, and the watched field values. It is updated only from link events. |
 | `Cinnabar.Editor.Document` | Scenes: the scene file's reader and writer, the snapshot that the host loads, operations, the undo stack, save, and autosave. |
+| `Cinnabar.Editor.Content` | The cook daemon's process and its cook link, the mirror of the daemon's asset index, and the asset operations. It is updated only from cook link events. |
 | `Cinnabar.Editor.Tools` | The viewport's tools: the editor camera, the gizmo's hit test and drag math, snapping, and the pose edits that a drag makes. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
@@ -126,7 +128,7 @@ The editor link is a message connection between the editor and the host. It uses
 - **Two handlers.** The host handles the messages that need no game state: the handshake, the viewport's size, frame acknowledgements and input, and it sends its own stats. The game handles the mode, because only it knows what its frame runs. It passes every other message, still encoded, to `Game_API.editor_poll`, once per frame between frames, with the connection (0 while no editor is linked). The game decodes them with its own copy of `lib/engine/editor/link`, and appends its own messages to a buffer that the host owns, which the host then queues. The game cannot write to the outbox directly: it logs while it polls, and the logger takes the outbox's lock. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
 - **Threads:** in the host, an accept thread waits for the editor, a reader thread queues its messages, and a writer thread sends the outbox. The main thread handles the queued messages between frames, after the reload point, while no job runs. Events of a frame go out at the end of it.
 - **The log:** while an editor is linked, the host's logger sends every line, the game's and the jobs' included, over the link instead of to the host's console. A line carries its level, time, location and text. If more than 16 MiB is waiting to be sent, log lines are dropped and counted. The editor's console also shows the host's own console output, which has the lines before the link and anything that does not go through the logger, such as a crash.
-- **One schema:** the messages are Odin structs in `lib/engine/editor/link`, a package that imports nothing from core or engine, so the host and the game both use it. `just link-schema` runs `host --emit-link-schema`, which writes `build/link/link-schema.json`, and a C# source generator for `Cinnabar.Editor.Link` reads it. A message's kind is its index in the `Message` union, and the protocol version is a hash of the schema, so any change to a message changes the version. A changed message is a build error in the editor, not a decode error at run time. Odin's `Snake_Case` names become `PascalCase` in C#.
+- **One schema:** the messages are Odin structs in `lib/engine/editor/link`, a package that imports nothing from core or engine, so the host and the game both use it. The framing, the wire format and the schema writer are in `lib/engine/wire`, which the cook link shares (see [Content pipeline](content-pipeline.md#cook-link)). `just link-schema` runs `host --emit-link-schema`, which writes `build/link/link-schema.json`, and `cook --emit-link-schema`, which writes `build/link/cook-schema.json`, and a C# source generator for `Cinnabar.Editor.Link` reads both. A message's kind is its index in the `Message` union, and the protocol version is a hash of the schema, so any change to a message changes the version. A changed message is a build error in the editor, not a decode error at run time. Odin's `Snake_Case` names become `PascalCase` in C#.
 
 ### Messages
 
@@ -181,11 +183,11 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 
 ## Shell
 
-- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties and undo history on the right, and the console, asset browser and resource monitor at the bottom.
+- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties and undo history on the right, and the console, content browser and resource monitor at the bottom.
 - **One instance of each panel.** Closing a panel takes it out of the layout, and showing it again puts the same panel back in its default dock, so its state survives. Docking can rebuild a panel's view at any time, so a view holds no state: the console's lines are in a `ConsoleLog`, and the viewport's device and frames are in a `ViewportSession`.
 - **The layout file:** the editor saves the layout to `layout.json` when it closes. The file is the editor's own: the tree of splits, tool docks and the document dock, with proportions and panel IDs. Dock's serializer would store Dock's types, and need metadata for each. A panel that floats docks again in its default dock at the next start, and panels cannot be pinned. A layout that has no viewport, or that does not parse, is replaced by the default with a warning in the console.
 - **The viewport is the only document.** It cannot close, float or move into a tool dock.
-- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code), the scene's file, the entity count, the selection, and the mode.
+- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code), the cook daemon's state (starting, watching, stopped, exited with its code), the scene's file, the entity count, the selection, and the mode.
 - **Theme:** dark, with one accent color, cinnabar (`#E34234`), also in Dock's brushes. Play mode tints the shell. Icons are Fluent UI System Icons (MIT), as path data in `Icons/Icons.axaml`, so the editor depends on no icon package.
 - **Errors:** an exception that no code handles on the UI thread goes to the console, and the editor keeps running. A bug in one panel must not close the editor and lose unsaved work.
 
@@ -224,9 +226,9 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 | Outliner | The entity hierarchy, with a filter, visibility and lock toggles, drag to reparent, and multi-select |
 | Properties | The components and behaviours of the selection |
 | Viewport | The frames, the overlays, the gizmo and the camera |
-| Asset Browser | The content roots, through the cook daemon |
+| Content Browser | The content roots' folders and assets, from the cook daemon's index, with each asset's cook status |
 | Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
-| Console | The host's and the cooker's log, with filters by level and source |
+| Console | The host's and the cook daemon's log |
 | Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
 
 ### Outliner
@@ -246,14 +248,14 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind. A component with no fields the editor can show, such as a tag, is a chip with its name. The components that the header shows (`Parent`, `Name`, `Inactive`, `Scene_Entity`) and `Behaviours` are not groups.
 - **Editing:** a field edits when the document has its component or behaviour. A number, a string or an axis is a box that sets the field on Enter or when it loses focus, and puts the value back on Escape. Dragging a number's name, or an axis's colored marker, changes it in one undo entry, ten times as fast with Shift and a tenth with Ctrl. A `bool` is a check box, an enum a choice of its names, and an entity reference takes a drop from the outliner and has a button that clears it. A rotation edits as Euler angles, so an edit of one angle keeps the others as they show. A position edits in meters, with m, km, Mm or Gm, and the other axes keep their raw values exactly. A box that has focus keeps what the user types while the host's values arrive.
 - **What does not edit:** fields with `editor:"read"`, a child's `Transform`, which propagation writes from its `Local_Transform`, `Previous_Transform`, which the world writes, and entities that the game spawned.
-- **The header** edits the name and, with the Active badge, the active state. Each group has a button that removes its component or behaviour, and Add Component offers the registered types that the entity lacks. A `Transform` or a `Local_Transform` starts as the identity. Adding a behaviour comes with the asset browser, which lists the scripts.
+- **The header** edits the name and, with the Active badge, the active state. Each group has a button that removes its component or behaviour, and Add Component offers the registered types that the entity lacks. A `Transform` or a `Local_Transform` starts as the identity. Add Behaviour offers the scripts that define a behaviour, from the content browser's index, and a script that defines one also drags from the content browser onto the panel.
 - A component that the document has and the game does not is a group with its values as the file writes them. The scene keeps it, and the group can remove it.
 - The panel builds its controls when the entity, its components or its behaviours change. When only values change, it updates their text, so it keeps its expanders and scroll position while values change twenty times a second. A collapsed group stays collapsed across selections.
 - An entity reference, such as `Parent` or an entity field, is a link that selects that entity.
 - **Reset:** a field that the scene sets shows a reset button, which removes it from the scene. With prefabs, the default is the prefab's value.
 - **Multi-select:** the panel shows the components that every selected entity has, without the behaviours. A field whose values differ shows "—", and setting it, dragging it or resetting it makes one operation for each entity, in one undo entry; an axis edit keeps each entity's own other axes. Removing a component removes it from each, Add Component adds to each that lacks it, and the Active badge sets all. The fields edit only when the document has every selected entity.
 - **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
-- An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference shows the asset's name, and accepts a drag from the asset browser.
+- An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference shows the asset's name, and accepts a drag from the content browser.
 
 ### Resource monitor
 
@@ -261,15 +263,29 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - **The game** sends `Game_Stats` as often: the entities, the archetypes, the behaviour instances, the script VM's bytes, and each loaded module's part of them (see [Scripting](scripting.md#embedding)).
 - **The panel** shows a minute of frame times as a graph, the longest frame of each interval faint behind the average, with a line at 16.7 ms; the host's memory and resources; the world; and the modules by memory, the largest first. It keeps a minute of samples, and forgets them when the link closes.
 
-### Asset browser
+### Content browser
 
-- The editor never writes a `.meta` file. It asks the cook daemon to create, move, rename and re-import assets, so each asset keeps its GUID (see [Content pipeline](content-pipeline.md#identity)).
-- Until the cook daemon exists, the asset browser is read-only.
+- **The index is the daemon's.** `AssetIndex` in `Cinnabar.Editor.Content` mirrors the daemon's `Asset_Snapshot` and `Asset_Delta` events, as `WorldModel` mirrors the game's world. The editor never scans the content roots itself.
+- **Layout:** the roots and their folders on the left, as a virtualized list of the visible rows like the outliner's, the selected folder's assets in the middle, with the folder's path over them, and the details of the asset that was selected first on the right. Several assets can be selected. The panel docks at the bottom, where it is wide and short, so the details are a column. Roots start expanded. Each asset shows an icon for its kind, its name, its behaviour's class, and a mark when it failed or has errors or warnings. Over the assets, the daemon's state or its last cook: what it cooked, in how long, and how many assets failed. Problems that belong to no asset, such as a broken definition file, show over the panel. *Thumbnails come later, as a cook output.*
+- **Search** shows the assets of every folder whose name or behaviour class has every word of the query. A `kind:` word, such as `kind:script`, filters by kind.
+- **Details:** the selected asset's path, GUID, status, behaviour, import settings, the assets that it depends on and those that use it, as links that select them, and its problems. Clicking a problem opens its file in the script editor at its line. Each import setting that the asset's importer takes has an editor: a check box for a setting of true or false, and a list of its values otherwise, with the setting's description as its tooltip. A change goes to the daemon.
+- **Problems** are in the daemon's log, which the console shows, with their file and line. An asset with problems shows them in its tooltip too.
+- **Opening:** double-clicking a scene opens it, and asks first to save unsaved changes. Double-clicking a script opens it in the script editor. An asset's menu also shows it in Explorer, and copies its GUID or its path.
+- **The script editor** is `"scriptEditor"` in `settings.json` in the editor's settings: an array of the program and its arguments, in which `{file}` and `{line}` stand for the script's path and a line, such as `["code", "-g", "{file}:{line}"]`, the default. The editor runs it through `cmd /c`, as VS Code's `code` is a batch file.
+- **Dragging:** a script that defines a behaviour drags onto an entity in the outliner, or onto the properties panel, which adds the behaviour to each selected entity that lacks it, in one undo entry. Assets drag onto a folder in the content browser, which moves them there. A drag of a selected asset takes the whole selection. *Later:* an asset drags onto an asset reference field.
+- **Operations:** the editor never writes a `.meta` file. Each operation sends its message to the daemon, which does it, and awaits the answer (see [Content pipeline](content-pipeline.md#asset-operations)). The commands are New Script, New Behaviour, New Scene and New Folder, which ask for a name and make it in the content browser's folder, and Rename Asset (F2), Duplicate Asset (Ctrl+D), Delete Asset (Delete) and Re-import, which act on the selected assets. They are in the command palette and the content browser's menus. Their keys work while the content browser has focus, because the same keys act on entities elsewhere. A folder's menu also renames and deletes it. Delete shows the assets that use what it takes, which will fail to cook, and confirms. When the daemon refuses an operation, the editor shows its reason, and the console has it. Without the cook link, the operations are disabled.
+- **No undo:** asset operations change the project, not the scene, so they are not on the undo stack. The Recycle Bin has what a delete takes.
+- **Missing scripts:** a delete does not change the scenes that use what it takes. A behaviour whose script is no longer in the content shows in the properties panel as a missing script, with its GUID and the values that the scene keeps, and a button that removes it. Restoring the script from the Recycle Bin brings the behaviour back. A behaviour that the scene names and the game did not attach shows the same way.
+- **The open scene follows its file:** when a move or a rename takes the open scene's file, the document takes the new path, and so does its autosave.
+- **Saving scenes:** the editor writes a scene's text, the one content file that it writes. A new scene in a root gets its `.meta` file at the daemon's next pass.
+- **Without the daemon:** while the cook link is down, the content browser keeps its last index, dimmed.
+- **Panel ID:** the panel is `contentBrowser`. A saved layout from before phase 10 names it `assetBrowser`, and the editor reads that as the new ID.
 
 ## Crash recovery
 
 - **Host crash:** the document is in the editor, so nothing is lost. The editor reports the crash with the end of the host's log, and restarts the host. The link connects again, the editor sends the snapshot, and the camera and the selection stay.
 - **Editor crash:** the editor saves each dirty scene to `build/editor/autosave/` every 30 s, and when a transaction ends if 30 s have passed. An autosave is named for its scene's file and a hash of its full path. When a scene opens and its autosave is newer than its file, the editor offers to restore it. Restoring makes the scene dirty, because its file lacks the changes. Saving the scene, undoing back to its file, choosing not to save it, or discarding the offer deletes the autosave.
+- **Cook daemon crash:** the editor reports it in the console and starts the daemon again, which scans the roots and sends a new snapshot. A daemon that exits less than 10 s after it starts, as when another cook holds the cache, is not started again, so the editor does not start it over and over. The status bar shows its exit code, and Restart Cook Daemon starts it.
 - **Code reload:** the host sends the types again. **Soft restart:** the host also sends a restart event, and the editor sends the snapshot again (see [Document model](#document-model)).
 
 ## Implementation phases
@@ -283,7 +299,9 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 7. **Viewport tools:** the editor camera, the ID buffer and picking, the selection outline, gizmos and snapping.
 8. **Modes:** play, pause, step and stop, and input forwarding.
 9. **Resource monitor and game commands:** the host's and the game's stats, script memory by module, and the game's commands in the ribbon.
-10. **Later:** the asset browser (with the cook daemon) and prefabs, each its own design.
+10. **Content browser:** after the cook daemon's first phase (see [Content pipeline](content-pipeline.md#implementation-phases)), `Cinnabar.Editor.Content`, the cook link and its schema in the generator, the daemon's log and problems in the console, and the read-only content browser: the index, search, opening scenes and scripts, and dragging a script to add a behaviour.
+11. **Asset operations:** create from a template, folders, rename, move, duplicate, delete with its dependents, import settings, and re-import.
+12. **Later:** prefabs, which are their own design.
 
 ## Deferred
 

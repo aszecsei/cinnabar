@@ -3,26 +3,26 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
-namespace Cinnabar.Editor.Host;
+namespace Cinnabar.Editor.Content;
 
 /// <summary>
-/// <c>host.exe</c> as a child process (see docs/editor.md#processes). The host runs in a Job Object that kills it when
-/// the job's handle closes, so it exits with the editor even when the editor crashes.
+/// A child process of the editor, such as <c>host.exe</c> or the cook daemon (see docs/editor.md#processes). It runs in
+/// a Job Object that kills it when the job's handle closes, so it exits with the editor even when the editor crashes.
 /// </summary>
-sealed partial class HostProcess : IDisposable
+public sealed partial class ChildProcess : IDisposable
 {
     readonly Process _process;
     readonly SafeFileHandle _job;
     // Set by Dispose. The process's events can still arrive afterwards, on a thread-pool thread.
     volatile bool _disposed;
 
-    /// <summary>A line of the host's log, without terminal colors. Raised on a thread-pool thread.</summary>
+    /// <summary>A line of the process's output, without terminal colors. Raised on a thread-pool thread.</summary>
     public event Action<string>? Output;
 
-    /// <summary>The host's exit code. Raised on a thread-pool thread.</summary>
+    /// <summary>The process's exit code. Raised on a thread-pool thread.</summary>
     public event Action<int>? Exited;
 
-    HostProcess(Process process, SafeFileHandle job)
+    ChildProcess(Process process, SafeFileHandle job)
     {
         _process = process;
         _job = job;
@@ -31,10 +31,10 @@ sealed partial class HostProcess : IDisposable
         _process.Exited += (_, _) => OnExited();
     }
 
-    public static HostProcess Start(string hostPath, IEnumerable<string> args, string workingDirectory)
+    public static ChildProcess Start(string path, IEnumerable<string> args, string workingDirectory)
     {
         var job = CreateKillOnCloseJob();
-        var info = new ProcessStartInfo(hostPath, args)
+        var info = new ProcessStartInfo(path, args)
         {
             WorkingDirectory = workingDirectory,
             UseShellExecute = false,
@@ -43,9 +43,9 @@ sealed partial class HostProcess : IDisposable
             RedirectStandardError = true,
         };
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
-        var host = new HostProcess(process, job);
+        var child = new ChildProcess(process, job);
         process.Start();
-        // The host starts no processes of its own, so nothing escapes the job before this.
+        // The editor's children start no processes of their own, so nothing escapes the job before this.
         if (!AssignProcessToJobObject(job, process.SafeHandle))
         {
             process.Kill();
@@ -53,7 +53,7 @@ sealed partial class HostProcess : IDisposable
         }
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-        return host;
+        return child;
     }
 
     void OnLine(string? line)
@@ -73,7 +73,7 @@ sealed partial class HostProcess : IDisposable
         }
         catch (InvalidOperationException)
         {
-            // Disposed while this event was on its way: the editor stopped the host on purpose.
+            // Disposed while this event was on its way: the editor stopped the process on purpose.
             return;
         }
         if (!_disposed)

@@ -66,7 +66,7 @@ public sealed class ShellTests : IDisposable
         string saved;
         using (var shell = NewShell())
         {
-            shell.Layout.Close("assetBrowser");
+            shell.Layout.Close("contentBrowser");
             shell.Layout.Close("undoHistory");
             shell.SaveLayout();
             saved = shell.Layout.Save().ToJson();
@@ -76,8 +76,20 @@ public sealed class ShellTests : IDisposable
 
         Assert.Empty(Problems(restored));
         Assert.Equal(saved, restored.Layout.Save().ToJson());
-        Assert.False(restored.Layout.IsOpen("assetBrowser"));
+        Assert.False(restored.Layout.IsOpen("contentBrowser"));
         Assert.True(restored.Layout.IsOpen("console"));
+    }
+
+    [Fact]
+    public void ALayoutOfAnEarlierEditorKeepsARenamedPanel()
+    {
+        using var shell = NewShell();
+        var json = shell.Layout.Save().ToJson().Replace("\"contentBrowser\"", "\"assetBrowser\"");
+        Assert.Contains("assetBrowser", json);
+
+        Assert.True(shell.Layout.Restore(Docking.LayoutFile.FromJson(json)!));
+
+        Assert.True(shell.Layout.IsOpen("contentBrowser"));
     }
 
     [Fact]
@@ -109,7 +121,7 @@ public sealed class ShellTests : IDisposable
         Assert.True(shell.Layout.IsOpen("properties"));
         // A floating panel docks again in its default dock.
         Assert.True(shell.Layout.IsOpen("console"));
-        Assert.False(shell.Layout.IsOpen("assetBrowser"));
+        Assert.False(shell.Layout.IsOpen("contentBrowser"));
     }
 
     [Fact]

@@ -33,7 +33,7 @@ content_root := "samples/" + game + "/content"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -134,6 +134,11 @@ scripts config="dev": cook
 scenes config="dev": cook
     "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
 
+# Run the cook daemon, which cooks the game's scripts and scenes into build/cache/dev whenever they change, until it is
+# stopped. A running game swaps the new blobs (see docs/content-pipeline.md#cook-daemon).
+watch: cook
+    "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" --root game="{{content_root}}"
+
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
@@ -177,9 +182,11 @@ dev-shared name="cinnabar": build viewer
     sleep 2
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
-# Write the editor link's schema, which the editor's source generator reads (see docs/editor.md#editor-link)
-link-schema: host
+# Write the editor link's and the cook link's schemas, which the editor's source generator reads (see
+# docs/editor.md#editor-link)
+link-schema: host cook
     "./{{build_dir}}/host.exe" --emit-link-schema "{{build_dir}}/link/link-schema.json"
+    "./{{build_dir}}/cook.exe" --emit-link-schema "{{build_dir}}/link/cook-schema.json"
 
 # Build the editor (see docs/editor.md#projects)
 editor: link-schema
@@ -187,7 +194,8 @@ editor: link-schema
 
 # Build everything and run the game in the editor
 edit: build editor
-    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene"
+    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene" \
+        --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" --root game="{{content_root}}"
 
 # Build the statically linked release executable
 release: agility-runtime shaders luau script-types (scripts "release") (scenes "release")
@@ -221,7 +229,7 @@ fmt:
 
 # lib/engine/editor embeds its compiled shaders, so its tests need them.
 test: luau link-schema shaders
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor

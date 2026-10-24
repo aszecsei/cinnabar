@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Commands.Ribbon;
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Host;
@@ -60,6 +61,8 @@ public sealed partial class EditorShell : IDisposable
     {
         Settings = settings;
         Host = new HostSession(options);
+        Cook = new CookSession(options.Cook, Assets);
+        WireCook();
         Autosave = new Autosave(options.AutosaveDirectory);
         Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport, () => new ViewportView(this)));
         RestoreLayout();
@@ -148,15 +151,11 @@ public sealed partial class EditorShell : IDisposable
 
     IEnumerable<PanelTool> CreatePanels()
     {
-        PanelTool Empty(string id, string title, string icon, string dock, string message) =>
-            new(id, title, icon, dock, () => new EmptyPanelView(message));
-
         yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(this));
         yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
-        yield return Empty("assetBrowser", "Asset Browser", "assets", EditorLayout.BottomDock,
-            "The content roots appear here once the cook daemon runs.");
+        yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));
         yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats));
     }
 
@@ -208,6 +207,7 @@ public sealed partial class EditorShell : IDisposable
     public void Dispose()
     {
         Host.Dispose();
+        Cook.Dispose();
         Viewport.Dispose();
     }
 }

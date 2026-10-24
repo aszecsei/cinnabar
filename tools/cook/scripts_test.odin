@@ -85,7 +85,7 @@ remove_tree :: proc(tree: Tree) {
 }
 
 @(private)
-tree_options :: proc(tree: Tree) -> Script_Options {
+tree_options :: proc(tree: Tree) -> Cook_Options {
 	roots := make([dynamic]Root, context.temp_allocator)
 	append(&roots, Root{"game", fmt.tprintf("%s/content", tree.dir)})
 	return {cache = fmt.tprintf("%s/cache", tree.dir), config = .Dev, roots = roots}
@@ -171,7 +171,10 @@ local b = require('@game/b')
 local c = [[require("./long")]]
 return function() return require("./inner") end`,
 	)
-	testing.expect(t, find_requires(&s))
+	problems := Problems {
+		log = true,
+	}
+	testing.expect(t, find_requires(&s, &problems))
 	testing.expect_value(t, len(s.requires), 3)
 	if len(s.requires) == 3 {
 		testing.expect_value(t, s.requires[0], Found_Require{"./a", 2})
@@ -187,14 +190,14 @@ return function() return require("./inner") end`,
 		source   = transmute([]byte)string("local name = './a'\nreturn require(name)"),
 		requires = make([dynamic]Found_Require, context.temp_allocator),
 	}
-	testing.expect(t, !find_requires(&dynamic_require))
+	testing.expect(t, !find_requires(&dynamic_require, &problems))
 	expect_error(t, &errors, "dynamic.luau:2: require takes one string literal")
 	broken := Script_Source {
 		path     = "broken.luau",
 		source   = transmute([]byte)string("local = 1"),
 		requires = make([dynamic]Found_Require, context.temp_allocator),
 	}
-	testing.expect(t, !find_requires(&broken))
+	testing.expect(t, !find_requires(&broken, &problems))
 	expect_error(t, &errors, "broken.luau:1:")
 }
 
@@ -212,7 +215,7 @@ a_content_root_cooks_with_aliases :: proc(t: ^testing.T) {
 	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
-	testing.expect(t, cook_scripts(options))
+	testing.expect(t, cook(options, {.Script}).ok)
 
 	main := tree_blob(t, tree, tree_guid(t, tree, "main.luau"))
 	blob, ok := format.script_view(main)
@@ -229,7 +232,7 @@ a_content_root_cooks_with_aliases :: proc(t: ^testing.T) {
 	// A second cook finds everything up to date and keeps the GUIDs.
 	key := blob.header.key
 	guid := tree_guid(t, tree, "main.luau")
-	testing.expect(t, cook_scripts(options))
+	testing.expect(t, cook(options, {.Script}).ok)
 	testing.expect_value(t, tree_guid(t, tree, "main.luau"), guid)
 	testing.expect_value(t, cooked_script_key(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(guid))), key)
 }
@@ -258,7 +261,7 @@ require_cycles_are_errors :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(tree_options(tree)))
+	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
 	expect_error(t, &errors, "require cycle: game/a.luau -> game/b.luau -> game/a.luau")
 }
 
@@ -270,8 +273,8 @@ copied_meta_files_are_errors :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(tree_options(tree)))
-	expect_error(t, &errors, "have the same GUID")
+	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
+	expect_error(t, &errors, "has the same GUID as")
 }
 
 @(test)
@@ -281,7 +284,7 @@ missing_modules_are_errors :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(tree_options(tree)))
+	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
 	expect_error(t, &errors, `a.luau:1: cannot require "./nothing": no module at`)
 }
 
@@ -308,7 +311,7 @@ return Door`},
 	)
 	defer remove_tree(tree)
 	options := tree_options(tree)
-	testing.expect(t, cook_scripts(options))
+	testing.expect(t, cook(options, {.Script}).ok)
 
 	data := tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
 	blob, ok := format.script_view(data)
@@ -336,7 +339,7 @@ return Door`},
 
 	// A field default that comes from a dependency changes with it.
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/defaults.luau", tree.dir), transmute([]byte)string("return {speed = 9}")) == nil)
-	testing.expect(t, cook_scripts(options))
+	testing.expect(t, cook(options, {.Script}).ok)
 	data = tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
 	blob, _ = format.script_view(data)
 	fields = format.script_fields(data, blob)
@@ -356,7 +359,7 @@ a_behaviour_top_level_that_calls_the_engine_is_an_error :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(tree_options(tree)))
+	testing.expect(t, !cook(tree_options(tree), {.Script}).ok)
 	expect_error(t, &errors, "eager.luau: a behaviour script's top level runs when it is cooked")
 	expect_error(t, &errors, "game/eager.luau:1: World is not available when the cooker reads a behaviour's fields")
 	expect_error(t, &errors, "the top level ran for more than 2 seconds")
@@ -372,7 +375,7 @@ end
 `
 
 @(private)
-typed_options :: proc(t: ^testing.T, tree: Tree, definitions := TEST_DEFINITIONS) -> Script_Options {
+typed_options :: proc(t: ^testing.T, tree: Tree, definitions := TEST_DEFINITIONS) -> Cook_Options {
 	options := tree_options(tree)
 	options.definitions = fmt.tprintf("%s/types.d.luau", tree.dir)
 	testing.expect(t, os.write_entire_file(options.definitions, transmute([]byte)definitions) == nil)
@@ -391,7 +394,7 @@ native_scripts_are_flagged :: proc(t: ^testing.T) {
 		},
 	)
 	defer remove_tree(tree)
-	testing.expect(t, cook_scripts(tree_options(tree)))
+	testing.expect(t, cook(tree_options(tree), {.Script}).ok)
 	Case :: struct {
 		name:   string,
 		native: bool,
@@ -419,7 +422,7 @@ type_errors_fail_the_cook :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	testing.expect(t, !cook(typed_options(t, tree), {.Script}).ok)
 	expect_error(t, &errors, "a.luau:2:")
 	expect_error(t, &errors, "Expected this to be 'number', but got 'boolean'")
 	// Types flow through require.
@@ -445,7 +448,7 @@ luaurc_sets_the_default_mode :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	testing.expect(t, !cook(typed_options(t, tree), {.Script}).ok)
 	testing.expect_value(t, len(errors.messages), 1)
 	expect_error(t, &errors, "checked.luau:2:")
 }
@@ -456,12 +459,12 @@ without_definitions_the_cook_does_not_type_check :: proc(t: ^testing.T) {
 	defer remove_tree(tree)
 	options := tree_options(tree)
 	options.definitions = fmt.tprintf("%s/missing.d.luau", tree.dir)
-	testing.expect(t, cook_scripts(options))
+	testing.expect(t, cook(options, {.Script}).ok)
 	// The definition file's hash is in the key, so the script is checked once the file exists.
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(typed_options(t, tree)))
+	testing.expect(t, !cook(typed_options(t, tree), {.Script}).ok)
 	expect_error(t, &errors, "a.luau:2:")
 }
 
@@ -472,6 +475,6 @@ a_broken_definition_file_fails_the_cook :: proc(t: ^testing.T) {
 	errors: Errors
 	context.logger = capture_errors(&errors)
 	defer release_errors(&errors)
-	testing.expect(t, !cook_scripts(typed_options(t, tree, "declare World: {")))
+	testing.expect(t, !cook(typed_options(t, tree, "declare World: {"), {.Script}).ok)
 	expect_error(t, &errors, "is not a valid definition file")
 }

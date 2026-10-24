@@ -47,6 +47,18 @@ public sealed class PropertiesView : ScrollViewer
         _selection = shell.Selection;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        // A script that defines a behaviour drags in from the content browser, and adds it to the selected entities.
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, (_, e) =>
+            e.DragEffects = ContentBrowserView.Dropped(e) is { } script && _shell.CanAddBehaviour(SelectedSceneIds(), script)
+                ? DragDropEffects.Link : DragDropEffects.None);
+        AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (ContentBrowserView.Dropped(e) is { } script)
+            {
+                _shell.AddBehaviour(SelectedSceneIds(), script);
+            }
+        });
         AttachedToVisualTree += (_, _) =>
         {
             _selection.Changed += OnSelectionChanged;
@@ -56,6 +68,7 @@ public sealed class PropertiesView : ScrollViewer
             _shell.SceneChanged += OnSceneChanged;
             _shell.ProblemsChanged += Rebuild;
             _shell.ModeChanged += Rebuild;
+            _shell.Assets.Changed += OnSceneChanged;
             Rebuild();
         };
         DetachedFromVisualTree += (_, _) =>
@@ -67,10 +80,18 @@ public sealed class PropertiesView : ScrollViewer
             _shell.SceneChanged -= OnSceneChanged;
             _shell.ProblemsChanged -= Rebuild;
             _shell.ModeChanged -= Rebuild;
+            _shell.Assets.Changed -= OnSceneChanged;
         };
     }
 
+    // A script that the content does not have: deleted, or moved outside the editor without its .meta file. The game
+    // keeps a module that it has loaded, so its behaviour stays in the world until the game restarts. Without the cook
+    // link, the index may be old, so no script is missing.
+    bool ScriptMissing(string script) => _shell.Assets.Linked && _shell.Assets.Find(script) == null;
+
     void OnSelectionChanged(IReadOnlyList<ulong> old, IReadOnlyList<ulong> entities) => Rebuild();
+
+    IEnumerable<ulong> SelectedSceneIds() => _selection.Entities.Select(e => _world.Find(e)?.SceneId ?? 0).Where(id => id != 0);
 
     void OnValuesChanged(ulong entity)
     {
@@ -87,7 +108,8 @@ public sealed class PropertiesView : ScrollViewer
         ShowValues();
     }
 
-    // An edit can add a component to the document or set a field, which changes what the panel offers.
+    // An edit can add a component to the document or set a field, and the content can lose or regain a script, which
+    // changes what the panel offers.
     void OnSceneChanged()
     {
         if (Structure() != _structure)
@@ -147,12 +169,19 @@ public sealed class PropertiesView : ScrollViewer
             _content.Children.Add(Group(title, fields,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
         }
+        var attached = new HashSet<string>();
         foreach (var behaviour in _world.Values(node.Handle)?.Behaviours ?? [])
         {
             var title = FieldValues.Humanize(behaviour.Class);
             var owner = "behaviour:" + behaviour.Class;
             var script = Convert.ToHexStringLower(behaviour.Script);
             var inDocument = document?.Behaviours.Find(b => b.Script == script);
+            attached.Add(script);
+            if (ScriptMissing(script))
+            {
+                _content.Children.Add(Unattached(document, script, inDocument, title));
+                continue;
+            }
             var fields = behaviour.Fields.Select(f => new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), false,
                 inDocument != null ? FieldEditor.ForBehaviour(_shell, document!.Id, script, f) : null,
                 inDocument != null ? () => inDocument.Fields.Any(x => x.Name == f.Name) : null,
@@ -162,6 +191,10 @@ public sealed class PropertiesView : ScrollViewer
         }
         if (document != null)
         {
+            foreach (var missing in document.Behaviours.Where(b => !attached.Contains(b.Script)))
+            {
+                _content.Children.Add(Unattached(document, missing.Script, missing, null));
+            }
             foreach (var missing in document.Components.Where(c => !node.Components.Contains(c.Id) && !Derived.Contains(c.Id)))
             {
                 _content.Children.Add(Kept(document, missing));
@@ -174,6 +207,7 @@ public sealed class PropertiesView : ScrollViewer
         if (document != null)
         {
             _content.Children.Add(AddComponentButton(node, document));
+            _content.Children.Add(AddBehaviourButton(document));
         }
         ShowValues();
     }
@@ -243,8 +277,9 @@ public sealed class PropertiesView : ScrollViewer
         var inDocument = document == null
             ? "-"
             : $"{string.Join(",", document.Components.Select(c => c.Id))}|{string.Join(",", document.Behaviours.Select(b => b.Script))}";
+        var scripts = behaviours.Select(b => Convert.ToHexStringLower(b.Script)).Concat(document?.Behaviours.Select(b => b.Script) ?? []);
         return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|" +
-            $"{_shell.ProblemsOf(node.SceneId).Count}|" +
+            $"{_shell.ProblemsOf(node.SceneId).Count}|{string.Join(",", scripts.Where(ScriptMissing))}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
     }
@@ -555,6 +590,38 @@ public sealed class PropertiesView : ScrollViewer
             remove: () => _shell.Edit($"Remove {title}", new RemoveComponent(document.Id, component.Id)));
     }
 
+    // A behaviour that the scene names and the game does not run as it is: its script is gone from the content, or the
+    // game did not attach it. The scene keeps it, with its values, so restoring the script brings it back.
+    Control Unattached(SceneEntity? document, string script, SceneBehaviour? behaviour, string? worldTitle)
+    {
+        var missing = ScriptMissing(script);
+        var asset = _shell.Assets.Find(script);
+        var title = asset is { Behaviour: not "" } ? FieldValues.Humanize(asset.Behaviour) : worldTitle ?? "Missing Script";
+        var text = missing
+            ? $"Its script, {script}, is not in the content: it was deleted, or moved without its .meta file. Restore it, or remove the behaviour. A running game keeps it until the host restarts."
+            : "The game did not attach it. The console says why.";
+        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Classes = { "fields" } };
+        var fields = behaviour?.Fields ?? [];
+        for (var i = 0; i < fields.Count; i++)
+        {
+            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
+            var name = new TextBlock { Text = FieldValues.Humanize(fields[i].Name), Classes = { "field-name" } };
+            var value = new TextBlock { Text = SceneFile.FormatValue(fields[i].Value), Classes = { "dim" }, TextTrimming = TextTrimming.CharacterEllipsis };
+            Grid.SetRow(name, i);
+            Grid.SetRow(value, i);
+            Grid.SetColumn(value, 1);
+            rows.Children.Add(name);
+            rows.Children.Add(value);
+        }
+        var content = new StackPanel
+        {
+            Spacing = 4,
+            Children = { new TextBlock { Text = text, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap }, rows },
+        };
+        return Expander(title, content, missing ? "Missing script" : "Not in game", disabled: true,
+            remove: document != null && behaviour != null ? () => _shell.Edit($"Remove {title}", new RemoveBehaviour(document.Id, script)) : null);
+    }
+
     Control Expander(string title, Control content, string? badge, bool disabled, Action? remove)
     {
         var header = new DockPanel();
@@ -612,6 +679,38 @@ public sealed class PropertiesView : ScrollViewer
             HorizontalContentAlignment = HorizontalAlignment.Center,
             Classes = { "add-component" },
             IsEnabled = menu.Items.Count > 0,
+        };
+    }
+
+    // The scripts that define a behaviour and that the entity lacks, from the cook daemon's index, in a menu that is
+    // filled when it opens, so it has the scripts of the latest cook.
+    Control AddBehaviourButton(SceneEntity document)
+    {
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            foreach (var script in _shell.Assets.Behaviours.Where(a => !document.Behaviours.Any(b => b.Script == a.Guid)))
+            {
+                var item = new MenuItem { Header = FieldValues.Humanize(script.Behaviour) };
+                ToolTip.SetTip(item, $"{script.Root}/{script.Path}");
+                var guid = script.Guid;
+                item.Click += (_, _) => _shell.AddBehaviour([document.Id], guid);
+                menu.Items.Add(item);
+            }
+            if (menu.Items.Count == 0)
+            {
+                var why = _shell.Assets.Roots.Count == 0 ? "The cook daemon lists the scripts once it runs" : "No other script defines a behaviour";
+                menu.Items.Add(new MenuItem { Header = why, IsEnabled = false });
+            }
+        };
+        return new Button
+        {
+            Content = "Add Behaviour",
+            Flyout = menu,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Classes = { "add-component" },
         };
     }
 

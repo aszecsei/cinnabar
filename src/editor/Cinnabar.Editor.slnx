@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="Cinnabar.Editor.Commands/Cinnabar.Editor.Commands.csproj" />
+  <Project Path="Cinnabar.Editor.Content/Cinnabar.Editor.Content.csproj" />
   <Project Path="Cinnabar.Editor.Document/Cinnabar.Editor.Document.csproj" />
   <Project Path="Cinnabar.Editor.Link.Generator/Cinnabar.Editor.Link.Generator.csproj" />
   <Project Path="Cinnabar.Editor.Link/Cinnabar.Editor.Link.csproj" />

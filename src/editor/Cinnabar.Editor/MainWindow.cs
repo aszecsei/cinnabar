@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
@@ -20,11 +21,13 @@ public sealed class MainWindow : Window
 {
     readonly EditorShell _shell;
     readonly TextBlock _hostStatus = new();
+    readonly TextBlock _cookStatus = new();
     readonly TextBlock _worldStatus = new();
     readonly TextBlock _sceneStatus = new();
     readonly TextBlock _modeStatus = new() { Text = "Edit" };
     Border? _status;
     readonly Ellipse _hostDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
+    readonly Ellipse _cookDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
     // The autosave is due at most every 30 s, so a check every few seconds is close enough.
     readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
     // Set once the user has answered about unsaved changes, so the second Close goes through.
@@ -59,8 +62,13 @@ public sealed class MainWindow : Window
         var palette = new CommandPalette(views);
         shell.PaletteRequested += palette.Open;
         shell.OpenSceneRequested += () => _ = PickScene();
+        shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
+        shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.RenameRequested += item => _ = AskRename(item);
+        shell.DeleteRequested += items => _ = ConfirmDelete(items);
+        shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -79,6 +87,8 @@ public sealed class MainWindow : Window
 
         shell.Host.StateChanged += UpdateHostStatus;
         UpdateHostStatus();
+        shell.Cook.StateChanged += UpdateCookStatus;
+        UpdateCookStatus();
         shell.World.EntitiesChanged += UpdateWorldStatus;
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
         shell.ModeChanged += UpdateModeStatus;
@@ -87,6 +97,7 @@ public sealed class MainWindow : Window
         // The command line's scene opened before the window could ask about its autosave.
         Opened += (_, _) =>
         {
+            shell.StartCook();
             if (shell.PendingRestore != null)
             {
                 _ = OfferRestore();
@@ -156,6 +167,77 @@ public sealed class MainWindow : Window
         }
     }
 
+    async Task AskNewAsset(Link.Cook.AssetTemplate? template)
+    {
+        if (_shell.ContentFolder is not { } folder)
+        {
+            return;
+        }
+        var (title, what) = template switch
+        {
+            Link.Cook.AssetTemplate.Script => ("New Script", "script"),
+            Link.Cook.AssetTemplate.Behaviour => ("New Behaviour", "behaviour, whose class is named for its file,"),
+            Link.Cook.AssetTemplate.Scene => ("New Scene", "scene"),
+            _ => ("New Folder", "folder"),
+        };
+        var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";
+        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.NewName(template), "Create");
+        if (name != null)
+        {
+            await _shell.Create(template, name);
+        }
+    }
+
+    async Task AskRename(Shell.ContentItem item)
+    {
+        string current;
+        if (item.Guid is { } guid && _shell.Assets.Find(guid) is { } asset)
+        {
+            current = System.IO.Path.GetFileNameWithoutExtension(asset.Path);
+        }
+        else if (item.Folder is { Path: not "" } folder)
+        {
+            current = folder.Name;
+        }
+        else
+        {
+            return;
+        }
+        var name = await Dialogs.AskName(this, "Rename", $"Rename {current}. Its .meta file goes with it, so it keeps its GUID.", current, "Rename");
+        if (name != null && name != current)
+        {
+            await _shell.Rename(item, name);
+        }
+    }
+
+    async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
+    {
+        var (deleted, users) = _shell.DeleteEffects(items);
+        var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)
+            .OfType<string>().ToList();
+        if (names.Count == 0)
+        {
+            return;
+        }
+        var what = names.Count == 1 ? names[0] : $"{names.Count} items";
+        var message = $"Send {what} to the Recycle Bin";
+        message += deleted.Count > 0 && items.Any(i => i.Folder != null) ? $", with the {deleted.Count} {(deleted.Count == 1 ? "asset" : "assets")} in it?" : "?";
+        if (users.Count > 0)
+        {
+            const int Shown = 8;
+            var list = string.Join("\n", users.Take(Shown).Select(u => $"    {u.Root}/{u.Path}"));
+            if (users.Count > Shown)
+            {
+                list += $"\n    and {users.Count - Shown} more";
+            }
+            message += $"\n\nThese use it, and will fail to cook until they no longer do:\n{list}";
+        }
+        if (await Dialogs.Ask(this, "Delete", message, "Delete", "Cancel") == "Delete")
+        {
+            await _shell.Delete(items);
+        }
+    }
+
     async Task PickSaveAs()
     {
         if (_shell.Scene is not { } scene)
@@ -179,7 +261,12 @@ public sealed class MainWindow : Window
     Control StatusBar()
     {
         var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { _sceneStatus, _worldStatus, _modeStatus } };
-        var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _hostDot, _hostStatus } };
+        var left = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 6,
+            Children = { _hostDot, _hostStatus, new Border { Width = 10 }, _cookDot, _cookStatus },
+        };
         var bar = new DockPanel { Children = { right, left } };
         DockPanel.SetDock(right, DockSide.Right);
         _status = new Border { Classes = { "status" }, Child = bar };
@@ -202,6 +289,14 @@ public sealed class MainWindow : Window
                 : null,
         });
         if (files.Count == 1 && files[0].TryGetLocalPath() is { } path)
+        {
+            _shell.OpenScene(path);
+        }
+    }
+
+    async Task OpenSceneFile(string path)
+    {
+        if (await ConfirmDiscard("opening another scene"))
         {
             _shell.OpenScene(path);
         }
@@ -239,6 +334,18 @@ public sealed class MainWindow : Window
         };
         _status?.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
         _status?.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);
+    }
+
+    void UpdateCookStatus()
+    {
+        var cook = _shell.Cook;
+        (_cookStatus.Text, _cookDot.Fill) = cook.State switch
+        {
+            CookState.Linked => ("Cook: watching", Brush.Parse("#4caf50")),
+            CookState.Starting => ("Cook: starting, linking", Brush.Parse("#e8b04a")),
+            CookState.Stopped => ("Cook: stopped", Brushes.Gray),
+            _ => ($"Cook: exited with code {cook.ExitCode}", Brush.Parse("#f0605a")),
+        };
     }
 
     void UpdateHostStatus()

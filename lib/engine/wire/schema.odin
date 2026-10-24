@@ -1,20 +1,20 @@
-package link
+package wire
 
 import "base:runtime"
 import "core:fmt"
 import "core:hash"
 import "core:strings"
 
-// schema describes every message as JSON, for the editor's C# source generator (see docs/editor.md#editor-link).
-// Its version is the protocol version.
-schema :: proc(allocator := context.allocator) -> string {
-	body := schema_body(context.temp_allocator)
-	return fmt.aprintf("{{\n  \"version\": \"%016x\",\n%s}}\n", protocol_version(), body, allocator = allocator)
+// schema describes every message of a link's union as JSON, for the editor's C# source generator (see
+// docs/editor.md#editor-link). Its version is the protocol version.
+schema :: proc(messages: typeid, allocator := context.allocator) -> string {
+	body := schema_body(messages, context.temp_allocator)
+	return fmt.aprintf("{{\n  \"version\": \"%016x\",\n%s}}\n", protocol_version(messages), body, allocator = allocator)
 }
 
 // protocol_version is a hash of the schema, so any change to a message changes it.
-protocol_version :: proc() -> u64 {
-	return hash.fnv64a(transmute([]byte)schema_body(context.temp_allocator))
+protocol_version :: proc(messages: typeid) -> u64 {
+	return hash.fnv64a(transmute([]byte)schema_body(messages, context.temp_allocator))
 }
 
 @(private = "file")
@@ -26,13 +26,13 @@ Schema_Writer :: struct {
 }
 
 @(private = "file")
-schema_body :: proc(allocator: runtime.Allocator) -> string {
+schema_body :: proc(messages: typeid, allocator: runtime.Allocator) -> string {
 	w := Schema_Writer {
 		b       = strings.builder_make(allocator),
 		structs = make([dynamic]^runtime.Type_Info, context.temp_allocator),
 		enums   = make([dynamic]^runtime.Type_Info, context.temp_allocator),
 	}
-	info := runtime.type_info_base(type_info_of(Message)).variant.(runtime.Type_Info_Union)
+	info := runtime.type_info_base(type_info_of(messages)).variant.(runtime.Type_Info_Union)
 	strings.write_string(&w.b, "  \"messages\": [\n")
 	for variant, i in info.variants {
 		write_struct(&w, variant, i + 1)
@@ -62,7 +62,7 @@ schema_body :: proc(allocator: runtime.Allocator) -> string {
 write_struct :: proc(w: ^Schema_Writer, ti: ^runtime.Type_Info, kind: int) {
 	info, is_struct := runtime.type_info_base(ti).variant.(runtime.Type_Info_Struct)
 	if !is_struct {
-		panic("link: a message must be a struct")
+		panic("wire: a message must be a struct")
 	}
 	fmt.sbprintf(&w.b, "    {{")
 	if kind > 0 {
@@ -90,12 +90,12 @@ type_string :: proc(w: ^Schema_Writer, ti: ^runtime.Type_Info) -> string {
 		return fmt.tprintf("f%d", base.size * 8)
 	case runtime.Type_Info_Boolean:
 		if base.size != 1 {
-			panic("link: only bool is supported, not b16, b32 or b64")
+			panic("wire: only bool is supported, not b16, b32 or b64")
 		}
 		return "bool"
 	case runtime.Type_Info_String:
 		if info.is_cstring || info.encoding != .UTF_8 {
-			panic("link: only UTF-8 string is supported")
+			panic("wire: only UTF-8 string is supported")
 		}
 		return "string"
 	case runtime.Type_Info_Array:
@@ -109,14 +109,14 @@ type_string :: proc(w: ^Schema_Writer, ti: ^runtime.Type_Info) -> string {
 		add_unique(&w.structs, ti)
 		return type_name(ti)
 	}
-	panic("link: a message has a field type that the wire format does not support")
+	panic("wire: a message has a field type that the wire format does not support")
 }
 
 @(private = "file")
 type_name :: proc(ti: ^runtime.Type_Info) -> string {
 	named, ok := ti.variant.(runtime.Type_Info_Named)
 	if !ok {
-		panic("link: structs and enums in messages must be named types")
+		panic("wire: structs and enums in messages must be named types")
 	}
 	return named.name
 }
