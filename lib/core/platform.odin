@@ -5,6 +5,8 @@ import "core:mem"
 import "core:mem/virtual"
 import "core:time"
 
+import "cinnabar:core/jobs"
+
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
 
@@ -37,6 +39,10 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 			return false
 		}
 	}
+	if !jobs.init() {
+		log.error("core: failed to start the job system")
+		return false
+	}
 	if !_window_open(title, width, height) {
 		log.error("core: failed to open window")
 		return false
@@ -55,6 +61,11 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		time_seconds                 = time_seconds,
 		window_size                  = window_size,
 		set_window_title             = _window_set_title,
+		jobs_run                     = jobs.run,
+		jobs_wait                    = jobs.wait,
+		jobs_lock                    = jobs.lock,
+		jobs_unlock                  = jobs.unlock,
+		jobs_worker_count            = jobs.worker_count,
 		gpu_features                 = backend.features,
 		gpu_frame_target             = backend.frame_target,
 		gpu_submit                   = backend.submit,
@@ -64,10 +75,13 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		gpu_create_sampler           = backend.create_sampler,
 		gpu_create_graphics_pipeline = backend.create_graphics_pipeline,
 		gpu_create_compute_pipeline  = backend.create_compute_pipeline,
+		gpu_update_graphics_pipeline = backend.update_graphics_pipeline,
+		gpu_update_compute_pipeline  = backend.update_compute_pipeline,
 		gpu_destroy_buffer           = backend.destroy_buffer,
 		gpu_destroy_texture          = backend.destroy_texture,
 		gpu_destroy_sampler          = backend.destroy_sampler,
 		gpu_destroy_pipeline         = backend.destroy_pipeline,
+		gpu_destroy_scope            = backend.destroy_scope,
 	}
 	return true
 }
@@ -75,6 +89,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 shutdown :: proc() {
 	backend.shutdown()
 	_window_close()
+	jobs.shutdown()
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
 	}
@@ -105,6 +120,9 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 
 // end_frame presents the frame. The GPU backend paces frames to vsync.
 end_frame :: proc() {
+	if !jobs.drain_frame() {
+		log.error("core: jobs ran past the end of the frame. Wait for every counter before the frame ends.")
+	}
 	backend.end_frame()
 }
 
@@ -117,8 +135,12 @@ alloc_game_state :: proc(size: int) -> rawptr {
 	return ptr
 }
 
-// reset_permanent frees all permanent allocations, for a soft restart with fresh state.
-reset_permanent :: proc() {
+// soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
+// Game scope, which the old game may have left, and frees all permanent allocations.
+soft_restart :: proc() {
+	if count := backend.destroy_scope(.Game); count > 0 {
+		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)
+	}
 	virtual.arena_free_all(&platform.permanent)
 }
 

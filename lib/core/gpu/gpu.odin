@@ -125,6 +125,15 @@ format_size :: proc(format: Format) -> int {
 	return 0
 }
 
+// Scope is a resource's lifetime group. On a soft restart, core destroys every resource in the Game scope.
+// The engine destroys the Level and Asset scopes with gpu_destroy_scope. Permanent resources belong to core.
+Scope :: enum u8 {
+	Game,
+	Level,
+	Asset,
+	Permanent,
+}
+
 Buffer_Usage :: enum u8 {
 	Index,
 	// The buffer has a write view.
@@ -139,6 +148,7 @@ Buffer_Usages :: bit_set[Buffer_Usage;u8]
 Buffer_Desc :: struct {
 	size:  u32,
 	usage: Buffer_Usages,
+	scope: Scope,
 	label: string,
 }
 
@@ -161,6 +171,7 @@ Texture_Desc :: struct {
 	// 0 means 1.
 	mip_count: u32,
 	usage:     Texture_Usages,
+	scope:     Scope,
 	label:     string,
 }
 
@@ -266,6 +277,7 @@ Sampler_Desc :: struct {
 	address:    Address_Mode,
 	// 0 or 1 disables anisotropic filtering. The maximum is 16.
 	anisotropy: u8,
+	scope:      Scope,
 	label:      string,
 }
 
@@ -317,11 +329,13 @@ Graphics_Pipeline_Desc :: struct {
 	depth_write:   bool,
 	topology:      Topology,
 	cull:          Cull_Mode,
+	scope:         Scope,
 	label:         string,
 }
 
 Compute_Pipeline_Desc :: struct {
 	compute: []byte,
+	scope:   Scope,
 	label:   string,
 }
 

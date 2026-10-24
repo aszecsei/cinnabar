@@ -89,3 +89,12 @@ pool_lookup :: proc(pool: ^Pool($H, $T), handle: H) -> (item: T, ok: bool) {
 	}
 	return ptr^, true
 }
+
+// pool_handle returns the handle of a live slot, for walking a pool by index up to pool.count.
+pool_handle :: proc(pool: ^Pool($H, $T), index: u32) -> (handle: H, ok: bool) {
+	generation := pool.generations[index]
+	if generation & 1 == 0 {
+		return
+	}
+	return {index = index, generation = generation}, true
+}

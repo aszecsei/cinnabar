@@ -1,5 +1,7 @@
 package gpu_d3d12
 
+import "core:sync"
+
 import d3d "vendor:directx/d3d12"
 
 import "cinnabar:core/gpu"
@@ -9,6 +11,8 @@ import "cinnabar:core/gpu"
 @(private)
 translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 	in_pass := false
+	// False while the bound pipeline is still compiling: its draws and dispatches are skipped.
+	pipeline_ready := false
 	it := gpu.packet_iterator(cb)
 	for p in gpu.next_packet(&it) {
 		switch p.kind {
@@ -27,7 +31,12 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 		case .Set_Pipeline:
 			entry := gpu.pool_get(&dev.pipeline_pool, gpu.payload(p, gpu.Set_Pipeline).pipeline)
 			assert(entry != nil, "gpu: invalid pipeline handle")
-			list->SetPipelineState(entry.pso)
+			pso := sync.atomic_load(&entry.pso)
+			pipeline_ready = pso != nil
+			if !pipeline_ready {
+				continue
+			}
+			list->SetPipelineState(pso)
 			if entry.info.kind == .Graphics {
 				list->IASetPrimitiveTopology(entry.topology)
 			}
@@ -64,12 +73,21 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			rect := d3d.RECT{s.position.x, s.position.y, s.position.x + s.size.x, s.position.y + s.size.y}
 			list->RSSetScissorRects(1, &rect)
 		case .Draw:
+			if !pipeline_ready {
+				continue
+			}
 			d := gpu.payload(p, gpu.Draw)
 			list->DrawInstanced(d.vertex_count, d.instance_count, d.first_vertex, d.first_instance)
 		case .Draw_Indexed:
+			if !pipeline_ready {
+				continue
+			}
 			d := gpu.payload(p, gpu.Draw_Indexed)
 			list->DrawIndexedInstanced(d.index_count, d.instance_count, d.first_index, d.vertex_offset, d.first_instance)
 		case .Dispatch:
+			if !pipeline_ready {
+				continue
+			}
 			d := gpu.payload(p, gpu.Dispatch)
 			list->Dispatch(d.groups.x, d.groups.y, d.groups.z)
 		case .Barriers:
@@ -107,7 +125,16 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 		}
 		depth_ptr = &depth
 	}
-	list->BeginRenderPass(pass.color_count, &targets[0], depth_ptr, {})
+	// The pieces of a split pass are in consecutive command lists of one ExecuteCommandLists call, because submit
+	// keeps the order and each frame executes in one call.
+	flags: d3d.RENDER_PASS_FLAGS
+	if .Suspending in pass.flags {
+		flags += {.SUSPENDING_PASS}
+	}
+	if .Resuming in pass.flags {
+		flags += {.RESUMING_PASS}
+	}
+	list->BeginRenderPass(pass.color_count, &targets[0], depth_ptr, flags)
 
 	viewport := d3d.VIEWPORT {
 		Width    = f32(size.x),

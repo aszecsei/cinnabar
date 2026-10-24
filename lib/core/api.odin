@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:time"
 
 import "cinnabar:core/gpu"
+import "cinnabar:core/jobs"
 
 // Platform_API is everything core provides to the game side (host -> game).
 // It is the complete porting surface.
@@ -16,6 +17,17 @@ Platform_API :: struct {
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),
+
+	// Frame jobs run on fibers and must finish before the frame ends. Wait from a job or from the game's frame code.
+	// Call these, not the jobs package: the DLL's copy of the scheduler is not running.
+	jobs_run:          proc(job_list: []jobs.Job, counter: ^jobs.Counter),
+	jobs_wait:         proc(counter: ^jobs.Counter),
+	// A fiber-aware lock: a fiber that waits for it suspends and frees its thread, so the holder may wait on
+	// counters while it holds the lock. Use it only from jobs and the frame code.
+	jobs_lock:         proc(mutex: ^jobs.Mutex),
+	jobs_unlock:       proc(mutex: ^jobs.Mutex),
+	// The number of threads that run jobs, including the main thread.
+	jobs_worker_count: proc() -> int,
 
 	gpu_features:     proc() -> gpu.Features,
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
@@ -32,11 +44,18 @@ Platform_API :: struct {
 	gpu_create_sampler:           proc(desc: gpu.Sampler_Desc) -> gpu.Sampler,
 	gpu_create_graphics_pipeline: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline,
 	gpu_create_compute_pipeline:  proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline,
+	// An update compiles a new version and keeps the current one in use until the new one is ready. It keeps the
+	// handle and the scope. It returns false, and changes nothing, if the new version changes the attachment
+	// formats or the topology: create a new pipeline for those.
+	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
+	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
 	// Destruction invalidates the handle at once and releases the resource when the GPU no longer uses it.
 	gpu_destroy_buffer:           proc(buffer: gpu.Buffer),
 	gpu_destroy_texture:          proc(texture: gpu.Texture),
 	gpu_destroy_sampler:          proc(sampler: gpu.Sampler),
 	gpu_destroy_pipeline:         proc(pipeline: gpu.Pipeline),
+	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
+	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
 }
 
 // Game_API is what the game side provides to the host (game -> host).

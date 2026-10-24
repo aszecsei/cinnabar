@@ -116,3 +116,53 @@ upload_ring_resets_each_frame :: proc(t: ^testing.T) {
 	c, _ := upload(4, 4)
 	testing.expect_value(t, c.offset, 0)
 }
+
+@(test)
+destroy_scope_keeps_other_scopes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	game_buffer := create_buffer({size = 64}, nil)
+	game_pipeline := create_compute_pipeline({compute = {0}})
+	level_texture := create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}, scope = .Level}, nil)
+	level_sampler := create_sampler({scope = .Level})
+
+	testing.expect_value(t, destroy_scope(.Game), 2)
+	_, buffer_ok := RESOURCES.buffer(game_buffer)
+	_, pipeline_ok := RESOURCES.pipeline(game_pipeline)
+	_, texture_ok := RESOURCES.texture(level_texture)
+	_, target_ok := RESOURCES.texture(frame_target())
+	testing.expect(t, !buffer_ok && !pipeline_ok, "a Game resource survived")
+	testing.expect(t, texture_ok && target_ok, "a resource outside the Game scope was destroyed")
+
+	testing.expect_value(t, destroy_scope(.Level), 2)
+	testing.expect_value(t, destroy_scope(.Level), 0)
+	_ = level_sampler
+}
+
+@(test)
+updates_keep_the_attachment_formats :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	shader := []byte{0}
+	desc := gpu.Graphics_Pipeline_Desc {
+		vertex = shader,
+		pixel  = shader,
+		colors = {{format = gpu.FRAME_TARGET_FORMAT}},
+	}
+	pipeline := create_graphics_pipeline(desc)
+	compute := create_compute_pipeline({compute = shader})
+	testing.expect(t, update_graphics_pipeline(pipeline, desc))
+	testing.expect(t, update_compute_pipeline(compute, {compute = shader}))
+
+	context.logger = log.nil_logger()
+	other := desc
+	other.colors = {{format = .RGBA16_Float}}
+	testing.expect(t, !update_graphics_pipeline(pipeline, other), "an update changed the attachment formats")
+	testing.expect(t, !update_compute_pipeline(pipeline, {compute = shader}), "an update changed the pipeline kind")
+	destroy_pipeline(compute)
+	testing.expect(t, !update_compute_pipeline(compute, {compute = shader}), "an update of a destroyed pipeline")
+}

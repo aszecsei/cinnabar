@@ -68,12 +68,25 @@ Depth_Attachment :: struct {
 	clear:   f32,
 }
 
+// A split pass is one pass recorded as pieces in consecutive command buffers of one submission. Each piece but
+// the last suspends the pass, and each piece but the first resumes it. See docs/gpu.md#split-passes.
+Pass_Flag :: enum u8 {
+	// The pass continues in the next command buffer. The piece must end its command buffer and store its attachments.
+	Suspending,
+	// The pass continues from the previous command buffer. The piece must start its command buffer, load its
+	// attachments, and have the same attachments as the suspended piece.
+	Resuming,
+}
+
+Pass_Flags :: bit_set[Pass_Flag;u8]
+
 // A pass begins with the viewport and scissor set to the attachment size, and with no pipeline,
-// pass constants or index buffer bound. End_Pass clears the bindings again.
+// pass constants or index buffer bound. End_Pass clears the bindings again. Each piece of a split pass does the same.
 Begin_Pass :: struct {
 	color_count: u32,
 	colors:      [MAX_COLOR_ATTACHMENTS]Color_Attachment,
 	depth:       Depth_Attachment,
+	flags:       Pass_Flags,
 }
 
 End_Pass :: struct {}
@@ -225,10 +238,11 @@ command_buffer :: proc(allocator: runtime.Allocator) -> Command_Buffer {
 	return {allocator = allocator}
 }
 
-cmd_begin_pass :: proc(cb: ^Command_Buffer, colors: []Color_Attachment, depth: Depth_Attachment = {}) {
+cmd_begin_pass :: proc(cb: ^Command_Buffer, colors: []Color_Attachment, depth: Depth_Attachment = {}, flags: Pass_Flags = {}) {
 	packet := Begin_Pass {
 		color_count = u32(len(colors)),
 		depth       = depth,
+		flags       = flags,
 	}
 	copy(packet.colors[:], colors)
 	push(cb, .Begin_Pass, packet)

@@ -125,7 +125,7 @@ game_swap :: proc(game: ^Game_Module, next: Game_Module, state: rawptr) -> rawpt
 	} else {
 		log.info("host: Game_State layout changed, restarting game")
 		game.api.shutdown(state)
-		core.reset_permanent()
+		core.soft_restart()
 		state = core.alloc_game_state(next.api.state_size())
 		next.api.init(state, platform)
 	}

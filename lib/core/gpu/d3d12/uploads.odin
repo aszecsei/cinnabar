@@ -62,6 +62,7 @@ shutdown_uploads :: proc() {
 init_upload_ring :: proc(ring: ^Upload_Ring) -> bool {
 	desc := gpu.Buffer_Desc {
 		size  = UPLOAD_RING_SIZE,
+		scope = .Permanent,
 		label = "upload ring",
 	}
 	resource := create_buffer_resource(desc, .UPLOAD) or_return

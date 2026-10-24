@@ -28,6 +28,8 @@ Validation_Error :: enum u8 {
 	Bad_Barrier,
 	Layout_Mismatch,
 	Attachment_Layout,
+	Bad_Resume,
+	Bad_Suspend,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -86,6 +88,9 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 	pass_formats: Pipeline_Info
 	marker_depth := 0
 	pass_marker_depth := 0
+	// The packet index of a suspending pass's End_Pass. Nothing may follow it.
+	suspended_at := -1
+	pass_flags: Pass_Flags
 	// Bindings reset at every pass boundary.
 	graphics_bound := false
 	compute_bound := false
@@ -94,12 +99,19 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 	it := packet_iterator(cb)
 	for p in next_packet(&it) {
 		defer packet += 1
+		if suspended_at >= 0 {
+			return .Bad_Suspend, packet
+		}
 		switch p.kind {
 		case .Begin_Pass:
 			if in_pass {
 				return .Nested_Pass, packet
 			}
 			pass := payload(p, Begin_Pass)
+			if err = validate_pass_flags(pass, packet); err != .None {
+				return err, packet
+			}
+			pass_flags = pass.flags
 			pass_formats, err = validate_attachments(pass, resources)
 			if err != .None {
 				return err, packet
@@ -117,6 +129,9 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 			}
 			if marker_depth != pass_marker_depth {
 				return .Marker_Crosses_Pass, packet
+			}
+			if .Suspending in pass_flags {
+				suspended_at = packet
 			}
 			in_pass = false
 			graphics_bound, compute_bound = false, false
@@ -222,6 +237,101 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 		return .Unclosed_Marker, packet
 	}
 	return .None, packet
+}
+
+// validate_submission validates each command buffer, and checks that the pieces of split passes form chains:
+// a command buffer that ends with a suspended pass is followed by one that resumes it with the same attachments.
+// buffer is the index of the offending command buffer.
+validate_submission :: proc(
+	buffers: []Command_Buffer,
+	resources: Resources,
+	layouts: ^Layout_Tracker = nil,
+) -> (
+	err: Validation_Error,
+	buffer: int,
+	packet: int,
+) {
+	suspended: ^Begin_Pass
+	for cb, i in buffers {
+		if err, packet = validate(cb, resources, layouts); err != .None {
+			return err, i, packet
+		}
+		resumed, suspends := chain_ends(cb)
+		switch {
+		case resumed != nil && suspended == nil:
+			return .Bad_Resume, i, 0
+		case resumed == nil && suspended != nil:
+			return .Bad_Suspend, i - 1, 0
+		case resumed != nil && !same_attachments(resumed, suspended):
+			return .Bad_Resume, i, 0
+		}
+		suspended = suspends
+	}
+	if suspended != nil {
+		return .Bad_Suspend, len(buffers) - 1, 0
+	}
+	return .None, len(buffers), 0
+}
+
+// A resumed piece loads what the suspended piece stored, so it neither clears nor discards. A suspended piece stores.
+@(private = "file")
+validate_pass_flags :: proc(pass: ^Begin_Pass, packet: int) -> Validation_Error {
+	has_depth := pass.depth.texture != {}
+	if .Resuming in pass.flags {
+		if packet != 0 {
+			return .Bad_Resume
+		}
+		for color in pass.colors[:pass.color_count] {
+			if color.load != .Load {
+				return .Bad_Resume
+			}
+		}
+		if has_depth && pass.depth.load != .Load {
+			return .Bad_Resume
+		}
+	}
+	if .Suspending in pass.flags {
+		for color in pass.colors[:pass.color_count] {
+			if color.store != .Store {
+				return .Bad_Suspend
+			}
+		}
+		if has_depth && pass.depth.store != .Store {
+			return .Bad_Suspend
+		}
+	}
+	return .None
+}
+
+// chain_ends returns the command buffer's first pass if it resumes, and its last pass if it suspends.
+// validate has already checked that a resuming pass comes first and a suspending pass comes last.
+@(private = "file")
+chain_ends :: proc(cb: Command_Buffer) -> (resumed: ^Begin_Pass, suspends: ^Begin_Pass) {
+	it := packet_iterator(cb)
+	for p in next_packet(&it) {
+		if p.kind != .Begin_Pass {
+			continue
+		}
+		pass := payload(p, Begin_Pass)
+		if .Resuming in pass.flags {
+			resumed = pass
+		}
+		suspends = .Suspending in pass.flags ? pass : nil
+	}
+	return
+}
+
+@(private = "file")
+same_attachments :: proc(a, b: ^Begin_Pass) -> bool {
+	if a.color_count != b.color_count || a.depth.texture != b.depth.texture {
+		return false
+	}
+	for i in 0 ..< a.color_count {
+		if a.colors[i].texture != b.colors[i].texture {
+			return false
+		}
+	}
+	return true
 }
 
 // validate_attachments returns the pass's attachment formats in the form a matching pipeline has.

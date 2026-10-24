@@ -14,13 +14,19 @@ FRAME_TIME :: time.Second / 60
 UPLOAD_RING_SIZE :: 4 * mem.Megabyte
 
 @(private = "file")
+Pipeline_Entry :: struct {
+	info:  gpu.Pipeline_Info,
+	scope: gpu.Scope,
+}
+
+@(private = "file")
 state: struct {
 	frame_start:   time.Tick,
 	frame_target:  gpu.Texture,
 	buffers:       gpu.Pool(gpu.Buffer, gpu.Buffer_Desc),
 	textures:      gpu.Pool(gpu.Texture, gpu.Texture_Desc),
 	samplers:      gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
-	pipelines:     gpu.Pool(gpu.Pipeline, gpu.Pipeline_Info),
+	pipelines:     gpu.Pool(gpu.Pipeline, Pipeline_Entry),
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
@@ -38,7 +44,7 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	gpu.layout_tracker_init(&state.layouts)
 	state.frame_target = gpu.pool_add(&state.textures, frame_target_desc(size))
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
-	state.upload_buffer = gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = UPLOAD_RING_SIZE})
+	state.upload_buffer = gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = UPLOAD_RING_SIZE, scope = .Permanent})
 	state.upload_memory = make([]byte, UPLOAD_RING_SIZE)
 	return true
 }
@@ -72,11 +78,9 @@ begin_frame :: proc(size: [2]i32) {
 
 // submit returns false if any command buffer breaks a rule. It then drops all of them.
 submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
-	for cb, i in buffers {
-		if err, packet := gpu.validate(cb, RESOURCES, &state.layouts); err != .None {
-			log.errorf("gpu: command buffer %d, packet %d: %v", i, packet, err)
-			return false
-		}
+	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts); err != .None {
+		log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
+		return false
 	}
 	return true
 }
@@ -93,7 +97,7 @@ create_buffer :: proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
 		log.errorf("gpu: buffer %q: %v", desc.label, err)
 		return {}
 	}
-	return gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage})
+	return gpu.pool_add(&state.buffers, gpu.Buffer_Desc{size = desc.size, usage = desc.usage, scope = desc.scope})
 }
 
 create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
@@ -121,7 +125,7 @@ create_graphics_pipeline :: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeli
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return {}
 	}
-	return gpu.pool_add(&state.pipelines, gpu.pipeline_info(desc))
+	return gpu.pool_add(&state.pipelines, Pipeline_Entry{gpu.pipeline_info(desc), desc.scope})
 }
 
 create_compute_pipeline :: proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline {
@@ -129,7 +133,39 @@ create_compute_pipeline :: proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return {}
 	}
-	return gpu.pool_add(&state.pipelines, gpu.Pipeline_Info{kind = .Compute})
+	return gpu.pool_add(&state.pipelines, Pipeline_Entry{{kind = .Compute}, desc.scope})
+}
+
+// An update must keep the pipeline's attachment formats, as in the real backends. Nothing compiles, so the new
+// version is ready at once.
+update_graphics_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool {
+	if err := gpu.validate_graphics_pipeline_desc(desc); err != .None {
+		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return false
+	}
+	return update_pipeline(pipeline, gpu.pipeline_info(desc), desc.label)
+}
+
+update_compute_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool {
+	if err := gpu.validate_compute_pipeline_desc(desc); err != .None {
+		log.errorf("gpu: pipeline %q: %v", desc.label, err)
+		return false
+	}
+	return update_pipeline(pipeline, {kind = .Compute}, desc.label)
+}
+
+@(private = "file")
+update_pipeline :: proc(pipeline: gpu.Pipeline, info: gpu.Pipeline_Info, label: string) -> bool {
+	entry, ok := gpu.pool_lookup(&state.pipelines, pipeline)
+	if !ok {
+		log.errorf("gpu: pipeline %q: update of an invalid handle", label)
+		return false
+	}
+	if entry.info != info {
+		log.errorf("gpu: pipeline %q: an update must keep the attachment formats. Create a new pipeline instead.", label)
+		return false
+	}
+	return true
 }
 
 // Nothing runs on a GPU, so destroyed slots are free at once.
@@ -159,6 +195,35 @@ destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	}
 }
 
+destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
+	assert(scope != .Permanent, "gpu: the Permanent scope belongs to core")
+	for i in 0 ..< state.buffers.count {
+		if buffer, ok := gpu.pool_handle(&state.buffers, i); ok && state.buffers.items[i].scope == scope {
+			destroy_buffer(buffer)
+			count += 1
+		}
+	}
+	for i in 0 ..< state.textures.count {
+		if texture, ok := gpu.pool_handle(&state.textures, i); ok && state.textures.items[i].scope == scope {
+			destroy_texture(texture)
+			count += 1
+		}
+	}
+	for i in 0 ..< state.samplers.count {
+		if sampler, ok := gpu.pool_handle(&state.samplers, i); ok && state.samplers.items[i].scope == scope {
+			destroy_sampler(sampler)
+			count += 1
+		}
+	}
+	for i in 0 ..< state.pipelines.count {
+		if pipeline, ok := gpu.pool_handle(&state.pipelines, i); ok && state.pipelines.items[i].scope == scope {
+			destroy_pipeline(pipeline)
+			count += 1
+		}
+	}
+	return
+}
+
 // upload returns false when the frame's upload ring is full.
 upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 	for {
@@ -175,10 +240,10 @@ upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 
 @(private = "file")
 frame_target_desc :: proc(size: [2]i32) -> gpu.Texture_Desc {
-	return {size = {u32(max(size.x, 1)), u32(max(size.y, 1))}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}}
+	return {size = {u32(max(size.x, 1)), u32(max(size.y, 1))}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}
 }
 
-@(private = "file")
+@(private)
 RESOURCES :: gpu.Resources {
 	texture = proc(texture: gpu.Texture) -> (gpu.Texture_Desc, bool) {
 		return gpu.pool_lookup(&state.textures, texture)
@@ -187,6 +252,7 @@ RESOURCES :: gpu.Resources {
 		return gpu.pool_lookup(&state.buffers, buffer)
 	},
 	pipeline = proc(pipeline: gpu.Pipeline) -> (gpu.Pipeline_Info, bool) {
-		return gpu.pool_lookup(&state.pipelines, pipeline)
+		entry, ok := gpu.pool_lookup(&state.pipelines, pipeline)
+		return entry.info, ok
 	},
 }

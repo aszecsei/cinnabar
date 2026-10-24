@@ -20,6 +20,12 @@ DEPTH_FORMAT :: gpu.Format.D32_Float
 // Matches numthreads in shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
 
+// The scene draws two large triangles and a grid of small ones, split across jobs in SCENE_PIECES pieces.
+GRID_COLUMNS :: 48
+GRID_ROWS :: 27
+SCENE_INSTANCES :: 2 + GRID_COLUMNS * GRID_ROWS
+SCENE_PIECES :: 4
+
 CHECKER_SIZE :: 64
 CHECKER_CELL :: 8
 
@@ -32,9 +38,11 @@ Vertex :: struct {
 
 // Matches Push in shaders/triangle.hlsl.
 Scene_Constants :: struct {
-	vertices: u32,
-	texture:  u32,
-	sampler:  u32,
+	vertices:       u32,
+	texture:        u32,
+	sampler:        u32,
+	first_instance: u32,
+	grid:           [2]u32,
 }
 
 // Matches Push in shaders/post.hlsl.
@@ -167,7 +175,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	depth := render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
 
-	p := render.add_render_pass(&g, "scene", draw_scene, frame)
+	p := render.add_render_pass(&g, "scene", draw_scene, frame, pieces = SCENE_PIECES)
 	render.color(&g, p, frame.scene, .Clear, {0.02, 0.02, 0.035, 1})
 	render.depth(&g, p, depth, .Clear, store = .Discard)
 	render.read(&g, p, frame.checker)
@@ -185,22 +193,29 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	render.execute(&g)
 }
 
-draw_scene :: proc(g: ^render.Graph, cb: ^gpu.Command_Buffer, data: rawptr) {
-	frame := (^Frame)(data)
+// draw_scene draws one piece's share of the instances. Each piece starts with nothing bound.
+draw_scene :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
+	first := u32(SCENE_INSTANCES * ctx.piece / ctx.piece_count)
+	end := u32(SCENE_INSTANCES * (ctx.piece + 1) / ctx.piece_count)
 	constants := Scene_Constants {
-		vertices = gpu.read_index(render.gpu_buffer(g, frame.vertices)),
-		texture  = gpu.read_index(render.gpu_texture(g, frame.checker)),
-		sampler  = gpu.sampler_index(frame.state.nearest),
+		vertices       = gpu.read_index(render.gpu_buffer(g, frame.vertices)),
+		texture        = gpu.read_index(render.gpu_texture(g, frame.checker)),
+		sampler        = gpu.sampler_index(frame.state.nearest),
+		first_instance = first,
+		grid           = {GRID_COLUMNS, GRID_ROWS},
 	}
 	gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene)
 	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
-	gpu.cmd_draw_indexed(cb, 3, instance_count = 2)
+	gpu.cmd_draw_indexed(cb, 3, instance_count = end - first)
 }
 
-run_post :: proc(g: ^render.Graph, cb: ^gpu.Command_Buffer, data: rawptr) {
-	frame := (^Frame)(data)
+run_post :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
 	constants := Post_Constants {
 		input  = gpu.read_index(render.gpu_texture(g, frame.scene)),
 		output = gpu.write_index(render.gpu_texture(g, frame.post)),
@@ -212,8 +227,9 @@ run_post :: proc(g: ^render.Graph, cb: ^gpu.Command_Buffer, data: rawptr) {
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
 
-draw_composite :: proc(g: ^render.Graph, cb: ^gpu.Command_Buffer, data: rawptr) {
-	frame := (^Frame)(data)
+draw_composite :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
 	constants := Composite_Constants {
 		input   = gpu.read_index(render.gpu_texture(g, frame.post)),
 		sampler = gpu.sampler_index(frame.state.linear),
@@ -235,33 +251,55 @@ shutdown :: proc(state: rawptr) {
 	log.info("mygame: shutdown")
 }
 
-// on_reload recreates the pipelines, because the new DLL may embed new shaders.
+// on_reload updates the pipelines, because the new DLL may embed new shaders. The old versions keep drawing until
+// the new ones compile. An update that changes a pipeline's formats is refused, so that pipeline is created again.
 on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
-	destroy_pipelines(platform, s.pipelines)
-	s.pipelines = create_pipelines(platform)
+	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
+	reload_graphics_pipeline(platform, &s.pipelines.composite, COMPOSITE_PIPELINE)
+	if !platform.gpu_update_compute_pipeline(s.pipelines.post, POST_PIPELINE) {
+		platform.gpu_destroy_pipeline(s.pipelines.post)
+		s.pipelines.post = platform.gpu_create_compute_pipeline(POST_PIPELINE)
+	}
 	log.infof("mygame: reloaded at frame %d", s.frame_count)
+}
+
+reload_graphics_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) {
+	if !platform.gpu_update_graphics_pipeline(pipeline^, desc) {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = platform.gpu_create_graphics_pipeline(desc)
+	}
 }
 
 create_pipelines :: proc(platform: ^core.Platform_API) -> Pipelines {
 	return {
-		scene = platform.gpu_create_graphics_pipeline(
-			{
-				vertex = TRIANGLE_VS,
-				pixel = TRIANGLE_PS,
-				colors = {{format = SCENE_FORMAT}},
-				depth_format = DEPTH_FORMAT,
-				depth_compare = .Less,
-				depth_write = true,
-				label = "scene",
-			},
-		),
-		post = platform.gpu_create_compute_pipeline({compute = POST_CS, label = "post"}),
-		composite = platform.gpu_create_graphics_pipeline(
-			{vertex = COMPOSITE_VS, pixel = COMPOSITE_PS, colors = {{format = gpu.FRAME_TARGET_FORMAT}}, label = "composite"},
-		),
+		scene = platform.gpu_create_graphics_pipeline(SCENE_PIPELINE),
+		post = platform.gpu_create_compute_pipeline(POST_PIPELINE),
+		composite = platform.gpu_create_graphics_pipeline(COMPOSITE_PIPELINE),
 	}
+}
+
+SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
+	vertex        = TRIANGLE_VS,
+	pixel         = TRIANGLE_PS,
+	colors        = {{format = SCENE_FORMAT}},
+	depth_format  = DEPTH_FORMAT,
+	depth_compare = .Less,
+	depth_write   = true,
+	label         = "scene",
+}
+
+POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	compute = POST_CS,
+	label   = "post",
+}
+
+COMPOSITE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
+	vertex = COMPOSITE_VS,
+	pixel  = COMPOSITE_PS,
+	colors = {{format = gpu.FRAME_TARGET_FORMAT}},
+	label  = "composite",
 }
 
 destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: Pipelines) {

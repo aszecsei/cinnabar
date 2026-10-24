@@ -37,7 +37,7 @@ The engine checks `Features` before it uses a capability. Every capability must 
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
-**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, and `create_*` and `destroy_*` for buffers, textures, samplers and pipelines. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
+**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers and pipelines, `update_*_pipeline`, and `destroy_scope`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
 The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 
@@ -77,7 +77,7 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 - **Initial data:** a buffer or texture created with data gets it through a staging buffer. The copies run before the command lists of the frame, so the resource is ready in the frame that creates it. Texture data is mip 0 with tightly packed rows.
 - **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout. `gpu.initial_layout` gives the layout. The [render graph](#render-graph) takes over from there.
 - **Deferred destruction:** `destroy` invalidates the handle at once. The backend releases the resource, and reuses the pool slot and its descriptors, when the GPU finishes the frame that destroyed it. Two frames are in flight.
-- **Lifetime scopes:** each resource belongs to a scope: `Permanent`, `Level`, `Asset` or `Game`. On a soft restart (see [Hot reload](hot-reload.md#reload-sequence)), `core` destroys all `Game` resources and keeps the others.
+- **Lifetime scopes:** each description has a `scope`: `Game` (the default), `Level`, `Asset` or `Permanent`. On a soft restart (see [Hot reload](hot-reload.md#reload-sequence)), `core` destroys every `Game` resource that the old game left, and keeps the others. `gpu_destroy_scope` destroys a `Level` or `Asset` scope. `Permanent` resources belong to `core` and the backend, for example the frame target and the upload rings.
 - **Memory:** the first version uses committed resources. Suballocation is a later change inside the backend.
 - **Upload ring:** `upload(size, align)` allocates CPU-written memory that is valid until the end of the frame. Each frame in flight has a 16 MB ring. An `Upload` holds the bytes, a buffer handle and an offset. Shaders read it through `read_index(upload.buffer)` at the offset, or as pass constants. Pass constants need `PASS_CONSTANTS_ALIGN` (256).
 
@@ -85,7 +85,10 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 
 - A pipeline description contains shader blobs, fixed-function state and attachment formats. D3D12 PSOs and Vulkan dynamic rendering both require the attachment formats.
 - Pipeline kinds: graphics (vertex), graphics (mesh), compute and ray tracing.
-- Pipelines are compiled on worker jobs. A pipeline handle is valid immediately. A draw with a pipeline that is not ready yet is skipped. Until the job system exists, `create_*_pipeline` compiles on the calling thread.
+- Pipelines compile on background jobs. A pipeline handle is valid immediately. Draws and dispatches with a pipeline that is not ready are skipped, and so are those with a pipeline that failed to compile. The backend copies the shader blobs and the label, because the compile job can outlive the call and the blobs can be in the game DLL's image.
+- `update_graphics_pipeline` and `update_compute_pipeline` compile a new version of a pipeline. The handle stays the same, and the current version keeps drawing until the new one is ready. If the new version fails to compile, the current one stays. The latest update wins if several are compiling at once.
+- An update must keep the attachment formats, the topology and the pipeline kind, because validation and translation use them before the new version is ready. Such an update returns false and changes nothing, and the game creates a new pipeline instead.
+- On a hot reload, the game updates its pipelines in `on_reload`, so the old shaders draw until the new ones compile.
 - Blending uses presets (`Opaque`, `Alpha`, `Premultiplied`, `Additive`), one per color target.
 
 ## Command buffers
@@ -101,12 +104,23 @@ The engine records commands into `Command_Buffer`s in frame memory.
 
 These rules come from Metal's encoder model. All backends enforce them.
 
-- A pass begins and ends in the same command buffer. Debug markers also begin and end in the same command buffer, and they nest with passes.
+- A pass begins and ends in the same command buffer. Debug markers also begin and end in the same command buffer, and they nest with passes. A [split pass](#split-passes) is a chain of such pieces.
 - Draws occur only inside a render pass.
 - Bindings reset at every pass boundary: the pipeline, pass constants and index buffer. Bind them again in each pass, and bind compute pipelines again after a pass. A render pass begins with the viewport and scissor set to the attachment size.
 - A graphics pipeline's attachment formats must match the pass. A compute pipeline is bound only outside a pass.
 - Copies, dispatches and acceleration structure builds occur only outside a render pass.
 - A render pass declares its attachments with load and store operations. It maps to `BeginRenderPass` (D3D12), dynamic rendering (Vulkan) and a render command encoder (Metal).
+
+### Split passes
+
+A large render pass can be recorded in parallel as pieces, in consecutive command buffers of one submission. On the GPU, the pieces are one render pass.
+
+- `Begin_Pass` has `Pass_Flags`. Each piece but the last is `Suspending`, and each piece but the first is `Resuming`.
+- A suspending piece ends its command buffer and stores its attachments. A resuming piece starts its command buffer, loads its attachments, and has the same attachments as the piece before it. Only the first piece clears, and only the last piece can discard.
+- Nothing runs between the pieces: no barriers and no debug markers. Each piece starts with nothing bound, like any pass.
+- `validate_submission` checks the chains: every suspended piece is resumed by the next command buffer, and no chain crosses the end of a submission.
+- **Mapping:** D3D12 `SUSPENDING_PASS` and `RESUMING_PASS`, in consecutive lists of one `ExecuteCommandLists` call. Vulkan dynamic rendering with `VK_RENDERING_SUSPENDING_BIT` and `VK_RENDERING_RESUMING_BIT` in one submission. Metal: the chain becomes one `MTLParallelRenderCommandEncoder`, with one child encoder per piece.
+- **Instance IDs:** `SV_InstanceID` starts at 0 in each draw on D3D12 but includes the first instance on Vulkan. A piece that draws part of an instance range passes its first instance to the shader, for example in push constants.
 
 ### Barriers
 
@@ -123,14 +137,15 @@ These rules come from Metal's encoder model. All backends enforce them.
 
 The game builds a `render.Graph` every frame in frame memory. Passes declare how they use each resource, and the graph computes the barriers.
 
-- **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
+- **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands through a `Pass_Context`. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
+- **Pieces:** `pieces = n` splits a pass across `n` jobs (at most `MAX_PASS_PIECES`). The `Pass_Proc` runs once per piece, and `Pass_Context.piece` and `piece_count` tell it which share of the work to record. The first piece records the barriers. A render pass becomes a [split pass](#split-passes): the graph makes the pieces load and store between each other, and puts each piece's debug marker inside its pass. A compute pass's pieces are plain command buffers.
 - **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
 - **Imported resources:** `import_texture` and `import_buffer` add resources that outlive the frame. An imported texture has a resting use, and the graph returns it to that layout at the end of the frame. The frame target rests as `Color`. A texture created with data rests as `Sampled`.
 - **Transient textures:** `create_texture` adds a texture that exists for one frame. The graph adds the usages that its uses need. A `Texture_Cache` in `Game_State` keeps the textures between frames, keyed by description and label, and destroys a texture after `CACHE_LIFETIME` frames without use.
 - **Barriers:** a use needs a barrier when it changes the layout, when it follows a write, or when it writes after any access. Reads in the same layout merge without a barrier, so a later write waits for all of them. A transient texture starts `Undefined`, and sampling it before a pass writes it is an error.
 - **Culling:** the graph walks the passes backward from the imported resources. A pass is live if it writes a resource that a later live pass reads, if it writes an imported resource, or if `keep_pass` marks it. A write that does not read (for example a clear) makes earlier writers of that resource unnecessary.
 - **Handles:** graph handles are valid for one graph. In a `Pass_Proc`, `gpu_texture` and `gpu_buffer` return the `gpu` handles, because transient textures exist only after recording starts.
-- **Execution:** `execute` records one command buffer and submits it. Phase 3 records passes on jobs.
+- **Execution:** `execute` computes all barriers in pass order first. Then each piece of each live pass records into its own command buffer on its own job, so `Pass_Proc`s run in parallel. `execute` submits the command buffers in pass order. A last command buffer returns imported textures to their resting layouts.
 
 ## GPU-driven rendering
 
@@ -162,8 +177,9 @@ The engine culls and builds draws on the GPU. The interface supports this from t
 
 ## Submission
 
-- `submit` translates each `Command_Buffer` into one native command list. Translation runs on worker jobs.
-- Native command allocators are pooled per job, not per thread, because a fiber can resume on a different thread (see [Core](core.md#job-system)).
+- `submit` translates each `Command_Buffer` into one native command list, each on its own job, and waits for them. The lists keep the submission order. Call `submit` from the frame code or from a job.
+- Native command lists and allocators are pooled per frame in flight, not per thread, because a fiber can resume on a different thread (see [Core](core.md#job-system)). A translation job takes a list from the pool. The pool grows when a frame needs more lists.
+- `end_frame` executes all of the frame's lists in one `ExecuteCommandLists` call: the frame target's transition in, the submitted lists in order, and the transition to present.
 
 ## Shaders
 
@@ -192,5 +208,5 @@ The engine culls and builds draws on the GPU. The interface supports this from t
 
 ## Open questions
 
-- **Passes across command buffers:** parallel recording (phase 3) will split one pass across jobs. This needs suspended and resumed passes (`SUSPENDING_PASS` and `RESUMING_PASS` in D3D12), or a parallel render encoder in Metal.
+- **Dividing a split pass's work:** a pass has a fixed piece count, and each piece takes a share by index. A `Pass_Proc` that starts its own child jobs for pieces would suit work that is not an array, but the graph would then have to collect and order the pieces.
 - **Asset resources on soft restart:** the asset runtime is game-side, but asset GPU resources must survive a soft restart. The asset runtime's handle tables must therefore live in host-owned memory.

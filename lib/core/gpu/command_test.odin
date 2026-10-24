@@ -429,3 +429,71 @@ validate_tracks_layouts :: proc(t: ^testing.T) {
 	layout, _ := tracked_layout(&layouts, MULTI)
 	testing.expect_value(t, layout, Texture_Layout.Shader_Resource)
 }
+
+@(test)
+validate_split_passes :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	LOADED :: Color_Attachment{texture = TARGET, load = .Load}
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, flags = {.Suspending}); cmd_end_pass(cb)}, .None},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {LOADED}, flags = {.Resuming}); cmd_end_pass(cb)}, .None},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET, load = .Clear}}, flags = {.Resuming}); cmd_end_pass(cb)}, .Bad_Resume},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET, store = .Discard}}, flags = {.Suspending}); cmd_end_pass(cb)}, .Bad_Suspend},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {LOADED}, flags = {.Resuming}); cmd_end_pass(cb); cmd_end_marker(cb)},
+			.Bad_Resume,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {{texture = TARGET}}, flags = {.Suspending}); cmd_end_pass(cb); cmd_end_marker(cb)},
+			.Bad_Suspend,
+		},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	first := command_buffer(allocator)
+	cmd_begin_pass(&first, {{texture = TARGET, load = .Clear}}, {texture = DEPTH, load = .Clear}, {.Suspending})
+	cmd_end_pass(&first)
+	middle := command_buffer(allocator)
+	cmd_begin_pass(&middle, {LOADED}, {texture = DEPTH, load = .Load}, {.Resuming, .Suspending})
+	cmd_end_pass(&middle)
+	last := command_buffer(allocator)
+	cmd_begin_pass(&last, {LOADED}, {texture = DEPTH, load = .Load}, {.Resuming})
+	cmd_end_pass(&last)
+	no_depth := command_buffer(allocator)
+	cmd_begin_pass(&no_depth, {LOADED}, flags = {.Resuming})
+	cmd_end_pass(&no_depth)
+	plain := command_buffer(allocator)
+	cmd_begin_pass(&plain, {{texture = TARGET}})
+	cmd_end_pass(&plain)
+
+	Chain :: struct {
+		buffers: []Command_Buffer,
+		err:     Validation_Error,
+		buffer:  int,
+	}
+	chains := []Chain {
+		{{plain, first, middle, last, plain}, .None, 5},
+		{{first, last}, .None, 2},
+		{{middle, last}, .Bad_Resume, 0},
+		{{first, middle}, .Bad_Suspend, 1},
+		{{first, plain}, .Bad_Suspend, 0},
+		{{first, no_depth}, .Bad_Resume, 1},
+	}
+	for c, i in chains {
+		err, buffer, _ := validate_submission(c.buffers, RESOURCES)
+		testing.expectf(t, err == c.err && buffer == c.buffer, "chain %d: got %v in %d, want %v in %d", i, err, buffer, c.err, c.buffer)
+	}
+}

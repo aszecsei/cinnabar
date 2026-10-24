@@ -343,6 +343,35 @@ destroy_sampler :: proc(sampler: gpu.Sampler) {
 	}
 }
 
+destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
+	assert(scope != .Permanent, "gpu: the Permanent scope belongs to core")
+	for i in 0 ..< dev.buffers.count {
+		if buffer, ok := gpu.pool_handle(&dev.buffers, i); ok && dev.buffers.items[i].desc.scope == scope {
+			destroy_buffer(buffer)
+			count += 1
+		}
+	}
+	for i in 0 ..< dev.textures.count {
+		if texture, ok := gpu.pool_handle(&dev.textures, i); ok && dev.textures.items[i].desc.scope == scope {
+			destroy_texture(texture)
+			count += 1
+		}
+	}
+	for i in 0 ..< dev.samplers.count {
+		if sampler, ok := gpu.pool_handle(&dev.samplers, i); ok && dev.samplers.items[i].scope == scope {
+			destroy_sampler(sampler)
+			count += 1
+		}
+	}
+	for i in 0 ..< dev.pipeline_pool.count {
+		if pipeline, ok := gpu.pool_handle(&dev.pipeline_pool, i); ok && dev.pipeline_pool.items[i].scope == scope {
+			destroy_pipeline(pipeline)
+			count += 1
+		}
+	}
+	return
+}
+
 // defer_release releases the object and frees the pool slot after the GPU finishes the current frame.
 @(private)
 defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
@@ -367,7 +396,8 @@ collect_releases :: proc() {
 	completed := dev.fence->GetCompletedValue()
 	for i := 0; i < len(dev.releases); {
 		r := dev.releases[i]
-		if r.fence_value == 0 || r.fence_value > completed {
+		// A pipeline slot waits for its compile job too, which writes the slot when it finishes.
+		if r.fence_value == 0 || r.fence_value > completed || (r.pool == .Pipeline && pipeline_compiling(r.index)) {
 			i += 1
 			continue
 		}

@@ -3,6 +3,7 @@ package gpu_d3d12
 
 import "base:runtime"
 import "core:log"
+import "core:sync"
 import win "core:sys/windows"
 import "core:time"
 
@@ -10,6 +11,7 @@ import d3d "vendor:directx/d3d12"
 import "vendor:directx/dxgi"
 
 import "cinnabar:core/gpu"
+import "cinnabar:core/jobs"
 
 FRAMES_IN_FLIGHT :: 2
 BACK_BUFFER_COUNT :: 3
@@ -33,11 +35,22 @@ agility_sdk_path: cstring = `.\D3D12\`
 // BeginEvent metadata for a null-terminated ANSI string, as PIX reads it.
 PIX_EVENT_ANSI_VERSION :: 1
 
+// Command lists are pooled per frame, not per thread: a translation job takes a list from the pool, and
+// its fiber can move between threads.
+@(private)
+Command_List :: struct {
+	allocator: ^d3d.ICommandAllocator,
+	list:      ^d3d.IGraphicsCommandList7,
+}
+
 @(private)
 Frame :: struct {
-	allocator:   ^d3d.ICommandAllocator,
 	fence_value: u64,
 	upload:      Upload_Ring,
+	lists:       [dynamic]Command_List,
+	lists_used:  int,
+	// The frame's closed command lists, in execution order.
+	submitted:   [dynamic]^d3d.ICommandList,
 }
 
 @(private)
@@ -57,7 +70,8 @@ dev: struct {
 	fence_value:       u64,
 	frames:            [FRAMES_IN_FLIGHT]Frame,
 	frame_index:       u64,
-	list:              ^d3d.IGraphicsCommandList7,
+	// Guards the current frame's lists and submitted.
+	lists_mutex:       sync.Mutex,
 	swapchain:         ^dxgi.ISwapChain3,
 	latency_waitable:  win.HANDLE,
 	size:              [2]i32,
@@ -102,9 +116,9 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.fence)), "CreateFence") or_return
 	dev.fence_event = win.CreateEventW(nil, false, false, nil)
 	for &frame in dev.frames {
-		check(dev.device->CreateCommandAllocator(.DIRECT, d3d.ICommandAllocator_UUID, (^rawptr)(&frame.allocator)), "CreateCommandAllocator") or_return
+		frame.lists = make([dynamic]Command_List, dev.allocator)
+		frame.submitted = make([dynamic]^d3d.ICommandList, dev.allocator)
 	}
-	dev.list = create_command_list(dev.frames[0].allocator) or_return
 
 	init_resources() or_return
 	init_pipelines() or_return
@@ -116,6 +130,7 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 }
 
 shutdown :: proc() {
+	wait_compiles()
 	if dev.queue != nil {
 		wait_idle()
 	}
@@ -127,9 +142,13 @@ shutdown :: proc() {
 	shutdown_uploads()
 	shutdown_pipelines()
 	shutdown_resources()
-	release(&dev.list)
 	for &frame in dev.frames {
-		release(&frame.allocator)
+		for &l in frame.lists {
+			release(&l.list)
+			release(&l.allocator)
+		}
+		delete(frame.lists)
+		delete(frame.submitted)
 	}
 	if dev.fence_event != nil {
 		win.CloseHandle(dev.fence_event)
@@ -163,8 +182,8 @@ frame_target :: proc() -> gpu.Texture {
 	return dev.frame_target
 }
 
-// begin_frame waits until the swapchain and the frame's command allocator and upload ring are free,
-// then opens the frame's command list.
+// begin_frame waits until the swapchain and the frame's command lists and upload ring are free,
+// then records the frame target's transition into the render target layout.
 begin_frame :: proc(size: [2]i32) {
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	wait_fence(frame.fence_value)
@@ -177,42 +196,113 @@ begin_frame :: proc(size: [2]i32) {
 		return
 	}
 	if size != dev.size {
-		resize(size)
+		resize_swapchain(size)
 	}
 
 	win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
-	check(frame.allocator->Reset(), "ICommandAllocator.Reset")
-	check(dev.list->Reset(frame.allocator, nil), "ICommandList.Reset")
-	bind_root_signature(dev.list)
+	frame.lists_used = 0
+	clear(&frame.submitted)
 
 	dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	target.resource = dev.back_buffers[dev.back_buffer_index]
 	target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
-	texture_barrier(dev.list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	list := acquire_list(frame)
+	texture_barrier(list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	submit_list(frame, list)
 	when ODIN_DEBUG {
 		gpu.track_layout(&dev.layouts, dev.frame_target, .Render_Target)
 	}
 }
 
-// submit translates the command buffers into the frame's command list.
-// Debug builds validate them first, and drop all of them if any breaks a rule.
+// submit translates each command buffer into its own command list on a job, and adds the lists to the frame
+// in order. Debug builds validate the buffers first, and drop all of them if any breaks a rule.
+// Call it from the game's frame code or from a job: it waits for the translation jobs.
 submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 	when ODIN_DEBUG {
-		for cb, i in buffers {
-			if err, packet := gpu.validate(cb, VALIDATION_RESOURCES, &dev.layouts); err != .None {
-				log.errorf("gpu: command buffer %d, packet %d: %v", i, packet, err)
-				return false
-			}
+		if err, buffer, packet := gpu.validate_submission(buffers, VALIDATION_RESOURCES, &dev.layouts); err != .None {
+			log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
+			return false
 		}
 	}
-	if !dev.recording {
+	if !dev.recording || len(buffers) == 0 {
 		return true
 	}
-	for cb in buffers {
-		translate(dev.list, cb)
+
+	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
+	tasks := make([]Translate_Task, len(buffers), dev.allocator)
+	defer delete(tasks, dev.allocator)
+	translate_jobs := make([]jobs.Job, len(buffers), dev.allocator)
+	defer delete(translate_jobs, dev.allocator)
+	for cb, i in buffers {
+		tasks[i] = {frame = frame, cb = cb}
+		translate_jobs[i] = {translate_job, &tasks[i]}
+	}
+	// Reserving the slots first keeps the submission order when several jobs submit at once.
+	sync.lock(&dev.lists_mutex)
+	first := len(frame.submitted)
+	resize(&frame.submitted, first + len(buffers))
+	sync.unlock(&dev.lists_mutex)
+
+	counter: jobs.Counter
+	jobs.run(translate_jobs, &counter)
+	jobs.wait(&counter)
+
+	sync.guard(&dev.lists_mutex)
+	for task, i in tasks {
+		frame.submitted[first + i] = (^d3d.ICommandList)(task.list)
 	}
 	return true
+}
+
+@(private = "file")
+Translate_Task :: struct {
+	frame: ^Frame,
+	cb:    gpu.Command_Buffer,
+	list:  ^d3d.IGraphicsCommandList7,
+}
+
+@(private = "file")
+translate_job :: proc(data: rawptr) {
+	task := (^Translate_Task)(data)
+	task.list = acquire_list(task.frame)
+	translate(task.list, task.cb)
+	check(task.list->Close(), "ICommandList.Close")
+}
+
+// acquire_list takes an open command list from the frame's pool, with the descriptor heaps and root signature
+// bound. The frame's fence has passed, so its lists are free to reset.
+@(private = "file")
+acquire_list :: proc(frame: ^Frame) -> ^d3d.IGraphicsCommandList7 {
+	sync.lock(&dev.lists_mutex)
+	if frame.lists_used == len(frame.lists) {
+		entry: Command_List
+		if !check(dev.device->CreateCommandAllocator(.DIRECT, d3d.ICommandAllocator_UUID, (^rawptr)(&entry.allocator)), "CreateCommandAllocator") {
+			log.panic("d3d12: cannot create a command allocator")
+		}
+		list, ok := create_command_list(entry.allocator)
+		if !ok {
+			log.panic("d3d12: cannot create a command list")
+		}
+		entry.list = list
+		append(&frame.lists, entry)
+	}
+	entry := frame.lists[frame.lists_used]
+	frame.lists_used += 1
+	sync.unlock(&dev.lists_mutex)
+
+	check(entry.allocator->Reset(), "ICommandAllocator.Reset")
+	check(entry.list->Reset(entry.allocator, nil), "ICommandList.Reset")
+	bind_root_signature(entry.list)
+	return entry.list
+}
+
+// submit_list closes a list and adds it to the end of the frame.
+@(private = "file")
+submit_list :: proc(frame: ^Frame, list: ^d3d.IGraphicsCommandList7) {
+	check(list->Close(), "ICommandList.Close")
+	sync.guard(&dev.lists_mutex)
+	append(&frame.submitted, (^d3d.ICommandList)(list))
 }
 
 // end_frame executes the frame's uploads and command list, then presents with vsync.
@@ -228,11 +318,13 @@ end_frame :: proc() {
 			log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
 		}
 	}
+	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
-	texture_barrier(dev.list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
-	check(dev.list->Close(), "ICommandList.Close")
-	lists := [?]^d3d.ICommandList{dev.list}
-	dev.queue->ExecuteCommandLists(len(lists), &lists[0])
+	list := acquire_list(frame)
+	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	submit_list(frame, list)
+	// One call for the whole frame: the next frame's work starts after this frame's work (docs/gpu.md#barriers).
+	dev.queue->ExecuteCommandLists(u32(len(frame.submitted)), raw_data(frame.submitted))
 
 	hr := dev.swapchain->Present(1, {})
 	if hr == dxgi.ERROR_DEVICE_REMOVED || hr == dxgi.ERROR_DEVICE_RESET {
@@ -241,7 +333,7 @@ end_frame :: proc() {
 	check(hr, "Present")
 
 	signal()
-	dev.frames[dev.frame_index % FRAMES_IN_FLIGHT].fence_value = dev.fence_value
+	frame.fence_value = dev.fence_value
 	stamp_releases(dev.fence_value)
 	dev.frame_index += 1
 }
@@ -358,7 +450,7 @@ create_swapchain :: proc(hwnd: win.HWND, size: [2]i32) -> bool {
 	// The frame target's resource and view change every frame to the current back buffer.
 	dev.frame_target = gpu.pool_add(
 		&dev.textures,
-		Texture_Entry{desc = {size = {desc.Width, desc.Height}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}}},
+		Texture_Entry{desc = {size = {desc.Width, desc.Height}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}},
 	)
 	return create_back_buffers()
 }
@@ -385,7 +477,7 @@ release_back_buffers :: proc() {
 }
 
 @(private = "file")
-resize :: proc(size: [2]i32) {
+resize_swapchain :: proc(size: [2]i32) {
 	wait_idle()
 	release_back_buffers()
 	if !check(dev.swapchain->ResizeBuffers(0, u32(size.x), u32(size.y), .UNKNOWN, SWAP_CHAIN_FLAGS), "ResizeBuffers") {

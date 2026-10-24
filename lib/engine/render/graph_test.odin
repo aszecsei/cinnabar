@@ -1,5 +1,6 @@
 package render
 
+import "core:fmt"
 import "core:log"
 import "core:mem/virtual"
 import "core:sync"
@@ -7,11 +8,12 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:core/jobs"
 // The tests submit to the null backend, which validates barriers against the layouts it tracks.
 // Engine code itself never imports a backend.
 import null "cinnabar:core/gpu/null"
 
-// The null backend is a singleton, and the test runner runs tests on several threads.
+// The null backend and the job system are singletons, and the test runner runs tests on several threads.
 @(private = "file")
 backend_lock: sync.Mutex
 
@@ -25,9 +27,12 @@ Fixture :: struct {
 @(private = "file")
 setup :: proc(t: ^testing.T, f: ^Fixture) {
 	testing.expect(t, virtual.arena_init_growing(&f.arena) == nil)
+	testing.expect(t, jobs.init(2))
 	testing.expect(t, null.init(nil, {64, 64}))
 	f.platform = {
 		frame_allocator     = virtual.arena_allocator(&f.arena),
+		jobs_run            = jobs.run,
+		jobs_wait           = jobs.wait,
 		gpu_frame_target    = null.frame_target,
 		gpu_submit          = null.submit,
 		gpu_create_texture  = null.create_texture,
@@ -39,11 +44,12 @@ setup :: proc(t: ^testing.T, f: ^Fixture) {
 teardown :: proc(f: ^Fixture) {
 	cache_destroy(&f.cache, &f.platform)
 	null.shutdown()
+	jobs.shutdown()
 	virtual.arena_destroy(&f.arena)
 }
 
 @(private = "file")
-nothing :: proc(g: ^Graph, cb: ^gpu.Command_Buffer, data: rawptr) {}
+nothing :: proc(ctx: ^Pass_Context) {}
 
 @(private = "file")
 SIZE :: [2]u32{64, 64}
@@ -56,19 +62,21 @@ Recorded :: struct {
 }
 
 @(private = "file")
-inspect :: proc(cb: gpu.Command_Buffer, allocator := context.allocator) -> (r: Recorded) {
+inspect :: proc(cbs: []gpu.Command_Buffer, allocator := context.allocator) -> (r: Recorded) {
 	r.buffers = make([dynamic]gpu.Buffer_Barrier, allocator)
 	r.textures = make([dynamic]gpu.Texture_Barrier, allocator)
 	r.markers = make([dynamic]string, allocator)
-	it := gpu.packet_iterator(cb)
-	for p in gpu.next_packet(&it) {
-		#partial switch p.kind {
-		case .Barriers:
-			buffers, textures := gpu.barrier_data(p)
-			append(&r.buffers, ..buffers)
-			append(&r.textures, ..textures)
-		case .Begin_Marker:
-			append(&r.markers, gpu.marker_label(p))
+	for cb in cbs {
+		it := gpu.packet_iterator(cb)
+		for p in gpu.next_packet(&it) {
+			#partial switch p.kind {
+			case .Barriers:
+				buffers, textures := gpu.barrier_data(p)
+				append(&r.buffers, ..buffers)
+				append(&r.textures, ..textures)
+			case .Begin_Marker:
+				append(&r.markers, gpu.marker_label(p))
+			}
 		}
 	}
 	return
@@ -151,7 +159,7 @@ multi_pass_barriers :: proc(t: ^testing.T) {
 			testing.expect_value(t, entry.desc.usage, gpu.Texture_Usages{.Storage, .Sampled})
 		}
 	}
-	testing.expect(t, null.submit({cb}))
+	testing.expect(t, null.submit(cb))
 	null.end_frame()
 }
 
@@ -185,7 +193,7 @@ unused_passes_are_culled :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, gpu_texture(&g, unused), gpu.Texture{})
 	testing.expect_value(t, len(r.textures), 0)
-	testing.expect(t, null.submit({cb}))
+	testing.expect(t, null.submit(cb))
 }
 
 @(test)
@@ -213,7 +221,7 @@ imported_textures_return_to_resting_layout :: proc(t: ^testing.T) {
 		testing.expect(t, ok)
 		r := inspect(cb, f.platform.frame_allocator)
 		expect_transitions(t, r.textures[:], {{field, .Unordered_Access, .Shader_Resource}, {field, .Shader_Resource, .Unordered_Access}})
-		testing.expect(t, null.submit({cb}))
+		testing.expect(t, null.submit(cb))
 		null.end_frame()
 		virtual.arena_free_all(&f.arena)
 	}
@@ -256,7 +264,7 @@ reads_merge_without_barriers :: proc(t: ^testing.T) {
 		testing.expect_value(t, b.access_after, gpu.Accesses{.Index_Buffer, .Shader_Resource})
 		testing.expect_value(t, b.sync_after, gpu.Syncs{.Index_Input, .Vertex_Shading, .Pixel_Shading})
 	}
-	testing.expect(t, null.submit({cb}))
+	testing.expect(t, null.submit(cb))
 }
 
 @(test)
@@ -309,4 +317,92 @@ cache_reuses_and_evicts :: proc(t: ^testing.T) {
 	for entry in f.cache.entries {
 		testing.expect_value(t, entry.texture, gpu.Texture{})
 	}
+}
+
+@(private = "file")
+mark_ran :: proc(ctx: ^Pass_Context) {
+	sync.atomic_store((^bool)(ctx.data), true)
+}
+
+@(test)
+parallel_passes_keep_their_order :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	COUNT :: 20
+	names: [COUNT]string
+	ran: [COUNT]bool
+	g := begin(&f.platform, &f.cache)
+	for i in 0 ..< COUNT {
+		names[i] = fmt.aprintf("pass %d", i, allocator = f.platform.frame_allocator)
+		keep_pass(&g, add_compute_pass(&g, names[i], mark_ran, &ran[i]))
+	}
+	cbs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(cbs), COUNT)
+	r := inspect(cbs, f.platform.frame_allocator)
+	testing.expect_value(t, len(r.markers), COUNT)
+	for i in 0 ..< min(COUNT, len(r.markers)) {
+		testing.expect_value(t, r.markers[i], names[i])
+		testing.expect(t, ran[i])
+	}
+	testing.expect(t, null.submit(cbs))
+}
+
+@(private = "file")
+mark_piece :: proc(ctx: ^Pass_Context) {
+	ran := (^[4]bool)(ctx.data)
+	assert(ctx.piece_count == len(ran))
+	sync.atomic_store(&ran[ctx.piece], true)
+}
+
+@(test)
+split_passes_form_a_chain :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	ran: [4]bool
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	scene_depth := create_texture(&g, {size = SIZE, format = .D32_Float, label = "depth"})
+	p := add_render_pass(&g, "scene", mark_piece, &ran, pieces = len(ran))
+	color(&g, p, target, .Clear)
+	depth(&g, p, scene_depth, .Clear, store = .Discard)
+
+	cbs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(cbs), len(ran))
+	for cb, i in cbs[:min(len(cbs), len(ran))] {
+		testing.expect(t, ran[i])
+		r := inspect({cb}, f.platform.frame_allocator)
+		// The depth texture's transition from Undefined is in the first piece only.
+		testing.expect_value(t, len(r.textures), i == 0 ? 1 : 0)
+		it := gpu.packet_iterator(cb)
+		for packet in gpu.next_packet(&it) {
+			if packet.kind != .Begin_Pass {
+				continue
+			}
+			pass := gpu.payload(packet, gpu.Begin_Pass)
+			want_flags: gpu.Pass_Flags
+			if i > 0 {
+				want_flags += {.Resuming}
+			}
+			if i < len(ran) - 1 {
+				want_flags += {.Suspending}
+			}
+			testing.expect_value(t, pass.flags, want_flags)
+			testing.expect_value(t, pass.colors[0].load, i == 0 ? gpu.Load_Op.Clear : .Load)
+			testing.expect_value(t, pass.depth.store, i == len(ran) - 1 ? gpu.Store_Op.Discard : .Store)
+		}
+	}
+	testing.expect(t, null.submit(cbs))
+
+	// The test runner fails a test that logs an error, and these rejections are expected.
+	context.logger = log.nil_logger()
+	testing.expect(t, !null.submit(cbs[1:]), "a submission started with a resumed piece")
+	testing.expect(t, !null.submit(cbs[:len(cbs) - 1]), "a submission ended with a suspended piece")
 }

@@ -7,6 +7,7 @@ import "core:log"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:core/jobs"
 
 // Graph handles are valid in the graph that returned them. 0 is the nil handle.
 Texture :: distinct u32
@@ -37,8 +38,24 @@ Pass_Kind :: enum u8 {
 	Compute,
 }
 
+// A pass can be split into at most this many pieces.
+MAX_PASS_PIECES :: 64
+
+// Pass_Context is what a Pass_Proc records with. A pass split into pieces runs its Pass_Proc once per piece, with
+// piece from 0 to piece_count - 1. Each piece records into its own command buffer and draws its share of the work.
+Pass_Context :: struct {
+	graph:       ^Graph,
+	cb:          ^gpu.Command_Buffer,
+	data:        rawptr,
+	piece:       int,
+	piece_count: int,
+}
+
 // Pass_Proc records a pass's commands. For a render pass, the graph records Begin_Pass before it and End_Pass after it.
-Pass_Proc :: #type proc(graph: ^Graph, cb: ^gpu.Command_Buffer, data: rawptr)
+// Each pass, and each piece of a split pass, records on its own job in parallel with the others. It may read the
+// graph and its data, and use context.temp_allocator, but it must not write shared state without synchronization.
+// Each piece of a render pass starts with nothing bound, so it binds its own pipeline and constants.
+Pass_Proc :: #type proc(ctx: ^Pass_Context)
 
 // Graph holds one frame's passes and resources in frame memory. Declare the passes in execution order, then call execute.
 Graph :: struct {
@@ -103,6 +120,23 @@ Pass_Node :: struct {
 	uses:           [dynamic]Use,
 	keep:           bool,
 	live:           bool,
+	piece_count:    int,
+	// Computed in order before the passes record. The first piece records them.
+	barriers:       Barriers,
+	cbs:            []gpu.Command_Buffer,
+	graph:          ^Graph,
+}
+
+@(private)
+Piece :: struct {
+	pass:  ^Pass_Node,
+	index: int,
+}
+
+@(private)
+Barriers :: struct {
+	buffers:  [dynamic]gpu.Buffer_Barrier,
+	textures: [dynamic]gpu.Texture_Barrier,
 }
 
 // begin starts the frame's graph. Build one graph per frame for each cache.
@@ -151,12 +185,14 @@ create_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> Texture {
 	return Texture(len(g.textures))
 }
 
-add_render_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil) -> Pass {
-	return add_pass(g, name, .Render, execute, data)
+// pieces splits a large pass across jobs. The pieces of a render pass are one render pass on the GPU: the first
+// piece loads or clears the attachments, and the last one stores them (see docs/gpu.md#split-passes).
+add_render_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, pieces := 1) -> Pass {
+	return add_pass(g, name, .Render, execute, data, pieces)
 }
 
-add_compute_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil) -> Pass {
-	return add_pass(g, name, .Compute, execute, data)
+add_compute_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, pieces := 1) -> Pass {
+	return add_pass(g, name, .Compute, execute, data, pieces)
 }
 
 // keep_pass stops the graph from culling a pass whose results it cannot see, for example a readback.
@@ -226,75 +262,48 @@ gpu_buffer :: proc(g: ^Graph, buffer: Buffer) -> gpu.Buffer {
 	return g.buffers[buffer - 1].buffer
 }
 
-// execute records the graph and submits it. It returns false if recording or the submission failed.
+// execute records the graph and submits its command buffers. It returns false if recording or the submission failed.
+// Call it from the game's frame code or from a job: it waits for the recording jobs.
 execute :: proc(g: ^Graph) -> bool {
-	cb, ok := record(g)
-	return ok && g.platform.gpu_submit({cb})
+	buffers, ok := record(g)
+	return ok && g.platform.gpu_submit(buffers)
 }
 
-// record culls passes that do not contribute to an imported resource, creates the transient textures, and
-// records the live passes in order with their barriers. At the end, imported textures go back to their
-// resting layouts.
-record :: proc(g: ^Graph) -> (cb: gpu.Command_Buffer, ok: bool) {
+// record culls passes that do not contribute to an imported resource, creates the transient textures and computes
+// the barriers in pass order. Then it records each live pass, with its barriers, into its own command buffer on a
+// job. A last command buffer returns imported textures to their resting layouts.
+record :: proc(g: ^Graph) -> (buffers: []gpu.Command_Buffer, ok: bool) {
 	cull(g)
 	create_transients(g) or_return
+	compute_barriers(g) or_return
 
-	cb = gpu.command_buffer(g.allocator)
-	buffer_barriers := make([dynamic]gpu.Buffer_Barrier, g.allocator)
-	texture_barriers := make([dynamic]gpu.Texture_Barrier, g.allocator)
+	live := make([dynamic]^Pass_Node, g.allocator)
+	pieces := make([dynamic]Piece, g.allocator)
 	for &pass in g.passes {
 		if !pass.live {
 			continue
 		}
-		clear(&buffer_barriers)
-		clear(&texture_barriers)
-		for use in pass.uses {
-			if use.buffer {
-				node := &g.buffers[use.index]
-				if before, needed := transition(&node.state, use.state); needed {
-					append(&buffer_barriers, gpu.Buffer_Barrier{node.buffer, before.sync, use.state.sync, before.access, use.state.access})
-				}
-				continue
-			}
-			node := &g.textures[use.index]
-			if node.state.layout == .Undefined && use.state.layout == .Shader_Resource {
-				log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
-				return {}, false
-			}
-			if before, needed := transition(&node.state, use.state); needed {
-				append(
-					&texture_barriers,
-					gpu.Texture_Barrier{node.texture, before.sync, use.state.sync, before.access, use.state.access, before.layout, use.state.layout},
-				)
-			}
+		append(&live, &pass)
+		pass.graph = g
+		pass.cbs = make([]gpu.Command_Buffer, pass.piece_count, g.allocator)
+		for i in 0 ..< pass.piece_count {
+			append(&pieces, Piece{&pass, i})
 		}
-		gpu.cmd_barriers(&cb, buffer_barriers[:], texture_barriers[:])
-
-		gpu.cmd_begin_marker(&cb, pass.name)
-		if pass.kind == .Render {
-			colors := pass.colors
-			for i in 0 ..< pass.color_count {
-				colors[i].texture = gpu_texture(g, pass.color_textures[i])
-			}
-			depth := pass.depth
-			if pass.depth_texture != 0 {
-				depth.texture = gpu_texture(g, pass.depth_texture)
-			}
-			gpu.cmd_begin_pass(&cb, colors[:pass.color_count], depth)
-		}
-		pass.execute(g, &cb, pass.data)
-		if pass.kind == .Render {
-			gpu.cmd_end_pass(&cb)
-		}
-		gpu.cmd_end_marker(&cb)
 	}
+	pass_jobs := make([]jobs.Job, len(pieces), g.allocator)
+	for &piece, i in pieces {
+		pass_jobs[i] = {record_piece, &piece}
+	}
+	counter: jobs.Counter
+	g.platform.jobs_run(pass_jobs, &counter)
 
 	// The next frame starts after this one ends, so only the layout has to change.
-	clear(&texture_barriers)
+	final := gpu.command_buffer(g.allocator)
+	textures := make([dynamic]gpu.Texture_Barrier, g.allocator)
 	for node in g.textures {
 		if node.imported && node.state.layout != node.resting {
 			append(
-				&texture_barriers,
+				&textures,
 				gpu.Texture_Barrier {
 					texture = node.texture,
 					sync_before = node.state.sync,
@@ -305,13 +314,118 @@ record :: proc(g: ^Graph) -> (cb: gpu.Command_Buffer, ok: bool) {
 			)
 		}
 	}
-	gpu.cmd_barriers(&cb, nil, texture_barriers[:])
-	return cb, true
+	gpu.cmd_barriers(&final, nil, textures[:])
+
+	g.platform.jobs_wait(&counter)
+	result := make([dynamic]gpu.Command_Buffer, 0, len(pieces) + 1, g.allocator)
+	for pass in live {
+		append(&result, ..pass.cbs)
+	}
+	if len(textures) > 0 {
+		append(&result, final)
+	}
+	return result[:], true
+}
+
+// compute_barriers walks the live passes in order and gives each pass the barriers before it.
+@(private = "file")
+compute_barriers :: proc(g: ^Graph) -> bool {
+	for &pass in g.passes {
+		if !pass.live {
+			continue
+		}
+		pass.barriers = {make([dynamic]gpu.Buffer_Barrier, g.allocator), make([dynamic]gpu.Texture_Barrier, g.allocator)}
+		for use in pass.uses {
+			if use.buffer {
+				node := &g.buffers[use.index]
+				if before, needed := transition(&node.state, use.state); needed {
+					append(&pass.barriers.buffers, gpu.Buffer_Barrier{node.buffer, before.sync, use.state.sync, before.access, use.state.access})
+				}
+				continue
+			}
+			node := &g.textures[use.index]
+			if node.state.layout == .Undefined && use.state.layout == .Shader_Resource {
+				log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
+				return false
+			}
+			if before, needed := transition(&node.state, use.state); needed {
+				append(
+					&pass.barriers.textures,
+					gpu.Texture_Barrier{node.texture, before.sync, use.state.sync, before.access, use.state.access, before.layout, use.state.layout},
+				)
+			}
+		}
+	}
+	return true
+}
+
+// record_piece records one piece of a pass. Only the first piece of a render pass loads or clears the attachments,
+// and only the last one stores them. Commands between suspended and resumed pieces are not allowed, so a split
+// render pass has its debug marker inside each piece.
+@(private = "file")
+record_piece :: proc(data: rawptr) {
+	piece := (^Piece)(data)
+	pass, i := piece.pass, piece.index
+	g := pass.graph
+	last := pass.piece_count - 1
+	split_render := pass.kind == .Render && pass.piece_count > 1
+	pass.cbs[i] = gpu.command_buffer(g.allocator)
+	cb := &pass.cbs[i]
+	if i == 0 {
+		gpu.cmd_barriers(cb, pass.barriers.buffers[:], pass.barriers.textures[:])
+	}
+	if !split_render {
+		gpu.cmd_begin_marker(cb, pass.name)
+	}
+	if pass.kind == .Render {
+		colors := pass.colors
+		depth := pass.depth
+		flags: gpu.Pass_Flags
+		if i > 0 {
+			flags += {.Resuming}
+			for &color in colors {
+				color.load = .Load
+			}
+			depth.load = .Load
+		}
+		if i < last {
+			flags += {.Suspending}
+			for &color in colors {
+				color.store = .Store
+			}
+			depth.store = .Store
+		}
+		for c in 0 ..< pass.color_count {
+			colors[c].texture = gpu_texture(g, pass.color_textures[c])
+		}
+		if pass.depth_texture != 0 {
+			depth.texture = gpu_texture(g, pass.depth_texture)
+		}
+		gpu.cmd_begin_pass(cb, colors[:pass.color_count], depth, flags)
+		if split_render {
+			gpu.cmd_begin_marker(cb, pass.name)
+		}
+	}
+	ctx := Pass_Context{g, cb, pass.data, i, pass.piece_count}
+	pass.execute(&ctx)
+	if pass.kind == .Render {
+		if split_render {
+			gpu.cmd_end_marker(cb)
+		}
+		gpu.cmd_end_pass(cb)
+	}
+	if !split_render {
+		gpu.cmd_end_marker(cb)
+	}
 }
 
 @(private = "file")
-add_pass :: proc(g: ^Graph, name: string, kind: Pass_Kind, execute: Pass_Proc, data: rawptr) -> Pass {
-	append(&g.passes, Pass_Node{name = name, kind = kind, execute = execute, data = data, uses = make([dynamic]Use, g.allocator)})
+add_pass :: proc(g: ^Graph, name: string, kind: Pass_Kind, execute: Pass_Proc, data: rawptr, pieces: int) -> Pass {
+	assert(pieces >= 1 && pieces <= MAX_PASS_PIECES, "render: a pass has 1 to MAX_PASS_PIECES pieces")
+	append(
+		&g.passes,
+		Pass_Node{name = name, kind = kind, execute = execute, data = data, piece_count = pieces, uses = make([dynamic]Use, g.allocator)},
+	)
 	return Pass(len(g.passes))
 }
 
