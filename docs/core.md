@@ -7,16 +7,20 @@
 Windows and D3D12 are the first targets. A later port must only add files to `core`.
 
 - **OS layer:** Odin's file-suffix convention (`*_windows.odin`) selects the platform implementation at compile time.
-- **GPU backend:** a build define selects the backend at compile time. There is no runtime dispatch.
+- **GPU backend:** the `gpu_backend` collection selects the backend at compile time. There is no runtime dispatch. See [GPU](gpu.md#packages).
 - **Rules:** `lib/engine` and games never import `core:sys/windows`, `vendor:directx` or any backend package. `lib/core/gpu/d3d12` is the only code that imports `vendor:directx`.
 
 ## Job system
 
-The job system has one worker thread per core and a pool of fibers. Jobs wait on atomic counters. Job entry procedures can come from the game DLL.
+The job system in `lib/core/jobs` has one worker thread per core and a pool of fibers. Jobs wait on atomic counters. Job entry procedures can come from the game DLL.
 
-- **Jobs are frame-scoped.** A job must not stay suspended across a frame boundary. A suspended fiber's stack holds return addresses into the DLL, so the [reload sequence](hot-reload.md#reload-sequence) requires a drained job system. Logic that spans frames belongs in [scripts](scripting.md).
-- **No thread-local state in jobs.** A fiber can resume on a different thread. Jobs must not use `@thread_local` variables or the runtime's default `context.temp_allocator`. Each job gets a scratch allocator through `context`.
-- **No OS locks across a yield.** Use the fiber-aware synchronization primitives from `core`.
+- **Interface:** a `Job` is a procedure and a data pointer. `jobs_run(jobs, &counter)` starts jobs and adds them to a `Counter`. `jobs_wait(&counter)` suspends the calling fiber until the counter is zero. A zero `Counter` is ready to use, and it can live on the stack of the fiber that waits for it.
+- **Game access:** the game calls the job system through `Platform_API`. The game DLL contains its own copy of `lib/core/jobs` for the types, but that copy's scheduler is not running.
+- **Main thread:** the frame runs on the main thread's own fiber. While that fiber waits, the main thread runs jobs. The main fiber resumes only on the main thread, so window calls from the frame code stay on the window's thread.
+- **Jobs are frame-scoped.** A job must not stay suspended across a frame boundary. A suspended fiber's stack holds return addresses into the DLL, so the [reload sequence](hot-reload.md#reload-sequence) requires a drained job system. `core` waits for all frame jobs at the end of each frame, and logs an error if any were still running. Logic that spans frames belongs in [scripts](scripting.md).
+- **Background jobs:** `jobs.run_background` starts jobs that may run across frames. They must run only host code, so the host can never unload code that they run. The GPU backend compiles pipelines this way. Background jobs are not part of `Platform_API`.
+- **No thread-local state in jobs.** A fiber can resume on a different thread. Jobs must not use `@thread_local` variables or the runtime's default `context.temp_allocator`. Each job's fiber has its own scratch arena as `context.temp_allocator`. It is freed when the next job starts on the fiber.
+- **No OS locks across a yield.** An OS lock blocks its thread, so a fiber that waits while it holds one can deadlock the workers. Use the fiber-aware `jobs.Mutex` (`jobs_lock` and `jobs_unlock`) for any section that waits. A fiber that finds the mutex locked suspends, and its thread runs other jobs. The unlocking fiber hands the mutex to the oldest waiter. An OS lock is still fine for a short section that never waits.
 
 ## Memory
 

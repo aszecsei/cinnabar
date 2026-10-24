@@ -18,6 +18,6 @@ The editor link is a message connection between the editor and the host. It uses
 
 ## Viewport
 
-- The host renders the game into a D3D12 shared texture and signals a shared fence. The editor opens both handles and displays the texture in its viewport panel.
+- The host renders the game into a D3D12 shared texture and signals a shared fence. The editor opens both handles and displays the texture in its viewport panel. Until the editor exists, `tools/viewer` opens them and shows the frames in a window (see [GPU](gpu.md#presentation)).
 - The editor sends input to the host over the editor link.
 - The editor does not reparent the host's window into its own. Windows attaches the input queues of a cross-process parent and child window, so a stall in the game would freeze the editor UI.

@@ -10,7 +10,7 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 
 - **Shared schemas:** `tools/cook` imports the same asset-type package from `lib/engine` that the runtime uses, so their struct layouts cannot diverge. Each asset type's version comes from its layout hash, so changing a type invalidates its cache entries.
 - **Incremental cooking:** a cache key is a hash of the source files, the import settings and the cooker version.
-- **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. DXC can also produce SPIR-V for a future Vulkan backend. The cooker stores each shader's reflected binding layout with its bytecode, so the runtime never compiles or reflects shaders. The DXC version is part of the cache key.
+- **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. A Vulkan port adds SPIR-V from DXC, and a Metal port adds a metallib from `metal-shaderconverter`. All shaders use one fixed bindless root signature (see [GPU](gpu.md#binding-model)), and the cooker rejects a shader that does not fit it. The runtime never compiles or reflects shaders. The DXC version is part of the cache key. For now the cooker cooks only shaders, and writes each output next to its source with its cache key in `<output>.key` (see [GPU](gpu.md#shaders)).
 
 ## Blob format
 

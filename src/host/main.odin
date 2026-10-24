@@ -9,6 +9,7 @@ import "core:strings"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/gpu"
 
 DEFAULT_GAME_PATH :: "build/mygame.dll"
 
@@ -22,14 +23,24 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	source_path := len(os.args) > 1 ? os.args[1] : DEFAULT_GAME_PATH
-	if !core.init("cinnabar host") {
+	// host [game.dll] [--shared <name>]. --shared renders into shared textures for the editor or tools/viewer.
+	source_path := DEFAULT_GAME_PATH
+	shared_target := ""
+	for i := 1; i < len(os.args); i += 1 {
+		if os.args[i] == "--shared" && i + 1 < len(os.args) {
+			shared_target = os.args[i + 1]
+			i += 1
+		} else {
+			source_path = os.args[i]
+		}
+	}
+	if !core.init("cinnabar host", shared_target = shared_target) {
 		return
 	}
 	defer core.shutdown()
 
-	game, ok := game_load(source_path, 0)
-	if !ok {
+	game, result := game_load(source_path, 0)
+	if result != .Loaded {
 		log.fatalf("host: could not load %s", source_path)
 		return
 	}
@@ -42,20 +53,36 @@ main :: proc() {
 		if !keep_running || !game.api.update(state, dt) {
 			break
 		}
+		core.end_frame()
 
 		// End of frame: the job system is drained, so this is the reload point.
 		if game_changed(game) {
-			if next, loaded := game_load(source_path, game.version + 1); loaded {
+			switch next, reload := game_load(source_path, game.version + 1); reload {
+			case .Loaded:
 				state = game_swap(&game, next, state)
+			case .Refused:
+				// The refused copy stays loaded and locked, so the next build needs the next version's file name.
+				game.version = next.version
+				game.modified = next.modified
+			case .Not_Ready:
 			}
 		}
 	}
 	game.api.shutdown(state)
 }
 
+Load_Result :: enum {
+	Loaded,
+	// The build is incomplete or missing. The next frame retries.
+	Not_Ready,
+	// The DLL loaded but cannot run in this host. Only a new build is tried.
+	Refused,
+}
+
 // game_load copies the DLL to a versioned name and loads the copy, so the
 // build can overwrite the original. Old copies are never unloaded.
-game_load :: proc(source_path: string, version: int) -> (game: Game_Module, ok: bool) {
+game_load :: proc(source_path: string, version: int) -> (game: Game_Module, result: Load_Result) {
+	result = .Not_Ready
 	modified, stat_err := os.modification_time_by_path(source_path)
 	if stat_err != nil {
 		log.errorf("host: %s: %v", source_path, stat_err)
@@ -76,17 +103,21 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, ok: 
 	get_api, found := dynlib.symbol_address(lib, core.GAME_API_SYMBOL)
 	if !found {
 		log.errorf("host: %s does not export %s", loaded_path, core.GAME_API_SYMBOL)
-		return
+		return {version = version, modified = modified}, .Refused
 	}
 
+	game = {
+		source_path = source_path,
+		version     = version,
+		modified    = modified,
+		api         = (proc() -> core.Game_API)(get_api)(),
+	}
+	if game.api.gpu_format_hash() != gpu.format_hash() {
+		log.errorf("host: %s was built with a different GPU command format. Restart the host to load it.", loaded_path)
+		return game, .Refused
+	}
 	log.infof("host: loaded %s", loaded_path)
-	return {
-			source_path = source_path,
-			version = version,
-			modified = modified,
-			api = (proc() -> core.Game_API)(get_api)(),
-		},
-		true
+	return game, .Loaded
 }
 
 game_changed :: proc(game: Game_Module) -> bool {
@@ -104,7 +135,7 @@ game_swap :: proc(game: ^Game_Module, next: Game_Module, state: rawptr) -> rawpt
 	} else {
 		log.info("host: Game_State layout changed, restarting game")
 		game.api.shutdown(state)
-		core.reset_permanent()
+		core.soft_restart()
 		state = core.alloc_game_state(next.api.state_size())
 		next.api.init(state, platform)
 	}

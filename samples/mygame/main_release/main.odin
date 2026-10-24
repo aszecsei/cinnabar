@@ -24,6 +24,7 @@ main :: proc() {
 		if !ok || !api.update(state, dt) {
 			break
 		}
+		core.end_frame()
 	}
 	api.shutdown(state)
 }
