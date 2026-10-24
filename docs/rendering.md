@@ -283,22 +283,37 @@ The design needs these changes in `lib/core/gpu` and the render graph:
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
 - **History textures** in the render graph (see [Later features](#later-features)).
 - **An HDR frame target** from `core`, for HDR output.
-- **Reversed Z** in `render.view_projection` and `render.view_depth`, and in the editor's picking.
+- **Block-compressed formats** (phase 0): `BC1`, `BC4`, `BC5`, `BC6H` and `BC7`, with sRGB variants of `BC1` and `BC7`. `format_size` becomes a block size, and `mip_chain_size` and the copies count 4×4 blocks, so a mip smaller than a block still takes one.
+## Assets and components
 
-## Prerequisites
+The renderer draws shader, texture and mesh assets, which the cooker makes (see [Content pipeline](content-pipeline.md#shaders)).
 
-The built-in renderer draws assets that do not exist yet:
+### GPU residency
 
-- **Shader assets:** the cook daemon cooks shaders as assets with GUIDs, instead of `just shaders` writing them next to their sources (see [Content pipeline](content-pipeline.md#cooking)).
-- **Texture assets:** PNG and others, with mips and BC compression, streamed with `gpu_stream_texture`.
-- **Mesh assets:** glTF, with meshlets for the mesh shader path and index buffers for the fallback.
-- **Components:** `Camera`, `Mesh_Renderer` (a mesh and a material instance for each submesh), the light components and `View_Model`.
+The asset runtime keeps blobs on the CPU. The renderer's residency table, in `Renderer`, gives the GPU resources of the assets that it draws.
+
+- **By GUID.** `render.resident_texture(&renderer, guid)` and `render.resident_mesh(&renderer, guid)` return the GPU handles and whether they are ready. The first call loads the asset, creates its resources and streams its data with `gpu_stream_texture` and `gpu_stream_buffer` (see [GPU](gpu.md#streaming)). Each later call is a lookup.
+- **Until a resource is ready**, a texture gives the default for its usage (white, a flat normal, black) and a mesh draws nothing. Nothing waits for a stream.
+- **Hot reload.** When `asset.poll` swaps a blob, the table streams the new data into new resources, and switches to them only when their transfers are done, so the old version draws until then. Then it destroys the old resources.
+- **Shaders** are not in the table. A game or the renderer loads a shader asset, creates its pipeline from the blob's entries, and calls `update_graphics_pipeline` or `update_compute_pipeline` when `asset.poll` swaps the blob. A shader change therefore needs no code reload: the daemon cooks it, and the next frame's pipeline compiles from it.
+- **Lifetime.** Resident resources have the `Game` scope. A soft restart destroys them with the old game, and loads the assets again, as it loads every asset again (see [Content pipeline](content-pipeline.md#loading)). Bottom-level acceleration structures are built on a mesh's first draw with `Ray_Query`.
+- **Unused assets** stay resident. Unloading by use, and streaming mips by distance, come with larger scenes.
+
+### Asset fields
+
+A component refers to an asset by GUID, in a `format.Guid` field with an `asset` tag that names the kind: ``mesh: format.Guid `asset:"mesh"` ``. The scene format, the editor link and the properties panel get an `Asset` field kind: the editor shows the asset's name, picks from the content browser's assets of that kind, and accepts an asset dragged onto the field. A GUID that names no asset of that kind is a scene warning, like a missing script.
+
+### Components
+
+- **`Camera`:** the vertical field of view and the near plane. The camera's pose is its entity's presented `Transform`. `Game_State` holds the active camera's entity, as world-wide state (see [World](world.md)). The game's view comes from it, unless an editor is linked (see [Editor](editor.md#viewport)).
+- **`Mesh_Renderer`:** a mesh, whether it casts shadows, and later a material instance for each of the mesh's submeshes. Until materials exist (phase 2), every mesh draws with one built-in shader that shades by its normal and a fixed light.
+- **Later:** the light components (phase 3) and `View_Model` (phase 4).
 
 ## Implementation phases
 
 | Phase | Result |
 |---|---|
-| 0 | Reversed Z. Shader, texture and mesh assets. `Camera` and `Mesh_Renderer`. |
+| 0 | In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
 | 1 | The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
 | 2 | The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
 | 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |

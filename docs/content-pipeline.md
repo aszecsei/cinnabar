@@ -20,7 +20,9 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 - **The cache's generation:** after a cook writes blobs, it adds one to the counter in `<cache>/<config>/.generation` (see [Loading](#loading)).
 - **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs. Otherwise two cooks could both give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes. A dev batch cook that finds the lock held leaves the cache to the cook daemon, which keeps it up to date, so `just build` works while the editor is open. Any other cook stops with an error.
 - **Problems:** each error and warning names its file (the asset's source or `.meta` file, or another file such as the definition file), and its line and column when it has them. A batch cook logs each one as `cook: <file>:<line>:<column>: <text>`.
-- **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. A Vulkan port adds SPIR-V from DXC, and a Metal port adds a metallib from `metal-shaderconverter`. All shaders use one fixed bindless root signature (see [GPU](gpu.md#binding-model)), and the cooker rejects a shader that does not fit it. The runtime never compiles or reflects shaders. The DXC version is part of the cache key. For now the cooker cooks only shaders, and writes each output next to its source with its cache key in `<output>.key` (see [GPU](gpu.md#shaders)).
+- **Kinds:** scripts, scenes, shaders, textures and meshes. Each kind has an importer: its extensions, its import settings and its cook (see the sections below).
+- **Slow kinds cook in parallel.** Textures and meshes can take seconds each, so a pass cooks them on worker threads, beside the scripts and scenes, which stay serial. A pass reports the assets that it has left while it runs, so the editor can show progress.
+- **Third-party code** for the importers is in `vendor/`, built with CMake into `build/` like Luau, and linked into `tools/cook` only: Compressonator's `CMP_Core` for block compression, and meshoptimizer for meshes. Odin's `vendor:stb/image`, `vendor:OpenEXRCore` and `vendor:cgltf` read the source files. The runtime links none of them.
 
 ### Scripts
 
@@ -45,6 +47,63 @@ Script import settings in `.meta`: `native = true` compiles the module to machin
 
 Scenes are `.scene` text files (see [Editor](editor.md#scenes)). `just scenes` runs `cook scenes --cache build/cache --config dev|release --root game=<content root>`. The cooker cannot lay out native components, because their types exist only in the game DLL, so it checks only the file: its syntax, and that the scene IDs and the script GUIDs that it names exist. A missing one is a warning. A scene with an error keeps its old blob. The cache key covers the cooker version, the configuration, the source path, the source and the `.meta` file.
 
+### Shaders
+
+Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shaders --cache build/cache --config dev|release --root game=<content root> --root engine=lib/engine/content --include lib/core/gpu/shaders`, and the daemon cooks them like any other kind.
+
+- **One asset per file.** The cooker compiles each of the file's `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points into one blob. A file with `[shader("...")]` attributes is a ray tracing library and has one library entry (see [GPU](gpu.md#shaders)).
+- **Includes are not assets.** `.hlsli` files have no GUID and no `.meta` file. The cooker resolves an include next to the including file first, then in each `--include` directory. The daemon also watches the `--include` directories.
+- **The fixed root signature** is attached to every stage, so DXC rejects a shader that does not fit it (see [GPU](gpu.md#binding-model)). The runtime never compiles or reflects shaders.
+- **Configurations:** development compiles with debug information embedded (`-Zi -Qembed_debug`), so PIX shows the source. Release strips it.
+- **Problems:** the cooker parses DXC's messages into problems with their file, line and column. A message in an include belongs to the include's file, and to no asset, as other files' problems do. A shader that fails keeps its old blob, so the running game keeps drawing with the last good version.
+- **The cache key** covers the cooker version, the DXC version, the configuration, the source path, the source, the `.meta` file, and the source of every file that it includes, directly or not.
+- **Engine shaders** are in the engine's content root, `lib/engine/content/shaders/`, with committed `.meta` files and fixed GUIDs: the editor tools' overlay and pick shaders first, and the renderer's later.
+- A port adds SPIR-V from DXC or a metallib from `metal-shaderconverter` as more entries in the same blob.
+
+### Textures
+
+Textures are `.png`, `.jpg`, `.tga` and `.hdr` files (with `vendor:stb/image`), and `.exr` files (with `vendor:OpenEXRCore`).
+
+| Setting | Values | Default | Effect |
+|---|---|---|---|
+| `usage` | `color`, `normal`, `mask`, `hdr`, `data` | From the name, see below | Selects the format and the mip filter |
+| `mips` | `true`, `false` | `true` | Make the full mip chain |
+| `max_size` | `256` to `16384` | `16384` | Halve the texture until its larger side fits |
+| `wrap` | `repeat`, `clamp` | `repeat` | The edge mode of the mip filter. The sampler is the material's choice. |
+
+| Usage | Format | Mips |
+|---|---|---|
+| `color` | BC7, sRGB. Alpha is kept. | Filtered in linear light. Alpha-tested textures keep their coverage. |
+| `normal` | BC5 (x and y; shaders compute z) | Filtered, then normalized again |
+| `mask` | BC4 (one channel: roughness, occlusion, height) | Filtered |
+| `hdr` | BC6H, unsigned | Filtered |
+| `data` | `RGBA8_Unorm`, not compressed | Filtered |
+
+- **The default usage** comes from the file when the cooker writes its `.meta` file: `.hdr` and `.exr` are `hdr`, a name ending in `_n` or `_normal` is `normal`, a name ending in `_r`, `_rough`, `_ao`, `_m`, `_metal` or `_mask` is `mask`, and everything else is `color`. The setting is then written in the `.meta` file, so a rename does not change it.
+- **Mips** use a Kaiser filter. The cooker filters in floating point, and compresses each mip after all are made.
+- **Quality:** development compresses at Compressonator's fast quality, and release at its high quality. The configuration is in the key, so release textures cook again in a release cook.
+- **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file.
+- *Cube maps and texture arrays come with environment lighting (see [Rendering](rendering.md)).*
+
+### Meshes
+
+Meshes are `.gltf` and `.glb` files, read with `vendor:cgltf`. One glTF file is one mesh asset.
+
+- **Flattening:** the cooker walks the default scene's nodes and bakes their transforms into the vertices. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh. Each submesh has a material slot named for its glTF material.
+- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding.
+- **Vertices** are two streams, so that depth and shadow passes read only positions:
+
+| Stream | Contents | Size |
+|---|---|---|
+| Positions | `f32` x, y, z | 12 bytes |
+| Attributes | Normal and tangent, octahedral in `snorm16` pairs, with the bitangent's sign; the first UV set in `f32`; the second UV set and the vertex color when the file has them | 16 to 28 bytes |
+
+- **Processing** with meshoptimizer: weld identical vertices, order the triangles for the vertex cache and the vertices for fetching, and build meshlets of at most 64 vertices and 124 triangles, each with a bounding sphere and a normal cone for culling. Indices are 16-bit when the mesh has fewer than 65 536 vertices.
+- **Bounds:** the mesh and each submesh have an axis-aligned box and a sphere.
+- **Not imported yet:** the file's materials, textures, cameras, lights, skins and animations. *Importing a glTF file as a scene, with texture assets and material instances, comes later.*
+- **Import settings:** `scale` (a number, default `1`) and `tangents` (`file` or `generate`, default `file`: MikkTSpace tangents are made when the file has none).
+- **The cache key** covers the cooker version, the meshoptimizer version, the source, the `.meta` file, and for a `.gltf` file the `.bin` files that it names.
+
 ## Cook daemon
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
@@ -52,7 +111,7 @@ In development, the cook daemon keeps the cache up to date while the sources cha
 `cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...`
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
-- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
+- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms.
 - **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names) and problems, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
 - **Removed assets:** when an asset leaves the index, the daemon deletes its blob, so a game that starts later does not load it. A running game keeps the modules that it has loaded. An asset that only shares its GUID with a copy keeps its blob.
 - **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
@@ -101,7 +160,8 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
-4. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
+4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, with the GPU residency table (see [Rendering](rendering.md#implementation-phases), phase 0).
+5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Blob format
 
@@ -121,6 +181,14 @@ A script blob holds:
 
 A scene blob holds a table of entities: the scene ID, the parent's scene ID, the name, the active flag, and slices of component and behaviour records. A component record has the stable ID and the name. A behaviour record has the script's GUID. Each has a slice of field records: the hash of the field's name, the name for messages, and the tagged value. The loader in `lib/engine/scene` matches the hashes to the fields of the registered types.
 
+A shader blob holds a table of entries. Each entry has a stage (`Vertex`, `Pixel`, `Compute`, `Amplification`, `Mesh` or `Library`), a target (`DXIL` first) and a slice of bytecode. It ends with the source path.
+
+A texture blob holds the format, the size, the mip count, the usage, and the whole mip chain: each mip tightly packed, mip 0 first. That is the layout that `gpu_stream_texture` takes (see [GPU](gpu.md#streaming)), so the blob's data streams without a copy.
+
+A mesh blob holds the bounds, the vertex count, the index size, a table of submeshes (the material slot's name, the index range, the meshlet range and the bounds), then the position stream, the attribute stream, the indices, and the meshlets: their vertex lists, their triangles packed as three bytes each, and their bounds and cones. Each stream starts at 16 bytes, so each streams straight into a buffer.
+
+The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
+
 ## Loading
 
 - **Two sources, one format:** the asset runtime (`lib/engine/asset`) reads through `asset.Source`, a union with two backends, so it holds no procedure pointers. `Loose_Cache` is used in development and `Bundle` is used in release. Both read the same blob format. *Until bundles exist, release builds read the release loose cache.*
@@ -128,4 +196,5 @@ A scene blob holds a table of entities: the scene ID, the parent's scene ID, the
 - **Handles:** `asset.load` returns a generational handle, and the same handle for an asset that is already loaded. A handle to an unloaded asset is detected. The asset table lives in `Game_State`, so a code reload keeps every loaded asset. A soft restart loads them again.
 - **Bundles** (`*.cbb`) contain a header, a table of contents sorted by GUID, and aligned blobs. A bundle is a load unit (global, per-level, or a streaming chunk), and it lists the bundles it depends on.
 - **Asset hot reload:** in development, after a cook writes blobs, it writes a counter to `build/cache/<config>/.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](scripting.md#script-hot-reload)).
+- **GPU data:** the asset runtime keeps blobs on the CPU and knows nothing about the GPU. The renderer keeps a residency table (see [Rendering](rendering.md#gpu-residency)), which creates and streams the GPU resources of texture and mesh assets.
 - **Scripts load on demand.** A script blob stays loaded while its module is loaded. The VM holds the module's result, not the blob, so the blob can be swapped under it.
