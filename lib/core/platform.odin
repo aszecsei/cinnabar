@@ -81,6 +81,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		permanent_allocator          = virtual.arena_allocator(&platform.permanent),
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
 		asset_allocator              = runtime.heap_allocator(),
+		heap_allocator               = runtime.heap_allocator(),
 		memory_reserve               = memory_reserve,
 		memory_commit                = memory_commit,
 		memory_release               = memory_release,

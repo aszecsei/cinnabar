@@ -16,6 +16,9 @@ Platform_API :: struct {
 	frame_allocator:     runtime.Allocator,
 	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
 	asset_allocator:     runtime.Allocator,
+	// A general-purpose allocator for other game-side state that grows and shrinks, such as the editor's view of the
+	// world. Its memory is the host's.
+	heap_allocator:      runtime.Allocator,
 
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
@@ -121,6 +124,18 @@ Game_API :: struct {
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting.md#types-and-tooling.
 	script_types:    proc(platform: ^Platform_API) -> string,
+	// The game's side of the editor link (see docs/editor.md#editor-link). The host calls it between frames with
+	// the editor's messages for the game, and the game appends its own messages, framed, to out. connection changes
+	// for each editor, and is 0 while none is linked. A game without editor support leaves it nil.
+	editor_poll:     proc(state: rawptr, connection: u64, incoming: []Editor_Message, out: ^[dynamic]byte),
+}
+
+// Editor_Message is a message of the editor link that the host does not handle, still encoded. The payload is valid
+// during the call.
+Editor_Message :: struct {
+	kind:    u16,
+	request: u32,
+	payload: []byte,
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

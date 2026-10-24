@@ -22,7 +22,7 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, and phase 3 added `Link` and its generator.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, and phase 4 added `Model`.
 
 | Project | Responsibility |
 |---|---|
@@ -96,7 +96,7 @@ The editor link is a message connection between the editor and the host. It uses
 - **Framing:** each message is a 12-byte little-endian header (payload length, kind, flags, request ID) and a payload of at most 64 MiB. A response has the request ID of its request. An event has request ID 0.
 - **Wire format:** numbers are little-endian as they are in memory, a `bool` is one byte, enums are their backing integer, and strings and slices are a `u32` count followed by their bytes or elements. A fixed array has no count, and a struct is its fields in order. A payload that does not decode to exactly one message is refused.
 - **Handshake:** the editor sends `Hello` with its protocol version. The host answers `Welcome` with the game's name and the DLL's layout hash, or `Refused` with both versions, and the editor shows the reason.
-- **Two handlers.** The host handles the messages that need no game state: viewport size and frame acknowledgements now, and input, mode changes and stats later. From phase 4 it passes every other message to `Game_API.editor_message`, which `lib/engine/editor` implements. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
+- **Two handlers.** The host handles the messages that need no game state: the handshake, viewport size and frame acknowledgements now, and input, mode changes and stats later. It passes every other message, still encoded, to `Game_API.editor_poll`, once per frame between frames, with the connection (0 while no editor is linked). The game decodes them with its own copy of `lib/engine/editor/link`, and appends its own messages to a buffer that the host owns, which the host then queues. The game cannot write to the outbox directly: it logs while it polls, and the logger takes the outbox's lock. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
 - **Threads:** in the host, an accept thread waits for the editor, a reader thread queues its messages, and a writer thread sends the outbox. The main thread handles the queued messages between frames, after the reload point, while no job runs. Events of a frame go out at the end of it.
 - **The log:** while an editor is linked, the host's logger sends every line, the game's and the jobs' included, over the link instead of to the host's console. A line carries its level, time, location and text. If more than 16 MiB is waiting to be sent, log lines are dropped and counted. The editor's console also shows the host's own console output, which has the lines before the link and anything that does not go through the logger, such as a crash.
 - **One schema:** the messages are Odin structs in `lib/engine/editor/link`, a package that imports nothing from core or engine, so the host and the game both use it. `just link-schema` runs `host --emit-link-schema`, which writes `build/link/link-schema.json`, and a C# source generator for `Cinnabar.Editor.Link` reads it. A message's kind is its index in the `Message` union, and the protocol version is a hash of the schema, so any change to a message changes the version. A changed message is a build error in the editor, not a decode error at run time. Odin's `Snake_Case` names become `PascalCase` in C#.
@@ -113,17 +113,21 @@ The editor link is a message connection between the editor and the host. It uses
 | Mode | Play, pause, step, stop |
 | Stats | Frame times, memory, counters, script memory by module |
 
+## World
+
+The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Editor` in its `Game_State`, and its `Game_API.editor_poll` calls `editor.poll` with the world and the script runtime. On the editor's side, `WorldModel` in `Cinnabar.Editor.Model` mirrors what it hears. The mirror is read-only: it changes only through the game's messages.
+
+- **A new connection gets everything.** When `poll` sees a connection that its state is not for, it sends `Component_Types` and an `Entity_Snapshot`. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches again after one.
+- **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent and the active state. It sends an `Entity_Delta` with the changed entities and the destroyed ones. A slot that a new generation took counts as a destroyed entity and a new one. The scan visits every entity, which suits worlds of tens of thousands; larger worlds will need change tracking in the ECS.
+- **Watching:** the outliner needs every entity, but only a few entities need their field values. The editor sends `Watch_Entity` and `Unwatch_Entity` for the selection, and the game sends `Entity_Values` for each watched entity at most twenty times a second, and only when the encoded values changed. A watched entity that dies stops being watched. At most 64 entities are watched.
+- **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code.
+- After a code reload, the game sends the types again, and the panels rebuild.
+
 ### Types
 
-- A component type gives its stable ID, its name and its fields. A field gives its name, offset, kind and flags.
-- **Field kinds:** the integer and float types, `bool`, enums with their names, `[3]f32`, `quaternion128`, `World_Position`, `Entity`, asset GUIDs and strings. Other fields are hidden.
-- **Struct tags:** `editor:"-"` hides a field, `editor:"read"` makes it read-only, and `editor:"range=0,100"` gives a slider range. Fields walk the same Odin type info that `script.expose` walks.
-- Behaviour fields come from the classes that the cooker recorded (see [Scripting](scripting.md#behaviours)). The host sends them for each loaded class.
-- After a code reload, the host sends the types again, and the editor rebuilds the open panels.
-
-### Watching
-
-The outliner needs every entity, but only a few entities need their field values. The host sends the entity list once, then deltas each frame. It sends field values only for watched entities: the selection, and entities that a panel pins. In play mode, the values change every frame, so the host sends at most 20 updates per second for each watched entity.
+- A component type gives its stable ID, its name, its size and its fields. A field gives its name, offset, kind, read-only flag and range, and an enum's backing kind and named values.
+- **Field kinds:** the integer and float types, `bool`, enums, `[3]f32`, `quaternion128`, `World_Position` and `Entity`. A nested struct that is none of these adds its fields with dotted names, such as `inner.amount`. Other fields are hidden. *Asset references come with asset fields.*
+- **Struct tags:** `editor:"-"` hides a field, `editor:"read"` makes it, and anything in it, read-only, and `editor:"range=0,100"` gives a slider range. The walk follows the same rules as `script.expose`. The `Behaviours` component's Luau reference is hidden this way.
 
 ## Viewport
 
@@ -166,7 +170,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 ### Commands
 
 - A command has an ID such as `edit.undo`, a label, an icon, a default shortcut, a can-execute check and an execute procedure.
-- **Editor commands** are C#. **Game commands** are described by the DLL and run in the host through `Game_API.editor_message`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
+- **Editor commands** are C#. **Game commands** are described by the DLL and run in the game through `Game_API.editor_poll`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
 - **Toggles and choices:** a command with a checked state is a toggle. A choice command picks one of a list of options. A command raises `Changed` when it runs, and owners of shared state, such as the host session, invalidate every command, so views update without polling.
 - **Key bindings:** `keybindings.json` in the editor settings is an object from command ID to key gesture, such as `{ "view.stats": "F3" }`. An empty gesture removes a shortcut. When two commands get the same gesture, the first by ID keeps it, and the console says so.
 - **The command palette** (Ctrl+Shift+P) searches every command by label and ID. Every word of the query must match. A label that starts with the query ranks first, then a label with a word that starts with it.
@@ -186,12 +190,17 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 ### Outliner
 
 - The outliner is a virtualized list of the visible rows of the tree, indented by depth. A tree control with one item per entity does not scale to tens of thousands of entities.
-- The hierarchy comes from `Parent`. Dragging a row onto another row is a reparent operation.
+- The hierarchy comes from `Parent`, in handle order. An entity whose parent the editor does not know is a root. Rows start expanded, and the outliner remembers the ones that the user collapsed.
+- A row shows the entity, as the engine prints it (`Entity(3:1)`), and its components, without the ones that the tree shows itself (`Parent`, `Previous_Transform`, `Inactive`, `Disabled`). An inactive entity is dimmed. *Names come with scenes.*
+- **Filter:** a filter shows the rows whose entity or components match, with their ancestors.
+- Dragging a row onto another row is a reparent operation. *With editing.*
 - **Visibility and lock are editor state.** Hidden entities are not drawn in the viewport, and locked entities cannot be picked. Neither changes the game's `Disabled` state, and neither is saved in the scene. The editor saves them for each user.
 
 ### Properties
 
-- The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind.
+- The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind. Until editing, it shows the values as text. A component with no fields the editor can show, such as a tag, is a line with its name.
+- The panel builds its controls when the entity, its components or its behaviours change. When only values change, it updates their text, so it keeps its expanders and scroll position while values change twenty times a second. A collapsed group stays collapsed across selections.
+- An entity reference, such as `Parent` or an entity field, is a link that selects that entity.
 - **Reset:** a field that differs from its default shows a reset button. With prefabs, the default is the prefab's value.
 - **Multi-select:** the panel shows the components that every selected entity has. A field whose values differ shows as mixed, and setting it makes one operation for each entity, in one transaction.
 - `World_Position` shows meters, and sets raw values.
@@ -213,7 +222,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
 2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
 3. **Link:** the server in `src/host`, the handshake, the schema and the C# generator, back-pressure, resizing, and the console. Tests in `Cinnabar.Editor.Tests` run the real host when it is built: the handshake, a refused version, a resize, and back-pressure measured on the shared fence.
-4. **Read-only world:** types, the entity list and deltas, the outliner, and the properties panel for watched entities.
+4. **Read-only world:** types, the entity list and deltas, the outliner, and the properties panel for watched entities, with behaviours' fields.
 5. **Scenes:** the `Name` component, the scene format, the loader, `cook scenes`, and snapshots over the link.
 6. **Editing:** operations, transactions, undo history, save and autosave, and field editors.
 7. **Viewport tools:** the editor camera, the ID buffer and picking, the selection outline, gizmos and snapping.

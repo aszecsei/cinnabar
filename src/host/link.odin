@@ -41,6 +41,8 @@ Link :: struct {
 	linked_connection: u64,
 	sent_generation:   i64,
 	decode_arena:      virtual.Arena,
+	// What the game's editor_poll wrote, before it goes into the outbox. The game appends to it with the host's heap.
+	game_out:          [dynamic]byte,
 	game:              string,
 	layout_hash:       u64,
 	console:           log.Logger,
@@ -71,6 +73,7 @@ link_start :: proc(l: ^Link, port: int, game: string) -> bool {
 	l.listener = listener
 	l.inbox = make([dynamic]Incoming, runtime.heap_allocator())
 	l.outbox = make([dynamic]byte, runtime.heap_allocator())
+	l.game_out = make([dynamic]byte, runtime.heap_allocator())
 	l.sent_generation = -1
 	l.game = game
 	l.console = context.logger
@@ -97,6 +100,7 @@ link_stop :: proc(l: ^Link) {
 	thread.destroy(l.acceptor)
 	l.acceptor = nil
 	virtual.arena_destroy(&l.decode_arena)
+	delete(l.game_out)
 }
 
 // link_logger logs to the editor while one is linked, and to the console otherwise.
@@ -155,9 +159,9 @@ link_send :: proc(l: ^Link, message: link.Message, request: u32 = 0) {
 	}
 }
 
-// link_poll handles the editor's messages and sends the events of this frame. The main thread calls it between
-// frames, while no job runs.
-link_poll :: proc(l: ^Link) {
+// link_poll handles the editor's messages, passes the game's to Game_API.editor_poll, and sends the events of this
+// frame. The main thread calls it between frames, while no job runs.
+link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 	if l.acceptor == nil {
 		return
 	}
@@ -175,17 +179,38 @@ link_poll :: proc(l: ^Link) {
 		core.pace_shared_frames(false)
 		log.info("host: the editor disconnected")
 	}
+	arena := virtual.arena_allocator(&l.decode_arena)
+	for_game := make([dynamic]core.Editor_Message, arena)
 	for m in incoming {
-		defer delete(m.payload, runtime.heap_allocator())
 		if !connected || m.connection != connection {
 			continue
 		}
-		message, ok := link.decode_message(m.header.kind, m.payload, virtual.arena_allocator(&l.decode_arena))
+		if !is_host_message(m.header.kind) {
+			append(&for_game, core.Editor_Message{kind = m.header.kind, request = m.header.request, payload = m.payload})
+			continue
+		}
+		message, ok := link.decode_message(m.header.kind, m.payload, arena)
 		if !ok {
 			log.warnf("host: editor link: cannot decode a message of kind %d", m.header.kind)
 			continue
 		}
 		handle_message(l, message, connection)
+	}
+	if game.editor_poll != nil {
+		// The game logs while it polls, and the logger takes the mutex, so the game writes to its own buffer.
+		clear(&l.game_out)
+		game.editor_poll(state, l.linked_connection if l.linked else 0, for_game[:], &l.game_out)
+		if len(l.game_out) > 0 {
+			sync.lock(&l.mutex)
+			if l.connected && l.connection == l.linked_connection {
+				append(&l.outbox, ..l.game_out[:])
+				sync.cond_signal(&l.wake)
+			}
+			sync.unlock(&l.mutex)
+		}
+	}
+	for m in incoming {
+		delete(m.payload, runtime.heap_allocator())
 	}
 	virtual.arena_free_all(&l.decode_arena)
 
@@ -199,6 +224,20 @@ link_poll :: proc(l: ^Link) {
 	if dropped > 0 {
 		log.warnf("host: editor link: dropped %d log lines while the editor was slow to read", dropped)
 	}
+}
+
+// is_host_message is true for the messages that the host handles itself: they need no game state. The game's
+// editor_poll gets the others.
+@(private = "file")
+is_host_message :: proc(kind: u16) -> bool {
+	switch kind {
+	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged):
+		return true
+	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target):
+		// Only the host sends these, so handle_message reports them.
+		return true
+	}
+	return false
 }
 
 @(private = "file")
@@ -230,6 +269,8 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		}
 	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values:
+		// is_host_message sends these to the game.
 	}
 }
 

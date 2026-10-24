@@ -87,7 +87,8 @@ public class LinkWireTests
                 {"kind": 1, "name": "Entity_List", "fields": [{"name": "entities", "type": "[]Entity_Info"}, {"name": "bounds", "type": "[3]f32"}]}
               ],
               "structs": [
-                {"name": "Entity_Info", "fields": [{"name": "id", "type": "u64"}, {"name": "kind", "type": "Entity_Kind"}]}
+                {"name": "Entity_Info", "fields": [{"name": "id", "type": "u64"}, {"name": "kind", "type": "Entity_Kind"}]},
+                {"name": "Blob", "fields": [{"name": "data", "type": "[]u8"}]}
               ],
               "enums": [
                 {"name": "Entity_Kind", "type": "u16", "values": [{"name": "Plain", "value": 0}, {"name": "Prefab_Root", "value": 7}]}
@@ -104,6 +105,8 @@ public class LinkWireTests
         Assert.Contains("reader.ReadSlice(static (ref global::Cinnabar.Editor.Link.LinkReader r0) => EntityInfo.Read(ref r0))", code);
         Assert.Contains("reader.ReadFixed(3, static (ref global::Cinnabar.Editor.Link.LinkReader r0) => r0.ReadF32())", code);
         Assert.Contains("writer.WriteU16((ushort)Kind)", code);
+        Assert.Contains("public sealed partial record Blob(byte[] Data)", code);
+        Assert.Contains("reader.ReadBytes()", code);
         Assert.Contains("ProtocolVersion = 0x00000000000000ffUL", code);
     }
 

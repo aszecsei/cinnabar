@@ -84,25 +84,47 @@ sealed class SharedFrames : IDisposable
         Size = new PixelSize((int)desc.Width, (int)desc.Height);
     }
 
-    /// <summary>Opens the host's frames, or returns null if the host has not made them yet.</summary>
+    /// <summary>
+    /// Opens the host's frames, or returns null if the host has not made them yet, or has already replaced them with
+    /// another generation while they were opening.
+    /// </summary>
     public static SharedFrames? TryOpen(ViewportDevice device, string prefix)
     {
-        // The host makes the textures before the fence, so an open fence means the textures exist.
+        // The host makes the textures before the fence, so an open fence means the textures exist, unless a resize
+        // releases them right after.
         using var fenceHandle = device.OpenByName($"{prefix}.fence");
         if (fenceHandle == null)
         {
             return null;
         }
         var fence = device.OpenFence(fenceHandle);
-        var textures = new ID3D11Texture2D[TextureCount];
-        for (var i = 0; i < TextureCount; i++)
+        var textures = new List<ID3D11Texture2D>(TextureCount);
+        try
         {
-            using var handle = device.OpenByName($"{prefix}.texture{i}")
-                ?? throw new InvalidOperationException($"{prefix}.fence exists but {prefix}.texture{i} does not");
-            textures[i] = device.Device.OpenSharedResource1<ID3D11Texture2D>(handle.DangerousGetHandle());
+            for (var i = 0; i < TextureCount; i++)
+            {
+                using var handle = device.OpenByName($"{prefix}.texture{i}");
+                if (handle == null)
+                {
+                    break;
+                }
+                textures.Add(device.Device.OpenSharedResource1<ID3D11Texture2D>(handle.DangerousGetHandle()));
+            }
         }
-        return new SharedFrames(fence, textures);
+        catch (SharpGen.Runtime.SharpGenException e) when (e.HResult == E_HANDLE)
+        {
+        }
+        if (textures.Count == TextureCount)
+        {
+            return new SharedFrames(fence, [.. textures]);
+        }
+        textures.ForEach(t => t.Dispose());
+        fence.Dispose();
+        return null;
     }
+
+    // What opening a shared object gives when its last owner released it a moment ago.
+    const int E_HANDLE = unchecked((int)0x80070006);
 
     public ID3D11Texture2D Texture(ulong frame) => _textures[frame % TextureCount];
 

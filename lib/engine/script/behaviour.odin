@@ -18,7 +18,8 @@ BEHAVIOURS_ID :: ecs.Component_Id(16)
 // Behaviours marks an entity with behaviour instances. record is a registry reference to the entity's record table:
 // its instances in the order they were added, and each class mapped to its instance.
 Behaviours :: struct {
-	record: c.int,
+	// A Luau registry reference, which means nothing outside the VM. The editor reads behaviours with inspect.
+	record: c.int `editor:"-"`,
 }
 
 // register_components registers the components that the script runtime uses. Call it from the game's component

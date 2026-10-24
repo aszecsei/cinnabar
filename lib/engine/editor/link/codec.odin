@@ -50,6 +50,17 @@ write_message :: proc(buf: ^[dynamic]byte, message: Message, request: u32 = 0) {
 	endian.unchecked_put_u32le(header[8:], request)
 }
 
+// kind_of is the kind of a message type: its index in Message, from 1.
+kind_of :: proc($T: typeid) -> u16 {
+	info := runtime.type_info_base(type_info_of(Message)).variant.(runtime.Type_Info_Union)
+	for variant, i in info.variants {
+		if variant.id == T {
+			return u16(i + 1)
+		}
+	}
+	panic("link: kind_of a type that is not a message")
+}
+
 // decode_message decodes a payload of the given kind. Strings and slices are allocated with allocator. A payload
 // that does not decode to exactly one message of the kind is refused.
 decode_message :: proc(kind: u16, payload: []byte, allocator: mem.Allocator) -> (message: Message, ok: bool) {

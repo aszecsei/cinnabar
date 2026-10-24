@@ -59,6 +59,8 @@ public ref struct LinkReader(ReadOnlySpan<byte> data)
 
     public string ReadString() => Encoding.UTF8.GetString(Take(ReadCount()));
 
+    public byte[] ReadBytes() => Take(ReadCount()).ToArray();
+
     public T[] ReadSlice<T>(ElementReader<T> read)
     {
         var count = ReadCount();
@@ -120,6 +122,12 @@ public sealed class LinkWriter
         var count = Encoding.UTF8.GetByteCount(value);
         WriteU32((uint)count);
         Encoding.UTF8.GetBytes(value, Next(count));
+    }
+
+    public void WriteBytes(byte[] bytes)
+    {
+        WriteU32((uint)bytes.Length);
+        bytes.CopyTo(Next(bytes.Length));
     }
 
     public void WriteSlice<T>(T[] items, Action<LinkWriter, T> write)

@@ -258,3 +258,38 @@ native_despawns_reach_on_destroy :: proc(t: ^testing.T) {
 	expect_reports(t, f, {5, 6})
 	testing.expect_value(t, f.runtime.instances[0].flags, Instance_Flags{})
 }
+
+@(test)
+inspect_reads_declared_fields_without_running_scripts :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(&f.runtime, "=inspect", DOOR + `
+local e = World.spawn()
+local d = e:add(Door, {speed = 5})
+d.label = "front"
+d.extra = "runtime state, not a field"
+Test.report(1)
+`)
+	testing.expect(t, ok)
+	found: [dynamic]ecs.Entity
+	defer delete(found)
+	ecs.collect(&f.world, {BEHAVIOURS_ID}, &found)
+	testing.expect_value(t, len(found), 1)
+	expect_reports(t, f, {1, 2, 1})
+
+	snapshots := inspect(&f.runtime, found[0], context.temp_allocator)
+
+	// Inspecting calls no callback.
+	expect_reports(t, f, {})
+	testing.expect_value(t, len(snapshots), 1)
+	door := snapshots[0]
+	testing.expect_value(t, door.class, "Door")
+	testing.expect(t, door.enabled)
+	testing.expect_value(t, len(door.fields), 2)
+	testing.expect_value(t, door.fields[0].name, "label")
+	testing.expect_value(t, door.fields[0].kind, Behaviour_Field_Kind.String)
+	testing.expect_value(t, door.fields[0].text, "front")
+	testing.expect_value(t, door.fields[1].name, "speed")
+	testing.expect_value(t, door.fields[1].number, 5)
+}

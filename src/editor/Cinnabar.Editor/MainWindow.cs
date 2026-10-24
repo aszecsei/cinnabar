@@ -18,6 +18,7 @@ public sealed class MainWindow : Window
 {
     readonly EditorShell _shell;
     readonly TextBlock _hostStatus = new();
+    readonly TextBlock _worldStatus = new();
     readonly Ellipse _hostDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
 
     public MainWindow(EditorShell shell)
@@ -64,17 +65,26 @@ public sealed class MainWindow : Window
 
         shell.Host.StateChanged += UpdateHostStatus;
         UpdateHostStatus();
+        shell.World.EntitiesChanged += UpdateWorldStatus;
+        shell.Selection.Changed += (_, _) => UpdateWorldStatus();
         Closing += (_, _) => shell.SaveLayout();
         Closed += (_, _) => shell.Dispose();
     }
 
     Control StatusBar()
     {
-        var mode = new TextBlock { Text = "Edit" };
+        var right = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Children = { _worldStatus, new TextBlock { Text = "Edit" } } };
         var left = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Children = { _hostDot, _hostStatus } };
-        var bar = new DockPanel { Children = { mode, left } };
-        DockPanel.SetDock(mode, DockSide.Right);
+        var bar = new DockPanel { Children = { right, left } };
+        DockPanel.SetDock(right, DockSide.Right);
         return new Border { Classes = { "status" }, Child = bar };
+    }
+
+    void UpdateWorldStatus()
+    {
+        var count = _shell.World.Entities.Count;
+        var selected = _shell.Selection.IsEmpty ? "" : $"  ·  {Model.EntityNode.Format(_shell.Selection.Entity)} selected";
+        _worldStatus.Text = _shell.World.HasWorld ? $"{count} {(count == 1 ? "entity" : "entities")}{selected}" : "";
     }
 
     void UpdateHostStatus()

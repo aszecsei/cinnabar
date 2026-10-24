@@ -2,10 +2,13 @@ using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Commands.Ribbon;
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Viewport;
 using FrameAcknowledged = Cinnabar.Editor.Link.Protocol.FrameAcknowledged;
+using UnwatchEntity = Cinnabar.Editor.Link.Protocol.UnwatchEntity;
 using ViewportSize = Cinnabar.Editor.Link.Protocol.ViewportSize;
+using WatchEntity = Cinnabar.Editor.Link.Protocol.WatchEntity;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -21,6 +24,8 @@ public sealed class EditorShell : IDisposable
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public ViewportSession Viewport { get; } = new();
+    public WorldModel World { get; } = new();
+    public Selection Selection { get; } = new();
     public EditorLayout Layout { get; }
     public RibbonLayout Ribbon { get; }
     public KeyBindings KeyBindings { get; }
@@ -58,7 +63,35 @@ public sealed class EditorShell : IDisposable
         Host.Output += Console.Add;
         Host.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
         Host.FrameTargetChanged += target => Viewport.Connect(target.Prefix, target.Generation);
+        Host.GameMessage += message => World.Apply(message);
         Host.StateChanged += OnHostStateChanged;
+        // The editor watches the selected entity, so the properties panel has its values.
+        Selection.Changed += (old, entity) =>
+        {
+            if (old != 0)
+            {
+                Host.Send(new UnwatchEntity(old));
+            }
+            if (entity != 0)
+            {
+                Host.Send(new WatchEntity(entity));
+            }
+        };
+        // A snapshot means a new stream from the game, which knows no watches yet.
+        World.Reset += () =>
+        {
+            if (!Selection.IsEmpty)
+            {
+                Host.Send(new WatchEntity(Selection.Entity));
+            }
+        };
+        World.EntitiesChanged += () =>
+        {
+            if (!Selection.IsEmpty && World.Find(Selection.Entity) == null)
+            {
+                Selection.Clear();
+            }
+        };
         Layout.Changed += Commands.InvalidateAll;
 
         EditorCommands.Register(this);
@@ -86,10 +119,8 @@ public sealed class EditorShell : IDisposable
         PanelTool Empty(string id, string title, string icon, string dock, string message) =>
             new(id, title, icon, dock, () => new EmptyPanelView(message));
 
-        yield return Empty("outliner", "Outliner", "outliner", EditorLayout.LeftDock,
-            "The world's entities appear here when the editor link connects to the host.");
-        yield return Empty("properties", "Properties", "properties", EditorLayout.RightDock,
-            "The selected entity's components and behaviours appear here.");
+        yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(World, Selection));
+        yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(World, Selection));
         yield return Empty("undoHistory", "Undo History", "history", EditorLayout.RightDock,
             "Edits appear here once scenes can be edited.");
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
@@ -104,6 +135,10 @@ public sealed class EditorShell : IDisposable
         if (!Host.Linked)
         {
             Viewport.Disconnect();
+            if (World.HasWorld)
+            {
+                World.Clear();
+            }
         }
         else if (Viewport.RequestedSize is { Width: > 0, Height: > 0 } size)
         {

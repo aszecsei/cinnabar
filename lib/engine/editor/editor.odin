@@ -1,0 +1,262 @@
+// Package editor is the game's side of the editor link (see docs/editor.md#world): the component types, the entity
+// list and its deltas, and the values of the entities that the editor watches. The game keeps an Editor in its
+// Game_State and calls poll from Game_API.editor_poll.
+package editor
+
+import "base:runtime"
+import "core:hash"
+import "core:log"
+
+import "cinnabar:core"
+import "cinnabar:engine/ecs"
+import "cinnabar:engine/editor/link"
+import "cinnabar:engine/script"
+
+// The entity list changes at most this often in the editor.
+SCAN_INTERVAL :: 0.1
+// Watched values change at most this often in the editor.
+VALUES_INTERVAL :: 0.05
+MAX_WATCHED :: 64
+
+// Editor is what the editor has been told. It lives in Game_State. Its arrays use the host's heap, so they survive
+// a code reload, and a soft restart starts a new one, which sends everything again.
+Editor :: struct {
+	platform:    ^core.Platform_API,
+	// The connection that this state is for. Another one means a new editor, which gets everything.
+	connection:  u64,
+	types_sent:  bool,
+	// What the editor knows of each entity slot, by entity index.
+	known:       [dynamic]Known,
+	scan:        u32,
+	watched:     [dynamic]Watched,
+	last_scan:   f64,
+	last_values: f64,
+}
+
+@(private)
+Known :: struct {
+	// 0 when the editor knows of no entity in this slot.
+	entity:    ecs.Entity,
+	archetype: u32,
+	parent:    ecs.Entity,
+	active:    bool,
+	// The scan that last saw the entity.
+	seen:      u32,
+}
+
+@(private)
+Watched :: struct {
+	entity: ecs.Entity,
+	// The hash of the values that the editor last got, or 0 to send them at the next chance.
+	sent:   u64,
+}
+
+init :: proc(e: ^Editor, platform: ^core.Platform_API) {
+	e^ = {
+		platform = platform,
+		known    = make([dynamic]Known, platform.heap_allocator),
+		watched  = make([dynamic]Watched, platform.heap_allocator),
+	}
+}
+
+// reload sends the types again after a code reload: the new DLL may describe them differently.
+reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
+	e.platform = platform
+	e.types_sent = false
+}
+
+destroy :: proc(e: ^Editor) {
+	delete(e.known)
+	delete(e.watched)
+	e^ = {}
+}
+
+// poll handles the editor's messages and appends the game's messages to out. Call it between frames, outside the
+// script phase.
+poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
+	snapshot := false
+	if connection != e.connection {
+		e.connection = connection
+		e.types_sent = false
+		clear(&e.known)
+		clear(&e.watched)
+		snapshot = connection != 0
+	}
+	if connection == 0 {
+		return
+	}
+	frame := e.platform.frame_allocator
+	for m in incoming {
+		message, ok := link.decode_message(m.kind, m.payload, frame)
+		if !ok {
+			log.warnf("editor: cannot decode a message of kind %d", m.kind)
+			continue
+		}
+		#partial switch v in message {
+		case link.Watch_Entity:
+			watch(e, ecs.Entity(v.entity))
+		case link.Unwatch_Entity:
+			unwatch(e, ecs.Entity(v.entity))
+		case:
+			log.warnf("editor: the game does not handle %v", message)
+		}
+	}
+	if !e.types_sent {
+		link.write_message(out, component_types(w, frame))
+		e.types_sent = true
+	}
+	now := e.platform.time_seconds()
+	if snapshot || now - e.last_scan >= SCAN_INTERVAL {
+		e.last_scan = now
+		if message, changed := scan(e, w, snapshot, frame); changed {
+			link.write_message(out, message)
+		}
+	}
+	if now - e.last_values >= VALUES_INTERVAL {
+		e.last_values = now
+		send_values(e, w, scripts, out, frame)
+	}
+}
+
+@(private)
+watch :: proc(e: ^Editor, entity: ecs.Entity) {
+	for w in e.watched {
+		if w.entity == entity {
+			return
+		}
+	}
+	if len(e.watched) == MAX_WATCHED {
+		log.warnf("editor: the editor watches more than %d entities, so %v is not watched", MAX_WATCHED, entity)
+		return
+	}
+	append(&e.watched, Watched{entity = entity})
+}
+
+@(private)
+unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
+	for w, i in e.watched {
+		if w.entity == entity {
+			ordered_remove(&e.watched, i)
+			return
+		}
+	}
+}
+
+// scan compares the world with what the editor knows. With full, it describes every entity in a snapshot. Otherwise
+// it describes the changes in a delta, and reports whether there are any.
+@(private)
+scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator) -> (message: link.Message, changed: bool) {
+	e.scan += 1
+	infos := make([dynamic]link.Entity_Info, allocator)
+	destroyed := make([dynamic]u64, allocator)
+	it := ecs.world_iter(w)
+	for entity, archetype, components in ecs.world_next(&it) {
+		index := int(ecs.entity_index(entity))
+		if index >= len(e.known) {
+			resize(&e.known, index + 1)
+		}
+		parent: ecs.Entity
+		if p := (^ecs.Parent)(ecs.get_raw(w, entity, ecs.PARENT_ID)); p != nil {
+			parent = p.entity
+		}
+		_, inactive := find(components, ecs.INACTIVE_ID)
+		now := Known{entity, archetype, parent, !inactive, e.scan}
+		k := &e.known[index]
+		// A new entity in the slot of one that the editor knows: that one died between two scans.
+		if k.entity != 0 && k.entity != entity && !full {
+			append(&destroyed, u64(k.entity))
+		}
+		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active {
+			ids := make([]u64, len(components), allocator)
+			for id, i in components {
+				ids[i] = u64(id)
+			}
+			append(&infos, link.Entity_Info{entity = u64(entity), parent = u64(parent), active = now.active, components = ids})
+		}
+		k^ = now
+	}
+	for &k in e.known {
+		if k.entity != 0 && k.seen != e.scan {
+			append(&destroyed, u64(k.entity))
+			k = {}
+		}
+	}
+	if full {
+		return link.Entity_Snapshot{entities = infos[:]}, true
+	}
+	return link.Entity_Delta{changed = infos[:], destroyed = destroyed[:]}, len(infos) > 0 || len(destroyed) > 0
+}
+
+// send_values sends the values of each watched entity whose values changed since the editor last got them. A watched
+// entity that died is no longer watched; the delta tells the editor that it is gone.
+@(private)
+send_values :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, out: ^[dynamic]byte, allocator: runtime.Allocator) {
+	for i := 0; i < len(e.watched); {
+		watched := &e.watched[i]
+		if !ecs.is_alive(w, watched.entity) {
+			ordered_remove(&e.watched, i)
+			continue
+		}
+		i += 1
+		components := ecs.entity_components(w, watched.entity)
+		values := make([]link.Component_Value, len(components), allocator)
+		for id, j in components {
+			values[j].id = u64(id)
+			info := ecs.registry_find(&w.registry, id)
+			data := ecs.get_raw(w, watched.entity, id)
+			if info != nil && data != nil {
+				values[j].data = ([^]u8)(data)[:info.size]
+			}
+		}
+		message := link.Entity_Values {
+			entity     = u64(watched.entity),
+			components = values,
+			behaviours = behaviour_values(scripts, watched.entity, allocator),
+		}
+		encoded := make([dynamic]byte, allocator)
+		link.write_message(&encoded, message)
+		// A hash of 0 means "never sent", so a real 0 counts as 1.
+		h := max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
+		if h != watched.sent {
+			watched.sent = h
+			append(out, ..encoded[:])
+		}
+	}
+}
+
+@(private)
+behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator: runtime.Allocator) -> []link.Behaviour_Value {
+	if scripts == nil || scripts.L == nil {
+		return nil
+	}
+	snapshots := script.inspect(scripts, entity, allocator)
+	values := make([]link.Behaviour_Value, len(snapshots), allocator)
+	for s, i in snapshots {
+		fields := make([]link.Behaviour_Field, len(s.fields), allocator)
+		for f, j in s.fields {
+			fields[j] = {
+				name    = f.name,
+				kind    = link.Behaviour_Field_Kind(f.kind),
+				number  = f.number,
+				boolean = f.boolean,
+				text    = f.text,
+				vector  = f.vector,
+				entity  = u64(f.entity),
+			}
+		}
+		values[i] = {class = s.class, enabled = s.enabled, fields = fields}
+	}
+	return values
+}
+
+@(private)
+find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
+	for x, i in ids {
+		if x == id {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+#assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))

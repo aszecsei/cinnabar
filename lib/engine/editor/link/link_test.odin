@@ -29,6 +29,29 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Viewport_Size{width = 1920, height = -1},
 		Frame_Target{prefix = "cinnabar.g3", generation = 3, width = 640, height = 360},
 		Frame_Acknowledged{generation = 3, frame = 1 << 40},
+		Component_Types{
+			types = {
+				{
+					id = 1,
+					name = "Transform",
+					size = 48,
+					fields = {
+						{name = "position", kind = .Position},
+						{name = "mode", offset = 40, kind = .Enum, enum_base = .U8, enum_values = {{"Off", 0}, {"On", 1}}},
+						{name = "speed", offset = 44, kind = .F32, read_only = true, has_range = true, range_min = -1, range_max = 1},
+					},
+				},
+			},
+		},
+		Entity_Snapshot{entities = {{entity = 1 << 32 | 3, parent = 0, active = true, components = {1, 3, 16}}}},
+		Entity_Delta{changed = {{entity = 5, parent = 1, components = {}}}, destroyed = {7, 8}},
+		Watch_Entity{entity = 9},
+		Unwatch_Entity{entity = 9},
+		Entity_Values{
+			entity = 9,
+			components = {{id = 1, data = {1, 2, 3}}},
+			behaviours = {{class = "Door", enabled = true, fields = {{name = "angle", kind = .Number, number = 90}, {name = "at", kind = .Vector, vector = {1, 2, 3}}}}},
+		},
 	}
 	for message in messages {
 		decoded := round_trip(t, message)
@@ -36,35 +59,15 @@ every_message_round_trips :: proc(t: ^testing.T) {
 	}
 }
 
+// equal compares the wire forms, which are equal exactly when every field is.
 @(private = "file")
 equal :: proc(a, b: Message) -> bool {
-	switch x in a {
-	case Hello:
-		y, ok := b.(Hello)
-		return ok && x == y
-	case Welcome:
-		y, ok := b.(Welcome)
-		return ok && x == y
-	case Refused:
-		y, ok := b.(Refused)
-		return ok && x == y
-	case Log:
-		y, ok := b.(Log)
-		return ok && x == y
-	case Game_Reloaded:
-		y, ok := b.(Game_Reloaded)
-		return ok && x == y
-	case Viewport_Size:
-		y, ok := b.(Viewport_Size)
-		return ok && x == y
-	case Frame_Target:
-		y, ok := b.(Frame_Target)
-		return ok && x == y
-	case Frame_Acknowledged:
-		y, ok := b.(Frame_Acknowledged)
-		return ok && x == y
-	}
-	return false
+	x, y: [dynamic]byte
+	defer delete(x)
+	defer delete(y)
+	write_message(&x, a)
+	write_message(&y, b)
+	return string(x[:]) == string(y[:])
 }
 
 @(test)
@@ -109,7 +112,7 @@ a_header_with_a_huge_payload_is_refused :: proc(t: ^testing.T) {
 @(test)
 the_schema_lists_every_message_and_type :: proc(t: ^testing.T) {
 	text := schema(context.temp_allocator)
-	for name in ([]string{"Hello", "Welcome", "Refused", "Log", "Game_Reloaded", "Viewport_Size", "Frame_Target", "Frame_Acknowledged", "Log_Level", "Reload_Kind"}) {
+	for name in ([]string{"Hello", "Welcome", "Refused", "Log", "Game_Reloaded", "Viewport_Size", "Frame_Target", "Frame_Acknowledged", "Log_Level", "Reload_Kind", "Entity_Values", "Behaviour_Field", "Field_Kind"}) {
 		testing.expectf(t, strings.contains(text, name), "the schema has no %s", name)
 	}
 	testing.expect(t, strings.contains(text, `"kind": 1, "name": "Hello"`))
@@ -160,4 +163,11 @@ the_bytes_match_the_editor_encoding :: proc(t: ^testing.T) {
 	write_message(&buf, Frame_Acknowledged{generation = 3, frame = 0x0102030405060708})
 	expected := []byte{12, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1}
 	testing.expectf(t, string(buf[:]) == string(expected), "wrote %v", buf[:])
+}
+
+@(test)
+kind_of_is_the_index_in_the_union :: proc(t: ^testing.T) {
+	testing.expect_value(t, kind_of(Hello), u16(1))
+	testing.expect_value(t, kind_of(Frame_Acknowledged), u16(8))
+	testing.expect_value(t, kind_of(Entity_Values), u16(14))
 }

@@ -120,6 +120,11 @@ public static class SchemaCode
 
     static string ReadExpression(string type, string reader, Dictionary<string, string> enums, int depth)
     {
+        // Bytes, such as a component's memory, are copied at once instead of one element at a time.
+        if (type == "[]u8")
+        {
+            return $"{reader}.ReadBytes()";
+        }
         if (TryArray(type, out var count, out var elem))
         {
             var r = $"r{depth}";
@@ -139,6 +144,10 @@ public static class SchemaCode
 
     static string WriteExpression(string type, string value, string writer, Dictionary<string, string> enums, int depth)
     {
+        if (type == "[]u8")
+        {
+            return $"{writer}.WriteBytes({value})";
+        }
         if (TryArray(type, out var count, out var elem))
         {
             var w = $"w{depth}";

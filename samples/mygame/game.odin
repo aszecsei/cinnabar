@@ -17,6 +17,7 @@ import "cinnabar:core/luau"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/editor"
 import "cinnabar:engine/render"
 import "cinnabar:engine/script"
 
@@ -209,6 +210,8 @@ Game_State :: struct {
 	scripts:     script.Runtime,
 	// content/scripts/hello.luau, which the scheduler runs.
 	hello:       script.Main_Script,
+	// What the editor knows of the world (see docs/editor.md#world).
+	editor:      editor.Editor,
 }
 
 Pipelines :: struct {
@@ -252,6 +255,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
+	editor.init(&s.editor, platform)
 
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
@@ -754,6 +758,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
+	editor.destroy(&s.editor)
 	script.destroy(&s.scripts)
 	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
@@ -783,6 +788,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
+	editor.reload(&s.editor, platform)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {
@@ -955,5 +961,11 @@ cinnabar_game_api :: proc() -> core.Game_API {
 		layout_hash = layout_hash,
 		gpu_format_hash = gpu.format_hash,
 		script_types = script_types,
+		editor_poll = editor_poll,
 	}
+}
+
+editor_poll :: proc(state: rawptr, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
+	s := (^Game_State)(state)
+	editor.poll(&s.editor, &s.world, &s.scripts, connection, incoming, out)
 }

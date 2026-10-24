@@ -54,6 +54,43 @@ archetype_components :: proc "contextless" (a: ^Archetype) -> []Component_Id {
 	return a.ids[:a.component_count]
 }
 
+// entity_components is the sorted component IDs of a live entity, or nil. Valid until the next structural change.
+entity_components :: proc "contextless" (w: ^World, e: Entity) -> []Component_Id {
+	record := live_record(w, e)
+	if record == nil {
+		return nil
+	}
+	return archetype_components(archetype(w, record.archetype))
+}
+
+// World_Iterator walks every entity, inactive ones too, archetype by archetype. It is for tools that see the whole
+// world, such as the editor. Systems use queries. Make no structural change while it runs.
+World_Iterator :: struct {
+	world:     ^World,
+	archetype: u32,
+	row:       u32,
+}
+
+world_iter :: proc "contextless" (w: ^World) -> World_Iterator {
+	return {world = w}
+}
+
+// world_next gives the next entity, the index of its archetype, which is the same for every entity with the same
+// components, and its sorted component IDs.
+world_next :: proc "contextless" (it: ^World_Iterator) -> (e: Entity, archetype_index: u32, components: []Component_Id, ok: bool) {
+	for it.archetype < it.world.archetype_count {
+		a := archetype(it.world, it.archetype)
+		if it.row < a.count {
+			e = entity_at(it.world, it.archetype, it.row)^
+			it.row += 1
+			return e, it.archetype, archetype_components(a), true
+		}
+		it.archetype += 1
+		it.row = 0
+	}
+	return
+}
+
 // add_raw adds a component, or overwrites it if the entity has it. A nil data zeroes the component. Otherwise data
 // must be the component's size. It returns false if the entity is not alive or the component is not registered.
 add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {

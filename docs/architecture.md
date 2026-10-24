@@ -58,7 +58,7 @@ flowchart TB
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
-| `lib/engine/editor` | Game | The game side of the editor link: type descriptors, scene snapshots and edit operations. |
+| `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, and watched values. Later, scene snapshots and edit operations. |
 | `lib/engine/editor/link` | Shared | The editor link's messages, their wire format and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
@@ -76,7 +76,7 @@ flowchart TB
 The two sides communicate only through two structs of procedures:
 
 - **`Platform_API`** (host → game): what `core` provides to the engine.
-- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), plus the editor procedures described in [Editor](#editor).
+- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](editor.md#world)).
 
 In development, the host gets `Game_API` from the DLL's exports. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
 

@@ -64,6 +64,9 @@ public sealed class HostSession : IDisposable
 
     public event Action<ReloadKind>? GameReloaded;
 
+    /// <summary>A message from the game's side of the link, such as the entity list.</summary>
+    public event Action<ILinkMessage>? GameMessage;
+
     internal HostSession(EditorOptions options) => _options = options;
 
     /// <summary>Starts the host on the adapter whose LUID the viewport found.</summary>
@@ -184,8 +187,11 @@ public sealed class HostSession : IDisposable
             case GameReloaded reloaded:
                 GameReloaded?.Invoke(reloaded.Kind);
                 break;
-            default:
+            case Hello or ViewportSize or FrameAcknowledged or WatchEntity or UnwatchEntity:
                 Output?.Invoke($"editor: the host sent a message that only the editor sends: {message.GetType().Name}");
+                break;
+            default:
+                GameMessage?.Invoke(message);
                 break;
         }
     }

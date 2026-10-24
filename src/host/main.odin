@@ -120,7 +120,7 @@ main :: proc() {
 			case .Not_Ready:
 			}
 		}
-		link_poll(&editor)
+		link_poll(&editor, game.api, state)
 	}
 	game.api.shutdown(state)
 }

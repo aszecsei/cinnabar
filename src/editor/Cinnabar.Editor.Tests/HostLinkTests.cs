@@ -122,6 +122,26 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheGameSendsItsWorldAndAWatchedEntitysValues()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+
+        var types = await editor.Next<ComponentTypes>();
+        var transform = Assert.Single(types.Types, t => t.Name == "Transform");
+        Assert.Equal(["position", "rotation", "scale"], transform.Fields.Select(f => f.Name));
+        var snapshot = await editor.Next<EntitySnapshot>();
+        // The camera has a Transform and nothing else, at scale 1.
+        var placed = snapshot.Entities.First(e => e.Components.SequenceEqual([transform.Id]));
+
+        editor.Link.Send(new WatchEntity(placed.Entity));
+        var values = await editor.Next<EntityValues>(v => v.Entity == placed.Entity);
+        var data = Assert.Single(values.Components, c => c.Id == transform.Id).Data;
+        Assert.Equal((int)transform.Size, data.Length);
+        Assert.Equal("(1, 1, 1)", Model.FieldValues.Format(transform.Fields[2], data));
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();
