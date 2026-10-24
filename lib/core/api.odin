@@ -13,6 +13,13 @@ Platform_API :: struct {
 	permanent_allocator: runtime.Allocator,
 	frame_allocator:     runtime.Allocator,
 
+	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
+	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
+	// every reservation that the game still holds at a soft restart.
+	memory_reserve: proc(size: int) -> rawptr,
+	memory_commit:  proc(ptr: rawptr, size: int) -> bool,
+	memory_release: proc(ptr: rawptr, size: int),
+
 	time_seconds:     proc() -> f64,
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,

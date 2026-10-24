@@ -35,3 +35,5 @@ The job system in `lib/core/jobs` has one worker thread per core and a pool of f
 | Script heap | Managed by the script VM | Yes |
 
 All arenas belong to the host. Game-side code allocates from them through allocators passed in `context` or held in `Game_State`.
+
+Game-side stores that must not move, such as world storage, reserve virtual memory directly with `memory_reserve` and `memory_commit` in `Platform_API`. They hold no allocator, so they survive code reload. `core` releases every reservation that the game still holds at a soft restart.
