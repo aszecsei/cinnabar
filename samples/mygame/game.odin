@@ -108,9 +108,8 @@ Spin :: struct {
 	speed: f32,
 }
 
-// Triangle is one of the large triangles: its instance index in the draw and the acceleration structure.
+// Triangle marks one of the large triangles, with its HDR brightness.
 Triangle :: struct {
-	instance:   u32,
 	brightness: f32,
 }
 
@@ -194,7 +193,7 @@ Game_State :: struct {
 	world:       ecs.World,
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
-	triangles:   ecs.Query,
+	triangles:   render.Extractor,
 }
 
 Pipelines :: struct {
@@ -225,6 +224,8 @@ Frame :: struct {
 	// The accel instances, and the triangle instances that the scene pass draws.
 	instances:      gpu.Upload,
 	triangles:      gpu.Upload,
+	// The number of triangle instances. The acceleration structure holds at most len(TRIANGLE_INSTANCES).
+	triangle_count: int,
 	checker:        render.Texture,
 	scene:          render.Texture,
 	shadows:        render.Texture,
@@ -321,14 +322,7 @@ register_world :: proc(s: ^Game_State) {
 	w := &s.world
 	register_components(&w.registry)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
-	s.triangles = ecs.query(
-		w,
-		{
-			ecs.read(w, ecs.Transform),
-			ecs.optional(ecs.read(w, ecs.Previous_Transform)),
-			ecs.read(w, Triangle),
-		},
-	)
+	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
 
 // spawn_scene places the camera and the large triangles at SCENE_ORIGIN.
@@ -337,7 +331,7 @@ spawn_scene :: proc(s: ^Game_State) {
 	origin := ecs.position_from_meters(SCENE_ORIGIN)
 	s.camera = ecs.spawn(w)
 	ecs.add(w, s.camera, ecs.Transform{position = origin, rotation = 1, scale = 1})
-	for t, i in TRIANGLE_INSTANCES {
+	for t in TRIANGLE_INSTANCES {
 		pose := ecs.Transform {
 			position = ecs.position_offset(origin, {0, 0, t.depth}),
 			rotation = 1,
@@ -347,7 +341,7 @@ spawn_scene :: proc(s: ^Game_State) {
 		ecs.add(w, e, pose)
 		ecs.add(w, e, ecs.Previous_Transform(pose))
 		ecs.add(w, e, Spin{t.speed})
-		ecs.add(w, e, Triangle{u32(i), t.brightness})
+		ecs.add(w, e, Triangle{t.brightness})
 	}
 }
 
@@ -501,45 +495,26 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	}
 }
 
-// extract_triangles writes the large triangles' camera-relative transforms, interpolated between the last two ticks,
-// for the scene pass and the acceleration structure.
+// extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
+// their poses relative to the camera, interpolated between the last two ticks, and their brightness.
 extract_triangles :: proc(frame: ^Frame) {
 	s := frame.state
 	w := &s.world
-	triangles, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(Triangle_Instance), 16)
-	if !ok {
+	count := render.extract_count(w, s.triangles)
+	triangles, ok := s.platform.gpu_upload(max(count, 1) * size_of(Triangle_Instance), 16)
+	if !ok || count == 0 {
 		return
 	}
-	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:len(TRIANGLE_INSTANCES)]
 	camera, _ := ecs.presented(w, s.camera)
-
-	it := ecs.query_iter(w, s.triangles)
-	for view in ecs.query_next(&it) {
-		previous := ecs.column(view, 1, ecs.Previous_Transform)
-		info := ecs.column(view, 2, Triangle)
-		for current, i in ecs.column(view, 0, ecs.Transform) {
-			pose := current
-			if previous != nil {
-				pose = ecs.interpolate(ecs.Transform(previous[i]), current, w.clock.alpha)
-			}
-			instances[info[i].instance] = {
-				rows       = camera_relative(pose, camera.position),
-				brightness = info[i].brightness,
-			}
+	chunks := render.extract(w, s.triangles, camera.position, triangles.data, size_of(Triangle_Instance))
+	instances := ([^]Triangle_Instance)(raw_data(triangles.data))[:count]
+	for c in chunks {
+		for t, i in ecs.column(c.view, render.EXTRACT_TERMS, Triangle) {
+			instances[c.first + i].brightness = t.brightness
 		}
 	}
 	frame.triangles = triangles
-}
-
-// camera_relative is a pose as the rows of a 3x4 matrix, relative to the camera's position. Only the difference of
-// two world positions reaches the GPU, so it is small and precise however far the scene is from the origin.
-camera_relative :: proc(pose: ecs.Transform, camera: ecs.World_Position) -> (rows: [3][4]f32) {
-	m := linalg.matrix3_from_quaternion_f32(pose.rotation)
-	offset := ecs.position_sub(pose.position, camera)
-	for r in 0 ..< 3 {
-		rows[r] = {m[r, 0] * pose.scale.x, m[r, 1] * pose.scale.y, m[r, 2] * pose.scale.z, offset[r]}
-	}
-	return
+	frame.triangle_count = count
 }
 
 // add_shadow_passes builds the acceleration structures and traces the shadow mask. The triangle's bottom-level
@@ -557,12 +532,13 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 		building_blas = true
 	}
 
+	count := min(frame.triangle_count, len(TRIANGLE_INSTANCES))
 	instances, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(gpu.Accel_Instance), 16)
-	if !ok || frame.triangles.data == nil {
+	if !ok || count == 0 {
 		return
 	}
-	records := ([^]gpu.Accel_Instance)(raw_data(instances.data))[:len(TRIANGLE_INSTANCES)]
-	triangles := ([^]Triangle_Instance)(raw_data(frame.triangles.data))[:len(TRIANGLE_INSTANCES)]
+	records := ([^]gpu.Accel_Instance)(raw_data(instances.data))[:count]
+	triangles := ([^]Triangle_Instance)(raw_data(frame.triangles.data))[:count]
 	blas := s.platform.gpu_accel_reference(s.blas)
 	for t, i in triangles {
 		records[i] = gpu.accel_instance(t.rows, blas, id = u32(i), flags = {.Cull_Disable, .Force_Opaque})
@@ -592,7 +568,8 @@ build_blas :: proc(ctx: ^render.Pass_Context) {
 build_tlas :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
 	upload := frame.instances
-	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, len(TRIANGLE_INSTANCES))
+	count := u32(min(frame.triangle_count, len(TRIANGLE_INSTANCES)))
+	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, count)
 }
 
 trace_shadows :: proc(ctx: ^render.Pass_Context) {
@@ -649,7 +626,7 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 	checker := gpu.read_index(render.gpu_texture(g, frame.checker))
 	switch ctx.piece {
 	case 0:
-		if frame.triangles.data == nil {
+		if frame.triangle_count == 0 {
 			return
 		}
 		constants := Scene_Constants {
@@ -663,7 +640,7 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 		gpu.cmd_push_constants(cb, &constants)
 		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
-		gpu.cmd_draw_indexed(cb, 3, instance_count = 2)
+		gpu.cmd_draw_indexed(cb, 3, instance_count = u32(frame.triangle_count))
 	case 1:
 		constants := Object_Constants {
 			vertices     = vertices,

@@ -80,7 +80,7 @@ World positions are fixed-point: `World_Position` holds three `i64` values in un
 
 | Consumer | What it sees |
 |---|---|
-| Rendering | Render extraction computes `position_sub(entity, camera)`. The GPU sees only camera-relative `f32` matrices. |
+| Rendering | Render extraction gives poses relative to the camera's position. The GPU sees only camera-relative `f32` matrices. See [Render extraction](#render-extraction). |
 | Physics | Simulates in `f32` relative to a `World_Position` anchor for each island, and writes back with `position_offset`. |
 | Scripts | A `WorldPosition` userdata that supports only `-` (gives a `vector`) and `+ vector`. Entity helpers such as `entity:offset_to(other)` and `entity:move(v)` do not allocate. Scripts never see raw values: a Luau number is an `f64`. |
 | Cooked scenes, editor link | Raw `i64` values. The editor shows meters, and sends a move as a delta or as raw values. |
@@ -105,6 +105,16 @@ World positions are fixed-point: `World_Position` holds three `i64` values in un
 - **Interpolation:** an entity that moves in `Fixed` systems has a `Previous_Transform`, and so do its children. At the start of each tick, the world copies `Transform` to `Previous_Transform`. Presentation (render extraction, cameras, UI, audio) uses `presented`, or `interpolate` with the clock's `alpha`, the fraction of the current tick that has passed. Presentation is therefore up to one tick late.
 - **Teleports:** to move an interpolated entity without a blend, use `teleport` or `command_teleport`. It sets both `Transform` and `Previous_Transform`.
 - **Rate changes:** `set_tick_rate` takes effect from the next tick. The schedule stays exact across the change.
+
+## Render extraction
+
+Rendering does not read the ECS. Each frame, before the render graph is built, extraction writes what the GPU needs into frame memory, usually the upload ring. `lib/engine/render` does this, and `ecs` does not know about rendering.
+
+- An **extractor** selects entities: every entity with a `Transform` that matches the extractor's extra terms. It reads `Previous_Transform` too, if the entity has one. Extractors are registrations, like queries.
+- `extract` writes each entity's presented pose (interpolated by the clock's `alpha`) as a 3x4 row-major matrix, relative to an origin. The origin is usually the camera's presented position. The matrix starts each record of a caller-chosen stride, so a game can put its own data after it in the same record, and the records go straight into the upload ring.
+- The matrices have no camera rotation, only the camera-relative translation. One set of records can therefore serve several views and the ray tracing acceleration structure. The view rotation and the projection belong in each view's constants.
+- Records are in query order. `extract` returns each chunk with the index of its first record, so the caller fills the rest of each record from its own columns. The caller's terms start at `EXTRACT_TERMS` in each chunk view.
+- Chunks are processed in parallel jobs. Run extraction after the `Late` stage, while no system runs.
 
 ## The script view
 
