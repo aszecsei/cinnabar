@@ -47,11 +47,14 @@ The game reaches these through `Platform_API`: `script_open`, `script_close`, `s
 
 ### Direct field access
 
-Luau's experimental `lua_registeruserdatadirectaccess` lets the VM call a get, set or namecall callback for a tagged userdata without a Luau call frame. It is an optional feature, selected by the `LUAU_DIRECT_ACCESS` config in `lib/core/script`. It is off by default.
+Luau's experimental `lua_registeruserdatadirectaccess` lets the VM call a get, set or namecall callback for a tagged userdata without a Luau call frame. It is an optional feature, selected by the `LUAU_DIRECT_ACCESS` config in `lib/core/script`. It is off by default. `CINNABAR_DIRECT_ACCESS=true just build` turns it on for the host, the game DLL and release builds.
 
-- **Same tables, different entry.** The direct access callbacks are host functions, like the dispatcher, and they look up the same per-type tables by tag and atom. Scripts see the same behaviour with the feature on or off. Tests run both ways.
-- **The cached slot is a hint.** Luau gives the callback a `cachedslot` that it shares between all userdata tags. The callback stores the field's index in it, and checks that the field at that index has the same tag and atom before it uses it. Otherwise it looks up the field again.
-- **Why optional:** the API is experimental and can change in a Luau update. With the feature off, nothing depends on it, so a Luau update never blocks on it.
+- **When the VM uses it:** at load, Luau rewrites each field read, field write and method call whose key has an atom to an instruction that calls the tag's direct access callback when the value is userdata. Every exposed field and every method name is interned, so their accesses qualify. Any other value takes the usual path.
+- **Same arguments, different entry.** The VM calls the callback in a C call frame with the metamethod's arguments: the userdata, the key and, for a write, the value. The callbacks are host functions, like the dispatcher (`script_host.direct_access`, through `Platform_API.script_direct_access`), and they call the game's handlers in `Bindings.direct`, which `on_reload` fills again. The handlers do what the metamethods do, so scripts see the same behaviour with the feature on or off. `just test` runs the script tests both ways.
+- **The engine's userdata:** component references (field reads and writes), `Quaternion` (fields and methods) and `WorldPosition` (methods). A `Transform` write takes the general path, because a child's write also sets its local pose. Light userdata, such as `Entity`, have no direct access in Luau.
+- **The cached slot is a hint.** Luau gives the callback a `cachedslot` for each instruction, which every userdata tag shares. A component reference stores the field's index plus one in it, and uses the field there only if it belongs to the reference's component and has the key's atom. Otherwise it looks up the field again.
+- **Why optional:** the API is experimental and can change in a Luau update. With the feature off, nothing calls it, so a Luau update never blocks on it.
+- `Bindings.direct_calls` counts the calls, so tests can tell that the path is used.
 
 ### Watchdog
 
@@ -275,7 +278,13 @@ A code reload of the DLL does not touch scripts. The VM, the instances and the c
 
 ## Native code generation
 
-A module marked `--!native`, or with `native = true` in its `.meta`, is compiled to machine code with `luau_codegen_compile` after it loads, if `luau_codegen_supported` is true. The code generator is part of `luau.dll`, so its executable memory survives a code reload. The cooker passes the engine's userdata type names in `userdataTypes`, so typed native code can use them.
+A module that starts with `--!native`, or that has `native = true` in its `.meta`, is compiled to machine code. The cooker sets the blob's `Native` flag for either, and the runtime calls `luau_codegen_compile` on the module after it loads, after a script hot reload too, if `luau_codegen_supported` is true. Without a code generator, the module runs as bytecode, with the same results.
+
+- `init` creates the code generator with `luau_codegen_create`. It is part of `luau.dll`, so its executable memory survives a code reload, and `lua_close` releases it.
+- Luau compiles every function of the module except the ones that it considers cold, such as the top level, which runs once.
+- The watchdog still works: native code calls the interrupt callback at the same safepoints.
+- The whole module is native or not. Luau's `@native` attribute on one function needs the C++ code generation API, which the bindings do not have yet.
+- *Not yet:* the cooker does not pass the engine's userdata type names in `userdataTypes`. Typed native code needs the runtime to map them to userdata tags with the C++ code generation API.
 
 ## Unity mapping
 
@@ -312,4 +321,5 @@ A module marked `--!native`, or with `native = true` in its `.meta`, is compiled
 4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler, the despawn log, and field schemas in the cooker.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
 6. **Script hot reload:** module patching, behaviour classes and `on_reload`, main script restarts.
-7. **Later:** editor inspector for fields, native code generation, direct field access, bundles.
+7. **Native code generation and direct field access.**
+8. **Later:** editor inspector for fields, bundles.

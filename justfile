@@ -18,8 +18,12 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
+# Luau's experimental direct field access for engine userdata (see docs/scripting.md#direct-field-access). Off unless
+# CINNABAR_DIRECT_ACCESS=true.
+direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
+luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
 # The development host and game DLL share luau.dll (see docs/scripting.md#embedding). Everything else links Luau statically.
-dev_defines := "-define:LUAU_SHARED=true"
+dev_defines := "-define:LUAU_SHARED=true " + luau_features
 # lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
 luau_dir := build_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
@@ -172,7 +176,7 @@ dev-shared name="cinnabar": build viewer
 # Build the statically linked release executable
 release: agility-runtime shaders luau script-types (scripts "release")
     mkdir -p "{{build_dir}}"
-    odin build "samples/{{game}}/main_release" {{collections}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
@@ -201,6 +205,8 @@ fmt:
 
 test: luau
     for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+    # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
+    odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
 
 # =================================
 # Cleanup

@@ -22,6 +22,21 @@ BINDING_SLOTS :: 2 * MAX_BINDINGS
 // The watchdog reads the clock once per this many interrupts, because Luau interrupts at every loop back edge.
 WATCHDOG_INTERVAL :: 1024
 
+// LUAU_DIRECT_ACCESS turns on Luau's experimental direct field access for the engine's userdata (see
+// docs/scripting.md#direct-field-access). Off, nothing depends on that API.
+LUAU_DIRECT_ACCESS :: #config(LUAU_DIRECT_ACCESS, false)
+
+// The game's direct access handlers for one userdata tag. They run with the arguments of __index, __newindex or
+// __namecall on the stack, and get the key's atom and the instruction's cached slot (see luau.UserdataDirectAccess).
+// A get pushes one result. A namecall returns its number of results, or YIELD.
+Direct_Proc :: #type proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16)
+Direct_Namecall_Proc :: #type proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16) -> c.int
+
+Direct_Access :: struct {
+	get, set: Direct_Proc,
+	namecall: Direct_Namecall_Proc,
+}
+
 // Binding_Id is the stable ID of a binding: the hash of its qualified name, such as "Entity.get". Zero is never an ID.
 Binding_Id :: distinct u32
 
@@ -49,6 +64,11 @@ Bindings :: struct {
 	count:    int,
 	// Counts interrupts, so the watchdog reads the clock only once per WATCHDOG_INTERVAL.
 	interrupts: u32,
+	// The direct access handlers of each userdata tag, for direct_access. They point into the DLL image, like the
+	// bindings, so clear empties them.
+	direct:       [luau.UTAG_LIMIT]Direct_Access,
+	// The number of direct access calls, for statistics and tests.
+	direct_calls: u64,
 }
 
 binding_id :: proc "contextless" (name: string) -> Binding_Id {
@@ -88,10 +108,58 @@ find :: proc "contextless" (b: ^Bindings, id: Binding_Id) -> Binding_Proc {
 	}
 }
 
-// clear removes every binding, for on_reload. ctx and deadline stay.
+// clear removes every binding and direct access handler, for on_reload. ctx and deadline stay.
 clear :: proc(b: ^Bindings) {
 	b.slots = {}
 	b.count = 0
+	b.direct = {}
+}
+
+// direct_access makes the VM call the host's direct access callbacks for a userdata tag, which forward to the game's
+// handlers in Bindings.direct. The tag's metatable must exist. It returns false when LUAU_DIRECT_ACCESS is off.
+direct_access :: proc(L: ^luau.State, tag: c.int) -> bool {
+	when LUAU_DIRECT_ACCESS {
+		return bool(luau.registeruserdatadirectaccess(L, tag, direct_get, direct_set, direct_namecall))
+	} else {
+		return false
+	}
+}
+
+@(private)
+direct_get :: proc "c" (L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) {
+	b := (^Bindings)(luau.callbacks(L).userdata)
+	b.direct_calls += 1
+	procedure := b.direct[utag].get
+	if procedure == nil {
+		luau.L_errorL(L, "this value has no direct field access")
+	}
+	context = b.ctx
+	procedure(L, data, atom, cachedslot)
+}
+
+@(private)
+direct_set :: proc "c" (L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) {
+	b := (^Bindings)(luau.callbacks(L).userdata)
+	b.direct_calls += 1
+	procedure := b.direct[utag].set
+	if procedure == nil {
+		luau.L_errorL(L, "this value has no direct field access")
+	}
+	context = b.ctx
+	procedure(L, data, atom, cachedslot)
+}
+
+@(private)
+direct_namecall :: proc "c" (L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) -> c.int {
+	b := (^Bindings)(luau.callbacks(L).userdata)
+	b.direct_calls += 1
+	procedure := b.direct[utag].namecall
+	if procedure == nil {
+		luau.L_errorL(L, "this value has no direct method calls")
+	}
+	context = b.ctx
+	n := procedure(L, data, atom, cachedslot)
+	return n == YIELD ? luau.yield(L, 0) : n
 }
 
 // dispatch is the lua_CFunction of every binding. Its upvalues are the binding ID and the binding's name.

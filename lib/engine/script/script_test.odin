@@ -69,6 +69,7 @@ setup :: proc(t: ^testing.T, register: Register_Proc) -> ^Fixture {
 		script_close        = script_host.close,
 		script_push_binding = script_host.push_binding,
 		script_atom         = script_host.atom,
+		script_direct_access = script_host.direct_access,
 	}
 	f.reports = make([dynamic]f64)
 	f.errors = make([dynamic]string)

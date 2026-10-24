@@ -52,12 +52,13 @@ struct RequireVisitor : Luau::AstVisitor
 
 // cn_luau_find_requires parses source and reports every call to the global require. It returns false if the source
 // does not parse; the errors are reported through onError. definesBehaviour is set if the source calls
-// Behaviour.define.
+// Behaviour.define, and native if it starts with a --!native comment.
 CN_LUAU_API bool cn_luau_find_requires(
-    const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError, bool* definesBehaviour
+    const char* source, size_t size, void* ud, cn_luau_require_fn onRequire, cn_luau_error_fn onError, bool* definesBehaviour, bool* native
 )
 {
     *definesBehaviour = false;
+    *native = false;
     Luau::Allocator allocator;
     Luau::AstNameTable names(allocator);
     Luau::ParseResult result = Luau::Parser::parse(source, size, names, allocator);
@@ -75,6 +76,11 @@ CN_LUAU_API bool cn_luau_find_requires(
     visitor.onError = onError;
     result.root->visit(&visitor);
     *definesBehaviour = visitor.definesBehaviour;
+    for (const Luau::HotComment& comment : result.hotcomments)
+    {
+        if (comment.header && comment.content == "native")
+            *native = true;
+    }
     return true;
 }
 

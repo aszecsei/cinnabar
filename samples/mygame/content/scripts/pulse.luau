@@ -1,5 +1,6 @@
 --!strict
--- Pulses a large triangle's brightness. The game attaches it to both large triangles, and hello.luau turns it off and
+--!native
+-- Pulses a large triangle's brightness. Its update runs every frame, so it is compiled to machine code. The game attaches it to both large triangles, and hello.luau turns it off and
 -- on with Tab.
 local Pulse = Behaviour.define("Pulse", {
 	-- Pulses per second.

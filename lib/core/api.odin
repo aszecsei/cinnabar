@@ -101,6 +101,9 @@ Platform_API :: struct {
 	script_push_binding: proc(L: ^luau.State, name: string),
 	// Interns a method or field name and returns its atom, or -1 if the interner is full. Atoms never change meaning.
 	script_atom:         proc(name: string) -> i16,
+	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting.md#direct-field-access). It returns
+	// false when the host was built without LUAU_DIRECT_ACCESS.
+	script_direct_access: proc(L: ^luau.State, tag: i32) -> bool,
 }
 
 // Game_API is what the game side provides to the host (game -> host).

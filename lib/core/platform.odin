@@ -121,6 +121,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		script_close                 = script_host.close,
 		script_push_binding          = script_host.push_binding,
 		script_atom                  = script_host.atom,
+		script_direct_access         = script_host.direct_access,
 	}
 	return true
 }

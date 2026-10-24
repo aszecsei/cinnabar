@@ -31,6 +31,13 @@ Health :: struct {
 	drift:  [3]f32,
 }
 
+// Score has a field named value at another offset than Health's, for the direct access tests.
+@(private)
+Score :: struct {
+	bonus: f32,
+	value: f32,
+}
+
 @(private)
 World_Fixture :: struct {
 	platform: core.Platform_API,
@@ -45,10 +52,16 @@ World_Fixture :: struct {
 @(private)
 register_world_test :: proc(r: ^Runtime) {
 	expose(r, Health, Health{limit = 100})
+	expose(r, Score)
 	define(r, "Test.report", proc(L: ^luau.State) -> c.int {
 		f := (^World_Fixture)(context.user_ptr)
 		append(&f.reports, luau.L_checknumber(L, 1))
 		return 0
+	})
+	// Whether the function that calls it runs as machine code.
+	define(r, "Test.native", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(L, luau.incustomexecution(L, 1))
+		return 1
 	})
 }
 
@@ -65,6 +78,7 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 		script_close        = script_host.close,
 		script_push_binding = script_host.push_binding,
 		script_atom         = script_host.atom,
+		script_direct_access = script_host.direct_access,
 		memory_reserve      = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
@@ -81,6 +95,7 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Health)
+	ecs.register_component(&f.world.registry, Score)
 	register_components(&f.world.registry)
 	context.user_ptr = f
 	testing.expect(t, init(&f.runtime, &f.platform, &f.world, nil, register_world_test))

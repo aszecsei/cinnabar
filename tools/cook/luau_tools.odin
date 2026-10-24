@@ -17,8 +17,9 @@ Luau_Report :: #type proc "c" (ud: rawptr, text: [^]u8, size: c.size_t, line: c.
 foreign luau_tools {
 	// cn_luau_find_requires parses source and reports each call of the global require with a string literal. A parse
 	// error, or a require whose argument is not a string literal, goes to on_error. It returns false if the source
-	// does not parse. defines_behaviour is set if the source calls Behaviour.define.
-	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require, on_error: Luau_Report, defines_behaviour: ^bool) -> bool ---
+	// does not parse. defines_behaviour is set if the source calls Behaviour.define, and native if it starts with a
+	// --!native comment.
+	cn_luau_find_requires :: proc(source: [^]u8, size: c.size_t, ud: rawptr, on_require, on_error: Luau_Report, defines_behaviour, native: ^bool) -> bool ---
 
 	cn_luau_checker_create :: proc() -> ^Luau_Checker ---
 	cn_luau_checker_destroy :: proc(checker: ^Luau_Checker) ---

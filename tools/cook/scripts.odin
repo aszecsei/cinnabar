@@ -19,7 +19,7 @@ import "cinnabar:core/luau"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker compiles scripts changes this, which invalidates every cooked script.
-SCRIPT_COOK_VERSION :: "scripts 4"
+SCRIPT_COOK_VERSION :: "scripts 5"
 // The justfile passes the vendor/luau tag, so a Luau update cooks every script again.
 LUAU_VERSION :: #config(LUAU_VERSION, "unknown")
 SCRIPT_EXTENSION :: ".luau"
@@ -56,6 +56,8 @@ Script_Source :: struct {
 	requires:  [dynamic]Found_Require,
 	// The source calls Behaviour.define, so the cooker runs its top level to read the fields.
 	defines_behaviour: bool,
+	// The source starts with --!native.
+	native_comment:    bool,
 	// The resolved requires, sorted by path.
 	resolved:  [dynamic]Resolved_Require,
 }
@@ -300,7 +302,7 @@ find_requires :: proc(s: ^Script_Source) -> bool {
 		f.failed = true
 	}
 	f := Find_Context{ctx = context, script = s}
-	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_behaviour)
+	cn_luau_find_requires(raw_data(s.source), c.size_t(len(s.source)), &f, on_require, on_error, &s.defines_behaviour, &s.native_comment)
 	return !f.failed
 }
 
@@ -494,7 +496,8 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 		requires[i] = r.entry
 	}
 	flags: format.Script_Flags
-	if native, _ := format.meta_value(s.meta, "native"); native == "true" {
+	// The runtime compiles the module to machine code (see docs/scripting.md#native-code-generation).
+	if native, _ := format.meta_value(s.meta, "native"); native == "true" || s.native_comment {
 		flags += {.Native}
 	}
 	if class_name != "" {

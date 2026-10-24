@@ -52,11 +52,11 @@ teardown_reload :: proc(f: Reload_Fixture) {
 // write_script writes a script's blob, as the cooker would. Each version gets a later modification time, so a
 // rewrite within the clock's resolution still looks new.
 @(private)
-write_script :: proc(t: ^testing.T, f: ^Reload_Fixture, n: u8, version: int, source: string, requires: []format.Require_Entry = nil) -> format.Guid {
+write_script :: proc(t: ^testing.T, f: ^Reload_Fixture, n: u8, version: int, source: string, requires: []format.Require_Entry = nil, flags := format.Script_Flags{}) -> format.Guid {
 	guid := format.Guid{0 = n, 1 = 0xee}
 	bytecode := compile(source)
 	defer luau.free_bytecode(raw_data(bytecode))
-	blob := format.script_write({guid = guid, bytecode = bytecode, requires = requires, source_path = fmt.tprintf("game/%d.luau", n)}, context.temp_allocator)
+	blob := format.script_write({guid = guid, flags = flags, bytecode = bytecode, requires = requires, source_path = fmt.tprintf("game/%d.luau", n)}, context.temp_allocator)
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", f.dir, format.guid_format(guid, &buffer))
 	testing.expect(t, os.write_entire_file(path, blob) == nil)

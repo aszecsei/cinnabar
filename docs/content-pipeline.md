@@ -33,7 +33,7 @@ For each script, the cooker:
 
 The cache key includes the source, the `.meta` file, the cooker version, the Luau version, the build configuration, the source path, the GUID that each require resolves to, the prelude, the definition file, and the sources of every module that the script requires, directly or not. A behaviour's field defaults and the type check depend on those modules, so a changed dependency cooks its dependents again.
 
-Script import settings in `.meta`: `native = true` compiles the module to machine code at load. An unknown setting is a warning.
+Script import settings in `.meta`: `native = true` compiles the module to machine code at load, like a `--!native` comment at the top of the source. An unknown setting is a warning.
 
 ## Blob format
 

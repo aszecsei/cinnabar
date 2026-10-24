@@ -138,6 +138,12 @@ Callbacks :: struct {
 	onfree:              proc "c" (L: ^State, block: rawptr),
 }
 
+// The direct access callbacks of a userdata tag (see registeruserdatadirectaccess). The VM calls them in a C call frame
+// with the same arguments as __index, __newindex or __namecall, and passes the key's atom and a slot that it caches per
+// instruction. cachedslot is shared by every tag, so a callback checks its value before it trusts it.
+UserdataDirectAccess :: #type proc "c" (L: ^State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int)
+UserdataDirectNamecall :: #type proc "c" (L: ^State, data: rawptr, atom: c.int, cachedslot: ^u16, utag: c.int) -> c.int
+
 L_Reg :: struct {
 	name: cstring,
 	func: CFunction,
@@ -286,8 +292,15 @@ foreign lib {
 	ref :: proc(L: ^State, idx: c.int) -> c.int ---
 	unref :: proc(L: ^State, ref: c.int) -> c.int ---
 
+	// Experimental: the VM calls these for the tag's __index, __newindex and __namecall, when the key has an atom. The
+	// tag's metatable must exist first. It returns false without one.
+	registeruserdatadirectaccess :: proc(L: ^State, tag: c.int, get, set: UserdataDirectAccess, namecall: UserdataDirectNamecall) -> b32 ---
+
 	// Debug
 	stackdepth :: proc(L: ^State) -> c.int ---
+	// The function at the level runs as native code.
+	incustomexecution :: proc(L: ^State, level: c.int) -> b32 ---
+	hascustomexecution :: proc(L: ^State, level: c.int) -> b32 ---
 	getinfo :: proc(L: ^State, level: c.int, what: cstring, ar: ^Debug) -> b32 ---
 	getargument :: proc(L: ^State, level: c.int, n: c.int) -> c.int ---
 	getlocal :: proc(L: ^State, level: c.int, n: c.int) -> cstring ---

@@ -62,6 +62,10 @@ Runtime :: struct {
 	// Registry references: the event queue, and protected_call's message handler.
 	events:           c.int,
 	traceback:        c.int,
+	// The VM has a code generator, so modules with the Native flag run as machine code.
+	native:           bool,
+	// The host calls the direct access handlers (see direct.odin).
+	direct_access:    bool,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -101,8 +105,14 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, asset
 		log.error("script: cannot open the VM")
 		return false
 	}
+	// The code generator lives in luau.dll, so its machine code survives a code reload.
+	r.native = bool(luau.codegen_supported())
+	if r.native {
+		luau.codegen_create(r.L)
+	}
 	// Values in the VM that a code reload keeps: the metatables hold dispatcher closures, which stay valid.
 	create_metatables(r)
+	enable_direct(r)
 	create_frame_values(r)
 	create_math_values(r)
 	r.platform.script_push_binding(r.L, "Script.traceback")
@@ -372,6 +382,7 @@ register_engine :: proc(r: ^Runtime) {
 	bind(r, "Script.traceback", traceback_binding)
 	register_behaviours(r)
 	register_waits(r)
+	register_direct(r)
 
 	define(r, "require", require_binding)
 	define(r, "Debug.log", proc(L: ^luau.State) -> c.int {return log_binding(L, .Info)})
@@ -385,7 +396,7 @@ register_engine :: proc(r: ^Runtime) {
 }
 
 // userdata_namecall is the __namecall of the engine's full userdata.
-@(private = "file")
+@(private)
 userdata_namecall :: proc(L: ^luau.State) -> c.int {
 	r := runtime_of(L)
 	atom: c.int

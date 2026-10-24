@@ -68,7 +68,7 @@ stop :: proc(r: ^Runtime, script: Main_Script) {
 // start_main runs a Main module's top level on a new sandboxed thread, until its first wait.
 @(private = "file")
 start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
-	bytecode, chunkname := load_module_asset(r, m) or_return
+	bytecode, chunkname, native := load_module_asset(r, m) or_return
 	L := r.L
 	co := luau.newthread(L)
 	luau.L_sandboxthread(co)
@@ -77,6 +77,7 @@ start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
 		luau.pop(L, 1)
 		return false
 	}
+	compile_native(r, co, native)
 	m.state = .Main
 	index := add_waiter(r, L, {})
 	luau.pop(L, 1)
@@ -129,7 +130,7 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 	L := r.L
 	top := luau.gettop(L)
 	defer luau.settop(L, top)
-	bytecode, chunkname, ok := load_module_asset(r, m)
+	bytecode, chunkname, native, ok := load_module_asset(r, m)
 	if !ok {
 		return
 	}
@@ -146,6 +147,7 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 		return
 	}
 	luau.remove(L, env)
+	compile_native(r, L, native)
 	m.state = .Loading
 	ran := protected_call(r, L, 0, 1)
 	m.state = .Loaded
@@ -294,7 +296,7 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 		raise(L, fmt.aprintf("%s runs as a script, so it cannot be required", module_name(r, m), allocator = frame(r)))
 	case .Unloaded:
 	}
-	bytecode, chunkname, ok := load_module_asset(r, m)
+	bytecode, chunkname, native, ok := load_module_asset(r, m)
 	if !ok {
 		raise(L, fmt.aprintf("cannot load the module %s", guid_text(r, guid), allocator = frame(r)))
 	}
@@ -310,6 +312,7 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 	status := luau.load(L, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), env)
 	luau.remove(L, env)
 	if status == .OK {
+		compile_native(r, L, native)
 		m.state = .Loading
 		status = luau.pcall(L, 0, 1, 0)
 	}
@@ -327,10 +330,10 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 	return 1
 }
 
-// load_module_asset loads a module's blob, and returns its bytecode and chunk name. The bytecode is valid until the
-// end of the frame.
+// load_module_asset loads a module's blob, and returns its bytecode, its chunk name and whether it is native code. The
+// bytecode is valid until the end of the frame.
 @(private)
-load_module_asset :: proc(r: ^Runtime, m: ^Module) -> (bytecode: []byte, chunkname: cstring, ok: bool) {
+load_module_asset :: proc(r: ^Runtime, m: ^Module) -> (bytecode: []byte, chunkname: cstring, native: bool, ok: bool) {
 	m.handle = asset.load(r.assets, m.guid) or_return
 	data, _ := asset.data(r.assets, m.handle)
 	blob, valid := format.script_view(data)
@@ -339,7 +342,16 @@ load_module_asset :: proc(r: ^Runtime, m: ^Module) -> (bytecode: []byte, chunkna
 		return
 	}
 	chunkname = fmt.caprintf("@%s", format.blob_string(data, blob.source_path), allocator = frame(r))
-	return format.blob_bytes(data, blob.bytecode), chunkname, true
+	return format.blob_bytes(data, blob.bytecode), chunkname, .Native in blob.flags, true
+}
+
+// compile_native compiles the function on top of L's stack, and the functions inside it, to machine code, if the
+// module is native and the VM has a code generator. Without one, the module runs as bytecode.
+@(private)
+compile_native :: proc(r: ^Runtime, L: ^luau.State, native: bool) {
+	if native && r.native {
+		luau.codegen_compile(L, -1)
+	}
 }
 
 @(private)

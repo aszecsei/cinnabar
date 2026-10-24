@@ -380,6 +380,30 @@ typed_options :: proc(t: ^testing.T, tree: Tree, definitions := TEST_DEFINITIONS
 }
 
 @(test)
+native_scripts_are_flagged :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/comment.luau", "--!native\nreturn 1"},
+			{"content/meta.luau", "return 2"},
+			{"content/meta.luau.meta", "guid = 00112233445566778899aabbccddee01\nnative = true\n"},
+			{"content/plain.luau", "-- not --!native\nreturn 3"},
+		},
+	)
+	defer remove_tree(tree)
+	testing.expect(t, cook_scripts(tree_options(tree)))
+	Case :: struct {
+		name:   string,
+		native: bool,
+	}
+	for c in ([]Case{{"comment.luau", true}, {"meta.luau", true}, {"plain.luau", false}}) {
+		data := tree_blob(t, tree, tree_guid(t, tree, c.name))
+		blob, ok := format.script_view(data)
+		testing.expectf(t, ok && (.Native in blob.flags) == c.native, "%s: native should be %v", c.name, c.native)
+	}
+}
+
+@(test)
 type_errors_fail_the_cook :: proc(t: ^testing.T) {
 	tree := make_tree(
 		t,
