@@ -109,7 +109,9 @@ dev: struct {
 }
 
 // A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
-init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
+// A non-zero adapter is the LUID of the only adapter to use. Shared objects open only on the adapter that made them,
+// so the editor passes the LUID of the adapter that composites its window.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	dev.logger = context.logger
 	dev.allocator = context.allocator
 	when ODIN_DEBUG {
@@ -126,7 +128,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
 			return false
 		}
 	}
-	if !create_device() {
+	if !create_device(adapter) {
 		return false
 	}
 	when ODIN_DEBUG {
@@ -482,10 +484,15 @@ create_command_list :: proc(
 }
 
 @(private = "file")
-create_device :: proc() -> bool {
+create_device :: proc(luid: u64) -> bool {
 	for i: u32 = 0;; i += 1 {
 		adapter: ^dxgi.IAdapter1
-		if win.FAILED(dev.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+		if luid != 0 {
+			// Only the named adapter, so the second pass ends the loop.
+			if i > 0 || win.FAILED(dev.factory->EnumAdapterByLuid(transmute(dxgi.LUID)luid, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
+				break
+			}
+		} else if win.FAILED(dev.factory->EnumAdapterByGpuPreference(i, .HIGH_PERFORMANCE, dxgi.IAdapter1_UUID, (^rawptr)(&adapter))) {
 			break
 		}
 		desc: dxgi.ADAPTER_DESC1
@@ -515,7 +522,11 @@ create_device :: proc() -> bool {
 		log.infof("d3d12: using %s, optional features %v", name, dev.features)
 		return true
 	}
-	log.error("d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers")
+	if luid != 0 {
+		log.errorf("d3d12: adapter %16x is missing, or lacks Shader Model 6.6, resource binding tier 3 or Enhanced Barriers", luid)
+	} else {
+		log.error("d3d12: no adapter supports Shader Model 6.6, resource binding tier 3 and Enhanced Barriers")
+	}
 	return false
 }
 

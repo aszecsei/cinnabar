@@ -44,8 +44,8 @@ Platform :: struct {
 platform: Platform
 
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
-// hidden (see docs/gpu.md#presentation).
-init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "") -> bool {
+// hidden (see docs/gpu.md#presentation). A non-zero adapter is the LUID of the GPU to use.
+init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
 		return false
@@ -65,7 +65,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		return false
 	}
 	platform.window_size = _window_size()
-	if !backend.init(_window_native_handle(), platform.window_size, shared_target) {
+	if !backend.init(_window_native_handle(), platform.window_size, shared_target, adapter) {
 		log.error("core: failed to initialize the GPU backend")
 		return false
 	}

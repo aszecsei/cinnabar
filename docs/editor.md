@@ -16,7 +16,7 @@ The model for the layout is a dense production tool: a ribbon of commands, a doc
 The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewport.
 
 - **WPF cannot show a D3D12 texture directly.** `D3DImage` takes only D3D9Ex surfaces, so each frame would go from D3D12 through D3D11 to a legacy shared texture and into D3D9Ex: an extra copy, BGRA8 only, and pacing tied to WPF's render thread. A child swapchain in an `HwndHost` avoids the copy, but WPF content cannot draw over it (the airspace problem), so the tool palette and the stats overlay would each need their own window.
-- **Avalonia imports external GPU images into its compositor.** `ICompositionGpuInterop` accepts `D3D11TextureNtHandle` images and `Direct3D12FenceNtHandle` semaphores. The host's shared textures are NT handles that D3D11 can open. The viewport is therefore an ordinary composited control, and other controls draw over it.
+- **Avalonia imports external GPU images into its compositor.** `ICompositionGpuInterop` imports D3D11 textures, so the viewport is an ordinary composited control, and other controls draw over it. On Windows the import needs a keyed mutex, which a D3D12 resource cannot have, so the editor copies each frame once (see [Viewport](#viewport)).
 - **What WPF has that Avalonia lacks** is a mature ribbon and a wider set of third-party controls. The editor builds its own ribbon (see [Ribbon](#ribbon)), and it would build its own property grid in either framework, because the types come from the DLL over the link and not from CLR objects.
 - Avalonia also runs on other platforms. That is not a goal, but it means a later Vulkan or Metal port does not force a new editor.
 
@@ -124,9 +124,11 @@ The outliner needs every entity, but only a few entities need their field values
 
 ## Viewport
 
-- **Frames:** the host renders into the named shared textures `<name>.textureN` and signals `<name>.fence` (see [GPU](gpu.md#presentation)). The editor opens them by name and gives the NT handles to Avalonia's `ICompositionGpuInterop`.
+- **Frames:** the host renders into the named shared textures `<name>.textureN` and signals `<name>.fence` (see [GPU](gpu.md#presentation)).
+- **One copy per frame.** Avalonia's Windows backend, ANGLE on D3D11, imports only D3D11 textures with a keyed mutex, in `R8G8B8A8_UNORM`, and it imports no semaphores. Its Vulkan backend imports only Vulkan's own handles. The `Direct3D12FenceNtHandle` semaphore type exists only for macOS. So the editor has its own D3D11 device, which opens the host's textures. On each composition update, if the host's fence shows a newer finished frame, the editor copies that frame into one of three keyed-mutex textures of its own, and gives that texture to the compositor. The fence is read on the CPU, so the copy never waits on the GPU.
+- **Opening the host's objects:** D3D11 cannot open a named shared object, so a D3D12 device on the same adapter turns the names into handles. D3D11 refuses a shared typeless texture from D3D12 unless it allows simultaneous access, so the host's shared textures have the frame target's typed sRGB format.
 - **Same adapter:** shared objects open only on the adapter that created them. The editor reads the LUID of Avalonia's composition adapter and starts the host with `--adapter <luid>`.
-- **Back-pressure:** the editor acknowledges each frame that it shows. The host renders frame k into a shared texture only if k ≤ acknowledged + 2, so it never draws into the texture that the editor shows. Otherwise `core` gives the frame a scratch target that nothing reads. A slow editor drops frames from the viewport. It never stalls the simulation.
+- **Back-pressure:** the editor reads a host texture only while it copies it. It acknowledges each frame that it copies, and the host renders frame k into a shared texture only if k ≤ acknowledged + 2, so it never draws into a texture that the editor is copying. Otherwise `core` gives the frame a scratch target that nothing reads. A slow editor drops frames from the viewport. It never stalls the simulation.
 - **Resizing:** the editor sends the viewport size, in physical pixels. The host makes new shared textures with a generation in their names, `<name>.g<gen>.textureN`, and reports the generation. The editor opens the new set and releases the old one.
 - **Camera:** in edit mode, the editor owns the camera. The fly and orbit controls are in C#, and the editor sends the pose (a `World_Position`, a rotation and the projection) each frame. A host restart therefore keeps the view. In play mode, the game's camera is used, unless the editor turns on its free camera.
 - **Input:** while the viewport has focus in play mode, the editor sends keyboard and mouse input, and the host gives it to the game as `core.Input` (see [Core](core.md#input)).
@@ -198,8 +200,8 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 ## Implementation phases
 
-1. **Viewport spike:** an Avalonia window that imports the host's shared textures and fence, with the adapter LUID. This settles the open question about fence values below.
-2. **Shell:** the projects, the docking layout, the ribbon and the command registry, and the viewport showing live frames. The host runs in its Job Object.
+1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
+2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
 3. **Link:** the server in `src/host`, the handshake, the schema and the C# generator, back-pressure, resizing, and the console.
 4. **Read-only world:** types, the entity list and deltas, the outliner, and the properties panel for watched entities.
 5. **Scenes:** the `Name` component, the scene format, the loader, `cook scenes`, and snapshots over the link.
@@ -207,10 +209,6 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 7. **Viewport tools:** the editor camera, the ID buffer and picking, the selection outline, gizmos and snapping.
 8. **Modes:** play, pause, step and stop, and input forwarding.
 9. **Later:** the asset browser (with the cook daemon), the resource monitor, game commands in the ribbon, prefabs.
-
-## Open questions
-
-- **Fence values in Avalonia** (settled by phase 1): `UpdateWithSemaphoresAsync` takes a wait and a signal semaphore, which suits binary semaphores. The host's fence counts frames. If Avalonia cannot wait for a given value, the editor waits on the fence with its own D3D11 device, copies the frame into a texture that it owns, and gives that to Avalonia instead.
 
 ## Deferred
 

@@ -1,0 +1,21 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:viewport="using:Cinnabar.Editor.Viewport"
+        x:Class="Cinnabar.Editor.MainWindow"
+        Title="cinnabar editor"
+        Width="1600" Height="900"
+        Background="#1b1b1d">
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="#2a2a2e" Padding="8,3">
+            <TextBlock x:Name="Status" FontSize="12" TextTrimming="CharacterEllipsis" />
+        </Border>
+        <Grid>
+            <viewport:ViewportControl x:Name="Viewport" />
+            <!-- An overlay on the composited frames: the reason the editor uses Avalonia (docs/editor.md#ui-framework). -->
+            <Border HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8" Padding="8,4"
+                    Background="#c0202024" CornerRadius="3" IsHitTestVisible="False">
+                <TextBlock x:Name="Stats" FontFamily="Consolas" FontSize="12" />
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

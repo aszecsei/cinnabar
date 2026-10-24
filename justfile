@@ -173,6 +173,14 @@ dev-shared name="cinnabar": build viewer
     sleep 2
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
+# Build the editor (see docs/editor.md#projects)
+editor:
+    dotnet build src/editor -nologo -v:quiet
+
+# Build everything and run the game in the editor
+edit: build editor
+    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll"
+
 # Build the statically linked release executable
 release: agility-runtime shaders luau script-types (scripts "release")
     mkdir -p "{{build_dir}}"

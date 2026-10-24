@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:log"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 
@@ -24,15 +25,25 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	// host [game.dll] [--shared <name>] [--emit-script-types <file>]. --shared renders into shared textures for the
-	// editor or tools/viewer. --emit-script-types writes the scripts' definition file and exits.
+	// host [game.dll] [--shared <name>] [--adapter <luid>] [--emit-script-types <file>]. --shared renders into shared
+	// textures for the editor or tools/viewer. --adapter names the GPU by its LUID in hex, so that the editor can open
+	// the shared textures on its own device. --emit-script-types writes the scripts' definition file and exits.
 	source_path := DEFAULT_GAME_PATH
 	shared_target := ""
+	adapter: u64
 	script_types := ""
 	for i := 1; i < len(os.args); i += 1 {
 		switch {
 		case os.args[i] == "--shared" && i + 1 < len(os.args):
 			shared_target = os.args[i + 1]
+			i += 1
+		case os.args[i] == "--adapter" && i + 1 < len(os.args):
+			luid, ok := strconv.parse_u64_of_base(os.args[i + 1], 16)
+			if !ok || luid == 0 {
+				log.fatalf("host: --adapter takes a LUID in hex, not %q", os.args[i + 1])
+				return
+			}
+			adapter = luid
 			i += 1
 		case os.args[i] == "--emit-script-types" && i + 1 < len(os.args):
 			script_types = os.args[i + 1]
@@ -43,7 +54,7 @@ main :: proc() {
 			source_path = os.args[i]
 		}
 	}
-	if !core.init("cinnabar host", shared_target = shared_target) {
+	if !core.init("cinnabar host", shared_target = shared_target, adapter = adapter) {
 		return
 	}
 	defer core.shutdown()

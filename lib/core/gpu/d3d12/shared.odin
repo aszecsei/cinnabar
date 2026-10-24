@@ -27,6 +27,9 @@ Shared_Target :: struct {
 	// The number of frames rendered, and the fence value of the last one.
 	frame:           u64,
 	frame_start:     time.Tick,
+	// A high-resolution timer for the pacing. time.sleep has the resolution of the system tick, 15.6 ms by default,
+	// so a 16.7 ms frame would sleep for two ticks.
+	timer:           win.HANDLE,
 }
 
 // create_shared_target creates the named textures and fence, and the frame target that renders into them.
@@ -36,14 +39,15 @@ create_shared_target :: proc(name: string, size: [2]i32) -> bool {
 	heap_props := d3d.HEAP_PROPERTIES {
 		Type = .DEFAULT,
 	}
-	// Typeless, so the render target view can be sRGB, like the swapchain's back buffers.
+	// Typed, unlike the swapchain's typeless back buffers: D3D11 cannot open a shared typeless texture without
+	// simultaneous access, and the editor opens these with D3D11 (see docs/editor.md#viewport).
 	desc := d3d.RESOURCE_DESC1 {
 		Dimension        = .TEXTURE2D,
 		Width            = u64(width),
 		Height           = height,
 		DepthOrArraySize = 1,
 		MipLevels        = 1,
-		Format           = .R8G8B8A8_TYPELESS,
+		Format           = view_format(gpu.FRAME_TARGET_FORMAT),
 		SampleDesc       = {Count = 1},
 		Flags            = {.ALLOW_RENDER_TARGET},
 	}
@@ -66,6 +70,11 @@ create_shared_target :: proc(name: string, size: [2]i32) -> bool {
 	check(dev.device->CreateFence(0, {.SHARED}, d3d.IFence_UUID, (^rawptr)(&shared.fence)), "CreateFence(shared)") or_return
 	fence_name := fmt.tprintf("%s.fence", name)
 	check(dev.device->CreateSharedHandle(shared.fence, nil, win.GENERIC_ALL, win.utf8_to_wstring(fence_name), &shared.fence_handle), "CreateSharedHandle(fence)") or_return
+	shared.timer = win.CreateWaitableTimerExW(nil, nil, win.CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, win.TIMER_ALL_ACCESS)
+	if shared.timer == nil {
+		log.errorf("d3d12: CreateWaitableTimerExW failed: %d", win.GetLastError())
+		return false
+	}
 	shared.frame_start = time.tick_now()
 
 	dev.size = {i32(width), i32(height)}
@@ -89,6 +98,9 @@ release_shared_target :: proc() {
 	if shared.fence_handle != nil {
 		win.CloseHandle(shared.fence_handle)
 	}
+	if shared.timer != nil {
+		win.CloseHandle(shared.timer)
+	}
 	release(&shared.fence)
 }
 
@@ -97,9 +109,17 @@ release_shared_target :: proc() {
 begin_shared_frame :: proc() -> (texture: ^d3d.IResource, rtv: d3d.CPU_DESCRIPTOR_HANDLE) {
 	shared := &dev.shared
 	if elapsed := time.tick_since(shared.frame_start); elapsed < SHARED_FRAME_TIME {
-		time.sleep(SHARED_FRAME_TIME - elapsed)
+		// A negative due time is relative, in 100 ns units.
+		due := win.LARGE_INTEGER(-i64((SHARED_FRAME_TIME - elapsed) / 100))
+		if win.SetWaitableTimerEx(shared.timer, &due, 0, nil, nil, nil, 0) {
+			win.WaitForSingleObject(shared.timer, win.INFINITE)
+		}
+		// On schedule, so the timer's wake-up latency does not add up from frame to frame.
+		shared.frame_start = time.tick_add(shared.frame_start, SHARED_FRAME_TIME)
+	} else {
+		// A late frame starts a new schedule instead of rushing to catch up.
+		shared.frame_start = time.tick_now()
 	}
-	shared.frame_start = time.tick_now()
 	index := u32((shared.frame + 1) % SHARED_TEXTURE_COUNT)
 	return shared.textures[index], rtv_handle(gpu.MAX_TEXTURES + index)
 }

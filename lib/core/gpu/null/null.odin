@@ -46,8 +46,8 @@ state: struct {
 	transfers:     u64,
 }
 
-// The null backend has no shared mode: it renders nothing to share.
-init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
+// The null backend has no shared mode and no adapter: it renders nothing to share.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	state = {
 		frame_start = time.tick_now(),
 	}
