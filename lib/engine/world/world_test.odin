@@ -2,9 +2,11 @@ package world
 
 import "core:log"
 import "core:mem/virtual"
+import "core:sync"
 import "core:testing"
 
 import "cinnabar:core"
+import "cinnabar:core/jobs"
 
 Health :: struct {
 	value: i32,
@@ -16,16 +18,27 @@ Velocity :: struct {
 
 Player :: struct {}
 
+// The job system is a singleton, and the test runner runs tests on several threads. Every test that starts it holds
+// this lock.
+@(private)
+scheduler_lock: sync.Mutex
+
 Fixture :: struct {
 	platform: core.Platform_API,
+	frame:    virtual.Arena,
 	world:    World,
 }
 
 // The world is large, so a fixture lives on the heap. The platform's address must not change after init.
-@(private = "file")
+@(private)
 setup :: proc(t: ^testing.T) -> ^Fixture {
 	f := new(Fixture)
+	testing.expect(t, virtual.arena_init_growing(&f.frame) == nil)
 	f.platform = {
+		frame_allocator = virtual.arena_allocator(&f.frame),
+		// Only tests that start the job system call these.
+		jobs_run = jobs.run,
+		jobs_wait = jobs.wait,
 		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
@@ -42,14 +55,16 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	return f
 }
 
-@(private = "file")
+@(private)
 teardown :: proc(f: ^Fixture) {
 	destroy(&f.world)
+	virtual.arena_destroy(&f.frame)
 	free(f)
 }
 
-@(private = "file")
+@(private)
 register_components :: proc(r: ^Registry) {
+	register_engine_components(r)
 	register_component(r, Health)
 	register_component(r, Velocity)
 	register_component(r, Player)

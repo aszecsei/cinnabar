@@ -62,6 +62,9 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if record == nil {
 		return false
 	}
+	if id == PARENT_ID {
+		w.hierarchy_dirty = true
+	}
 	a := archetype(w, record.archetype)
 	column, found := slice.binary_search(archetype_components(a), id)
 	if !found {
@@ -103,6 +106,9 @@ remove_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 	column, found := slice.binary_search(archetype_components(a), id)
 	if !found {
 		return false
+	}
+	if id == PARENT_ID {
+		w.hierarchy_dirty = true
 	}
 	ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
 	copy(ids[:], a.ids[:column])
@@ -218,6 +224,7 @@ find_or_create_archetype :: proc(w: ^World, ids: []Component_Id) -> u32 {
 	archetype(w, index)^ = created
 	table[slot] = index + 1
 	w.archetype_count += 1
+	match_new_archetype(w, index)
 	return index
 }
 

@@ -76,6 +76,9 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	if record == nil {
 		return false
 	}
+	if _, child := column_index(archetype(w, record.archetype), PARENT_ID); child {
+		w.hierarchy_dirty = true
+	}
 	remove_row(w, record.archetype, record.row)
 	record.archetype = NO_ARCHETYPE
 	if record.generation == max(u32) {
