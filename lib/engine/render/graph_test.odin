@@ -130,7 +130,8 @@ multi_pass_barriers :: proc(t: ^testing.T) {
 	read(&g, p, post)
 	color(&g, p, target, .Discard)
 
-	cb, ok := record(&g)
+	subs, ok := record(&g)
+	cb := all_buffers(subs)
 	testing.expect(t, ok)
 	r := inspect(cb, f.platform.frame_allocator)
 	s, d, o := gpu_texture(&g, scene), gpu_texture(&g, scene_depth), gpu_texture(&g, post)
@@ -183,7 +184,8 @@ unused_passes_are_culled :: proc(t: ^testing.T) {
 	p = add_compute_pass(&g, "kept", nothing)
 	keep_pass(&g, p)
 
-	cb, ok := record(&g)
+	subs, ok := record(&g)
+	cb := all_buffers(subs)
 	testing.expect(t, ok)
 	r := inspect(cb, f.platform.frame_allocator)
 	testing.expect_value(t, len(r.markers), 2)
@@ -217,7 +219,8 @@ imported_textures_return_to_resting_layout :: proc(t: ^testing.T) {
 		read(&g, p, imported)
 		color(&g, p, target, .Clear)
 
-		cb, ok := record(&g)
+		subs, ok := record(&g)
+		cb := all_buffers(subs)
 		testing.expect(t, ok)
 		r := inspect(cb, f.platform.frame_allocator)
 		expect_transitions(t, r.textures[:], {{field, .Unordered_Access, .Shader_Resource}, {field, .Shader_Resource, .Unordered_Access}})
@@ -253,7 +256,8 @@ reads_merge_without_barriers :: proc(t: ^testing.T) {
 	read(&g, p, buffer)
 	color(&g, p, target, .Clear)
 
-	cb, ok := record(&g)
+	subs, ok := record(&g)
+	cb := all_buffers(subs)
 	testing.expect(t, ok)
 	r := inspect(cb, f.platform.frame_allocator)
 	testing.expect_value(t, len(r.textures), 0)
@@ -339,7 +343,8 @@ parallel_passes_keep_their_order :: proc(t: ^testing.T) {
 		names[i] = fmt.aprintf("pass %d", i, allocator = f.platform.frame_allocator)
 		keep_pass(&g, add_compute_pass(&g, names[i], mark_ran, &ran[i]))
 	}
-	cbs, ok := record(&g)
+	subs, ok := record(&g)
+	cbs := all_buffers(subs)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(cbs), COUNT)
 	r := inspect(cbs, f.platform.frame_allocator)
@@ -373,7 +378,8 @@ split_passes_form_a_chain :: proc(t: ^testing.T) {
 	color(&g, p, target, .Clear)
 	depth(&g, p, scene_depth, .Clear, store = .Discard)
 
-	cbs, ok := record(&g)
+	subs, ok := record(&g)
+	cbs := all_buffers(subs)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(cbs), len(ran))
 	for cb, i in cbs[:min(len(cbs), len(ran))] {
@@ -405,4 +411,74 @@ split_passes_form_a_chain :: proc(t: ^testing.T) {
 	context.logger = log.nil_logger()
 	testing.expect(t, !null.submit(cbs[1:]), "a submission started with a resumed piece")
 	testing.expect(t, !null.submit(cbs[:len(cbs) - 1]), "a submission ended with a suspended piece")
+}
+
+@(private = "file")
+all_buffers :: proc(subs: []Submission) -> []gpu.Command_Buffer {
+	if len(subs) == 0 {
+		return nil
+	}
+	result := make([dynamic]gpu.Command_Buffer, subs[0].buffers.allocator)
+	for s in subs {
+		append(&result, ..s.buffers[:])
+	}
+	return result[:]
+}
+
+@(test)
+async_compute_waits_across_queues :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	args := null.create_buffer({size = 256, usage = {.Storage, .Indirect}}, nil)
+	defer null.destroy_buffer(args)
+
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	arguments := import_buffer(&g, args)
+	field := create_texture(&g, {size = SIZE, format = .RGBA16_Float, label = "field"})
+
+	p := add_compute_pass(&g, "clear", nothing, queue = .Compute)
+	write(&g, p, arguments)
+	p = add_compute_pass(&g, "cull", nothing, queue = .Compute)
+	write(&g, p, arguments)
+	write(&g, p, field)
+	p = add_render_pass(&g, "draw", nothing)
+	indirect_buffer(&g, p, arguments)
+	read(&g, p, field)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(subs), 2)
+	if len(subs) != 2 {
+		return
+	}
+	testing.expect_value(t, subs[0].queue, gpu.Queue.Compute)
+	testing.expect_value(t, len(subs[0].buffers), 2)
+	testing.expect_value(t, subs[1].queue, gpu.Queue.Graphics)
+	testing.expect_value(t, subs[1].wait_for, gpu.Queues{.Compute})
+
+	compute := inspect(subs[0].buffers[:], f.platform.frame_allocator)
+	// The two writes on the compute queue need a barrier between them, with compute stages only.
+	testing.expect_value(t, len(compute.buffers), 1)
+	if len(compute.buffers) == 1 {
+		testing.expect_value(t, compute.buffers[0].sync_before, gpu.Syncs{.Compute_Shading})
+		testing.expect_value(t, compute.buffers[0].access_after, gpu.Accesses{.Unordered_Access})
+	}
+	expect_transitions(t, compute.textures[:], {{gpu_texture(&g, field), .Undefined, .Unordered_Access}})
+
+	// The wait orders the queues, so the graphics side changes only the texture's layout.
+	graphics := inspect(subs[1].buffers[:], f.platform.frame_allocator)
+	testing.expect_value(t, len(graphics.buffers), 0)
+	expect_transitions(t, graphics.textures[:], {{gpu_texture(&g, field), .Unordered_Access, .Shader_Resource}})
+	if len(graphics.textures) == 1 {
+		testing.expect_value(t, graphics.textures[0].access_before, gpu.Accesses{})
+	}
+
+	for s in subs {
+		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
+	}
 }

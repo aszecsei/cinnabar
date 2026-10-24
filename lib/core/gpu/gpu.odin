@@ -200,6 +200,8 @@ Sync :: enum u8 {
 	Depth_Stencil,
 	Render_Target,
 	Compute_Shading,
+	// Reading indirect arguments and counts.
+	Execute_Indirect,
 }
 
 Syncs :: bit_set[Sync;u16]
@@ -211,11 +213,25 @@ Access :: enum u8 {
 	Depth_Stencil_Write,
 	Shader_Resource,
 	Unordered_Access,
+	Indirect_Argument,
 }
 
 Accesses :: bit_set[Access;u16]
 
 WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access}
+
+// A compute queue runs no graphics work, so its barriers use only these.
+COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect}
+COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument}
+
+// Queue is where a submission runs. Compute runs alongside graphics (async compute). Cross-queue dependencies
+// are declared at submission (see docs/gpu.md#queues).
+Queue :: enum u8 {
+	Graphics,
+	Compute,
+}
+
+Queues :: bit_set[Queue;u8]
 
 Texture_Layout :: enum u8 {
 	// The contents are undefined. As a barrier's layout_before, it discards the contents.
@@ -374,3 +390,27 @@ Upload :: struct {
 
 // Pass constants must be aligned to this in the upload ring.
 PASS_CONSTANTS_ALIGN :: 256
+
+// Indirect argument records. A draw record starts with a draw ID, which shaders read as CN_DRAW_ID. Portable code
+// stores the record's index there, counting from the record at the command's offset: the Vulkan backend delivers
+// that index, not the stored value. See docs/gpu.md#gpu-driven-rendering.
+Draw_Indirect_Args :: struct {
+	draw_id:        u32,
+	vertex_count:   u32,
+	instance_count: u32,
+	first_vertex:   u32,
+	first_instance: u32,
+}
+
+Draw_Indexed_Indirect_Args :: struct {
+	draw_id:        u32,
+	index_count:    u32,
+	instance_count: u32,
+	first_index:    u32,
+	vertex_offset:  i32,
+	first_instance: u32,
+}
+
+Dispatch_Indirect_Args :: struct {
+	groups: [3]u32,
+}

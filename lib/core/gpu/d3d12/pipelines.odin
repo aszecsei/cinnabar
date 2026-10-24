@@ -14,6 +14,9 @@ import "cinnabar:core/jobs"
 // lib/core/gpu/shaders/cinnabar.hlsli.
 ROOT_PUSH_CONSTANTS :: 0
 ROOT_PASS_CONSTANTS :: 1
+// One root constant at b2: the draw ID. An indirect draw's command signature sets it from each argument record.
+// Every other draw sees 0.
+ROOT_DRAW_ID :: 2
 
 // pso is nil until the pipeline's first compile job finishes. An update replaces it when the new version is
 // ready. Read and write it atomically.
@@ -36,6 +39,10 @@ Pipelines :: struct {
 	// The compile jobs that may still write each slot. A slot is not reused until its count is zero.
 	compiling:        []int,
 	compile_counter:  jobs.Counter,
+	// Command signatures for the indirect commands. The draw signatures set ROOT_DRAW_ID from each record.
+	draw_signature:     ^d3d.ICommandSignature,
+	indexed_signature:  ^d3d.ICommandSignature,
+	dispatch_signature: ^d3d.ICommandSignature,
 }
 
 @(private)
@@ -43,7 +50,7 @@ init_pipelines :: proc() -> bool {
 	gpu.pool_init(&dev.pipeline_pool, gpu.MAX_PIPELINES, dev.allocator)
 	dev.compiling = make([]int, gpu.MAX_PIPELINES, dev.allocator)
 
-	params: [2]d3d.ROOT_PARAMETER1
+	params: [3]d3d.ROOT_PARAMETER1
 	params[ROOT_PUSH_CONSTANTS].ParameterType = ._32BIT_CONSTANTS
 	params[ROOT_PUSH_CONSTANTS].Constants = {
 		ShaderRegister = 0,
@@ -53,6 +60,11 @@ init_pipelines :: proc() -> bool {
 	params[ROOT_PASS_CONSTANTS].Descriptor = {
 		ShaderRegister = 1,
 		Flags          = {.DATA_STATIC_WHILE_SET_AT_EXECUTE},
+	}
+	params[ROOT_DRAW_ID].ParameterType = ._32BIT_CONSTANTS
+	params[ROOT_DRAW_ID].Constants = {
+		ShaderRegister = 2,
+		Num32BitValues = 1,
 	}
 	desc := d3d.VERSIONED_ROOT_SIGNATURE_DESC {
 		Version = ._1_1,
@@ -75,7 +87,40 @@ init_pipelines :: proc() -> bool {
 		dev.device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), d3d.IRootSignature_UUID, (^rawptr)(&dev.root_signature)),
 		"CreateRootSignature",
 	) or_return
+
+	draw_id := d3d.INDIRECT_ARGUMENT_DESC {
+		Type = .CONSTANT,
+	}
+	draw_id.Constant = {
+		RootParameterIndex = ROOT_DRAW_ID,
+		Num32BitValuesToSet = 1,
+	}
+	draw := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DRAW}}
+	indexed := [2]d3d.INDIRECT_ARGUMENT_DESC{draw_id, {Type = .DRAW_INDEXED}}
+	dispatch := [1]d3d.INDIRECT_ARGUMENT_DESC{{Type = .DISPATCH}}
+	dev.draw_signature = create_signature(draw[:], size_of(gpu.Draw_Indirect_Args), dev.root_signature) or_return
+	dev.indexed_signature = create_signature(indexed[:], size_of(gpu.Draw_Indexed_Indirect_Args), dev.root_signature) or_return
+	// A signature that sets no root arguments takes no root signature.
+	dev.dispatch_signature = create_signature(dispatch[:], size_of(gpu.Dispatch_Indirect_Args), nil) or_return
 	return true
+}
+
+@(private = "file")
+create_signature :: proc(
+	args: []d3d.INDIRECT_ARGUMENT_DESC,
+	stride: u32,
+	root_signature: ^d3d.IRootSignature,
+) -> (
+	signature: ^d3d.ICommandSignature,
+	ok: bool,
+) {
+	desc := d3d.COMMAND_SIGNATURE_DESC {
+		ByteStride       = stride,
+		NumArgumentDescs = u32(len(args)),
+		pArgumentDescs   = raw_data(args),
+	}
+	check(dev.device->CreateCommandSignature(&desc, root_signature, d3d.ICommandSignature_UUID, (^rawptr)(&signature)), "CreateCommandSignature") or_return
+	return signature, true
 }
 
 // wait_compiles waits for the compile jobs. Call it before the GPU device shuts down.
@@ -89,16 +134,22 @@ shutdown_pipelines :: proc() {
 	gpu.pool_each(&dev.pipeline_pool, proc(entry: ^Pipeline_Entry) {release(&entry.pso)})
 	gpu.pool_destroy(&dev.pipeline_pool)
 	delete(dev.compiling, dev.allocator)
+	release(&dev.draw_signature)
+	release(&dev.indexed_signature)
+	release(&dev.dispatch_signature)
 	release(&dev.root_signature)
 }
 
 // bind_root_signature binds the descriptor heaps and the root signature at the start of a command list.
+// A compute list has only the compute root signature.
 @(private)
-bind_root_signature :: proc(list: ^d3d.IGraphicsCommandList7) {
+bind_root_signature :: proc(list: ^d3d.IGraphicsCommandList7, queue := gpu.Queue.Graphics) {
 	// The heaps must be bound before a root signature that indexes them directly.
 	heaps := [?]^d3d.IDescriptorHeap{dev.resource_heap, dev.sampler_heap}
 	list->SetDescriptorHeaps(len(heaps), &heaps[0])
-	list->SetGraphicsRootSignature(dev.root_signature)
+	if queue == .Graphics {
+		list->SetGraphicsRootSignature(dev.root_signature)
+	}
 	list->SetComputeRootSignature(dev.root_signature)
 }
 

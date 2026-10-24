@@ -30,6 +30,8 @@ Validation_Error :: enum u8 {
 	Attachment_Layout,
 	Bad_Resume,
 	Bad_Suspend,
+	Wrong_Queue,
+	Bad_Indirect,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -75,7 +77,17 @@ tracked_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) -> (layout: T
 // With a tracker, it also checks barrier layouts and attachment layouts, and applies the barriers to the tracker.
 // After a rejected command buffer, the tracker holds the layouts that the valid packets left.
 // packet is the index of the offending packet, or the packet count for errors found at the end.
-validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Tracker = nil) -> (err: Validation_Error, packet: int) {
+// queue is the queue that the command buffer is submitted to. A compute queue runs no render passes, and its barriers
+// use only COMPUTE_QUEUE_SYNCS and COMPUTE_QUEUE_ACCESSES.
+validate :: proc(
+	cb: Command_Buffer,
+	resources: Resources,
+	layouts: ^Layout_Tracker = nil,
+	queue := Queue.Graphics,
+) -> (
+	err: Validation_Error,
+	packet: int,
+) {
 	if layouts != nil {
 		sync.lock(&layouts.mutex)
 	}
@@ -104,6 +116,9 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 		}
 		switch p.kind {
 		case .Begin_Pass:
+			if queue != .Graphics {
+				return .Wrong_Queue, packet
+			}
 			if in_pass {
 				return .Nested_Pass, packet
 			}
@@ -196,11 +211,45 @@ validate :: proc(cb: Command_Buffer, resources: Resources, layouts: ^Layout_Trac
 			if !compute_bound {
 				return .No_Pipeline, packet
 			}
+		case .Draw_Indirect, .Draw_Indexed_Indirect:
+			if !in_pass {
+				return .Draw_Outside_Pass, packet
+			}
+			if !graphics_bound {
+				return .No_Pipeline, packet
+			}
+			if p.kind == .Draw_Indexed_Indirect && !index_buffer_set {
+				return .No_Index_Buffer, packet
+			}
+			d := payload(p, Draw_Indirect)
+			stride := p.kind == .Draw_Indirect ? size_of(Draw_Indirect_Args) : size_of(Draw_Indexed_Indirect_Args)
+			if err = validate_indirect(resources, d.arguments, d.offset, int(d.max_count) * stride); err != .None {
+				return err, packet
+			}
+			if d.count != {} {
+				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32)); err != .None {
+					return err, packet
+				}
+			}
+		case .Dispatch_Indirect:
+			if in_pass {
+				return .Dispatch_Inside_Pass, packet
+			}
+			if !compute_bound {
+				return .No_Pipeline, packet
+			}
+			d := payload(p, Dispatch_Indirect)
+			if err = validate_indirect(resources, d.arguments, d.offset, size_of(Dispatch_Indirect_Args)); err != .None {
+				return err, packet
+			}
 		case .Barriers:
 			if in_pass {
 				return .Barrier_Inside_Pass, packet
 			}
 			buffers, textures := barrier_data(p)
+			if queue == .Compute && !compute_queue_barriers(buffers, textures) {
+				return .Bad_Barrier, packet
+			}
 			for b in buffers {
 				desc, ok := resources.buffer(b.buffer)
 				if !ok {
@@ -246,6 +295,7 @@ validate_submission :: proc(
 	buffers: []Command_Buffer,
 	resources: Resources,
 	layouts: ^Layout_Tracker = nil,
+	queue := Queue.Graphics,
 ) -> (
 	err: Validation_Error,
 	buffer: int,
@@ -253,7 +303,7 @@ validate_submission :: proc(
 ) {
 	suspended: ^Begin_Pass
 	for cb, i in buffers {
-		if err, packet = validate(cb, resources, layouts); err != .None {
+		if err, packet = validate(cb, resources, layouts, queue); err != .None {
 			return err, i, packet
 		}
 		resumed, suspends := chain_ends(cb)
@@ -397,6 +447,43 @@ valid_sync :: proc(sync: Syncs, access: Accesses) -> bool {
 	return sync != {} || access == {}
 }
 
+// validate_indirect checks an indirect argument or count buffer: the Indirect usage, a 4-byte aligned offset, and
+// size bytes in range.
+@(private = "file")
+validate_indirect :: proc(resources: Resources, buffer: Buffer, offset: u32, size: int) -> Validation_Error {
+	desc, ok := resources.buffer(buffer)
+	if !ok {
+		return .Invalid_Buffer
+	}
+	if .Indirect not_in desc.usage {
+		return .Bad_Buffer_Usage
+	}
+	if offset % 4 != 0 || int(offset) + size > int(desc.size) {
+		return .Bad_Indirect
+	}
+	return .None
+}
+
+@(private = "file")
+compute_queue_barriers :: proc(buffers: []Buffer_Barrier, textures: []Texture_Barrier) -> bool {
+	for b in buffers {
+		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) || !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
+			return false
+		}
+	}
+	for b in textures {
+		if !(b.sync_before + b.sync_after <= COMPUTE_QUEUE_SYNCS) || !(b.access_before + b.access_after <= COMPUTE_QUEUE_ACCESSES) {
+			return false
+		}
+		for layout in ([2]Texture_Layout{b.layout_before, b.layout_after}) {
+			if layout != .Undefined && layout != .Shader_Resource && layout != .Unordered_Access {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 @(private = "file")
 valid_buffer_barrier :: proc(b: Buffer_Barrier, desc: Buffer_Desc) -> bool {
 	allowed := Accesses{.Shader_Resource}
@@ -405,6 +492,9 @@ valid_buffer_barrier :: proc(b: Buffer_Barrier, desc: Buffer_Desc) -> bool {
 	}
 	if .Storage in desc.usage {
 		allowed += {.Unordered_Access}
+	}
+	if .Indirect in desc.usage {
+		allowed += {.Indirect_Argument}
 	}
 	return b.access_before <= allowed && b.access_after <= allowed && valid_sync(b.sync_before, b.access_before) && valid_sync(b.sync_after, b.access_after)
 }

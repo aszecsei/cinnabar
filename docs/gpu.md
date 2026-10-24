@@ -49,6 +49,7 @@ All resource binding is bindless. There is one fixed root signature for all pipe
 |---|---|
 | Root constants | 128 bytes of push constants. This is the size Vulkan guarantees. |
 | Root CBV | Per-pass constants. |
+| Root constant | The draw ID of an indirect draw (`CN_DRAW_ID`, `b2`). 0 for every other draw. |
 | Descriptor heaps | Every buffer, texture, acceleration structure and sampler view. Shaders use `ResourceDescriptorHeap` and `SamplerDescriptorHeap`. |
 
 - A shader receives resources as `u32` bindless indices, usually in push constants.
@@ -130,7 +131,8 @@ A large render pass can be recorded in parallel as pieces, in consecutive comman
 - `Undefined` as the layout before discards the contents, whatever the texture's layout is.
 - The backend does not track resource states to translate barriers. State tracking would serialize parallel recording.
 - Validation in debug builds and in the null backend tracks texture layouts. It rejects a barrier whose layout before is wrong, and a render pass whose attachments are not in the render target or depth write layout.
-- **Frame boundary:** a frame starts after the GPU completes the work of the previous frame. A resource therefore needs no barrier for work in an earlier frame, only a layout change. The D3D12 backend executes each frame's work in one `ExecuteCommandLists` call. A Vulkan backend adds a full barrier at the start of each frame.
+- **Frame boundary:** a frame starts after the GPU completes the work of the previous frame, on both queues. A resource therefore needs no barrier for work in an earlier frame, only a layout change. In D3D12, the completion of an `ExecuteCommandLists` call finishes all work and flushes all caches, and the compute queue's first work in a frame waits for the previous frame's end. A Vulkan backend adds a full barrier at the start of each frame.
+- **Cross-queue use** works the same way: after a fence wait, the earlier work of the other queue is complete and visible, so only a layout change needs a barrier (see [Queues](#queues)).
 - The render graph in `lib/engine/render` records all barriers.
 
 ### Render graph
@@ -139,21 +141,33 @@ The game builds a `render.Graph` every frame in frame memory. Passes declare how
 
 - **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands through a `Pass_Context`. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
 - **Pieces:** `pieces = n` splits a pass across `n` jobs (at most `MAX_PASS_PIECES`). The `Pass_Proc` runs once per piece, and `Pass_Context.piece` and `piece_count` tell it which share of the work to record. The first piece records the barriers. A render pass becomes a [split pass](#split-passes): the graph makes the pieces load and store between each other, and puts each piece's debug marker inside its pass. A compute pass's pieces are plain command buffers.
-- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
+- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer, and `indirect_buffer` declares indirect arguments or a count. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
 - **Imported resources:** `import_texture` and `import_buffer` add resources that outlive the frame. An imported texture has a resting use, and the graph returns it to that layout at the end of the frame. The frame target rests as `Color`. A texture created with data rests as `Sampled`.
 - **Transient textures:** `create_texture` adds a texture that exists for one frame. The graph adds the usages that its uses need. A `Texture_Cache` in `Game_State` keeps the textures between frames, keyed by description and label, and destroys a texture after `CACHE_LIFETIME` frames without use.
 - **Barriers:** a use needs a barrier when it changes the layout, when it follows a write, or when it writes after any access. Reads in the same layout merge without a barrier, so a later write waits for all of them. A transient texture starts `Undefined`, and sampling it before a pass writes it is an error.
 - **Culling:** the graph walks the passes backward from the imported resources. A pass is live if it writes a resource that a later live pass reads, if it writes an imported resource, or if `keep_pass` marks it. A write that does not read (for example a clear) makes earlier writers of that resource unnecessary.
 - **Handles:** graph handles are valid for one graph. In a `Pass_Proc`, `gpu_texture` and `gpu_buffer` return the `gpu` handles, because transient textures exist only after recording starts.
-- **Execution:** `execute` computes all barriers in pass order first. Then each piece of each live pass records into its own command buffer on its own job, so `Pass_Proc`s run in parallel. `execute` submits the command buffers in pass order. A last command buffer returns imported textures to their resting layouts.
+- **Queues:** `add_compute_pass(..., queue = .Compute)` runs a compute pass on the compute queue. When a pass uses a resource that another queue used last in the frame, the pass waits for that queue, and the resource's state resets as at a frame boundary. Only a layout change still needs a barrier.
+- **Execution:** `execute` computes all barriers and queue waits in pass order first. Then each piece of each live pass records into its own command buffer on its own job, so `Pass_Proc`s run in parallel. Consecutive live passes on one queue form one `Submission`, and `execute` submits them in pass order. A last command buffer returns imported textures to their resting layouts.
 
 ## GPU-driven rendering
 
-The engine culls and builds draws on the GPU. The interface supports this from the first version.
+The engine culls and builds draws on the GPU.
 
-- **Indirect commands:** `draw_indirect`, `draw_indexed_indirect`, `draw_mesh_indirect` and `dispatch_indirect`. Each takes an argument buffer and an optional count buffer.
-- **Draw ID:** each indirect argument record starts with a `u32` draw ID, followed by the standard arguments. Shaders read it with the `CN_DRAW_ID` macro. The D3D12 backend delivers it as a root constant in the command signature. The Vulkan backend delivers it as the `DrawIndex` built-in.
-- **Async compute:** a submission targets the graphics, compute or copy queue. Cross-queue dependencies use timeline fences that the render graph declares.
+- **Indirect commands:** `cmd_draw_indirect`, `cmd_draw_indexed_indirect` and `cmd_dispatch_indirect`. A draw takes an argument buffer, an offset, a maximum draw count and an optional count buffer: the `u32` at the count offset caps the draws. `draw_mesh_indirect` comes with mesh shaders (phase 5).
+- **Records:** `Draw_Indirect_Args`, `Draw_Indexed_Indirect_Args` and `Dispatch_Indirect_Args` define the argument layouts. Argument and count buffers need the `Indirect` usage, and offsets are multiples of 4. Validation checks that the records are in range.
+- **Draw ID:** each draw record starts with a `u32` draw ID, followed by the standard arguments. Shaders read it with the `CN_DRAW_ID` macro. The D3D12 backend delivers it as a root constant through the command signature. A Vulkan backend delivers the `DrawIndex` built-in, which is the record's index from the command's offset. So portable code stores each record's index as its draw ID, and keeps per-draw data in a buffer indexed by it.
+- **Instance IDs:** `SV_InstanceID` does not include the first instance on D3D12, but does on Vulkan. Shaders that need the first instance read it from their own data.
+- **Barriers:** indirect reads use the `Execute_Indirect` sync and the `Indirect_Argument` access.
+
+## Queues
+
+- `Queue` is `Graphics` or `Compute`. `gpu_submit(buffers, queue, wait_for)` runs the command buffers on the queue, in order after the queue's earlier submissions in the frame. They start after the earlier submissions in the frame of each queue in `wait_for`.
+- A compute-queue command buffer has no render passes. Its barriers use only `COMPUTE_QUEUE_SYNCS` and `COMPUTE_QUEUE_ACCESSES`, and its textures only the `Shader_Resource` and `Unordered_Access` layouts. Validation checks this.
+- Work on both queues is frame-scoped: a frame's compute work starts after the previous frame's end, and the frame ends after its compute work. The upload ring and deferred destruction therefore cover both queues.
+- **D3D12:** a direct and a compute queue, each with a fence. `end_frame` runs the submissions in order. Each queue's lists wait in a batch until another queue waits for them or the frame ends, and then run in one `ExecuteCommandLists` call after the batch's fence waits. A wait applies before the whole batch, which can only delay earlier lists. Each wait records the fence value at the time it is declared, so batching cannot make a wait cycle.
+- **Vulkan and Metal:** queue submissions with timeline semaphores, and a Metal compute command queue with `MTLEvent`s.
+- A copy queue comes with asset streaming (phase 7).
 
 ## Mesh shaders
 
@@ -179,7 +193,7 @@ The engine culls and builds draws on the GPU. The interface supports this from t
 
 - `submit` translates each `Command_Buffer` into one native command list, each on its own job, and waits for them. The lists keep the submission order. Call `submit` from the frame code or from a job.
 - Native command lists and allocators are pooled per frame in flight, not per thread, because a fiber can resume on a different thread (see [Core](core.md#job-system)). A translation job takes a list from the pool. The pool grows when a frame needs more lists.
-- `end_frame` executes all of the frame's lists in one `ExecuteCommandLists` call: the frame target's transition in, the submitted lists in order, and the transition to present.
+- Command lists are pooled per queue type. `end_frame` executes the submissions as described in [Queues](#queues). The frame target's transitions in and out run in the first and last graphics batches.
 
 ## Shaders
 

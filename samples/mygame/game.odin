@@ -11,6 +11,10 @@ import "cinnabar:engine/render"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
 TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
+OBJECTS_VS :: #load("shaders/objects.vs.dxil")
+OBJECTS_PS :: #load("shaders/objects.ps.dxil")
+COUNT_RESET_CS :: #load("shaders/count_reset.cs.dxil")
+CULL_CS :: #load("shaders/cull.cs.dxil")
 POST_CS :: #load("shaders/post.cs.dxil")
 COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
@@ -19,17 +23,21 @@ SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
 // Matches numthreads in shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
+// Matches numthreads in shaders/cull.hlsl.
+CULL_GROUP_SIZE :: 64
 
-// The scene draws two large triangles and a grid of small ones, split across jobs in SCENE_PIECES pieces.
-GRID_COLUMNS :: 48
-GRID_ROWS :: 27
-SCENE_INSTANCES :: 2 + GRID_COLUMNS * GRID_ROWS
-SCENE_PIECES :: 4
+// The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw.
+OBJECT_COLUMNS :: 64
+OBJECT_ROWS :: 36
+OBJECT_COUNT :: OBJECT_COLUMNS * OBJECT_ROWS
+
+// The scene pass is split in two: one piece draws the large triangles, the other the culled objects.
+SCENE_PIECES :: 2
 
 CHECKER_SIZE :: 64
 CHECKER_CELL :: 8
 
-// Matches Vertex in shaders/triangle.hlsl.
+// Matches Vertex in shaders/triangle.hlsl and shaders/objects.hlsl.
 Vertex :: struct {
 	position: [2]f32,
 	uv:       [2]f32,
@@ -38,11 +46,32 @@ Vertex :: struct {
 
 // Matches Push in shaders/triangle.hlsl.
 Scene_Constants :: struct {
-	vertices:       u32,
-	texture:        u32,
-	sampler:        u32,
-	first_instance: u32,
-	grid:           [2]u32,
+	vertices: u32,
+	texture:  u32,
+	sampler:  u32,
+}
+
+// Matches Push in shaders/objects.hlsl.
+Object_Constants :: struct {
+	vertices: u32,
+	visible:  u32,
+	texture:  u32,
+	sampler:  u32,
+	grid:     [2]u32,
+}
+
+// Matches Push in shaders/count_reset.hlsl.
+Reset_Constants :: struct {
+	count: u32,
+}
+
+// Matches Push in shaders/cull.hlsl.
+Cull_Constants :: struct {
+	arguments:    u32,
+	count:        u32,
+	visible:      u32,
+	object_count: u32,
+	grid:         [2]u32,
 }
 
 // Matches Push in shaders/post.hlsl.
@@ -58,7 +87,7 @@ Composite_Constants :: struct {
 	sampler: u32,
 }
 
-// Matches Pass in shaders/triangle.hlsl.
+// Matches Pass in shaders/triangle.hlsl, shaders/objects.hlsl and shaders/cull.hlsl.
 Pass_Constants :: struct {
 	time:   f32,
 	aspect: f32,
@@ -73,6 +102,10 @@ Game_State :: struct {
 	pipelines:   Pipelines,
 	vertices:    gpu.Buffer,
 	indices:     gpu.Buffer,
+	// The cull pass writes these on the compute queue each frame, and the scene pass reads them.
+	arguments:   gpu.Buffer,
+	draw_count:  gpu.Buffer,
+	visible:     gpu.Buffer,
 	checker:     gpu.Texture,
 	nearest:     gpu.Sampler,
 	linear:      gpu.Sampler,
@@ -80,9 +113,12 @@ Game_State :: struct {
 }
 
 Pipelines :: struct {
-	scene:     gpu.Pipeline,
-	post:      gpu.Pipeline,
-	composite: gpu.Pipeline,
+	scene:       gpu.Pipeline,
+	objects:     gpu.Pipeline,
+	count_reset: gpu.Pipeline,
+	cull:        gpu.Pipeline,
+	post:        gpu.Pipeline,
+	composite:   gpu.Pipeline,
 }
 
 // Frame is what the pass procedures need. It lives in frame memory.
@@ -92,6 +128,9 @@ Frame :: struct {
 	pass_constants: gpu.Upload,
 	vertices:       render.Buffer,
 	indices:        render.Buffer,
+	arguments:      render.Buffer,
+	draw_count:     render.Buffer,
+	visible:        render.Buffer,
 	checker:        render.Texture,
 	scene:          render.Texture,
 	post:           render.Texture,
@@ -112,6 +151,12 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	indices := [4]u16{0, 1, 2, 0}
 	s.vertices = platform.gpu_create_buffer({size = size_of(vertices), label = "triangle vertices"}, gpu_bytes(&vertices))
 	s.indices = platform.gpu_create_buffer({size = size_of(indices), usage = {.Index}, label = "triangle indices"}, gpu_bytes(&indices))
+	s.arguments = platform.gpu_create_buffer(
+		{size = OBJECT_COUNT * size_of(gpu.Draw_Indexed_Indirect_Args), usage = {.Storage, .Indirect}, label = "object draws"},
+		nil,
+	)
+	s.draw_count = platform.gpu_create_buffer({size = size_of(u32), usage = {.Storage, .Indirect}, label = "object draw count"}, nil)
+	s.visible = platform.gpu_create_buffer({size = OBJECT_COUNT * size_of(u32), usage = {.Storage}, label = "visible objects"}, nil)
 
 	checker: [CHECKER_SIZE * CHECKER_SIZE][4]u8
 	for &texel, i in checker {
@@ -156,8 +201,9 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	return true
 }
 
-// render_frame draws the scene into an HDR target with depth, post-processes it in a compute pass,
-// and tone maps it into the frame target. The render graph places the barriers between the passes.
+// render_frame culls the objects on the compute queue, draws the scene into an HDR target with depth,
+// post-processes it in a compute pass, and tone maps it into the frame target. The render graph places the
+// barriers between the passes and the waits between the queues.
 render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	frame := new(Frame, s.platform.frame_allocator)
 	frame^ = {
@@ -171,16 +217,30 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	frame.checker = render.import_texture(&g, s.checker, .Sampled)
 	frame.vertices = render.import_buffer(&g, s.vertices)
 	frame.indices = render.import_buffer(&g, s.indices)
+	frame.arguments = render.import_buffer(&g, s.arguments)
+	frame.draw_count = render.import_buffer(&g, s.draw_count)
+	frame.visible = render.import_buffer(&g, s.visible)
 	frame.scene = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
 	depth := render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
 
-	p := render.add_render_pass(&g, "scene", draw_scene, frame, pieces = SCENE_PIECES)
+	p := render.add_compute_pass(&g, "reset draw count", reset_count, frame, queue = .Compute)
+	render.write(&g, p, frame.draw_count)
+
+	p = render.add_compute_pass(&g, "cull", cull_objects, frame, queue = .Compute)
+	render.write(&g, p, frame.draw_count)
+	render.write(&g, p, frame.arguments)
+	render.write(&g, p, frame.visible)
+
+	p = render.add_render_pass(&g, "scene", draw_scene, frame, pieces = SCENE_PIECES)
 	render.color(&g, p, frame.scene, .Clear, {0.02, 0.02, 0.035, 1})
 	render.depth(&g, p, depth, .Clear, store = .Discard)
 	render.read(&g, p, frame.checker)
 	render.read(&g, p, frame.vertices)
 	render.index_buffer(&g, p, frame.indices)
+	render.indirect_buffer(&g, p, frame.arguments)
+	render.indirect_buffer(&g, p, frame.draw_count)
+	render.read(&g, p, frame.visible)
 
 	p = render.add_compute_pass(&g, "post", run_post, frame)
 	render.read(&g, p, frame.scene)
@@ -193,24 +253,61 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	render.execute(&g)
 }
 
-// draw_scene draws one piece's share of the instances. Each piece starts with nothing bound.
+reset_count :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	constants := Reset_Constants {
+		count = gpu.write_index(render.gpu_buffer(ctx.graph, frame.draw_count)),
+	}
+	gpu.cmd_set_pipeline(ctx.cb, frame.state.pipelines.count_reset)
+	gpu.cmd_push_constants(ctx.cb, &constants)
+	gpu.cmd_dispatch(ctx.cb, {1, 1, 1})
+}
+
+cull_objects :: proc(ctx: ^render.Pass_Context) {
+	frame := (^Frame)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
+	constants := Cull_Constants {
+		arguments    = gpu.write_index(render.gpu_buffer(g, frame.arguments)),
+		count        = gpu.write_index(render.gpu_buffer(g, frame.draw_count)),
+		visible      = gpu.write_index(render.gpu_buffer(g, frame.visible)),
+		object_count = OBJECT_COUNT,
+		grid         = {OBJECT_COLUMNS, OBJECT_ROWS},
+	}
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.cull)
+	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
+	gpu.cmd_push_constants(cb, &constants)
+	gpu.cmd_dispatch(cb, {(OBJECT_COUNT + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, 1, 1})
+}
+
+// draw_scene draws the large triangles in piece 0, and the objects that survived culling in piece 1.
+// Each piece starts with nothing bound.
 draw_scene :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
 	g, cb := ctx.graph, ctx.cb
-	first := u32(SCENE_INSTANCES * ctx.piece / ctx.piece_count)
-	end := u32(SCENE_INSTANCES * (ctx.piece + 1) / ctx.piece_count)
-	constants := Scene_Constants {
-		vertices       = gpu.read_index(render.gpu_buffer(g, frame.vertices)),
-		texture        = gpu.read_index(render.gpu_texture(g, frame.checker)),
-		sampler        = gpu.sampler_index(frame.state.nearest),
-		first_instance = first,
-		grid           = {GRID_COLUMNS, GRID_ROWS},
+	vertices := gpu.read_index(render.gpu_buffer(g, frame.vertices))
+	checker := gpu.read_index(render.gpu_texture(g, frame.checker))
+	switch ctx.piece {
+	case 0:
+		constants := Scene_Constants{vertices, checker, gpu.sampler_index(frame.state.nearest)}
+		gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene)
+		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
+		gpu.cmd_push_constants(cb, &constants)
+		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
+		gpu.cmd_draw_indexed(cb, 3, instance_count = 2)
+	case 1:
+		constants := Object_Constants {
+			vertices = vertices,
+			visible  = gpu.read_index(render.gpu_buffer(g, frame.visible)),
+			texture  = checker,
+			sampler  = gpu.sampler_index(frame.state.nearest),
+			grid     = {OBJECT_COLUMNS, OBJECT_ROWS},
+		}
+		gpu.cmd_set_pipeline(cb, frame.state.pipelines.objects)
+		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
+		gpu.cmd_push_constants(cb, &constants)
+		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
+		gpu.cmd_draw_indexed_indirect(cb, render.gpu_buffer(g, frame.arguments), 0, OBJECT_COUNT, render.gpu_buffer(g, frame.draw_count))
 	}
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene)
-	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
-	gpu.cmd_push_constants(cb, &constants)
-	gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
-	gpu.cmd_draw_indexed(cb, 3, instance_count = end - first)
 }
 
 run_post :: proc(ctx: ^render.Pass_Context) {
@@ -246,6 +343,9 @@ shutdown :: proc(state: rawptr) {
 	s.platform.gpu_destroy_sampler(s.linear)
 	s.platform.gpu_destroy_sampler(s.nearest)
 	s.platform.gpu_destroy_texture(s.checker)
+	s.platform.gpu_destroy_buffer(s.visible)
+	s.platform.gpu_destroy_buffer(s.draw_count)
+	s.platform.gpu_destroy_buffer(s.arguments)
 	s.platform.gpu_destroy_buffer(s.indices)
 	s.platform.gpu_destroy_buffer(s.vertices)
 	log.info("mygame: shutdown")
@@ -257,11 +357,11 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
+	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.composite, COMPOSITE_PIPELINE)
-	if !platform.gpu_update_compute_pipeline(s.pipelines.post, POST_PIPELINE) {
-		platform.gpu_destroy_pipeline(s.pipelines.post)
-		s.pipelines.post = platform.gpu_create_compute_pipeline(POST_PIPELINE)
-	}
+	reload_compute_pipeline(platform, &s.pipelines.count_reset, COUNT_RESET_PIPELINE)
+	reload_compute_pipeline(platform, &s.pipelines.cull, CULL_PIPELINE)
+	reload_compute_pipeline(platform, &s.pipelines.post, POST_PIPELINE)
 	log.infof("mygame: reloaded at frame %d", s.frame_count)
 }
 
@@ -272,9 +372,19 @@ reload_graphics_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pi
 	}
 }
 
+reload_compute_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) {
+	if !platform.gpu_update_compute_pipeline(pipeline^, desc) {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = platform.gpu_create_compute_pipeline(desc)
+	}
+}
+
 create_pipelines :: proc(platform: ^core.Platform_API) -> Pipelines {
 	return {
 		scene = platform.gpu_create_graphics_pipeline(SCENE_PIPELINE),
+		objects = platform.gpu_create_graphics_pipeline(OBJECTS_PIPELINE),
+		count_reset = platform.gpu_create_compute_pipeline(COUNT_RESET_PIPELINE),
+		cull = platform.gpu_create_compute_pipeline(CULL_PIPELINE),
 		post = platform.gpu_create_compute_pipeline(POST_PIPELINE),
 		composite = platform.gpu_create_graphics_pipeline(COMPOSITE_PIPELINE),
 	}
@@ -288,6 +398,26 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	depth_compare = .Less,
 	depth_write   = true,
 	label         = "scene",
+}
+
+OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
+	vertex        = OBJECTS_VS,
+	pixel         = OBJECTS_PS,
+	colors        = {{format = SCENE_FORMAT}},
+	depth_format  = DEPTH_FORMAT,
+	depth_compare = .Less,
+	depth_write   = true,
+	label         = "objects",
+}
+
+COUNT_RESET_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	compute = COUNT_RESET_CS,
+	label   = "count reset",
+}
+
+CULL_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	compute = CULL_CS,
+	label   = "cull",
 }
 
 POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
@@ -304,6 +434,9 @@ COMPOSITE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 
 destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: Pipelines) {
 	platform.gpu_destroy_pipeline(pipelines.scene)
+	platform.gpu_destroy_pipeline(pipelines.objects)
+	platform.gpu_destroy_pipeline(pipelines.count_reset)
+	platform.gpu_destroy_pipeline(pipelines.cull)
 	platform.gpu_destroy_pipeline(pipelines.post)
 	platform.gpu_destroy_pipeline(pipelines.composite)
 }

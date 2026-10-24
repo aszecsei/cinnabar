@@ -77,8 +77,9 @@ begin_frame :: proc(size: [2]i32) {
 }
 
 // submit returns false if any command buffer breaks a rule. It then drops all of them.
-submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
-	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts); err != .None {
+// Nothing runs, so the queues and waits only affect validation.
+submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
+	if err, buffer, packet := gpu.validate_submission(buffers, RESOURCES, &state.layouts, queue); err != .None {
 		log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
 		return false
 	}

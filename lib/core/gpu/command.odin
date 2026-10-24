@@ -34,6 +34,9 @@ Packet_Kind :: enum u16 {
 	Draw_Indexed,
 	Dispatch,
 	Barriers,
+	Draw_Indirect,
+	Draw_Indexed_Indirect,
+	Dispatch_Indirect,
 }
 
 // size includes the header and the padding after the payload.
@@ -155,6 +158,23 @@ Dispatch :: struct {
 	groups: [3]u32,
 }
 
+// Draw_Indirect runs up to max_count draws whose records start at offset in arguments. With a count buffer, the
+// u32 at count_offset in it caps the number of draws. Both buffers need the Indirect usage. The draw kinds share
+// this payload. Their records are Draw_Indirect_Args or Draw_Indexed_Indirect_Args.
+Draw_Indirect :: struct {
+	arguments:    Buffer,
+	offset:       u32,
+	max_count:    u32,
+	count:        Buffer,
+	count_offset: u32,
+}
+
+// The record at offset is a Dispatch_Indirect_Args.
+Dispatch_Indirect :: struct {
+	arguments: Buffer,
+	offset:    u32,
+}
+
 Buffer_Barrier :: struct {
 	buffer:        Buffer,
 	sync_before:   Syncs,
@@ -201,6 +221,11 @@ Packet_Format :: struct {
 	barriers:           Barriers,
 	buffer_barrier:     Buffer_Barrier,
 	texture_barrier:    Texture_Barrier,
+	draw_indirect:      Draw_Indirect,
+	dispatch_indirect:  Dispatch_Indirect,
+	draw_args:          Draw_Indirect_Args,
+	draw_indexed_args:  Draw_Indexed_Indirect_Args,
+	dispatch_args:      Dispatch_Indirect_Args,
 }
 
 #assert(size_of(Packet_Header) + size_of(Begin_Pass) <= MAX_PACKET_SIZE)
@@ -307,6 +332,26 @@ cmd_draw_indexed :: proc(
 
 cmd_dispatch :: proc(cb: ^Command_Buffer, groups: [3]u32) {
 	push(cb, .Dispatch, Dispatch{groups})
+}
+
+// cmd_draw_indirect runs Draw_Indirect_Args records from the arguments buffer. A nil count buffer runs max_count draws.
+cmd_draw_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset, max_count: u32, count: Buffer = {}, count_offset: u32 = 0) {
+	push(cb, .Draw_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
+}
+
+// cmd_draw_indexed_indirect runs Draw_Indexed_Indirect_Args records with the bound index buffer.
+cmd_draw_indexed_indirect :: proc(
+	cb: ^Command_Buffer,
+	arguments: Buffer,
+	offset, max_count: u32,
+	count: Buffer = {},
+	count_offset: u32 = 0,
+) {
+	push(cb, .Draw_Indexed_Indirect, Draw_Indirect{arguments, offset, max_count, count, count_offset})
+}
+
+cmd_dispatch_indirect :: proc(cb: ^Command_Buffer, arguments: Buffer, offset: u32 = 0) {
+	push(cb, .Dispatch_Indirect, Dispatch_Indirect{arguments, offset})
 }
 
 // cmd_barriers records barriers that the backend issues together. The render graph records all barriers.

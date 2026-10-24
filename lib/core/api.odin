@@ -33,8 +33,10 @@ Platform_API :: struct {
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target: proc() -> gpu.Texture,
-	// gpu_submit returns false if the backend rejected the command buffers.
-	gpu_submit:       proc(buffers: []gpu.Command_Buffer) -> bool,
+	// gpu_submit runs the command buffers on a queue, in order after the queue's earlier submissions in the frame.
+	// They start after the earlier submissions of the wait_for queues finish. It returns false if the backend
+	// rejected the command buffers. See docs/gpu.md#queues.
+	gpu_submit:       proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool,
 	// gpu_upload allocates memory in the frame's upload ring. It returns false when the ring is full.
 	gpu_upload:       proc(size, align: int) -> (gpu.Upload, bool),
 

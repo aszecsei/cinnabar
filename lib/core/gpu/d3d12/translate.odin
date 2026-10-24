@@ -92,6 +92,21 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			list->Dispatch(d.groups.x, d.groups.y, d.groups.z)
 		case .Barriers:
 			barriers(list, p)
+		case .Draw_Indirect, .Draw_Indexed_Indirect:
+			if !pipeline_ready {
+				continue
+			}
+			d := gpu.payload(p, gpu.Draw_Indirect)
+			signature := p.kind == .Draw_Indirect ? dev.draw_signature : dev.indexed_signature
+			execute_indirect(list, signature, d.arguments, d.offset, d.max_count, d.count, d.count_offset)
+			// The draws set the draw ID, and ExecuteIndirect leaves it undefined afterward.
+			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
+		case .Dispatch_Indirect:
+			if !pipeline_ready {
+				continue
+			}
+			d := gpu.payload(p, gpu.Dispatch_Indirect)
+			execute_indirect(list, dev.dispatch_signature, d.arguments, d.offset, 1, {}, 0)
 		}
 	}
 }
@@ -147,6 +162,7 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 	}
 	list->RSSetViewports(1, &viewport)
 	list->RSSetScissorRects(1, &scissor)
+	list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 }
 
 @(private = "file")
@@ -167,6 +183,22 @@ beginning_access :: proc(load: gpu.Load_Op, format: gpu.Format, clear: d3d.CLEAR
 @(private = "file")
 ending_access :: proc(store: gpu.Store_Op) -> d3d.RENDER_PASS_ENDING_ACCESS_TYPE {
 	return store == .Store ? .PRESERVE : .DISCARD
+}
+
+@(private = "file")
+execute_indirect :: proc(
+	list: ^d3d.IGraphicsCommandList7,
+	signature: ^d3d.ICommandSignature,
+	arguments: gpu.Buffer,
+	offset, max_count: u32,
+	count: gpu.Buffer,
+	count_offset: u32,
+) {
+	count_resource: ^d3d.IResource
+	if count != {} {
+		count_resource = buffer_entry(count).resource
+	}
+	list->ExecuteIndirect(signature, max_count, buffer_entry(arguments).resource, u64(offset), count_resource, u64(count_offset))
 }
 
 @(private = "file")
@@ -248,6 +280,7 @@ SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
 	.Depth_Stencil   = .DEPTH_STENCIL,
 	.Render_Target   = .RENDER_TARGET,
 	.Compute_Shading = .COMPUTE_SHADING,
+	.Execute_Indirect = .EXECUTE_INDIRECT,
 }
 
 @(private = "file")
@@ -257,6 +290,7 @@ ACCESS := [gpu.Access]d3d.BARRIER_ACCESS_FLAG {
 	.Depth_Stencil_Write = .DEPTH_STENCIL_WRITE,
 	.Shader_Resource     = .SHADER_RESOURCE,
 	.Unordered_Access    = .UNORDERED_ACCESS,
+	.Indirect_Argument   = .INDIRECT_ARGUMENT,
 }
 
 @(private)

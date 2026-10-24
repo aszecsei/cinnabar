@@ -8,6 +8,14 @@
 // Pass constants: the root CBV, set with gpu.cmd_set_pass_constants.
 #define CN_PASS_CONSTANTS(Type, name) ConstantBuffer<Type> name : register(b1, space0)
 
+// The draw ID of an indirect draw: the draw_id of its argument record. Portable argument records store the record's
+// index, which a Vulkan backend delivers as DrawIndex. Every other draw sees 0.
+struct CnDraw {
+	uint id;
+};
+ConstantBuffer<CnDraw> cn_draw : register(b2, space0);
+#define CN_DRAW_ID (cn_draw.id)
+
 // Bindless access. Indices come from gpu.read_index, gpu.write_index and gpu.sampler_index.
 // Wrap an index in NonUniformResourceIndex when it can differ within a wave.
 ByteAddressBuffer cn_buffer(uint index) { return ResourceDescriptorHeap[index]; }

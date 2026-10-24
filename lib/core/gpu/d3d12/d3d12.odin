@@ -45,12 +45,26 @@ Command_List :: struct {
 
 @(private)
 Frame :: struct {
+	// The graphics fence value of the frame's end. The graphics queue waits for the compute queue before it, so
+	// the frame's work on both queues is done when it passes.
 	fence_value: u64,
 	upload:      Upload_Ring,
-	lists:       [dynamic]Command_List,
-	lists_used:  int,
-	// The frame's closed command lists, in execution order.
-	submitted:   [dynamic]^d3d.ICommandList,
+	lists:       [gpu.Queue][dynamic]Command_List,
+	lists_used:  [gpu.Queue]int,
+	// The frame's submissions in order, and their closed command lists.
+	ops:         [dynamic]Op,
+	op_lists:    [dynamic]^d3d.ICommandList,
+	// end_frame batches each queue's lists here until it must execute them.
+	pending:     [gpu.Queue][dynamic]^d3d.ICommandList,
+}
+
+// Op is one submission: op_lists[first:][:count] on a queue, after the earlier submissions of the wait_for queues.
+@(private)
+Op :: struct {
+	queue:    gpu.Queue,
+	wait_for: gpu.Queues,
+	first:    int,
+	count:    int,
 }
 
 @(private)
@@ -64,13 +78,17 @@ dev: struct {
 	info_queue:        ^d3d.IInfoQueue1,
 	callback_cookie:   u32,
 	features:          gpu.Features,
+	// The graphics queue and its fence. Frame ends, uploads and deferred releases use this fence.
 	queue:             ^d3d.ICommandQueue,
 	fence:             ^d3d.IFence,
 	fence_event:       win.HANDLE,
 	fence_value:       u64,
+	compute_queue:     ^d3d.ICommandQueue,
+	compute_fence:     ^d3d.IFence,
+	compute_value:     u64,
 	frames:            [FRAMES_IN_FLIGHT]Frame,
 	frame_index:       u64,
-	// Guards the current frame's lists and submitted.
+	// Guards the current frame's lists, ops and op_lists.
 	lists_mutex:       sync.Mutex,
 	swapchain:         ^dxgi.ISwapChain3,
 	latency_waitable:  win.HANDLE,
@@ -114,10 +132,23 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	}
 	check(dev.device->CreateCommandQueue(&queue_desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.queue)), "CreateCommandQueue") or_return
 	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.fence)), "CreateFence") or_return
+	compute_desc := d3d.COMMAND_QUEUE_DESC {
+		Type = .COMPUTE,
+	}
+	check(dev.device->CreateCommandQueue(&compute_desc, d3d.ICommandQueue_UUID, (^rawptr)(&dev.compute_queue)), "CreateCommandQueue(compute)") or_return
+	check(dev.device->CreateFence(0, {}, d3d.IFence_UUID, (^rawptr)(&dev.compute_fence)), "CreateFence(compute)") or_return
+	dev.queue->SetName(win.L("graphics"))
+	dev.compute_queue->SetName(win.L("compute"))
 	dev.fence_event = win.CreateEventW(nil, false, false, nil)
 	for &frame in dev.frames {
-		frame.lists = make([dynamic]Command_List, dev.allocator)
-		frame.submitted = make([dynamic]^d3d.ICommandList, dev.allocator)
+		for &lists in frame.lists {
+			lists = make([dynamic]Command_List, dev.allocator)
+		}
+		frame.ops = make([dynamic]Op, dev.allocator)
+		frame.op_lists = make([dynamic]^d3d.ICommandList, dev.allocator)
+		for &pending in frame.pending {
+			pending = make([dynamic]^d3d.ICommandList, dev.allocator)
+		}
 	}
 
 	init_resources() or_return
@@ -143,16 +174,24 @@ shutdown :: proc() {
 	shutdown_pipelines()
 	shutdown_resources()
 	for &frame in dev.frames {
-		for &l in frame.lists {
-			release(&l.list)
-			release(&l.allocator)
+		for lists in frame.lists {
+			for &l in lists {
+				release(&l.list)
+				release(&l.allocator)
+			}
+			delete(lists)
 		}
-		delete(frame.lists)
-		delete(frame.submitted)
+		delete(frame.ops)
+		delete(frame.op_lists)
+		for pending in frame.pending {
+			delete(pending)
+		}
 	}
 	if dev.fence_event != nil {
 		win.CloseHandle(dev.fence_event)
 	}
+	release(&dev.compute_fence)
+	release(&dev.compute_queue)
 	release(&dev.fence)
 	release(&dev.queue)
 	if dev.info_queue != nil {
@@ -200,27 +239,31 @@ begin_frame :: proc(size: [2]i32) {
 	}
 
 	win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
-	frame.lists_used = 0
-	clear(&frame.submitted)
+	frame.lists_used = {}
+	clear(&frame.ops)
+	clear(&frame.op_lists)
 
 	dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	target.resource = dev.back_buffers[dev.back_buffer_index]
 	target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
-	list := acquire_list(frame)
+	list := acquire_list(frame, .Graphics)
 	texture_barrier(list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
-	submit_list(frame, list)
+	check(list->Close(), "ICommandList.Close")
+	append(&frame.ops, Op{queue = .Graphics, first = len(frame.op_lists), count = 1})
+	append(&frame.op_lists, (^d3d.ICommandList)(list))
 	when ODIN_DEBUG {
 		gpu.track_layout(&dev.layouts, dev.frame_target, .Render_Target)
 	}
 }
 
-// submit translates each command buffer into its own command list on a job, and adds the lists to the frame
-// in order. Debug builds validate the buffers first, and drop all of them if any breaks a rule.
-// Call it from the game's frame code or from a job: it waits for the translation jobs.
-submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
+// submit translates each command buffer into its own command list on a job, and adds them to the frame as one
+// submission on the queue. end_frame executes the submissions in order. Debug builds validate the buffers first,
+// and drop all of them if any breaks a rule. Call it from the game's frame code or from a job: it waits for the
+// translation jobs.
+submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
 	when ODIN_DEBUG {
-		if err, buffer, packet := gpu.validate_submission(buffers, VALIDATION_RESOURCES, &dev.layouts); err != .None {
+		if err, buffer, packet := gpu.validate_submission(buffers, VALIDATION_RESOURCES, &dev.layouts, queue); err != .None {
 			log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
 			return false
 		}
@@ -235,13 +278,14 @@ submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 	translate_jobs := make([]jobs.Job, len(buffers), dev.allocator)
 	defer delete(translate_jobs, dev.allocator)
 	for cb, i in buffers {
-		tasks[i] = {frame = frame, cb = cb}
+		tasks[i] = {frame = frame, queue = queue, cb = cb}
 		translate_jobs[i] = {translate_job, &tasks[i]}
 	}
-	// Reserving the slots first keeps the submission order when several jobs submit at once.
+	// Reserving the submission first keeps the order when several jobs submit at once.
 	sync.lock(&dev.lists_mutex)
-	first := len(frame.submitted)
-	resize(&frame.submitted, first + len(buffers))
+	first := len(frame.op_lists)
+	resize(&frame.op_lists, first + len(buffers))
+	append(&frame.ops, Op{queue, wait_for - {queue}, first, len(buffers)})
 	sync.unlock(&dev.lists_mutex)
 
 	counter: jobs.Counter
@@ -250,7 +294,7 @@ submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 
 	sync.guard(&dev.lists_mutex)
 	for task, i in tasks {
-		frame.submitted[first + i] = (^d3d.ICommandList)(task.list)
+		frame.op_lists[first + i] = (^d3d.ICommandList)(task.list)
 	}
 	return true
 }
@@ -258,6 +302,7 @@ submit :: proc(buffers: []gpu.Command_Buffer) -> bool {
 @(private = "file")
 Translate_Task :: struct {
 	frame: ^Frame,
+	queue: gpu.Queue,
 	cb:    gpu.Command_Buffer,
 	list:  ^d3d.IGraphicsCommandList7,
 }
@@ -265,7 +310,7 @@ Translate_Task :: struct {
 @(private = "file")
 translate_job :: proc(data: rawptr) {
 	task := (^Translate_Task)(data)
-	task.list = acquire_list(task.frame)
+	task.list = acquire_list(task.frame, task.queue)
 	translate(task.list, task.cb)
 	check(task.list->Close(), "ICommandList.Close")
 }
@@ -273,39 +318,39 @@ translate_job :: proc(data: rawptr) {
 // acquire_list takes an open command list from the frame's pool, with the descriptor heaps and root signature
 // bound. The frame's fence has passed, so its lists are free to reset.
 @(private = "file")
-acquire_list :: proc(frame: ^Frame) -> ^d3d.IGraphicsCommandList7 {
+acquire_list :: proc(frame: ^Frame, queue: gpu.Queue) -> ^d3d.IGraphicsCommandList7 {
 	sync.lock(&dev.lists_mutex)
-	if frame.lists_used == len(frame.lists) {
+	lists := &frame.lists[queue]
+	if frame.lists_used[queue] == len(lists) {
+		type := LIST_TYPE[queue]
 		entry: Command_List
-		if !check(dev.device->CreateCommandAllocator(.DIRECT, d3d.ICommandAllocator_UUID, (^rawptr)(&entry.allocator)), "CreateCommandAllocator") {
+		if !check(dev.device->CreateCommandAllocator(type, d3d.ICommandAllocator_UUID, (^rawptr)(&entry.allocator)), "CreateCommandAllocator") {
 			log.panic("d3d12: cannot create a command allocator")
 		}
-		list, ok := create_command_list(entry.allocator)
+		list, ok := create_command_list(entry.allocator, type)
 		if !ok {
 			log.panic("d3d12: cannot create a command list")
 		}
 		entry.list = list
-		append(&frame.lists, entry)
+		append(lists, entry)
 	}
-	entry := frame.lists[frame.lists_used]
-	frame.lists_used += 1
+	entry := lists[frame.lists_used[queue]]
+	frame.lists_used[queue] += 1
 	sync.unlock(&dev.lists_mutex)
 
 	check(entry.allocator->Reset(), "ICommandAllocator.Reset")
 	check(entry.list->Reset(entry.allocator, nil), "ICommandList.Reset")
-	bind_root_signature(entry.list)
+	bind_root_signature(entry.list, queue)
 	return entry.list
 }
 
-// submit_list closes a list and adds it to the end of the frame.
 @(private = "file")
-submit_list :: proc(frame: ^Frame, list: ^d3d.IGraphicsCommandList7) {
-	check(list->Close(), "ICommandList.Close")
-	sync.guard(&dev.lists_mutex)
-	append(&frame.submitted, (^d3d.ICommandList)(list))
+LIST_TYPE := [gpu.Queue]d3d.COMMAND_LIST_TYPE {
+	.Graphics = .DIRECT,
+	.Compute  = .COMPUTE,
 }
 
-// end_frame executes the frame's uploads and command list, then presents with vsync.
+// end_frame executes the frame's uploads and submissions, then presents with vsync.
 end_frame :: proc() {
 	flush_uploads()
 	if !dev.recording {
@@ -320,11 +365,27 @@ end_frame :: proc() {
 	}
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
-	list := acquire_list(frame)
+	list := acquire_list(frame, .Graphics)
 	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
-	submit_list(frame, list)
-	// One call for the whole frame: the next frame's work starts after this frame's work (docs/gpu.md#barriers).
-	dev.queue->ExecuteCommandLists(u32(len(frame.submitted)), raw_data(frame.submitted))
+	check(list->Close(), "ICommandList.Close")
+
+	// The compute queue starts after the previous frame's end and this frame's uploads, and the graphics queue
+	// ends the frame after the compute queue's work. So a frame's work on either queue starts after the previous
+	// frame's work on both queues (docs/gpu.md#barriers).
+	e := Executor {
+		frame = frame,
+	}
+	e.waits[.Compute][.Graphics] = dev.fence_value
+	e.waited[.Graphics][.Compute] = dev.compute_value
+	for op in frame.ops {
+		for other in op.wait_for {
+			wait_for(&e, op.queue, other)
+		}
+		append(&frame.pending[op.queue], ..frame.op_lists[op.first:][:op.count])
+	}
+	wait_for(&e, .Graphics, .Compute)
+	append(&frame.pending[.Graphics], (^d3d.ICommandList)(list))
+	flush(&e, .Graphics)
 
 	hr := dev.swapchain->Present(1, {})
 	if hr == dxgi.ERROR_DEVICE_REMOVED || hr == dxgi.ERROR_DEVICE_RESET {
@@ -338,9 +399,59 @@ end_frame :: proc() {
 	dev.frame_index += 1
 }
 
+// Executor runs a frame's submissions. A queue's lists wait in the frame's pending batch until another queue needs
+// them or the frame ends, so lists of consecutive submissions run in one ExecuteCommandLists call. In particular
+// the frame target's transitions, which are lists with only a barrier, run with the frame's other graphics lists.
+@(private = "file")
+Executor :: struct {
+	frame:  ^Frame,
+	// For each queue, the fence value of each other queue that its pending lists must wait for. 0 is no wait.
+	waits:  [gpu.Queue][gpu.Queue]u64,
+	// The highest fence value of each other queue that each queue has waited for.
+	waited: [gpu.Queue][gpu.Queue]u64,
+}
+
+// wait_for makes the queue's pending lists wait for the other queue's work so far. Waiting before lists that came
+// earlier only delays them, so it is always safe. The value is taken now, so a wait never covers later work.
+@(private = "file")
+wait_for :: proc(e: ^Executor, queue, other: gpu.Queue) {
+	flush(e, other)
+	_, value := fence_of(other)
+	if value > e.waited[queue][other] {
+		e.waits[queue][other] = max(e.waits[queue][other], value)
+	}
+}
+
+// flush executes a queue's pending lists after their waits, and signals the queue's fence.
+@(private = "file")
+flush :: proc(e: ^Executor, queue: gpu.Queue) {
+	pending := &e.frame.pending[queue]
+	if len(pending) == 0 {
+		return
+	}
+	q := queue_of(queue)
+	for other in gpu.Queue {
+		if value := e.waits[queue][other]; value > 0 {
+			fence, _ := fence_of(other)
+			check(q->Wait(fence, value), "ICommandQueue.Wait")
+			e.waited[queue][other] = max(e.waited[queue][other], value)
+		}
+	}
+	e.waits[queue] = {}
+	q->ExecuteCommandLists(u32(len(pending)), raw_data(pending^))
+	signal_queue(queue)
+	clear(pending)
+}
+
 @(private)
-create_command_list :: proc(allocator: ^d3d.ICommandAllocator) -> (list: ^d3d.IGraphicsCommandList7, ok: bool) {
-	check(dev.device->CreateCommandList(0, .DIRECT, allocator, nil, d3d.IGraphicsCommandList7_UUID, (^rawptr)(&list)), "CreateCommandList") or_return
+create_command_list :: proc(
+	allocator: ^d3d.ICommandAllocator,
+	type := d3d.COMMAND_LIST_TYPE.DIRECT,
+) -> (
+	list: ^d3d.IGraphicsCommandList7,
+	ok: bool,
+) {
+	check(dev.device->CreateCommandList(0, type, allocator, nil, d3d.IGraphicsCommandList7_UUID, (^rawptr)(&list)), "CreateCommandList") or_return
 	check(list->Close(), "Close") or_return
 	return list, true
 }
@@ -530,8 +641,36 @@ wait_fence :: proc(value: u64) {
 	}
 }
 
+// signal_queue advances a queue's fence after the work submitted to it so far.
+@(private = "file")
+signal_queue :: proc(queue: gpu.Queue) {
+	switch queue {
+	case .Graphics:
+		signal()
+	case .Compute:
+		dev.compute_value += 1
+		check(dev.compute_queue->Signal(dev.compute_fence, dev.compute_value), "ICommandQueue.Signal")
+	}
+}
+
+@(private = "file")
+queue_of :: proc(queue: gpu.Queue) -> ^d3d.ICommandQueue {
+	return queue == .Graphics ? dev.queue : dev.compute_queue
+}
+
+// fence_of returns a queue's fence and the value of its last signal.
+@(private = "file")
+fence_of :: proc(queue: gpu.Queue) -> (^d3d.IFence, u64) {
+	return queue == .Graphics ? dev.fence : dev.compute_fence, queue == .Graphics ? dev.fence_value : dev.compute_value
+}
+
+// wait_idle waits for both queues. The graphics queue waits for the compute queue, so its fence covers both.
 @(private)
 wait_idle :: proc() {
+	if dev.compute_queue != nil {
+		signal_queue(.Compute)
+		check(dev.queue->Wait(dev.compute_fence, dev.compute_value), "ICommandQueue.Wait")
+	}
 	signal()
 	wait_fence(dev.fence_value)
 }

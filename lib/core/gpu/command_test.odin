@@ -18,6 +18,8 @@ INDICES :: Buffer{index = 0, generation = 1}
 @(private = "file")
 PLAIN :: Buffer{index = 1, generation = 1}
 @(private = "file")
+INDIRECT :: Buffer{index = 2, generation = 1}
+@(private = "file")
 COLOR_PIPELINE :: Pipeline{index = 0, generation = 1}
 @(private = "file")
 DEPTH_PIPELINE :: Pipeline{index = 1, generation = 1}
@@ -47,6 +49,8 @@ RESOURCES :: Resources {
 			return {size = 64, usage = {.Index}}, true
 		case PLAIN:
 			return {size = 64}, true
+		case INDIRECT:
+			return {size = 96, usage = {.Storage, .Indirect}}, true
 		}
 		return {}, false
 	},
@@ -495,5 +499,107 @@ validate_split_passes :: proc(t: ^testing.T) {
 	for c, i in chains {
 		err, buffer, _ := validate_submission(c.buffers, RESOURCES)
 		testing.expectf(t, err == c.err && buffer == c.buffer, "chain %d: got %v in %d, want %v in %d", i, err, buffer, c.err, c.buffer)
+	}
+}
+
+@(test)
+validate_indirect_and_queues :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		queue:  Queue,
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		// INDIRECT holds 96 bytes: four indexed records, or a count at offset 92.
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_begin_pass(cb, {{texture = TARGET}})
+				cmd_set_pipeline(cb, COLOR_PIPELINE)
+				cmd_set_index_buffer(cb, INDICES, .U16)
+				cmd_draw_indexed_indirect(cb, INDIRECT, 0, 3, INDIRECT, 92)
+				cmd_draw_indirect(cb, INDIRECT, 16, 4)
+				cmd_end_pass(cb)
+				cmd_set_pipeline(cb, COMPUTE_PIPELINE)
+				cmd_dispatch_indirect(cb, INDIRECT, 84)
+			},
+			.Graphics,
+			.None,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 0, 5)},
+			.Graphics,
+			.Bad_Indirect,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 2, 1)},
+			.Graphics,
+			.Bad_Indirect,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indirect(cb, PLAIN, 0, 1)},
+			.Graphics,
+			.Bad_Buffer_Usage,
+		},
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_begin_pass(cb, {{texture = TARGET}})
+				cmd_set_pipeline(cb, COLOR_PIPELINE)
+				cmd_draw_indirect(cb, INDIRECT, 0, 1, INDIRECT, 96)
+			},
+			.Graphics,
+			.Bad_Indirect,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_pipeline(cb, COLOR_PIPELINE); cmd_draw_indexed_indirect(cb, INDIRECT, 0, 1)},
+			.Graphics,
+			.No_Index_Buffer,
+		},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_draw_indirect(cb, INDIRECT, 0, 1)}, .Graphics, .Draw_Outside_Pass},
+		{proc(cb: ^Command_Buffer) {cmd_dispatch_indirect(cb, INDIRECT)}, .Graphics, .No_Pipeline},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_indirect(cb, INDIRECT, 88)}, .Graphics, .Bad_Indirect},
+		{proc(cb: ^Command_Buffer) {cmd_set_pipeline(cb, COMPUTE_PIPELINE); cmd_dispatch_indirect(cb, INDIRECT)}, .Compute, .None},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_pass(cb)}, .Compute, .Wrong_Queue},
+		{
+			proc(cb: ^Command_Buffer) {
+				barrier := Buffer_Barrier {
+					buffer        = INDIRECT,
+					sync_before   = {.Compute_Shading},
+					access_before = {.Unordered_Access},
+					sync_after    = {.Execute_Indirect},
+					access_after  = {.Indirect_Argument},
+				}
+				cmd_barriers(cb, {barrier}, nil)
+			},
+			.Compute,
+			.None,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = INDIRECT, sync_before = {.Pixel_Shading}, access_before = {.Shader_Resource}}}, nil)},
+			.Compute,
+			.Bad_Barrier,
+		},
+		{
+			proc(cb: ^Command_Buffer) {
+				cmd_barriers(cb, nil, {{texture = TARGET, sync_after = {.Render_Target}, access_after = {.Render_Target}, layout_after = .Render_Target}})
+			},
+			.Compute,
+			.Bad_Barrier,
+		},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = PLAIN, sync_after = {.Execute_Indirect}, access_after = {.Indirect_Argument}}}, nil)},
+			.Graphics,
+			.Bad_Barrier,
+		},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES, queue = c.queue)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
 	}
 }
