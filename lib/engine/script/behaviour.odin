@@ -52,6 +52,8 @@ Instance_Flags :: bit_set[Instance_Flag;u8]
 Instance :: struct {
 	table:      c.int,
 	entity:     ecs.Entity,
+	// The memory category of the class's module, which its callbacks allocate in (see memory.odin).
+	category:   c.int,
 	// Odd while the slot is live, so a stale handle never matches.
 	generation: u32,
 	flags:      Instance_Flags,
@@ -228,7 +230,11 @@ attach :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, class_idx, values_idx
 		r.instance_used += 1
 	}
 
-	// The instance table: entity, transform, the fields' defaults, then the given values.
+	// The instance table, which counts toward the class's module: entity, transform, the fields' defaults, then the
+	// given values.
+	category := class_category(r, L, class)
+	previous := set_category(r, L, category)
+	defer set_category(r, L, previous)
 	luau.newtable(L)
 	t := luau.gettop(L)
 	luau.pushvalue(L, class)
@@ -271,6 +277,7 @@ attach :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, class_idx, values_idx
 	i := &r.instances[slot]
 	i^ = {
 		entity     = e,
+		category   = category,
 		generation = i.generation + 1,
 		flags      = {.Live},
 	}
@@ -525,7 +532,9 @@ call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int
 	luau.remove(L, -2)
 	luau.insert(L, -2 - nargs)
 	luau.insert(L, -1 - nargs)
+	previous := set_category(r, L, i.category)
 	protected_call(r, L, nargs + 1, 0)
+	set_category(r, L, previous)
 }
 
 // attach_script adds a behaviour from a script asset to an entity, with the given field values. Its awake runs in

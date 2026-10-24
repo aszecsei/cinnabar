@@ -40,6 +40,7 @@ state: struct {
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
+	upload_peak:   int,
 	layouts:       gpu.Layout_Tracker,
 	// Textures that have been streamed. Each is streamed once.
 	streamed:      map[gpu.Texture]bool,
@@ -88,6 +89,20 @@ features :: proc() -> gpu.Features {
 	return FEATURES
 }
 
+// stats counts the live resources. The null backend has no video memory.
+stats :: proc() -> gpu.Stats {
+	s := gpu.Stats {
+		buffers          = gpu.pool_live(&state.buffers),
+		textures         = gpu.pool_live(&state.textures),
+		samplers         = gpu.pool_live(&state.samplers),
+		pipelines        = gpu.pool_live(&state.pipelines),
+		accels           = gpu.pool_live(&state.accels),
+		upload_bytes_max = u64(state.upload_peak),
+	}
+	state.upload_peak = 0
+	return s
+}
+
 frame_target :: proc() -> gpu.Texture {
 	return state.frame_target
 }
@@ -108,6 +123,7 @@ begin_frame :: proc(size: [2]i32) {
 	state.frame_start = time.tick_now()
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
+	state.upload_peak = max(state.upload_peak, state.upload_offset)
 	state.upload_offset = 0
 }
 

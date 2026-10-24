@@ -19,6 +19,8 @@ import "cinnabar:engine/script"
 SCAN_INTERVAL :: 0.1
 // Watched values change at most this often in the editor.
 VALUES_INTERVAL :: 0.05
+// Game_Stats go out this often.
+STATS_INTERVAL :: 0.25
 MAX_WATCHED :: 64
 
 // Editor is what the editor has been told. It lives in Game_State. Its arrays use the host's heap, so they survive
@@ -42,6 +44,9 @@ Editor :: struct {
 	steps:       int,
 	last_scan:   f64,
 	last_values: f64,
+	last_stats:  f64,
+	// The game's commands (see commands.odin). Registrations: reload clears them.
+	commands:    [dynamic]Command,
 }
 
 @(private)
@@ -70,6 +75,7 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 		known       = make([dynamic]Known, platform.heap_allocator),
 		watched     = make([dynamic]Watched, platform.heap_allocator),
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
+		commands = make([dynamic]Command, platform.heap_allocator),
 		viewport = {
 			selection = make([dynamic]ecs.Entity, platform.heap_allocator),
 			hidden = make([dynamic]ecs.Entity, platform.heap_allocator),
@@ -78,10 +84,12 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	}
 }
 
-// reload sends the types again after a code reload: the new DLL may describe them differently.
+// reload sends the types again after a code reload: the new DLL may describe them differently. It forgets the commands,
+// whose procedures are the old DLL's, so register them again after it.
 reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.platform = platform
 	e.types_sent = false
+	clear(&e.commands)
 	reload_viewport_gpu(e)
 }
 
@@ -89,6 +97,7 @@ destroy :: proc(e: ^Editor) {
 	delete(e.known)
 	delete(e.watched)
 	delete(e.by_scene_id)
+	delete(e.commands)
 	delete(e.viewport.selection)
 	delete(e.viewport.hidden)
 	delete(e.viewport.picks)
@@ -99,8 +108,8 @@ destroy :: proc(e: ^Editor) {
 }
 
 // poll handles the editor's messages and appends the game's messages to out. Call it between frames, outside the
-// script phase.
-poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
+// script phase. user is the game's own data, which its commands get.
+poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte, user: rawptr = nil) {
 	snapshot := false
 	if connection != e.connection {
 		e.connection = connection
@@ -147,6 +156,8 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			if v.mode != .Paused {
 				e.steps = 0
 			}
+		case link.Run_Game_Command:
+			run_command(e, w, scripts, user, v.id, out, frame)
 		case link.Step_Frame:
 			if e.mode == .Paused {
 				e.steps += 1
@@ -160,6 +171,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	finish_pick(e, w, out, frame)
 	if !e.types_sent {
 		link.write_message(out, component_types(w, frame))
+		link.write_message(out, command_infos(e, frame))
 		e.types_sent = true
 	}
 	now := e.platform.time_seconds()
@@ -173,6 +185,29 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		e.last_values = now
 		send_values(e, w, scripts, out, frame)
 	}
+	if now - e.last_stats >= STATS_INTERVAL {
+		e.last_stats = now
+		link.write_message(out, game_stats(w, scripts, frame))
+	}
+}
+
+@(private)
+game_stats :: proc(w: ^ecs.World, scripts: ^script.Runtime, allocator: runtime.Allocator) -> link.Game_Stats {
+	stats := link.Game_Stats {
+		entities   = ecs.entity_count(w),
+		archetypes = w.archetype_count,
+	}
+	if scripts != nil {
+		total, modules := script.memory(scripts, allocator)
+		stats.behaviours = u32(script.behaviour_count(scripts))
+		stats.script_bytes = u64(total)
+		list := make([]link.Script_Module_Memory, len(modules), allocator)
+		for m, i in modules {
+			list[i] = {name = m.name, bytes = u64(m.bytes)}
+		}
+		stats.modules = list
+	}
+	return stats
 }
 
 @(private)

@@ -27,9 +27,13 @@ public sealed partial class EditorShell : IDisposable
     public HostSession Host { get; }
     public ViewportSession Viewport { get; } = new();
     public WorldModel World { get; } = new();
+    public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
     public EditorLayout Layout { get; }
-    public RibbonLayout Ribbon { get; }
+    public RibbonLayout Ribbon { get; private set; }
+
+    /// <summary>The ribbon's layout changed, as when the game's commands change.</summary>
+    public event Action? RibbonChanged;
     public KeyBindings KeyBindings { get; }
 
     bool _ribbonCollapsed;
@@ -153,8 +157,7 @@ public sealed partial class EditorShell : IDisposable
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return Empty("assetBrowser", "Asset Browser", "assets", EditorLayout.BottomDock,
             "The content roots appear here once the cook daemon runs.");
-        yield return Empty("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock,
-            "Frame times, memory and GPU counters arrive over the editor link.");
+        yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats));
     }
 
     void OnHostStateChanged()
@@ -170,6 +173,10 @@ public sealed partial class EditorShell : IDisposable
         if (!Host.Linked)
         {
             Viewport.Disconnect();
+            if (Stats.Host != null || Stats.Game != null)
+            {
+                Stats.Clear();
+            }
             if (World.HasWorld)
             {
                 World.Clear();

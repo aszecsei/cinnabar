@@ -16,6 +16,8 @@ import "cinnabar:engine/editor/link"
 
 // While the editor is slow to read, log lines beyond this much unsent data are dropped and counted.
 MAX_OUTBOX :: 16 * mem.Megabyte
+// Host_Stats go out this often.
+STATS_INTERVAL :: 250 * time.Millisecond
 
 // The host's side of the editor link (see docs/editor.md#editor-link). It listens on loopback for one editor at a
 // time. A reader thread queues the editor's messages, and the main thread handles them between frames. Everything
@@ -46,6 +48,18 @@ Link :: struct {
 	game:              string,
 	layout_hash:       u64,
 	console:           log.Logger,
+	// The frames since the last Host_Stats.
+	stats:             Frame_Stats,
+}
+
+// Frame_Stats adds up the frames of an interval.
+Frame_Stats :: struct {
+	start:       time.Tick,
+	frames:      u32,
+	frame_total: time.Duration,
+	frame_max:   time.Duration,
+	work_total:  time.Duration,
+	work_max:    time.Duration,
 }
 
 @(private = "file")
@@ -159,6 +173,58 @@ link_send :: proc(l: ^Link, message: link.Message, request: u32 = 0) {
 	}
 }
 
+// link_frame counts a frame: the time since the last one started, and the time that the game's update and the frame's
+// end took.
+link_frame :: proc(l: ^Link, frame, work: time.Duration) {
+	s := &l.stats
+	s.frames += 1
+	s.frame_total += frame
+	s.frame_max = max(s.frame_max, frame)
+	s.work_total += work
+	s.work_max = max(s.work_max, work)
+}
+
+// send_stats sends Host_Stats once an interval has passed.
+@(private = "file")
+send_stats :: proc(l: ^Link) {
+	s := &l.stats
+	if s.start == {} {
+		s.start = time.tick_now()
+	}
+	interval := time.tick_since(s.start)
+	if interval < STATS_INTERVAL {
+		return
+	}
+	ms :: proc(d: time.Duration) -> f32 {
+		return f32(time.duration_milliseconds(d))
+	}
+	frames := max(s.frames, 1)
+	gpu := core.gpu_stats()
+	permanent, frame_max := core.memory_stats()
+	link_send(
+		l,
+		link.Host_Stats {
+			interval = f32(time.duration_seconds(interval)),
+			frames = s.frames,
+			frame_ms_average = ms(s.frame_total) / f32(frames),
+			frame_ms_max = ms(s.frame_max),
+			work_ms_average = ms(s.work_total) / f32(frames),
+			work_ms_max = ms(s.work_max),
+			permanent_bytes = permanent,
+			frame_bytes_max = frame_max,
+			upload_bytes_max = gpu.upload_bytes_max,
+			buffers = gpu.buffers,
+			textures = gpu.textures,
+			samplers = gpu.samplers,
+			pipelines = gpu.pipelines,
+			accels = gpu.accels,
+			video_memory_used = gpu.video_memory_used,
+			video_memory_budget = gpu.video_memory_budget,
+		},
+	)
+	s^ = {start = time.tick_now()}
+}
+
 // link_poll handles the editor's messages, passes the game's to Game_API.editor_poll, and sends the events of this
 // frame. The main thread calls it between frames, while no job runs.
 link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
@@ -226,6 +292,9 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 	if dropped > 0 {
 		log.warnf("host: editor link: dropped %d log lines while the editor was slow to read", dropped)
 	}
+	if l.linked {
+		send_stats(l)
+	}
 }
 
 // is_host_message is true for the messages that the host handles itself: they need no game state. The game's
@@ -235,7 +304,7 @@ is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
 	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Editor_Input):
 		return true
-	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target):
+	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats):
 		// Only the host sends these, so handle_message reports them.
 		return true
 	}
@@ -277,9 +346,9 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 			}
 			core.queue_input(events)
 		}
-	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target:
+	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result:
 		// is_host_message sends these to the game.
 	}
 }

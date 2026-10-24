@@ -5,7 +5,7 @@ namespace Cinnabar.Editor.Document;
 /// <summary>
 /// The scene as a <c>Load_Scene</c> message, which replaces the host's world (see docs/editor.md#document-model). The
 /// editor sends it when the link connects, after a soft restart, and when it opens a scene. Operations use the same
-/// conversions for their parts.
+/// conversions for their parts, and the game's commands the ones back from the wire.
 /// </summary>
 public static class SceneSnapshot
 {
@@ -22,6 +22,28 @@ public static class SceneSnapshot
     public static Wire.SceneComponent Component(SceneComponent c) => new(c.Id, c.Name, [.. c.Fields.Select(Field)]);
 
     public static Wire.SceneField Field(SceneField f) => new(f.Name, Value(f.Value));
+
+    public static SceneEntity FromWire(Wire.SceneEntity e)
+    {
+        var entity = new SceneEntity(e.Id) { Name = e.Name, Parent = e.Parent, Active = e.Active };
+        entity.Components.AddRange(e.Components.Select(FromWire));
+        entity.Behaviours.AddRange(e.Behaviours.Select(b => new SceneBehaviour(Convert.ToHexStringLower(b.Script), [.. b.Fields.Select(FromWire)])));
+        return entity;
+    }
+
+    public static SceneComponent FromWire(Wire.SceneComponent c) => new(c.Id, c.Name, [.. c.Fields.Select(FromWire)]);
+
+    public static SceneField FromWire(Wire.SceneField f) => new(f.Name, FromWire(f.Value));
+
+    public static SceneValue FromWire(Wire.SceneValue v) => v.Kind switch
+    {
+        Wire.SceneValueKind.Bool => SceneValue.Of(v.Ints[0] != 0),
+        Wire.SceneValueKind.String => SceneValue.String(v.Text),
+        Wire.SceneValueKind.Name => SceneValue.Name(v.Text),
+        Wire.SceneValueKind.Entity => SceneValue.EntityRef(v.Entity),
+        _ => SceneValue.Of([.. Enumerable.Range(0, Math.Min((int)v.Count, 4))
+            .Select(i => (v.Integer & (1 << i)) != 0 ? SceneNumber.Of(v.Ints[i]) : SceneNumber.Of(v.Floats[i]))]),
+    };
 
     public static Wire.SceneValue Value(SceneValue v)
     {

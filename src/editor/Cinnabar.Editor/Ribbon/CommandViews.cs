@@ -36,7 +36,8 @@ sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
 
     public CommandAdapter Adapter(string id)
     {
-        if (!_adapters.TryGetValue(id, out var adapter))
+        // A game command is registered again when the game's commands change, so an adapter can hold an old one.
+        if (!_adapters.TryGetValue(id, out var adapter) || adapter.Command != Commands.Find(id))
         {
             adapter = new CommandAdapter(Commands.Get(id));
             _adapters[id] = adapter;

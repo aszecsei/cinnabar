@@ -99,10 +99,12 @@ main :: proc() {
 
 	for {
 		dt, keep_running := core.begin_frame()
+		work := time.tick_now()
 		if !keep_running || !game.api.update(state, dt) {
 			break
 		}
 		core.end_frame()
+		link_frame(&editor, dt, time.tick_since(work))
 
 		// End of frame: the job system is drained, so this is the reload point.
 		if game_changed(game) {

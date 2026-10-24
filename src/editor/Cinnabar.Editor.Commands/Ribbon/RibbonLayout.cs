@@ -40,6 +40,37 @@ public sealed record RibbonLayout(IReadOnlyList<RibbonCategory> Categories, IRea
         return errors;
     }
 
+    /// <summary>
+    /// The layout with more commands in it, each in a group of a tab by their labels: the game's commands. A group goes
+    /// at the end of the tab with that label, or of a new tab after the others. A group of one or two commands has large
+    /// buttons, and a larger one stacks of small buttons.
+    /// </summary>
+    public RibbonLayout WithCommands(IEnumerable<(string Tab, string Group, string Command)> commands)
+    {
+        var tabs = Tabs.ToList();
+        foreach (var byTab in commands.GroupBy(c => c.Tab.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            var groups = byTab.GroupBy(c => c.Group.Trim(), StringComparer.OrdinalIgnoreCase).Select(g =>
+            {
+                var ids = g.Select(c => c.Command).ToList();
+                IReadOnlyList<RibbonItem> items = ids.Count <= 2
+                    ? [.. ids.Select(id => new LargeButton(id))]
+                    : [.. ids.Chunk(SmallStack.MaxCommands).Select(chunk => new SmallStack(chunk))];
+                return new RibbonGroup(g.Key, items);
+            }).ToList();
+            var at = tabs.FindIndex(t => string.Equals(t.Label, byTab.Key, StringComparison.OrdinalIgnoreCase));
+            if (at >= 0)
+            {
+                tabs[at] = tabs[at] with { Groups = [.. tabs[at].Groups, .. groups] };
+            }
+            else
+            {
+                tabs.Add(new RibbonTab($"commands.{byTab.Key.ToLowerInvariant()}", byTab.Key, groups));
+            }
+        }
+        return this with { Tabs = tabs };
+    }
+
     /// <summary>The tabs to show: every tab without a context, and contextual tabs whose context is active.</summary>
     public IEnumerable<RibbonTab> VisibleTabs(EditorContext context) =>
         Tabs.Where(t => t.Context == null || context.IsActive(t.Context));

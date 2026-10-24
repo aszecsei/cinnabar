@@ -18,6 +18,7 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
+import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
@@ -275,6 +276,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	mem.zero_item(s)
 	s.platform = platform
 	editor.init(&s.editor, platform)
+	register_editor_commands(s)
 
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
@@ -844,6 +846,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
+	register_editor_commands(s)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {
@@ -1023,7 +1026,90 @@ cinnabar_game_api :: proc() -> core.Game_API {
 	}
 }
 
+// register_editor_commands describes the game's commands, which the editor shows on its Game tab (see
+// docs/editor.md#commands). init and on_reload call it.
+register_editor_commands :: proc(s: ^Game_State) {
+	editor.register_command(&s.editor, {
+		id = "mygame.add_triangle",
+		label = "Add Triangle",
+		description = "Add a spinning triangle 2 m in front of the editor's camera.",
+		tab = "Game",
+		group = "Triangles",
+		icon = "add",
+		edits = true,
+		procedure = add_triangle,
+	})
+	editor.register_command(&s.editor, {
+		id = "mygame.reverse_spin",
+		label = "Reverse Spin",
+		description = "Turn the selected triangles the other way.",
+		tab = "Game",
+		group = "Triangles",
+		icon = "rotate",
+		edits = true,
+		procedure = reverse_spin,
+	})
+	editor.register_command(&s.editor, {
+		id = "mygame.world_report",
+		label = "World Report",
+		description = "Write the number of entities and triangles to the console.",
+		tab = "Game",
+		group = "Debug",
+		icon = "stats",
+		procedure = world_report,
+	})
+}
+
+// add_triangle creates an entity with the triangle's components, as an operation, so the editor can undo it.
+add_triangle :: proc(ctx: ^editor.Command_Context) {
+	c := ctx.camera
+	rotation := quaternion(x = c.rotation.x, y = c.rotation.y, z = c.rotation.z, w = c.rotation.w)
+	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
+	position := ecs.position_offset({c.position}, forward * 2)
+	id := editor.new_scene_id()
+	triangle := link.Scene_Entity {
+		id     = id,
+		name   = "Triangle",
+		active = true,
+		components = slice.clone([]link.Scene_Component{
+			{
+				id = u64(ecs.TRANSFORM_ID),
+				name = "Transform",
+				fields = slice.clone([]link.Scene_Field{
+					editor.scene_field("position", editor.scene_position(position)),
+					editor.scene_field("rotation", editor.scene_numbers(0, 0, 0, 1)),
+					editor.scene_field("scale", editor.scene_numbers(1, 1, 1)),
+				}),
+			},
+			{id = u64(ecs.PREVIOUS_TRANSFORM_ID), name = "Previous_Transform"},
+			{id = u64(SPIN_ID), name = "Spin", fields = slice.clone([]link.Scene_Field{editor.scene_field("speed", editor.scene_numbers(1))})},
+			{id = u64(TRIANGLE_ID), name = "Triangle", fields = slice.clone([]link.Scene_Field{editor.scene_field("brightness", editor.scene_numbers(2))})},
+		}),
+	}
+	append(&ctx.operations, link.Operation{kind = .Create_Entity, entity = id, created = slice.clone([]link.Scene_Entity{triangle})})
+}
+
+// reverse_spin sets the negated speed of each selected entity that spins.
+reverse_spin :: proc(ctx: ^editor.Command_Context) {
+	for entity in ctx.selection {
+		id := editor.scene_id(ctx.world, entity)
+		if spin := ecs.get(ctx.world, entity, Spin); spin != nil && id != 0 {
+			field := editor.scene_field("speed", editor.scene_numbers(f64(-spin.speed)))
+			append(&ctx.operations, link.Operation{kind = .Set_Field, entity = id, component = u64(SPIN_ID), fields = slice.clone([]link.Scene_Field{field})})
+		}
+	}
+	if len(ctx.operations) == 0 {
+		ctx.message = "mygame: select a triangle of the scene to reverse its spin"
+	}
+}
+
+// world_report counts, and changes nothing.
+world_report :: proc(ctx: ^editor.Command_Context) {
+	s := (^Game_State)(ctx.user)
+	ctx.message = fmt.aprintf("mygame: %d entities, %d triangles, frame %d", ecs.entity_count(ctx.world), render.extract_count(ctx.world, s.triangles), s.frame_count, allocator = ctx.allocator)
+}
+
 editor_poll :: proc(state: rawptr, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte) {
 	s := (^Game_State)(state)
-	editor.poll(&s.editor, &s.world, &s.scripts, connection, incoming, out)
+	editor.poll(&s.editor, &s.world, &s.scripts, connection, incoming, out, s)
 }

@@ -543,6 +543,21 @@ accel_instance :: proc(
 	}
 }
 
+// Stats is what a backend holds, for the editor's resource monitor (see docs/editor.md#resource-monitor). The live
+// counts include the backend's own permanent resources.
+Stats :: struct {
+	buffers:             u32,
+	textures:            u32,
+	samplers:            u32,
+	pipelines:           u32,
+	accels:              u32,
+	// The most that a frame's upload ring used since the last call.
+	upload_bytes_max:    u64,
+	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
+	video_memory_used:   u64,
+	video_memory_budget: u64,
+}
+
 // Transfer identifies a streaming copy (see docs/gpu.md#streaming). gpu_transfer_done reports when the resource can
 // be used. The zero Transfer is always done.
 Transfer :: distinct u64

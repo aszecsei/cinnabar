@@ -39,6 +39,8 @@ Platform :: struct {
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
+	// The most that a frame's arena used since memory_stats last read it.
+	frame_peak:  uint,
 	// Input from the editor, for the next frame.
 	input_queue: [dynamic]Input_Event,
 	api:         Platform_API,
@@ -164,6 +166,7 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 
 	platform.frame_index += 1
 	frame := &platform.frame[platform.frame_index % len(platform.frame)]
+	platform.frame_peak = max(platform.frame_peak, frame.total_used)
 	virtual.arena_free_all(frame)
 	platform.api.frame_allocator = virtual.arena_allocator(frame)
 	return
@@ -242,6 +245,16 @@ resize_shared_target :: proc(size: [2]i32) {
 // shared_target is the shared target's current generation: its object name prefix, in temporary memory, its
 // generation number and its size. It is empty outside shared mode.
 shared_target :: backend.shared_target
+
+// gpu_stats is the GPU backend's resource counts and memory, for the host's stats. Call it between frames.
+gpu_stats :: backend.stats
+
+// memory_stats is the permanent arena's bytes in use, and the most that a frame's arena used since the last call.
+memory_stats :: proc() -> (permanent, frame_max: u64) {
+	permanent, frame_max = u64(platform.permanent.total_used), u64(platform.frame_peak)
+	platform.frame_peak = 0
+	return
+}
 
 // pace_shared_frames turns the reader's back-pressure on or off (see docs/editor.md#viewport).
 pace_shared_frames :: backend.pace_shared_frames

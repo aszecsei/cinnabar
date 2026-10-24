@@ -20,6 +20,31 @@ public abstract record Operation(ulong Entity)
     /// </summary>
     public virtual bool IsReplacedBy(Operation later) => false;
 
+    /// <summary>The operation that a wire operation describes, as a game command returns them.</summary>
+    public static Operation FromWire(Wire.Operation op)
+    {
+        string Script() => Convert.ToHexStringLower(op.Script);
+        Link.Protocol.SceneField OnlyField() => op.Fields.Length == 1 ? op.Fields[0] : throw new InvalidOperationException($"{op.Kind} of {op.Entity:x16} has {op.Fields.Length} fields, not one");
+        return op.Kind switch
+        {
+            Link.Protocol.OperationKind.CreateEntity when op.Created.Length == 1 => new CreateEntity(SceneSnapshot.FromWire(op.Created[0])),
+            Link.Protocol.OperationKind.DestroyEntity => new DestroyEntity(op.Entity),
+            Link.Protocol.OperationKind.Rename => new Rename(op.Entity, op.Name),
+            Link.Protocol.OperationKind.SetParent => new SetParent(op.Entity, op.Parent),
+            Link.Protocol.OperationKind.SetActive => new SetActive(op.Entity, op.Active),
+            Link.Protocol.OperationKind.AddComponent when op.Components.Length == 1 => new AddComponent(op.Entity, SceneSnapshot.FromWire(op.Components[0])),
+            Link.Protocol.OperationKind.RemoveComponent => new RemoveComponent(op.Entity, op.Component),
+            Link.Protocol.OperationKind.SetField => new SetField(op.Entity, op.Component, OnlyField().Name, SceneSnapshot.FromWire(OnlyField().Value)),
+            Link.Protocol.OperationKind.ResetField => new SetField(op.Entity, op.Component, OnlyField().Name, null),
+            // The host attaches a new behaviour last, and so does the document.
+            Link.Protocol.OperationKind.AddBehaviour => new AddBehaviour(op.Entity, new SceneBehaviour(Script(), [.. op.Fields.Select(SceneSnapshot.FromWire)]), int.MaxValue),
+            Link.Protocol.OperationKind.RemoveBehaviour => new RemoveBehaviour(op.Entity, Script()),
+            Link.Protocol.OperationKind.SetBehaviourField => new SetBehaviourField(op.Entity, Script(), OnlyField().Name, SceneSnapshot.FromWire(OnlyField().Value)),
+            Link.Protocol.OperationKind.ResetBehaviourField => new SetBehaviourField(op.Entity, Script(), OnlyField().Name, null),
+            _ => throw new InvalidOperationException($"{op.Kind} of {op.Entity:x16} does not have the parts it needs"),
+        };
+    }
+
     protected static SceneEntity Find(Scene scene, ulong id) =>
         scene.Find(id) ?? throw new InvalidOperationException($"the scene has no entity {id:x16}");
 

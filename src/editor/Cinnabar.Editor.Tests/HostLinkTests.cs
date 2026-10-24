@@ -264,6 +264,37 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheGameDescribesItsCommandsAndSendsStats()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        var commands = await editor.Next<GameCommands>();
+        Assert.Contains(commands.Commands, c => c.Id == "mygame.add_triangle" && c.Edits && c.Tab == "Game");
+        var snapshot = await editor.Next<EntitySnapshot>();
+
+        var host = await editor.Next<HostStats>();
+        Assert.True(host.Frames > 0 && host.Buffers > 0 && host.Pipelines > 0 && host.PermanentBytes > 0);
+        var game = await editor.Next<GameStats>();
+        Assert.Equal((uint)snapshot.Entities.Length, game.Entities);
+        Assert.True(game.Behaviours >= 2);
+        Assert.Contains(game.Modules, m => m.Name == "game/scripts/pulse.luau" && m.Bytes > 0);
+
+        editor.Link.Send(new RunGameCommand("mygame.world_report"));
+        var report = await editor.Next<GameCommandResult>(r => r.Id == "mygame.world_report");
+        Assert.Contains("3 entities", report.Message);
+        Assert.Empty(report.Operations);
+
+        // A command that edits sends operations by scene ID, and leaves the world as it is.
+        var front = Assert.Single(snapshot.Entities, e => e.Name == "Front Triangle");
+        editor.Link.Send(new SetSelection([front.Entity]));
+        editor.Link.Send(new RunGameCommand("mygame.reverse_spin"));
+        var reversed = await editor.Next<GameCommandResult>(r => r.Id == "mygame.reverse_spin");
+        var op = Assert.Single(reversed.Operations);
+        Assert.Equal((OperationKind.SetField, front.SceneId, 1001UL), (op.Kind, op.Entity, op.Component));
+        Assert.Equal(-1.0, Assert.Single(op.Fields).Value.Floats[0]);
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();

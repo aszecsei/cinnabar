@@ -233,6 +233,28 @@ features :: proc() -> gpu.Features {
 	return dev.features
 }
 
+// stats counts the live resources, and reads the adapter's memory use. Call it between frames.
+stats :: proc() -> gpu.Stats {
+	s := gpu.Stats {
+		buffers          = gpu.pool_live(&dev.buffers),
+		textures         = gpu.pool_live(&dev.textures),
+		samplers         = gpu.pool_live(&dev.samplers),
+		pipelines        = gpu.pool_live(&dev.pipeline_pool),
+		accels           = gpu.pool_live(&dev.accels),
+		upload_bytes_max = u64(dev.upload_peak),
+	}
+	dev.upload_peak = 0
+	adapter: ^dxgi.IAdapter3
+	if dev.adapter != nil && win.SUCCEEDED(dev.adapter->QueryInterface(dxgi.IAdapter3_UUID, (^rawptr)(&adapter))) {
+		info: dxgi.QUERY_VIDEO_MEMORY_INFO
+		if win.SUCCEEDED(adapter->QueryVideoMemoryInfo(0, .LOCAL, &info)) {
+			s.video_memory_used, s.video_memory_budget = info.CurrentUsage, info.Budget
+		}
+		adapter->Release()
+	}
+	return s
+}
+
 frame_target :: proc() -> gpu.Texture {
 	return dev.frame_target
 }

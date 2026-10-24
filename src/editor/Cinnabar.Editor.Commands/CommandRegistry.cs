@@ -16,6 +16,9 @@ public sealed class CommandRegistry
         return command;
     }
 
+    /// <summary>Removes a command, as when the game's commands change. Views that hold it find it gone.</summary>
+    public bool Unregister(string id) => _commands.Remove(id);
+
     public Command? Find(string id) => _commands.GetValueOrDefault(id);
 
     public Command Get(string id) =>

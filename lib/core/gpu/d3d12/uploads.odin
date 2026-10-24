@@ -35,6 +35,8 @@ Uploads :: struct {
 	// True while upload_list records the current batch.
 	upload_open:    bool,
 	upload_mutex:   sync.Mutex,
+	// The most that a frame's ring used since stats last read it.
+	upload_peak:    int,
 }
 
 @(private)
@@ -74,6 +76,7 @@ init_upload_ring :: proc(ring: ^Upload_Ring) -> bool {
 
 @(private)
 reset_upload_ring :: proc(ring: ^Upload_Ring) {
+	dev.upload_peak = max(dev.upload_peak, sync.atomic_load(&ring.offset))
 	sync.atomic_store(&ring.offset, 0)
 }
 

@@ -31,6 +31,7 @@ Tuned :: struct {
 
 @(private = "file")
 Fixture :: struct {
+	t:        ^testing.T,
 	platform: core.Platform_API,
 	frame:    virtual.Arena,
 	world:    ecs.World,
@@ -81,9 +82,23 @@ teardown :: proc(f: ^Fixture) {
 	free(f)
 }
 
-// step polls once, with the given messages from the editor, and returns what the game sent.
+// step polls once, with the given messages from the editor, and returns what the game sent, without the stats and the
+// command list, which every poll here sends.
 @(private = "file")
 step :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> []link.Message {
+	messages := make([dynamic]link.Message, context.temp_allocator)
+	for m in step_all(f, connection, ..incoming) {
+		#partial switch _ in m {
+		case link.Game_Stats, link.Game_Commands:
+		case:
+			append(&messages, m)
+		}
+	}
+	return messages[:]
+}
+
+@(private = "file")
+step_all :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> []link.Message {
 	encoded := make([dynamic]core.Editor_Message, context.temp_allocator)
 	for m in incoming {
 		buf := make([dynamic]byte, context.temp_allocator)
@@ -92,7 +107,7 @@ step :: proc(f: ^Fixture, connection: u64 = 1, incoming: ..link.Message) -> []li
 		append(&encoded, core.Editor_Message{kind = header.kind, payload = buf[link.HEADER_SIZE:]})
 	}
 	clear(&f.out)
-	poll(&f.editor, &f.world, nil, connection, encoded[:], &f.out)
+	poll(&f.editor, &f.world, nil, connection, encoded[:], &f.out, f)
 	messages := make([dynamic]link.Message, context.temp_allocator)
 	for rest := f.out[:]; len(rest) > 0; {
 		header, _ := link.read_header(rest)
@@ -571,4 +586,58 @@ the_editors_mode_decides_whether_the_world_runs :: proc(t: ^testing.T) {
 	step(f, 1, link.Set_Mode{mode = .Edit})
 	_, ok = view(&f.editor)
 	testing.expect(t, ok)
+}
+
+@(test)
+game_commands_go_with_the_types_and_return_operations :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	e := spawn(f, {})
+	ecs.add(&f.world, e, scene.Scene_Entity{id = 0x51})
+	register_command(&f.editor, {
+		id = "test.rename",
+		label = "Rename",
+		tab = "Test",
+		group = "Names",
+		edits = true,
+		procedure = proc(ctx: ^Command_Context) {
+			f := (^Fixture)(ctx.user)
+			testing.expect_value(f.t, len(ctx.selection), 1)
+			for entity in ctx.selection {
+				append(&ctx.operations, link.Operation{kind = .Rename, entity = scene_id(ctx.world, entity), name = "Renamed"})
+			}
+			ctx.message = "renamed"
+		},
+	})
+	f.t = t
+
+	commands: link.Game_Commands
+	stats: link.Game_Stats
+	for m in step_all(f) {
+		#partial switch v in m {
+		case link.Game_Commands:
+			commands = v
+		case link.Game_Stats:
+			stats = v
+		}
+	}
+	testing.expect_value(t, len(commands.commands), 1)
+	testing.expect_value(t, commands.commands[0].tab, "Test")
+	testing.expect_value(t, stats.entities, 1)
+
+	result: link.Game_Command_Result
+	for m in step(f, 1, link.Set_Selection{entities = {u64(e)}}, link.Run_Game_Command{id = "test.rename"}) {
+		if r, ok := m.(link.Game_Command_Result); ok {
+			result = r
+		}
+	}
+	testing.expect_value(t, result.message, "renamed")
+	testing.expect_value(t, len(result.operations), 1)
+	testing.expect_value(t, result.operations[0].entity, 0x51)
+	// The game does not apply them itself: the editor sends them back.
+	testing.expect_value(t, ecs.name_of(&f.world, e), "")
+
+	// A code reload forgets the commands, whose procedures were the old DLL's.
+	reload(&f.editor, &f.platform)
+	testing.expect_value(t, len(f.editor.commands), 0)
 }

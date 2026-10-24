@@ -105,6 +105,14 @@ is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {
 	return live_record(w, e) != nil
 }
 
+// entity_count is the number of live entities. It visits every slot.
+entity_count :: proc "contextless" (w: ^World) -> (count: u32) {
+	for record in records(w)[:w.entities.count] {
+		count += u32(record.archetype != NO_ARCHETYPE)
+	}
+	return
+}
+
 // slot_count is the number of entity slots, so every entity's index is below it.
 slot_count :: proc "contextless" (w: ^World) -> u32 {
 	return w.entities.count

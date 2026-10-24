@@ -55,6 +55,7 @@ public sealed class RibbonView : DockPanel
         Children.Add(_body);
 
         shell.Context.Changed += Rebuild;
+        shell.RibbonChanged += Rebuild;
         shell.RibbonCollapsedChanged += () =>
         {
             collapse.IsChecked = shell.RibbonCollapsed;

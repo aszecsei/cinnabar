@@ -63,7 +63,7 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 | Play | The full frame. | None. The outliner and properties show the host's world, read-only, with a tint. |
 | Paused | As in Edit, and the full frame of one fixed tick for each step. | None |
 
-- **The game decides what runs.** The editor sends `Set_Mode`, and the game's editor package keeps the mode, because only the game knows what its frame runs. `editor.simulation` tells the game's frame whether to run its world and with what time step: the frame's in Play, one fixed tick for each `Step_Frame` while paused, and nothing in Edit. A frame that does not run its world still propagates transforms (`ecs.update_transforms`), so edits of a parent move its children, and it still renders. Without an editor, the world always runs. A game that an editor has just linked to is in Edit, and so is the fresh state of a soft restart.
+- **The game decides what runs.** The editor sends `Set_Mode`, and the game's editor package keeps the mode, because only the game knows what its frame runs. `editor.simulation` tells the game's frame whether to run its world and with what time step: the frame's in Play, one fixed tick for each `Step_Frame` while paused, and nothing in Edit. A frame that does not run its world still propagates transforms (`ecs.update_transforms`), so edits of a parent move its children, and it still renders.
 - **Play** (F5) starts the world that the game has, or goes on after a pause. Behaviours that the scene loaded wake in the first script phase, so they get `awake` and `start` as for a scene load. The game's main script keeps running across a stop, as it does across a scene load.
 - **Pause** (F6) stops the world where it is, and **Step** (F10) runs one frame of one fixed tick.
 - **Stop** (Shift+F5) sets Edit, and the editor sends its scene again, which replaces the game's world. Nothing from play mode reaches the document. Restart Host has no shortcut now: its Shift+F5 went to Stop.
@@ -122,7 +122,7 @@ The editor link is a message connection between the editor and the host. It uses
 - **Framing:** each message is a 12-byte little-endian header (payload length, kind, flags, request ID) and a payload of at most 64 MiB. A response has the request ID of its request. An event has request ID 0.
 - **Wire format:** numbers are little-endian as they are in memory, a `bool` is one byte, enums are their backing integer, and strings and slices are a `u32` count followed by their bytes or elements. A fixed array has no count, and a struct is its fields in order. A payload that does not decode to exactly one message is refused.
 - **Handshake:** the editor sends `Hello` with its protocol version. The host answers `Welcome` with the game's name and the DLL's layout hash, or `Refused` with both versions, and the editor shows the reason.
-- **Two handlers.** The host handles the messages that need no game state: the handshake, the viewport's size, frame acknowledgements and input, and later stats. The game handles the mode, because only it knows what its frame runs. It passes every other message, still encoded, to `Game_API.editor_poll`, once per frame between frames, with the connection (0 while no editor is linked). The game decodes them with its own copy of `lib/engine/editor/link`, and appends its own messages to a buffer that the host owns, which the host then queues. The game cannot write to the outbox directly: it logs while it polls, and the logger takes the outbox's lock. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
+- **Two handlers.** The host handles the messages that need no game state: the handshake, the viewport's size, frame acknowledgements and input, and it sends its own stats. The game handles the mode, because only it knows what its frame runs. It passes every other message, still encoded, to `Game_API.editor_poll`, once per frame between frames, with the connection (0 while no editor is linked). The game decodes them with its own copy of `lib/engine/editor/link`, and appends its own messages to a buffer that the host owns, which the host then queues. The game cannot write to the outbox directly: it logs while it polls, and the logger takes the outbox's lock. Type info for game-side types exists only in the DLL's image, so the editor never reflects over game types itself.
 - **Threads:** in the host, an accept thread waits for the editor, a reader thread queues its messages, and a writer thread sends the outbox. The main thread handles the queued messages between frames, after the reload point, while no job runs. Events of a frame go out at the end of it.
 - **The log:** while an editor is linked, the host's logger sends every line, the game's and the jobs' included, over the link instead of to the host's console. A line carries its level, time, location and text. If more than 16 MiB is waiting to be sent, log lines are dropped and counted. The editor's console also shows the host's own console output, which has the lines before the link and anything that does not go through the logger, such as a crash.
 - **One schema:** the messages are Odin structs in `lib/engine/editor/link`, a package that imports nothing from core or engine, so the host and the game both use it. `just link-schema` runs `host --emit-link-schema`, which writes `build/link/link-schema.json`, and a C# source generator for `Cinnabar.Editor.Link` reads it. A message's kind is its index in the `Message` union, and the protocol version is a hash of the schema, so any change to a message changes the version. A changed message is a build error in the editor, not a decode error at run time. Odin's `Snake_Case` names become `PascalCase` in C#.
@@ -132,12 +132,12 @@ The editor link is a message connection between the editor and the host. It uses
 | Group | Messages |
 |---|---|
 | Session | `Hello`, `Welcome`, `Refused`, `Log`, `Game_Reloaded` |
-| Types | Component types with their fields, behaviour classes with their fields, game commands |
+| Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
 | Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result` |
 | Mode | `Set_Mode`, `Step_Frame`, and `Editor_Input`, which the host handles |
-| Stats | Frame times, memory, counters, script memory by module |
+| Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
 
 ## World
 
@@ -205,6 +205,13 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 - A command has an ID such as `edit.undo`, a label, an icon, a default shortcut, a can-execute check and an execute procedure.
 - **Editor commands** are C#. **Game commands** are described by the DLL and run in the game through `Game_API.editor_poll`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
+
+### Game commands
+
+- **The game registers them** with `editor.register_command`: an ID, a label, a description, the ribbon tab and group by label, an icon of the editor's set, whether it edits the scene, and a procedure. The strings and the procedure are the DLL's, so the commands are registrations: `editor.reload` forgets them, and the game registers them again in `on_reload`, as it does its systems.
+- **The editor gets the list** as `Game_Commands`, with the component types, when it links and after a code reload. It registers each as `game.<id>`, removes the ones that the list no longer has, and adds each to its group at the end of the tab with that label, or of a new tab after the others. A group of one or two commands has large buttons, and a larger one stacks of small buttons. The commands are in the command palette too. A command that edits runs only in Edit, and every command needs a linked host.
+- **Running one** sends `Run_Game_Command`. The game calls the procedure in `poll`, between frames, with a `Command_Context`: the world, the scripts, the game's own data that it passes to `poll`, the editor's selection and camera. The procedure does not change the scene itself: it adds operations by scene ID to the context, which `editor.new_scene_id`, `scene_numbers`, `scene_position` and `scene_field` help build, and it can set a message. The game sends them back in `Game_Command_Result`. The editor turns the wire operations back into the document's, applies them as one undo entry under the command's label, which sends them to the game as for any edit, writes the message to the console, and selects the entities that the command created.
+- **The sample's commands** are on the Game tab: Add Triangle makes a spinning triangle 2 m in front of the editor's camera, Reverse Spin negates the selected triangles' speed, and World Report writes the counts to the console without an edit.
 - **Toggles and choices:** a command with a checked state is a toggle. A choice command picks one of a list of options. A command raises `Changed` when it runs, and owners of shared state, such as the host session, invalidate every command, so views update without polling.
 - **Key bindings:** `keybindings.json` in the editor settings is an object from command ID to key gesture, such as `{ "view.stats": "F3" }`. An empty gesture removes a shortcut. When two commands get the same gesture, the first by ID keeps it, and the console says so.
 - **The command palette** (Ctrl+Shift+P) searches every command by label and ID. Every word of the query must match. A label that starts with the query ranks first, then a label with a word that starts with it.
@@ -246,6 +253,12 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
 - An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference shows the asset's name, and accepts a drag from the asset browser.
 
+### Resource monitor
+
+- **The host** sends `Host_Stats` four times a second while the editor is linked: the frames of the interval with their average and longest frame times, and how much of each the game's update and the frame's end took; the permanent arena's size and the most that a frame's arena used; and from the GPU backend's `stats`, the live buffers, textures, samplers, pipelines and acceleration structures, the most that a frame's upload ring used, and the adapter's local memory in use against the budget that the OS gives the process.
+- **The game** sends `Game_Stats` as often: the entities, the archetypes, the behaviour instances, the script VM's bytes, and each loaded module's part of them (see [Scripting](scripting.md#embedding)).
+- **The panel** shows a minute of frame times as a graph, the longest frame of each interval faint behind the average, with a line at 16.7 ms; the host's memory and resources; the world; and the modules by memory, the largest first. It keeps a minute of samples, and forgets them when the link closes.
+
 ### Asset browser
 
 - The editor never writes a `.meta` file. It asks the cook daemon to create, move, rename and re-import assets, so each asset keeps its GUID (see [Content pipeline](content-pipeline.md#identity)).
@@ -267,7 +280,8 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 6. **Editing:** operations, transactions, undo history, save and autosave, and field editors.
 7. **Viewport tools:** the editor camera, the ID buffer and picking, the selection outline, gizmos and snapping.
 8. **Modes:** play, pause, step and stop, and input forwarding.
-9. **Later:** the asset browser (with the cook daemon), the resource monitor, game commands in the ribbon, prefabs.
+9. **Resource monitor and game commands:** the host's and the game's stats, script memory by module, and the game's commands in the ribbon.
+10. **Later:** the asset browser (with the cook daemon) and prefabs, each its own design.
 
 ## Deferred
 

@@ -72,6 +72,8 @@ start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
 	L := r.L
 	co := luau.newthread(L)
 	luau.L_sandboxthread(co)
+	// The main script's thread allocates in its module's category, for as long as it runs.
+	luau.setmemcat(co, category_of(module_index(r, m)))
 	if luau.load(co, chunkname, raw_data(bytecode), c.size_t(len(bytecode)), 0) != .OK {
 		log.errorf("script: %s", luau.toodinstring(co, -1))
 		luau.pop(L, 1)
@@ -90,7 +92,7 @@ start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
 	return false
 }
 
-@(private = "file")
+@(private)
 module_index :: proc(r: ^Runtime, m: ^Module) -> int {
 	return int((uintptr(m) - uintptr(&r.modules[0])) / size_of(Module))
 }
@@ -149,7 +151,9 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 	luau.remove(L, env)
 	compile_native(r, L, native)
 	m.state = .Loading
+	previous := set_category(r, L, category_of(module_index(r, m)))
 	ran := protected_call(r, L, 0, 1)
+	set_category(r, L, previous)
 	m.state = .Loaded
 	if !ran {
 		log.errorf("script: %s keeps its old version", module_name(r, m))
@@ -314,7 +318,9 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 	if status == .OK {
 		compile_native(r, L, native)
 		m.state = .Loading
+		previous := set_category(r, L, category_of(module_index(r, m)))
 		status = luau.pcall(L, 0, 1, 0)
+		set_category(r, L, previous)
 	}
 	if status != .OK {
 		// The module can be required again, for example after a fix.

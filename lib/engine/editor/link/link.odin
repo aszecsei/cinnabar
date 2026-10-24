@@ -31,6 +31,11 @@ Message :: union {
 	Set_Mode,
 	Step_Frame,
 	Editor_Input,
+	Host_Stats,
+	Game_Stats,
+	Game_Commands,
+	Run_Game_Command,
+	Game_Command_Result,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -510,4 +515,85 @@ Input_Event :: struct {
 // core.Input from the next frame.
 Editor_Input :: struct {
 	events: []Input_Event,
+}
+
+// Stats (see docs/editor.md#resource-monitor). The host and the game each send theirs four times a second while an
+// editor is linked.
+
+// Host to editor: the frames and the memory of the last interval.
+Host_Stats :: struct {
+	// The length of the interval, in seconds, and the frames in it.
+	interval:            f32,
+	frames:              u32,
+	// The time from one frame's start to the next's, and the part of it that the game's update and the frame's end
+	// took, in milliseconds.
+	frame_ms_average:    f32,
+	frame_ms_max:        f32,
+	work_ms_average:     f32,
+	work_ms_max:         f32,
+	// The permanent arena's bytes in use, and the most that a frame's arena used.
+	permanent_bytes:     u64,
+	frame_bytes_max:     u64,
+	// The most that a frame's upload ring used.
+	upload_bytes_max:    u64,
+	// The GPU resources that live now.
+	buffers:             u32,
+	textures:            u32,
+	samplers:            u32,
+	pipelines:           u32,
+	accels:              u32,
+	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
+	video_memory_used:   u64,
+	video_memory_budget: u64,
+}
+
+Script_Module_Memory :: struct {
+	// The module's asset path, or its GUID.
+	name:  string,
+	bytes: u64,
+}
+
+// Game to editor: the world and the scripts.
+Game_Stats :: struct {
+	entities:     u32,
+	archetypes:   u32,
+	behaviours:   u32,
+	// Every byte that the script VM holds, and the part that each module's code allocated. The engine's own part is
+	// the rest.
+	script_bytes: u64,
+	modules:      []Script_Module_Memory,
+}
+
+// Game commands (see docs/editor.md#commands).
+
+Game_Command_Info :: struct {
+	// Unique in the game, such as "mygame.add_triangle". The editor's command ID is "game." and this.
+	id:          string,
+	label:       string,
+	description: string,
+	// The ribbon tab and group to show it in, by label. A tab that the editor lacks is added.
+	tab:         string,
+	group:       string,
+	// The name of an icon of the editor's set, or "".
+	icon:        string,
+	// Whether the command edits the scene, so the editor offers it only in Edit.
+	edits:       bool,
+}
+
+// Game to editor: the game's commands, with the types: when a new editor links and after a code reload.
+Game_Commands :: struct {
+	commands: []Game_Command_Info,
+}
+
+// Editor to game: run a command, with the selection that the editor last sent.
+Run_Game_Command :: struct {
+	id: string,
+}
+
+// Game to editor: what a command did. The game does not apply the operations itself: the editor applies them to its
+// document as one undo entry, which sends them back as for any edit. message goes to the console.
+Game_Command_Result :: struct {
+	id:         string,
+	operations: []Operation,
+	message:    string,
 }

@@ -374,10 +374,23 @@ public sealed partial class EditorShell
 
     internal void OnGameMessage(Link.ILinkMessage message)
     {
-        if (message is PickResult picked)
+        switch (message)
         {
-            OnPickResult(picked);
-            return;
+            case PickResult picked:
+                OnPickResult(picked);
+                return;
+            case Link.Protocol.GameCommands commands:
+                OnGameCommands(commands);
+                return;
+            case Link.Protocol.GameCommandResult result:
+                OnGameCommandResult(result);
+                return;
+            case Link.Protocol.GameStats stats:
+                Stats.Apply(stats);
+                return;
+            case Link.Protocol.HostStats host:
+                Stats.Apply(host);
+                return;
         }
         if (message is not EditProblems problems)
         {

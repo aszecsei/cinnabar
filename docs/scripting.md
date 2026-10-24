@@ -63,7 +63,7 @@ The `interrupt` callback checks a deadline at loop back edges and calls. A scrip
 ### Garbage collection
 
 - The script phase runs an incremental GC step with a fixed budget each frame. It never runs a full collection during a frame.
-- Each loaded module gets a Luau memory category (`lua_setmemcat`), up to 255 modules. Category 0 is the engine. The debug overlay and the editor show memory by module.
+- Each loaded module gets a Luau memory category (`lua_setmemcat`): its index + 1, and the last of the 256 modules shares the 255th's. Category 0 is the engine. A module's top level runs in its category, a main script's thread has its module's, and each behaviour instance keeps its class's module's, which its callbacks run in. A coroutine's thread keeps the category of the code that started it, so what a behaviour's coroutines allocate counts toward its module too. `script.memory` gives the VM's total and each module's part, and the editor's resource monitor shows them.
 
 ## Values
 
