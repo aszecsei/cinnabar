@@ -1,18 +1,24 @@
 package mygame
 
+import "core:c"
 import "core:fmt"
 import "core:hash"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 import "core:slice"
 import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
-import "cinnabar:engine/render"
+import "cinnabar:core/luau"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/render"
+import "cinnabar:engine/script"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
 TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
@@ -26,6 +32,11 @@ SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
 SHADOWS_RT_LIB :: #load("shaders/shadows_rt.lib.dxil")
 COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
+// The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
+CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
+// Content refers to content by GUID. Until scenes exist, the game reads its one script's GUID from the .meta file.
+HELLO_META :: #load("content/scripts/hello.luau.meta", string)
+PULSE_META :: #load("content/scripts/pulse.luau.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -194,6 +205,10 @@ Game_State :: struct {
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
+	assets:      asset.Assets,
+	scripts:     script.Runtime,
+	// content/scripts/hello.luau, which the scheduler runs.
+	hello:       script.Main_Script,
 }
 
 Pipelines :: struct {
@@ -234,9 +249,9 @@ Frame :: struct {
 
 init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
-	s^ = {
-		platform = platform,
-	}
+	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
+	mem.zero_item(s)
+	s.platform = platform
 
 	vertices := [3]Vertex {
 		{{0, 0.6}, {0.5, 0}, {1, 0.3, 0.3, 1}},
@@ -306,6 +321,21 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	register_world(s)
 	spawn_scene(s)
+	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
+	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
+		log.panic("mygame: cannot open the script VM")
+	}
+	if hello, ok := format.meta_guid(HELLO_META); ok {
+		s.hello, _ = script.spawn_script(&s.scripts, hello)
+	}
+	// Until scenes exist, the game attaches the large triangles' behaviour itself.
+	if pulse, ok := format.meta_guid(PULSE_META); ok {
+		triangles := make([dynamic]ecs.Entity, platform.frame_allocator)
+		ecs.collect(&s.world, {ecs.registry_find_type(&s.world.registry, Triangle).id}, &triangles)
+		for e in triangles {
+			script.attach_script(&s.scripts, e, pulse)
+		}
+	}
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
 
@@ -313,6 +343,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 // layout_hash on its own, so a component change restarts the game.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_engine_components(r)
+	script.register_components(r)
 	ecs.register_component(r, Spin)
 	ecs.register_component(r, Triangle)
 }
@@ -345,6 +376,25 @@ spawn_scene :: proc(s: ^Game_State) {
 	}
 }
 
+// register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
+register_scripts :: proc(r: ^script.Runtime) {
+	script.expose(r, Spin)
+	script.expose(r, Triangle)
+	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
+		luau.pushnumber(L, f64(game_of(L).frame_count))
+		return 1
+	}, "() -> number")
+	script.define(r, "Game.greeting", proc(L: ^luau.State) -> c.int {
+		luau.pushstring(L, "hello from Luau")
+		return 1
+	}, "() -> string")
+}
+
+// game_of is the Game_State of a script binding.
+game_of :: proc "contextless" (L: ^luau.State) -> ^Game_State {
+	return container_of(script.runtime_of(L), Game_State, "scripts")
+}
+
 spin :: proc(ctx: ^ecs.System_Context) {
 	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
 	for view in ecs.query_next(&it) {
@@ -358,12 +408,14 @@ spin :: proc(ctx: ^ecs.System_Context) {
 
 update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s := (^Game_State)(state)
+	defer end_frame(s)
 	s.frame_count += 1
 	s.elapsed += dt
 
 	ecs.run_fixed(&s.world, dt, s)
 	ecs.run_stage(&s.world, .Update, dt, s)
-	// The script phase and its apply go here once scripts exist.
+	// The script phase, with its structural changes (phases 5 and 6).
+	script.run_phase(&s.scripts, dt, s.platform.input())
 	ecs.run_stage(&s.world, .Late, dt, s)
 
 	if s.elapsed >= s.next_report {
@@ -395,6 +447,11 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 	render_frame(s, {u32(size.x), u32(size.y)}, pass)
 	return true
+}
+
+// end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
+end_frame :: proc(s: ^Game_State) {
+	script.reload_changed(&s.scripts, asset.poll(&s.assets))
 }
 
 // stream_rings generates the rings' mip chain and streams it. The backend copies the data before the call returns.
@@ -697,6 +754,8 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 
 shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
+	script.destroy(&s.scripts)
+	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
 	destroy_pipelines(s.platform, s.pipelines)
@@ -722,6 +781,8 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s.platform = platform
 	ecs.reload(&s.world, platform)
 	register_world(s)
+	asset.reload(&s.assets, platform)
+	script.reload(&s.scripts, platform, register_scripts)
 	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
 	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
 	if s.mesh_path {
@@ -866,6 +927,23 @@ layout_hash :: proc() -> u64 {
 	return hash.fnv64a(slice.to_bytes(hashes[:]))
 }
 
+// script_types writes the scripts' definition file from a world and a script runtime of its own, so it makes no
+// game state and no GPU resources.
+script_types :: proc(platform: ^core.Platform_API) -> string {
+	world := new(ecs.World, platform.permanent_allocator)
+	if !ecs.init(world, platform) {
+		log.panic("mygame: cannot create a world for the script types")
+	}
+	defer ecs.destroy(world)
+	register_components(&world.registry)
+	r := new(script.Runtime, platform.permanent_allocator)
+	if !script.init(r, platform, world, nil, register_scripts) {
+		log.panic("mygame: cannot open a script VM for the script types")
+	}
+	defer script.destroy(r)
+	return script.definitions(r, platform.permanent_allocator)
+}
+
 @(export)
 cinnabar_game_api :: proc() -> core.Game_API {
 	return {
@@ -876,5 +954,6 @@ cinnabar_game_api :: proc() -> core.Game_API {
 		state_size = state_size,
 		layout_hash = layout_hash,
 		gpu_format_hash = gpu.format_hash,
+		script_types = script_types,
 	}
 }

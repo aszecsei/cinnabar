@@ -50,10 +50,15 @@ flowchart TB
 |---|---|---|
 | `lib/core` | Host | Platform services and every OS or device resource: window, input, GPU device, audio device, worker threads, fiber scheduler, virtual memory, file I/O, file watching, dynamic library loading. |
 | `lib/core/gpu` | Shared | Backend-agnostic GPU interface: handles and the command list format. Backends execute the command lists that the engine records. |
+| `lib/core/luau` | Shared | Odin bindings to the Luau C API. |
+| `lib/core/script` | Host | The script VM's allocator, and every function pointer that Luau stores. |
 | `lib/core/layout` | Shared | Type layout hashing, used to detect `Game_State` and command format changes across a reload. |
 | `lib/core/gpu/d3d12` | Host | The D3D12 backend. |
 | `lib/core/gpu/null` | Host | A backend that validates command lists and executes nothing. Used for headless tests. |
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
+| `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
+| `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
+| `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
 | `src/editor` | — | The C# editor application. It runs `host.exe` as a child process. |
@@ -69,7 +74,7 @@ flowchart TB
 The two sides communicate only through two structs of procedures:
 
 - **`Platform_API`** (host → game): what `core` provides to the engine.
-- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, plus the editor procedures described in [Editor](#editor).
+- **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `script_types` (see [Scripting](scripting.md#types-and-tooling)), plus the editor procedures described in [Editor](#editor).
 
 In development, the host gets `Game_API` from the DLL's exports. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
 
@@ -102,7 +107,7 @@ One frame runs these phases in order:
 2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs), applies their structural changes and propagates transforms.
 3. Run the `Update` systems (parallel jobs).
 4. Apply queued structural changes to the world.
-5. Run the script phase (serial): deliver events and resume coroutines.
+5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines.
 6. Apply queued structural changes to the world.
 7. Run the `Late` systems, then transform propagation (parallel jobs).
 8. Record render command lists. Render extraction interpolates between the last two ticks.
@@ -135,7 +140,8 @@ Details: [GPU](gpu.md).
 Gameplay logic that spans frames runs in sandboxed Luau.
 
 - The host and the game DLL share one copy of Luau. It is `luau.dll` in development and linked statically in release.
-- The VM heap lives in host-owned memory, so scripts and their suspended coroutines survive code reload.
+- The VM heap lives in host-owned memory, so scripts and their suspended coroutines survive code reload. Every function pointer that Luau stores is host code, which forwards to the game's bindings by stable ID.
+- The API follows Unity's: entities, behaviours with serialized fields, `get`, `spawn`, `destroy` and coroutines.
 - Scripts are content. `tools/cook` compiles them to bytecode, and they hot-reload through the asset system.
 
 Details: [Scripting](scripting.md).
@@ -169,7 +175,7 @@ Details: [Editor](editor.md).
 ```mermaid
 flowchart TB
     SOURCE[("source/<br/>png, gltf, wav, hlsl, scripts, scenes<br/>+ .meta sidecars")]
-    CACHE[("cache/<br/>content-addressed,<br/>one blob per compiled asset")]
+    CACHE[("build/cache/<br/>one blob per asset<br/>and configuration")]
     BUNDLES[("bundles/*.cbb")]
     DEVRT["Development runtime"]
     RELRT["Release runtime"]

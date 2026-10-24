@@ -7,7 +7,7 @@ All world data lives in a native ECS in `lib/engine/ecs`. Scripts see an object-
 - **Entities** are generational handles: a 32-bit index and a 32-bit generation. A handle to a destroyed entity is detected; it is never reused silently. A slot whose generation would wrap is retired.
 - **Component types have stable IDs.** The ID is a hash of the type's name, or an explicit value. It is never a `typeid` (see [Hot reload](hot-reload.md#rules), rule 3). Cooked scenes, the editor link and scripts all identify component types by this ID.
 - **Native systems** run as jobs on the job system. Engine systems (transforms, physics, animation, render extraction) and performance-critical game logic are native.
-- **Structural changes are deferred.** Spawning, destroying, and adding or removing components go into command buffers. The buffers are applied at fixed points in the frame. This applies to native systems and to scripts.
+- **Structural changes are deferred.** Spawning, destroying, and adding or removing components go into command buffers. The buffers are applied at fixed points in the frame. Scripts are the exception: the script phase is serial, so they change the structure at once, except for despawns (see [Scripting](scripting.md#structural-changes)).
 - **Resources are not entities.** World-wide state, such as the active camera or the physics settings, is a plain field in `Game_State`.
 
 ### Component registry
@@ -31,6 +31,8 @@ All world data lives in a native ECS in `lib/engine/ecs`. Scripts see an object-
 - Iteration gives chunks. A system gets a typed slice of each column from the chunk. In debug builds, the column type is checked against the term.
 - Iteration can start at a chunk index and stop after a number of chunks. This is how a system divides its work into jobs.
 - Queries are registrations. `reload` clears them, and the game creates them again in `on_reload`.
+- **Inactive entities:** a query excludes the `Inactive` tag unless it names `Inactive` in a term. Render extraction, physics and game systems therefore skip inactive entities without extra terms. `ecs.collect` skips them the same way. `Disabled` marks an entity that was deactivated itself. The world adds `Inactive` to it and to its descendants. `ecs.set_active` updates them at once, and `apply` updates them for the changes in its buffers. Native code that adds or removes `Parent` or `Disabled` directly calls `update_activity` before the next query. Activity is the scripts' `set_active` (see [Scripting](scripting.md#enabled-state)).
+- **The log:** `ecs.watch` makes the world log the removal of chosen components, with their first 8 bytes, and every change of `Inactive`. The script runtime watches `Behaviours`, and drains the log with `take_log` each script phase. A world that nothing watches logs nothing.
 
 ### Systems
 
@@ -94,6 +96,7 @@ World positions are fixed-point: `World_Position` holds three `i64` values in un
 - **Despawning a parent despawns its descendants.** To keep a child, remove its `Parent` first. Entities do not store their children, so finding them scans every child in the world. `apply` scans once, at the end, for every despawn in its buffers, and commands for the children in the same `apply` still run first. The immediate `despawn` scans at once, so use commands to despawn many entities.
 - The world keeps every child sorted by depth, and sorts again only when the hierarchy changes. Propagation runs one level at a time. The entities in one level are processed in parallel.
 - Propagation runs after each fixed tick and again after the `Late` stage.
+- Propagation includes `Inactive` entities, so an entity is in the right place when it becomes active.
 
 ## Fixed and variable rate
 
@@ -118,8 +121,9 @@ Rendering does not read the ECS. Each frame, before the render graph is built, e
 
 ## The script view
 
-- Scripts hold entity handles and access components through them, for example `entity:get(Transform)`. Scripts never hold pointers into component storage, because storage can move when components are added or removed.
-- A `Behaviour` component holds a reference to a Luau object. Behaviours receive events (`on_spawn`, `on_hit`) and can start coroutines. This gives scripters a GameObject-like model.
-- There is no per-entity `update` call by default. Calling into Luau for every entity every frame is too expensive at scale. The API favors events, coroutines and batch operations.
-- Scripts run once per frame, between the `Update` and `Late` stages. A script that affects the simulation (for example, a force) records the change, and the next tick uses it.
-- Scripts can define their own components. These are Luau tables in a side table keyed by entity. Native systems cannot query them efficiently, so components that need performance are defined in Odin.
+Details: [Scripting](scripting.md#the-entity-and-component-view).
+
+- Scripts hold entity handles and access components through them, for example `entity:get(Health)`. An entity is a light userdata whose payload is the handle, so it does not allocate and works as a table key. Scripts never hold pointers into component storage, because storage can move when components are added or removed.
+- A behaviour is a script class, like Unity's `MonoBehaviour`. The native `Behaviours` component holds a reference to the entity's record of behaviour instances. Behaviours receive events (`on_trigger_enter`), own coroutines and hold the script-side state of the entity. Native systems cannot query that state efficiently, so state that needs performance is a native component.
+- Per-entity `update` is opt-in for each class. Calling into Luau for every entity every frame is too expensive at scale. The API favors events, coroutines and batch operations.
+- Scripts run once per frame, between the `Update` and `Late` stages. A script that affects the simulation (for example, a force) writes a component, and the next tick uses it.

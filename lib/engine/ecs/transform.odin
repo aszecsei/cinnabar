@@ -55,6 +55,8 @@ register_engine_components :: proc(r: ^Registry) {
 	register_component(r, Local_Transform, LOCAL_TRANSFORM_ID)
 	register_component(r, Parent, PARENT_ID)
 	register_component(r, Previous_Transform, PREVIOUS_TRANSFORM_ID)
+	register_component(r, Disabled, DISABLED_ID)
+	register_component(r, Inactive, INACTIVE_ID)
 }
 
 // compose gives a child's world-space pose. A non-uniform parent scale is applied before the child's rotation, so
@@ -170,7 +172,7 @@ propagate_one :: proc(w: ^World, e: Entity) {
 }
 
 // rebuild_hierarchy sorts every child by its depth. levels[d] is where the children at depth d + 1 start.
-@(private = "file")
+@(private)
 rebuild_hierarchy :: proc(w: ^World) {
 	w.hierarchy_dirty = false
 	count := 0

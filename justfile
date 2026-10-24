@@ -1,5 +1,8 @@
 set dotenv-load
 set windows-shell := ["C:/Program Files/Git/bin/bash.exe", "-c"]
+# Multi-line recipes are [script] recipes, which run through this interpreter. A shebang would need cygpath, which only
+# Git Bash has on its PATH, so the recipes would fail from other shells.
+set script-interpreter := ["C:/Program Files/Git/bin/bash.exe"]
 
 # =================================
 # Configuration
@@ -15,7 +18,22 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render lib/engine/ecs src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+# Luau's experimental direct field access for engine userdata (see docs/scripting.md#direct-field-access). Off unless
+# CINNABAR_DIRECT_ACCESS=true.
+direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
+luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
+# The development host and game DLL share luau.dll (see docs/scripting.md#embedding). Everything else links Luau statically.
+dev_defines := "-define:LUAU_SHARED=true " + luau_features
+# lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
+luau_dir := build_dir + "/luau"
+cmake_generator := "Visual Studio 17 2022"
+# The cooker puts this in every script's cache key, so a Luau update cooks every script again.
+luau_version := `git -C vendor/luau describe --tags --always`
+content_root := "samples/" + game + "/content"
+cache_dir := build_dir + "/cache"
+# The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
+script_types := build_dir + "/script-types/cinnabar.d.luau"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -33,8 +51,8 @@ install: install-agility install-dxc
     git submodule update --init --recursive
 
 # Download the D3D12 Agility SDK runtime
+[script]
 install-agility:
-    #!/usr/bin/env bash
     set -euo pipefail
     [ -f "{{agility_dir}}/D3D12Core.dll" ] && exit 0
     mkdir -p "{{agility_dir}}"
@@ -44,8 +62,8 @@ install-agility:
     echo "✓ Agility SDK {{agility_version}}"
 
 # Download the DirectX Shader Compiler
+[script]
 install-dxc:
-    #!/usr/bin/env bash
     set -euo pipefail
     dir="$(dirname "{{dxc}}")"
     [ -f "{{dxc}}" ] && exit 0
@@ -65,8 +83,8 @@ setup: install
 update: update-luau
 
 # Update Luau to a release tag (default: latest)
+[script]
 update-luau tag="":
-    #!/usr/bin/env bash
     set -euo pipefail
     git -C vendor/luau fetch --tags --quiet
     tag="{{tag}}"
@@ -81,18 +99,40 @@ update-luau tag="":
 
 alias b := build
 
-# Build the host and the game DLL
-build: host game-dll
+# Build the host and the game DLL, and cook the game's scripts
+build: host game-dll script-types scripts
 
 # Build the development host
-host: agility-runtime
+host: agility-runtime luau
     mkdir -p "{{build_dir}}"
-    odin build src/host {{collections}} -out:"{{build_dir}}/host.exe" -debug
+    odin build src/host {{collections}} {{dev_defines}} -out:"{{build_dir}}/host.exe" -debug
+
+# Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
+[script]
+luau:
+    set -euo pipefail
+    for kind in static shared; do
+        dir="{{luau_dir}}/$kind"
+        shared=$([ "$kind" = shared ] && echo ON || echo OFF)
+        [ -f "$dir/CMakeCache.txt" ] || cmake -S lib/core/luau -B "$dir" -G "{{cmake_generator}}" -A x64 -DCINNABAR_LUAU_SHARED=$shared > /dev/null
+        target=$([ "$kind" = shared ] && echo luau || echo luau_shim)
+        cmake --build "$dir" --config Release --target "$target" -- -m -nologo -v:quiet
+    done
+    # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
+    cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
 
 # Build the cooker
-cook:
+cook: luau
     mkdir -p "{{build_dir}}"
-    odin build tools/cook -out:"{{build_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
+
+# Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
+scripts config="dev": cook
+    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" --root game="{{content_root}}"
+
+# Write the scripts' type definitions from the game's bindings
+script-types: host game-dll
+    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
 
 # Cook the game's shaders: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray tracing library.
 # Only changed shaders recompile (see tools/cook).
@@ -100,9 +140,9 @@ shaders: install-dxc cook
     "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: shaders
+game-dll: shaders luau
     mkdir -p "{{build_dir}}/pdb"
-    odin build "samples/{{game}}" {{collections}} -build-mode:dll \
+    odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{build_dir}}/{{game}}.dll" \
         -pdb-name:"{{build_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
         -debug
@@ -123,8 +163,8 @@ viewer:
     odin build tools/viewer {{collections}} -out:"{{build_dir}}/viewer.exe" -debug
 
 # Run the game in shared mode, as the editor will, and show its frames in the viewer
+[script]
 dev-shared name="cinnabar": build viewer
-    #!/usr/bin/env bash
     set -euo pipefail
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --shared "{{name}}" &
     host=$!
@@ -134,9 +174,9 @@ dev-shared name="cinnabar": build viewer
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Build the statically linked release executable
-release: agility-runtime shaders
+release: agility-runtime shaders luau script-types (scripts "release")
     mkdir -p "{{build_dir}}"
-    odin build "samples/{{game}}/main_release" {{collections}} -out:"{{build_dir}}/{{game}}.exe" -o:speed
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
@@ -163,8 +203,10 @@ fmt:
 # Testing
 # =================================
 
-test:
-    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render lib/engine/ecs tools/cook; do odin test "$p" {{collections}} || exit 1; done
+test: luau
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+    # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
+    odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
 
 # =================================
 # Cleanup
@@ -185,8 +227,8 @@ info:
     @echo ""
     @just --list
 
+[script]
 add-tag:
-    #!/usr/bin/env bash
     set -euo pipefail
     VERSION=$(<VERSION)
     # if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then

@@ -5,6 +5,8 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/luau"
+import script_host "cinnabar:core/script"
 
 // Platform_API is everything core provides to the game side (host -> game).
 // It is the complete porting surface.
@@ -12,6 +14,8 @@ Platform_API :: struct {
 	// Allocators are built by the host, so their procedures stay valid across reloads.
 	permanent_allocator: runtime.Allocator,
 	frame_allocator:     runtime.Allocator,
+	// A general-purpose allocator for loaded assets, which can free. Its memory is the host's.
+	asset_allocator:     runtime.Allocator,
 
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
@@ -21,6 +25,14 @@ Platform_API :: struct {
 	memory_release: proc(ptr: rawptr, size: int),
 
 	time_seconds:     proc() -> f64,
+	// The keyboard and mouse at the start of the frame. In shared mode the window is hidden, so the input is empty
+	// until the editor link sends input.
+	input:            proc() -> Input,
+	// File I/O for the asset runtime. Paths are relative to the working directory. file_read reads a whole file into
+	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
+	// or 0 if it does not exist.
+	file_read:        proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool),
+	file_modified:    proc(path: string) -> i64,
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),
@@ -78,6 +90,20 @@ Platform_API :: struct {
 	gpu_destroy_accel:            proc(accel: gpu.Accel_Struct),
 	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
 	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
+
+	// The script VM lives in host memory, and every function pointer that it stores is host code (see
+	// docs/scripting.md#host-trampolines). bindings must stay at the same address until script_close, and on_reload
+	// must register every binding again. The VM opens with the built-in libraries. A soft restart closes the VMs
+	// that the game left open.
+	script_open:         proc(bindings: ^script_host.Bindings) -> ^luau.State,
+	script_close:        proc(L: ^luau.State),
+	// Pushes a closure that calls the binding with this name. It stays valid across code reloads.
+	script_push_binding: proc(L: ^luau.State, name: string),
+	// Interns a method or field name and returns its atom, or -1 if the interner is full. Atoms never change meaning.
+	script_atom:         proc(name: string) -> i16,
+	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting.md#direct-field-access). It returns
+	// false when the host was built without LUAU_DIRECT_ACCESS.
+	script_direct_access: proc(L: ^luau.State, tag: i32) -> bool,
 }
 
 // Game_API is what the game side provides to the host (game -> host).
@@ -92,6 +118,9 @@ Game_API :: struct {
 	layout_hash: proc() -> u64,
 	// The host refuses a DLL whose GPU command format differs from its own (see docs/gpu.md#command-buffers).
 	gpu_format_hash: proc() -> u64,
+	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
+	// must not need init: it makes its own script runtime. See docs/scripting.md#types-and-tooling.
+	script_types:    proc(platform: ^Platform_API) -> string,
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

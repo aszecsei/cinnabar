@@ -65,6 +65,9 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 	if id == PARENT_ID {
 		w.hierarchy_dirty = true
 	}
+	if id == PARENT_ID || id == DISABLED_ID {
+		w.activity_dirty = true
+	}
 	a := archetype(w, record.archetype)
 	column, found := slice.binary_search(archetype_components(a), id)
 	if !found {
@@ -110,6 +113,10 @@ remove_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 	if id == PARENT_ID {
 		w.hierarchy_dirty = true
 	}
+	if id == PARENT_ID || id == DISABLED_ID {
+		w.activity_dirty = true
+	}
+	log_removal(w, e, record.archetype, u32(column))
 	ids: [MAX_ARCHETYPE_COMPONENTS]Component_Id
 	copy(ids[:], a.ids[:column])
 	copy(ids[column:], a.ids[column + 1:a.component_count])

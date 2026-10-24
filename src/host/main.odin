@@ -5,6 +5,7 @@ import "core:dynlib"
 import "core:fmt"
 import "core:log"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
@@ -23,14 +24,22 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	// host [game.dll] [--shared <name>]. --shared renders into shared textures for the editor or tools/viewer.
+	// host [game.dll] [--shared <name>] [--emit-script-types <file>]. --shared renders into shared textures for the
+	// editor or tools/viewer. --emit-script-types writes the scripts' definition file and exits.
 	source_path := DEFAULT_GAME_PATH
 	shared_target := ""
+	script_types := ""
 	for i := 1; i < len(os.args); i += 1 {
-		if os.args[i] == "--shared" && i + 1 < len(os.args) {
+		switch {
+		case os.args[i] == "--shared" && i + 1 < len(os.args):
 			shared_target = os.args[i + 1]
 			i += 1
-		} else {
+		case os.args[i] == "--emit-script-types" && i + 1 < len(os.args):
+			script_types = os.args[i + 1]
+			// The window stays hidden.
+			shared_target = "cinnabar_script_types"
+			i += 1
+		case:
 			source_path = os.args[i]
 		}
 	}
@@ -45,6 +54,10 @@ main :: proc() {
 		return
 	}
 	platform := core.platform_api()
+	if script_types != "" {
+		emit_script_types(game, platform, script_types)
+		return
+	}
 	state := core.alloc_game_state(game.api.state_size())
 	game.api.init(state, platform)
 
@@ -69,6 +82,18 @@ main :: proc() {
 		}
 	}
 	game.api.shutdown(state)
+}
+
+emit_script_types :: proc(game: Game_Module, platform: ^core.Platform_API, path: string) {
+	text := game.api.script_types(platform)
+	if dir := filepath.dir(path); dir != "" {
+		os.make_directory_all(dir)
+	}
+	if err := os.write_entire_file(path, transmute([]byte)text); err != nil {
+		log.errorf("host: %s: %v", path, err)
+		os.exit(1)
+	}
+	log.infof("host: wrote the script types to %s", path)
 }
 
 Load_Result :: enum {
