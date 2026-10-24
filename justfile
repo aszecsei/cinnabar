@@ -1,5 +1,8 @@
 set dotenv-load
 set windows-shell := ["C:/Program Files/Git/bin/bash.exe", "-c"]
+# Multi-line recipes are [script] recipes, which run through this interpreter. A shebang would need cygpath, which only
+# Git Bash has on its PATH, so the recipes would fail from other shells.
+set script-interpreter := ["C:/Program Files/Git/bin/bash.exe"]
 
 # =================================
 # Configuration
@@ -42,8 +45,8 @@ install: install-agility install-dxc
     git submodule update --init --recursive
 
 # Download the D3D12 Agility SDK runtime
+[script]
 install-agility:
-    #!/usr/bin/env bash
     set -euo pipefail
     [ -f "{{agility_dir}}/D3D12Core.dll" ] && exit 0
     mkdir -p "{{agility_dir}}"
@@ -53,8 +56,8 @@ install-agility:
     echo "✓ Agility SDK {{agility_version}}"
 
 # Download the DirectX Shader Compiler
+[script]
 install-dxc:
-    #!/usr/bin/env bash
     set -euo pipefail
     dir="$(dirname "{{dxc}}")"
     [ -f "{{dxc}}" ] && exit 0
@@ -74,8 +77,8 @@ setup: install
 update: update-luau
 
 # Update Luau to a release tag (default: latest)
+[script]
 update-luau tag="":
-    #!/usr/bin/env bash
     set -euo pipefail
     git -C vendor/luau fetch --tags --quiet
     tag="{{tag}}"
@@ -99,8 +102,8 @@ host: agility-runtime luau
     odin build src/host {{collections}} {{dev_defines}} -out:"{{build_dir}}/host.exe" -debug
 
 # Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
+[script]
 luau:
-    #!/usr/bin/env bash
     set -euo pipefail
     for kind in static shared; do
         dir="{{luau_dir}}/$kind"
@@ -150,8 +153,8 @@ viewer:
     odin build tools/viewer {{collections}} -out:"{{build_dir}}/viewer.exe" -debug
 
 # Run the game in shared mode, as the editor will, and show its frames in the viewer
+[script]
 dev-shared name="cinnabar": build viewer
-    #!/usr/bin/env bash
     set -euo pipefail
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --shared "{{name}}" &
     host=$!
@@ -212,8 +215,8 @@ info:
     @echo ""
     @just --list
 
+[script]
 add-tag:
-    #!/usr/bin/env bash
     set -euo pipefail
     VERSION=$(<VERSION)
     # if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
