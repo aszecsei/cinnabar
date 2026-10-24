@@ -39,7 +39,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
-**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference` and `destroy_scope`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
+**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference`, `destroy_scope`, `stream_buffer`, `stream_texture` and `transfer_done`. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
 The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 
@@ -78,7 +78,7 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 - **Bindless indices:** see [Bindless indices](#bindless-indices).
 - **Creation:** `create_*` returns the nil handle and logs an error if the description is invalid. The backend copies the description and the initial data, so neither can point into the DLL image after the call.
 - **Initial data:** a buffer or texture created with data gets it through a staging buffer. The copies run before the command lists of the frame, so the resource is ready in the frame that creates it. Texture data is mip 0 with tightly packed rows.
-- **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout. `gpu.initial_layout` gives the layout. The [render graph](#render-graph) takes over from there.
+- **Initial layout:** a texture starts in the layout of its first usage in this order: render target, depth stencil, storage, sampled. A texture created with data starts in the sampled layout, and so does a `Streamed` texture once its transfer is done. `gpu.initial_layout` gives the layout. The [render graph](#render-graph) takes over from there.
 - **Deferred destruction:** `destroy` invalidates the handle at once. The backend releases the resource, and reuses the pool slot and its descriptors, when the GPU finishes the frame that destroyed it. Two frames are in flight.
 - **Lifetime scopes:** each description has a `scope`: `Game` (the default), `Level`, `Asset` or `Permanent`. On a soft restart (see [Hot reload](hot-reload.md#reload-sequence)), `core` destroys every `Game` resource that the old game left, and keeps the others. `gpu_destroy_scope` destroys a `Level` or `Asset` scope. `Permanent` resources belong to `core` and the backend, for example the frame target and the upload rings.
 - **Memory:** the first version uses committed resources. Suballocation is a later change inside the backend.
@@ -143,7 +143,7 @@ The game builds a `render.Graph` every frame in frame memory. Passes declare how
 
 - **Passes:** `add_render_pass` or `add_compute_pass`, in execution order. Each pass has a `Pass_Proc` that records its commands through a `Pass_Context`. The graph records the barriers, a debug marker with the pass name, and for a render pass `Begin_Pass` and `End_Pass`.
 - **Pieces:** `pieces = n` splits a pass across `n` jobs (at most `MAX_PASS_PIECES`). The `Pass_Proc` runs once per piece, and `Pass_Context.piece` and `piece_count` tell it which share of the work to record. The first piece records the barriers. A render pass becomes a [split pass](#split-passes): the graph makes the pieces load and store between each other, and puts each piece's debug marker inside its pass. A compute pass's pieces are plain command buffers.
-- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer, and `indirect_buffer` declares indirect arguments or a count. `import_accel`, `build_accel`, `read_accel` and `build_input` declare acceleration structures, their builds, traces against them, and the geometry and bottom-level structures that a build reads. `add_ray_tracing_pass` adds a pass whose shader accesses synchronize with the ray tracing stage. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
+- **Uses:** `color` and `depth` declare attachments with load and store operations. `read` and `write` declare shader access to textures and buffers. `index_buffer` declares an index buffer, and `indirect_buffer` declares indirect arguments or a count. `import_accel`, `build_accel`, `read_accel` and `build_input` declare acceleration structures, their builds, traces against them, and the geometry and bottom-level structures that a build reads. `add_ray_tracing_pass` adds a pass whose shader accesses synchronize with the ray tracing stage. `copy_source` and `copy_dest` declare the buffers of `cmd_copy_buffer`. A pass can read a resource in several ways, but any other second use of the same resource in one pass is an error.
 - **Imported resources:** `import_texture` and `import_buffer` add resources that outlive the frame. An imported texture has a resting use, and the graph returns it to that layout at the end of the frame. The frame target rests as `Color`. A texture created with data rests as `Sampled`.
 - **Transient textures:** `create_texture` adds a texture that exists for one frame. The graph adds the usages that its uses need. A `Texture_Cache` in `Game_State` keeps the textures between frames, keyed by description and label, and destroys a texture after `CACHE_LIFETIME` frames without use.
 - **Barriers:** a use needs a barrier when it changes the layout, when it follows a write, or when it writes after any access. Reads in the same layout merge without a barrier, so a later write waits for all of them. A transient texture starts `Undefined`, and sampling it before a pass writes it is an error.
@@ -169,7 +169,17 @@ The engine culls and builds draws on the GPU.
 - Work on both queues is frame-scoped: a frame's compute work starts after the previous frame's end, and the frame ends after its compute work. The upload ring and deferred destruction therefore cover both queues.
 - **D3D12:** a direct and a compute queue, each with a fence. `end_frame` runs the submissions in order. Each queue's lists wait in a batch until another queue waits for them or the frame ends, and then run in one `ExecuteCommandLists` call after the batch's fence waits. A wait applies before the whole batch, which can only delay earlier lists. Each wait records the fence value at the time it is declared, so batching cannot make a wait cycle.
 - **Vulkan and Metal:** queue submissions with timeline semaphores, and a Metal compute command queue with `MTLEvent`s.
-- A copy queue comes with asset streaming (phase 7).
+- The backend has a copy queue for [streaming](#streaming). It is not a submission target: command buffers run on the graphics and compute queues, and those queues also run `cmd_copy_buffer`.
+
+## Streaming
+
+Streaming copies data into resources on the copy queue, beside the frame's work. The asset runtime will stream its GPU data this way.
+
+- `gpu_stream_buffer(buffer, offset, data)` and `gpu_stream_texture(texture, data)` copy the data before they return and return a `Transfer`. Use the resource once `gpu_transfer_done(transfer)` is true.
+- A streamed texture has the `Streamed` usage with `Sampled` and no other usage, and is streamed once with its whole mip chain: each mip tightly packed, mip 0 first (`mip_chain_size`). Copy queues cannot change texture layouts, so the texture is created in the common layout. When its copy is complete, the backend moves it to the sampled layout at the start of the next frame, and only then reports the transfer done.
+- A failed stream logs an error and returns the zero `Transfer`. Validation rejects a range out of bounds, data of the wrong size, and a second stream of a texture.
+- **D3D12:** each stream call records into the open copy batch with its own staging buffer, and `end_frame` executes the batch and signals the copy fence. A transfer's ID is its batch's fence value. A destroyed resource or a staging buffer is released only after both the frame fence and the copy fence pass, because a copy batch can outlive the frame.
+- **Copies in command buffers:** `cmd_copy_buffer` copies between two different buffers, outside render passes, with the `Copy` sync and the `Copy_Source` and `Copy_Dest` accesses. The source can be the upload ring, which makes it the way to update or clear a default-heap buffer. The sample zeroes its draw count this way.
 
 ## Mesh shaders
 
@@ -197,7 +207,8 @@ The engine culls and builds draws on the GPU.
 - The frame target is in the render target layout when the frame starts, and the game must leave it in that layout. Its contents are undefined at the start of each frame.
 - `core` reads the window size once at the start of each frame. The frame target has that size, and `window_size` returns it for the whole frame. While the window is minimized, the size is zero and the game renders nothing.
 - **Standalone:** `core` copies the frame target to the swapchain and presents with vsync. Vsync paces the frame.
-- **Editor:** `core` renders into a shared texture and signals a shared fence instead (see [Editor](editor.md#viewport)).
+- **Editor:** `core` renders into shared textures and signals a shared fence instead (see [Editor](editor.md#viewport)). `host --shared <name>` selects this: the window is hidden, the frame target keeps the window's size, and nothing presents. The D3D12 backend renders frame k into the named shared texture `<name>.texture<k % 3>` and then signals k on the shared fence `<name>.fence`, so a reader that sees fence value v reads texture v % 3. A frame ends with its texture in the common layout, which other processes can use. A 60 Hz timer paces the frame.
+- `tools/viewer <name>` opens these by name and shows the frames in its own window. It stands in for the editor's viewport, and `just dev-shared` runs both. There is no back-pressure yet: a reader that falls more than a frame behind can read a texture that the host is drawing again. The editor link will add it.
 
 ## Submission
 
@@ -208,8 +219,11 @@ The engine culls and builds draws on the GPU.
 ## Shaders
 
 - Shaders are HLSL. `tools/cook` compiles each shader to DXIL with DXC. A Vulkan port adds SPIR-V from DXC. A Metal port adds a metallib from `metal-shaderconverter`.
-- The cooker checks that each shader fits the fixed root signature. The runtime never compiles or reflects shaders.
-- Until `tools/cook` exists, the build compiles shaders with DXC directly. `just install` downloads the DXC release that the justfile pins. `just shaders` compiles each `<name>.hlsl` in the game's `shaders/` directory: its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points become `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`. A file with `[shader("...")]` attributes is a ray tracing library and becomes `<name>.lib.dxil`.
+- `tools/cook shaders` compiles shaders, and `just shaders` runs it on the game's `shaders/` directory with the DXC release that the justfile pins. Each `<name>.hlsl` compiles its `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points to `<name>.vs.dxil`, `<name>.ps.dxil`, `<name>.cs.dxil`, `<name>.as.dxil` and `<name>.ms.dxil`. A file with `[shader("...")]` attributes is a ray tracing library and becomes `<name>.lib.dxil`.
+- The cooker attaches the fixed root signature, `CN_ROOT_SIGNATURE` in `cinnabar.hlsli`, to every shader stage. So DXC rejects a shader that binds anything outside it, and the runtime never compiles or reflects shaders. A library gets its global root signature from the pipeline instead.
+- A pipeline passes its root signature to D3D12, which then ignores the embedded one. So debug builds compare each shader's embedded root signature with the backend's, and refuse a pipeline whose shaders differ. That catches `CN_ROOT_SIGNATURE` drifting from the backend.
+- An output recompiles only when its cache key changes: a hash of the cooker version, the DXC version, the profile, the entry point, and the source with every file it includes. The key is stored in `<output>.key`.
+- Pipeline descriptions stay in game code until the asset runtime can load cooked pipeline assets.
 - The game embeds the DXIL with `#load`. A hot reload therefore brings new shaders, and the game recreates its pipelines in `on_reload`.
 
 ## Debugging
@@ -228,7 +242,7 @@ The engine culls and builds draws on the GPU.
 | 4 | Indirect commands with draw ID and count buffers. Async compute queue. GPU culling sample. |
 | 5 | Mesh shaders, with the vertex fallback. |
 | 6 | Acceleration structures and inline ray tracing. Then ray tracing pipelines. |
-| 7 | Editor shared texture. Async copy queue for asset streaming. Cooker-built shaders and pipelines. |
+| 7 | Editor shared texture. Async copy queue for asset streaming. Cooker-built shaders and pipelines (cooked pipelines wait for the asset runtime). |
 
 ## Open questions
 

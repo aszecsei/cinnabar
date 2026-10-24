@@ -23,8 +23,18 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	source_path := len(os.args) > 1 ? os.args[1] : DEFAULT_GAME_PATH
-	if !core.init("cinnabar host") {
+	// host [game.dll] [--shared <name>]. --shared renders into shared textures for the editor or tools/viewer.
+	source_path := DEFAULT_GAME_PATH
+	shared_target := ""
+	for i := 1; i < len(os.args); i += 1 {
+		if os.args[i] == "--shared" && i + 1 < len(os.args) {
+			shared_target = os.args[i + 1]
+			i += 1
+		} else {
+			source_path = os.args[i]
+		}
+	}
+	if !core.init("cinnabar host", shared_target = shared_target) {
 		return
 	}
 	defer core.shutdown()

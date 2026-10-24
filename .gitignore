@@ -3,3 +3,4 @@ build
 vendor/agility
 vendor/dxc
 *.dxil
+*.dxil.key

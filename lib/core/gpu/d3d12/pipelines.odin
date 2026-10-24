@@ -56,29 +56,14 @@ init_pipelines :: proc() -> bool {
 	gpu.pool_init(&dev.pipeline_pool, gpu.MAX_PIPELINES, dev.allocator)
 	dev.compiling = make([]int, gpu.MAX_PIPELINES, dev.allocator)
 
-	params: [3]d3d.ROOT_PARAMETER1
-	params[ROOT_PUSH_CONSTANTS].ParameterType = ._32BIT_CONSTANTS
-	params[ROOT_PUSH_CONSTANTS].Constants = {
-		ShaderRegister = 0,
-		Num32BitValues = gpu.MAX_PUSH_CONSTANTS_SIZE / 4,
-	}
-	params[ROOT_PASS_CONSTANTS].ParameterType = .CBV
-	params[ROOT_PASS_CONSTANTS].Descriptor = {
-		ShaderRegister = 1,
-		Flags          = {.DATA_STATIC_WHILE_SET_AT_EXECUTE},
-	}
-	params[ROOT_DRAW_ID].ParameterType = ._32BIT_CONSTANTS
-	params[ROOT_DRAW_ID].Constants = {
-		ShaderRegister = 2,
-		Num32BitValues = 1,
-	}
+	params := root_parameters()
 	desc := d3d.VERSIONED_ROOT_SIGNATURE_DESC {
 		Version = ._1_1,
 	}
 	desc.Desc_1_1 = {
 		NumParameters = len(params),
 		pParameters   = &params[0],
-		Flags         = {.CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED, .SAMPLER_HEAP_DIRECTLY_INDEXED},
+		Flags         = ROOT_SIGNATURE_FLAGS,
 	}
 	blob, error_blob: ^d3d.IBlob
 	if !check(d3d.SerializeVersionedRootSignature(&desc, &blob, &error_blob), "SerializeVersionedRootSignature") {
@@ -131,6 +116,93 @@ create_signature :: proc(
 	}
 	check(dev.device->CreateCommandSignature(&desc, root_signature, d3d.ICommandSignature_UUID, (^rawptr)(&signature)), "CreateCommandSignature") or_return
 	return signature, true
+}
+
+// The fixed root signature. CN_ROOT_SIGNATURE in lib/core/gpu/shaders/cinnabar.hlsli describes the same one, and
+// tools/cook embeds it in every shader stage.
+@(private = "file")
+ROOT_SIGNATURE_FLAGS :: d3d.ROOT_SIGNATURE_FLAGS{.CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED, .SAMPLER_HEAP_DIRECTLY_INDEXED}
+
+// D3D12_ROOT_DESCRIPTOR_FLAG_DATA_STATIC_WHILE_SET_AT_EXECUTE. vendor:directx/d3d12 numbers ROOT_DESCRIPTOR_FLAG's bits
+// from 2 instead of 1, so its .DATA_STATIC_WHILE_SET_AT_EXECUTE is 0x8, which is DATA_STATIC.
+@(private = "file")
+DATA_STATIC_WHILE_SET_AT_EXECUTE :: 0x4
+
+@(private = "file")
+root_parameters :: proc() -> (params: [3]d3d.ROOT_PARAMETER1) {
+	params[ROOT_PUSH_CONSTANTS].ParameterType = ._32BIT_CONSTANTS
+	params[ROOT_PUSH_CONSTANTS].Constants = {
+		ShaderRegister = 0,
+		Num32BitValues = gpu.MAX_PUSH_CONSTANTS_SIZE / 4,
+	}
+	params[ROOT_PASS_CONSTANTS].ParameterType = .CBV
+	params[ROOT_PASS_CONSTANTS].Descriptor = {
+		ShaderRegister = 1,
+		Flags          = transmute(d3d.ROOT_DESCRIPTOR_FLAGS)u32(DATA_STATIC_WHILE_SET_AT_EXECUTE),
+	}
+	params[ROOT_DRAW_ID].ParameterType = ._32BIT_CONSTANTS
+	params[ROOT_DRAW_ID].Constants = {
+		ShaderRegister = 2,
+		Num32BitValues = 1,
+	}
+	return
+}
+
+// embedded_root_signature_matches compares a shader's embedded root signature with the backend's. A pipeline passes its
+// root signature to D3D12, which then ignores the embedded one, so only this check catches CN_ROOT_SIGNATURE drifting
+// from root_parameters. A shader without an embedded root signature passes.
+@(private = "file")
+embedded_root_signature_matches :: proc(blob: []byte) -> bool {
+	if len(blob) == 0 {
+		return true
+	}
+	deserializer: ^d3d.IVersionedRootSignatureDeserializer
+	iid := d3d.IVersionedRootSignatureDeserializer_UUID
+	if win.FAILED(d3d.CreateVersionedRootSignatureDeserializer(raw_data(blob), uint(len(blob)), iid, (^rawptr)(&deserializer))) {
+		return true
+	}
+	defer deserializer->Release()
+	desc: ^d3d.VERSIONED_ROOT_SIGNATURE_DESC
+	if win.FAILED(deserializer->GetRootSignatureDescAtVersion(._1_1, &desc)) {
+		return false
+	}
+	got := desc.Desc_1_1
+	expected := root_parameters()
+	if got.NumParameters != len(expected) || got.NumStaticSamplers != 0 || got.Flags != ROOT_SIGNATURE_FLAGS {
+		return false
+	}
+	for e, i in expected {
+		p := ([^]d3d.ROOT_PARAMETER1)(got.pParameters)[i]
+		if p.ParameterType != e.ParameterType || p.ShaderVisibility != e.ShaderVisibility {
+			return false
+		}
+		#partial switch e.ParameterType {
+		case ._32BIT_CONSTANTS:
+			if p.Constants != e.Constants {
+				return false
+			}
+		case .CBV:
+			if p.Descriptor != e.Descriptor {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// check_root_signatures logs and returns false if a shader's embedded root signature differs from the backend's.
+@(private = "file")
+check_root_signatures :: proc(label: string, blobs: ..[]byte) -> bool {
+	for blob in blobs {
+		if !embedded_root_signature_matches(blob) {
+			log.errorf(
+				"gpu: pipeline %q: a shader's embedded root signature differs from the backend's. Keep CN_ROOT_SIGNATURE in cinnabar.hlsli equal to root_parameters in pipelines.odin.",
+				label,
+			)
+			return false
+		}
+	}
+	return true
 }
 
 // wait_compiles waits for the compile jobs. Call it before the GPU device shuts down.
@@ -384,6 +456,9 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 		return
 	}
 
+	when ODIN_DEBUG {
+		check_root_signatures(desc.label, desc.vertex, desc.amplification, desc.mesh, desc.pixel) or_return
+	}
 	is_mesh := len(desc.mesh) > 0
 	if is_mesh && .Mesh_Shaders not_in dev.features {
 		log.errorf("gpu: pipeline %q: the device has no mesh shaders. Check gpu_features and use a vertex pipeline.", desc.label)
@@ -431,6 +506,9 @@ compute_task :: proc(desc: gpu.Compute_Pipeline_Desc) -> (task: ^Compile_Task, e
 	if err := gpu.validate_compute_pipeline_desc(desc); err != .None {
 		log.errorf("gpu: pipeline %q: %v", desc.label, err)
 		return
+	}
+	when ODIN_DEBUG {
+		check_root_signatures(desc.label, desc.compute) or_return
 	}
 	task = new_task(desc.label, desc.compute)
 	task.is_compute = true

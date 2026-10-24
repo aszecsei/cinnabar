@@ -15,7 +15,7 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render src/host samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/engine lib/engine/render src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -89,22 +89,15 @@ host: agility-runtime
     mkdir -p "{{build_dir}}"
     odin build src/host {{collections}} -out:"{{build_dir}}/host.exe" -debug
 
-# Compile the game's shaders. Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points
-# to <name>.<stage>.dxil. A file with [shader("...")] attributes is a ray tracing library: <name>.lib.dxil.
-shaders: install-dxc
-    #!/usr/bin/env bash
-    set -euo pipefail
-    for src in samples/{{game}}/shaders/*.hlsl; do
-        if grep -q '\[shader("' "$src"; then
-            "{{dxc}}" -nologo -HV 2021 -T lib_6_6 -I lib/core/gpu/shaders -Zi -Qembed_debug -Fo "${src%.hlsl}.lib.dxil" "$src"
-            continue
-        fi
-        for stage in vs ps cs as ms; do
-            grep -q "\b${stage}_main\b" "$src" || continue
-            "{{dxc}}" -nologo -HV 2021 -T "${stage}_6_6" -E "${stage}_main" -I lib/core/gpu/shaders -Zi -Qembed_debug \
-                -Fo "${src%.hlsl}.${stage}.dxil" "$src"
-        done
-    done
+# Build the cooker
+cook:
+    mkdir -p "{{build_dir}}"
+    odin build tools/cook -out:"{{build_dir}}/cook.exe" -o:speed
+
+# Cook the game's shaders: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray tracing library.
+# Only changed shaders recompile (see tools/cook).
+shaders: install-dxc cook
+    "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "samples/{{game}}/shaders"
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
 game-dll: shaders
@@ -123,6 +116,22 @@ agility-runtime: install-agility
 # Build and run the game in the development host
 dev: build
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll"
+
+# Build the viewer, which shows a host's shared frames in place of the editor's viewport
+viewer:
+    mkdir -p "{{build_dir}}"
+    odin build tools/viewer {{collections}} -out:"{{build_dir}}/viewer.exe" -debug
+
+# Run the game in shared mode, as the editor will, and show its frames in the viewer
+dev-shared name="cinnabar": build viewer
+    #!/usr/bin/env bash
+    set -euo pipefail
+    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --shared "{{name}}" &
+    host=$!
+    trap 'kill $host 2>/dev/null || true' EXIT
+    # The viewer opens the shared objects, so the host must create them first.
+    sleep 2
+    "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Build the statically linked release executable
 release: agility-runtime shaders
@@ -155,7 +164,7 @@ fmt:
 # =================================
 
 test:
-    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render; do odin test "$p" {{collections}} || exit 1; done
+    for p in lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/engine/render tools/cook; do odin test "$p" {{collections}} || exit 1; done
 
 # =================================
 # Cleanup

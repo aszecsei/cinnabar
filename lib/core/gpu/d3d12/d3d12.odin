@@ -99,12 +99,17 @@ dev: struct {
 	frame_target:      gpu.Texture,
 	// False while the window is minimized: submissions are dropped and nothing is presented.
 	recording:         bool,
+	// Shared mode renders into shared textures instead of the swapchain (see shared.odin).
+	shared_mode:       bool,
+	shared:            Shared_Target,
 	using resources:   Resources,
 	using pipelines:   Pipelines,
 	using uploads:     Uploads,
+	using streaming:   Streaming,
 }
 
-init :: proc(window: rawptr, size: [2]i32) -> bool {
+// A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
 	dev.logger = context.logger
 	dev.allocator = context.allocator
 	when ODIN_DEBUG {
@@ -155,8 +160,13 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 	init_resources() or_return
 	init_pipelines() or_return
 	init_uploads() or_return
+	init_streaming() or_return
 	for &frame in dev.frames {
 		init_upload_ring(&frame.upload) or_return
+	}
+	if shared_name != "" {
+		dev.shared_mode = true
+		return create_shared_target(shared_name, size)
 	}
 	return create_swapchain(win.HWND(window), size)
 }
@@ -167,11 +177,13 @@ shutdown :: proc() {
 		wait_idle()
 	}
 	release_back_buffers()
+	release_shared_target()
 	if dev.latency_waitable != nil {
 		win.CloseHandle(dev.latency_waitable)
 	}
 	release(&dev.swapchain)
 	shutdown_uploads()
+	shutdown_streaming()
 	shutdown_pipelines()
 	shutdown_resources()
 	for &frame in dev.frames {
@@ -232,26 +244,31 @@ begin_frame :: proc(size: [2]i32) {
 	reset_scratch_pool(&frame.scratch)
 	collect_releases()
 
-	dev.recording = size.x > 0 && size.y > 0
+	// In shared mode the window is hidden and the frame target keeps its size.
+	dev.recording = dev.shared_mode || (size.x > 0 && size.y > 0)
 	if !dev.recording {
 		time.sleep(MINIMIZED_FRAME_TIME)
 		return
 	}
-	if size != dev.size {
+	if !dev.shared_mode && size != dev.size {
 		resize_swapchain(size)
 	}
 
-	win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
+	target := gpu.pool_get(&dev.textures, dev.frame_target)
+	if dev.shared_mode {
+		target.resource, target.rtv = begin_shared_frame()
+	} else {
+		win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
+		dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
+		target.resource = dev.back_buffers[dev.back_buffer_index]
+		target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
+	}
 	frame.lists_used = {}
 	clear(&frame.ops)
 	clear(&frame.op_lists)
-
-	dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
-	target := gpu.pool_get(&dev.textures, dev.frame_target)
-	target.resource = dev.back_buffers[dev.back_buffer_index]
-	target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
 	list := acquire_list(frame, .Graphics)
 	texture_barrier(list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
+	finish_streams(list)
 	check(list->Close(), "ICommandList.Close")
 	append(&frame.ops, Op{queue = .Graphics, first = len(frame.op_lists), count = 1})
 	append(&frame.op_lists, (^d3d.ICommandList)(list))
@@ -356,6 +373,7 @@ LIST_TYPE := [gpu.Queue]d3d.COMMAND_LIST_TYPE {
 // end_frame executes the frame's uploads and submissions, then presents with vsync.
 end_frame :: proc() {
 	flush_uploads()
+	flush_streams()
 	if !dev.recording {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
@@ -390,11 +408,15 @@ end_frame :: proc() {
 	append(&frame.pending[.Graphics], (^d3d.ICommandList)(list))
 	flush(&e, .Graphics)
 
-	hr := dev.swapchain->Present(1, {})
-	if hr == dxgi.ERROR_DEVICE_REMOVED || hr == dxgi.ERROR_DEVICE_RESET {
-		log.panicf("d3d12: device removed: 0x%8x", u32(dev.device->GetDeviceRemovedReason()))
+	if dev.shared_mode {
+		end_shared_frame()
+	} else {
+		hr := dev.swapchain->Present(1, {})
+		if hr == dxgi.ERROR_DEVICE_REMOVED || hr == dxgi.ERROR_DEVICE_RESET {
+			log.panicf("d3d12: device removed: 0x%8x", u32(dev.device->GetDeviceRemovedReason()))
+		}
+		check(hr, "Present")
 	}
-	check(hr, "Present")
 
 	signal()
 	frame.fence_value = dev.fence_value

@@ -39,6 +39,12 @@ Platform_API :: struct {
 	gpu_submit:       proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool,
 	// gpu_upload allocates memory in the frame's upload ring. It returns false when the ring is full.
 	gpu_upload:       proc(size, align: int) -> (gpu.Upload, bool),
+	// Streaming copies data into a resource on the copy queue, beside the frame's work. The data is copied before the
+	// call returns. Use the resource once gpu_transfer_done is true. A texture needs the Streamed usage, is streamed
+	// once, and takes its whole mip chain. A failed stream logs an error and returns the zero Transfer.
+	gpu_stream_buffer:  proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer,
+	gpu_stream_texture: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer,
+	gpu_transfer_done:  proc(transfer: gpu.Transfer) -> bool,
 
 	// Creation returns the nil handle on failure. data may be nil. The backend copies the description and the data.
 	gpu_create_buffer:            proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer,

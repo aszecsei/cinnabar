@@ -41,6 +41,7 @@ Packet_Kind :: enum u16 {
 	Draw_Mesh_Indirect,
 	Build_Accel,
 	Dispatch_Rays,
+	Copy_Buffer,
 }
 
 // size includes the header and the padding after the payload.
@@ -197,6 +198,16 @@ Build_Accel :: struct {
 	update:    b32,
 }
 
+// Copy_Buffer copies size bytes between two different buffers, outside a render pass. Offsets and size are
+// multiples of 4. The source can be the upload ring.
+Copy_Buffer :: struct {
+	source:      Buffer,
+	source_offset: u32,
+	dest:        Buffer,
+	dest_offset: u32,
+	size:        u32,
+}
+
 // Dispatch_Rays launches the bound ray tracing pipeline's ray generation shader once per element of size.
 Dispatch_Rays :: struct {
 	size: [3]u32,
@@ -268,6 +279,7 @@ Packet_Format :: struct {
 	draw_mesh_args:     Draw_Mesh_Indirect_Args,
 	build_accel:        Build_Accel,
 	dispatch_rays:      Dispatch_Rays,
+	copy_buffer:        Copy_Buffer,
 	accel_barrier:      Accel_Barrier,
 	accel_instance:     Accel_Instance,
 }
@@ -423,6 +435,10 @@ cmd_barriers :: proc(cb: ^Command_Buffer, buffers: []Buffer_Barrier, textures: [
 		push(cb, .Barriers, packet, slice.to_bytes(buffers[:b]), slice.to_bytes(textures[:t]), slice.to_bytes(accels[:a]))
 		buffers, textures, accels = buffers[b:], textures[t:], accels[a:]
 	}
+}
+
+cmd_copy_buffer :: proc(cb: ^Command_Buffer, source: Buffer, source_offset: u32, dest: Buffer, dest_offset: u32, size: u32) {
+	push(cb, .Copy_Buffer, Copy_Buffer{source, source_offset, dest, dest_offset, size})
 }
 
 // cmd_dispatch_rays needs a ray tracing pipeline, outside a render pass.

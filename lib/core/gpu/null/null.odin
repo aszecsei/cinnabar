@@ -41,9 +41,13 @@ state: struct {
 	upload_memory: []byte,
 	upload_offset: int,
 	layouts:       gpu.Layout_Tracker,
+	// Textures that have been streamed. Each is streamed once.
+	streamed:      map[gpu.Texture]bool,
+	transfers:     u64,
 }
 
-init :: proc(window: rawptr, size: [2]i32) -> bool {
+// The null backend has no shared mode: it renders nothing to share.
+init :: proc(window: rawptr, size: [2]i32, shared_name := "") -> bool {
 	state = {
 		frame_start = time.tick_now(),
 	}
@@ -63,6 +67,7 @@ init :: proc(window: rawptr, size: [2]i32) -> bool {
 shutdown :: proc() {
 	delete(state.upload_memory)
 	gpu.layout_tracker_destroy(&state.layouts)
+	delete(state.streamed)
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
@@ -216,6 +221,7 @@ destroy_texture :: proc(texture: gpu.Texture) {
 	if _, ok := gpu.pool_remove(&state.textures, texture); ok {
 		gpu.pool_free(&state.textures, texture.index)
 		gpu.untrack_layout(&state.layouts, texture)
+		delete_key(&state.streamed, texture)
 	}
 }
 
@@ -297,6 +303,40 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 		}
 	}
 	return
+}
+
+// Nothing runs, so a transfer is done at once. The calls are validated as in the real backends.
+stream_buffer :: proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer {
+	desc, ok := gpu.pool_lookup(&state.buffers, buffer)
+	if !ok {
+		log.error("gpu: stream to an invalid buffer")
+		return {}
+	}
+	if err := gpu.validate_stream_buffer(desc, offset, data); err != .None {
+		log.errorf("gpu: buffer stream: %v", err)
+		return {}
+	}
+	state.transfers += 1
+	return gpu.Transfer(state.transfers)
+}
+
+stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
+	desc, ok := gpu.pool_lookup(&state.textures, texture)
+	if !ok {
+		log.error("gpu: stream to an invalid texture")
+		return {}
+	}
+	if err := gpu.validate_stream_texture(desc, state.streamed[texture], data); err != .None {
+		log.errorf("gpu: texture stream: %v", err)
+		return {}
+	}
+	state.streamed[texture] = true
+	state.transfers += 1
+	return gpu.Transfer(state.transfers)
+}
+
+transfer_done :: proc(transfer: gpu.Transfer) -> bool {
+	return true
 }
 
 // upload returns false when the frame's upload ring is full.

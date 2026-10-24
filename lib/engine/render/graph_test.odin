@@ -546,3 +546,41 @@ accel_builds_order_before_traces :: proc(t: ^testing.T) {
 	testing.expect_value(t, gpu_accel(&g, top), tlas)
 	testing.expect(t, null.submit(all_buffers(subs)))
 }
+
+@(test)
+copies_order_with_their_readers :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	staging := null.create_buffer({size = 64}, nil)
+	defer null.destroy_buffer(staging)
+	counts := null.create_buffer({size = 64, usage = {.Storage}}, nil)
+	defer null.destroy_buffer(counts)
+
+	g := begin(&f.platform, &f.cache)
+	source := import_buffer(&g, staging)
+	dest := import_buffer(&g, counts)
+	p := add_compute_pass(&g, "reset", nothing, queue = .Compute)
+	copy_source(&g, p, source)
+	copy_dest(&g, p, dest)
+	p = add_compute_pass(&g, "count", nothing, queue = .Compute)
+	write(&g, p, dest)
+	keep_pass(&g, p)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	r := inspect(all_buffers(subs), f.platform.frame_allocator)
+	// The copy writes the counts, so the compute pass waits for it.
+	testing.expect_value(t, len(r.buffers), 1)
+	if len(r.buffers) == 1 {
+		testing.expect_value(t, r.buffers[0].buffer, counts)
+		testing.expect_value(t, r.buffers[0].sync_before, gpu.Syncs{.Copy})
+		testing.expect_value(t, r.buffers[0].access_before, gpu.Accesses{.Copy_Dest})
+		testing.expect_value(t, r.buffers[0].access_after, gpu.Accesses{.Unordered_Access})
+	}
+	for s in subs {
+		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
+	}
+}

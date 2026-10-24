@@ -11,7 +11,7 @@ window: struct {
 	close_requested: bool,
 }
 
-_window_open :: proc(title: string, width, height: i32) -> bool {
+_window_open :: proc(title: string, width, height: i32, visible := true) -> bool {
 	instance := win.HINSTANCE(win.GetModuleHandleW(nil))
 	class := win.WNDCLASSEXW {
 		cbSize        = size_of(win.WNDCLASSEXW),
@@ -25,7 +25,10 @@ _window_open :: proc(title: string, width, height: i32) -> bool {
 		return false
 	}
 
-	style := win.WS_OVERLAPPEDWINDOW | win.WS_VISIBLE
+	style := win.WS_OVERLAPPEDWINDOW
+	if visible {
+		style |= win.WS_VISIBLE
+	}
 	rect := win.RECT{0, 0, width, height}
 	win.AdjustWindowRect(&rect, style, false)
 	window.hwnd = win.CreateWindowExW(

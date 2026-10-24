@@ -126,6 +126,10 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
 		case .Build_Accel:
 			build_accel(list, gpu.payload(p, gpu.Build_Accel))
+		case .Copy_Buffer:
+			c := gpu.payload(p, gpu.Copy_Buffer)
+			dest, source := buffer_entry(c.dest), buffer_entry(c.source)
+			list->CopyBufferRegion(dest.resource, u64(c.dest_offset), source.resource, u64(c.source_offset), u64(c.size))
 		case .Dispatch_Rays:
 			if !pipeline_ready {
 				continue
@@ -329,6 +333,7 @@ SYNC := [gpu.Sync]d3d.BARRIER_SYNC_FLAG {
 	.Execute_Indirect = .EXECUTE_INDIRECT,
 	.Build_Accel      = .BUILD_RAYTRACING_ACCELERATION_STRUCTURE,
 	.Ray_Tracing      = .RAYTRACING,
+	.Copy             = .COPY,
 }
 
 @(private = "file")
@@ -341,6 +346,8 @@ ACCESS := [gpu.Access]d3d.BARRIER_ACCESS_FLAG {
 	.Indirect_Argument   = .INDIRECT_ARGUMENT,
 	.Accel_Read          = .RAYTRACING_ACCELERATION_STRUCTURE_READ,
 	.Accel_Write         = .RAYTRACING_ACCELERATION_STRUCTURE_WRITE,
+	.Copy_Source         = .COPY_SOURCE,
+	.Copy_Dest           = .COPY_DEST,
 }
 
 @(private)

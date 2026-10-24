@@ -173,6 +173,9 @@ Texture_Usage :: enum u8 {
 	Storage,
 	Render_Target,
 	Depth_Stencil,
+	// The contents arrive with gpu_stream_texture on the copy queue. The texture is sampled once the transfer is done.
+	// It needs Sampled and no other usage.
+	Streamed,
 }
 
 Texture_Usages :: bit_set[Texture_Usage;u8]
@@ -220,6 +223,7 @@ Sync :: enum u8 {
 	Build_Accel,
 	// The shaders of a ray tracing pipeline.
 	Ray_Tracing,
+	Copy,
 }
 
 Syncs :: bit_set[Sync;u16]
@@ -234,15 +238,17 @@ Access :: enum u8 {
 	Indirect_Argument,
 	Accel_Read,
 	Accel_Write,
+	Copy_Source,
+	Copy_Dest,
 }
 
 Accesses :: bit_set[Access;u16]
 
-WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access, .Accel_Write}
+WRITE_ACCESSES :: Accesses{.Render_Target, .Depth_Stencil_Write, .Unordered_Access, .Accel_Write, .Copy_Dest}
 
 // A compute queue runs no graphics work, so its barriers use only these.
-COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing}
-COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument, .Accel_Read, .Accel_Write}
+COMPUTE_QUEUE_SYNCS :: Syncs{.All, .Compute_Shading, .Execute_Indirect, .Build_Accel, .Ray_Tracing, .Copy}
+COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirect_Argument, .Accel_Read, .Accel_Write, .Copy_Source, .Copy_Dest}
 // The accesses an acceleration structure can have.
 ACCEL_ACCESSES :: Accesses{.Accel_Read, .Accel_Write}
 
@@ -532,6 +538,20 @@ accel_instance :: proc(
 		hit_group_offset_flags = (hit_group_offset & 0xffffff) | u32(transmute(u8)flags) << 24,
 		accel = accel_reference,
 	}
+}
+
+// Transfer identifies a streaming copy (see docs/gpu.md#streaming). gpu_transfer_done reports when the resource can
+// be used. The zero Transfer is always done.
+Transfer :: distinct u64
+
+// mip_chain_size is the size of a texture's mips, each tightly packed, mip 0 first: the data of gpu_stream_texture.
+mip_chain_size :: proc(desc: Texture_Desc) -> int {
+	size := 0
+	for mip in 0 ..< max(desc.mip_count, 1) {
+		width, height := max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1)
+		size += int(width * height) * format_size(desc.format)
+	}
+	return size
 }
 
 // Upload is memory in the frame's upload ring. It is valid until the end of the frame.

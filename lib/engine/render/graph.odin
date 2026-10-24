@@ -36,6 +36,9 @@ Buffer_Use :: enum u8 {
 	Indirect,
 	// Geometry that an acceleration structure build reads.
 	Build_Input,
+	// The source or destination of cmd_copy_buffer.
+	Copy_Source,
+	Copy_Dest,
 }
 
 Accel_Use :: enum u8 {
@@ -325,6 +328,15 @@ build_input :: proc {
 	build_input_accel,
 }
 
+// copy_source and copy_dest declare that the pass copies from or to a buffer with cmd_copy_buffer.
+copy_source :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
+	use_buffer(g, pass, buffer, .Copy_Source)
+}
+
+copy_dest :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
+	use_buffer(g, pass, buffer, .Copy_Dest)
+}
+
 build_input_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Build_Input)
 }
@@ -593,7 +605,9 @@ use_accel :: proc(g: ^Graph, pass: Pass, accel: Accel, use: Accel_Use) {
 @(private = "file")
 use_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer, use: Buffer_Use) {
 	p := &g.passes[pass - 1]
-	add_use(p, {index = u32(buffer - 1), buffer = true, state = buffer_state(use, p.kind), reads = true})
+	assert(p.kind != .Render || (use != .Copy_Source && use != .Copy_Dest), "render: copies occur outside render passes")
+	// A copy destination is written without being read, so earlier writers are not needed for it.
+	add_use(p, {index = u32(buffer - 1), buffer = true, state = buffer_state(use, p.kind), reads = use != .Copy_Dest})
 }
 
 // add_use merges two reads of a resource in one pass. Any other second use of the resource is an error.
@@ -669,6 +683,10 @@ buffer_state :: proc(use: Buffer_Use, kind: Pass_Kind) -> State {
 		return {sync = {.Execute_Indirect}, access = {.Indirect_Argument}}
 	case .Build_Input:
 		return {sync = {.Build_Accel}, access = {.Shader_Resource}}
+	case .Copy_Source:
+		return {sync = {.Copy}, access = {.Copy_Source}}
+	case .Copy_Dest:
+		return {sync = {.Copy}, access = {.Copy_Dest}}
 	}
 	return {}
 }

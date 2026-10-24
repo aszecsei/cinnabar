@@ -2,6 +2,15 @@
 #ifndef CINNABAR_HLSLI
 #define CINNABAR_HLSLI
 
+// The fixed root signature, in HLSL's root signature language. tools/cook compiles every shader stage with it, so DXC
+// rejects a shader that does not fit it, and D3D12 rejects a pipeline if it differs from the backend's root signature.
+// Keep it equal to init_pipelines in lib/core/gpu/d3d12/pipelines.odin.
+#define CN_ROOT_SIGNATURE \
+	"RootFlags(CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | SAMPLER_HEAP_DIRECTLY_INDEXED), " \
+	"RootConstants(num32BitConstants=32, b0), " \
+	"CBV(b1, flags=DATA_STATIC_WHILE_SET_AT_EXECUTE), " \
+	"RootConstants(num32BitConstants=1, b2)"
+
 // Push constants: up to 128 bytes, set with gpu.cmd_push_constants.
 #define CN_PUSH_CONSTANTS(Type, name) ConstantBuffer<Type> name : register(b0, space0)
 

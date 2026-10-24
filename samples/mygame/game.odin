@@ -16,7 +16,6 @@ OBJECTS_VS :: #load("shaders/objects.vs.dxil")
 OBJECTS_AS :: #load("shaders/objects.as.dxil")
 OBJECTS_MS :: #load("shaders/objects.ms.dxil")
 OBJECTS_PS :: #load("shaders/objects.ps.dxil")
-COUNT_RESET_CS :: #load("shaders/count_reset.cs.dxil")
 CULL_CS :: #load("shaders/cull.cs.dxil")
 POST_CS :: #load("shaders/post.cs.dxil")
 SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
@@ -65,6 +64,12 @@ SCENE_PIECES :: 2
 CHECKER_SIZE :: 64
 CHECKER_CELL :: 8
 
+// A texture of rings streams in on the copy queue after STREAM_FRAME frames, and then replaces the checker on the
+// large triangles.
+RINGS_SIZE :: 256
+RINGS_MIPS :: 9
+STREAM_FRAME :: 60
+
 // Matches Vertex in shaders/triangle.hlsl and shaders/objects.hlsl.
 Vertex :: struct {
 	position: [2]f32,
@@ -87,11 +92,6 @@ Object_Constants :: struct {
 	sampler:      u32,
 	grid:         [2]u32,
 	object_count: u32,
-}
-
-// Matches Push in shaders/count_reset.hlsl.
-Reset_Constants :: struct {
-	count: u32,
 }
 
 // Matches Push in shaders/cull.hlsl.
@@ -154,6 +154,10 @@ Game_State :: struct {
 	tlas:        gpu.Accel_Struct,
 	blas_built:  bool,
 	checker:     gpu.Texture,
+	rings:       gpu.Texture,
+	// Zero until the rings are streamed, and rings_ready once the transfer is done.
+	rings_transfer: gpu.Transfer,
+	rings_ready: bool,
 	nearest:     gpu.Sampler,
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
@@ -164,7 +168,6 @@ Pipelines :: struct {
 	objects:     gpu.Pipeline,
 	// Nil without mesh shaders.
 	mesh:        gpu.Pipeline,
-	count_reset: gpu.Pipeline,
 	cull:        gpu.Pipeline,
 	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and nil otherwise.
 	shadows:     gpu.Pipeline,
@@ -231,6 +234,10 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		{size = CHECKER_SIZE, format = .RGBA8_Unorm_Srgb, usage = {.Sampled}, label = "checker"},
 		gpu_bytes(&checker),
 	)
+	s.rings = platform.gpu_create_texture(
+		{size = RINGS_SIZE, format = .RGBA8_Unorm_Srgb, mip_count = RINGS_MIPS, usage = {.Sampled, .Streamed}, label = "rings"},
+		nil,
+	)
 	s.nearest = platform.gpu_create_sampler({label = "nearest"})
 	s.linear = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "linear clamp"})
 
@@ -270,6 +277,14 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		s.platform.set_window_title(title)
 	}
 
+	if s.frame_count == STREAM_FRAME {
+		stream_rings(s)
+	}
+	if s.rings_transfer != 0 && !s.rings_ready && s.platform.gpu_transfer_done(s.rings_transfer) {
+		s.rings_ready = true
+		log.infof("mygame: rings streamed in at frame %d", s.frame_count)
+	}
+
 	// A minimized window has no size, and nothing is rendered.
 	size := s.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
@@ -287,6 +302,30 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	return true
 }
 
+// stream_rings generates the rings' mip chain and streams it. The backend copies the data before the call returns.
+stream_rings :: proc(s: ^Game_State) {
+	desc := gpu.Texture_Desc {
+		size      = RINGS_SIZE,
+		format    = .RGBA8_Unorm_Srgb,
+		mip_count = RINGS_MIPS,
+	}
+	colors := [3][4]u8{{255, 170, 60, 255}, {60, 190, 255, 255}, {40, 40, 70, 255}}
+	data := make([]byte, gpu.mip_chain_size(desc), s.platform.frame_allocator)
+	texels := ([^][4]u8)(raw_data(data))
+	i := 0
+	for mip in 0 ..< u32(RINGS_MIPS) {
+		n := u32(RINGS_SIZE) >> mip
+		for y in 0 ..< n {
+			for x in 0 ..< n {
+				d := [2]f32{(f32(x) + 0.5) / f32(n) - 0.5, (f32(y) + 0.5) / f32(n) - 0.5}
+				texels[i] = colors[int(math.sqrt(d.x * d.x + d.y * d.y) * 16) % 3]
+				i += 1
+			}
+		}
+	}
+	s.rings_transfer = s.platform.gpu_stream_texture(s.rings, data)
+}
+
 // render_frame culls the objects on the compute queue, draws the scene into an HDR target with depth,
 // post-processes it in a compute pass, and tone maps it into the frame target. The render graph places the
 // barriers between the passes and the waits between the queues.
@@ -300,7 +339,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 
 	g := render.begin(s.platform, &s.textures)
 	target := render.import_texture(&g, s.platform.gpu_frame_target(), .Color)
-	frame.checker = render.import_texture(&g, s.checker, .Sampled)
+	// The large triangles show the rings once they are streamed in.
+	frame.checker = render.import_texture(&g, s.rings_ready ? s.rings : s.checker, .Sampled)
 	frame.vertices = render.import_buffer(&g, s.vertices)
 	frame.indices = render.import_buffer(&g, s.indices)
 	frame.arguments = render.import_buffer(&g, s.arguments)
@@ -316,7 +356,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, pass_constants: gpu.Upload) {
 	// The mesh path culls in its amplification shaders, so only the vertex fallback has the compute passes.
 	if !s.mesh_path {
 		p := render.add_compute_pass(&g, "reset draw count", reset_count, frame, queue = .Compute)
-		render.write(&g, p, frame.draw_count)
+		render.copy_dest(&g, p, frame.draw_count)
 
 		p = render.add_compute_pass(&g, "cull", cull_objects, frame, queue = .Compute)
 		render.write(&g, p, frame.draw_count)
@@ -434,14 +474,15 @@ trace_shadows :: proc(ctx: ^render.Pass_Context) {
 	}
 }
 
+// reset_count zeroes the draw count with a copy from the upload ring.
 reset_count :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
-	constants := Reset_Constants {
-		count = gpu.write_index(render.gpu_buffer(ctx.graph, frame.draw_count)),
+	zero, ok := frame.state.platform.gpu_upload(size_of(u32), size_of(u32))
+	if !ok {
+		return
 	}
-	gpu.cmd_set_pipeline(ctx.cb, frame.state.pipelines.count_reset)
-	gpu.cmd_push_constants(ctx.cb, &constants)
-	gpu.cmd_dispatch(ctx.cb, {1, 1, 1})
+	(^u32)(raw_data(zero.data))^ = 0
+	gpu.cmd_copy_buffer(ctx.cb, zero.buffer, zero.offset, render.gpu_buffer(ctx.graph, frame.draw_count), 0, size_of(u32))
 }
 
 cull_objects :: proc(ctx: ^render.Pass_Context) {
@@ -536,6 +577,7 @@ shutdown :: proc(state: rawptr) {
 	s.platform.gpu_destroy_sampler(s.nearest)
 	s.platform.gpu_destroy_accel(s.tlas)
 	s.platform.gpu_destroy_accel(s.blas)
+	s.platform.gpu_destroy_texture(s.rings)
 	s.platform.gpu_destroy_texture(s.checker)
 	s.platform.gpu_destroy_buffer(s.mesh_draw)
 	s.platform.gpu_destroy_buffer(s.visible)
@@ -557,7 +599,6 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 		reload_graphics_pipeline(platform, &s.pipelines.mesh, OBJECTS_MESH_PIPELINE)
 	}
 	reload_graphics_pipeline(platform, &s.pipelines.composite, COMPOSITE_PIPELINE)
-	reload_compute_pipeline(platform, &s.pipelines.count_reset, COUNT_RESET_PIPELINE)
 	reload_compute_pipeline(platform, &s.pipelines.cull, CULL_PIPELINE)
 	reload_compute_pipeline(platform, &s.pipelines.post, POST_PIPELINE)
 	switch s.shadow_mode {
@@ -600,7 +641,6 @@ create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_m
 		scene = platform.gpu_create_graphics_pipeline(SCENE_PIPELINE),
 		objects = platform.gpu_create_graphics_pipeline(OBJECTS_PIPELINE),
 		mesh = mesh_path ? platform.gpu_create_graphics_pipeline(OBJECTS_MESH_PIPELINE) : {},
-		count_reset = platform.gpu_create_compute_pipeline(COUNT_RESET_PIPELINE),
 		cull = platform.gpu_create_compute_pipeline(CULL_PIPELINE),
 		shadows = shadows,
 		post = platform.gpu_create_compute_pipeline(POST_PIPELINE),
@@ -639,11 +679,6 @@ OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	label         = "objects (mesh)",
 }
 
-COUNT_RESET_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = COUNT_RESET_CS,
-	label   = "count reset",
-}
-
 CULL_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	compute = CULL_CS,
 	label   = "cull",
@@ -679,7 +714,6 @@ destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: Pipelines) {
 	platform.gpu_destroy_pipeline(pipelines.scene)
 	platform.gpu_destroy_pipeline(pipelines.objects)
 	platform.gpu_destroy_pipeline(pipelines.mesh)
-	platform.gpu_destroy_pipeline(pipelines.count_reset)
 	platform.gpu_destroy_pipeline(pipelines.cull)
 	platform.gpu_destroy_pipeline(pipelines.shadows)
 	platform.gpu_destroy_pipeline(pipelines.post)

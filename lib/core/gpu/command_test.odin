@@ -809,3 +809,65 @@ validate_ray_dispatches :: proc(t: ^testing.T) {
 	bad.max_recursion = 32
 	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Bad_Stages)
 }
+
+@(test)
+validate_copies_and_streams :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	Case :: struct {
+		record: proc(cb: ^Command_Buffer),
+		queue:  Queue,
+		err:    Validation_Error,
+	}
+	cases := []Case {
+		// PLAIN holds 64 bytes and INDIRECT 96.
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 32, PLAIN, 0, 64)}, .Compute, .None},
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, PLAIN, 0, PLAIN, 32, 16)}, .Graphics, .Bad_Copy},
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 68)}, .Graphics, .Bad_Copy},
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, INDIRECT, 2, PLAIN, 0, 4)}, .Graphics, .Bad_Copy},
+		{proc(cb: ^Command_Buffer) {cmd_copy_buffer(cb, {index = 9, generation = 1}, 0, PLAIN, 0, 4)}, .Graphics, .Invalid_Buffer},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_copy_buffer(cb, INDIRECT, 0, PLAIN, 0, 4)}, .Graphics, .Copy_Inside_Pass},
+		{
+			proc(cb: ^Command_Buffer) {cmd_barriers(cb, {{buffer = PLAIN, sync_before = {.Copy}, access_before = {.Copy_Dest}, sync_after = {.Copy}, access_after = {.Copy_Source}}}, nil)},
+			.Compute,
+			.None,
+		},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		c.record(&cb)
+		err, _ := validate(cb, RESOURCES, queue = c.queue)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	streamed := Texture_Desc {
+		size      = {16, 8},
+		format    = .RGBA8_Unorm,
+		mip_count = 5,
+		usage     = {.Sampled, .Streamed},
+	}
+	// 16x8, 8x4, 4x2, 2x1 and 1x1 texels of 4 bytes.
+	testing.expect_value(t, mip_chain_size(streamed), (128 + 32 + 8 + 2 + 1) * 4)
+	testing.expect_value(t, validate_texture_desc(streamed, nil), Desc_Error.None)
+	bad := streamed
+	bad.usage = {.Sampled, .Streamed, .Render_Target}
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
+	bad.usage = {.Streamed}
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
+
+	data := make([]byte, mip_chain_size(streamed), allocator)
+	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
+	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_stream_texture(streamed, false, data[1:]), Desc_Error.Bad_Data_Size)
+	plain := streamed
+	plain.usage = {.Sampled}
+	testing.expect_value(t, validate_stream_texture(plain, false, data), Desc_Error.Bad_Usage)
+
+	buffer := Buffer_Desc{size = 64}
+	testing.expect_value(t, validate_stream_buffer(buffer, 32, data[:32]), Desc_Error.None)
+	testing.expect_value(t, validate_stream_buffer(buffer, 48, data[:32]), Desc_Error.Bad_Data_Size)
+	testing.expect_value(t, validate_stream_buffer(buffer, 2, data[:8]), Desc_Error.Bad_Data_Size)
+}

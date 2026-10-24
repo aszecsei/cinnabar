@@ -222,3 +222,22 @@ ray_tracing_resources :: proc(t: ^testing.T) {
 	testing.expect(t, !submit({cb}))
 	testing.expect_value(t, destroy_scope(.Game), 3)
 }
+
+@(test)
+streams_are_checked :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	texture := create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled, .Streamed}}, nil)
+	buffer := create_buffer({size = 64}, nil)
+	data := make([]byte, 64, context.temp_allocator)
+	transfer := stream_texture(texture, data)
+	testing.expect(t, transfer != 0 && transfer_done(transfer))
+	testing.expect(t, stream_buffer(buffer, 0, data) != 0)
+
+	context.logger = log.nil_logger()
+	testing.expect_value(t, stream_texture(texture, data), gpu.Transfer(0))
+	testing.expect_value(t, stream_buffer(buffer, 4, data), gpu.Transfer(0))
+	testing.expect_value(t, stream_buffer({index = 99, generation = 1}, 0, data[:4]), gpu.Transfer(0))
+}

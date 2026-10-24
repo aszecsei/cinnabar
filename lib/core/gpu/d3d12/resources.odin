@@ -19,6 +19,8 @@ Buffer_Entry :: struct {
 Texture_Entry :: struct {
 	desc:     gpu.Texture_Desc,
 	resource: ^d3d.IResource,
+	// A Streamed texture is streamed once.
+	streamed: bool,
 	rtv:      d3d.CPU_DESCRIPTOR_HANDLE,
 	dsv:      d3d.CPU_DESCRIPTOR_HANDLE,
 }
@@ -44,6 +46,8 @@ Release :: struct {
 	index:       u32,
 	// 0 until end_frame stamps it with the fence value of the frame that destroyed it.
 	fence_value: u64,
+	// The copy fence value that covers every copy recorded before the release: streaming may still use the object.
+	copy_value:  u64,
 }
 
 @(private)
@@ -232,7 +236,14 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	}
 
 	// Data arrives through a copy, and the copy moves the texture to the sampled layout.
-	layout := data != nil ? d3d.BARRIER_LAYOUT.COPY_DEST : LAYOUT[gpu.initial_layout(desc.usage, false)]
+	// Data arrives through a copy that moves the texture to the sampled layout. A streamed texture starts in the
+	// common layout, because the copy queue writes it (see streaming.odin).
+	layout := LAYOUT[gpu.initial_layout(desc.usage, false)]
+	if data != nil {
+		layout = .COPY_DEST
+	} else if .Streamed in desc.usage {
+		layout = .COMMON
+	}
 	resource: ^d3d.IResource
 	hr := dev.device->CreateCommittedResource3(&heap_props, {}, &resource_desc, layout, nil, nil, 0, nil, d3d.IResource_UUID, (^rawptr)(&resource))
 	if !check(hr, "CreateCommittedResource3(texture)") {
@@ -390,14 +401,14 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 @(private)
 defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
 	sync.guard(&dev.releases_mutex)
-	append(&dev.releases, Release{object = object, pool = pool, index = index})
+	append(&dev.releases, Release{object = object, pool = pool, index = index, copy_value = sync.atomic_load(&dev.copy_horizon)})
 }
 
 // defer_free frees backend memory after the GPU finishes the current frame.
 @(private)
 defer_free :: proc(memory: rawptr) {
 	sync.guard(&dev.releases_mutex)
-	append(&dev.releases, Release{memory = memory})
+	append(&dev.releases, Release{memory = memory, copy_value = sync.atomic_load(&dev.copy_horizon)})
 }
 
 // stamp_releases assigns the fence value that the frame's work signals to the releases queued during the frame.
@@ -415,10 +426,12 @@ stamp_releases :: proc(fence_value: u64) {
 collect_releases :: proc() {
 	sync.guard(&dev.releases_mutex)
 	completed := dev.fence->GetCompletedValue()
+	copies := copy_completed()
 	for i := 0; i < len(dev.releases); {
 		r := dev.releases[i]
 		// A pipeline slot waits for its compile job too, which writes the slot when it finishes.
-		if r.fence_value == 0 || r.fence_value > completed || (r.pool == .Pipeline && pipeline_compiling(r.index)) {
+		waiting := r.fence_value == 0 || r.fence_value > completed || r.copy_value > copies
+		if waiting || (r.pool == .Pipeline && pipeline_compiling(r.index)) {
 			i += 1
 			continue
 		}

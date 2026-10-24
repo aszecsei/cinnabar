@@ -37,7 +37,9 @@ Platform :: struct {
 @(private)
 platform: Platform
 
-init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
+// A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
+// hidden (see docs/gpu.md#presentation).
+init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "") -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
 		return false
@@ -52,12 +54,12 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		log.error("core: failed to start the job system")
 		return false
 	}
-	if !_window_open(title, width, height) {
+	if !_window_open(title, width, height, visible = shared_target == "") {
 		log.error("core: failed to open window")
 		return false
 	}
 	platform.window_size = _window_size()
-	if !backend.init(_window_native_handle(), platform.window_size) {
+	if !backend.init(_window_native_handle(), platform.window_size, shared_target) {
 		log.error("core: failed to initialize the GPU backend")
 		return false
 	}
@@ -81,6 +83,9 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720) -> bool {
 		gpu_frame_target             = backend.frame_target,
 		gpu_submit                   = backend.submit,
 		gpu_upload                   = backend.upload,
+		gpu_stream_buffer            = backend.stream_buffer,
+		gpu_stream_texture           = backend.stream_texture,
+		gpu_transfer_done            = backend.transfer_done,
 		gpu_create_buffer            = backend.create_buffer,
 		gpu_create_texture           = backend.create_texture,
 		gpu_create_sampler           = backend.create_sampler,

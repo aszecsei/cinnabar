@@ -35,6 +35,8 @@ Validation_Error :: enum u8 {
 	Invalid_Accel,
 	Build_Inside_Pass,
 	Bad_Accel_Build,
+	Copy_Inside_Pass,
+	Bad_Copy,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -276,6 +278,21 @@ validate :: proc(
 				if err = validate_indirect(resources, d.count, d.count_offset, size_of(u32)); err != .None {
 					return err, packet
 				}
+			}
+		case .Copy_Buffer:
+			if in_pass {
+				return .Copy_Inside_Pass, packet
+			}
+			c := payload(p, Copy_Buffer)
+			source, source_ok := resources.buffer(c.source)
+			dest, dest_ok := resources.buffer(c.dest)
+			if !source_ok || !dest_ok {
+				return .Invalid_Buffer, packet
+			}
+			aligned := c.source_offset % 4 == 0 && c.dest_offset % 4 == 0 && c.size % 4 == 0
+			in_range := int(c.source_offset) + int(c.size) <= int(source.size) && int(c.dest_offset) + int(c.size) <= int(dest.size)
+			if c.source == c.dest || !aligned || !in_range {
+				return .Bad_Copy, packet
 			}
 		case .Dispatch_Rays:
 			if in_pass {
@@ -601,7 +618,7 @@ compute_queue_barriers :: proc(buffers: []Buffer_Barrier, textures: []Texture_Ba
 
 @(private = "file")
 valid_buffer_barrier :: proc(b: Buffer_Barrier, desc: Buffer_Desc) -> bool {
-	allowed := Accesses{.Shader_Resource}
+	allowed := Accesses{.Shader_Resource, .Copy_Source, .Copy_Dest}
 	if .Index in desc.usage {
 		allowed += {.Index_Buffer}
 	}
@@ -670,6 +687,10 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 	if .Storage in desc.usage && is_srgb_format(desc.format) {
 		return .Bad_Usage
 	}
+	// The copy queue writes a streamed texture, and copy queues cannot change layouts.
+	if .Streamed in desc.usage && (desc.usage != {.Sampled, .Streamed} || data != nil) {
+		return .Bad_Usage
+	}
 	if desc.mip_count > mip_count(desc.size) {
 		return .Bad_Mip_Count
 	}
@@ -717,6 +738,25 @@ validate_ray_tracing_pipeline_desc :: proc(desc: Ray_Tracing_Pipeline_Desc) -> D
 		if name == "" {
 			return .Missing_Shader
 		}
+	}
+	return .None
+}
+
+// validate_stream_buffer checks a buffer stream: the data fits at the offset, and both are multiples of 4.
+validate_stream_buffer :: proc(desc: Buffer_Desc, offset: u32, data: []byte) -> Desc_Error {
+	if len(data) == 0 || len(data) % 4 != 0 || offset % 4 != 0 || int(offset) + len(data) > int(desc.size) {
+		return .Bad_Data_Size
+	}
+	return .None
+}
+
+// validate_stream_texture checks a texture stream: a Streamed texture, not streamed before, and its whole mip chain.
+validate_stream_texture :: proc(desc: Texture_Desc, streamed_before: bool, data: []byte) -> Desc_Error {
+	if .Streamed not_in desc.usage || streamed_before {
+		return .Bad_Usage
+	}
+	if len(data) != mip_chain_size(desc) {
+		return .Bad_Data_Size
 	}
 	return .None
 }
