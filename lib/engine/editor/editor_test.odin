@@ -8,6 +8,7 @@ import "core:testing"
 import "cinnabar:core"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/scene"
 
 Mode :: enum u8 {
 	Idle,
@@ -63,6 +64,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
+	scene.register_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Tuned)
 	init(&f.editor, &f.platform)
 	return f
@@ -229,4 +231,47 @@ another_connection_starts_over :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(messages), 2)
 	_, is_snapshot := messages[1].(link.Entity_Snapshot)
 	testing.expect(t, is_snapshot)
+}
+
+@(test)
+a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	old := spawn(f, {})
+	step(f, 1, link.Watch_Entity{u64(old)})
+
+	position := link.Scene_Value {
+		kind    = .Number,
+		count   = 3,
+		integer = 0b111,
+		ints    = {16777216, 0, 0, 0},
+	}
+	load := link.Load_Scene {
+		entities = {
+			{id = 0xa1, name = "Door", active = true, components = {{id = u64(ecs.TRANSFORM_ID), name = "Transform", fields = {{name = "position", value = position}}}}},
+			{id = 0xb2, name = "Hinge", parent = 0xa1, active = true},
+		},
+	}
+	messages := step(f, 1, load)
+
+	testing.expect_value(t, len(messages), 1)
+	snapshot := messages[0].(link.Entity_Snapshot)
+	testing.expect_value(t, len(snapshot.entities), 2)
+	door: ecs.Entity
+	for info in snapshot.entities {
+		if info.scene_id == 0xa1 {
+			door = ecs.Entity(info.entity)
+			testing.expect_value(t, info.name, "Door")
+		}
+	}
+	testing.expect(t, door != 0 && !ecs.is_alive(&f.world, old))
+	testing.expect_value(t, ecs.get(&f.world, door, ecs.Transform).position.raw.x, 16777216)
+	for info in snapshot.entities {
+		if info.scene_id == 0xb2 {
+			testing.expect_value(t, info.name, "Hinge")
+			testing.expect_value(t, ecs.Entity(info.parent), door)
+		}
+	}
+	// The old entity was watched, and its watch went with it.
+	testing.expect_value(t, len(f.editor.watched), 0)
 }

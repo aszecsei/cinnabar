@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinnabar.Editor.Commands\Cinnabar.Editor.Commands.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Document\Cinnabar.Editor.Document.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor\Cinnabar.Editor.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Model\Cinnabar.Editor.Model.csproj" />

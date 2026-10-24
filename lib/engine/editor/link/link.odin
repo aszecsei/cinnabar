@@ -19,6 +19,7 @@ Message :: union {
 	Watch_Entity,
 	Unwatch_Entity,
 	Entity_Values,
+	Load_Scene,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -159,6 +160,10 @@ Enum_Value :: struct {
 
 Entity_Info :: struct {
 	entity:     u64,
+	// The Name component's text, or "".
+	name:       string,
+	// The scene ID of an entity that a scene made, or 0 for one that the game spawned.
+	scene_id:   u64,
 	// The Parent component's entity, or 0.
 	parent:     u64,
 	// False when the entity has the Inactive tag.
@@ -223,5 +228,64 @@ Behaviour_Field :: struct {
 	boolean: bool,
 	text:    string,
 	vector:  [3]f32,
+	entity:  u64,
+}
+
+// Edit (see docs/editor.md#document-model).
+
+// Editor to game: the editor's scene document. The game replaces its world with it, and then sends an
+// Entity_Snapshot. The editor sends it when the link connects and after a soft restart. Values are tagged as the
+// scene file writes them, and the game converts them to its fields' kinds.
+Load_Scene :: struct {
+	entities: []Scene_Entity,
+}
+
+Scene_Entity :: struct {
+	id:         u64,
+	name:       string,
+	// The parent's scene ID, or 0.
+	parent:     u64,
+	active:     bool,
+	components: []Scene_Component,
+	behaviours: []Scene_Behaviour,
+}
+
+Scene_Component :: struct {
+	id:     u64,
+	name:   string,
+	fields: []Scene_Field,
+}
+
+Scene_Behaviour :: struct {
+	// The script's GUID.
+	script: [16]u8,
+	fields: []Scene_Field,
+}
+
+Scene_Field :: struct {
+	name:  string,
+	value: Scene_Value,
+}
+
+Scene_Value_Kind :: enum u8 {
+	Bool,
+	Number,
+	String,
+	Name,
+	Entity,
+}
+
+// A field's value, as asset_format.Scene_Value describes it. Only the members for its kind are set.
+Scene_Value :: struct {
+	kind:    Scene_Value_Kind,
+	// Number: how many numbers, 1 to 4.
+	count:   u8,
+	// Number: bit i is set when number i is an integer, which ints holds exactly.
+	integer: u8,
+	// Bool: 1 or 0 in ints[0].
+	ints:    [4]i64,
+	floats:  [4]f64,
+	text:    string,
+	// Entity: a scene ID, or 0 for none.
 	entity:  u64,
 }

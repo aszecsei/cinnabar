@@ -22,19 +22,19 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, and phase 4 added `Model`.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, phase 4 added `Model`, and phase 5 added `Document`.
 
 | Project | Responsibility |
 |---|---|
 | `Cinnabar.Editor.Link` | The editor link client: the connection, framing, the wire format, and the messages that the generator writes from the schema. |
 | `Cinnabar.Editor.Link.Generator` | The Roslyn source generator that turns the link's schema into C# records with their readers and writers. |
 | `Cinnabar.Editor.Model` | The type registry and the mirror of the host's world: entities, hierarchy, and the watched field values. It is updated only from link events. |
-| `Cinnabar.Editor.Document` | Scenes, operations, the undo stack, selection, save, and autosave. |
+| `Cinnabar.Editor.Document` | Scenes: the scene file's reader and writer, and the snapshot that the host loads. Later, operations, the undo stack, selection, save, and autosave. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
 | `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. Later, tests against a real host with the null backend. |
 
-`just editor` builds the solution with `dotnet build`, `just edit` builds everything and starts the editor, and `just test` runs the editor's tests with the engine's. Build output goes to `build/dotnet`. The editor's settings are in `%LOCALAPPDATA%\cinnabar\editor`.
+`just editor` builds the solution with `dotnet build`, `just edit` builds everything and starts the editor with the game's `scenes/main.scene`, and `just test` runs the editor's tests with the engine's. Build output goes to `build/dotnet`. The editor's settings are in `%LOCALAPPDATA%\cinnabar\editor`.
 
 ## Document model
 
@@ -43,7 +43,8 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 - **Why:** the host can lose its world at any time. A crash loses it, and so does a soft restart after a `Game_State` layout change (see [Hot reload](hot-reload.md#reload-sequence)). Unsaved edits must survive both. If the host owned the scene, they would not.
 - **Edits are operations.** Every change is an operation on the document: create or destroy an entity, set a field, add or remove a component or a behaviour, reparent, rename. Each operation has an inverse. The editor applies an operation to its document, puts it on the undo stack and sends it to the host. The host applies it to its world. The editor never waits for the host to confirm an edit.
 - **Transactions:** an interaction groups its operations into one undo entry. A gizmo drag or a drag on a number field sends field values while it moves, and makes one undo entry when the mouse is released.
-- **Resync:** when the link connects, the editor sends the whole document as a scene snapshot, and the host replaces its world with it. This is the same path after a crash, a host restart and a soft restart. The host reports a soft restart with an event, and the editor sends the snapshot again.
+- **Resync:** when the link connects, the editor sends the whole document as a scene snapshot (`Load_Scene`), and the host replaces its world with it. This is the same path after a crash, a host restart and a soft restart. The host reports a soft restart with an event, and the editor sends the snapshot again. The game loads its own scene at `init`, so without an open document the host shows that.
+- **Opening a scene:** `--scene <file>`, or Open Scene (Ctrl+O). A file with an error does not open: its problems go to the console with their lines, and the open scene stays. The title bar and the status bar show the scene's file.
 - **Rejected operations:** the host can refuse an operation, for example a field that the new DLL no longer has. The document keeps the operation, and the editor shows a warning on the entity. The document is never changed to match the host.
 
 ### Modes
@@ -60,33 +61,45 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 
 ## Scenes
 
-A scene is a source asset with a GUID and a `.meta` file, like every other asset (see [Content pipeline](content-pipeline.md#identity)). Scenes do not exist yet. This section gives the design.
+A scene is a source asset with a GUID and a `.meta` file, like every other asset (see [Content pipeline](content-pipeline.md#identity)). The cooker parses scenes with `asset_format.scene_parse`, and the editor with `SceneFile` in `Cinnabar.Editor.Document`. The two must agree.
 
-- **Scene IDs:** each entity in a scene has a 64-bit random ID, unique in its scene. Operations, the link and the scene file use scene IDs. The host maps them to entity handles, which change on every load.
-- **Text source:** a scene file is text, so it diffs and merges. It has one block per entity, sorted by scene ID, so an edit changes only the lines of the entity it touches. Fields are written by name.
+- **Scene IDs:** each entity in a scene has a 64-bit random ID, nonzero and unique in its scene. Operations, the link and the scene file use scene IDs. The host maps them to entity handles, which change on every load. The loader gives each entity a `Scene_Entity` component with its scene ID, and `Entity_Info` carries it to the editor.
+- **Text source:** a scene file is text, so it diffs and merges. It starts with `scene 1`, the format's version. It has one block per entity, sorted by scene ID, so an edit changes only the lines of the entity it touches. Fields are written by name. A line that starts with `#` is a comment, and the editor keeps only the comments before `scene 1`.
+- **Entity keys:** an entity block has `name`, `parent` (a scene ID) and `active = false` for a disabled entity, then its `component` and `behaviour` blocks with their fields indented. An entity key that the editor does not know is a warning, and the editor writes it back unchanged.
+- **Values:** `true` and `false`; a number, or an array of up to four numbers such as `[0, 0.7071068, 0, 0.7071068]`; a quoted string with `\"`, `\\`, `\n` and `\t`; a scene ID after `@`, such as `@1b04c7e95a2f3d88`, or `@0` for none; and a bare word, such as an enum value's name. A number written as an integer is kept exactly. The writer gives every float a point or an exponent, so it reads back as a float.
 - **Components by stable ID:** a component block gives the [stable ID](world.md#ecs) and the type's name. The loader uses the ID. The name is for people and for error messages.
 - **Positions** are raw `i64` values (see [World](world.md#where-positions-go)), so a scene round-trips exactly. The editor shows meters.
 - **Unknown data round-trips.** A component ID or a field that the current DLL does not know is kept, written back unchanged, and reported as a warning. A broken build therefore never deletes scene data.
 - **Behaviours** are written by script GUID, with their field values by name.
-- **Names:** the engine gets a `Name` component, so that the outliner can show names in play mode.
+- **Names:** the engine's `Name` component holds up to 63 bytes in the component itself, because component storage holds no pointers. A longer name is cut at a character boundary. The outliner and the properties panel show names, and `Entity_Info` carries them.
 - **Prefab paths:** an entity in a prefab instance is identified by a path: the instance's scene ID, then `#` and the entity's scene ID in the prefab, such as `5f3a9c01e2b47d10#a90b3e7f15c4d2e8`. A prefab in a prefab adds a level for each nesting. The prefab's asset GUID is not in the path, because every instance of a prefab has the same one. The path stays the same when the prefab changes, so overrides in the scene still find their entities.
 
 A sketch of the format:
 
 ```
+scene 1
+
 entity 5f3a9c01e2b47d10
 name = "Door"
-parent = 1b04c7e95a2f3d88
+parent = @1b04c7e95a2f3d88
 component 1 Transform
 	position = [16777216, 0, -754974720]
 	rotation = [0, 0.7071068, 0, 0.7071068]
 	scale = [1, 1, 1]
 behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 	open_angle = 90
-	trigger = 7a11e0c3d94b2f56
+	trigger = @7a11e0c3d94b2f56
 ```
 
-**Cooking:** the cooker cannot lay out native components, because their types exist only in the DLL. The cooked blob therefore stores each field as a tagged value with the hash of its name, and the scene loader in `lib/engine` matches them to the registry's field descriptors at load. The same code applies a snapshot from the editor.
+**Cooking:** the cooker cannot lay out native components, because their types exist only in the DLL. The cooked blob therefore stores each field as a tagged value with the hash of its name (see [Content pipeline](content-pipeline.md#scenes)), and the scene loader in `lib/engine/scene` matches them to the fields of the registered types at load. The same code applies a snapshot from the editor.
+
+**Loading** replaces every entity in the world, between frames, with `ecs.despawn_all`. After it, the world gives out the freed slots from the lowest index up, so the handles, and with them the outliner's order, follow the scene's order. The loader spawns every entity before it sets any field, so a field can refer to an entity later in the file.
+
+- A field that the scene does not set is zero. A value is converted to its field's kind: an integer must fit, an enum takes a name or an integer, a position takes three integers, and an entity takes a scene ID.
+- What the world cannot use is skipped with a warning, and the rest of the entity still loads: a component that the game does not register, a field that its type does not have, a value that does not fit, a scene ID that is not in the scene, or a behaviour field that the class does not declare.
+- `Previous_Transform` starts equal to `Transform`, so nothing interpolates from where the old world was. Behaviours wake in the next script phase.
+- The `Name`, `Parent`, `Inactive` and `Scene_Entity` components come from the entity's keys, so a component block for one of them is ignored.
+- A component that cooked scenes use gets an explicit ID (see [World](world.md#component-registry)). The sample game's components are 1001 and up.
 
 ## Editor link
 
@@ -108,7 +121,7 @@ The editor link is a message connection between the editor and the host. It uses
 | Session | `Hello`, `Welcome`, `Refused`, `Log`, `Game_Reloaded` |
 | Types | Component types with their fields, behaviour classes with their fields, game commands |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
-| Edit | Apply operations, load a scene snapshot, refused operations |
+| Edit | `Load_Scene`; later apply operations and refused operations |
 | Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`; later camera, selection, gizmo state, input, pick request and result |
 | Mode | Play, pause, step, stop |
 | Stats | Frame times, memory, counters, script memory by module |
@@ -117,8 +130,8 @@ The editor link is a message connection between the editor and the host. It uses
 
 The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Editor` in its `Game_State`, and its `Game_API.editor_poll` calls `editor.poll` with the world and the script runtime. On the editor's side, `WorldModel` in `Cinnabar.Editor.Model` mirrors what it hears. The mirror is read-only: it changes only through the game's messages.
 
-- **A new connection gets everything.** When `poll` sees a connection that its state is not for, it sends `Component_Types` and an `Entity_Snapshot`. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches again after one.
-- **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent and the active state. It sends an `Entity_Delta` with the changed entities and the destroyed ones. A slot that a new generation took counts as a destroyed entity and a new one. The scan visits every entity, which suits worlds of tens of thousands; larger worlds will need change tracking in the ECS.
+- **A new connection gets everything.** When `poll` sees a connection that its state is not for, it sends `Component_Types` and an `Entity_Snapshot`. After a `Load_Scene`, it sends an `Entity_Snapshot` again, and forgets the watches, whose entities are gone. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches again after one.
+- **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent, the active state and the name. It sends an `Entity_Delta` with the changed entities and the destroyed ones. A slot that a new generation took counts as a destroyed entity and a new one. The scan visits every entity, which suits worlds of tens of thousands; larger worlds will need change tracking in the ECS.
 - **Watching:** the outliner needs every entity, but only a few entities need their field values. The editor sends `Watch_Entity` and `Unwatch_Entity` for the selection, and the game sends `Entity_Values` for each watched entity at most twenty times a second, and only when the encoded values changed. A watched entity that dies stops being watched. At most 64 entities are watched.
 - **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code.
 - After a code reload, the game sends the types again, and the panels rebuild.
@@ -127,7 +140,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 
 - A component type gives its stable ID, its name, its size and its fields. A field gives its name, offset, kind, read-only flag and range, and an enum's backing kind and named values.
 - **Field kinds:** the integer and float types, `bool`, enums, `[3]f32`, `quaternion128`, `World_Position` and `Entity`. A nested struct that is none of these adds its fields with dotted names, such as `inner.amount`. Other fields are hidden. *Asset references come with asset fields.*
-- **Struct tags:** `editor:"-"` hides a field, `editor:"read"` makes it, and anything in it, read-only, and `editor:"range=0,100"` gives a slider range. The walk follows the same rules as `script.expose`. The `Behaviours` component's Luau reference is hidden this way.
+- **Struct tags:** `editor:"-"` hides a field, `editor:"read"` makes it, and anything in it, read-only, and `editor:"range=0,100"` gives a slider range. The walk follows the same rules as `script.expose`. The `Behaviours` component's Luau reference is hidden this way. The walk is `scene.component_fields`, so a scene can set exactly the fields that the editor shows.
 
 ## Viewport
 
@@ -150,7 +163,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 - **One instance of each panel.** Closing a panel takes it out of the layout, and showing it again puts the same panel back in its default dock, so its state survives. Docking can rebuild a panel's view at any time, so a view holds no state: the console's lines are in a `ConsoleLog`, and the viewport's device and frames are in a `ViewportSession`.
 - **The layout file:** the editor saves the layout to `layout.json` when it closes. The file is the editor's own: the tree of splits, tool docks and the document dock, with proportions and panel IDs. Dock's serializer would store Dock's types, and need metadata for each. A panel that floats docks again in its default dock at the next start, and panels cannot be pinned. A layout that has no viewport, or that does not parse, is replaced by the default with a warning in the console.
 - **The viewport is the only document.** It cannot close, float or move into a tool dock.
-- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code) and the mode. The selection count comes with selection.
+- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code), the scene's file, the entity count and the mode. The selection count comes with selection.
 - **Theme:** dark, with one accent color, cinnabar (`#E34234`), also in Dock's brushes. Play mode tints the shell. Icons are Fluent UI System Icons (MIT), as path data in `Icons/Icons.axaml`, so the editor depends on no icon package.
 - **Errors:** an exception that no code handles on the UI thread goes to the console, and the editor keeps running. A bug in one panel must not close the editor and lose unsaved work.
 
@@ -191,8 +204,8 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 - The outliner is a virtualized list of the visible rows of the tree, indented by depth. A tree control with one item per entity does not scale to tens of thousands of entities.
 - The hierarchy comes from `Parent`, in handle order. An entity whose parent the editor does not know is a root. Rows start expanded, and the outliner remembers the ones that the user collapsed.
-- A row shows the entity, as the engine prints it (`Entity(3:1)`), and its components, without the ones that the tree shows itself (`Parent`, `Previous_Transform`, `Inactive`, `Disabled`). An inactive entity is dimmed. *Names come with scenes.*
-- **Filter:** a filter shows the rows whose entity or components match, with their ancestors.
+- A row shows the entity's name, or the entity as the engine prints it (`Entity(3:1)`) when it has none, and its components, without the ones that the tree shows itself (`Parent`, `Previous_Transform`, `Inactive`, `Disabled`, `Name`, `Scene_Entity`). An inactive entity is dimmed.
+- **Filter:** a filter shows the rows whose name, entity or components match, with their ancestors.
 - Dragging a row onto another row is a reparent operation. *With editing.*
 - **Visibility and lock are editor state.** Hidden entities are not drawn in the viewport, and locked entities cannot be picked. Neither changes the game's `Disabled` state, and neither is saved in the scene. The editor saves them for each user.
 

@@ -33,7 +33,7 @@ content_root := "samples/" + game + "/content"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -99,8 +99,8 @@ update-luau tag="":
 
 alias b := build
 
-# Build the host and the game DLL, and cook the game's scripts
-build: host game-dll script-types scripts
+# Build the host and the game DLL, and cook the game's scripts and scenes
+build: host game-dll script-types scripts scenes
 
 # Build the development host
 host: agility-runtime luau
@@ -129,6 +129,10 @@ cook: luau
 # Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
     "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" --root game="{{content_root}}"
+
+# Cook the game's scenes into the loose cache, build/cache/<config>. A scene without a .meta file gets one: commit it.
+scenes config="dev": cook
+    "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
 
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
@@ -183,10 +187,10 @@ editor: link-schema
 
 # Build everything and run the game in the editor
 edit: build editor
-    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll"
+    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene"
 
 # Build the statically linked release executable
-release: agility-runtime shaders luau script-types (scripts "release")
+release: agility-runtime shaders luau script-types (scripts "release") (scenes "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
@@ -216,7 +220,7 @@ fmt:
 # =================================
 
 test: luau link-schema
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor

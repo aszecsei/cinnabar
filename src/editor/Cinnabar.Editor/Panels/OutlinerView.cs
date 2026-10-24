@@ -17,12 +17,12 @@ namespace Cinnabar.Editor.Panels;
 public sealed class OutlinerView : DockPanel
 {
     // The components that the tree itself shows: the hierarchy, and activity by dimming.
-    static readonly HashSet<string> Structural = ["Parent", "Previous_Transform", "Inactive", "Disabled"];
+    static readonly HashSet<string> Structural = ["Parent", "Previous_Transform", "Inactive", "Disabled", "Name", "Scene_Entity"];
     const double Indent = 14;
 
     readonly WorldModel _world;
     readonly Selection _selection;
-    readonly TextBox _filter = new() { PlaceholderText = "Filter by entity or component", Classes = { "outliner-filter" } };
+    readonly TextBox _filter = new() { PlaceholderText = "Filter by name, entity or component", Classes = { "outliner-filter" } };
     readonly ListBox _list = new() { Classes = { "outliner" } };
     readonly TextBlock _empty;
     // Rows start expanded. The set holds the ones that the user collapsed.
@@ -93,12 +93,13 @@ public sealed class OutlinerView : DockPanel
     bool Add(List<OutlinerRow> rows, EntityNode node, int depth, string filter)
     {
         var summary = string.Join(", ", node.Components.Select(_world.TypeName).Where(n => !Structural.Contains(n)).Select(FieldValues.Humanize));
-        var label = node.ToString();
+        var label = node.Label;
         var row = new OutlinerRow(node, depth, label, summary, node.Children.Count > 0, !_collapsed.Contains(node.Handle));
         var at = rows.Count;
         rows.Add(row);
         var matches = filter.Length == 0
             || label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || node.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
             || summary.Contains(filter, StringComparison.OrdinalIgnoreCase);
         var childMatches = false;
         if (row.Expanded || filter.Length > 0)

@@ -9,6 +9,10 @@ public sealed class EntityNode
     public EntityNode(ulong handle) => Handle = handle;
 
     public ulong Handle { get; }
+    /// <summary>The Name component's text, or "".</summary>
+    public string Name { get; internal set; } = "";
+    /// <summary>The scene ID of an entity that the scene made, or 0 for one that the game spawned.</summary>
+    public ulong SceneId { get; internal set; }
     public ulong Parent { get; internal set; }
     public bool Active { get; internal set; }
 
@@ -25,6 +29,9 @@ public sealed class EntityNode
 
     /// <summary>As the engine prints an entity: <c>Entity(3:1)</c> is index 3, generation 1.</summary>
     public static string Format(ulong handle) => handle == 0 ? "none" : $"Entity({(uint)handle}:{(uint)(handle >> 32)})";
+
+    /// <summary>The name, or the handle as the engine prints it for an entity without one.</summary>
+    public string Label => Name.Length > 0 ? Name : Format(Handle);
 
     public override string ToString() => Format(Handle);
 }
@@ -141,6 +148,8 @@ public sealed class WorldModel
             node = new EntityNode(info.Entity);
             _entities[info.Entity] = node;
         }
+        node.Name = info.Name;
+        node.SceneId = info.SceneId;
         node.Parent = info.Parent;
         node.Active = info.Active;
         node.Components = info.Components;

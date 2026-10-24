@@ -15,6 +15,7 @@ static class DefaultRibbon
             [
                 new RibbonTab("home", "Home",
                 [
+                    new RibbonGroup("Scene", [new LargeButton(EditorCommands.OpenScene)]),
                     new RibbonGroup("Host", [new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost])]),
                     new RibbonGroup("Window",
                     [

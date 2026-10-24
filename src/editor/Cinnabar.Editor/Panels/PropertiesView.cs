@@ -147,14 +147,17 @@ public sealed class PropertiesView : ScrollViewer
             return "";
         }
         var behaviours = _world.Values(node.Handle)?.Behaviours ?? [];
-        return $"{node.Handle}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|" +
+        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
     }
 
+    // An entity that the world does not know shows as the engine prints it.
+    string Label(ulong entity) => _world.Find(entity)?.Label ?? EntityNode.Format(entity);
+
     Control Header(EntityNode node)
     {
-        var title = new TextBlock { Text = node.ToString(), Classes = { "title" } };
+        var title = new TextBlock { Text = node.Label, Classes = { "title" } };
         var state = new Border
         {
             Classes = { "badge", node.Active ? "active" : "inactive" },
@@ -166,7 +169,7 @@ public sealed class PropertiesView : ScrollViewer
         var header = new StackPanel { Classes = { "properties-header" }, Spacing = 4, Children = { top } };
         if (node.Parent != 0)
         {
-            var parent = new EntityView(_selection.Select);
+            var parent = new EntityView(_selection.Select, Label);
             parent.Show(new FieldDisplay(DisplayKind.Entity, EntityNode.Format(node.Parent), [], false, node.Parent, null));
             header.Children.Add(new StackPanel
             {
@@ -193,7 +196,7 @@ public sealed class PropertiesView : ScrollViewer
                 VerticalAlignment = VerticalAlignment.Center,
             };
             ToolTip.SetTip(name, field);
-            var view = FieldView.Create(kind, _selection.Select);
+            var view = FieldView.Create(kind, _selection.Select, Label);
             Grid.SetRow(name, row);
             Grid.SetRow(view.Control, row);
             Grid.SetColumn(view.Control, 1);

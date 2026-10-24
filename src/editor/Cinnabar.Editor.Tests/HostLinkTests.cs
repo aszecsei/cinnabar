@@ -131,14 +131,40 @@ public sealed class HostLinkTests : IAsyncDisposable
         var transform = Assert.Single(types.Types, t => t.Name == "Transform");
         Assert.Equal(["position", "rotation", "scale"], transform.Fields.Select(f => f.Name));
         var snapshot = await editor.Next<EntitySnapshot>();
-        // The camera has a Transform and nothing else, at scale 1.
-        var placed = snapshot.Entities.First(e => e.Components.SequenceEqual([transform.Id]));
+        // The game's own scene has a camera at scale 1.
+        var placed = Assert.Single(snapshot.Entities, e => e.Name == "Camera");
+        Assert.Contains(transform.Id, placed.Components);
 
         editor.Link.Send(new WatchEntity(placed.Entity));
         var values = await editor.Next<EntityValues>(v => v.Entity == placed.Entity);
         var data = Assert.Single(values.Components, c => c.Id == transform.Id).Data;
         Assert.Equal((int)transform.Size, data.Length);
         Assert.Equal("(1, 1, 1)", Model.FieldValues.Format(transform.Fields[2], data));
+    }
+
+    [Fact]
+    public async Task TheEditorsSceneReplacesTheGamesWorld()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        var first = await editor.Next<EntitySnapshot>();
+        Assert.Contains(first.Entities, e => e.Name == "Front Triangle");
+
+        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
+        var (scene, problems) = Document.SceneFile.Parse(File.ReadAllText(path));
+        Assert.NotNull(scene);
+        Assert.Empty(problems);
+        var front = scene.Entities.Single(e => e.Name == "Front Triangle");
+        front.Name = "Renamed";
+        scene.Entities.Remove(scene.Entities.Single(e => e.Name == "Back Triangle"));
+        scene.Entities.Add(new Document.SceneEntity(0x1234) { Name = "Child", Parent = front.Id });
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
+
+        var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == "Renamed"));
+        Assert.Equal(["Camera", "Child", "Renamed"], loaded.Entities.Select(e => e.Name).Order());
+        var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
+        Assert.Equal(front.Id, renamed.SceneId);
+        Assert.Equal(renamed.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
     }
 
     [Fact]

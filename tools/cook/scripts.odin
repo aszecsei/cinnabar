@@ -5,7 +5,6 @@ package cook
 
 import "base:runtime"
 import "core:c"
-import "core:crypto"
 import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
@@ -185,97 +184,44 @@ cook_scripts :: proc(options: Script_Options) -> bool {
 	return ok
 }
 
-// collect_scripts reads every script in the roots with its .meta file, in path order. A script without a .meta file
-// gets a new GUID, and the cooker writes its .meta file.
+// collect_scripts reads every script in the roots with its .meta file, in path order, and checks its settings.
 collect_scripts :: proc(roots: []Root) -> (scripts: []Script_Source, ok: bool) {
-	found := make([dynamic]Script_Source, context.temp_allocator)
-	ok = true
-	for root, root_index in roots {
-		walker := os.walker_create(root.dir)
-		defer os.walker_destroy(&walker)
-		for info in os.walker_walk(&walker) {
-			if strings.has_prefix(info.name, ".") {
-				if info.type == .Directory {
-					os.walker_skip_dir(&walker)
-				}
-				continue
-			}
-			if info.type != .Regular || !strings.has_suffix(info.name, SCRIPT_EXTENSION) {
-				continue
-			}
-			path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
-			name := fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir)))
-			s := Script_Source {
-				root     = root_index,
-				path     = path,
-				name     = name,
+	assets: []Asset_Source
+	assets, ok = collect_assets(roots, SCRIPT_EXTENSION)
+	found := make([dynamic]Script_Source, 0, len(assets), context.temp_allocator)
+	for a in assets {
+		if !check_script_settings(a) {
+			ok = false
+			continue
+		}
+		append(
+			&found,
+			Script_Source {
+				root = a.root,
+				path = a.path,
+				name = a.name,
+				meta_text = a.meta_text,
+				meta = a.meta,
+				source = a.source,
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
-			}
-			if !read_script(&s) {
-				ok = false
-				continue
-			}
-			append(&found, s)
-		}
-		if path, err := os.walker_error(&walker); err != nil {
-			log.errorf("cook: %s: %v", path, err)
-			ok = false
-		}
-	}
-	slice.sort_by(found[:], proc(a, b: Script_Source) -> bool {return a.path < b.path})
-	for i in 1 ..< len(found) {
-		for j in 0 ..< i {
-			if found[i].meta.guid == found[j].meta.guid {
-				log.errorf("cook: %s and %s have the same GUID. Delete the .meta file of the copy.", found[j].path, found[i].path)
-				ok = false
-			}
-		}
+			},
+		)
 	}
 	return found[:], ok
 }
 
 @(private = "file")
-read_script :: proc(s: ^Script_Source) -> bool {
-	source, err := os.read_entire_file(s.path, context.temp_allocator)
-	if err != nil {
-		log.errorf("cook: %s: %v", s.path, err)
-		return false
-	}
-	s.source = source
-	meta_path := fmt.tprintf("%s%s", s.path, format.META_EXTENSION)
-	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
-	if meta_err == .Not_Exist {
-		guid: format.Guid
-		crypto.rand_bytes(guid[:])
-		buffer: [32]u8
-		text := fmt.tprintf("# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).\nguid = %s\n", format.guid_format(guid, &buffer))
-		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
-			log.errorf("cook: %s: %v", meta_path, write_err)
-			return false
-		}
-		log.infof("cook: assigned a GUID to %s", s.name)
-		meta_bytes = transmute([]byte)text
-	} else if meta_err != nil {
-		log.errorf("cook: %s: %v", meta_path, meta_err)
-		return false
-	}
-	s.meta_text = string(meta_bytes)
-	meta, meta_ok := format.meta_parse(s.meta_text, context.temp_allocator)
-	if !meta_ok {
-		log.errorf("cook: %s: needs `guid = <32 hex digits>`, and `key = value` lines", meta_path)
-		return false
-	}
-	s.meta = meta
-	for setting in meta.settings {
+check_script_settings :: proc(a: Asset_Source) -> bool {
+	for setting in a.meta.settings {
 		switch setting.key {
 		case "native":
 			if setting.value != "true" && setting.value != "false" {
-				log.errorf("cook: %s: native must be true or false", meta_path)
+				log.errorf("cook: %s%s: native must be true or false", a.path, format.META_EXTENSION)
 				return false
 			}
 		case:
-			log.warnf("cook: %s: unknown setting %q", meta_path, setting.key)
+			log.warnf("cook: %s%s: unknown setting %q", a.path, format.META_EXTENSION, setting.key)
 		}
 	}
 	return true
@@ -469,20 +415,10 @@ script_key :: proc(config: Script_Config, s: Script_Source, dependencies: u64) -
 // cooked_script_key reads the key of a cooked script. It returns 0 if there is none, or if the blob is from a
 // cooker with other blob structures.
 cooked_script_key :: proc(output: string) -> u64 {
-	data, err := os.read_entire_file(output, context.temp_allocator)
-	if err != nil || len(data) < size_of(format.Blob_Header) {
-		return 0
-	}
-	header: format.Blob_Header
-	copy(([^]byte)(&header)[:size_of(header)], data)
-	if header.magic != format.BLOB_MAGIC || header.kind != .Script || header.layout != format.script_layout() {
-		return 0
-	}
-	return header.key
+	return cooked_key(output, .Script, format.script_layout())
 }
 
-// compile_script compiles a script and writes its blob. The blob is written to a temporary file and renamed, so the
-// running game never reads a partial blob.
+// compile_script compiles a script and writes its blob.
 compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output: string, class_name: string, fields: []format.Field_Entry) -> bool {
 	bytecode := compile_source(config, string(s.source))
 	defer luau.free_bytecode(raw_data(bytecode))
@@ -516,16 +452,7 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 		},
 		context.temp_allocator,
 	)
-	temporary := fmt.tprintf("%s.tmp", output)
-	if err := os.write_entire_file(temporary, blob); err != nil {
-		log.errorf("cook: %s: %v", temporary, err)
-		return false
-	}
-	if err := os.rename(temporary, output); err != nil {
-		log.errorf("cook: %s: %v", output, err)
-		return false
-	}
-	return true
+	return write_blob(output, blob)
 }
 
 // compile_source compiles with the configuration's settings. Release the result with luau.free_bytecode.

@@ -1,7 +1,7 @@
 // tools/cook compiles source assets. See docs/content-pipeline.md#cooking.
 //
-// `cook shaders --dxc <dxc.exe> --include <dir> <dir>` cooks shaders, and `cook scripts` cooks scripts (see
-// scripts.odin).
+// `cook shaders --dxc <dxc.exe> --include <dir> <dir>` cooks shaders, `cook scripts` cooks scripts (see
+// scripts.odin), and `cook scenes` cooks scenes (see scenes.odin).
 //
 // Each <name>.hlsl compiles its vs_main, ps_main, cs_main, as_main and ms_main entry points to <name>.<stage>.dxil,
 // with the fixed root signature attached, so DXC rejects a shader that does not fit it. A file with [shader("...")]
@@ -29,7 +29,8 @@ Options :: struct {
 }
 
 USAGE :: `usage: cook shaders --dxc <dxc.exe> [--include <dir>]... <shader dir>
-       cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...`
+       cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...
+       cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...`
 
 main :: proc() {
 	context.logger = log.create_console_logger(.Info)
@@ -45,6 +46,11 @@ main :: proc() {
 		options: Script_Options
 		if options, parsed = parse_script_args(os.args[2:]); parsed {
 			ok = cook_scripts(options)
+		}
+	case "scenes":
+		options: Script_Options
+		if options, parsed = parse_script_args(os.args[2:]); parsed {
+			ok = cook_scenes(options)
 		}
 	}
 	if !parsed {

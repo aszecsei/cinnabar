@@ -33,7 +33,7 @@ public sealed class PanelTool : Tool
 }
 
 /// <summary>The viewport, as the only document. It cannot close, float or move into a tool dock.</summary>
-public sealed class ViewportDocument : Document
+public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
 {
     public const string PanelId = "viewport";
 

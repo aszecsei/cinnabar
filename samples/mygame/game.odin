@@ -19,6 +19,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/render"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
@@ -35,9 +36,9 @@ COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
 COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
 // The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
-// Content refers to content by GUID. Until scenes exist, the game reads its one script's GUID from the .meta file.
+// Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
-PULSE_META :: #load("content/scripts/pulse.luau.meta", string)
+MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
@@ -56,19 +57,11 @@ Shadow_Mode :: enum u8 {
 	Pipeline,
 }
 
-// The large triangles: rotation speed in radians per second, scale, depth in front of the camera and HDR
-// brightness. Instance 0 is a bright triangle in front. Instance 1 is a larger, dimmer triangle behind it that turns
-// the other way, so the depth test hides the part of it that the first one covers.
-TRIANGLE_INSTANCES :: [2]struct {
-	speed, scale, depth, brightness: f32,
-} {
-	{1, 1, 0.4, 3},
-	{-0.7, 1.5, 0.6, 0.6},
-}
-
-// The scene is about 1 AU from the world origin. Fixed-point positions keep it exact there: the camera-relative
-// transforms that the GPU sees are small.
-SCENE_ORIGIN :: [3]f64{1.5e11, 0, 0}
+// The large triangles come from content/scenes/main.scene: a bright one in front, and a larger, dimmer one behind it
+// that turns the other way, so the depth test hides the part of it that the first one covers. The scene is about 1 AU
+// from the world origin. Fixed-point positions keep it exact there: the camera-relative transforms that the GPU sees
+// are small. The acceleration structure holds at most this many.
+MAX_TRIANGLES :: 2
 
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
@@ -115,6 +108,11 @@ Triangle_Instance :: struct {
 	_:          [3]f32,
 }
 
+// The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
+SPIN_ID :: ecs.Component_Id(1001)
+TRIANGLE_ID :: ecs.Component_Id(1002)
+CAMERA_ID :: ecs.Component_Id(1003)
+
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
 	speed: f32,
@@ -124,6 +122,9 @@ Spin :: struct {
 Triangle :: struct {
 	brightness: f32,
 }
+
+// Camera marks the entity that the frame is drawn from.
+Camera :: struct {}
 
 // Matches Push in shaders/objects.hlsl.
 Object_Constants :: struct {
@@ -203,6 +204,7 @@ Game_State :: struct {
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
 	world:       ecs.World,
+	// The scene's Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:      ecs.Entity,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
@@ -242,7 +244,7 @@ Frame :: struct {
 	// The accel instances, and the triangle instances that the scene pass draws.
 	instances:      gpu.Upload,
 	triangles:      gpu.Upload,
-	// The number of triangle instances. The acceleration structure holds at most len(TRIANGLE_INSTANCES).
+	// The number of triangle instances. The acceleration structure holds at most MAX_TRIANGLES.
 	triangle_count: int,
 	checker:        render.Texture,
 	scene:          render.Texture,
@@ -316,7 +318,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 			opaque        = true,
 		}
 		s.blas = platform.gpu_create_accel({kind = .Bottom, geometries = {triangle}, label = "triangle"})
-		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = len(TRIANGLE_INSTANCES), label = "scene"})
+		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"})
 	}
 	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
 
@@ -324,7 +326,6 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		log.panic("mygame: cannot create the world")
 	}
 	register_world(s)
-	spawn_scene(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
@@ -332,13 +333,9 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if hello, ok := format.meta_guid(HELLO_META); ok {
 		s.hello, _ = script.spawn_script(&s.scripts, hello)
 	}
-	// Until scenes exist, the game attaches the large triangles' behaviour itself.
-	if pulse, ok := format.meta_guid(PULSE_META); ok {
-		triangles := make([dynamic]ecs.Entity, platform.frame_allocator)
-		ecs.collect(&s.world, {ecs.registry_find_type(&s.world.registry, Triangle).id}, &triangles)
-		for e in triangles {
-			script.attach_script(&s.scripts, e, pulse)
-		}
+	// An editor replaces this scene with its own document when it links (see docs/editor.md#document-model).
+	if main_scene, ok := format.meta_guid(MAIN_SCENE_META); ok {
+		scene.load_asset(&s.world, &s.scripts, &s.assets, main_scene)
 	}
 	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
 }
@@ -348,8 +345,10 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_engine_components(r)
 	script.register_components(r)
-	ecs.register_component(r, Spin)
-	ecs.register_component(r, Triangle)
+	scene.register_components(r)
+	ecs.register_component(r, Spin, SPIN_ID)
+	ecs.register_component(r, Triangle, TRIANGLE_ID)
+	ecs.register_component(r, Camera, CAMERA_ID)
 }
 
 // register_world makes the world's registrations: components, systems and queries.
@@ -360,24 +359,14 @@ register_world :: proc(s: ^Game_State) {
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
 
-// spawn_scene places the camera and the large triangles at SCENE_ORIGIN.
-spawn_scene :: proc(s: ^Game_State) {
-	w := &s.world
-	origin := ecs.position_from_meters(SCENE_ORIGIN)
-	s.camera = ecs.spawn(w)
-	ecs.add(w, s.camera, ecs.Transform{position = origin, rotation = 1, scale = 1})
-	for t in TRIANGLE_INSTANCES {
-		pose := ecs.Transform {
-			position = ecs.position_offset(origin, {0, 0, t.depth}),
-			rotation = 1,
-			scale    = t.scale,
-		}
-		e := ecs.spawn(w)
-		ecs.add(w, e, pose)
-		ecs.add(w, e, ecs.Previous_Transform(pose))
-		ecs.add(w, e, Spin{t.speed})
-		ecs.add(w, e, Triangle{t.brightness})
+// find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
+find_camera :: proc(s: ^Game_State) {
+	if ecs.is_alive(&s.world, s.camera) {
+		return
 	}
+	cameras := make([dynamic]ecs.Entity, s.platform.frame_allocator)
+	ecs.collect(&s.world, {CAMERA_ID}, &cameras)
+	s.camera = cameras[0] if len(cameras) > 0 else 0
 }
 
 // register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
@@ -436,6 +425,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		log.infof("mygame: rings streamed in at frame %d", s.frame_count)
 	}
 
+	find_camera(s)
 	// A minimized window has no size, and nothing is rendered.
 	size := s.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
@@ -593,8 +583,8 @@ add_shadow_passes :: proc(g: ^render.Graph, frame: ^Frame) -> (building_blas: bo
 		building_blas = true
 	}
 
-	count := min(frame.triangle_count, len(TRIANGLE_INSTANCES))
-	instances, ok := s.platform.gpu_upload(len(TRIANGLE_INSTANCES) * size_of(gpu.Accel_Instance), 16)
+	count := min(frame.triangle_count, MAX_TRIANGLES)
+	instances, ok := s.platform.gpu_upload(MAX_TRIANGLES * size_of(gpu.Accel_Instance), 16)
 	if !ok || count == 0 {
 		return
 	}
@@ -629,7 +619,7 @@ build_blas :: proc(ctx: ^render.Pass_Context) {
 build_tlas :: proc(ctx: ^render.Pass_Context) {
 	frame := (^Frame)(ctx.data)
 	upload := frame.instances
-	count := u32(min(frame.triangle_count, len(TRIANGLE_INSTANCES)))
+	count := u32(min(frame.triangle_count, MAX_TRIANGLES))
 	gpu.cmd_build_top_accel(ctx.cb, render.gpu_accel(ctx.graph, frame.tlas), upload.buffer, upload.offset, count)
 }
 

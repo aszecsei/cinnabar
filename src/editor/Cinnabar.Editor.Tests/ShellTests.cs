@@ -155,6 +155,39 @@ public sealed class ShellTests : IDisposable
         Assert.False(shell.Commands.Get(EditorCommands.StopHost).CanExecute);
     }
 
+    [Fact]
+    public void ASceneWithAnErrorDoesNotReplaceTheOpenOne()
+    {
+        Directory.CreateDirectory(_settingsDirectory);
+        var good = Path.Combine(_settingsDirectory, "good.scene");
+        var bad = Path.Combine(_settingsDirectory, "bad.scene");
+        File.WriteAllText(good, "scene 1\nentity 0000000000000001\nname = \"One\"\n");
+        File.WriteAllText(bad, "scene 1\nentity 0000000000000001\n\tx = 1\n");
+        using var shell = NewShell();
+        var changes = 0;
+        shell.SceneChanged += () => changes++;
+
+        Assert.True(shell.OpenScene(good));
+        Assert.Equal("good.scene", shell.Scene!.Title);
+        Assert.False(shell.OpenScene(bad));
+
+        Assert.Equal(good, shell.Scene!.Path);
+        Assert.Equal(1, changes);
+        Assert.Contains(Problems(shell), p => p.Contains($"{bad}:3") && p.Contains("no component or behaviour is open"));
+    }
+
+    [Fact]
+    public void TheCommandLineOpensAScene()
+    {
+        Directory.CreateDirectory(_settingsDirectory);
+        var path = Path.Combine(_settingsDirectory, "start.scene");
+        File.WriteAllText(path, "scene 1\n");
+        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path), new EditorSettings(_settingsDirectory));
+
+        Assert.Equal(path, shell.Scene?.Path);
+        Assert.True(shell.Commands.Get(EditorCommands.OpenScene).CanExecute);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_settingsDirectory))

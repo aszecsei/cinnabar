@@ -199,3 +199,23 @@ while true do Test.report(value + 10) coroutine.yield() end`, {{"./util", util}}
 	hot_reload(&f)
 	expect_reports(t, f, {12})
 }
+
+@(test)
+attached_scripts_take_field_values_and_skip_bad_ones :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	door := write_script(t, &f, 4, 0, `
+local Door = Behaviour.define("Door", {speed = Field.number(1), label = Field.string("door")})
+function Door:start()
+	Test.report(self.speed)
+	Test.report(self.label == "door" and 1 or 0)
+end
+return Door`)
+	e := ecs.spawn(&f.world)
+	fields := []Behaviour_Field{{name = "speed", kind = .Number, number = 3}, {name = "label", kind = .Boolean, boolean = true}, {name = "colour", kind = .Number, number = 2}}
+	testing.expect(t, attach_script(&f.runtime, e, door, fields))
+	phase(f.base)
+	// The wrong type and the unknown field are skipped with warnings, and the rest is set.
+	expect_reports(t, f, {3, 1})
+}

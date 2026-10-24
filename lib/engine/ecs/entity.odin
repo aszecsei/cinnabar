@@ -1,5 +1,6 @@
 package ecs
 
+import "core:slice"
 import "core:sync"
 
 // Entity is a generational handle: the slot index in the low 32 bits and the generation in the high 32 bits.
@@ -81,6 +82,23 @@ despawn :: proc(w: ^World, e: Entity) -> bool {
 	}
 	despawn_orphans(w)
 	return true
+}
+
+// despawn_all despawns every entity. The next spawns take the freed slots from the lowest index up, so a world that is
+// filled again, such as by a scene load, gets its handles in the order that it spawns them.
+despawn_all :: proc(w: ^World) {
+	flush_reserved(w)
+	for index in 0 ..< w.entities.count {
+		record := &records(w)[index]
+		if record.archetype != NO_ARCHETYPE {
+			despawn_one(w, make_entity(index, record.generation))
+		}
+	}
+	// Every entity is gone, so no child is left for despawn_orphans to find.
+	w.orphans_pending = false
+	// reserve takes slots from the end of the free list.
+	es := &w.entities
+	slice.sort_by(free_list(w)[:es.free_count], proc(a, b: u32) -> bool {return a > b})
 }
 
 is_alive :: proc "contextless" (w: ^World, e: Entity) -> bool {

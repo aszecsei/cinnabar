@@ -8,8 +8,8 @@ public class WorldModelTests
 {
     static ulong Handle(uint index, uint generation = 1) => (ulong)generation << 32 | index;
 
-    static EntityInfo Info(ulong entity, ulong parent = 0, bool active = true, params ulong[] components) =>
-        new(entity, parent, active, components);
+    static EntityInfo Info(ulong entity, ulong parent = 0, bool active = true, string name = "", ulong sceneId = 0, params ulong[] components) =>
+        new(entity, name, sceneId, parent, active, components);
 
     static WorldModel Snapshot(params EntityInfo[] entities)
     {

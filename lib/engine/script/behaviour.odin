@@ -311,10 +311,20 @@ attach :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, class_idx, values_idx
 // check_field_value raises an error for a value that the class does not declare, or that has the wrong type.
 @(private = "file")
 check_field_value :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key: string, value_idx: c.int) {
+	if problem := field_problem(r, L, class, fields, key, value_idx); problem != "" {
+		raise(L, problem)
+	}
+}
+
+// field_problem describes why a value cannot set a field of the class, or is "" when it can.
+@(private = "file")
+field_problem :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key: string, value_idx: c.int) -> string {
 	value := luau.absindex(L, value_idx)
+	top := luau.gettop(L)
+	defer luau.settop(L, top)
 	luau.pushodinstring(L, key)
 	if luau.rawget(L, fields) != .TABLE {
-		raise(L, fmt.aprintf("%s has no field %s", class_name(r, L, class), key, allocator = frame(r)))
+		return fmt.aprintf("%s has no field %s", class_name(r, L, class), key, allocator = frame(r))
 	}
 	luau.rawgetfield(L, -1, "__field")
 	kind := luau.toodinstring(L, -1)
@@ -333,9 +343,9 @@ check_field_value :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key
 		ok = actual == .NIL || to_entity(L, value) != 0
 	}
 	if !ok {
-		raise(L, fmt.aprintf("%s.%s takes a %s", class_name(r, L, class), key, kind, allocator = frame(r)))
+		return fmt.aprintf("%s.%s takes a %s", class_name(r, L, class), key, kind, allocator = frame(r))
 	}
-	luau.pop(L, 2)
+	return ""
 }
 
 // wake runs awake once, and then on_enable if the instance is enabled. Both run only while the entity is active.
@@ -518,24 +528,44 @@ call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int
 	protected_call(r, L, nargs + 1, 0)
 }
 
-// attach_script adds a behaviour from a script asset to an entity. Its awake runs in the next script phase.
-// The script must return a Behaviour class.
-attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid) -> bool {
+// attach_script adds a behaviour from a script asset to an entity, with the given field values. Its awake runs in
+// the next script phase. The script must return a Behaviour class. A field that the class does not declare, or a
+// value of the wrong type, is skipped with a warning, so a scene that a script change left behind still loads.
+attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid, fields: []Behaviour_Field = nil) -> bool {
 	Data :: struct {
-		r:     ^Runtime,
-		e:     ecs.Entity,
-		guid:  format.Guid,
-		error: string,
+		r:      ^Runtime,
+		e:      ecs.Entity,
+		guid:   format.Guid,
+		fields: []Behaviour_Field,
 	}
-	data := Data{r, e, guid, ""}
+	data := Data{r, e, guid, fields}
 	status := luau.cpcall(r.L, proc "c" (L: ^luau.State) -> c.int {
 		d := (^Data)(luau.touserdata(L, 1))
 		context = d.r.bindings.ctx
 		push_module(d.r, L, d.guid)
-		if !is_class(L, -1) {
+		class := luau.gettop(L)
+		if !is_class(L, class) {
 			raise(L, fmt.aprintf("%s does not return a Behaviour class", guid_text(d.r, d.guid), allocator = frame(d.r)))
 		}
-		attach(d.r, L, d.e, -1, 0, immediate = false)
+		values: c.int
+		if len(d.fields) > 0 {
+			luau.rawgetfield(L, class, "__fields")
+			schema := luau.gettop(L)
+			luau.newtable(L)
+			values = luau.gettop(L)
+			for f in d.fields {
+				push_field(L, f)
+				if problem := field_problem(d.r, L, class, schema, f.name, -1); problem != "" {
+					log.warnf("script: Entity(%s): %s, so the value is not set", entity_text(d.r, d.e), problem)
+					luau.pop(L, 1)
+					continue
+				}
+				luau.pushodinstring(L, f.name)
+				luau.insert(L, -2)
+				luau.rawset(L, values)
+			}
+		}
+		attach(d.r, L, d.e, class, values, immediate = false)
 		return 0
 	}, &data)
 	if status != .OK {
@@ -544,4 +574,22 @@ attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid) -> bool {
 		return false
 	}
 	return true
+}
+
+@(private = "file")
+push_field :: proc(L: ^luau.State, f: Behaviour_Field) {
+	switch f.kind {
+	case .Nil:
+		luau.pushnil(L)
+	case .Number:
+		luau.pushnumber(L, f.number)
+	case .Boolean:
+		luau.pushboolean(L, b32(f.boolean))
+	case .String:
+		luau.pushodinstring(L, f.text)
+	case .Vector:
+		luau.pushvector(L, f.vector.x, f.vector.y, f.vector.z)
+	case .Entity:
+		push_entity(L, f.entity)
+	}
 }

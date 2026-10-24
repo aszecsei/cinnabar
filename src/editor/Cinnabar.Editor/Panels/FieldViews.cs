@@ -17,11 +17,12 @@ abstract class FieldView
 
     public abstract void Show(FieldDisplay value);
 
-    public static FieldView Create(DisplayKind kind, Action<ulong> select) => kind switch
+    /// <summary>A view for a kind of value. An entity shows as its <paramref name="label"/>, such as its name.</summary>
+    public static FieldView Create(DisplayKind kind, Action<ulong> select, Func<ulong, string> label) => kind switch
     {
         DisplayKind.Axes => new AxesView(),
         DisplayKind.Bool => new BoolView(),
-        DisplayKind.Entity => new EntityView(select),
+        DisplayKind.Entity => new EntityView(select, label),
         DisplayKind.Number => new BoxView(numeric: true),
         _ => new BoxView(numeric: false),
     };
@@ -108,10 +109,12 @@ sealed class BoolView : FieldView
 sealed class EntityView : FieldView
 {
     readonly TextBlock _text = new() { Text = "…", TextTrimming = TextTrimming.CharacterEllipsis };
+    readonly Func<ulong, string> _label;
     ulong _entity;
 
-    public EntityView(Action<ulong> select)
+    public EntityView(Action<ulong> select, Func<ulong, string> label)
     {
+        _label = label;
         _text.PointerPressed += (_, e) =>
         {
             if (_entity != 0)
@@ -127,7 +130,8 @@ sealed class EntityView : FieldView
     public override void Show(FieldDisplay value)
     {
         _entity = value.Entity;
-        _text.Text = value.Text;
+        _text.Text = _entity != 0 ? _label(_entity) : value.Text;
+        SetTooltip(_text, _entity != 0 ? value.Text : null);
         _text.Classes.Set("link", _entity != 0);
         _text.Classes.Set("dim", _entity == 0);
         _text.Cursor = _entity != 0 ? new Cursor(StandardCursorType.Hand) : Cursor.Default;

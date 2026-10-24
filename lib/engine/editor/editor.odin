@@ -6,10 +6,13 @@ package editor
 import "base:runtime"
 import "core:hash"
 import "core:log"
+import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:engine/ecs"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
 // The entity list changes at most this often in the editor.
@@ -40,6 +43,8 @@ Known :: struct {
 	archetype: u32,
 	parent:    ecs.Entity,
 	active:    bool,
+	// A hash of the name, which scripts and systems can change.
+	name:      u64,
 	// The scan that last saw the entity.
 	seen:      u32,
 }
@@ -97,6 +102,11 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			watch(e, ecs.Entity(v.entity))
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
+		case link.Load_Scene:
+			scene.load(w, scripts, scene_of(v, frame))
+			// Every entity is new, so the editor gets a snapshot, and its watches are of entities that are gone.
+			clear(&e.watched)
+			snapshot = true
 		case:
 			log.warnf("editor: the game does not handle %v", message)
 		}
@@ -160,18 +170,33 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 			parent = p.entity
 		}
 		_, inactive := find(components, ecs.INACTIVE_ID)
-		now := Known{entity, archetype, parent, !inactive, e.scan}
+		name := ecs.name_of(w, entity)
+		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name), e.scan}
 		k := &e.known[index]
 		// A new entity in the slot of one that the editor knows: that one died between two scans.
 		if k.entity != 0 && k.entity != entity && !full {
 			append(&destroyed, u64(k.entity))
 		}
-		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active {
+		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active || k.name != now.name {
 			ids := make([]u64, len(components), allocator)
 			for id, i in components {
 				ids[i] = u64(id)
 			}
-			append(&infos, link.Entity_Info{entity = u64(entity), parent = u64(parent), active = now.active, components = ids})
+			scene_id: u64
+			if s := (^scene.Scene_Entity)(ecs.get_raw(w, entity, scene.SCENE_ENTITY_ID)); s != nil {
+				scene_id = s.id
+			}
+			append(
+				&infos,
+				link.Entity_Info {
+					entity = u64(entity),
+					name = strings.clone(name, allocator),
+					scene_id = scene_id,
+					parent = u64(parent),
+					active = now.active,
+					components = ids,
+				},
+			)
 		}
 		k^ = now
 	}
@@ -249,6 +274,51 @@ behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator
 	return values
 }
 
+// scene_of converts the editor's scene to the loader's. Strings and slices still point into the message.
+@(private)
+scene_of :: proc(m: link.Load_Scene, allocator: runtime.Allocator) -> format.Scene {
+	fields_of :: proc(fields: []link.Scene_Field, allocator: runtime.Allocator) -> []format.Scene_Field {
+		result := make([]format.Scene_Field, len(fields), allocator)
+		for f, i in fields {
+			v := f.value
+			result[i] = {
+				name = f.name,
+				hash = format.scene_field_hash(f.name),
+				value = {
+					kind = format.Scene_Value_Kind(v.kind),
+					count = v.count,
+					integer = v.integer,
+					ints = v.ints,
+					floats = v.floats,
+					text = v.text,
+					entity = v.entity,
+				},
+			}
+		}
+		return result
+	}
+	entities := make([]format.Scene_Entity, len(m.entities), allocator)
+	for e, i in m.entities {
+		components := make([]format.Scene_Component, len(e.components), allocator)
+		for c, j in e.components {
+			components[j] = {id = c.id, name = c.name, fields = fields_of(c.fields, allocator)}
+		}
+		behaviours := make([]format.Scene_Behaviour, len(e.behaviours), allocator)
+		for b, j in e.behaviours {
+			behaviours[j] = {script = format.Guid(b.script), fields = fields_of(b.fields, allocator)}
+		}
+		entities[i] = {
+			id         = e.id,
+			name       = e.name,
+			parent     = e.parent,
+			active     = e.active,
+			components = components,
+			behaviours = behaviours,
+		}
+	}
+	return {entities = entities}
+}
+
 @(private)
 find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 	for x, i in ids {
@@ -260,3 +330,4 @@ find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 }
 
 #assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))
+#assert(int(format.Scene_Value_Kind.Entity) == int(link.Scene_Value_Kind.Entity))

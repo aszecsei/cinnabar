@@ -8,6 +8,7 @@ namespace Cinnabar.Editor.Shell;
 static class EditorCommands
 {
     public const string Palette = "app.commandPalette";
+    public const string OpenScene = "file.openScene";
     public const string RestartHost = "host.restart";
     public const string StopHost = "host.stop";
     public const string ResetLayout = "view.resetLayout";
@@ -26,6 +27,12 @@ static class EditorCommands
             Description = "Search every command by name.",
             Icon = "search",
             Shortcut = "Ctrl+Shift+P",
+        });
+        commands.Register(new Command(OpenScene, "Open Scene", shell.RequestOpenScene)
+        {
+            Description = "Open a scene file. The host's world becomes the scene.",
+            Icon = "assets",
+            Shortcut = "Ctrl+O",
         });
         commands.Register(new Command(RestartHost, "Restart Host", shell.Host.Restart)
         {
