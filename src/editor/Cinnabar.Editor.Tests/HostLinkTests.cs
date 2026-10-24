@@ -168,6 +168,28 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheGameAppliesEditsAndSendsBackWhatItCannot()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
+        var document = new Document.SceneDocument(path, Document.SceneFile.Parse(File.ReadAllText(path)).Scene!);
+        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire())]));
+        await editor.Next<EntitySnapshot>();
+        var front = document.Scene.Entities.Single(e => e.Name == "Front Triangle");
+
+        document.Apply("Rename", new Document.Rename(front.Id, "Edited"));
+        document.Apply("Bad field", new Document.SetField(front.Id, 1001, "no_such_field", Document.SceneValue.Of(true)));
+
+        var problems = await editor.Next<EditProblems>(p => !p.Snapshot);
+        var problem = Assert.Single(problems.Problems);
+        Assert.Equal(front.Id, problem.Entity);
+        Assert.Contains("no_such_field", problem.Message);
+        // The rename arrives with the next entity delta.
+        await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.SceneId == front.Id && e.Name == "Edited"));
+    }
+
+    [Fact]
     public async Task AnotherProtocolVersionIsRefused()
     {
         await using var editor = await Connect();

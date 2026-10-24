@@ -317,7 +317,7 @@ check_field_value :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key
 }
 
 // field_problem describes why a value cannot set a field of the class, or is "" when it can.
-@(private = "file")
+@(private)
 field_problem :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key: string, value_idx: c.int) -> string {
 	value := luau.absindex(L, value_idx)
 	top := luau.gettop(L)
@@ -554,7 +554,7 @@ attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid, fields: []B
 			luau.newtable(L)
 			values = luau.gettop(L)
 			for f in d.fields {
-				push_field(L, f)
+				push_behaviour_field(L, f)
 				if problem := field_problem(d.r, L, class, schema, f.name, -1); problem != "" {
 					log.warnf("script: Entity(%s): %s, so the value is not set", entity_text(d.r, d.e), problem)
 					luau.pop(L, 1)
@@ -576,8 +576,8 @@ attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid, fields: []B
 	return true
 }
 
-@(private = "file")
-push_field :: proc(L: ^luau.State, f: Behaviour_Field) {
+@(private)
+push_behaviour_field :: proc(L: ^luau.State, f: Behaviour_Field) {
 	switch f.kind {
 	case .Nil:
 		luau.pushnil(L)

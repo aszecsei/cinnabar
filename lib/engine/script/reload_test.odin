@@ -219,3 +219,37 @@ return Door`)
 	// The wrong type and the unknown field are skipped with warnings, and the rest is set.
 	expect_reports(t, f, {3, 1})
 }
+
+@(test)
+editor_operations_set_reset_and_detach_behaviours :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	door := write_script(t, &f, 5, 0, `
+local Door = Behaviour.define("Door", {speed = Field.number(1)})
+function Door:update() Test.report(self.speed) end
+function Door:on_destroy() Test.report(-1) end
+return Door`)
+	e := ecs.spawn(&f.world)
+	testing.expect(t, attach_script(&f.runtime, e, door))
+	phase(f.base)
+	expect_reports(t, f, {1})
+
+	testing.expect_value(t, set_behaviour_field(&f.runtime, e, door, {name = "speed", kind = .Number, number = 4}), "")
+	testing.expect_value(t, set_behaviour_field(&f.runtime, e, door, {name = "speed", kind = .String, text = "x"}), "Door.speed takes a number")
+	testing.expect_value(t, set_behaviour_field(&f.runtime, e, door, {name = "size", kind = .Number}), "Door has no field size")
+	phase(f.base)
+	expect_reports(t, f, {4})
+
+	snapshots := inspect(&f.runtime, e, context.temp_allocator)
+	testing.expect_value(t, snapshots[0].script, door)
+
+	testing.expect_value(t, set_behaviour_field(&f.runtime, e, door, {name = "speed"}, reset = true), "")
+	phase(f.base)
+	expect_reports(t, f, {1})
+
+	testing.expect(t, detach_script(&f.runtime, e, door))
+	expect_reports(t, f, {-1})
+	testing.expect(t, !detach_script(&f.runtime, e, door))
+	testing.expect_value(t, set_behaviour_field(&f.runtime, e, door, {name = "speed", kind = .Number}), "the entity has no Door")
+}

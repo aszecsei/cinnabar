@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
@@ -22,6 +23,10 @@ public sealed class MainWindow : Window
     readonly TextBlock _worldStatus = new();
     readonly TextBlock _sceneStatus = new();
     readonly Ellipse _hostDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
+    // The autosave is due at most every 30 s, so a check every few seconds is close enough.
+    readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
+    // Set once the user has answered about unsaved changes, so the second Close goes through.
+    bool _closing;
 
     public MainWindow(EditorShell shell)
     {
@@ -52,6 +57,8 @@ public sealed class MainWindow : Window
         var palette = new CommandPalette(views);
         shell.PaletteRequested += palette.Open;
         shell.OpenSceneRequested += () => _ = PickScene();
+        shell.SaveAsRequested += () => _ = PickSaveAs();
+        shell.RestoreOffered += () => _ = OfferRestore();
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -72,8 +79,98 @@ public sealed class MainWindow : Window
         UpdateHostStatus();
         shell.World.EntitiesChanged += UpdateWorldStatus;
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
-        Closing += (_, _) => shell.SaveLayout();
-        Closed += (_, _) => shell.Dispose();
+        _autosave.Tick += (_, _) => shell.Tick(DateTime.UtcNow);
+        _autosave.Start();
+        // The command line's scene opened before the window could ask about its autosave.
+        Opened += (_, _) =>
+        {
+            if (shell.PendingRestore != null)
+            {
+                _ = OfferRestore();
+            }
+        };
+        Closing += OnClosing;
+        Closed += (_, _) =>
+        {
+            _autosave.Stop();
+            shell.Dispose();
+        };
+    }
+
+    async void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_closing)
+        {
+            return;
+        }
+        e.Cancel = true;
+        if (await ConfirmDiscard("closing"))
+        {
+            _closing = true;
+            _shell.SaveLayout();
+            Close();
+        }
+    }
+
+    /// <summary>Asks about unsaved changes before they would be lost, and returns whether to go on.</summary>
+    async Task<bool> ConfirmDiscard(string doing)
+    {
+        if (_shell.Scene is not { IsDirty: true } scene)
+        {
+            return true;
+        }
+        var answer = await Dialogs.Ask(this, "Unsaved changes", $"{scene.Title} has changes that are not saved. Save them before {doing}?",
+            "Save", "Don't Save", "Cancel");
+        switch (answer)
+        {
+            case "Save":
+                return _shell.SaveScene();
+            case "Don't Save":
+                _shell.DiscardChanges();
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    async Task OfferRestore()
+    {
+        if (_shell.Scene is not { } scene || _shell.PendingRestore is not { } autosave)
+        {
+            return;
+        }
+        var when = File.GetLastWriteTime(autosave).ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+        var answer = await Dialogs.Ask(this, "Restore unsaved changes",
+            $"The editor autosaved changes to {scene.Title} at {when} that the file does not have. It may have closed without saving them. Restore them?",
+            "Restore", "Discard");
+        if (answer == "Restore")
+        {
+            _shell.RestoreAutosave();
+        }
+        else
+        {
+            _shell.DiscardAutosave();
+        }
+    }
+
+    async Task PickSaveAs()
+    {
+        if (_shell.Scene is not { } scene)
+        {
+            return;
+        }
+        var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save Scene As",
+            SuggestedFileName = scene.Title,
+            DefaultExtension = Document.SceneFile.Extension,
+            FileTypeChoices = [new FilePickerFileType("Scenes") { Patterns = [$"*{Document.SceneFile.Extension}"] }],
+            SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(System.IO.Path.GetDirectoryName(scene.Path)!),
+        });
+        if (file?.TryGetLocalPath() is { } path)
+        {
+            _shell.SaveScene(path);
+        }
     }
 
     Control StatusBar()
@@ -87,6 +184,10 @@ public sealed class MainWindow : Window
 
     async Task PickScene()
     {
+        if (!await ConfirmDiscard("opening another scene"))
+        {
+            return;
+        }
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open Scene",
@@ -105,8 +206,9 @@ public sealed class MainWindow : Window
     void UpdateSceneStatus()
     {
         var scene = _shell.Scene;
-        Title = scene == null ? "cinnabar editor" : $"{scene.Title} - cinnabar editor";
-        _sceneStatus.Text = scene == null ? "No scene" : scene.Title;
+        var dirty = scene is { IsDirty: true } ? " •" : "";
+        Title = scene == null ? "cinnabar editor" : $"{scene.Title}{dirty} - cinnabar editor";
+        _sceneStatus.Text = scene == null ? "No scene" : scene.Title + dirty;
         ToolTip.SetTip(_sceneStatus, scene?.Path);
     }
 

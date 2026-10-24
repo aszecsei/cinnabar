@@ -8,10 +8,11 @@ NAME_ID :: Component_Id(7)
 MAX_NAME :: 63
 
 // Name is an entity's name, for people: the outliner, logs and the editor in play mode. The text is in the
-// component, because component storage holds no pointers.
+// component, because component storage holds no pointers. The editor shows and edits it as the entity's name, not
+// as fields.
 Name :: struct {
-	length: u8,
-	text:   [MAX_NAME]u8,
+	length: u8 `editor:"-"`,
+	text:   [MAX_NAME]u8 `editor:"-"`,
 }
 
 make_name :: proc "contextless" (text: string) -> Name {

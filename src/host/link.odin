@@ -269,7 +269,7 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		}
 	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems:
 		// is_host_message sends these to the game.
 	}
 }

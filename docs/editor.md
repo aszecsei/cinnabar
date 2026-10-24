@@ -29,7 +29,7 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 | `Cinnabar.Editor.Link` | The editor link client: the connection, framing, the wire format, and the messages that the generator writes from the schema. |
 | `Cinnabar.Editor.Link.Generator` | The Roslyn source generator that turns the link's schema into C# records with their readers and writers. |
 | `Cinnabar.Editor.Model` | The type registry and the mirror of the host's world: entities, hierarchy, and the watched field values. It is updated only from link events. |
-| `Cinnabar.Editor.Document` | Scenes: the scene file's reader and writer, and the snapshot that the host loads. Later, operations, the undo stack, selection, save, and autosave. |
+| `Cinnabar.Editor.Document` | Scenes: the scene file's reader and writer, the snapshot that the host loads, operations, the undo stack, save, and autosave. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
 | `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. Later, tests against a real host with the null backend. |
@@ -41,11 +41,17 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 **The editor owns the scene.** The host's world is a mirror of the editor's document while the editor is in edit mode.
 
 - **Why:** the host can lose its world at any time. A crash loses it, and so does a soft restart after a `Game_State` layout change (see [Hot reload](hot-reload.md#reload-sequence)). Unsaved edits must survive both. If the host owned the scene, they would not.
-- **Edits are operations.** Every change is an operation on the document: create or destroy an entity, set a field, add or remove a component or a behaviour, reparent, rename. Each operation has an inverse. The editor applies an operation to its document, puts it on the undo stack and sends it to the host. The host applies it to its world. The editor never waits for the host to confirm an edit.
-- **Transactions:** an interaction groups its operations into one undo entry. A gizmo drag or a drag on a number field sends field values while it moves, and makes one undo entry when the mouse is released.
+- **Edits are operations.** Every change is an operation on the document: create or destroy an entity, rename, reparent, set active, add or remove a component, set or reset a field, remove a behaviour, and set or reset a behaviour's field. Each operation returns its inverse when it applies. The editor applies an operation to its document, puts it on the undo stack and sends it to the host in `Apply_Operations`. The host applies it to its world. The editor never waits for the host to confirm an edit.
+- **Resetting** a field removes it from the scene, so a component's field is zero and a behaviour's field has its class's default, as in a scene that does not set it.
+- **Edits of more than one operation:** destroying an entity destroys its descendants first, each with its own operation, so undo creates each after its parent. Duplicating copies an entity and its descendants with new scene IDs, and a reference inside the copy refers to the copy. Reparenting sets the entity's `Local_Transform`, or for a new root its `Transform`, so it stays where it is in the world: `SceneEdits` composes poses as the engine's propagation does.
+- **Transactions:** an interaction groups its operations into one undo entry. A gizmo drag or a drag on a number field sends field values while it moves, and makes one undo entry when the mouse is released. A step that replaces the step before it, such as the next value of the same field, takes its place, so the entry has the last value and the first inverse. An operation that does not fit the document, such as one for an entity that is not there, undoes the transaction's earlier steps and goes to the console.
+- **Undo and redo** are Ctrl+Z and Ctrl+Y. A new edit after an undo drops the entries after it. The document is dirty when its position in the history is not the one that the file has, so undoing back to it makes the document clean again. The title bar and the status bar mark a dirty scene with a dot.
+- **Save** (Ctrl+S) writes the file through a temporary file, so a crash never leaves half a file. Save As (Ctrl+Shift+S) writes a new file, which the editor then edits. Closing the editor or opening another scene with unsaved changes asks whether to save them.
+- **Selection by scene ID:** the editor keeps the selected entity's scene ID, so a resync, which gives every entity a new handle, keeps the selection. An entity that an edit creates is selected when the host reports it. Entities that the game spawned have no scene ID, and the editor does not edit them.
 - **Resync:** when the link connects, the editor sends the whole document as a scene snapshot (`Load_Scene`), and the host replaces its world with it. This is the same path after a crash, a host restart and a soft restart. The host reports a soft restart with an event, and the editor sends the snapshot again. The game loads its own scene at `init`, so without an open document the host shows that.
 - **Opening a scene:** `--scene <file>`, or Open Scene (Ctrl+O). A file with an error does not open: its problems go to the console with their lines, and the open scene stays. The title bar and the status bar show the scene's file.
-- **Rejected operations:** the host can refuse an operation, for example a field that the new DLL no longer has. The document keeps the operation, and the editor shows a warning on the entity. The document is never changed to match the host.
+- **Rejected operations:** the host can refuse an operation, for example a field that the new DLL no longer has. It sends `Edit_Problems` with the entity's scene ID and the reason. The document keeps the operation, and the editor shows a warning on the entity, in the outliner and the properties panel, and in the console. A scene load sends its problems too, which replace the ones before them. The document is never changed to match the host.
+- **The game's side** maps scene IDs to entities. A load fills the map, and a stale entry, such as for the game's own scene at `init`, makes the game build it again from every entity's `Scene_Entity`. The operations use the loader's procedures for an entity, a component or a field, so they convert values and report problems as a load does.
 
 ### Modes
 
@@ -121,7 +127,7 @@ The editor link is a message connection between the editor and the host. It uses
 | Session | `Hello`, `Welcome`, `Refused`, `Log`, `Game_Reloaded` |
 | Types | Component types with their fields, behaviour classes with their fields, game commands |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
-| Edit | `Load_Scene`; later apply operations and refused operations |
+| Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
 | Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`; later camera, selection, gizmo state, input, pick request and result |
 | Mode | Play, pause, step, stop |
 | Stats | Frame times, memory, counters, script memory by module |
@@ -133,7 +139,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 - **A new connection gets everything.** When `poll` sees a connection that its state is not for, it sends `Component_Types` and an `Entity_Snapshot`. After a `Load_Scene`, it sends an `Entity_Snapshot` again, and forgets the watches, whose entities are gone. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches again after one.
 - **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent, the active state and the name. It sends an `Entity_Delta` with the changed entities and the destroyed ones. A slot that a new generation took counts as a destroyed entity and a new one. The scan visits every entity, which suits worlds of tens of thousands; larger worlds will need change tracking in the ECS.
 - **Watching:** the outliner needs every entity, but only a few entities need their field values. The editor sends `Watch_Entity` and `Unwatch_Entity` for the selection, and the game sends `Entity_Values` for each watched entity at most twenty times a second, and only when the encoded values changed. A watched entity that dies stops being watched. At most 64 entities are watched.
-- **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code.
+- **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code. A behaviour's value also names the script asset whose module returned its class, which is how the document finds it.
 - After a code reload, the game sends the types again, and the panels rebuild.
 
 ### Types
@@ -196,7 +202,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 | Properties | The components and behaviours of the selection |
 | Viewport | The frames, the overlays, the gizmo and the camera |
 | Asset Browser | The content roots, through the cook daemon |
-| Undo History | The undo stack. Clicking an entry undoes or redoes to it. |
+| Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
 | Console | The host's and the cooker's log, with filters by level and source |
 | Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
 
@@ -206,16 +212,21 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - The hierarchy comes from `Parent`, in handle order. An entity whose parent the editor does not know is a root. Rows start expanded, and the outliner remembers the ones that the user collapsed.
 - A row shows the entity's name, or the entity as the engine prints it (`Entity(3:1)`) when it has none, and its components, without the ones that the tree shows itself (`Parent`, `Previous_Transform`, `Inactive`, `Disabled`, `Name`, `Scene_Entity`). An inactive entity is dimmed.
 - **Filter:** a filter shows the rows whose name, entity or components match, with their ancestors.
-- Dragging a row onto another row is a reparent operation. *With editing.*
+- **Dragging** a row onto another row reparents its entity, and onto the space below the rows makes it a root, without moving it in the world. A row cannot go under itself or its descendants. A row also drags onto an entity field in the properties panel.
+- A row's menu duplicates, deletes and moves to the root, and makes a new entity. A row whose entity the game could not apply all of has a warning mark, with the problems in its tooltip.
 - **Visibility and lock are editor state.** Hidden entities are not drawn in the viewport, and locked entities cannot be picked. Neither changes the game's `Disabled` state, and neither is saved in the scene. The editor saves them for each user.
 
 ### Properties
 
-- The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind. Until editing, it shows the values as text. A component with no fields the editor can show, such as a tag, is a line with its name.
+- The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind. A component with no fields the editor can show, such as a tag, is a chip with its name. The components that the header shows (`Parent`, `Name`, `Inactive`, `Scene_Entity`) and `Behaviours` are not groups.
+- **Editing:** a field edits when the document has its component or behaviour. A number, a string or an axis is a box that sets the field on Enter or when it loses focus, and puts the value back on Escape. Dragging a number's name, or an axis's colored marker, changes it in one undo entry, ten times as fast with Shift and a tenth with Ctrl. A `bool` is a check box, an enum a choice of its names, and an entity reference takes a drop from the outliner and has a button that clears it. A rotation edits as Euler angles, so an edit of one angle keeps the others as they show. A position edits in meters, with m, km, Mm or Gm, and the other axes keep their raw values exactly. A box that has focus keeps what the user types while the host's values arrive.
+- **What does not edit:** fields with `editor:"read"`, a child's `Transform`, which propagation writes from its `Local_Transform`, `Previous_Transform`, which the world writes, and entities that the game spawned.
+- **The header** edits the name and, with the Active badge, the active state. Each group has a button that removes its component or behaviour, and Add Component offers the registered types that the entity lacks. A `Transform` or a `Local_Transform` starts as the identity. Adding a behaviour comes with the asset browser, which lists the scripts.
+- A component that the document has and the game does not is a group with its values as the file writes them. The scene keeps it, and the group can remove it.
 - The panel builds its controls when the entity, its components or its behaviours change. When only values change, it updates their text, so it keeps its expanders and scroll position while values change twenty times a second. A collapsed group stays collapsed across selections.
 - An entity reference, such as `Parent` or an entity field, is a link that selects that entity.
-- **Reset:** a field that differs from its default shows a reset button. With prefabs, the default is the prefab's value.
-- **Multi-select:** the panel shows the components that every selected entity has. A field whose values differ shows as mixed, and setting it makes one operation for each entity, in one transaction.
+- **Reset:** a field that the scene sets shows a reset button, which removes it from the scene. With prefabs, the default is the prefab's value.
+- **Multi-select** comes with box selection: the panel shows the components that every selected entity has. A field whose values differ shows as mixed, and setting it makes one operation for each entity, in one transaction.
 - **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
 - An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference shows the asset's name, and accepts a drag from the asset browser.
 
@@ -227,7 +238,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 ## Crash recovery
 
 - **Host crash:** the document is in the editor, so nothing is lost. The editor reports the crash with the end of the host's log, and restarts the host. The link connects again, the editor sends the snapshot, and the camera and the selection stay.
-- **Editor crash:** the editor saves each dirty scene to `build/editor/autosave/` every 30 s, and when a transaction ends if 30 s have passed. At start, it offers to restore a newer autosave.
+- **Editor crash:** the editor saves each dirty scene to `build/editor/autosave/` every 30 s, and when a transaction ends if 30 s have passed. An autosave is named for its scene's file and a hash of its full path. When a scene opens and its autosave is newer than its file, the editor offers to restore it. Restoring makes the scene dirty, because its file lacks the changes. Saving the scene, undoing back to its file, choosing not to save it, or discarding the offer deletes the autosave.
 - **Code reload:** the host sends the types again. **Soft restart:** the host also sends a restart event, and the editor sends the snapshot again (see [Document model](#document-model)).
 
 ## Implementation phases

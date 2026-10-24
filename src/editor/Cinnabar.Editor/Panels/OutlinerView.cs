@@ -4,6 +4,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using CommunityToolkit.Mvvm.Input;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 using DockSide = Avalonia.Controls.Dock;
@@ -12,7 +13,9 @@ namespace Cinnabar.Editor.Panels;
 
 /// <summary>
 /// The outliner (see docs/editor.md#outliner): the entity hierarchy as a virtualized list of the visible rows,
-/// indented by depth. A tree control with one item per entity would not scale to a large world.
+/// indented by depth. A tree control with one item per entity would not scale to a large world. Dragging a row onto
+/// another reparents it, and onto the empty space below the rows makes it a root. A row also drags onto an entity
+/// field in the properties panel.
 /// </summary>
 public sealed class OutlinerView : DockPanel
 {
@@ -20,6 +23,10 @@ public sealed class OutlinerView : DockPanel
     static readonly HashSet<string> Structural = ["Parent", "Previous_Transform", "Inactive", "Disabled", "Name", "Scene_Entity"];
     const double Indent = 14;
 
+    // A press must move this far, in pixels, before it starts a drag.
+    const double DragThreshold = 4;
+
+    readonly EditorShell _shell;
     readonly WorldModel _world;
     readonly Selection _selection;
     readonly TextBox _filter = new() { PlaceholderText = "Filter by name, entity or component", Classes = { "outliner-filter" } };
@@ -28,11 +35,15 @@ public sealed class OutlinerView : DockPanel
     // Rows start expanded. The set holds the ones that the user collapsed.
     readonly HashSet<ulong> _collapsed = [];
     bool _syncing;
+    // The press that may start a drag, and the row it is on.
+    PointerPressedEventArgs? _press;
+    OutlinerRow? _pressedRow;
 
-    public OutlinerView(WorldModel world, Selection selection)
+    public OutlinerView(EditorShell shell)
     {
-        _world = world;
-        _selection = selection;
+        _shell = shell;
+        _world = shell.World;
+        _selection = shell.Selection;
         SetDock(_filter, DockSide.Top);
         Children.Add(_filter);
         _empty = new TextBlock
@@ -47,6 +58,10 @@ public sealed class OutlinerView : DockPanel
             Margin = new Thickness(16),
         };
         Children.Add(new Panel { Children = { _list, _empty } });
+        // A drop below the rows, on the list itself, makes the entity a root.
+        DragDrop.SetAllowDrop(_list, true);
+        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
+        _list.AddHandler(DragDrop.DropEvent, (_, e) => Drop(e, 0));
 
         _list.ItemTemplate = new FuncDataTemplate<OutlinerRow>((row, _) => row == null ? new Control() : RowView(row));
         _list.SelectionChanged += (_, _) =>
@@ -63,6 +78,7 @@ public sealed class OutlinerView : DockPanel
             _world.EntitiesChanged += Rebuild;
             _world.TypesChanged += Rebuild;
             _selection.Changed += OnSelectionChanged;
+            _shell.ProblemsChanged += Rebuild;
             Rebuild();
         };
         DetachedFromVisualTree += (_, _) =>
@@ -70,6 +86,7 @@ public sealed class OutlinerView : DockPanel
             _world.EntitiesChanged -= Rebuild;
             _world.TypesChanged -= Rebuild;
             _selection.Changed -= OnSelectionChanged;
+            _shell.ProblemsChanged -= Rebuild;
         };
     }
 
@@ -148,12 +165,13 @@ public sealed class OutlinerView : DockPanel
                 Rebuild();
             };
         }
-        return new StackPanel
+        var view = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(row.Depth * Indent, 0, 0, 0),
             Spacing = 6,
             Opacity = row.Node.Active ? 1 : 0.45,
+            Background = Brushes.Transparent,
             Children =
             {
                 expander,
@@ -161,6 +179,108 @@ public sealed class OutlinerView : DockPanel
                 new TextBlock { Text = row.Summary, Classes = { "dim" } },
             },
         };
+        if (_shell.ProblemsOf(row.Node.SceneId) is { Count: > 0 } problems)
+        {
+            var warning = new TextBlock { Text = "⚠", Classes = { "warning" } };
+            ToolTip.SetTip(warning, string.Join("\n", problems));
+            view.Children.Insert(1, warning);
+        }
+        view.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(view).Properties.IsLeftButtonPressed && row.Node.SceneId != 0)
+            {
+                _press = e;
+                _pressedRow = row;
+            }
+        };
+        view.PointerMoved += async (_, e) =>
+        {
+            if (_press is not { } press || _pressedRow != row)
+            {
+                return;
+            }
+            var moved = e.GetPosition(view) - press.GetPosition(view);
+            if (Math.Abs(moved.X) + Math.Abs(moved.Y) < DragThreshold)
+            {
+                return;
+            }
+            _press = null;
+            var data = new DataTransfer();
+            data.Add(DataTransferItem.Create(EntityView.EntityFormat, row.Node.Handle.ToString()));
+            await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Move | DragDropEffects.Link);
+        };
+        view.PointerReleased += (_, _) => _press = null;
+        DragDrop.SetAllowDrop(view, true);
+        view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            e.DragEffects = CanDrop(e, row.Node.SceneId) ? DragDropEffects.Move : DragDropEffects.None;
+            e.Handled = true;
+        });
+        view.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            Drop(e, row.Node.SceneId);
+            e.Handled = true;
+        });
+        view.ContextMenu = RowMenu(row);
+        return view;
+    }
+
+    // An entity can go under any scene entity that is not itself or one of its descendants, or to the root.
+    bool CanDrop(DragEventArgs e, ulong parent)
+    {
+        var dragged = _world.Find(EntityView.Dropped(e));
+        if (dragged is not { SceneId: not 0 } || _shell.Scene == null || (parent == 0 ? dragged.Parent == 0 : parent == dragged.SceneId))
+        {
+            return false;
+        }
+        for (var p = _world.FindScene(parent); p != null; p = p.Parent == 0 ? null : _world.Find(p.Parent))
+        {
+            if (p.SceneId == dragged.SceneId)
+            {
+                return false;
+            }
+        }
+        return parent == 0 || _world.FindScene(parent) != null;
+    }
+
+    void Drop(DragEventArgs e, ulong parent)
+    {
+        if (CanDrop(e, parent) && _world.Find(EntityView.Dropped(e)) is { } dragged)
+        {
+            _shell.Reparent(dragged.SceneId, parent);
+        }
+    }
+
+    ContextMenu? RowMenu(OutlinerRow row)
+    {
+        if (row.Node.SceneId == 0)
+        {
+            return null;
+        }
+        MenuItem Item(string header, string command) => new()
+        {
+            Header = header,
+            Command = new RelayCommand(() =>
+            {
+                _selection.Select(row.Node.Handle);
+                _shell.Commands.Get(command).Execute();
+            }),
+        };
+        var menu = new ContextMenu
+        {
+            Items =
+            {
+                Item("Duplicate", EditorCommands.DuplicateEntity),
+                Item("Delete", EditorCommands.DeleteEntity),
+                new Separator(),
+                Item("New Entity", EditorCommands.CreateEntity),
+            },
+        };
+        if (row.Node.Parent != 0)
+        {
+            menu.Items.Add(new MenuItem { Header = "Move to Root", Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)) });
+        }
+        return menu;
     }
 }
 

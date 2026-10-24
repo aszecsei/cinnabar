@@ -1,10 +1,12 @@
 package script
 
 import "base:runtime"
+import "core:c"
 import "core:slice"
 import "core:strings"
 
 import "cinnabar:core/luau"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 Behaviour_Field_Kind :: enum u8 {
@@ -29,6 +31,8 @@ Behaviour_Field :: struct {
 
 Behaviour_Snapshot :: struct {
 	class:   string,
+	// The script asset whose module returns the class, or zero for a class that no module returns.
+	script:  format.Guid,
 	enabled: bool,
 	// Sorted by name.
 	fields:  []Behaviour_Field,
@@ -74,9 +78,26 @@ inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []B
 			}
 		}
 		slice.sort_by(fields[:], proc(a, b: Behaviour_Field) -> bool {return a.name < b.name})
-		append(&snapshots, Behaviour_Snapshot{class = name, enabled = .Enabled in i.flags, fields = fields[:]})
+		append(&snapshots, Behaviour_Snapshot{class = name, script = script_of(r, L, class), enabled = .Enabled in i.flags, fields = fields[:]})
 	}
 	return snapshots[:]
+}
+
+// script_of is the script asset whose module returned the class at idx, or zero.
+@(private = "file")
+script_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
+	for m in r.modules[:r.module_count] {
+		if m.state != .Loaded || m.result == luau.NOREF {
+			continue
+		}
+		luau.getref(L, m.result)
+		same := luau.rawequal(L, -1, idx)
+		luau.pop(L, 1)
+		if same {
+			return m.guid
+		}
+	}
+	return {}
 }
 
 // read_field pops a key and reads the instance's value for it, without metamethods.

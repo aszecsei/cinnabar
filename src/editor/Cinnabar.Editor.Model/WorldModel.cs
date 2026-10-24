@@ -45,6 +45,7 @@ public sealed class WorldModel
 {
     readonly Dictionary<ulong, ComponentType> _types = [];
     readonly Dictionary<ulong, EntityNode> _entities = [];
+    readonly Dictionary<ulong, EntityNode> _bySceneId = [];
     readonly List<EntityNode> _roots = [];
     readonly Dictionary<ulong, EntityValues> _values = [];
 
@@ -69,6 +70,9 @@ public sealed class WorldModel
     public event Action<ulong>? ValuesChanged;
 
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
+
+    /// <summary>The entity that a scene made with this scene ID, or null.</summary>
+    public EntityNode? FindScene(ulong sceneId) => sceneId == 0 ? null : _bySceneId.GetValueOrDefault(sceneId);
 
     public ComponentType? Type(ulong id) => _types.GetValueOrDefault(id);
 
@@ -134,6 +138,7 @@ public sealed class WorldModel
         _types.Clear();
         _entities.Clear();
         _roots.Clear();
+        _bySceneId.Clear();
         _values.Clear();
         HasWorld = false;
         TypesChanged?.Invoke();
@@ -160,9 +165,14 @@ public sealed class WorldModel
     void RebuildHierarchy()
     {
         _roots.Clear();
+        _bySceneId.Clear();
         foreach (var node in _entities.Values)
         {
             node.ChildList.Clear();
+            if (node.SceneId != 0)
+            {
+                _bySceneId[node.SceneId] = node;
+            }
         }
         foreach (var node in _entities.Values.OrderBy(n => n.Index).ThenBy(n => n.Generation))
         {

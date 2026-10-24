@@ -254,8 +254,10 @@ a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 	}
 	messages := step(f, 1, load)
 
-	testing.expect_value(t, len(messages), 1)
-	snapshot := messages[0].(link.Entity_Snapshot)
+	testing.expect_value(t, len(messages), 2)
+	problems := messages[0].(link.Edit_Problems)
+	testing.expect(t, problems.snapshot && len(problems.problems) == 0)
+	snapshot := messages[1].(link.Entity_Snapshot)
 	testing.expect_value(t, len(snapshot.entities), 2)
 	door: ecs.Entity
 	for info in snapshot.entities {
@@ -274,4 +276,123 @@ a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 	}
 	// The old entity was watched, and its watch went with it.
 	testing.expect_value(t, len(f.editor.watched), 0)
+}
+
+@(private = "file")
+number :: proc(values: ..f64) -> link.Scene_Value {
+	v := link.Scene_Value {
+		kind  = .Number,
+		count = u8(len(values)),
+	}
+	for x, i in values {
+		v.floats[i] = x
+		if x == f64(i64(x)) {
+			v.ints[i] = i64(x)
+			v.integer |= 1 << u8(i)
+		}
+	}
+	return v
+}
+
+@(private = "file")
+DOOR :: 0xa1
+@(private = "file")
+HINGE :: 0xb2
+
+// load_door loads a door with a Tuned component and a hinge, and returns the entities that they became.
+@(private = "file")
+load_door :: proc(f: ^Fixture) -> (door, hinge: ecs.Entity) {
+	tuned := u64(ecs.registry_find_type(&f.world.registry, Tuned).id)
+	step(f)
+	step(f, 1, link.Load_Scene{entities = {{id = DOOR, name = "Door", active = true, components = {{id = tuned, name = "Tuned"}}}, {id = HINGE, active = true}}})
+	return find_scene_entity(&f.editor, &f.world, DOOR), find_scene_entity(&f.editor, &f.world, HINGE)
+}
+
+@(test)
+operations_edit_the_world :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	door, hinge := load_door(f)
+	tuned := u64(ecs.registry_find_type(&f.world.registry, Tuned).id)
+
+	ops := []link.Operation {
+		{kind = .Rename, entity = DOOR, name = "Front Door"},
+		{kind = .Set_Parent, entity = HINGE, parent = DOOR},
+		{kind = .Set_Active, entity = DOOR, active = false},
+		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "inner.amount", value = number(2.5)}}},
+		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "mode", value = {kind = .Name, text = "Busy"}}}},
+		{kind = .Add_Component, entity = HINGE, components = {{id = u64(ecs.TRANSFORM_ID), name = "Transform", fields = {{name = "scale", value = number(1, 2, 3)}}}}},
+		{kind = .Create_Entity, created = {{id = 0xc3, name = "Knob", parent = DOOR, active = true}}},
+	}
+	messages := step(f, 1, link.Apply_Operations{operations = ops})
+
+	for m in messages {
+		_, refused := m.(link.Edit_Problems)
+		testing.expectf(t, !refused, "refused: %v", m)
+	}
+	testing.expect_value(t, ecs.name_of(&f.world, door), "Front Door")
+	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Parent).entity, door)
+	testing.expect(t, ecs.has(&f.world, door, ecs.Disabled) && ecs.has(&f.world, hinge, ecs.Inactive))
+	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 2.5)
+	testing.expect_value(t, ecs.get(&f.world, door, Tuned).mode, Mode.Busy)
+	testing.expect_value(t, ecs.get(&f.world, hinge, ecs.Transform).scale, [3]f32{1, 2, 3})
+	knob := find_scene_entity(&f.editor, &f.world, 0xc3)
+	testing.expect(t, knob != 0)
+	testing.expect_value(t, ecs.get(&f.world, knob, ecs.Parent).entity, door)
+
+	undo := []link.Operation {
+		{kind = .Reset_Field, entity = DOOR, component = tuned, fields = {{name = "inner.amount"}}},
+		{kind = .Remove_Component, entity = HINGE, component = u64(ecs.TRANSFORM_ID)},
+		{kind = .Set_Active, entity = DOOR, active = true},
+		{kind = .Set_Parent, entity = HINGE},
+		{kind = .Destroy_Entity, entity = 0xc3},
+	}
+	step(f, 1, link.Apply_Operations{operations = undo})
+
+	testing.expect_value(t, ecs.get(&f.world, door, Tuned).inner.amount, 0)
+	testing.expect(t, !ecs.has(&f.world, hinge, ecs.Transform) && !ecs.has(&f.world, hinge, ecs.Parent))
+	testing.expect(t, !ecs.has(&f.world, door, ecs.Inactive))
+	testing.expect(t, !ecs.is_alive(&f.world, knob))
+}
+
+@(test)
+operations_that_the_game_cannot_apply_come_back :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	load_door(f)
+	tuned := u64(ecs.registry_find_type(&f.world.registry, Tuned).id)
+
+	ops := []link.Operation {
+		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "removed", value = number(1)}}},
+		{kind = .Set_Field, entity = DOOR, component = tuned, fields = {{name = "mode", value = number(1.5)}}},
+		{kind = .Rename, entity = 0x99, name = "Ghost"},
+		{kind = .Remove_Component, entity = DOOR, component = u64(scene.SCENE_ENTITY_ID)},
+	}
+	messages := step(f, 1, link.Apply_Operations{operations = ops})
+
+	problems: link.Edit_Problems
+	for m in messages {
+		if p, ok := m.(link.Edit_Problems); ok {
+			problems = p
+		}
+	}
+	testing.expect(t, !problems.snapshot)
+	testing.expect_value(t, len(problems.problems), 4)
+	entities := [4]u64{DOOR, DOOR, 0x99, DOOR}
+	for p, i in problems.problems {
+		testing.expect_value(t, p.entity, entities[i])
+	}
+}
+
+@(test)
+the_games_own_scene_is_found_by_scene_id :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	e := ecs.spawn(&f.world)
+	ecs.add(&f.world, e, scene.Scene_Entity{0x51})
+	step(f)
+
+	step(f, 1, link.Apply_Operations{operations = {{kind = .Rename, entity = 0x51, name = "Found"}}})
+
+	testing.expect_value(t, ecs.name_of(&f.world, e), "Found")
 }

@@ -7,6 +7,9 @@ namespace Cinnabar.Editor;
 /// </summary>
 public sealed record EditorOptions(string HostPath, string GamePath, string? ScenePath = null)
 {
+    /// <summary>Where autosaves go (see docs/editor.md#crash-recovery).</summary>
+    public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
+
     public static EditorOptions Parse(IReadOnlyList<string> args)
     {
         var host = Path.Combine("build", "host.exe");

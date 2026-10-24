@@ -29,6 +29,19 @@ public sealed class SceneEntity(ulong id)
     /// <summary>Entity keys that this editor does not know, such as from a newer one, with their value's text.</summary>
     public List<(string Key, string Text)> UnknownKeys { get; } = [];
 
+    /// <summary>A copy that shares nothing that can change with this one.</summary>
+    public SceneEntity Clone() => Copy(Id);
+
+    /// <summary>A copy with another scene ID.</summary>
+    public SceneEntity Copy(ulong id)
+    {
+        var copy = new SceneEntity(id) { Name = Name, Parent = Parent, Active = Active };
+        copy.Components.AddRange(Components.Select(c => c.Copy()));
+        copy.Behaviours.AddRange(Behaviours.Select(b => b.Copy()));
+        copy.UnknownKeys.AddRange(UnknownKeys);
+        return copy;
+    }
+
     /// <summary>A new random scene ID that is not 0.</summary>
     public static ulong NewId()
     {
@@ -44,10 +57,16 @@ public sealed class SceneEntity(ulong id)
 }
 
 /// <summary>A component by its stable ID. The name is for people and messages.</summary>
-public sealed record SceneComponent(ulong Id, string Name, List<SceneField> Fields);
+public sealed record SceneComponent(ulong Id, string Name, List<SceneField> Fields)
+{
+    public SceneComponent Copy() => this with { Fields = [.. Fields] };
+}
 
 /// <summary>A behaviour by its script's GUID, as 32 lowercase hex digits.</summary>
-public sealed record SceneBehaviour(string Script, List<SceneField> Fields);
+public sealed record SceneBehaviour(string Script, List<SceneField> Fields)
+{
+    public SceneBehaviour Copy() => this with { Fields = [.. Fields] };
+}
 
 public sealed record SceneField(string Name, SceneValue Value);
 

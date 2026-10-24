@@ -4,20 +4,24 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// The scene as a <c>Load_Scene</c> message, which replaces the host's world (see docs/editor.md#document-model). The
-/// editor sends it when the link connects, after a soft restart, and when it opens a scene.
+/// editor sends it when the link connects, after a soft restart, and when it opens a scene. Operations use the same
+/// conversions for their parts.
 /// </summary>
 public static class SceneSnapshot
 {
-    public static Wire.LoadScene ToMessage(Scene scene) =>
-        new([.. scene.Entities.Select(e => new Wire.SceneEntity(
-            e.Id,
-            e.Name,
-            e.Parent,
-            e.Active,
-            [.. e.Components.Select(c => new Wire.SceneComponent(c.Id, c.Name, Fields(c.Fields)))],
-            [.. e.Behaviours.Select(b => new Wire.SceneBehaviour(Convert.FromHexString(b.Script), Fields(b.Fields)))]))]);
+    public static Wire.LoadScene ToMessage(Scene scene) => new([.. scene.Entities.Select(Entity)]);
 
-    static Wire.SceneField[] Fields(List<SceneField> fields) => [.. fields.Select(f => new Wire.SceneField(f.Name, Value(f.Value)))];
+    public static Wire.SceneEntity Entity(SceneEntity e) => new(
+        e.Id,
+        e.Name,
+        e.Parent,
+        e.Active,
+        [.. e.Components.Select(Component)],
+        [.. e.Behaviours.Select(b => new Wire.SceneBehaviour(Convert.FromHexString(b.Script), [.. b.Fields.Select(Field)]))]);
+
+    public static Wire.SceneComponent Component(SceneComponent c) => new(c.Id, c.Name, [.. c.Fields.Select(Field)]);
+
+    public static Wire.SceneField Field(SceneField f) => new(f.Name, Value(f.Value));
 
     public static Wire.SceneValue Value(SceneValue v)
     {

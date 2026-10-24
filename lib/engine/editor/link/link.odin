@@ -20,6 +20,8 @@ Message :: union {
 	Unwatch_Entity,
 	Entity_Values,
 	Load_Scene,
+	Apply_Operations,
+	Edit_Problems,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -207,6 +209,8 @@ Component_Value :: struct {
 
 Behaviour_Value :: struct {
 	class:   string,
+	// The script asset that the class comes from, as scenes name it, or zero.
+	script:  [16]u8,
 	enabled: bool,
 	fields:  []Behaviour_Field,
 }
@@ -234,8 +238,8 @@ Behaviour_Field :: struct {
 // Edit (see docs/editor.md#document-model).
 
 // Editor to game: the editor's scene document. The game replaces its world with it, and then sends an
-// Entity_Snapshot. The editor sends it when the link connects and after a soft restart. Values are tagged as the
-// scene file writes them, and the game converts them to its fields' kinds.
+// Entity_Snapshot and the Edit_Problems of the load. The editor sends it when the link connects and after a soft
+// restart. Values are tagged as the scene file writes them, and the game converts them to its fields' kinds.
 Load_Scene :: struct {
 	entities: []Scene_Entity,
 }
@@ -288,4 +292,67 @@ Scene_Value :: struct {
 	text:    string,
 	// Entity: a scene ID, or 0 for none.
 	entity:  u64,
+}
+
+Operation_Kind :: enum u8 {
+	// created holds the entity, with its components and behaviours.
+	Create_Entity,
+	// The entity and its descendants. The editor sends their operations too, so each can be undone.
+	Destroy_Entity,
+	// name.
+	Rename,
+	// parent: a scene ID, or 0 for none.
+	Set_Parent,
+	// active.
+	Set_Active,
+	// components holds the component, with its values. It replaces one that the entity has.
+	Add_Component,
+	// component.
+	Remove_Component,
+	// component, and the value in fields.
+	Set_Field,
+	// component, and the field's name in fields. The field becomes zero, as in a scene that does not set it.
+	Reset_Field,
+	// script, and the values in fields.
+	Add_Behaviour,
+	// script.
+	Remove_Behaviour,
+	// script, and the value in fields.
+	Set_Behaviour_Field,
+	// script, and the field's name in fields. The field gets its class's default.
+	Reset_Behaviour_Field,
+}
+
+// An edit of the scene, by the entity's scene ID. Only the members for its kind are set.
+Operation :: struct {
+	kind:       Operation_Kind,
+	entity:     u64,
+	created:    []Scene_Entity,
+	name:       string,
+	parent:     u64,
+	active:     bool,
+	component:  u64,
+	components: []Scene_Component,
+	script:     [16]u8,
+	fields:     []Scene_Field,
+}
+
+// Editor to game: edits, in order. The editor has already applied them to its document, and does not wait for an
+// answer. The game sends Edit_Problems for the ones that it cannot apply.
+Apply_Operations :: struct {
+	operations: []Operation,
+}
+
+Edit_Problem :: struct {
+	// The scene ID of the entity.
+	entity:  u64,
+	message: string,
+}
+
+// Game to editor: what the game could not apply of a Load_Scene, with snapshot set, or of an Apply_Operations. A
+// snapshot's problems replace the ones before it. The editor keeps the document as it is, and shows the problems on
+// their entities.
+Edit_Problems :: struct {
+	snapshot: bool,
+	problems: []Edit_Problem,
 }

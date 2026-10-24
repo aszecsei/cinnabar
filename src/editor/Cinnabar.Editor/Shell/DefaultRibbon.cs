@@ -15,7 +15,18 @@ static class DefaultRibbon
             [
                 new RibbonTab("home", "Home",
                 [
-                    new RibbonGroup("Scene", [new LargeButton(EditorCommands.OpenScene)]),
+                    new RibbonGroup("Scene",
+                    [
+                        new LargeButton(EditorCommands.OpenScene),
+                        new LargeButton(EditorCommands.Save),
+                        new SmallStack([EditorCommands.SaveAs]),
+                    ]),
+                    new RibbonGroup("Edit", [new SmallStack([EditorCommands.Undo, EditorCommands.Redo])]),
+                    new RibbonGroup("Entity",
+                    [
+                        new LargeButton(EditorCommands.CreateEntity),
+                        new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
+                    ]),
                     new RibbonGroup("Host", [new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost])]),
                     new RibbonGroup("Window",
                     [

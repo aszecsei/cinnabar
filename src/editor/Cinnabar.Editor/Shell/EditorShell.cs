@@ -18,7 +18,7 @@ namespace Cinnabar.Editor.Shell;
 /// The editor's parts and how they connect: the host, the viewport, the panels and their layout, the commands and
 /// the ribbon. The window shows a shell, and the shell has no controls of its own, so tests can build one.
 /// </summary>
-public sealed class EditorShell : IDisposable
+public sealed partial class EditorShell : IDisposable
 {
     public EditorSettings Settings { get; }
     public CommandRegistry Commands { get; } = new();
@@ -34,14 +34,6 @@ public sealed class EditorShell : IDisposable
 
     bool _ribbonCollapsed;
     bool _linked;
-
-    /// <summary>The open scene, which the host's world mirrors. Null until one is opened.</summary>
-    public SceneDocument? Scene { get; private set; }
-
-    public event Action? SceneChanged;
-
-    /// <summary>The user asked to pick a scene file. The window shows the picker, and calls <see cref="OpenScene"/>.</summary>
-    public event Action? OpenSceneRequested;
 
     public bool RibbonCollapsed
     {
@@ -64,6 +56,7 @@ public sealed class EditorShell : IDisposable
     {
         Settings = settings;
         Host = new HostSession(options);
+        Autosave = new Autosave(options.AutosaveDirectory);
         Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport));
         RestoreLayout();
 
@@ -82,11 +75,12 @@ public sealed class EditorShell : IDisposable
                 SendScene();
             }
         };
-        Host.GameMessage += message => World.Apply(message);
+        Host.GameMessage += OnGameMessage;
         Host.StateChanged += OnHostStateChanged;
         // The editor watches the selected entity, so the properties panel has its values.
         Selection.Changed += (old, entity) =>
         {
+            _selectedSceneId = World.Find(entity)?.SceneId ?? 0;
             if (old != 0)
             {
                 Host.Send(new UnwatchEntity(old));
@@ -104,14 +98,10 @@ public sealed class EditorShell : IDisposable
                 Host.Send(new WatchEntity(Selection.Entity));
             }
         };
-        World.EntitiesChanged += () =>
-        {
-            if (!Selection.IsEmpty && World.Find(Selection.Entity) == null)
-            {
-                Selection.Clear();
-            }
-        };
+        World.EntitiesChanged += OnEntitiesChanged;
         Layout.Changed += Commands.InvalidateAll;
+        // Commands such as Delete act on the selected entity.
+        Selection.Changed += (_, _) => Commands.InvalidateAll();
 
         EditorCommands.Register(this);
         Ribbon = DefaultRibbon.Create(Layout.Panels);
@@ -135,41 +125,6 @@ public sealed class EditorShell : IDisposable
         }
     }
 
-    public void RequestOpenScene() => OpenSceneRequested?.Invoke();
-
-    /// <summary>
-    /// Opens a scene file, and replaces the host's world with it. A file with an error is not opened: the problems go
-    /// to the console with their lines, and the scene that was open stays.
-    /// </summary>
-    public bool OpenScene(string path)
-    {
-        var (document, problems) = SceneDocument.Open(path);
-        foreach (var p in problems)
-        {
-            var location = p.Line > 0 ? $"{path}:{p.Line}" : path;
-            Console.Add(p.IsError ? LogLevel.Error : LogLevel.Warning, $"scene: {location}: {p.Message}");
-        }
-        if (document == null)
-        {
-            Console.Add(LogLevel.Error, $"scene: cannot open {path}");
-            return false;
-        }
-        Scene = document;
-        Console.Add(LogLevel.Info, $"scene: opened {document.Path}, {document.Scene.Entities.Count} entities");
-        SceneChanged?.Invoke();
-        SendScene();
-        return true;
-    }
-
-    // The host replaces its world with the document. Its next entity snapshot shows the result.
-    void SendScene()
-    {
-        if (Scene != null && Host.Linked)
-        {
-            Host.Send(SceneSnapshot.ToMessage(Scene.Scene));
-        }
-    }
-
     public void RequestPalette() => PaletteRequested?.Invoke();
 
     IEnumerable<PanelTool> CreatePanels()
@@ -177,10 +132,9 @@ public sealed class EditorShell : IDisposable
         PanelTool Empty(string id, string title, string icon, string dock, string message) =>
             new(id, title, icon, dock, () => new EmptyPanelView(message));
 
-        yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(World, Selection));
-        yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(World, Selection));
-        yield return Empty("undoHistory", "Undo History", "history", EditorLayout.RightDock,
-            "Edits appear here once scenes can be edited.");
+        yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(this));
+        yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
+        yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return Empty("assetBrowser", "Asset Browser", "assets", EditorLayout.BottomDock,
             "The content roots appear here once the cook daemon runs.");

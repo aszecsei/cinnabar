@@ -32,6 +32,8 @@ Editor :: struct {
 	known:       [dynamic]Known,
 	scan:        u32,
 	watched:     [dynamic]Watched,
+	// The entity of each scene ID, for the editor's operations (see find_scene_entity).
+	by_scene_id: map[u64]ecs.Entity,
 	last_scan:   f64,
 	last_values: f64,
 }
@@ -58,9 +60,10 @@ Watched :: struct {
 
 init :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e^ = {
-		platform = platform,
-		known    = make([dynamic]Known, platform.heap_allocator),
-		watched  = make([dynamic]Watched, platform.heap_allocator),
+		platform    = platform,
+		known       = make([dynamic]Known, platform.heap_allocator),
+		watched     = make([dynamic]Watched, platform.heap_allocator),
+		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
 	}
 }
 
@@ -73,6 +76,7 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 destroy :: proc(e: ^Editor) {
 	delete(e.known)
 	delete(e.watched)
+	delete(e.by_scene_id)
 	e^ = {}
 }
 
@@ -103,10 +107,18 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		case link.Unwatch_Entity:
 			unwatch(e, ecs.Entity(v.entity))
 		case link.Load_Scene:
-			scene.load(w, scripts, scene_of(v, frame))
+			problems := make([dynamic]scene.Problem, frame)
+			scene.load(w, scripts, scene_of(v, frame), &e.by_scene_id, &problems)
+			link.write_message(out, edit_problems(problems[:], true, frame))
 			// Every entity is new, so the editor gets a snapshot, and its watches are of entities that are gone.
 			clear(&e.watched)
 			snapshot = true
+		case link.Apply_Operations:
+			problems := make([dynamic]scene.Problem, frame)
+			apply_operations(e, w, scripts, v.operations, &problems)
+			if len(problems) > 0 {
+				link.write_message(out, edit_problems(problems[:], false, frame))
+			}
 		case:
 			log.warnf("editor: the game does not handle %v", message)
 		}
@@ -269,54 +281,9 @@ behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator
 				entity  = u64(f.entity),
 			}
 		}
-		values[i] = {class = s.class, enabled = s.enabled, fields = fields}
+		values[i] = {class = s.class, script = ([16]u8)(s.script), enabled = s.enabled, fields = fields}
 	}
 	return values
-}
-
-// scene_of converts the editor's scene to the loader's. Strings and slices still point into the message.
-@(private)
-scene_of :: proc(m: link.Load_Scene, allocator: runtime.Allocator) -> format.Scene {
-	fields_of :: proc(fields: []link.Scene_Field, allocator: runtime.Allocator) -> []format.Scene_Field {
-		result := make([]format.Scene_Field, len(fields), allocator)
-		for f, i in fields {
-			v := f.value
-			result[i] = {
-				name = f.name,
-				hash = format.scene_field_hash(f.name),
-				value = {
-					kind = format.Scene_Value_Kind(v.kind),
-					count = v.count,
-					integer = v.integer,
-					ints = v.ints,
-					floats = v.floats,
-					text = v.text,
-					entity = v.entity,
-				},
-			}
-		}
-		return result
-	}
-	entities := make([]format.Scene_Entity, len(m.entities), allocator)
-	for e, i in m.entities {
-		components := make([]format.Scene_Component, len(e.components), allocator)
-		for c, j in e.components {
-			components[j] = {id = c.id, name = c.name, fields = fields_of(c.fields, allocator)}
-		}
-		behaviours := make([]format.Scene_Behaviour, len(e.behaviours), allocator)
-		for b, j in e.behaviours {
-			behaviours[j] = {script = format.Guid(b.script), fields = fields_of(b.fields, allocator)}
-		}
-		entities[i] = {
-			id         = e.id,
-			name       = e.name,
-			parent     = e.parent,
-			active     = e.active,
-			components = components,
-			behaviours = behaviours,
-		}
-	}
-	return {entities = entities}
 }
 
 @(private)

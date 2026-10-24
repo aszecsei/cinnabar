@@ -86,14 +86,18 @@ public static class SceneFile
         _ => value.Entity == 0 ? "@0" : $"@{value.Entity:x16}",
     };
 
-    // A float always has a point or an exponent, so it reads back as a float.
+    // A float always has a point or an exponent, so it reads back as a float. A value that an f32 holds exactly, as
+    // the editor writes for f32 fields, gets the f32's shortest form, so 0.70710677 is not 0.7071067690849304.
     static string FormatNumber(SceneNumber n)
     {
         if (n.Integer is { } integer)
         {
             return integer.ToString(CultureInfo.InvariantCulture);
         }
-        var text = n.Float.ToString("R", CultureInfo.InvariantCulture);
+        var single = (float)n.Float;
+        var text = single == n.Float
+            ? single.ToString("R", CultureInfo.InvariantCulture)
+            : n.Float.ToString("R", CultureInfo.InvariantCulture);
         return text.AsSpan().IndexOfAny(".Ee") >= 0 || !double.IsFinite(n.Float) ? text : text + ".0";
     }
 

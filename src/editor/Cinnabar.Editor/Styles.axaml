@@ -214,6 +214,93 @@
         <Setter Property="TextDecorations" Value="Underline" />
     </Style>
 
+    <!-- Field editors: a box that edits looks like the read-only box, with the text box's chrome removed. -->
+    <Style Selector="Border.value-box.editable">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="Border.value-box.editable:pointerover">
+        <Setter Property="BorderBrush" Value="#55555C" />
+    </Style>
+    <Style Selector="Border.value-box.axis.editable">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="TextBox.value-edit">
+        <Setter Property="FontFamily" Value="Consolas" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinHeight" Value="20" />
+        <Setter Property="Padding" Value="6,1" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.value-edit /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="TextBox.value-edit:focus /template/ Border#PART_BorderElement">
+        <Setter Property="Background" Value="#101012" />
+        <Setter Property="BorderBrush" Value="{DynamicResource SystemAccentColor}" />
+        <Setter Property="BorderThickness" Value="1" />
+    </Style>
+    <!-- An axis marker that edits is wide enough to drag. -->
+    <Style Selector="Border.axis-marker.handle">
+        <Setter Property="Width" Value="6" />
+        <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="ComboBox.value-choice">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="MinHeight" Value="22" />
+        <Setter Property="Padding" Value="6,1" />
+    </Style>
+    <Style Selector="Button.field-button">
+        <Setter Property="Padding" Value="5,0" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="#A0A0A8" />
+    </Style>
+    <Style Selector="Button.badge-button">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="7,1" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+    <Style Selector="Button.badge-button.active">
+        <Setter Property="Background" Value="#335CB85C" />
+    </Style>
+    <Style Selector="Button.badge-button.inactive">
+        <Setter Property="Background" Value="#33A0A0A8" />
+    </Style>
+    <Style Selector="TextBox.title-edit">
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="MinHeight" Value="26" />
+        <Setter Property="Padding" Value="4,2" />
+        <Setter Property="Margin" Value="0,0,8,0" />
+    </Style>
+    <Style Selector="Border.problems">
+        <Setter Property="Background" Value="#26E8B04A" />
+        <Setter Property="BorderBrush" Value="#80E8B04A" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Padding" Value="8,4" />
+    </Style>
+    <Style Selector="TextBlock.warning">
+        <Setter Property="Foreground" Value="#E8B04A" />
+    </Style>
+    <Style Selector="Button.add-component">
+        <Setter Property="Margin" Value="4,6" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="ListBox.history">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+    <Style Selector="ListBox.history ListBoxItem">
+        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="MinHeight" Value="0" />
+    </Style>
+
     <Style Selector="TextBlock.empty">
         <Setter Property="Foreground" Value="#808088" />
         <Setter Property="FontSize" Value="12" />
