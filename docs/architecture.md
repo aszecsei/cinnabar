@@ -58,6 +58,7 @@ flowchart TB
 | `lib/engine` | Game | Everything that does not own an OS resource: world, render frontend, asset runtime, script bindings, gameplay systems. |
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
+| `lib/engine/editor` | Game | The game side of the editor link: link messages, type descriptors, scene snapshots and edit operations. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `samples/<game>` | Game | A game. Each game has a game package and a small `main_release` package that links everything statically. |
 | `src/host` | Host | The generic development host. It loads the game DLL, runs the frame loop, drives hot reload and serves the editor link. One host serves every game. |
@@ -148,7 +149,7 @@ Details: [Scripting](scripting.md).
 
 ## Editor
 
-The editor is a separate C# application. It is not part of the engine, and games never link it.
+The editor is a separate C# application, built with Avalonia. It is not part of the engine, and games never link it.
 
 ```mermaid
 flowchart LR
@@ -167,6 +168,7 @@ flowchart LR
 - The editor runs `host.exe` as a child process. The host also runs without the editor, in its own window.
 - The editor controls the host through the **editor link**, a message protocol. The host serves it by calling the editor procedures in `Game_API`. Type info for game-side types exists only in the DLL, so all introspection goes through those procedures.
 - The host renders the game into a shared GPU texture, which the editor displays in its viewport.
+- The editor owns the scene being edited, and the host's world mirrors it. A host crash or a soft restart therefore loses no edits: the editor sends the scene again.
 
 Details: [Editor](editor.md).
 
