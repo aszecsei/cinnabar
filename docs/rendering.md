@@ -14,7 +14,7 @@ The built-in renderer draws the world, a first-person view model, the UI and deb
 | Question | Decision | Why |
 |---|---|---|
 | Shading path | Clustered forward, with a depth and normal prepass | See [Clustered forward](#clustered-forward). |
-| Depth | Reversed infinite Z: depth is `near / z`, test `Greater`, clear 0 | `D32_Float` has its precision near 0. The current `1 - near / z` puts that precision at the near plane, where nothing needs it. |
+| Depth | Reversed infinite Z: depth is `near / z`, test `Greater`, clear 0 | `D32_Float` has its precision near 0. Reversing puts that precision in the distance instead of at the near plane, where nothing needs it. |
 | Scene color | `RGBA16_Float`, linear, pre-exposed | Bloom, exposure and tone mapping need HDR. Pre-exposure keeps bright values inside the half-float range. |
 | View model | A second view drawn into the scene's targets, not a separate target | See [View model](#view-model). |
 | UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than they do. |

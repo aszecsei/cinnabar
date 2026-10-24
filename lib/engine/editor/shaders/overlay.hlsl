@@ -87,10 +87,10 @@ float4 ps_main(Varyings i) : SV_Target {
 				continue;
 			}
 			float there = depth_at(other);
-			// Depth grows with distance, and the background is 1.
+			// Depth is reversed: it shrinks with distance, and the background is 0.
 			float selected_depth = inside ? here : there;
 			float other_depth = inside ? there : here;
-			if (other_depth >= selected_depth) {
+			if (other_depth <= selected_depth) {
 				return OUTLINE;
 			}
 		}

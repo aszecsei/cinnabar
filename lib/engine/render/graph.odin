@@ -265,7 +265,8 @@ color :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear:
 	p.color_count += 1
 }
 
-depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: f32 = 1, store := gpu.Store_Op.Store) {
+// depth declares the pass's depth attachment. The clear is 0, the far end of reversed depth (see view_projection).
+depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: f32 = 0, store := gpu.Store_Op.Store) {
 	p := &g.passes[pass - 1]
 	assert(p.kind == .Render, "render: a depth attachment needs a render pass")
 	assert(p.depth_texture == 0, "render: a pass has one depth attachment")

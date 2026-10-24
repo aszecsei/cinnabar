@@ -914,7 +914,7 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	pixel         = TRIANGLE_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
-	depth_compare = .Less,
+	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "scene",
 }
@@ -924,7 +924,7 @@ OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	pixel         = OBJECTS_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
-	depth_compare = .Less,
+	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "objects",
 }
@@ -935,7 +935,7 @@ OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	pixel         = OBJECTS_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
-	depth_compare = .Less,
+	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "objects (mesh)",
 }
