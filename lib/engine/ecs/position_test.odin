@@ -61,3 +61,14 @@ meters_round_trip :: proc(t: ^testing.T) {
 	m := [3]f64{12345.5, -0.25, 1 << 28}
 	testing.expect_value(t, position_to_meters(position_from_meters(m)), m)
 }
+
+@(test)
+long_steps_convert_exactly :: proc(t: ^testing.T) {
+	// 128 m is 2^31 units, past the range of an i32.
+	origin: World_Position
+	for meters in ([]f32{128, 129, -129, 1e6, -3e9}) {
+		p := position_offset(origin, {meters, 0, 0})
+		testing.expect_value(t, p.raw.x, i64(f64(meters) * (1 << POSITION_FRACTION_BITS)))
+		testing.expect_value(t, position_sub(p, origin).x, meters)
+	}
+}

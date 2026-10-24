@@ -27,10 +27,11 @@ position_sub :: proc "contextless" (a, b: World_Position) -> [3]f32 {
 position_offset :: proc(p: World_Position, delta: [3]f32) -> World_Position {
 	result := p
 	for i in 0 ..< 3 {
-		// The scale is a power of two, so the product is exact.
-		step := math.round(delta[i] * POSITION_SCALE)
+		// The scale is a power of two, so the product is exact. It is f64 because Odin (dev-2026-08) converts an f32
+		// of 2^31 or more to i64 wrongly, and a step of 128 m is 2^31 units.
+		step := math.round(f64(delta[i]) * f64(POSITION_SCALE))
 		// This also rejects NaN.
-		assert(abs(step) < f32(POSITION_LIMIT), "ecs: position delta out of range")
+		assert(abs(step) < f64(POSITION_LIMIT), "ecs: position delta out of range")
 		result.raw[i] += i64(step)
 		assert(abs(result.raw[i]) <= POSITION_LIMIT, "ecs: position out of range")
 	}
