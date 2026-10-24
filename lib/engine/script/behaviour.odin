@@ -362,6 +362,13 @@ wake :: proc(r: ^Runtime, h: Instance_Handle) {
 	if i == nil || .Active not_in i.flags {
 		return
 	}
+	// The next script phase wakes it.
+	if r.quiet {
+		if .Awake not_in i.flags {
+			i.flags += {.Needs_Awake}
+		}
+		return
+	}
 	i.flags -= {.Needs_Awake}
 	if .Awake not_in i.flags {
 		i.flags += {.Awake}
@@ -518,7 +525,7 @@ on_record_removed :: proc(r: ^Runtime, record: c.int) {
 call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int = 0) {
 	L := r.L
 	i := instance_at(r, h)
-	if i == nil {
+	if i == nil || r.quiet {
 		luau.pop(L, nargs)
 		return
 	}

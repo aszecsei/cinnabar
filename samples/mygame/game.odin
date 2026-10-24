@@ -424,8 +424,11 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	s.frame_count += 1
 
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
-	// edits show (see docs/editor.md#modes).
-	if run, step := editor.simulation(&s.editor, &s.world, dt); run {
+	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
+	// despawns (see docs/editor.md#modes).
+	run, step := editor.simulation(&s.editor, &s.world, dt)
+	script.set_quiet(&s.scripts, !run)
+	if run {
 		s.elapsed += step
 		ecs.run_fixed(&s.world, step, s)
 		ecs.run_stage(&s.world, .Update, step, s)
@@ -434,6 +437,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		ecs.run_stage(&s.world, .Late, step, s)
 	} else {
 		ecs.update_transforms(&s.world)
+		script.settle(&s.scripts)
 	}
 
 	if s.elapsed >= s.next_report {

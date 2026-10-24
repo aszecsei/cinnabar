@@ -43,6 +43,27 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	end_phase(r)
 }
 
+// set_quiet stops or starts the callbacks that the world's changes run, as the editor's edit mode does (see
+// docs/editor.md#modes). While quiet, a despawned behaviour, or one that an edit removes, ends without on_disable or
+// on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one gets awake and on_enable
+// in the next script phase that runs, and one that was awake gets no on_enable. The script phase itself still runs
+// everything: the game does not run it while quiet.
+set_quiet :: proc(r: ^Runtime, quiet: bool) {
+	r.quiet = quiet
+}
+
+// settle applies the world's changes to the scripts without running script code, as a frame that runs no script phase
+// does: the behaviours of despawned entities end, and their memory is free to collect.
+settle :: proc(r: ^Runtime) {
+	if r.L == nil {
+		return
+	}
+	quiet := r.quiet
+	r.quiet = true
+	drain_log(r)
+	r.quiet = quiet
+}
+
 // drain_log runs the callbacks for the world's changes: on_disable and on_destroy for despawned behaviours, and the
 // activation callbacks. Bindings that change activity drain it at once, so their callbacks run before they return.
 @(private)

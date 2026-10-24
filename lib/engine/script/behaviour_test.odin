@@ -293,3 +293,39 @@ Test.report(1)
 	testing.expect_value(t, door.fields[1].name, "speed")
 	testing.expect_value(t, door.fields[1].number, 5)
 }
+
+@(test)
+quiet_changes_run_no_callbacks :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+World.spawn():add(Door)
+local b = World.spawn()
+b:add(Door)
+b:set_active(false)
+`)
+	testing.expect(t, ok)
+	expect_reports(t, f, {1, 2, 1, 2, 5})
+	release(&f.runtime, thread)
+	// Without Inactive, collect finds the active door, and with it, the inactive one.
+	actives := make([dynamic]ecs.Entity, context.temp_allocator)
+	inactives := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(f.runtime.world, {BEHAVIOURS_ID}, &actives)
+	ecs.collect(f.runtime.world, {BEHAVIOURS_ID, ecs.INACTIVE_ID}, &inactives)
+	testing.expect(t, len(actives) == 1 && len(inactives) == 1)
+	active, inactive := actives[0], inactives[0]
+
+	// As in the editor's edit mode: a despawn ends its behaviour, and an activation waits, without script code.
+	set_quiet(&f.runtime, true)
+	ecs.despawn(f.runtime.world, active)
+	ecs.set_active(f.runtime.world, inactive, true)
+	settle(&f.runtime)
+	expect_reports(t, f, {})
+	testing.expect_value(t, behaviour_count(&f.runtime), 1)
+
+	// The next script phase starts the one that is left. It was awake, so it gets no on_enable.
+	set_quiet(&f.runtime, false)
+	phase(f)
+	expect_reports(t, f, {3, 4})
+}

@@ -165,6 +165,11 @@ public sealed class HostLinkTests : IAsyncDisposable
         var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
         Assert.Equal(front.Id, renamed.SceneId);
         Assert.Equal(renamed.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
+
+        // In Edit, the game's own two behaviours end with their entities, without their callbacks, and the scene's
+        // one is left.
+        await editor.Next<GameStats>(s => s.Behaviours == 1);
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
     [Fact]
@@ -341,6 +346,9 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         public LinkClient Link { get; }
 
+        /// <summary>Every message that Next has passed over.</summary>
+        public List<ILinkMessage> Skipped { get; } = [];
+
         public Editor(LinkClient link)
         {
             Link = link;
@@ -363,6 +371,7 @@ public sealed class HostLinkTests : IAsyncDisposable
                         return t;
                     }
                     skipped.Add(message);
+                    Skipped.Add(message);
                 }
             }
             catch (OperationCanceledException)

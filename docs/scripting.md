@@ -222,7 +222,7 @@ Unity has two switches, and so does cinnabar:
 The game runs the script phase with one call, `script.run_phase(r, dt, platform.input())`, between the `Update` and `Late` stages. It covers phases 5 and 6 of [Frame](architecture.md#frame), in Unity's order:
 
 1. Set `Time` and `Input`.
-2. Drain the world's log: `on_disable` and `on_destroy` for despawned behaviours, and `awake`, `on_enable` or `on_disable` for activity changes from native code.
+2. Drain the world's log: `on_disable` and `on_destroy` for despawned behaviours, and `awake`, `on_enable` or `on_disable` for activity changes from native code. While the runtime is quiet, as in the editor's edit mode, `script.settle` drains it instead, with none of these callbacks (see [Editor](editor.md#modes)).
 3. `awake` and `on_enable` for instances that native code attached.
 4. `start` for instances that are enabled and active and have not started.
 5. Deliver the events that the fixed ticks and the `Update` systems queued.

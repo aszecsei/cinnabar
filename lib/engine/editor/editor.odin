@@ -118,6 +118,10 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		clear(&e.watched)
 		reset_viewport(e)
 		e.mode, e.free_camera, e.steps = .Edit, false, 0
+		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
+		if scripts != nil {
+			script.set_quiet(scripts, connection != 0)
+		}
 		snapshot = connection != 0
 	}
 	if connection == 0 {
@@ -155,6 +159,10 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			e.mode, e.free_camera = v.mode, v.free_camera
 			if v.mode != .Paused {
 				e.steps = 0
+			}
+			// The edits that follow in this poll run no script code outside Play.
+			if scripts != nil {
+				script.set_quiet(scripts, v.mode != .Play)
 			}
 		case link.Run_Game_Command:
 			run_command(e, w, scripts, user, v.id, out, frame)
