@@ -56,6 +56,7 @@ Viewport :: struct {
 	gpu_failed:       bool,
 	pick_pipeline:    render.Shader_Pipeline,
 	overlay_pipeline: render.Shader_Pipeline,
+	icons_pipeline:   render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
 	// How the editor wants the viewport drawn, from Viewport_Settings.
@@ -143,6 +144,8 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		return
 	}
 	sync_viewport_pipelines(e)
+	// The icons first, so the pick and the outline find them.
+	add_icons_pass(e, g, w, frame)
 	platform := e.platform
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
@@ -404,6 +407,7 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 	platform := e.platform
 	v.pick_pipeline = render.shader_pipeline(PICK_SHADER)
 	v.overlay_pipeline = render.shader_pipeline(OVERLAY_SHADER)
+	v.icons_pipeline = render.shader_pipeline(ICONS_SHADER)
 	v.results = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"}, nil)
 	v.readback = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"}, nil)
 	v.gpu_ready = e.assets != nil && v.results != {} && v.readback != {}
@@ -421,9 +425,10 @@ destroy_viewport_gpu :: proc(e: ^Editor) {
 	platform := e.platform
 	render.destroy_shader_pipeline(&v.pick_pipeline, platform)
 	render.destroy_shader_pipeline(&v.overlay_pipeline, platform)
+	render.destroy_shader_pipeline(&v.icons_pipeline, platform)
 	platform.gpu_destroy_buffer(v.results)
 	platform.gpu_destroy_buffer(v.readback)
-	v.pick_pipeline, v.overlay_pipeline, v.results, v.readback = {}, {}, {}, {}
+	v.pick_pipeline, v.overlay_pipeline, v.icons_pipeline, v.results, v.readback = {}, {}, {}, {}, {}
 	v.gpu_ready = false
 }
 
@@ -438,6 +443,7 @@ sync_viewport_pipelines :: proc(e: ^Editor, force := false) {
 	}
 	render.sync_compute_pipeline(&v.pick_pipeline, e.platform, e.assets, PICK_PIPELINE, force)
 	render.sync_graphics_pipeline(&v.overlay_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, OVERLAY_PIPELINE, force)
+	render.sync_graphics_pipeline(&v.icons_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, ICONS_PIPELINE, force)
 }
 
 @(private)

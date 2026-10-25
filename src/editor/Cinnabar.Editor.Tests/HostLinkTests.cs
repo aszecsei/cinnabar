@@ -400,6 +400,36 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    [Fact]
+    public async Task ALightsIconPicksIt()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+
+        // A point light 2 m ahead of the camera, with nothing else to draw.
+        var lamp = Entity(1, "Lamp", z: 1);
+        lamp.Components.Add(new Document.SceneComponent(PointLightId, "Point_Light", [Field("intensity", Document.SceneValue.Of(Number(1.0)))]));
+        await Load(editor, Scene(lamp));
+        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(EditorShell.DefaultViewportSettings);
+
+        PickResult center = new(0, [], 0);
+        for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, target.Width / 2, target.Height / 2, 1, 1));
+            center = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
+        }
+        Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
+        Assert.InRange(center.Depth, 1.9f, 2.1f);
+
+        // Without the icons, the light is not drawn, so nothing is there.
+        editor.Link.Send(EditorShell.DefaultViewportSettings with { ShowIcons = false });
+        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        Assert.Empty((await editor.Next<PickResult>(r => r.Id == 7)).Hits);
+    }
+
     // Latest acknowledges the viewport's frames for a while, so the game draws with what it was sent, and gives the last.
     static async Task<ulong> Latest(Editor editor, SharedFrames frames, FrameTarget target)
     {
@@ -551,6 +581,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
     // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
     const ulong MeshRendererId = 33;
+    const ulong PointLightId = 35;
     const ulong VolumeId = 42;
     const ulong EnvironmentId = 49;
     const ulong SpinId = 1001;

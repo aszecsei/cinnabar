@@ -647,8 +647,10 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	}
 	extract_triangles(frame)
 	editing := editor.active(&s.editor)
-	// The editor's viewport settings (see docs/editor.md#viewport), or none without an editor.
+	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor.md#viewport), or
+	// none without an editor.
 	overrides := editor.render_overrides(&s.editor)
+	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
 	desc := render.Frame_Desc {
 		view            = view,
 		size            = size,

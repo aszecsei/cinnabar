@@ -249,6 +249,26 @@ public sealed partial class EditorShell
         }
     }
 
+    /// <summary>
+    /// Adds a global volume where the selected entity is, as New Entity does, for the settings components that volumes
+    /// carry (see docs/world.md#volumes).
+    /// </summary>
+    public void CreateVolume()
+    {
+        if (Scene == null)
+        {
+            return;
+        }
+        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Scene, selected)?.Position : null;
+        var create = SceneEdits.NewEntity(Scene.Scene, at ?? [0, 0, 0]);
+        create.Created.Name = "Volume";
+        create.Created.Components.Add(new SceneComponent(SceneEdits.VolumeId, "Volume", [new SceneField("shape", SceneValue.Name("Global"))]));
+        if (Edit("Create Volume", create))
+        {
+            SelectScene(create.Created.Id);
+        }
+    }
+
     /// <summary>Copies the selected entities with their descendants, and selects the copies.</summary>
     public void DuplicateSelected()
     {

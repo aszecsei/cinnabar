@@ -25,7 +25,7 @@ static class DefaultRibbon
                     new RibbonGroup("Entity",
                     [
                         new LargeButton(EditorCommands.CreateEntity),
-                        new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
+                        new SmallStack([EditorCommands.CreateVolume, EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
                         new SmallStack([EditorCommands.HideSelected, EditorCommands.ShowAll, EditorCommands.LockSelected]),
                     ]),
                     new RibbonGroup("Tools",

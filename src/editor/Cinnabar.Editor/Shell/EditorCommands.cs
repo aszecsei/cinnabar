@@ -15,6 +15,7 @@ static class EditorCommands
     public const string Undo = "edit.undo";
     public const string Redo = "edit.redo";
     public const string CreateEntity = "entity.create";
+    public const string CreateVolume = "entity.createVolume";
     public const string DuplicateEntity = "entity.duplicate";
     public const string DeleteEntity = "entity.delete";
     public const string RestartHost = "host.restart";
@@ -139,6 +140,12 @@ static class EditorCommands
             Description = "Add an entity with a Transform, where the selected entity is.",
             Icon = "add",
             Shortcut = "Ctrl+Shift+N",
+            CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
+        });
+        commands.Register(new Command(CreateVolume, "New Volume", shell.CreateVolume)
+        {
+            Description = "Add a global volume, where the selected entity is, for settings such as the post-processing and the fog. Add its settings components in the properties panel.",
+            Icon = "add",
             CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
         });
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)

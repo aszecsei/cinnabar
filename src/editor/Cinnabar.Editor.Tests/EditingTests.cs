@@ -208,6 +208,21 @@ public sealed class EditingTests : IDisposable
     }
 
     [Fact]
+    public void ANewVolumeIsGlobalAndOneUndoEntry()
+    {
+        using var shell = NewShell(out _);
+
+        Assert.True(shell.Commands.Get(EditorCommands.CreateVolume).Execute());
+
+        var created = shell.Scene!.Scene.Entities.Single(e => e.Id != 1);
+        Assert.Equal("Volume", created.Name);
+        var volume = created.Components.Single(c => c.Id == SceneEdits.VolumeId);
+        Assert.Equal("Global", volume.Fields.Single(f => f.Name == "shape").Value.Text);
+        Assert.Contains(created.Components, c => c.Id == SceneEdits.TransformId);
+        Assert.Equal("Create Volume", Assert.Single(shell.Scene.History).Label);
+    }
+
+    [Fact]
     public void ANewEntityGoesWhereTheSelectionIsOrToTheOrigin()
     {
         using var shell = NewShell(out _);
