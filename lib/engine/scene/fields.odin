@@ -46,22 +46,27 @@ Enum_Value :: struct {
 // so a Field is valid only for the frame that it is made in.
 Field :: struct {
 	// Nested structs are flattened, with dotted names, such as inner.amount.
-	name:        string,
-	offset:      u32,
-	kind:        Field_Kind,
-	enum_base:   Field_Kind,
-	enum_values: []Enum_Value,
+	name:            string,
+	offset:          u32,
+	kind:            Field_Kind,
+	enum_base:       Field_Kind,
+	enum_values:     []Enum_Value,
 	// From the struct tag editor:"read".
-	read_only:   bool,
+	read_only:       bool,
 	// From the struct tag editor:"range=min,max".
-	has_range:   bool,
-	range_min:   f64,
-	range_max:   f64,
+	has_range:       bool,
+	range_min:       f64,
+	range_max:       f64,
 	// From the struct tag editor:"color", for a Vector3 that holds a linear color.
-	color:       bool,
+	color:           bool,
+	// A setting that a volume can override (see docs/world.md#volumes): a struct of exactly override: bool and
+	// value: T. The field is the value, and override_offset is where its override flag is. A scene that sets the field
+	// sets the flag, and a reset clears it.
+	has_override:    bool,
+	override_offset: u32,
 	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", as the cook link names
 	// kinds in lowercase, such as "mesh". "" takes any asset.
-	asset_kind:  string,
+	asset_kind:      string,
 }
 
 // component_fields lists the fields of a component type. A nested struct that is not a kind of its own adds its
@@ -94,7 +99,15 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 			continue
 		}
 		asset_kind := reflect.struct_tag_get(reflect.Struct_Tag(s.tags[i]), "asset")
-		if field_kind(s.types[i], &field, allocator) {
+		if value, override, is_value := overridable(s.types[i]); is_value {
+			if field_kind(value.type, &field, allocator) {
+				field.color &&= field.kind == .Vector3
+				field.has_override = true
+				field.override_offset = field.offset + u32(override)
+				field.offset += u32(value.offset)
+				append(fields, field)
+			}
+		} else if field_kind(s.types[i], &field, allocator) {
 			field.color &&= field.kind == .Vector3
 			if field.kind == .Asset {
 				field.asset_kind = asset_kind
@@ -112,6 +125,17 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 			add_fields(fields, s.types[i], name, base + s.offsets[i], field.read_only, allocator)
 		}
 	}
+}
+
+// overridable reports whether a type is an overridable setting: a struct of exactly override: bool and value: T, such
+// as volume.Value(T). It gives the value's field and the flag's offset.
+@(private = "file")
+overridable :: proc(ti: ^runtime.Type_Info) -> (value: reflect.Struct_Field, override: uintptr, ok: bool) {
+	s, is_struct := runtime.type_info_base(ti).variant.(runtime.Type_Info_Struct)
+	if !is_struct || s.field_count != 2 || s.names[0] != "override" || s.names[1] != "value" || s.types[0].id != bool {
+		return
+	}
+	return {name = s.names[1], type = s.types[1], offset = s.offsets[1]}, s.offsets[0], true
 }
 
 // editor_tags reads an editor tag, a list of words with spaces between them, into the field. It returns false for

@@ -200,23 +200,27 @@ Field_Kind :: enum u8 {
 }
 
 Field_Info :: struct {
-	name:        string,
+	name:            string,
 	// The byte offset in the component.
-	offset:      u32,
-	kind:        Field_Kind,
-	enum_base:   Field_Kind,
-	enum_values: []Enum_Value,
+	offset:          u32,
+	kind:            Field_Kind,
+	enum_base:       Field_Kind,
+	enum_values:     []Enum_Value,
 	// From the struct tag editor:"read".
-	read_only:   bool,
+	read_only:       bool,
 	// From the struct tag editor:"range=min,max".
-	has_range:   bool,
-	range_min:   f64,
-	range_max:   f64,
+	has_range:       bool,
+	range_min:       f64,
+	range_max:       f64,
 	// From the struct tag editor:"color": a Vector3 that holds a linear color.
-	color:       bool,
+	color:           bool,
+	// A setting that a volume can override: the byte at override_offset is 1 when the component overrides it. A scene
+	// that sets the field overrides it.
+	has_override:    bool,
+	override_offset: u32,
 	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", in lowercase as the
 	// cook link's Asset_Kind names it, such as "mesh". "" takes any asset.
-	asset_kind:  string,
+	asset_kind:      string,
 }
 
 Enum_Value :: struct {

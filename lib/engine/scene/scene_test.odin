@@ -246,3 +246,47 @@ editor_tags_are_a_list :: proc(t: ^testing.T) {
 	testing.expect_value(t, fields[2].kind, Field_Kind.Vector2)
 	testing.expect(t, !fields[2].color)
 }
+@(private = "file")
+Setting :: struct($T: typeid) {
+	override: bool,
+	value:    T,
+}
+
+@(private = "file")
+Knob :: struct {
+	gain:  Setting(f32) `editor:"range=0,4"`,
+	level: Setting([3]f32) `editor:"color"`,
+}
+
+@(test)
+a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	ecs.register_component(&f.world.registry, Knob, ecs.Component_Id(101))
+
+	fields := component_fields(Knob, context.temp_allocator)
+	testing.expect_value(t, len(fields), 2)
+	testing.expect_value(t, fields[0].name, "gain")
+	testing.expect_value(t, fields[0].kind, Field_Kind.F32)
+	testing.expect(t, fields[0].has_override && fields[0].has_range)
+	testing.expect_value(t, fields[0].offset, u32(offset_of(Knob, gain) + offset_of(Setting(f32), value)))
+	testing.expect_value(t, fields[0].override_offset, u32(offset_of(Knob, gain)))
+	testing.expect(t, fields[1].color && fields[1].has_override)
+
+	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain = 2\n"))
+	e := find(f, 1)
+	knob := ecs.get(&f.world, e, Knob)
+	testing.expect_value(t, knob.gain, Setting(f32){true, 2})
+	testing.expect_value(t, knob.level, Setting([3]f32){})
+
+	level := format.Scene_Field {
+		name = "level",
+		hash = format.scene_field_hash("level"),
+		value = {kind = .Number, count = 3, floats = {0.5, 0.5, 0.5, 0}},
+	}
+	testing.expect(t, set_field(&f.world, e, 1, 101, level, false, nil))
+	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){true, {0.5, 0.5, 0.5}})
+	gain := format.Scene_Field{name = "gain", hash = format.scene_field_hash("gain")}
+	testing.expect(t, set_field(&f.world, e, 1, 101, gain, true, nil))
+	testing.expect_value(t, ecs.get(&f.world, e, Knob).gain, Setting(f32){})
+}

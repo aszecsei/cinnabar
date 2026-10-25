@@ -191,6 +191,23 @@ public sealed class EditingTests : IDisposable
     }
 
     [Fact]
+    public void OverridingASettingSetsItsValueAndClearingResetsIt()
+    {
+        using var shell = NewShell(out _);
+        var gain = FieldEditor.ForComponent(shell, 1, 1, TestFields.Of(FieldKind.F32, name: "gain", overrideOffset: 0))!;
+        Document.SceneField? Gain() => shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == 1).Fields.SingleOrDefault(f => f.Name == "gain");
+
+        // The value that shows becomes the volume's own.
+        gain.Current = SceneEdits.Floats(0.5);
+        gain.Override();
+        Assert.Equal("Override Gain", shell.Scene!.History[^1].Label);
+        Assert.Equal(0.5, Gain()!.Value.Numbers[0].Float);
+
+        gain.Reset();
+        Assert.Null(Gain());
+    }
+
+    [Fact]
     public void ANewEntityGoesWhereTheSelectionIsOrToTheOrigin()
     {
         using var shell = NewShell(out _);

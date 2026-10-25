@@ -132,6 +132,12 @@ sealed class FieldEditor : IFieldEditor
 
     Operation[] Operations(SceneValue value) => [.. _entities.Select(id => _operation(id, value))];
 
+    /// <summary>
+    /// Sets the field of every entity to the value that it has, so the scene sets it: for a volume's setting, the
+    /// volume then overrides it (see docs/world.md#volumes).
+    /// </summary>
+    public void Override() => _shell.Edit($"Override {_label["Set ".Length..]}", Operations(current => current));
+
     /// <summary>Resets the field of every entity, so the scene no longer sets it.</summary>
     public void Reset() => _shell.Edit($"Reset {_label["Set ".Length..]}", [.. _entities.Select(id => _operation(id, null))]);
 

@@ -23,6 +23,7 @@ import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/volume"
 
 // The shaders are assets, which the cooker compiles (see docs/content-pipeline.md#shaders). The game finds them by the
 // GUIDs in their .meta files.
@@ -381,6 +382,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	render.register_components(r)
 	script.register_components(r)
 	scene.register_components(r)
+	volume.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 }

@@ -6,6 +6,7 @@ namespace Cinnabar.Editor.Tests;
 static class TestFields
 {
     public static FieldInfo Of(FieldKind kind, uint offset = 0, FieldKind enumBase = FieldKind.U8, EnumValue[]? values = null,
-        string name = "f", bool readOnly = false, (double Min, double Max)? range = null, bool color = false) =>
-        new(name, offset, kind, enumBase, values ?? [], readOnly, range != null, range?.Min ?? 0, range?.Max ?? 0, color, "");
+        string name = "f", bool readOnly = false, (double Min, double Max)? range = null, bool color = false, uint? overrideOffset = null) =>
+        new(name, offset, kind, enumBase, values ?? [], readOnly, range != null, range?.Min ?? 0, range?.Max ?? 0, color,
+            overrideOffset != null, overrideOffset ?? 0, "");
 }
