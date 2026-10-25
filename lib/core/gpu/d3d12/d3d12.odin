@@ -15,11 +15,13 @@ import "cinnabar:core/jobs"
 
 FRAMES_IN_FLIGHT :: 2
 BACK_BUFFER_COUNT :: 3
-BACK_BUFFER_FORMAT :: dxgi.FORMAT.R8G8B8A8_UNORM
 SWAP_CHAIN_FLAGS :: dxgi.SWAP_CHAIN{.FRAME_LATENCY_WAITABLE_OBJECT}
 
 // While the window is minimized, nothing is presented, so this paces the frame instead of vsync.
 MINIMIZED_FRAME_TIME :: time.Second / 60
+
+// The display that shows the window is found again this often, since the window can move to another one.
+DISPLAY_CHECK_FRAMES :: 60
 
 // The D3D12 runtime reads these exports from the executable and loads the Agility SDK runtime from the path,
 // relative to the executable. Enhanced Barriers need it on Windows versions whose built-in runtime is older.
@@ -92,11 +94,17 @@ dev: struct {
 	// Guards the current frame's lists, ops and op_lists.
 	lists_mutex:       sync.Mutex,
 	swapchain:         ^dxgi.ISwapChain3,
+	hwnd:              win.HWND,
 	latency_waitable:  win.HANDLE,
 	size:              [2]i32,
 	back_buffers:      [BACK_BUFFER_COUNT]^d3d.IResource,
 	back_buffer_index: u32,
 	frame_target:      gpu.Texture,
+	// The output that the game asked for, and the frame's (see docs/gpu.md#presentation). Shared mode is always Sdr.
+	request:           gpu.Output_Request,
+	output:            gpu.Output,
+	// The modes whose color space the swapchain cannot present, which are not tried again.
+	unsupported:       bit_set[gpu.Output_Mode],
 	// False while the window is minimized: submissions are dropped and nothing is presented.
 	recording:         bool,
 	// Shared mode renders into shared textures instead of the swapchain (see shared.odin).
@@ -114,6 +122,7 @@ dev: struct {
 init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	dev.logger = context.logger
 	dev.allocator = context.allocator
+	dev.output = {format = gpu.FRAME_TARGET_FORMAT}
 	when ODIN_DEBUG {
 		enable_debug_layer()
 	}
@@ -259,6 +268,16 @@ frame_target :: proc() -> gpu.Texture {
 	return dev.frame_target
 }
 
+output :: proc() -> gpu.Output {
+	return dev.output
+}
+
+// request_output changes the output from the next frame on. Shared mode stays Sdr: the editor reads its textures as
+// sRGB.
+request_output :: proc(request: gpu.Output_Request) {
+	dev.request = request
+}
+
 // begin_frame waits until the swapchain and the frame's command lists and upload ring are free,
 // then records the frame target's transition into the render target layout.
 begin_frame :: proc(size: [2]i32) {
@@ -276,6 +295,9 @@ begin_frame :: proc(size: [2]i32) {
 	}
 	if !dev.shared_mode && size != dev.size {
 		resize_swapchain(size)
+	}
+	if !dev.shared_mode {
+		update_output()
 	}
 
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
@@ -603,7 +625,7 @@ create_swapchain :: proc(hwnd: win.HWND, size: [2]i32) -> bool {
 	desc := dxgi.SWAP_CHAIN_DESC1 {
 		Width = u32(max(size.x, 1)),
 		Height = u32(max(size.y, 1)),
-		Format = BACK_BUFFER_FORMAT,
+		Format = swapchain_format(gpu.FRAME_TARGET_FORMAT),
 		SampleDesc = {Count = 1},
 		BufferUsage = {.RENDER_TARGET_OUTPUT},
 		BufferCount = BACK_BUFFER_COUNT,
@@ -616,6 +638,7 @@ create_swapchain :: proc(hwnd: win.HWND, size: [2]i32) -> bool {
 	defer swapchain1->Release()
 	check(swapchain1->QueryInterface(dxgi.ISwapChain3_UUID, (^rawptr)(&dev.swapchain)), "QueryInterface(ISwapChain3)") or_return
 	dev.factory->MakeWindowAssociation(hwnd, {.NO_ALT_ENTER})
+	dev.hwnd = hwnd
 
 	check(dev.swapchain->SetMaximumFrameLatency(FRAMES_IN_FLIGHT), "SetMaximumFrameLatency") or_return
 	dev.latency_waitable = dev.swapchain->GetFrameLatencyWaitableObject()
@@ -632,7 +655,7 @@ create_swapchain :: proc(hwnd: win.HWND, size: [2]i32) -> bool {
 @(private = "file")
 create_back_buffers :: proc() -> bool {
 	view := d3d.RENDER_TARGET_VIEW_DESC {
-		Format        = view_format(gpu.FRAME_TARGET_FORMAT),
+		Format        = view_format(dev.output.format),
 		ViewDimension = .TEXTURE2D,
 	}
 	for &buffer, i in dev.back_buffers {
@@ -660,6 +683,64 @@ resize_swapchain :: proc(size: [2]i32) {
 	create_back_buffers()
 	dev.size = size
 	gpu.pool_get(&dev.textures, dev.frame_target).desc.size = {u32(size.x), u32(size.y)}
+}
+
+// swapchain_format is the back buffers' format for a frame target format. The sRGB one is written through an sRGB
+// view of plain buffers, since flip-model swapchains cannot have sRGB buffers.
+@(private = "file")
+swapchain_format :: proc(format: gpu.Format) -> dxgi.FORMAT {
+	return format == .RGBA8_Unorm_Srgb ? .R8G8B8A8_UNORM : view_format(format)
+}
+
+@(private = "file")
+OUTPUT_COLOR_SPACE := [gpu.Output_Mode]dxgi.COLOR_SPACE_TYPE {
+	.Sdr   = .RGB_FULL_G22_NONE_P709,
+	.Hdr10 = .RGB_FULL_G2084_NONE_P2020,
+	.Scrgb = .RGB_FULL_G10_NONE_P709,
+}
+
+// update_output finds the display again now and then, and switches the swapchain to the mode that the request gives
+// on it. A mode whose color space the swapchain cannot present falls back to Sdr.
+@(private = "file")
+update_output :: proc() {
+	if dev.frame_index % DISPLAY_CHECK_FRAMES == 0 || !dev.factory->IsCurrent() {
+		display := find_display()
+		if display != dev.output.display {
+			log.infof("d3d12: display %v", display)
+		}
+		dev.output.display = display
+	}
+	mode := gpu.output_mode(dev.request, dev.output.display)
+	if mode in dev.unsupported {
+		mode = .Sdr
+	}
+	if mode == dev.output.mode {
+		return
+	}
+	wait_idle()
+	release_back_buffers()
+	if set_swapchain_mode(mode) {
+		log.infof("d3d12: output %v", mode)
+	} else {
+		log.warnf("d3d12: the swapchain cannot present %v, so the output is Sdr", mode)
+		dev.unsupported += {mode}
+		set_swapchain_mode(.Sdr)
+	}
+	create_back_buffers()
+	gpu.pool_get(&dev.textures, dev.frame_target).desc.format = dev.output.format
+}
+
+// set_swapchain_mode gives the swapchain's buffers the mode's format and its color space, if it can present that.
+@(private = "file")
+set_swapchain_mode :: proc(mode: gpu.Output_Mode) -> bool {
+	format := gpu.output_format(mode)
+	if !check(dev.swapchain->ResizeBuffers(0, u32(dev.size.x), u32(dev.size.y), swapchain_format(format), SWAP_CHAIN_FLAGS), "ResizeBuffers") {
+		log.panic("d3d12: cannot change the swapchain's format")
+	}
+	dev.output.mode, dev.output.format = mode, format
+	support: dxgi.SWAP_CHAIN_COLOR_SPACE_SUPPORT
+	dev.swapchain->CheckColorSpaceSupport(OUTPUT_COLOR_SPACE[mode], &support)
+	return .PRESENT in support && check(dev.swapchain->SetColorSpace1(OUTPUT_COLOR_SPACE[mode]), "SetColorSpace1")
 }
 
 @(private)

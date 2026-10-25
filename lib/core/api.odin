@@ -55,6 +55,11 @@ Platform_API :: struct {
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target: proc() -> gpu.Texture,
+	// The frame's output: how the frame target's colors reach the display, the frame target's format, which follows
+	// from it, and the display (see docs/gpu.md#presentation). gpu_request_output asks for an output mode from the
+	// next frame on; Auto, the default, is HDR10 while the display is in HDR mode. Shared mode is always Sdr.
+	gpu_output:         proc() -> gpu.Output,
+	gpu_request_output: proc(request: gpu.Output_Request),
 	// The editor's previews render into shared targets of their own beside the frame target (see
 	// docs/rendering.md#material-previews). gpu_preview_target gives target id's texture for this frame at a size, at
 	// most gpu.MAX_PREVIEW_SIZE on a side, in the render target layout, which the game must leave it in; the frame's end

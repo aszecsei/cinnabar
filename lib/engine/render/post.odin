@@ -44,6 +44,11 @@ DEFAULT_ADAPTATION_SPEED :: 1.5
 // tone_lut.hlsli.
 LUT_SIZE :: 32
 LUT_FORMAT :: gpu.Format.RGBA16_Float
+// In HDR output, SDR's white, which the UI has, is the display's SDR white, as Windows shows SDR content, or
+// DEFAULT_PAPER_WHITE nits when that is unknown. The brightest colors reach the display's peak, or DEFAULT_PEAK nits
+// (see docs/rendering.md#hdr-output).
+DEFAULT_PAPER_WHITE :: 200
+DEFAULT_PEAK :: 1000
 
 Tone_Mapper :: enum u8 {
 	// AgX: a smooth roll-off to white that desaturates bright colors.
@@ -83,6 +88,10 @@ Post_Settings :: struct {
 	contrast:              f32,
 	saturation:            f32,
 	tint:                  [3]f32,
+	// For HDR output, in nits: the brightness of SDR's white, which the UI has, 0 giving the display's SDR white, and
+	// the brightest color, 0 giving the display's peak. Paper white is at most the peak.
+	paper_white:           f32,
+	peak:                  f32,
 }
 
 // Post is the post-processing's state between frames, in the Renderer.
@@ -119,6 +128,10 @@ Grading :: struct {
 	contrast:    f32,
 	saturation:  f32,
 	tint:        [3]f32,
+	// For HDR output, with its paper white and peak in nits, which are zero for SDR.
+	hdr:         bool,
+	paper_white: f32,
+	peak:        f32,
 }
 
 // Post_Frame is what one frame's post passes need, in frame memory.
@@ -142,6 +155,8 @@ Post_Frame :: struct {
 	bloom_up:      [BLOOM_LEVELS]Texture,
 	bloom_sizes:   [BLOOM_LEVELS][2]u32,
 	grading:       Grading,
+	// In HDR output, the UI's white in nits, which the output pass scales it to.
+	paper_white:   f32,
 }
 
 // Bloom_Step is one pass of bloom's chain: a level's downsample, or its upsample.
@@ -230,7 +245,10 @@ Lut_Push :: struct {
 	contrast:    f32,
 	saturation:  f32,
 	tint:        [3]f32,
-	padding:     u32,
+	hdr:         u32,
+	paper_white: f32,
+	peak:        f32,
+	padding:     [2]u32,
 }
 
 #assert(size_of(Temporal_Constants) == 128 && size_of(Bloom_Push) <= 128 && size_of(Exposure_Push) <= 128)
@@ -423,6 +441,13 @@ add_post_passes :: proc(f: ^Frame) {
 		saturation  = s.saturation > 0 ? s.saturation : 1,
 		tint        = s.tint != {} ? s.tint : {1, 1, 1},
 	}
+	if f.output.mode != .Sdr {
+		display := f.output.display
+		peak := s.peak > 0 ? s.peak : display.max_luminance > 0 ? display.max_luminance : DEFAULT_PEAK
+		paper_white := s.paper_white > 0 ? s.paper_white : display.sdr_white > 0 ? display.sdr_white : DEFAULT_PAPER_WHITE
+		pf.grading.hdr, pf.grading.peak, pf.grading.paper_white = true, peak, min(paper_white, peak)
+		pf.paper_white = pf.grading.paper_white
+	}
 	stale := !p.lut_baked || pf.grading != p.lut_grading || p.tone_lut.version != p.lut_version
 	if stale && pipeline_ready(platform, &p.tone_lut) {
 		pass := add_compute_pass(g, "tone mapping lut", run_tone_lut, f)
@@ -555,6 +580,9 @@ run_tone_lut :: proc(ctx: ^Pass_Context) {
 		contrast    = grading.contrast,
 		saturation  = grading.saturation,
 		tint        = grading.tint,
+		hdr         = u32(grading.hdr),
+		paper_white = grading.paper_white,
+		peak        = grading.peak,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.tone_lut.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

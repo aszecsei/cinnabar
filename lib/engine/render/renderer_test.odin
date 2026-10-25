@@ -9,6 +9,7 @@ import "core:sync"
 import "core:testing"
 
 import "cinnabar:core"
+import "cinnabar:core/gpu"
 import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
 import "cinnabar:engine/asset"
@@ -69,6 +70,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		gpu_destroy_accel            = null.destroy_accel,
 		gpu_accel_reference          = null.accel_reference,
 		gpu_frame_target             = null.frame_target,
+		gpu_output                   = null.output,
+		gpu_request_output           = null.request_output,
 		gpu_submit                   = null.submit,
 		gpu_upload                   = null.upload,
 		gpu_create_texture           = null.create_texture,
@@ -214,6 +217,25 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi)
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// HDR output: the frame target changes its format, the output pass draws with the pipeline of that format, and the
+	// lookup table bakes again for HDR, with the default paper white and peak, since the null backend has no display.
+	for mode in gpu.Output_Mode {
+		r.output_pipelines[mode].pipeline = platform.gpu_create_graphics_pipeline(
+			{vertex = code, pixel = code, colors = {{format = gpu.output_format(mode)}}, label = "test output"},
+		)
+	}
+	for request in ([]gpu.Output_Request{.Hdr10, .Scrgb, .Auto}) {
+		platform.gpu_request_output(request)
+		null.begin_frame({64, 32})
+		mode := gpu.output_mode(request, {})
+		testing.expect_value(t, platform.gpu_output().format, gpu.output_format(mode))
+		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		testing.expect_value(t, r.post.lut_grading.hdr, mode != .Sdr)
+		testing.expect_value(t, r.post.lut_grading.paper_white, mode != .Sdr ? DEFAULT_PAPER_WHITE : 0)
+		testing.expect_value(t, r.post.lut_grading.peak, mode != .Sdr ? DEFAULT_PEAK : 0)
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 	// The jitter cycles inside the pixel.

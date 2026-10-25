@@ -1,6 +1,7 @@
 // The tone mapping lookup table (see docs/rendering.md#post-processing): LUT_SIZE^3 entries over a range of stops
-// around middle grey, its blue slices side by side in one 2D texture. Each entry holds the sRGB-encoded display color
-// of a pre-exposed scene color. tone_lut.hlsl bakes it, and the output pass reads it.
+// around middle grey, its blue slices side by side in one 2D texture. Each entry holds the display color of a
+// pre-exposed scene color: sRGB-encoded for SDR output, and for HDR output its nits with Rec. 709 primaries, encoded
+// with the PQ curve. tone_lut.hlsl bakes it, and the output pass reads it.
 #ifndef TONE_LUT_HLSLI
 #define TONE_LUT_HLSLI
 
@@ -40,8 +41,38 @@ float3 encode_srgb(float3 c) {
 	return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1 / 2.4) - 0.055);
 }
 
+// encode_srgb_extended encodes HDR colors too: above 1, the curve goes on as it does below.
+float3 encode_srgb_extended(float3 c) {
+	c = max(c, 0);
+	return select(c <= 0.0031308, c * 12.92, 1.055 * pow(c, 1 / 2.4) - 0.055);
+}
+
 float3 decode_srgb(float3 c) {
 	return select(c <= 0.04045, c / 12.92, pow((c + 0.055) / 1.055, 2.4));
 }
+
+// The PQ curve of SMPTE ST 2084, which HDR10 encodes with: 1 is PQ_MAX_NITS.
+static const float PQ_MAX_NITS = 10000;
+static const float PQ_M1 = 0.1593017578125;
+static const float PQ_M2 = 78.84375;
+static const float PQ_C1 = 0.8359375;
+static const float PQ_C2 = 18.8515625;
+static const float PQ_C3 = 18.6875;
+
+float3 encode_pq(float3 nits) {
+	float3 p = pow(saturate(nits / PQ_MAX_NITS), PQ_M1);
+	return pow((PQ_C1 + PQ_C2 * p) / (1 + PQ_C3 * p), PQ_M2);
+}
+
+float3 decode_pq(float3 c) {
+	float3 p = pow(saturate(c), 1 / PQ_M2);
+	return pow(max(p - PQ_C1, 0) / (PQ_C2 - PQ_C3 * p), 1 / PQ_M1) * PQ_MAX_NITS;
+}
+
+// Linear colors with Rec. 709 primaries to Rec. 2020's.
+static const float3x3 REC709_TO_REC2020 = float3x3(
+	0.6274040, 0.3292820, 0.0433136,
+	0.0690970, 0.9195400, 0.0113612,
+	0.0163916, 0.0880132, 0.8955950);
 
 #endif

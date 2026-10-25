@@ -922,3 +922,15 @@ block_formats_count_whole_blocks :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_texture_desc(with_data, data[:]), Desc_Error.None)
 	testing.expect_value(t, validate_texture_desc(with_data, data[:16]), Desc_Error.Bad_Data_Size)
 }
+
+@(test)
+output_modes_follow_the_request_and_the_display :: proc(t: ^testing.T) {
+	sdr, hdr := Display{}, Display{hdr = true, max_luminance = 1000}
+	testing.expect_value(t, output_mode(.Auto, sdr), Output_Mode.Sdr)
+	testing.expect_value(t, output_mode(.Auto, hdr), Output_Mode.Hdr10)
+	testing.expect_value(t, output_mode(.Sdr, hdr), Output_Mode.Sdr)
+	testing.expect_value(t, output_mode(.Scrgb, sdr), Output_Mode.Scrgb)
+	testing.expect_value(t, output_format(.Sdr), FRAME_TARGET_FORMAT)
+	testing.expect_value(t, output_format(.Hdr10), Format.RGB10A2_Unorm)
+	testing.expect_value(t, output_format(.Scrgb), Format.RGBA16_Float)
+}

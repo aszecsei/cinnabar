@@ -120,8 +120,72 @@ Format :: enum u8 {
 	BC7_Unorm_Srgb,
 }
 
-// The frame target is written through an sRGB view.
+// The frame target is written through an sRGB view in the Sdr output mode, as the preview targets always are.
 FRAME_TARGET_FORMAT :: Format.RGBA8_Unorm_Srgb
+
+// Output_Mode is how the frame target's colors reach the display (see docs/gpu.md#presentation).
+Output_Mode :: enum u8 {
+	// sRGB, in FRAME_TARGET_FORMAT.
+	Sdr,
+	// HDR10: RGB10A2_Unorm, Rec. 2020 primaries encoded with the PQ curve of SMPTE ST 2084, where 1 is 10000 nits.
+	Hdr10,
+	// scRGB: RGBA16_Float, linear with Rec. 709 primaries, where 1 is 80 nits.
+	Scrgb,
+}
+
+// Output_Request is the output mode that a game asks for. Auto is Hdr10 while the display is in HDR mode, and Sdr
+// otherwise.
+Output_Request :: enum u8 {
+	Auto,
+	Sdr,
+	Hdr10,
+	Scrgb,
+}
+
+// Display is what the backend knows of the display that shows most of the window. Luminances are in nits, 0 when
+// unknown.
+Display :: struct {
+	// The desktop is in HDR on this display.
+	hdr:                      bool,
+	min_luminance:            f32,
+	max_luminance:            f32,
+	max_full_frame_luminance: f32,
+	// The brightness that Windows gives SDR content on the display in HDR, which its settings set.
+	sdr_white:                f32,
+}
+
+// Output is a frame's output: its mode, the frame target's format, which follows from the mode, and the display.
+Output :: struct {
+	mode:    Output_Mode,
+	format:  Format,
+	display: Display,
+}
+
+// output_format is the frame target's format in an output mode.
+output_format :: proc(mode: Output_Mode) -> Format {
+	switch mode {
+	case .Hdr10:
+		return .RGB10A2_Unorm
+	case .Scrgb:
+		return .RGBA16_Float
+	case .Sdr:
+	}
+	return FRAME_TARGET_FORMAT
+}
+
+// output_mode is the mode that a request gives on a display.
+output_mode :: proc(request: Output_Request, display: Display) -> Output_Mode {
+	switch request {
+	case .Sdr:
+		return .Sdr
+	case .Hdr10:
+		return .Hdr10
+	case .Scrgb:
+		return .Scrgb
+	case .Auto:
+	}
+	return display.hdr ? .Hdr10 : .Sdr
+}
 
 // The editor's previews render into shared targets of their own beside the frame target, at most this many, each at
 // most this large on a side (see docs/rendering.md#material-previews).

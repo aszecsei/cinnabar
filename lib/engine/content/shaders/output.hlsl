@@ -1,6 +1,7 @@
 // The output pass (see docs/rendering.md#output): it adds bloom to the scene, tone maps it through the lookup table
 // into sRGB-encoded colors, blends the UI and then the debug layer over it as sRGB-encoded values, and writes the frame
-// target.
+// target, encoded for its output mode (see docs/rendering.md#hdr-output). In HDR, the colors are relative to paper
+// white, so the UI's white is paper white, and the scene's go above 1.
 #include "tone_lut.hlsli"
 
 // Matches Output_Push in lib/engine/render/renderer.odin.
@@ -17,6 +18,9 @@ struct Push {
 	uint sampler_index;
 	float scene_scale;
 	float bloom_scale;
+	uint lut_hdr;
+	uint mode;
+	float paper_white;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -25,6 +29,12 @@ struct Varyings {
 };
 
 // Three vertices make one triangle that covers the screen.
+// Match gpu.Output_Mode.
+static const uint OUTPUT_HDR10 = 1;
+static const uint OUTPUT_SCRGB = 2;
+// scRGB's 1 is this many nits.
+static const float SCRGB_NITS = 80;
+
 Varyings vs_main(uint vertex_id : SV_VertexID) {
 	float2 uv = float2((vertex_id << 1) & 2, vertex_id & 2);
 	Varyings o;
@@ -43,7 +53,13 @@ float4 ps_main(Varyings i) : SV_Target {
 		hdr += cn_texture(push.bloom).SampleLevel(linear_clamp, i.position.xy / size, 0).rgb * push.bloom_scale;
 	}
 	// Until the table is baked, a plain roll-off to white.
-	float3 color = push.has_lut != 0 ? lut_sample(cn_texture(push.lut), linear_clamp, hdr) : encode_srgb(hdr / (1 + hdr));
+	float3 color = encode_srgb(hdr / (1 + hdr));
+	if (push.has_lut != 0) {
+		color = lut_sample(cn_texture(push.lut), linear_clamp, hdr);
+		if (push.lut_hdr != 0) {
+			color = encode_srgb_extended(decode_pq(color) / push.paper_white);
+		}
+	}
 	// The UI is premultiplied and sRGB-encoded already, as designers' tools blend.
 	if (push.has_ui != 0) {
 		float4 ui = cn_texture(push.ui).Load(pixel);
@@ -56,6 +72,13 @@ float4 ps_main(Varyings i) : SV_Target {
 			color = encode_srgb(debug.rgb / debug.a) * debug.a + color * (1 - debug.a);
 		}
 	}
+	float3 linear_color = decode_srgb(color);
+	if (push.mode == OUTPUT_HDR10) {
+		return float4(encode_pq(mul(REC709_TO_REC2020, linear_color) * push.paper_white), 1);
+	}
+	if (push.mode == OUTPUT_SCRGB) {
+		return float4(linear_color * (push.paper_white / SCRGB_NITS), 1);
+	}
 	// The frame target's sRGB view encodes what it is given, so the encoded color goes back to linear.
-	return float4(decode_srgb(color), 1);
+	return float4(linear_color, 1);
 }

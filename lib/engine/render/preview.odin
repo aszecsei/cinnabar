@@ -344,11 +344,11 @@ draw_preview :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 draw_preview_output :: proc(ctx: ^Pass_Context) {
 	pf := (^Preview_Frame)(ctx.data)
 	g := ctx.graph
-	output := pf.renderer.output_pipeline.pipeline
+	output := pf.renderer.output_pipelines[.Sdr].pipeline
 	if output == {} {
 		return
 	}
-	push := output_push(pf.frame, gpu_texture(g, pf.scene))
+	push := output_push(pf.frame, gpu_texture(g, pf.scene), .Sdr)
 	gpu.cmd_set_pipeline(ctx.cb, output)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)

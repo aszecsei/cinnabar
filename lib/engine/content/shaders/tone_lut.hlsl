@@ -1,5 +1,6 @@
 // Bakes the tone mapping lookup table (see tone_lut.hlsli): each entry's scene color, color graded, then tone mapped to
-// a display color and encoded to sRGB. It runs when the settings change.
+// a display color, which is encoded to sRGB, or for HDR output given room up to the display's peak and encoded with PQ.
+// It runs when the settings change.
 #include "tone_lut.hlsli"
 
 // Matches Lut_Push in lib/engine/render/post.odin. tone_mapper is a render.Tone_Mapper.
@@ -9,7 +10,10 @@ struct Push {
 	float contrast;
 	float saturation;
 	float3 tint;
-	uint padding;
+	uint hdr;
+	float paper_white;
+	float peak;
+	uint2 padding;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -75,6 +79,23 @@ float3 aces(float3 color) {
 	return saturate(mul(output, a / b));
 }
 
+// HDR output keeps the tone mapper's display colors up to HDR_KNEE of SDR's white as they are, so they look as they do
+// in SDR, and opens up the brighter ones, so that SDR's white reaches the display's peak instead.
+static const float HDR_KNEE = 0.5;
+
+// hdr_expand gives an SDR display color room up to peak, a multiple of SDR's white, with a curve that goes on from the
+// knee at the same slope. It scales the color by its largest channel, so its hue and saturation stay.
+float3 hdr_expand(float3 display, float peak) {
+	float largest = max(display.r, max(display.g, display.b));
+	if (largest <= HDR_KNEE) {
+		return display;
+	}
+	float t = (largest - HDR_KNEE) / (1 - HDR_KNEE);
+	float c = 1 - (1 - HDR_KNEE) / (peak - HDR_KNEE);
+	float expanded = HDR_KNEE + (1 - HDR_KNEE) * t / (1 - c * t);
+	return display * (expanded / largest);
+}
+
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (id.x >= LUT_SIZE * LUT_SIZE || id.y >= LUT_SIZE) {
@@ -97,5 +118,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		display = agx(color);
 		break;
 	}
-	cn_rw_texture(push.output)[id.xy] = float4(encode_srgb(display), 1);
+	float3 encoded = push.hdr != 0 ? encode_pq(hdr_expand(display, push.peak / push.paper_white) * push.paper_white) : encode_srgb(display);
+	cn_rw_texture(push.output)[id.xy] = float4(encoded, 1);
 }

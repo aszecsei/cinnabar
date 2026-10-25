@@ -18,6 +18,7 @@ The built-in renderer draws the world, a first-person view model, the UI and deb
 | Scene color | `RGBA16_Float`, linear, pre-exposed | Bloom, exposure and tone mapping need HDR. Pre-exposure keeps bright values inside the half-float range. |
 | View model | A second view drawn into the scene's targets, not a separate target | See [View model](#view-model). |
 | UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than they do. |
+| HDR output | HDR10 by default on a display in HDR, scRGB on request; the tone mapper's SDR result, opened up above a knee to the display's peak | The tone mappers keep their look, and SDR's white, which the UI has, is as bright as Windows shows SDR content. See [HDR output](#hdr-output). |
 | Instance positions | Relative to a render origin that snaps to a 1024 m grid, in a persistent GPU scene | See [GPU scene](#gpu-scene). |
 | Anti-aliasing | Temporal, no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. |
 
@@ -124,7 +125,7 @@ A first-person view model needs its own field of view, and it must never go into
 ### UI
 
 - The UI draws into its own target in sRGB-encoded values, and blends them as encoded values, as design tools do. A color that a designer picks is the color on the screen.
-- The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space and later scale the UI to the display's paper white for HDR output.
+- The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space, and in HDR output, scale the UI to paper white (see [HDR output](#hdr-output)).
 - The UI target has the frame target's size. The scene can render at a lower resolution, and the UI stays sharp.
 - The UI renderer itself is not part of this design. It only has to write into the UI target, through the `ui` hook. The sample draws a HUD panel there, with colors picked as sRGB values, and the `Premultiplied` blend.
 
@@ -143,11 +144,24 @@ A first-person view model needs its own field of view, and it must never go into
 The output pass is one full-screen pass that writes the frame target (`lib/engine/content/shaders/output.hlsl`):
 
 1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. *Later, a separate pass tone maps the scene, and this pass reads it, upscaled to the frame's size if the scene's resolution is lower.*
-2. Without the table, encode the color to sRGB.
+2. Without the table, encode the color to sRGB. In HDR output, the table's colors are in nits: divide them by paper white and encode them with the sRGB curve, which goes on above 1.
 3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
-4. Write the result. The frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again.
+4. Write the result, encoded for the output mode (`Frame.output`). In SDR, the frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again. In HDR, the pass decodes it, scales it by paper white and encodes it for the display (see [HDR output](#hdr-output)).
 
-*HDR output* needs a frame target in `RGB10A2_Unorm` (PQ) or `RGBA16_Float` (scRGB) from `core`. The output pass then encodes for the display instead of step 2, and scales the UI and debug layers to paper white. Only this pass changes.
+The pass has a pipeline for each output mode's frame target format (`Renderer.output_pipelines`), made when a frame first needs it.
+
+### HDR output
+
+On a display in HDR, the frame reaches it in HDR: highlights go up to the display's peak, while the colors up to SDR's white look as they do in SDR.
+
+- **The mode** is `core`'s (see [GPU](gpu.md#presentation)): `Frame.output` holds the frame's `gpu.Output`, with its mode, the frame target's format and the display. A game asks for a mode with `gpu_request_output`. The default, `Auto`, is HDR10 on a display in HDR and SDR otherwise. `CINNABAR_OUTPUT` replaces the game's request, for example `CINNABAR_OUTPUT=Scrgb`. The editor's viewport is always SDR.
+- **Paper white** is the brightness of SDR's white, in nits. The UI's white has it, and so does the display color that a tone mapper gives 1 in SDR. By default it is the display's SDR white, which Windows' HDR settings set, so the frame's SDR colors are as bright as other SDR content on the desktop. Where that is unknown, it is `DEFAULT_PAPER_WHITE` (200). `Post_Settings.paper_white` replaces it.
+- **The peak** is the display's maximum luminance, `DEFAULT_PEAK` (1000) when it is unknown, or `Post_Settings.peak`. Paper white is at most the peak.
+- **The lookup table** bakes the tone mapper's SDR display colors as before, then opens up those above `HDR_KNEE` (0.5) of SDR's white, so that SDR's white reaches the peak instead (`hdr_expand` in `tone_lut.hlsl`). Below the knee, the colors keep their SDR values. Above it, a curve goes on at the same slope and reaches peak / paper white at 1. The curve scales each color by its largest channel, so the tone mapper's hue and desaturation stay. The entries hold the result times paper white, in nits, encoded with the PQ curve. The table bakes again when the mode, paper white or the peak changes.
+- **The output pass** blends the UI and the debug layer as in SDR, in sRGB-encoded values relative to paper white, where the scene's highlights are above 1. Then it decodes the result to linear and scales it by paper white. For HDR10, it converts the result from Rec. 709 primaries to Rec. 2020 primaries and encodes it with PQ. For scRGB, it divides by 80 nits, scRGB's 1.
+- **A frame whose table is still SDR or HDR** after the mode changes, until the table bakes again, reads the table as it was baked.
+- The editor's previews are always SDR. They draw only in shared mode, which is SDR, so the table is SDR for them too.
+- *Later:* HDR10 metadata for the swapchain, a UI scale for its brightness separate from the scene's paper white, and a calibration screen for the peak and paper white.
 
 ## Clustered forward
 
@@ -350,7 +364,7 @@ The post passes run after the `before_post` hook, in linear HDR at the scene's r
 | Temporal AA | Reprojection by velocity, a Catmull-Rom history, clipping to the neighborhood's colors; an upscaler later | Scene color, velocity, depth, history | Its history texture, which becomes `Frame.scene` |
 | Exposure | A luminance histogram, then the exposure that maps its average to middle grey | Scene color, depth | The exposure buffer, which pre-exposes the next frame |
 | Bloom | A chain of downsamples with a 13-tap filter, and upsamples with a 3x3 tent | Scene color | `Frame.bloom` |
-| Tone mapping | A lookup table that a compute pass bakes when the settings change: the color grading and the curve (AgX by default; Khronos PBR Neutral, ACES); the output pass reads it | Scene color, bloom | sRGB-encoded colors |
+| Tone mapping | A lookup table that a compute pass bakes when the settings change: the color grading and the curve (AgX by default; Khronos PBR Neutral, ACES); the output pass reads it | Scene color, bloom | sRGB-encoded colors, or PQ-encoded nits in [HDR output](#hdr-output) |
 
 - **Jitter.** With temporal AA, the camera's projection moves within the pixel every frame, through the first 8 points of the Halton (2, 3) sequence (`Frame.jitter`, in normalized device coordinates). The camera's and the view model's views draw with it, the velocities leave it out, and `jittered_view_projection` gives it to a game's own draws. The debug layer and the editor's tools draw without it. The ID buffer is jittered with the scene, so the editor's selection outline can move by a pixel at edges from frame to frame.
 - **Temporal AA** (`temporal_aa.hlsl`, a compute pass) takes each pixel's motion from the nearest of its 3x3 neighbors, so edges move with the surface in front. Where the prepass drew nothing (`VELOCITY_NONE`), the pixel moves with the camera: its depth gives its position, which moves by the camera's motion (`Frame.camera_motion`) into last frame's projection (`Frame.previous_view_projection`). The history is read with a Catmull-Rom filter in five bilinear taps, scaled by the ratio of this frame's exposure to last frame's, and clipped to the neighborhood's mean ± 1.25 standard deviations in YCoCg. Then 10% of this frame (`TEMPORAL_BLEND`) blends in, after a reversible tone map, so one bright sample does not dominate. Without a valid history, or where last frame's position is off the screen, the pixel is this frame's color.
@@ -381,7 +395,7 @@ The design needs these changes in `lib/core/gpu` and the render graph:
 - *Done in phase 6:* history textures in the render graph (`history_texture`, see [GPU](gpu.md#render-graph)).
 - *Done in phase 7:* 3D textures (`Texture_Desc.depth`, see [GPU](gpu.md#resources)), and the layout change for a compute-queue pass, which the texture's last pass on the graphics queue makes (see [GPU](gpu.md#render-graph)).
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
-- **An HDR frame target** from `core`, for HDR output.
+- *Done in phase 9:* output modes for the frame target: HDR10 and scRGB beside SDR, with the display's HDR state, luminances and SDR white (`gpu_output`, `gpu_request_output`, see [GPU](gpu.md#presentation)).
 ## Assets and components
 
 The renderer draws shader, texture and mesh assets, which the cooker makes (see [Content pipeline](content-pipeline.md#shaders)).
@@ -435,7 +449,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 6 | *Done.* Post-processing: history textures in the render graph, temporal AA with the camera's jitter, the exposure from a luminance histogram, which pre-exposes the scene, bloom, and the tone mapping lookup table with AgX, Khronos PBR Neutral and ACES, and color grading. The `before_post` hook. |
 | 7 | *Done.* GTAO with a temporal denoiser on the compute queue. Volumetric fog: the `Fog` component, a froxel volume with the clusters' slices, injection with traced or mapped shadows, integration, and the background's fog. 3D textures, and the graph's layout changes for the compute queue. The sample's scene has low fog. |
 | 8 | *Done.* Global illumination with screen-space radiance cascades on the compute queue: five cascades traced through the depth buffer into last frame's lit scene, merged with the ambient sky beyond, gathered into diffuse and specular histories that the forward pass reads in place of the ambient light. |
-| 9 | HDR output. |
+| 9 | *Done.* HDR output: HDR10 and scRGB frame targets from `core`, chosen by the display's HDR state; paper white from Windows' SDR white; a lookup table that opens the tone mapper's SDR colors up to the display's peak; and the output pass, which blends the UI at paper white and encodes for the display. |
 
 ## Future work
 

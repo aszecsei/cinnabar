@@ -61,7 +61,8 @@ Renderer :: struct {
 	gi:              Global_Illumination,
 	fog:             Volumetric_Fog,
 	post:            Post,
-	output_pipeline: Shader_Pipeline,
+	// The output pass's pipeline for each output mode's frame target format. Only the frame's mode's is made.
+	output_pipelines: [gpu.Output_Mode]Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
 	debug_hidden:    Shader_Pipeline,
 	// Tested lines where the view model is, whose depth they cannot compare with.
@@ -127,6 +128,8 @@ Frame :: struct {
 	data:                     rawptr,
 	view:                     View,
 	size:                     [2]u32,
+	// How the frame target reaches the display (see docs/rendering.md#hdr-output).
+	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
 	// The camera's subpixel jitter for temporal AA, in normalized device coordinates, which the renderer's draws add
 	// (see jittered_view_projection). Zero without temporal AA.
@@ -205,6 +208,10 @@ Output_Push :: struct {
 	sampler_index: u32,
 	scene_scale:   f32,
 	bloom_scale:   f32,
+	// The lookup table holds HDR colors. mode is the gpu.Output_Mode, and paper_white the UI's white in nits in HDR.
+	lut_hdr:       u32,
+	mode:          u32,
+	paper_white:   f32,
 }
 
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
@@ -214,7 +221,9 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	mem.zero_item(r)
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
-	r.output_pipeline = shader_pipeline(OUTPUT_SHADER)
+	for &p in r.output_pipelines {
+		p = shader_pipeline(OUTPUT_SHADER)
+	}
 	r.debug_tested = shader_pipeline(DEBUG_SHADER)
 	r.debug_hidden = shader_pipeline(DEBUG_SHADER)
 	r.debug_behind = shader_pipeline(DEBUG_SHADER)
@@ -263,7 +272,10 @@ renderer_destroy :: proc(r: ^Renderer) {
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	post_destroy(&r.post, r.platform)
-	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
+	for &p in r.output_pipelines {
+		destroy_shader_pipeline(&p, r.platform)
+	}
+	for p in ([]^Shader_Pipeline{&r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
@@ -273,7 +285,8 @@ renderer_destroy :: proc(r: ^Renderer) {
 // the shadows, then post-processing runs on it. It returns false if the graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	residency_update(&r.residency)
-	sync_frame_pipelines(r)
+	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
+	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
@@ -282,6 +295,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		data            = desc.hooks.data,
 		view            = desc.view,
 		size            = desc.size,
+		output          = output,
 		view_projection = view_projection(desc.view, f32(desc.size.x) / f32(max(desc.size.y, 1))),
 		hooks           = desc.hooks,
 		scene_scale     = 1,
@@ -418,11 +432,15 @@ frame_time :: proc(r: ^Renderer) -> f32 {
 // sync_frame_pipelines creates the renderer's pipelines from their shaders, and updates those whose shaders changed,
 // or all of them after a code reload.
 @(private = "file")
-sync_frame_pipelines :: proc(r: ^Renderer) {
+sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool) {
 	force := r.reloaded
 	r.reloaded = false
 	assets := r.residency.assets
-	sync_graphics_pipeline(&r.output_pipeline, r.platform, assets, {.Vertex, .Pixel}, OUTPUT_PIPELINE, force)
+	sync_output_pipeline(r, mode, force)
+	// The previews' targets are always in FRAME_TARGET_FORMAT.
+	if mode != .Sdr && previews {
+		sync_output_pipeline(r, .Sdr, force)
+	}
 	sync_post_pipelines(r, force)
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
@@ -446,9 +464,12 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 }
 
 @(private = "file")
-OUTPUT_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors = {{format = gpu.FRAME_TARGET_FORMAT}},
-	label  = "output",
+sync_output_pipeline :: proc(r: ^Renderer, mode: gpu.Output_Mode, force: bool) {
+	desc := gpu.Graphics_Pipeline_Desc {
+		colors = {{format = gpu.output_format(mode)}},
+		label  = "output",
+	}
+	sync_graphics_pipeline(&r.output_pipelines[mode], r.platform, r.residency.assets, {.Vertex, .Pixel}, desc, force)
 }
 
 @(private = "file")
@@ -528,10 +549,11 @@ draw_debug_lines :: proc(ctx: ^Pass_Context) {
 draw_output :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	g := ctx.graph
-	if f.renderer.output_pipeline.pipeline == {} {
+	pipeline := f.renderer.output_pipelines[f.output.mode].pipeline
+	if pipeline == {} {
 		return
 	}
-	push := output_push(f, gpu_texture(g, f.scene))
+	push := output_push(f, gpu_texture(g, f.scene), f.output.mode)
 	if f.bloom != 0 {
 		push.bloom, push.has_bloom = gpu.read_index(gpu_texture(g, f.bloom)), 1
 		push.scene_scale, push.bloom_scale = f.scene_scale, f.bloom_scale
@@ -542,15 +564,15 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	if f.debug != 0 {
 		push.debug, push.has_debug = gpu.read_index(gpu_texture(g, f.debug)), 1
 	}
-	gpu.cmd_set_pipeline(ctx.cb, f.renderer.output_pipeline.pipeline)
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)
 }
 
 // output_push is the output pass's constants for a scene, which it tone maps through the lookup table once that is
-// baked.
+// baked, and encodes for an output mode.
 @(private)
-output_push :: proc(f: ^Frame, scene: gpu.Texture) -> Output_Push {
+output_push :: proc(f: ^Frame, scene: gpu.Texture, mode: gpu.Output_Mode) -> Output_Push {
 	r := f.renderer
 	return {
 		scene         = gpu.read_index(scene),
@@ -558,5 +580,9 @@ output_push :: proc(f: ^Frame, scene: gpu.Texture) -> Output_Push {
 		has_lut       = u32(r.post.lut_baked),
 		sampler_index = gpu.sampler_index(r.post.sampler),
 		scene_scale   = 1,
+		lut_hdr       = u32(r.post.lut_grading.hdr),
+		mode          = u32(mode),
+		// An SDR frame whose table is still HDR, until it is baked again, reads it with the paper white it was baked with.
+		paper_white   = f.post.paper_white > 0 ? f.post.paper_white : max(r.post.lut_grading.paper_white, 1),
 	}
 }
