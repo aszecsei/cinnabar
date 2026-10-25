@@ -410,6 +410,16 @@ The post passes run after the `before_post` hook, in linear HDR at the scene's r
 - **The lookup table** (`tone_lut.hlsl`, `tone_lut.hlsli`) has 32 entries on each axis, its blue slices side by side in one 1024x32 `RGBA16_Float` texture, since textures are 2D. The entries cover -12.5 to +8 stops around middle grey on a log2 scale, so a scene color in any range has a place. Each holds the display color of its scene color, sRGB-encoded: the tint, the saturation and the contrast (`tint`, `saturation`, `contrast`), then the tone mapper. A compute pass bakes it in the first frame, and again when the grading or its shader changes. The output pass reads it with two bilinear samples. AgX rolls bright colors off to white with less saturation than Khronos PBR Neutral, and keeps dark colors a little brighter, so `tone_mapper = .Pbr_Neutral` gives the look that the fixed tone mapper had before.
 - *Later:* an upscaler in place of temporal AA, the exposure on the compute queue, a sky that counts in the histogram once it is pre-exposed, and velocities for a game's own draws.
 
+### Post effects
+
+A game adds its own post effects among the renderer's passes (`lib/engine/render/post_effects.odin`). Each is driven by a settings component on [volumes](world.md#volumes), as the renderer's settings are, so the editor shows it on a volume, and a volume turns it on where it reaches.
+
+- **Registering:** `register_post_effect(&renderer, &world, name, point, T, defaults, add, order)` after `renderer_init` and again after `renderer_reload`, which clears the effects, because their procedures were in the old code. `T` is a registered settings component, and `defaults` its settings with the defaults that 0 stands for. At most `MAX_POST_EFFECTS` (16).
+- **Points:** `Before_Temporal_Aa`, after the `before_post` hook; `After_Temporal_Aa`, before the exposure's histogram and bloom, so an effect changes both; and `Before_Tone_Mapping`, in linear HDR just before the output pass. The renderer's own passes keep their order. At a point, effects run by `order`, then in the order that they registered.
+- **When an effect runs:** where a volume with its component reaches the camera. Its procedure gets the `Frame` and its settings, blended from the volumes there. It reads `Frame.scene`, and a pass that makes a new scene color sets `Frame.scene` to it. `Frame.data` is the hooks' data. An effect whose pipeline is not ready (`pipeline_ready`) should add nothing, as the renderer's own passes do.
+- **Bloom first:** before the effects at `Before_Tone_Mapping`, a composite pass (`bloom.hlsl`'s composite mode) adds bloom into a new scene color, as the output pass would, so the effects see the scene as the display will. The output pass then adds no bloom. Without an effect there, the frame has no composite pass.
+- **The sample's lens** (`Lens`, stable ID 1003, and `lens.hlsl`): chromatic aberration and a vignette at `Before_Tone_Mapping`, on the sample scene's Global Volume. Before, the sample did them in its `after_world` pass, before temporal AA. That pass now only multiplies in its triangles' shadows.
+
 ## Later features
 
 | Feature | Place in the frame | Inputs | Output read by |
@@ -489,6 +499,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 8 | *Done.* Global illumination with screen-space radiance cascades on the compute queue: five cascades traced through the depth buffer into last frame's lit scene, merged with the ambient sky beyond, gathered into diffuse and specular histories that the forward pass reads in place of the ambient light. |
 | 9 | *Done.* HDR output: HDR10 and scRGB frame targets from `core`, chosen by the display's HDR state; paper white from Windows' SDR white; a lookup table that opens the tone mapper's SDR colors up to the display's peak; and the output pass, which blends the UI at paper white and encodes for the display. |
 | 10 | *Done.* Settings on volumes: the settings components, `resolve_settings` at the camera, and `Fog` with a base height in the world. The sample's scene has a Global Volume. |
+| 11 | *Done.* Post effects: `register_post_effect` with three points among the post passes, settings on volumes, and the bloom composite before tone mapping. The sample's lens is one. |
 
 ## Future work
 

@@ -137,26 +137,34 @@ Grading :: struct {
 // Post_Frame is what one frame's post passes need, in frame memory.
 @(private)
 Post_Frame :: struct {
-	settings:      Post_Settings,
-	temporal:      bool,
+	settings:         Post_Settings,
+	temporal:         bool,
 	// The exposure pass runs, and with exposure_auto, the histogram before it.
-	exposure:      bool,
-	exposure_auto: bool,
-	history:       History,
-	reproject:     matrix[4, 4]f32,
+	exposure:         bool,
+	exposure_auto:    bool,
+	history:          History,
+	reproject:        matrix[4, 4]f32,
 	// The scenes that temporal AA and bloom read.
-	temporal_in:   Texture,
-	bloom_in:      Texture,
-	reset:         bool,
-	delta:         f32,
-	histogram:     Buffer,
-	bloom_levels:  int,
-	bloom_down:    [BLOOM_LEVELS]Texture,
-	bloom_up:      [BLOOM_LEVELS]Texture,
-	bloom_sizes:   [BLOOM_LEVELS][2]u32,
-	grading:       Grading,
+	temporal_in:      Texture,
+	bloom_in:         Texture,
+	reset:            bool,
+	delta:            f32,
+	histogram:        Buffer,
+	bloom_levels:     int,
+	bloom_down:       [BLOOM_LEVELS]Texture,
+	bloom_up:         [BLOOM_LEVELS]Texture,
+	bloom_sizes:      [BLOOM_LEVELS][2]u32,
+	grading:          Grading,
 	// In HDR output, the UI's white in nits, which the output pass scales it to.
-	paper_white:   f32,
+	paper_white:      f32,
+	// The game's post effects run, with their settings, by their index in Renderer.effects.
+	effects:          bool,
+	effect_settings:  []Effect_Settings,
+	// The bloom composite's scene, bloom and their scales, and its result.
+	composite_in:     Texture,
+	composite_bloom:  Texture,
+	composite_out:    Texture,
+	composite_scales: [2]f32,
 }
 
 // Bloom_Step is one pass of bloom's chain: a level's downsample, or its upsample.
@@ -187,16 +195,18 @@ Temporal_Constants :: struct {
 }
 
 // The modes of bloom.hlsl: the first downsample, which weighs down bright pixels so they do not flicker, the others,
-// and the upsamples.
-@(private = "file")
+// the upsamples, and the composite into the scene before a game's effects (see add_post_effects).
+@(private)
 BLOOM_FIRST :: 0
-@(private = "file")
+@(private)
 BLOOM_DOWN :: 1
-@(private = "file")
+@(private)
 BLOOM_UP :: 2
+@(private)
+BLOOM_COMPOSITE :: 3
 
 // Bloom_Push matches Push in bloom.hlsl.
-@(private = "file")
+@(private)
 Bloom_Push :: struct {
 	source:        u32,
 	base:          u32,
@@ -205,7 +215,9 @@ Bloom_Push :: struct {
 	source_texel:  [2]f32,
 	size:          [2]u32,
 	mode:          u32,
-	padding:       [3]u32,
+	scene_scale:   f32,
+	bloom_scale:   f32,
+	padding:       u32,
 }
 
 // Histogram_Push matches Push in exposure_histogram.hlsl.
@@ -292,8 +304,7 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 }
 
 // pipeline_ready is whether a pipeline is compiled, so a pass that it records does its work. A post pass whose
-// pipeline is not ready is left out, and the frame goes on without it.
-@(private)
+// pipeline is not ready is left out, and the frame goes on without it, as a game's post effect should be.
 pipeline_ready :: proc(platform: ^core.Platform_API, p: ^Shader_Pipeline) -> bool {
 	return p.pipeline != {} && (platform.gpu_pipeline_ready == nil || platform.gpu_pipeline_ready(p.pipeline))
 }
@@ -366,6 +377,7 @@ add_post_passes :: proc(f: ^Frame) {
 	platform := r.platform
 	s := pf.settings
 
+	add_post_effects(f, .Before_Temporal_Aa)
 	if pf.temporal {
 		pf.history = history_texture(g, {size = f.size, format = SCENE_FORMAT, label = "temporal aa history"})
 		if pf.history.current != 0 {
@@ -381,6 +393,7 @@ add_post_passes :: proc(f: ^Frame) {
 			f.scene = pf.history.current
 		}
 	}
+	add_post_effects(f, .After_Temporal_Aa)
 
 	if pf.exposure {
 		pf.reset = !p.adapted
@@ -434,6 +447,7 @@ add_post_passes :: proc(f: ^Frame) {
 		f.bloom_scale = intensity / f32(pf.bloom_levels)
 		f.scene_scale = 1 - intensity
 	}
+	add_post_effects(f, .Before_Tone_Mapping)
 
 	pf.grading = {
 		tone_mapper = s.tone_mapper,

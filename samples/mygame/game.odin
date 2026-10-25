@@ -31,6 +31,7 @@ TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
 OBJECTS_SHADER :: #load("content/shaders/objects.hlsl.meta", string)
 CULL_SHADER :: #load("content/shaders/cull.hlsl.meta", string)
 POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
+LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
 SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
 UI_SHADER :: #load("content/shaders/ui.hlsl.meta", string)
@@ -111,6 +112,7 @@ Triangle_Instance :: struct {
 // The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
+LENS_ID :: ecs.Component_Id(1003)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
@@ -120,6 +122,21 @@ Spin :: struct {
 // Triangle marks one of the large triangles, with its HDR brightness.
 Triangle :: struct {
 	brightness: f32,
+}
+
+// Lens is the sample's post effect, on volumes (see docs/rendering.md#post-effects): chromatic aberration and a
+// vignette. 0 gives the defaults in DEFAULT_LENS.
+Lens :: struct {
+	// How far red and blue move apart toward the frame's edges, in pixels for each unit of the frame's size from its
+	// center.
+	chromatic_aberration: volume.Value(f32) `editor:"range=0,64"`,
+	// How fast the vignette darkens toward the corners.
+	vignette:             volume.Value(f32) `editor:"range=0,4"`,
+}
+
+DEFAULT_LENS :: Lens {
+	chromatic_aberration = {value = 24},
+	vignette = {value = 1.6},
 }
 
 // Matches Push in content/shaders/objects.hlsl.
@@ -148,6 +165,16 @@ Post_Constants :: struct {
 	size:        [2]u32,
 	shadows:     u32,
 	has_shadows: u32,
+}
+
+// Matches Push in content/shaders/lens.hlsl.
+Lens_Constants :: struct {
+	input:      u32,
+	output:     u32,
+	size:       [2]u32,
+	aberration: f32,
+	vignette:   f32,
+	_:          [2]u32,
 }
 
 // Matches Push in content/shaders/shadows.hlsl.
@@ -246,6 +273,7 @@ Pipelines :: struct {
 	// otherwise.
 	shadows:   render.Shader_Pipeline,
 	post:      render.Shader_Pipeline,
+	lens:      render.Shader_Pipeline,
 	ui:        render.Shader_Pipeline,
 }
 
@@ -352,6 +380,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		cull      = render.shader_pipeline(CULL_SHADER),
 		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
 		post      = render.shader_pipeline(POST_SHADER),
+		lens      = render.shader_pipeline(LENS_SHADER),
 		ui        = render.shader_pipeline(UI_SHADER),
 	}
 
@@ -361,6 +390,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
+	register_post_effects(s)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
@@ -385,6 +415,56 @@ register_components :: proc(r: ^ecs.Registry) {
 	volume.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
+	ecs.register_component(r, Lens, LENS_ID)
+}
+
+// register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
+// reaches the camera. init and on_reload call it after the renderer's.
+register_post_effects :: proc(s: ^Game_State) {
+	render.register_post_effect(&s.renderer, &s.world, "lens", .Before_Tone_Mapping, Lens, DEFAULT_LENS, add_lens)
+}
+
+// Lens_Pass is the lens's pass, in frame memory.
+Lens_Pass :: struct {
+	frame:  ^Frame,
+	lens:   Lens,
+	input:  render.Texture,
+	output: render.Texture,
+}
+
+add_lens :: proc(f: ^render.Frame, settings: rawptr) {
+	frame := (^Frame)(f.data)
+	if !render.pipeline_ready(f.renderer.platform, &frame.state.pipelines.lens) {
+		return
+	}
+	g := f.graph
+	pass := new(Lens_Pass, frame.state.platform.frame_allocator)
+	pass^ = {
+		frame  = frame,
+		lens   = (^Lens)(settings)^,
+		input  = f.scene,
+		output = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "lens"}),
+	}
+	p := render.add_compute_pass(g, "lens", run_lens, pass)
+	render.read(g, p, pass.input)
+	render.write(g, p, pass.output)
+	f.scene = pass.output
+}
+
+run_lens :: proc(ctx: ^render.Pass_Context) {
+	pass := (^Lens_Pass)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
+	constants := Lens_Constants {
+		input      = gpu.read_index(render.gpu_texture(g, pass.input)),
+		output     = gpu.write_index(render.gpu_texture(g, pass.output)),
+		size       = pass.frame.size,
+		aberration = pass.lens.chromatic_aberration.value,
+		vignette   = pass.lens.vignette.value,
+	}
+	groups := (pass.frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
+	gpu.cmd_set_pipeline(cb, pass.frame.state.pipelines.lens.pipeline)
+	gpu.cmd_push_constants(cb, &constants)
+	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
 
 // register_world makes the world's registrations: components, systems and queries.
@@ -636,7 +716,7 @@ world_uses :: proc(f: ^render.Frame, p: render.Pass) {
 	}
 }
 
-// after_world traces the triangles' shadows, and post-processes the scene into a new color that the renderer tone maps.
+// after_world traces the triangles' shadows, and multiplies them into a new scene color, before temporal AA.
 after_world :: proc(f: ^render.Frame) {
 	frame := (^Frame)(f.data)
 	s := frame.state
@@ -911,6 +991,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	ecs.reload(&s.world, platform)
 	register_world(s)
 	render.renderer_reload(&s.renderer, platform, &s.world)
+	register_post_effects(s)
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
@@ -930,6 +1011,7 @@ sync_pipelines :: proc(s: ^Game_State, force := false) {
 	}
 	render.sync_compute_pipeline(&p.cull, platform, assets, CULL_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
+	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
 	render.sync_graphics_pipeline(&p.ui, platform, assets, {.Vertex, .Pixel}, UI_PIPELINE, force)
 	switch s.shadow_mode {
 	case .None:
@@ -988,6 +1070,10 @@ POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	label   = "post",
 }
 
+LENS_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	label   = "lens",
+}
+
 // The HUD panel, blended into the UI layer.
 UI_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors = {{format = render.UI_FORMAT, blend = .Premultiplied}},
@@ -1001,6 +1087,7 @@ destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
 	render.destroy_shader_pipeline(&pipelines.cull, platform)
 	render.destroy_shader_pipeline(&pipelines.shadows, platform)
 	render.destroy_shader_pipeline(&pipelines.post, platform)
+	render.destroy_shader_pipeline(&pipelines.lens, platform)
 	render.destroy_shader_pipeline(&pipelines.ui, platform)
 }
 

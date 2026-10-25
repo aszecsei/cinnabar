@@ -68,6 +68,7 @@ component 42 Volume
 	shape = Global
 component 49 Environment
 	background = [0.02, 0.02, 0.035]
+component 1003 Lens
 
 entity 7820834ecb6da56e
 name = "Floor"

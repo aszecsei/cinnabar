@@ -140,6 +140,8 @@ Frame_Settings :: struct {
 	// The world pass clears the scene to this, which is not pre-exposed.
 	background:        [3]f32,
 	ambient:           Ambient,
+	// The game's post effects' settings, by their index in Renderer.effects (see register_post_effect).
+	effects:           []Effect_Settings,
 }
 
 register_settings_components :: proc(r: ^ecs.Registry) {
@@ -193,5 +195,6 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 		},
 		background = env.background.value,
 		ambient = {sky = env.sky.value, ground = env.ground.value},
+		effects = resolve_effects(r, w, &inf),
 	}
 }

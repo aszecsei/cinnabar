@@ -63,6 +63,9 @@ Renderer :: struct {
 	gi:              Gi_Passes,
 	fog:             Volumetric_Fog,
 	post:            Post,
+	// The game's post effects, in the order that they run at each point. renderer_reload clears them.
+	effects:         [MAX_POST_EFFECTS]Post_Effect,
+	effect_count:    int,
 	// The output pass's pipeline for each output mode's frame target format. Only the frame's mode's is made.
 	output_pipelines: [gpu.Output_Mode]Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
@@ -250,6 +253,8 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	r.meshes = mesh_extractor(w)
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
+	// The effects' procedures were in the old code, so the game registers them again.
+	r.effect_count = 0
 	r.reloaded = true
 	residency_reload(&r.residency, platform)
 	materials_reload(&r.materials)
@@ -304,6 +309,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
 	begin_post(f, settings.post)
+	f.post.effects, f.post.effect_settings = true, settings.effects
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
 	assign_shadows(f)

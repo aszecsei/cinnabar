@@ -1,10 +1,11 @@
 // Bloom's chain (see docs/rendering.md#post-processing): each level halves the one before with a 13-tap filter, then
 // from the smallest level up, each level adds the level below it, blurred with a 3x3 tent. The output pass adds the
-// largest level to the scene.
+// largest level to the scene, or the composite adds it, before a game's effects that read the scene with its bloom.
 #include "cinnabar.hlsli"
 
 // Matches Bloom_Push in lib/engine/render/post.odin. The source is read with a bilinear, clamped sampler; source_texel
-// is a texel of it in UV. base is the downsampled level that an upsample adds to.
+// is a texel of it in UV. base is the downsampled level that an upsample adds to. The composite reads the scene as
+// source and the bloom as base, with their scales.
 struct Push {
 	uint source;
 	uint base;
@@ -13,13 +14,16 @@ struct Push {
 	float2 source_texel;
 	uint2 size;
 	uint mode;
-	uint3 padding;
+	float scene_scale;
+	float bloom_scale;
+	uint padding;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
 static const uint BLOOM_FIRST = 0;
 static const uint BLOOM_DOWN = 1;
 static const uint BLOOM_UP = 2;
+static const uint BLOOM_COMPOSITE = 3;
 
 float luma(float3 c) {
 	return dot(c, float3(0.2126, 0.7152, 0.0722));
@@ -41,7 +45,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float2 uv = (float2(id.xy) + 0.5) / float2(push.size);
 	float2 t = push.source_texel;
 	float3 color;
-	if (push.mode == BLOOM_UP) {
+	if (push.mode == BLOOM_COMPOSITE) {
+		// As the output pass adds it.
+		color = max(source.Load(int3(id.xy, 0)).rgb, 0) * push.scene_scale;
+		color += cn_texture(push.base).SampleLevel(s, uv, 0).rgb * push.bloom_scale;
+	} else if (push.mode == BLOOM_UP) {
 		color = source.SampleLevel(s, uv + t * float2(-1, -1), 0).rgb;
 		color += source.SampleLevel(s, uv + t * float2(0, -1), 0).rgb * 2;
 		color += source.SampleLevel(s, uv + t * float2(1, -1), 0).rgb;
