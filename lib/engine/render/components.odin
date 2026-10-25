@@ -55,16 +55,16 @@ DEFAULT_AREA_SIZE :: 1
 // Directional_Light lights the world from far away, along its entity's +z, as the sun does. Its light is color times
 // intensity, in the same units as the sky's. A color of 0 means white. See docs/rendering.md#lights-and-clusters.
 Directional_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	cast_shadows: bool,
 }
 
 // Point_Light lights every direction from its entity's position. Its light falls off with the square of the distance,
 // and reaches 0 at its range in meters (0 means DEFAULT_LIGHT_RANGE).
 Point_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	range:        f32 `editor:"range=0,1000"`,
 	cast_shadows: bool,
 }
@@ -72,8 +72,8 @@ Point_Light :: struct {
 // Spot_Light is a point light in a cone along its entity's +z: full inside inner_angle and none outside outer_angle,
 // both half angles in radians (0 means DEFAULT_SPOT_OUTER for the outer angle, and the outer angle for the inner).
 Spot_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	range:        f32 `editor:"range=0,1000"`,
 	inner_angle:  f32 `editor:"range=0,1.5"`,
 	outer_angle:  f32 `editor:"range=0,1.5"`,
@@ -87,8 +87,8 @@ Spot_Light :: struct {
 // Quad_Light is a rectangle of light, width by height along its entity's x and y (0 means DEFAULT_AREA_SIZE), that
 // shines along its +z, or both ways when two_sided.
 Quad_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	width:        f32 `editor:"range=0,100"`,
 	height:       f32 `editor:"range=0,100"`,
 	range:        f32 `editor:"range=0,1000"`,
@@ -99,8 +99,8 @@ Quad_Light :: struct {
 // Disk_Light is a disk of light, width and height across along its entity's x and y, so an ellipse when they differ (0
 // means DEFAULT_AREA_SIZE), that shines along its +z, or both ways when two_sided.
 Disk_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	width:        f32 `editor:"range=0,100"`,
 	height:       f32 `editor:"range=0,100"`,
 	range:        f32 `editor:"range=0,1000"`,
@@ -111,8 +111,8 @@ Disk_Light :: struct {
 // Line_Light is a tube of light along its entity's x, length long (0 means DEFAULT_AREA_SIZE), with round ends. A radius
 // of 0 is an ideal line.
 Line_Light :: struct {
-	color:        [3]f32,
-	intensity:    f32,
+	color:        [3]f32 `editor:"color"`,
+	intensity:    f32 `editor:"range=0,100"`,
 	length:       f32 `editor:"range=0,100"`,
 	radius:       f32 `editor:"range=0,10"`,
 	range:        f32 `editor:"range=0,1000"`,
@@ -125,7 +125,7 @@ Line_Light :: struct {
 Fog :: struct {
 	density:        f32 `editor:"range=0,1"`,
 	// The share of the light that the fog takes away that it scatters rather than absorbs, per channel. 0 means white.
-	albedo:         [3]f32,
+	albedo:         [3]f32 `editor:"color"`,
 	// How fast the density falls with height above the entity, per meter. 0 keeps it the same everywhere.
 	height_falloff: f32 `editor:"range=0,10"`,
 	// Where the fog scatters light: above 0 forward, so it glows around a light that the camera looks toward, and below

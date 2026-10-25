@@ -195,6 +195,8 @@ Field_Kind :: enum u8 {
 	Entity,
 	// An asset's GUID, 16 bytes.
 	Asset,
+	// [2]f32.
+	Vector2,
 }
 
 Field_Info :: struct {
@@ -210,6 +212,8 @@ Field_Info :: struct {
 	has_range:   bool,
 	range_min:   f64,
 	range_max:   f64,
+	// From the struct tag editor:"color": a Vector3 that holds a linear color.
+	color:       bool,
 	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", in lowercase as the
 	// cook link's Asset_Kind names it, such as "mesh". "" takes any asset.
 	asset_kind:  string,

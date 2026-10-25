@@ -29,7 +29,7 @@ Tuned :: struct {
 	mode:   Mode,
 	inner:  Inner,
 	secret: i32 `editor:"-"`,
-	locked: [3]f32 `editor:"read"`,
+	locked: [3]f32 `editor:"read color"`,
 }
 
 @(private = "file")
@@ -180,7 +180,7 @@ fields_are_flattened_tagged_and_hidden :: proc(t: ^testing.T) {
 	testing.expect_value(t, amount.offset, u32(offset_of(Tuned, inner) + offset_of(Inner, amount)))
 	testing.expect(t, amount.has_range && amount.range_max == 10)
 	testing.expect_value(t, locked.kind, link.Field_Kind.Vector3)
-	testing.expect(t, locked.read_only)
+	testing.expect(t, locked.read_only && locked.color)
 }
 
 @(test)

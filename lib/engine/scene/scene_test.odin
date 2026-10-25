@@ -31,6 +31,7 @@ Probe :: struct {
 		amount: f64,
 	},
 	hidden: i32 `editor:"-"`,
+	span:   [2]f32,
 }
 
 @(private = "file")
@@ -132,6 +133,7 @@ component 100 Probe
 	model = $9db8150cc7215ffc2708d20d77cf60bf
 	skins.1 = $ffeeddccbbaa99887766554433221100
 	inner.amount = 7
+	span = [0.5, 2]
 `
 	load(&f.world, nil, parse(t, text))
 
@@ -169,6 +171,7 @@ component 100 Probe
 	testing.expect_value(t, p.model, format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
 	testing.expect_value(t, p.skins, [2]format.Guid{{}, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {}})
 	testing.expect_value(t, p.inner.amount, 7)
+	testing.expect_value(t, p.span, [2]f32{0.5, 2})
 }
 
 @(test)
@@ -208,7 +211,8 @@ fields_flatten_and_hide :: proc(t: ^testing.T) {
 	for field in fields {
 		append(&names, field.name)
 	}
-	testing.expect_value(t, len(fields), 13)
+	testing.expect_value(t, len(fields), 14)
+	testing.expect_value(t, fields[13].kind, Field_Kind.Vector2)
 	testing.expect_value(t, fields[12].name, "inner.amount")
 	testing.expect_value(t, fields[12].offset, u32(offset_of(Probe, inner)))
 	// An array of asset references is a field for each element.
@@ -220,4 +224,25 @@ fields_flatten_and_hide :: proc(t: ^testing.T) {
 	testing.expect_value(t, fields[4].kind, Field_Kind.Enum)
 	testing.expect_value(t, fields[4].enum_values[1], Enum_Value{"Busy", 5})
 	testing.expect_value(t, fields[7].kind, Field_Kind.Position)
+}
+
+@(private = "file")
+Tagged :: struct {
+	tint:  [3]f32 `editor:"color range=0,1"`,
+	speed: f32 `editor:"read range=-1,2"`,
+	flat:  [2]f32 `editor:"color"`,
+	gone:  f32 `editor:"read -"`,
+}
+
+@(test)
+editor_tags_are_a_list :: proc(t: ^testing.T) {
+	fields := component_fields(Tagged, context.temp_allocator)
+	testing.expect_value(t, len(fields), 3)
+	testing.expect(t, fields[0].color && fields[0].has_range && !fields[0].read_only)
+	testing.expect_value(t, fields[0].range_max, 1)
+	testing.expect(t, fields[1].read_only && fields[1].has_range)
+	testing.expect_value(t, fields[1].range_min, -1)
+	// Only a [3]f32 can be a color.
+	testing.expect_value(t, fields[2].kind, Field_Kind.Vector2)
+	testing.expect(t, !fields[2].color)
 }

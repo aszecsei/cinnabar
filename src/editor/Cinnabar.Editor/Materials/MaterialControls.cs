@@ -118,12 +118,7 @@ static class MaterialControls
     /// <summary>A swatch of a linear color, as the screen shows it.</summary>
     public static Border Swatch(IReadOnlyList<double> rgba)
     {
-        static byte Encode(double linear)
-        {
-            var c = Math.Clamp(linear, 0, 1);
-            var srgb = c <= 0.0031308 ? c * 12.92 : 1.055 * Math.Pow(c, 1 / 2.4) - 0.055;
-            return (byte)Math.Round(srgb * 255);
-        }
+        static byte Encode(double linear) => (byte)Math.Round(Model.LinearColor.ToSrgb(linear) * 255);
         var color = rgba.Count >= 3 ? Color.FromRgb(Encode(rgba[0]), Encode(rgba[1]), Encode(rgba[2])) : Colors.Transparent;
         return new Border
         {

@@ -18,6 +18,7 @@ enum EditKind
     F32,
     F64,
     Enum,
+    Vector2,
     Vector3,
     /// <summary>Edited as Euler angles in degrees, as it shows.</summary>
     Quaternion,
@@ -98,6 +99,7 @@ sealed class FieldEditor : IFieldEditor
             FieldKind.F32 => new FieldEditor(shell, sceneIds, label, EditKind.F32, Set),
             FieldKind.F64 => new FieldEditor(shell, sceneIds, label, EditKind.F64, Set),
             FieldKind.Enum => new FieldEditor(shell, sceneIds, label, EditKind.Enum, Set, Range(field.EnumBase), field.EnumValues),
+            FieldKind.Vector2 => new FieldEditor(shell, sceneIds, label, EditKind.Vector2, Set),
             FieldKind.Vector3 => new FieldEditor(shell, sceneIds, label, EditKind.Vector3, Set),
             FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set),
             FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set),
@@ -157,7 +159,7 @@ sealed class FieldEditor : IFieldEditor
         var data = component.Slice((int)field.Offset, size);
         var floats = new double[4];
         var longs = new long[3];
-        if (field.Kind is FieldKind.Vector3 or FieldKind.Quaternion)
+        if (field.Kind is FieldKind.Vector2 or FieldKind.Vector3 or FieldKind.Quaternion)
         {
             for (var i = 0; i < size / 4; i++)
             {
@@ -179,6 +181,8 @@ sealed class FieldEditor : IFieldEditor
                 return SceneValue.Of(SceneNumber.Of((double)BinaryPrimitives.ReadSingleLittleEndian(data)));
             case FieldKind.F64:
                 return SceneValue.Of(SceneNumber.Of(BinaryPrimitives.ReadDoubleLittleEndian(data)));
+            case FieldKind.Vector2:
+                return SceneValue.Of(SceneNumber.Of(floats[0]), SceneNumber.Of(floats[1]));
             case FieldKind.Vector3:
                 return SceneValue.Of(SceneNumber.Of(floats[0]), SceneNumber.Of(floats[1]), SceneNumber.Of(floats[2]));
             case FieldKind.Quaternion:
@@ -281,7 +285,7 @@ sealed class FieldEditor : IFieldEditor
             EditKind.Integer => Clamp(start.Numbers[0].Integer!.Value + (Int128)Math.Round(pixels / PixelsPerInteger * scale)),
             EditKind.F32 => SceneEdits.Floats(start.Numbers[0].Float + pixels * FloatStep * scale),
             EditKind.F64 => SceneValue.Of(SceneNumber.Of(start.Numbers[0].Float + pixels * FloatStep * scale)),
-            EditKind.Vector3 => WithAxis(start, axis, start.Numbers[axis].Float + pixels * FloatStep * scale),
+            EditKind.Vector2 or EditKind.Vector3 => WithAxis(start, axis, start.Numbers[axis].Float + pixels * FloatStep * scale),
             EditKind.Quaternion => Turned(start, axis, d => d + pixels * DegreeStep * scale),
             EditKind.Position => Moved(start, axis, m => m + pixels * MeterStep * scale),
             _ => null,
@@ -290,6 +294,30 @@ sealed class FieldEditor : IFieldEditor
         if (ops.Count > 0)
         {
             _shell.PreviewEdit(ops);
+        }
+    }
+
+    public void SetNumbers(double[] values)
+    {
+        SceneValue? value = _kind switch
+        {
+            EditKind.Integer => Clamp((Int128)Math.Round(values[0])),
+            EditKind.F32 => SceneEdits.Floats(values[0]),
+            EditKind.F64 => SceneValue.Of(SceneNumber.Of(values[0])),
+            EditKind.Vector2 or EditKind.Vector3 => SceneEdits.Floats(values),
+            _ => null,
+        };
+        if (value == null)
+        {
+            return;
+        }
+        if (_starts != null)
+        {
+            _shell.PreviewEdit(Operations(value));
+        }
+        else
+        {
+            _shell.Edit(_label, Operations(value));
         }
     }
 
@@ -326,7 +354,7 @@ sealed class FieldEditor : IFieldEditor
                     return null;
                 }
                 return Exact(integer);
-            case EditKind.F32 or EditKind.F64 or EditKind.Vector3:
+            case EditKind.F32 or EditKind.F64 or EditKind.Vector2 or EditKind.Vector3:
                 if (!TryNumber(trimmed, out var number))
                 {
                     error = $"\"{text}\" is not a number";

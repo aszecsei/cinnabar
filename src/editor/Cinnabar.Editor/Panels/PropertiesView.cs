@@ -161,10 +161,10 @@ public sealed class PropertiesView : ScrollViewer
             // A child's Transform is what propagation writes from its Local_Transform, so only the latter edits.
             var editable = inDocument != null && !WorldWritten.Contains(id) && !(id == SceneEdits.TransformId && node.Parent != 0);
             var owner = id.ToString("x16");
-            var fields = type.Fields.Select(f => new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), f.Kind == Link.Protocol.FieldKind.Enum,
+            var fields = type.Fields.Select(f => FieldRow.Of(owner, f,
                 editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null,
                 editable && !f.ReadOnly ? () => inDocument!.Fields.Any(x => x.Name == f.Name) : null,
-                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetField(document!.Id, id, f.Name, null))) { AssetKind = f.AssetKind });
+                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetField(document!.Id, id, f.Name, null))));
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             _content.Children.Add(Group(title, fields,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
@@ -313,9 +313,9 @@ public sealed class PropertiesView : ScrollViewer
             var fields = type.Fields.Select(f =>
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
-                return new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), f.Kind == Link.Protocol.FieldKind.Enum, editor,
+                return FieldRow.Of(owner, f, editor,
                     editor != null ? () => inDocument!.Any(c => c!.Fields.Any(x => x.Name == f.Name)) : null,
-                    () => editor?.Reset()) { AssetKind = f.AssetKind };
+                    () => editor?.Reset());
             });
             _content.Children.Add(Group(title, fields, remove: remove));
         }
@@ -517,6 +517,21 @@ public sealed class PropertiesView : ScrollViewer
     {
         /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
         public string AssetKind { get; init; } = "";
+
+        /// <summary>For an Axes field, its number of boxes.</summary>
+        public int Axes { get; init; } = 3;
+
+        /// <summary>For a number, the range of its slider, from the game's editor:"range=min,max" tag.</summary>
+        public (double Min, double Max)? Range { get; init; }
+
+        /// <summary>A component field's row, with what its field info says of how it shows.</summary>
+        public static FieldRow Of(string owner, Link.Protocol.FieldInfo f, FieldEditor? editor, Func<bool>? isSet, Action reset) =>
+            new(owner, f.Name, FieldValues.DisplayKindOf(f), f.Kind == Link.Protocol.FieldKind.Enum, editor, isSet, reset)
+            {
+                AssetKind = f.AssetKind,
+                Axes = f.Kind == Link.Protocol.FieldKind.Vector2 ? 2 : 3,
+                Range = f.HasRange ? (f.RangeMin, f.RangeMax) : null,
+            };
     }
 
     Control Group(string title, IEnumerable<FieldRow> fields, string? badge = null, bool disabled = false, Action? remove = null, string? note = null)
@@ -538,7 +553,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 FieldView.Scrubbable(name, field.Editor, 0);
             }
-            var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(_shell.Assets, field.AssetKind, _shell.RevealAsset));
+            var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(_shell.Assets, field.AssetKind, _shell.RevealAsset), field.Axes, field.Range);
             Grid.SetRow(name, row);
             Grid.SetRow(view.Control, row);
             Grid.SetColumn(view.Control, 1);
