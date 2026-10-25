@@ -18,7 +18,9 @@ import "cinnabar:engine/ecs"
 // What the hooks of the test frame saw, and the logged problems other than the shaders that the test cache lacks.
 @(private = "file")
 Hook_Record :: struct {
-	before_world, world_uses, after_world, ui, debug: bool,
+	before_world, world_uses, after_world, before_post, ui, debug: bool,
+	// What the debug hook, which runs after post-processing, saw.
+	bloom, history_valid:                               bool,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
 	post:                                               Texture,
@@ -148,13 +150,18 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				f.scene = post
 				rec.post = post
 			},
+			before_post = proc(f: ^Frame) {
+				(^Hook_Record)(f.data).before_post = true
+			},
 			ui = proc(f: ^Frame) {
 				(^Hook_Record)(f.data).ui = true
 				p := add_render_pass(f.graph, "hud", proc(_: ^Pass_Context) {}, nil)
 				color(f.graph, p, f.ui, .Load)
 			},
 			debug = proc(f: ^Frame) {
-				(^Hook_Record)(f.data).debug = f.debug != 0
+				rec := (^Hook_Record)(f.data)
+				rec.debug = f.debug != 0
+				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
 				read(f.graph, p, f.ids)
@@ -163,7 +170,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		},
 	}
 	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
-	testing.expect(t, record.before_world && record.world_uses && record.after_world && record.ui && record.debug)
+	testing.expect(t, record.before_world && record.world_uses && record.after_world && record.before_post && record.ui && record.debug)
 	testing.expect_value(t, record.world_pieces, 2)
 	testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
 	testing.expect(t, record.post != 0)
@@ -174,4 +181,22 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	// A frame without hooks or lines has no UI or debug layer, and the IDs and the depth are discarded.
 	testing.expect(t, draw_frame(r, w, {view = desc.view, size = desc.size}))
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// With the post pipelines, which the test's cache cannot cook, every post pass runs: the frames after the first
+	// read temporal AA's history, and the lookup table bakes once. The null backend checks every barrier.
+	code := []byte{1}
+	for p in ([]^Shader_Pipeline{&r.post.temporal_aa, &r.post.bloom, &r.post.histogram, &r.post.adapt, &r.post.tone_lut}) {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "post"})
+	}
+	for i in 0 ..< 3 {
+		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		testing.expect(t, record.bloom)
+		testing.expect_value(t, record.history_valid, i > 0)
+		testing.expect(t, r.post.lut_baked)
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+	// The jitter cycles inside the pixel.
+	for n in u32(1) ..= JITTER_SAMPLES {
+		testing.expect(t, halton(n, 2) > 0 && halton(n, 2) < 1 && halton(n, 3) > 0 && halton(n, 3) < 1)
+	}
 }

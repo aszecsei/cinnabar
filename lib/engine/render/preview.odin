@@ -9,8 +9,9 @@ import format "cinnabar:engine/asset/format"
 
 // Material previews (see docs/rendering.md#material-previews): a frame can draw a material on one mesh into a target of
 // its own, as the editor's material editor shows it. A preview draws no world: its mesh, lit by one directional light
-// and the ambient light, with the material's prepass and forward pipelines, then the output pass's tone mapping. Its
-// records are relative to its camera, which orbits the mesh's middle. It has no shadows, no clusters and no history.
+// and the ambient light, with the material's prepass and forward pipelines, then the output pass's tone mapping
+// through the frame's lookup table. Its records are relative to its camera, which orbits the mesh's middle. It has no
+// shadows, no clusters, no history and no exposure.
 
 // The engine's preview meshes, a sphere, a cube and a plane, each 1 m across (lib/engine/content/models/preview.gltf),
 // by their .meta file.
@@ -62,6 +63,7 @@ Previews :: struct {
 @(private)
 Preview_Frame :: struct {
 	renderer:    ^Renderer,
+	frame:       ^Frame,
 	desc:        ^Preview_Desc,
 	pipeline:    ^Material_Pipeline,
 	draw_count:  u32,
@@ -163,7 +165,8 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 			ready &&= pipeline.pipelines[pass] != {} && platform.gpu_pipeline_ready(pipeline.pipelines[pass])
 		}
 		if desc.complete != nil {
-			desc.complete^ = ready && !table.waiting
+			// The output pass tone maps with the lookup table only once it is baked.
+			desc.complete^ = ready && !table.waiting && r.post.lut_baked
 		}
 		write_preview_records(f, pf, mesh, block, &table, view_projection)
 	}
@@ -196,8 +199,10 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		p := add_render_pass(g, "preview background", proc(_: ^Pass_Context) {}, pf)
 		color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
 	}
+	pf.frame = f
 	p := add_render_pass(g, "preview output", draw_preview_output, pf)
 	read(g, p, pf.scene)
+	read(g, p, f.lut)
 	color(g, p, pf.target, .Discard)
 }
 
@@ -290,6 +295,7 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 		near                     = PREVIEW_NEAR,
 		shadow_sampler           = gpu.sampler_index(r.shadows.sampler),
 		screen_size              = {f32(desc.size.x), f32(desc.size.y)},
+		exposure                 = gpu.read_index(r.post.unit_exposure),
 	}
 	pf.constants, ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -342,10 +348,7 @@ draw_preview_output :: proc(ctx: ^Pass_Context) {
 	if output == {} {
 		return
 	}
-	push := Output_Push {
-		scene    = gpu.read_index(gpu_texture(g, pf.scene)),
-		exposure = 1,
-	}
+	push := output_push(pf.frame, gpu_texture(g, pf.scene))
 	gpu.cmd_set_pipeline(ctx.cb, output)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)

@@ -55,6 +55,13 @@ struct Frame_Constants {
 	uint clustered;
 	// The frame's size in pixels.
 	float2 screen_size;
+	// The camera's subpixel jitter for temporal AA, as the offset that it adds to positions in normalized device
+	// coordinates, which view_projection holds. The velocities leave it out.
+	float2 jitter;
+	// The exposure that pre-exposes the scene's colors: the float at 0 of this buffer (see
+	// docs/rendering.md#post-processing).
+	uint exposure;
+	uint frame_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -170,6 +177,11 @@ static const float PI = 3.14159265;
 // 1024 m goes on without a seam when the origin moves (see docs/rendering.md#gpu-scene).
 float3 world_position(Material_Inputs inputs) {
 	return inputs.position + frame.origin_offset.xyz;
+}
+
+// frame_exposure scales the colors that the forward pass writes, so the scene is pre-exposed.
+float frame_exposure() {
+	return cn_buffer(frame.exposure).Load<float>(0);
 }
 
 // cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a later path that

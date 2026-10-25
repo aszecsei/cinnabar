@@ -54,8 +54,8 @@ flowchart TB
 
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
-- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the shadows' acceleration structure, and later the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
-- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the ambient light until global illumination (`Ambient`, `DEFAULT_AMBIENT` when zero), the hooks, and the editor's material previews to draw (see [Material previews](#material-previews)). The lights are components (see [Lights and clusters](#lights-and-clusters)).
+- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the shadows' acceleration structure, and post-processing's pipelines, exposure and lookup table (`render.Post`). It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the post-processing settings (`Post_Settings`, see [Post-processing](#post-processing)), the clear color, which is not pre-exposed, the ambient light until global illumination (`Ambient`, `DEFAULT_AMBIENT` when zero), the hooks, and the editor's material previews to draw (see [Material previews](#material-previews)). The lights are components (see [Lights and clusters](#lights-and-clusters)).
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
 
 | Hook | When | What it does |
@@ -64,12 +64,13 @@ flowchart TB
 | `after_prepass` | After the prepass | Adds passes that read `Frame.depth`, `Frame.normals` and `Frame.velocity` |
 | `world_uses` | When the world pass is declared | Declares what `world_draw` reads |
 | `world_draw` | In the world pass, the forward pass, `world_pieces` pieces, after the meshes in piece 0 | Records draws into the world's targets |
-| `after_world` | After the world pass | Adds passes, such as post effects; a pass that makes a new scene color sets `Frame.scene` to it |
+| `after_world` | After the world pass | Adds passes; a pass that makes a new scene color sets `Frame.scene` to it |
+| `before_post` | Just before post-processing | Adds passes, such as a layer of the game's own that it composites into `Frame.scene` in linear HDR; post-processing then reads `Frame.scene` |
 | `ui` | After a pass that clears the UI target | Adds passes that draw the UI; they load it |
 | `debug` | After the debug lines | Adds passes that draw into the debug layer, such as the editor's tools |
 
-- The hooks are procedures in the game DLL, so they are never stored in `Game_State`. *Phase 6 adds a hook before post.*
-- **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals or velocities, no shadows from the renderer and no clusters' lights unless their shaders read them.
+- The hooks are procedures in the game DLL, so they are never stored in `Game_State`.
+- **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals or velocities, no shadows from the renderer and no clusters' lights unless their shaders read them. They place vertices with `render.jittered_view_projection(f)`, so they cover the same pixels as the renderer's draws, and scale their colors by the exposure in `Frame.exposure`, because the scene is pre-exposed (see [Post-processing](#post-processing)). The sample's draws do both. Temporal AA moves their pixels with the camera, since they have no velocities, so a moving draw of a game's own leaves a short trail that the history's clipping limits.
 - **Missing shaders:** a pass whose pipeline does not exist yet, because its shader is not cooked, records nothing, so the frame still validates.
 
 ### Views
@@ -90,7 +91,7 @@ The GPU scene holds every instance's record in a persistent buffer, `Gpu_Scene` 
 - **Draw items** are one per submesh of each visible `Mesh_Renderer` whose mesh is resident: its slot, its mesh's record, its indices, its material's block, its bin, and its submesh's bounding sphere. Hidden entities (`Frame_Desc.hidden`) keep their slots but have no items.
 - **Culling** is a compute pass, `cull_draws.hlsl`, with a row of the dispatch for each view: the camera (`VIEW_CAMERA`), the view model (`VIEW_VIEW_MODEL`), then each shadow view (see [Shadows](#shadows)). It tests each item's sphere, moved by its instance's rows and the view's offset from their space, against the view's six planes; the camera's and the view model's far planes are at infinity. A shadow view takes only the items that cast shadows (the `Mesh_Renderer`'s `cast_shadows` and the material's), the view model's view only the view model's items, and every other view leaves those out. A visible item takes the next place in its bin of that view with an atomic add, and writes there both its indirect draw, whose draw ID is that place, and its draw record. Each view has room for every item, and each bin has the same range in every view. *Occlusion culling, and culling on the compute queue, come later.*
 - **Drawing:** the prepass, the shadow maps and the forward pass each draw a bin of their view with one `cmd_draw_indirect` and the bin's count, with the bin's material's pipeline for their pass. The vertex shader reads its draw record by its draw ID, and pulls its index from the mesh's index buffer, then its vertex: every mesh has buffers of its own, so no one index buffer could be bound for a bin. *The mesh shader path draws meshlets instead, later.*
-- **The frame's constants** (`Frame_Constants`, the pass constants of every material pass) hold the view's projection and last frame's, the camera's offset from the origin and last frame's camera's, the camera's offset from the origin again as `origin_offset`, which the view model's copy keeps where it zeroes the others, the ambient light, the cascades' splits, the records' bindless indices and their offsets in the upload ring (mesh records, material table, lights, shadow views), and the clusters' grid. Each shadow view has a copy with its own projection, which takes positions relative to the camera too, so the depth pass places vertices with the same code. The forward pass pushes the shadow atlas and the shadow mask (`Material_Push`), which exist only once the frame records.
+- **The frame's constants** (`Frame_Constants`, the pass constants of every material pass) hold the view's projection, with the camera's jitter for the camera's and the view model's copies, and last frame's without it, the camera's offset from the origin and last frame's camera's, the camera's offset from the origin again as `origin_offset`, which the view model's copy keeps where it zeroes the others, the ambient light, the cascades' splits, the records' bindless indices and their offsets in the upload ring (mesh records, material table, lights, shadow views), the clusters' grid, the jitter, and the exposure buffer, which the forward pass scales its colors by. Each shadow view has a copy with its own projection, which takes positions relative to the camera too, so the depth pass places vertices with the same code. The forward pass pushes the shadow atlas and the shadow mask (`Material_Push`), which exist only once the frame records.
 - **The acceleration structure.** With `Ray_Query`, each instance whose `Mesh_Renderer` casts shadows is an instance of the GPU scene's top-level acceleration structure, in the render origin's space, with its slot as its ID. It is built again every frame that traces shadows.
 
 ## Layers
@@ -118,7 +119,7 @@ A first-person view model needs its own field of view, and it must never go into
 - **Shadows:** the view model receives the world's shadows: the shadow maps sample at its position relative to the camera, and the mask traces from it. It casts none, into the world or onto itself, because its pose is not its real place in the world: it is in no shadow view and not in the acceleration structure.
 - **A game's own draws** in `world_draw` test the stencil bit with `render.WORLD_STENCIL`, so they never cover the view model either. The sample's pipelines do.
 - **Debug lines** that test depth compare it only with the world's pixels: over the view model, they draw at the hidden part's alpha, as behind a wall.
-- A game that wants a truly separate target can use a hook at `Before_Post`, which still composites in linear HDR before post.
+- A game that wants a truly separate target can use the `before_post` hook, which still composites in linear HDR before post.
 
 ### UI
 
@@ -141,8 +142,8 @@ A first-person view model needs its own field of view, and it must never go into
 
 The output pass is one full-screen pass that writes the frame target (`lib/engine/content/shaders/output.hlsl`):
 
-1. Read the scene, scaled by the exposure, and tone map it. Until the tone mapping lookup table (phase 6), the pass tone maps itself with Khronos PBR Neutral, which keeps colors up to 0.76 as they are. *Later, it reads the tone-mapped scene, upscaled to the frame's size if the scene's resolution is lower.*
-2. Encode it to sRGB.
+1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. *Later, a separate pass tone maps the scene, and this pass reads it, upscaled to the frame's size if the scene's resolution is lower.*
+2. Without the table, encode the color to sRGB.
 3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
 4. Write the result. The frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again.
 
@@ -160,7 +161,7 @@ Forward shading with a prepass is the default and only path at first.
 
 ### Prepass
 
-- Writes depth, the normal in the world (folded into the octahedron, `NORMAL_FORMAT`, `RG16_Float`) and the velocity: how far the surface moved on the screen since last frame, in UV (`VELOCITY_FORMAT`, `RG16_Float`), from the instance's last pose and last frame's camera and projection. *The stencil bits come with the view model (phase 4).*
+- Writes depth, the normal in the world (folded into the octahedron, `NORMAL_FORMAT`, `RG16_Float`) and the velocity: how far the surface moved on the screen since last frame, in UV (`VELOCITY_FORMAT`, `RG16_Float`), from the instance's last pose and last frame's camera and projection, without the camera's jitter. The pass clears the velocity to `VELOCITY_NONE` where it draws nothing, which temporal AA then moves with the camera.
 - **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
 - The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
 - The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
@@ -291,9 +292,9 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 
 The editor's material editor shows the material on a mesh. The game renders it with the renderer, as a second kind of view, into a second shared target. The preview therefore uses the same shaders, shading models and passes as the game.
 
-- **Its own scene.** A preview does not draw the world. It draws one preview mesh with the material, lit by one directional light from over the camera's shoulder and the default ambient light, with the material's prepass and forward pipelines, then tone maps it with the output pass. The mesh is one of the engine's, a sphere, a cube or a plane, each 1 m across (`lib/engine/content/models/preview.gltf`, `render.preview_mesh`), or a mesh asset. Its records are relative to its camera, which orbits the mesh's middle. It has no shadows, no clusters, no fog, no GI and no temporal passes, so it keeps no history.
+- **Its own scene.** A preview does not draw the world. It draws one preview mesh with the material, lit by one directional light from over the camera's shoulder and the default ambient light, with the material's prepass and forward pipelines, then tone maps it with the output pass, through the frame's lookup table. It is not pre-exposed (`Post.unit_exposure`) and has no bloom. The mesh is one of the engine's, a sphere, a cube or a plane, each 1 m across (`lib/engine/content/models/preview.gltf`, `render.preview_mesh`), or a mesh asset. Its records are relative to its camera, which orbits the mesh's middle. It has no shadows, no clusters, no fog, no GI and no temporal passes, so it keeps no history.
 - **In the frame's graph.** `Frame_Desc.previews` gives the previews that a frame draws (`render.Preview_Desc`): the target, the material, the mesh and the camera. `draw_frame` adds each one's passes to its graph: a copy of its records into the renderer's preview buffers, which the shaders read from their starts, its prepass, its forward pass and its output pass. A preview without its mesh or its material clears its target to the background.
-- **Complete.** `draw_frame` sets a preview's `complete` when its mesh was resident, its pipelines were compiled (`gpu_pipeline_ready`) and its textures were resident, so the game draws it again until it shows the material as it is.
+- **Complete.** `draw_frame` sets a preview's `complete` when its mesh was resident, its pipelines were compiled (`gpu_pipeline_ready`), its textures were resident and the lookup table was baked, so the game draws it again until it shows the material as it is.
 - **Its own shared target.** Each preview has a set of shared textures and a fence, named and paced as the viewport's are (see [GPU](gpu.md#presentation) and [Editor](editor.md#viewport)): `<name>.preview<id>.g<generation>.texture0..2`, with IDs below `gpu.MAX_PREVIEW_TARGETS` (4). `gpu_preview_target` gives the game a target's texture for a frame, at most `gpu.MAX_PREVIEW_SIZE` (1024) on each side, and `gpu_release_preview_target` releases it.
 - **Only when needed.** The game's editor package (`editor.previews`, which the game's frame puts in `Frame_Desc.previews`) draws a preview when its material, its mesh, its camera or its size changes, until it is complete, and every frame while its material reads the time (the blob's `Reads_Time`). It draws at most one in each frame, in turn, and none whose target the editor may still be reading.
 - **Editor link messages:** `Open_Preview` with the preview's ID, the material or instance GUID and whether to load the unsaved blob, `Preview_Settings` with the mesh, the orbit camera and the size, `Close_Preview`, and `Preview_Target` from the game with the shared target's name and generation. The editor acknowledges each frame that it copies with `Preview_Acknowledged`, which the host handles. The editor's side is in [Editor](editor.md#material-editor).
@@ -303,14 +304,23 @@ The editor's material editor shows the material on a mesh. The game renders it w
 
 ## Post-processing
 
-All post passes before tone mapping work in linear HDR at the scene's resolution.
+The post passes run after the `before_post` hook, in linear HDR at the scene's resolution (`lib/engine/render/post.odin`). `Frame_Desc.post`, a `render.Post_Settings`, sets them, and its zero value gives the defaults. A pass whose pipeline is not compiled yet is left out, and the frame goes on without it: no jitter without temporal AA, and a plain roll-off to white until the lookup table is baked.
 
-| Pass | Method | Inputs |
-|---|---|---|
-| Temporal AA | Reprojection with velocity, neighborhood clamping; an upscaler later | Scene color, velocity, depth, history |
-| Bloom | A chain of downsamples and upsamples with a 13-tap filter | Scene color |
-| Exposure | A luminance histogram on the compute queue; the result scales the next frame (pre-exposure) | Scene color |
-| Tone mapping | A 3D lookup table that a compute pass bakes when the settings change: the curve (AgX by default; Khronos PBR Neutral, ACES) and color grading | Scene color, bloom, exposure |
+| Pass | Method | Inputs | Output |
+|---|---|---|---|
+| Temporal AA | Reprojection by velocity, a Catmull-Rom history, clipping to the neighborhood's colors; an upscaler later | Scene color, velocity, depth, history | Its history texture, which becomes `Frame.scene` |
+| Exposure | A luminance histogram, then the exposure that maps its average to middle grey | Scene color, depth | The exposure buffer, which pre-exposes the next frame |
+| Bloom | A chain of downsamples with a 13-tap filter, and upsamples with a 3x3 tent | Scene color | `Frame.bloom` |
+| Tone mapping | A lookup table that a compute pass bakes when the settings change: the color grading and the curve (AgX by default; Khronos PBR Neutral, ACES); the output pass reads it | Scene color, bloom | sRGB-encoded colors |
+
+- **Jitter.** With temporal AA, the camera's projection moves within the pixel every frame, through the first 8 points of the Halton (2, 3) sequence (`Frame.jitter`, in normalized device coordinates). The camera's and the view model's views draw with it, the velocities leave it out, and `jittered_view_projection` gives it to a game's own draws. The debug layer and the editor's tools draw without it. The ID buffer is jittered with the scene, so the editor's selection outline can move by a pixel at edges from frame to frame.
+- **Temporal AA** (`temporal_aa.hlsl`, a compute pass) takes each pixel's motion from the nearest of its 3x3 neighbors, so edges move with the surface in front. Where the prepass drew nothing (`VELOCITY_NONE`), the pixel moves with the camera: its depth gives its position, which moves by the camera's motion (`Frame.camera_motion`) into last frame's projection (`Frame.previous_view_projection`). The history is read with a Catmull-Rom filter in five bilinear taps, scaled by the ratio of this frame's exposure to last frame's, and clipped to the neighborhood's mean ± 1.25 standard deviations in YCoCg. Then 10% of this frame (`TEMPORAL_BLEND`) blends in, after a reversible tone map, so one bright sample does not dominate. Without a valid history, or where last frame's position is off the screen, the pixel is this frame's color.
+- **History textures:** `history_texture` in the render graph gives a pair of textures that the `Texture_Cache` keeps and swaps every frame, for temporal AA now and later for fog, GI and the denoisers (see [GPU](gpu.md#render-graph)). Last frame's is not valid in the first frame, after a frame that did not use it, or when the view's size changes.
+- **Pre-exposure.** The forward pass multiplies its colors by the exposure, so the scene holds `radiance × exposure`, inside the half-float range at any brightness. The exposure is in a buffer of two floats (`Post.exposure`): this frame's, then last frame's. The exposure pass writes the next frame's after the scene is drawn, so the exposure lags a frame, and temporal AA rescales the history by the ratio. A game's own draws in the world pass read it too. The clear color is not pre-exposed.
+- **Exposure.** With `Auto`, the histogram (`exposure_histogram.hlsl`) counts each pixel's luminance, without pre-exposure, into 256 bins of log2 luminance from -12 to 8. Pixels where nothing drew hold the clear color, which is not pre-exposed, so they do not count; otherwise the exposure would chase its own scale. The exposure pass (`exposure_adapt.hlsl`) takes the mean log2 luminance between the 10th and the 90th percentiles, clamps it to `exposure_range` (`DEFAULT_EXPOSURE_RANGE`, -8 to 4), and aims at `0.18 / average × 2^exposure_compensation`. It goes `1 - e^(-speed × seconds)` of the way there in a frame (`adaptation_speed`, `DEFAULT_ADAPTATION_SPEED`), and all the way in the first frame. With `Manual`, the exposure is `exposure × 2^exposure_compensation`, at once. Both passes run on the graphics queue: on the compute queue, the next frame's forward pass would need the graph to order the exposure buffer across frames.
+- **Bloom** halves the scene at most `BLOOM_LEVELS` (6) times, while each side stays at least `BLOOM_MIN_SIZE` (8) pixels. The first downsample weighs each of the filter's five boxes by `1 / (1 + luminance)`, so a single bright pixel does not flicker as it moves. Then, from the smallest level up, each level adds the level below it, blurred with a 3x3 tent. The output pass adds the largest level: `scene × (1 - intensity) + bloom × intensity / levels`, with `bloom_intensity` 0.04 by default (`DEFAULT_BLOOM_INTENSITY`).
+- **The lookup table** (`tone_lut.hlsl`, `tone_lut.hlsli`) has 32 entries on each axis, its blue slices side by side in one 1024x32 `RGBA16_Float` texture, since textures are 2D. The entries cover -12.5 to +8 stops around middle grey on a log2 scale, so a scene color in any range has a place. Each holds the display color of its scene color, sRGB-encoded: the tint, the saturation and the contrast (`tint`, `saturation`, `contrast`), then the tone mapper. A compute pass bakes it in the first frame, and again when the grading or its shader changes. The output pass reads it with two bilinear samples. AgX rolls bright colors off to white with less saturation than Khronos PBR Neutral, and keeps dark colors a little brighter, so `tone_mapper = .Pbr_Neutral` gives the look that the fixed tone mapper had before.
+- *Later:* an upscaler in place of temporal AA, the exposure on the compute queue, a sky that counts in the histogram once it is pre-exposed, and velocities for a game's own draws.
 
 ## Later features
 
@@ -322,7 +332,7 @@ All post passes before tone mapping work in linear HDR at the scene's resolution
 | Ray-traced shadows | See [Shadows](#shadows). | Depth, the acceleration structure | The forward template |
 | Sky and atmosphere | Lookup tables baked when the sun moves; the sky draws in the forward pass where depth is 0. | The directional light | Forward, fog, GI |
 
-**History textures.** Temporal AA, exposure, fog, GI and the denoisers each keep textures from frame to frame. The render graph gets `history_texture`: a pair of textures that a cache in `Game_State` keeps and swaps every frame, and that it clears when the view's size changes. The pass that writes this frame's texture reads last frame's.
+**History textures.** Fog, GI and the denoisers keep textures from frame to frame with the render graph's `history_texture`, as temporal AA does (see [Post-processing](#post-processing)).
 
 ## GPU additions
 
@@ -331,8 +341,8 @@ The design needs these changes in `lib/core/gpu` and the render graph:
 - *Done in phase 3:* depth bias and clamping, and comparison samplers (see [GPU](gpu.md#pipelines)).
 - *Done in phase 4:* stencil state in `Graphics_Pipeline_Desc`, the reference value in a command, the stencil's load and clear with the depth attachment, and a view of the stencil for shaders.
 - *Done in phase 5:* preview targets beside the frame target (`gpu_preview_target`), and whether a pipeline is compiled (`gpu_pipeline_ready`) (see [GPU](gpu.md#presentation)).
+- *Done in phase 6:* history textures in the render graph (`history_texture`, see [GPU](gpu.md#render-graph)).
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
-- **History textures** in the render graph (see [Later features](#later-features)).
 - **An HDR frame target** from `core`, for HDR output.
 ## Assets and components
 
@@ -383,7 +393,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 3 | *Done.* Clustered forward: the prepass with normals and velocities, the forward pass with `Equal` depth, the light components, clusters, shadow maps in an atlas with cascades, and ray-traced shadow masks with the GPU scene's acceleration structures. The sample's scene has a sun, a point light and a spot light. |
 | 4 | *Done.* The view model, with the stencil additions: the `View_Model` tag, its projection from the `Camera`, its stencil bit in the prepass and the forward pass, and positions rebuilt with its projection for its pixels. The sample's camera holds a rod that reaches through the triangles. |
 | 5 | *Done.* The material graph: the `.material` graph format and material functions, the cooker's code generation with each permutation's switches decided and hash-named sources that compile once, the editor's node editor, and material previews in their own shared targets with `Cook_Preview`. The sample's checker material is a graph. |
-| 6 | Post: history textures, temporal AA, bloom, exposure, the tone mapping lookup table. |
+| 6 | *Done.* Post-processing: history textures in the render graph, temporal AA with the camera's jitter, the exposure from a luminance histogram, which pre-exposes the scene, bloom, and the tone mapping lookup table with AgX, Khronos PBR Neutral and ACES, and color grading. The `before_post` hook. |
 | 7 | Ambient occlusion and volumetric fog. |
 | 8 | Global illumination with radiance cascades. |
 | 9 | HDR output. |

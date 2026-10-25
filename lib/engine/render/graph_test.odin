@@ -585,3 +585,52 @@ copies_order_with_their_readers :: proc(t: ^testing.T) {
 		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
 	}
 }
+
+@(test)
+history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// One frame of a temporal pass: it reads last frame's history and writes this frame's, which the output reads.
+	frame :: proc(t: ^testing.T, f: ^Fixture, size: [2]u32) -> (current, previous: gpu.Texture, valid: bool) {
+		g := begin(&f.platform, &f.cache)
+		target := import_texture(&g, null.frame_target(), .Color)
+		h := history_texture(&g, {size = size, format = .RGBA16_Float, label = "taa"})
+		testing.expect(t, h.current != 0 && h.previous != 0)
+		p := add_compute_pass(&g, "temporal", nothing)
+		read(&g, p, h.previous)
+		write(&g, p, h.current)
+		p = add_render_pass(&g, "output", nothing)
+		read(&g, p, h.current)
+		color(&g, p, target, .Clear)
+		subs, ok := record(&g)
+		testing.expect(t, ok)
+		testing.expect(t, null.submit(all_buffers(subs)))
+		null.end_frame()
+		current, previous, valid = gpu_texture(&g, h.current), gpu_texture(&g, h.previous), h.valid
+		virtual.arena_free_all(&f.arena)
+		return
+	}
+	skip :: proc(f: ^Fixture) {
+		_ = begin(&f.platform, &f.cache)
+		virtual.arena_free_all(&f.arena)
+	}
+
+	a, b, valid := frame(t, &f, SIZE)
+	testing.expect(t, !valid, "the first frame has no history")
+	c, d, valid2 := frame(t, &f, SIZE)
+	testing.expect(t, valid2)
+	testing.expect_value(t, c, b)
+	testing.expect_value(t, d, a)
+	// A frame without the history leaves it stale.
+	skip(&f)
+	_, _, valid3 := frame(t, &f, SIZE)
+	testing.expect(t, !valid3, "a skipped frame clears the history")
+	_, _, valid4 := frame(t, &f, SIZE)
+	testing.expect(t, valid4)
+	// A new size makes the pair again.
+	_, _, valid5 := frame(t, &f, {32, 32})
+	testing.expect(t, !valid5, "a new size clears the history")
+}

@@ -188,6 +188,8 @@ Pass_Constants :: struct {
 	aspect:          f32,
 	tan_half_fov:    f32,
 	near:            f32,
+	exposure:        u32,
+	padding:         [3]u32,
 }
 
 // Game_State is the root of all persistent game-side state. The host owns its memory.
@@ -594,6 +596,10 @@ before_world :: proc(f: ^render.Frame) {
 	s := frame.state
 	g := f.graph
 	// The large triangles show the rings once they are streamed in.
+	// The sample's own draws cover the same pixels as the renderer's, with its jitter, and pre-expose their colors.
+	constants := (^Pass_Constants)(raw_data(frame.pass_constants.data))
+	constants.view_projection = render.jittered_view_projection(f)
+	constants.exposure = gpu.read_index(render.gpu_buffer(g, f.exposure))
 	frame.checker = render.import_texture(g, s.rings_ready ? s.rings : s.checker, .Sampled)
 	frame.vertices = render.import_buffer(g, s.vertices)
 	frame.indices = render.import_buffer(g, s.indices)

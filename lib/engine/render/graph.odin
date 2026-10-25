@@ -219,6 +219,28 @@ import_accel :: proc(g: ^Graph, accel: gpu.Accel_Struct) -> Accel {
 	return Accel(len(g.buffers))
 }
 
+// History is a history texture in one frame (see history_texture): current, which a pass writes this frame, and
+// previous, which holds what current held in the last frame. previous holds nothing when valid is false.
+History :: struct {
+	current:  Texture,
+	previous: Texture,
+	valid:    bool,
+}
+
+// history_texture adds a pair of textures that the graph's cache keeps between frames and swaps every frame, as
+// temporal passes need (see docs/gpu.md#render-graph). A pass writes current in shaders, and the pass after it may
+// read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
+// Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history, or when
+// desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
+// zero History when the cache has no room or the backend cannot create the textures.
+history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
+	current, previous, valid, ok := cache_history(g.cache, g.platform, desc)
+	if !ok {
+		return {}
+	}
+	return {current = import_texture(g, current, .Storage), previous = import_texture(g, previous, .Storage), valid = valid}
+}
+
 // create_texture adds a transient texture. Its contents are undefined until a pass writes them.
 // The graph adds the usages that the passes need to desc.usage.
 create_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> Texture {

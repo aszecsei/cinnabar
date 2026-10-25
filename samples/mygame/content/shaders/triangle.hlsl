@@ -51,7 +51,7 @@ Varyings vs_main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID)
 	Varyings o;
 	o.position = mul(pass.view_projection, float4(p, 1));
 	o.uv = v.uv;
-	// The scene is HDR. The composite pass tone maps it.
+	// The scene is HDR. The output pass tone maps it.
 	o.color = v.color * instance.brightness;
 	o.id = instance.id;
 	return o;
@@ -60,6 +60,7 @@ Varyings vs_main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID)
 Targets ps_main(Varyings i) {
 	Targets o;
 	o.color = cn_texture(push.texture).Sample(cn_sampler(push.sampler_index), i.uv) * i.color;
+	o.color.rgb *= exposure();
 	o.id = i.id;
 	return o;
 }

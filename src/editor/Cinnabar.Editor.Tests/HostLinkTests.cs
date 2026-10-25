@@ -335,8 +335,9 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.True(last > 0);
         var center = Pixel(device, frames.Texture(last), 64, 48);
         var corner = Pixel(device, frames.Texture(last), 2, 2);
-        Assert.True(center.R > center.B + 40 && center.G > center.B, $"the sphere's middle is {center}, not gold");
-        Assert.True(corner.R < 40 && corner.G < 40 && corner.B < 40, $"the corner is {corner}, not the background");
+        // AgX, the default tone mapper, takes the saturation out of the bright highlight, so gold is a pale one there.
+        Assert.True(center.R > center.B + 25 && center.G > center.B, $"the sphere's middle is {center}, not gold");
+        Assert.True(corner.R < 60 && corner.G < 60 && corner.B < 60, $"the corner is {corner}, not the background");
 
         // A new camera and mesh draw it again, and so does a new size, into a new generation.
         editor.Link.Send(new PreviewSettings(0, PreviewMesh.Cube, new byte[16], 1.2f, 0.5f, 3f, 128, 96));

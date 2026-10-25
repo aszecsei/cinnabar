@@ -69,6 +69,10 @@ Frame_Constants :: struct {
 	shadow_views_offset:      u32,
 	clustered:                u32,
 	screen_size:              [2]f32,
+	// The camera's jitter, which view_projection has, and the exposure buffer.
+	jitter:                   [2]f32,
+	exposure:                 u32,
+	padding:                  u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -162,7 +166,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 384)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 400)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -376,6 +380,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	shadows := f.shadows
 	platform := r.platform
 	view_model := view_projection(view_model_view(f.view), f32(f.size.x) / f32(max(f.size.y, 1)))
+	f.previous_view_projection = s.has_previous ? s.previous_view_projection : f.view_projection
+	f.camera_motion = s.has_previous ? ecs.position_sub(f.view.position, s.previous_position) : {}
 	defer {
 		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
 		s.previous_view_model = view_model
@@ -433,6 +439,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		shadow_views_offset      = shadows.views_upload.offset,
 		clustered                = u32(lf.clustered),
 		screen_size              = {f32(f.size.x), f32(f.size.y)},
+		exposure                 = gpu.read_index(r.post.exposure),
 	}
 	if lf.clustered {
 		constants.clusters = gpu.read_index(r.lights.clusters)
@@ -457,6 +464,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			copy(views[v].planes[:], planes[:])
 			// The far plane is at infinity.
 			views[v].planes[5] = {0, 0, 0, 1}
+			// The camera's views draw with its jitter, which the velocities leave out.
+			c.view_projection = jitter_projection(c.view_projection, f.jitter)
+			c.jitter = f.jitter
 		case:
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
 			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]

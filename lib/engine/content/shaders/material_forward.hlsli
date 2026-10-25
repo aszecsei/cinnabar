@@ -10,7 +10,7 @@
 #include "material_vertex.hlsli"
 #include "material_lighting.hlsli"
 
-// The scene's HDR colors, and the entity IDs that the editor picks from.
+// The scene's HDR colors, pre-exposed, and the entity IDs that the editor picks from.
 struct Targets {
 	float4 color : SV_Target0;
 	uint id : SV_Target1;
@@ -41,7 +41,7 @@ Targets ps_forward(Varyings i, bool front : SV_IsFrontFace) {
 	color += shade_indirect(s, p, indirect);
 #endif
 	Targets o;
-	o.color = float4(color, 1);
+	o.color = float4(color * frame_exposure(), 1);
 	o.id = i.id;
 	return o;
 }

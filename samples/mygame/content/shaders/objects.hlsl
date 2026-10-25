@@ -113,6 +113,7 @@ struct Targets {
 Targets ps_main(Varyings i) {
 	Targets o;
 	o.color = cn_texture(push.texture).Sample(cn_sampler(push.sampler_index), i.uv) * i.color;
+	o.color.rgb *= exposure();
 	o.id = 0;
 	return o;
 }
