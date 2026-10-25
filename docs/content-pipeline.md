@@ -8,6 +8,8 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 
 - A GUID is 128 random bits, written as 32 hex digits. Engine content (such as the script prelude) has fixed GUIDs in committed `.meta` files.
 - A `.meta` file has lines of `key = value`, and `#` comments. `guid` is required. The other keys are import settings. When the cooker finds an asset without a `.meta` file, it writes one. Commit it with the asset.
+- **Sub-assets:** one source file can make several assets, such as the meshes of a glTF file. Each sub-asset has its own GUID and its own blob, and loads like any other asset. Its GUID is in its file's `.meta` file, on a line `<kind>.<name> = <guid>`, such as `mesh.Door_Frame = 3f9c...`. The cooker writes the line when it first makes the sub-asset, and finds it again by kind and name, so a re-import keeps every reference. The file itself is the parent, and has a GUID of its own but no blob when it makes only sub-assets.
+- **A renamed sub-asset** (a mesh renamed in the modelling tool) gets a new GUID, with a warning that names the old one. The old line stays in the `.meta` file, as a warning, until the asset is re-imported, so a rename back in the modelling tool restores it.
 - Two assets with the same GUID, of any kinds, are a cook error, and neither cooks. This happens when an asset is copied with its `.meta` file. Delete the copy's `.meta` file to give it a new GUID.
 - Each game has one content root, `samples/<game>/content/`. Engine content is in `lib/engine/content/`. The cooker takes each root with a name, such as `--root game=samples/mygame/content`, and an asset's source path is the root's name and its path in the root, such as `game/scripts/hello.luau`.
 - At runtime, a loaded asset is a generational handle in the asset runtime's table. Persistent state holds handles or GUIDs, never pointers into blobs (see [Hot reload](hot-reload.md#rules)).
@@ -87,9 +89,12 @@ Textures are `.png`, `.jpg`, `.tga` and `.hdr` files (with `vendor:stb/image`), 
 
 ### Meshes
 
-Meshes are `.gltf` and `.glb` files, read with `vendor:cgltf`. One glTF file is one mesh asset.
+Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a model: a parent whose meshes are sub-assets (see [Identity](#identity)).
 
-- **Flattening:** the cooker walks the default scene's nodes and bakes their transforms into the vertices. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh. Each submesh has a material slot named for its glTF material.
+- **One mesh asset per glTF mesh**, named for the glTF mesh, in its own space with its own pivot. Node transforms are not baked in, so a mesh that many nodes use is one asset. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh, and each submesh has a material slot named for its glTF material.
+- **Unnamed meshes** are named for the first node that uses them, then `mesh_<index>`.
+- **`combine = true`** makes one mesh asset, named for the file, instead: the cooker walks the default scene's nodes and bakes their transforms into the vertices. This suits a file that is one prop exported in pieces. The default is `false`.
+- *Later, a model also makes a prefab of its node hierarchy that places its meshes, and its textures and materials become sub-assets too (texture assets and material instances). That is importing a glTF file as a scene, and it waits for prefabs.*
 - **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding.
 - **Vertices** are two streams, so that depth and shadow passes read only positions:
 
@@ -100,9 +105,9 @@ Meshes are `.gltf` and `.glb` files, read with `vendor:cgltf`. One glTF file is 
 
 - **Processing** with meshoptimizer: weld identical vertices, order the triangles for the vertex cache and the vertices for fetching, and build meshlets of at most 64 vertices and 124 triangles, each with a bounding sphere and a normal cone for culling. Indices are 16-bit when the mesh has fewer than 65 536 vertices.
 - **Bounds:** the mesh and each submesh have an axis-aligned box and a sphere.
-- **Not imported yet:** the file's materials, textures, cameras, lights, skins and animations. *Importing a glTF file as a scene, with texture assets and material instances, comes later.*
-- **Import settings:** `scale` (a number, default `1`) and `tangents` (`file` or `generate`, default `file`: MikkTSpace tangents are made when the file has none).
-- **The cache key** covers the cooker version, the meshoptimizer version, the source, the `.meta` file, and for a `.gltf` file the `.bin` files that it names.
+- **Not imported yet:** the node hierarchy (except with `combine`), the file's materials, textures, cameras, lights, skins and animations.
+- **Import settings:** `combine` (`true` or `false`, default `false`), `scale` (a number, default `1`) and `tangents` (`file` or `generate`, default `file`: MikkTSpace tangents are made when the file has none). The settings apply to every mesh of the file.
+- **The cache key** is the model's: the cooker version, the meshoptimizer version, the source, the `.meta` file, and for a `.gltf` file the `.bin` files that it names. A model cooks all of its meshes together, and a mesh that fails fails the model, so its meshes keep their old blobs together.
 
 ## Cook daemon
 
@@ -112,7 +117,7 @@ In development, the cook daemon keeps the cache up to date while the sources cha
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
 - **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms.
-- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names) and problems, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names), problems, and for a sub-asset its parent, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
 - **Removed assets:** when an asset leaves the index, the daemon deletes its blob, so a game that starts later does not load it. A running game keeps the modules that it has loaded. An asset that only shares its GUID with a copy keeps its blob.
 - **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
@@ -127,8 +132,9 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 - **Names** are what Windows takes and the scan does not skip: no `<>:"/\|?*`, no name that starts with a dot or ends with a dot or a space, and no device name such as `CON`. An asset's name is without its extension, which the daemon adds.
 - **Then a pass:** after the operations that the editor sent, the daemon makes a pass, sends what changed, and then answers each operation. The editor's index therefore has the change when the answer comes. The watcher's events for the operation make one more pass, which finds nothing to cook.
 - **Create** makes an asset from a template, with a new `.meta` file: a script that returns a table, a behaviour whose class is named for its file (`door_bell.luau` defines `Door_Bell`), or an empty scene. A folder's parent must exist.
+- **Sub-assets** move, rename and delete only with their file, because their GUIDs are in its `.meta` file. The operations take files, never sub-assets, and the editor offers them only on files.
 - **Move and rename** move the `.meta` file, then the source. They never replace a file, and a rename that changes only the case works. A file moves to another drive too. Folders have no `.meta` files and no GUIDs. A folder renames with everything in it, on its drive.
-- **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings.
+- **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings. Its sub-assets get new GUIDs at the next pass, as a new file's do.
 - **Delete** sends sources with their `.meta` files, and folders with everything in them, to the Recycle Bin. A root cannot be deleted. The editor finds the assets that use what a delete takes in its index, and shows them in the confirmation.
 - **Import settings:** the daemon checks new settings with the asset's importer, writes the `.meta` file through a temporary file, and cooks the asset again, because the settings are part of its key. The `.meta` file keeps its comments. A setting that the importer does not know stays as the file has it, but the editor cannot add one. **Re-import** cooks assets again with the same settings, also when their keys say that they are up to date.
 - **Saving a scene** is the editor's. Save As writes the scene's text where the user picks, and a new scene in a root gets its `.meta` file at the daemon's next pass, as any new file does.
@@ -145,7 +151,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
 - **Handshake:** `Hello`, then `Welcome` with the roots, the configuration and the importers, each with its extension and import settings, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed. It sends `Cook_Finished` after every pass.
-- **An entry has everything that the editor shows,** the import settings and the behaviour class included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
+- **An entry has everything that the editor shows,** the import settings, the behaviour class and a sub-asset's parent included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
 - **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
 
 | Group | Messages |
@@ -160,7 +166,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
-4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, with the GPU residency table (see [Rendering](rendering.md#implementation-phases), phase 0).
+4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](rendering.md#implementation-phases), phase 0).
 5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Blob format
