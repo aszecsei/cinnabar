@@ -68,6 +68,10 @@ struct Frame_Constants {
 	float2 fog_scale;
 	// Whether Material_Push has the global illumination.
 	uint gi;
+	// The area lights' lookup tables and their sampler (see ltc.hlsli).
+	uint ltc_matrix;
+	uint ltc_amplitude;
+	uint ltc_sampler;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -139,10 +143,17 @@ struct Material_Inputs {
 
 // Matches Light_Record in lib/engine/render/lights.odin. position is relative to the camera, and direction is where
 // the light travels. A spot light's falloff is saturate(cos * spot_scale + spot_offset), squared. shadow is the light's
-// first shadow view, and mask its channel of the shadow mask, or -1 for none.
+// first shadow view, and mask its channel of the shadow mask, or -1 for none. An area light's position is its middle,
+// extent is its half size along its +x, and extent_y a quad's half height, a disk's radius along its +y, or a line's
+// radius; its color is a point light's that is as bright.
 static const uint LIGHT_DIRECTIONAL = 0;
 static const uint LIGHT_POINT = 1;
 static const uint LIGHT_SPOT = 2;
+static const uint LIGHT_QUAD = 3;
+static const uint LIGHT_DISK = 4;
+static const uint LIGHT_LINE = 5;
+// Light_Record's flags.
+static const uint LIGHT_TWO_SIDED = 1;
 struct Light_Record {
 	float3 position;
 	float range;
@@ -153,7 +164,9 @@ struct Light_Record {
 	float spot_offset;
 	int shadow;
 	int mask;
-	float padding;
+	uint flags;
+	float3 extent;
+	float extent_y;
 };
 
 // Matches Shadow_View in lib/engine/render/shadows.odin: a shadow map's projection of positions relative to the
@@ -177,6 +190,22 @@ struct Shading_Point {
 // A light that reaches the point: the direction toward it, and its light there.
 struct Light {
 	float3 direction;
+	float3 color;
+};
+
+// An area light that reaches the point (see docs/rendering.md#area-lights): its shape relative to the point, and its
+// radiance after its range's window and its shadow, which a shading model multiplies by ltc_integral of its lobes.
+// shape is LIGHT_QUAD, LIGHT_DISK or LIGHT_LINE. axis_x and axis_y are a quad's or a disk's half sizes, and axis_x a
+// line's half length, with radius its radius, 0 for an ideal line, whose radiance is per meter of its width.
+struct Area_Light {
+	uint shape;
+	float3 center;
+	float3 axis_x;
+	float3 axis_y;
+	// Where a quad or a disk shines, unless it is two-sided.
+	float3 normal;
+	float radius;
+	bool two_sided;
 	float3 color;
 };
 
@@ -245,5 +274,7 @@ float2 unorm16(uint word) {
 float4 unpack_unorm8(uint c) {
 	return float4(c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff, c >> 24) / 255.0;
 }
+
+#include "ltc.hlsli"
 
 #endif

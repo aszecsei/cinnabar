@@ -29,6 +29,20 @@ float3 shade_direct(Surface s, Shading_Point p, Light light) {
 	return (diffuse + specular) * light.color * nl;
 }
 
+// An area light, by linearly transformed cosines: the specular lobe's, fitted to shade_direct's GGX (see ltc.hlsli),
+// and Lambert's for the diffuse, which takes the Fresnel at the light's middle as shade_direct does.
+float3 shade_area(Surface s, Shading_Point p, Area_Light light) {
+	float3 n = p.normal;
+	float3 v = p.view;
+	Ltc_Ggx ggx = ltc_ggx(s.roughness, dot(n, v));
+	float3 f0 = lit_f0(s);
+	float3 specular = (f0 * ggx.magnitude + (1 - f0) * ggx.fresnel) * ltc_integral(light, n, v, ggx.inverse);
+	float vh = saturate(dot(v, normalize(v + normalize(light.center))));
+	float3 fresnel = f0 + (1 - f0) * pow(1 - vh, 5);
+	float3 diffuse = (1 - fresnel) * (1 - s.metallic) * s.base_color * ltc_integral(light, n, v, float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1));
+	return (diffuse + specular) * light.color;
+}
+
 // The indirect light, with Karis's analytic fit of the environment BRDF for the specular part.
 float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect) {
 	float nv = saturate(dot(p.normal, p.view));

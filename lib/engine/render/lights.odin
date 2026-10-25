@@ -27,15 +27,34 @@ MAX_DIRECTIONAL_LIGHTS :: 4
 // CLUSTER_SHADER is the engine's light clustering shader (lib/engine/content/shaders/cluster_lights.hlsl).
 CLUSTER_SHADER :: #load("../content/shaders/cluster_lights.hlsl.meta", string)
 
+// The area lights' lookup tables (see docs/rendering.md#area-lights), which tools/ltc_fit fits: two LTC_SIZE x LTC_SIZE
+// RGBA32_Float textures, one after the other. Matches LTC_SIZE in ltc.hlsli.
+LTC_SIZE :: 64
+@(private = "file", rodata)
+ltc_tables := #load("ltc_ggx.bin")
+
 Light_Type :: enum u32 {
 	Directional,
 	Point,
 	Spot,
+	Quad,
+	Disk,
+	Line,
+}
+
+Light_Flag :: enum u32 {
+	// An area light that shines from both of its faces.
+	Two_Sided,
 }
 
 // Light_Record matches Light_Record in material_common.hlsli: a light relative to the camera. direction is where the
 // light travels. A spot light's cone falls off as saturate(cos * spot_scale + spot_offset), squared. shadow is the
 // light's first shadow view and mask its channel of the shadow mask, each -1 for none.
+//
+// An area light's position is its middle, and its range reaches past its shape by the component's range. extent is its
+// half size along its +x in the world: a quad's half width, a disk's radius, a line's half length. extent_y is a quad's
+// half height or a disk's radius along its +y, which is cross(direction, extent), or a line's radius. Its color is a
+// point light's that is as bright, which the shaders spread over its area.
 Light_Record :: struct {
 	position:    [3]f32,
 	range:       f32,
@@ -46,10 +65,12 @@ Light_Record :: struct {
 	spot_offset: f32,
 	shadow:      i32,
 	mask:        i32,
-	padding:     f32,
+	flags:       bit_set[Light_Flag;u32],
+	extent:      [3]f32,
+	extent_y:    f32,
 }
 
-#assert(size_of(Light_Record) == 64)
+#assert(size_of(Light_Record) == 80)
 
 // Ambient is the light from everything else until global illumination: the sky's from above and the ground's from
 // below.
@@ -90,12 +111,19 @@ Lights :: struct {
 	directional:      Extractor,
 	point:            Extractor,
 	spot:             Extractor,
+	quad:             Extractor,
+	disk:             Extractor,
+	line:             Extractor,
 	clusters:         gpu.Buffer,
 	indices:          gpu.Buffer,
 	counter:          gpu.Buffer,
 	cluster_capacity: int,
 	index_capacity:   int,
 	pipeline:         Shader_Pipeline,
+	// The area lights' lookup tables, and their bilinear sampler.
+	ltc_matrix:       gpu.Texture,
+	ltc_amplitude:    gpu.Texture,
+	ltc_sampler:      gpu.Sampler,
 }
 
 // Light_Frame is one frame's lights, in frame memory. casts says which lights want a shadow, as the shadows assign
@@ -123,6 +151,18 @@ lights_init :: proc(l: ^Lights, platform: ^core.Platform_API, w: ^ecs.World) {
 	lights_register(l, w)
 	l.counter = platform.gpu_create_buffer({size = 4, usage = {.Storage}, label = "light cluster counter"}, nil)
 	l.pipeline = shader_pipeline(CLUSTER_SHADER)
+	table_size := LTC_SIZE * LTC_SIZE * 16
+	assert(len(ltc_tables) == 2 * table_size, "render: ltc_ggx.bin is not two tables of LTC_SIZE; run just ltc-fit")
+	desc := gpu.Texture_Desc {
+		size   = {LTC_SIZE, LTC_SIZE},
+		format = .RGBA32_Float,
+		usage  = {.Sampled},
+		label  = "ltc matrix",
+	}
+	l.ltc_matrix = platform.gpu_create_texture(desc, ltc_tables[:table_size])
+	desc.label = "ltc amplitude"
+	l.ltc_amplitude = platform.gpu_create_texture(desc, ltc_tables[table_size:])
+	l.ltc_sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, label = "ltc sampler"})
 }
 
 // lights_register makes the light extractors, in init and after a code reload.
@@ -130,6 +170,9 @@ lights_register :: proc(l: ^Lights, w: ^ecs.World) {
 	l.directional = extractor(w, {ecs.read(w, Directional_Light)})
 	l.point = extractor(w, {ecs.read(w, Point_Light)})
 	l.spot = extractor(w, {ecs.read(w, Spot_Light)})
+	l.quad = extractor(w, {ecs.read(w, Quad_Light)})
+	l.disk = extractor(w, {ecs.read(w, Disk_Light)})
+	l.line = extractor(w, {ecs.read(w, Line_Light)})
 }
 
 lights_destroy :: proc(l: ^Lights, platform: ^core.Platform_API) {
@@ -137,6 +180,9 @@ lights_destroy :: proc(l: ^Lights, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&l.pipeline, platform)
+	platform.gpu_destroy_texture(l.ltc_matrix)
+	platform.gpu_destroy_texture(l.ltc_amplitude)
+	platform.gpu_destroy_sampler(l.ltc_sampler)
 }
 
 // cluster_grid is the clusters' columns and rows for a frame's size.
@@ -176,6 +222,24 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 	}
 	color_of :: proc(color: [3]f32, intensity: f32) -> [3]f32 {
 		return (color == {} ? 1 : color) * intensity
+	}
+	size_or_default :: proc(size: f32) -> f32 {
+		return size > 0 ? size : DEFAULT_AREA_SIZE
+	}
+	// area is an area light's record, its range grown by the radius of its shape's bounding sphere.
+	area :: proc(f: ^Frame, pose: ecs.Transform, type: Light_Type, color: [3]f32, range, half_x, half_y, bounds: f32, two_sided: bool) -> Light_Record {
+		return {
+			type = type,
+			position = ecs.position_sub(pose.position, f.view.position),
+			range = (range > 0 ? range : DEFAULT_LIGHT_RANGE) + bounds,
+			color = color,
+			direction = forward_of(pose),
+			shadow = -1,
+			mask = -1,
+			flags = two_sided ? {.Two_Sided} : {},
+			extent = right_of(pose) * half_x,
+			extent_y = half_y,
+		}
 	}
 
 	it := ecs.query_iter(w, l.directional.query)
@@ -241,6 +305,43 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 			)
 		}
 	}
+	it = ecs.query_iter(w, l.quad.query)
+	for view in ecs.query_next(&it) {
+		for e, i in ecs.entities(view) {
+			pose, ok := light_pose(w, view, i, hidden, e)
+			light := ecs.column(view, EXTRACT_TERMS, Quad_Light)[i]
+			if !ok {
+				continue
+			}
+			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
+			bounds := math.sqrt(half_x * half_x + half_y * half_y)
+			add(lf, area(f, pose, .Quad, color_of(light.color, light.intensity), light.range, half_x, half_y, bounds, light.two_sided), light.cast_shadows)
+		}
+	}
+	it = ecs.query_iter(w, l.disk.query)
+	for view in ecs.query_next(&it) {
+		for e, i in ecs.entities(view) {
+			pose, ok := light_pose(w, view, i, hidden, e)
+			light := ecs.column(view, EXTRACT_TERMS, Disk_Light)[i]
+			if !ok {
+				continue
+			}
+			half_x, half_y := size_or_default(light.width) / 2, size_or_default(light.height) / 2
+			add(lf, area(f, pose, .Disk, color_of(light.color, light.intensity), light.range, half_x, half_y, max(half_x, half_y), light.two_sided), light.cast_shadows)
+		}
+	}
+	it = ecs.query_iter(w, l.line.query)
+	for view in ecs.query_next(&it) {
+		for e, i in ecs.entities(view) {
+			pose, ok := light_pose(w, view, i, hidden, e)
+			light := ecs.column(view, EXTRACT_TERMS, Line_Light)[i]
+			if !ok {
+				continue
+			}
+			half, radius := size_or_default(light.length) / 2, max(light.radius, 0)
+			add(lf, area(f, pose, .Line, color_of(light.color, light.intensity), light.range, half, radius, half + radius, false), light.cast_shadows)
+		}
+	}
 	if len(lf.records) == MAX_LIGHTS {
 		log.warnf("render: more than %d lights; the rest are left out", MAX_LIGHTS)
 	}
@@ -266,6 +367,12 @@ light_pose :: proc(w: ^ecs.World, view: ecs.Chunk_View, i: int, hidden: []u32, e
 @(private)
 forward_of :: proc(pose: ecs.Transform) -> [3]f32 {
 	return linalg.normalize(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 0, 1}))
+}
+
+// right_of is a pose's +x in the world, along an area light's width or length.
+@(private)
+right_of :: proc(pose: ecs.Transform) -> [3]f32 {
+	return linalg.normalize(linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0}))
 }
 
 // upload_lights writes the light records into the upload ring, after the shadows set their views and channels, and

@@ -39,10 +39,14 @@ struct Light_Record {
 	float spot_offset;
 	int shadow;
 	int mask;
-	float padding;
+	uint flags;
+	float3 extent;
+	float extent_y;
 };
 
 static const uint LIGHT_DIRECTIONAL = 0;
+// The first area light type; the others follow it.
+static const uint LIGHT_QUAD = 3;
 // Matches VIEW_MODEL_STENCIL in lib/engine/render/renderer.odin.
 static const uint VIEW_MODEL_STENCIL = 1;
 // Directional rays stop this far away, in meters.
@@ -97,7 +101,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 				ray.TMax = distance;
 			}
 			if (dot(ray.Direction, normal) <= 0) {
-				result[c] = 0;
+				// A surface that faces away from an area light's middle can still see some of it, which its shading
+				// clips to the horizon, so it is left lit.
+				result[c] = l.type >= LIGHT_QUAD ? 1 : 0;
 				continue;
 			}
 			RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;

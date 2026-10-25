@@ -79,6 +79,10 @@ Frame_Constants :: struct {
 	fog_scale:                [2]f32,
 	// Whether Material_Push has the global illumination.
 	gi:                       u32,
+	// The area lights' lookup tables and their sampler.
+	ltc_matrix:               u32,
+	ltc_amplitude:            u32,
+	ltc_sampler:              u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -177,7 +181,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 416)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 428)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -455,6 +459,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		clustered                = u32(lf.clustered),
 		screen_size              = {f32(f.size.x), f32(f.size.y)},
 		exposure                 = gpu.read_index(r.post.exposure),
+		ltc_matrix               = gpu.read_index(r.lights.ltc_matrix),
+		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
+		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 	}
 	constants.gi = u32(f.gi != nil)
 	if f.fog != nil {

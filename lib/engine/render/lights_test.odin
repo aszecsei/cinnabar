@@ -169,6 +169,63 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(frame.shadows.views), 0)
 }
 
+@(test)
+area_lights_record_their_shapes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f := light_setup(t)
+	defer light_teardown(f)
+	w := &f.world
+
+	// Turned a quarter about y: +x goes to -z, +y stays, and +z goes to +x.
+	turn := linalg.quaternion_angle_axis_f32(math.PI / 2, {0, 1, 0})
+	spawn_light(w, {0, 0, 4}, turn, Quad_Light{intensity = 2, width = 2, height = 1, range = 5, two_sided = true, cast_shadows = true})
+	spawn_light(w, {1, 0, 4}, 1, Disk_Light{intensity = 1, height = 3})
+	spawn_light(w, {-1, 0, 4}, 1, Line_Light{intensity = 1, length = 4, radius = 0.25})
+	hidden := spawn_light(w, {0, 0, 4}, 1, Quad_Light{intensity = 1})
+	hidden_bits := make([]u32, ecs.entity_index(hidden) / 32 + 1, context.temp_allocator)
+	hidden_bits[ecs.entity_index(hidden) / 32] |= 1 << (ecs.entity_index(hidden) % 32)
+
+	frame := &f.frame
+	frame.lights = extract_lights(frame, w, hidden_bits)
+	lf := frame.lights
+	testing.expect_value(t, len(lf.records), 3)
+	near :: proc(a, b: [3]f32) -> bool {
+		return linalg.length(a - b) < 1e-5
+	}
+
+	quad := lf.records[0]
+	testing.expect_value(t, quad.type, Light_Type.Quad)
+	testing.expect(t, near(quad.position, {0, 0, 4}), "an area light's position is its middle")
+	testing.expect(t, near(quad.direction, {1, 0, 0}), "a quad shines along its +z")
+	testing.expect(t, near(quad.extent, {0, 0, -1}), "a quad's extent is its half width along its +x")
+	testing.expect_value(t, quad.extent_y, 0.5)
+	testing.expect(t, near(linalg.cross(quad.direction, linalg.normalize(quad.extent)), {0, 1, 0}), "a quad's height is along its +y")
+	testing.expect_value(t, quad.flags, bit_set[Light_Flag;u32]{.Two_Sided})
+	// The range reaches past the corners, so the clusters' spheres hold the whole quad.
+	testing.expect(t, abs(quad.range - (5 + math.sqrt(f32(1.25)))) < 1e-5)
+	testing.expect_value(t, quad.color, [3]f32{2, 2, 2})
+
+	disk := lf.records[1]
+	testing.expect_value(t, disk.type, Light_Type.Disk)
+	// A width of 0 takes DEFAULT_AREA_SIZE; the radii differ, so it is an ellipse.
+	testing.expect(t, abs(linalg.length(disk.extent) - f32(DEFAULT_AREA_SIZE) / 2) < 1e-5)
+	testing.expect_value(t, disk.extent_y, 1.5)
+	testing.expect_value(t, disk.range, DEFAULT_LIGHT_RANGE + 1.5)
+	testing.expect_value(t, disk.flags, bit_set[Light_Flag;u32]{})
+
+	line := lf.records[2]
+	testing.expect_value(t, line.type, Light_Type.Line)
+	testing.expect(t, near(line.extent, {2, 0, 0}), "a line's extent is its half length along its +x")
+	testing.expect_value(t, line.extent_y, 0.25)
+	testing.expect_value(t, line.range, DEFAULT_LIGHT_RANGE + 2.25)
+
+	// An area light casts its shadows from its middle, as a point light does: a cube of six views.
+	assign_shadow_views(frame, trace = false)
+	testing.expect_value(t, lf.records[0].shadow, 0)
+	testing.expect_value(t, len(frame.shadows.views), 6)
+	testing.expect_value(t, lf.records[1].shadow, -1)
+}
+
 @(private = "file")
 sphere_in :: proc(planes: [][4]f32, center: [3]f32, radius: f32) -> bool {
 	for p in planes {

@@ -34,7 +34,7 @@ static const float LAST_SLICE_FAR = 1e6;
 struct Light_Record {
 	float3 position;
 	float range;
-	float4 rest[3];
+	float4 rest[4];
 };
 
 // reaches is whether a light's sphere reaches a box in view space.

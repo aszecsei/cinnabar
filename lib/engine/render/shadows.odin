@@ -209,7 +209,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 			// The cone's half angle is where the falloff reaches 0: cos = -offset / scale.
 			add_perspective_view(f, sf, record.position, record.direction, min(cone * 2, math.to_radians(f32(170))), record.range, first_slot + next_slot)
 			next_slot += 1
-		case .Point:
+		case .Point, .Quad, .Disk, .Line:
+			// An area light casts its shadows from its middle, as a point light does.
 			if first_slot + next_slot + 6 > MAX_SHADOW_VIEWS {
 				continue
 			}

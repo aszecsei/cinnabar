@@ -1,6 +1,6 @@
 // The forward pass's light loop (see docs/rendering.md#lights-and-clusters): every directional light, then the
-// punctual lights of the pixel's cluster, each with its shadow from the shadow mask or the shadow maps. The shading
-// model shades each light; this file only finds the lights and how much of each reaches the point.
+// punctual and area lights of the pixel's cluster, each with its shadow from the shadow mask or the shadow maps. The
+// shading model shades each light; this file only finds the lights and how much of each reaches the point.
 #ifndef MATERIAL_LIGHTING_HLSLI
 #define MATERIAL_LIGHTING_HLSLI
 
@@ -86,8 +86,11 @@ int shadow_view(Light_Record light, float3 p, float depth) {
 		view += cascade;
 		break;
 	}
-	case LIGHT_POINT: {
-		// The cube face of the direction from the light: +x, -x, +y, -y, +z, -z.
+	case LIGHT_POINT:
+	case LIGHT_QUAD:
+	case LIGHT_DISK:
+	case LIGHT_LINE: {
+		// The cube face of the direction from the light: +x, -x, +y, -y, +z, -z. An area light's cube is at its middle.
 		float3 d = p - light.position;
 		float3 a = abs(d);
 		int face = a.x >= a.y && a.x >= a.z ? (d.x >= 0 ? 0 : 1) : (a.y >= a.z ? (d.y >= 0 ? 2 : 3) : (d.z >= 0 ? 4 : 5));
@@ -107,8 +110,15 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float4 position)
 	return view < 0 ? 1 : shadow_map(uint(view), p, normal);
 }
 
+// range_window is 1 near a light and 0 at its range: saturate(1 - (d / range)^4)^2.
+float range_window(float distance2, float range) {
+	float window = saturate(1 - distance2 * distance2 / (range * range * range * range));
+	return window * window;
+}
+
 // light_falloff is one light as it reaches a point, before its shadow: the direction toward it, and its light there.
-// A punctual light falls off with the square of the distance, windowed to 0 at its range.
+// A punctual light falls off with the square of the distance, windowed to 0 at its range. The fog sees an area light as
+// a point light at its middle, whose light a quad or a disk sends out with the cosine of its face.
 Light light_falloff(Light_Record l, float3 p) {
 	Light light;
 	if (l.type == LIGHT_DIRECTIONAL) {
@@ -118,11 +128,13 @@ Light light_falloff(Light_Record l, float3 p) {
 		float3 d = l.position - p;
 		float distance2 = max(dot(d, d), 1e-4);
 		light.direction = d * rsqrt(distance2);
-		float window = saturate(1 - distance2 * distance2 / (l.range * l.range * l.range * l.range));
-		float falloff = window * window / distance2;
+		float falloff = range_window(distance2, l.range) / distance2;
 		if (l.type == LIGHT_SPOT) {
 			float cone = saturate(dot(-light.direction, l.direction) * l.spot_scale + l.spot_offset);
 			falloff *= cone * cone;
+		} else if (l.type == LIGHT_QUAD || l.type == LIGHT_DISK) {
+			float face = dot(-light.direction, l.direction);
+			falloff *= (l.flags & LIGHT_TWO_SIDED) != 0 ? abs(face) : saturate(face);
 		}
 		light.color = l.color * falloff;
 	}
@@ -138,7 +150,49 @@ Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
 	return light;
 }
 
+// area_light_at is an area light as it reaches a point: its shape relative to the point, and its radiance, which is
+// its color over the area that it shows along its normal (an ideal line's over its length), after its range's window,
+// from its middle, and its shadow. A surface that faces away from its middle can still see some of it, so its shadow
+// is looked up whatever the normal.
+Area_Light area_light_at(Light_Record l, float3 p, float3 normal, float4 position) {
+	Area_Light light;
+	light.shape = l.type;
+	light.center = l.position - p;
+	light.axis_x = l.extent;
+	float half_x = length(l.extent);
+	light.axis_y = cross(l.direction, l.extent / max(half_x, 1e-7)) * l.extent_y;
+	light.normal = l.direction;
+	light.radius = l.extent_y;
+	light.two_sided = (l.flags & LIGHT_TWO_SIDED) != 0;
+	float area;
+	switch (l.type) {
+	case LIGHT_QUAD:
+		area = 4 * half_x * l.extent_y;
+		break;
+	case LIGHT_DISK:
+		area = PI * half_x * l.extent_y;
+		break;
+	default:
+		area = l.extent_y > 0 ? 4 * half_x * l.extent_y + PI * l.extent_y * l.extent_y : 2 * half_x;
+		break;
+	}
+	light.color = l.color / max(area, 1e-7) * range_window(dot(light.center, light.center), l.range);
+	if (any(light.color > 0)) {
+		light.color *= light_shadow(l, p, normal, position);
+	}
+	return light;
+}
+
 #if !SHADING_NO_LIGHTING
+// shade_light is one light's shading at a point, by the shading model's shade_area for an area light and its
+// shade_direct for the others.
+float3 shade_light(Surface s, Shading_Point p, Light_Record l, float3 normal, float4 position) {
+	if (l.type >= LIGHT_QUAD) {
+		return shade_area(s, p, area_light_at(l, p.position, normal, position));
+	}
+	return shade_direct(s, p, light_at(l, p.position, normal, position));
+}
+
 // direct_light adds every light's shading at a point. normal is the geometric normal, which the shadows offset along.
 float3 direct_light(Surface s, Shading_Point p, float3 normal, float4 position) {
 	float3 color = 0;
@@ -152,7 +206,7 @@ float3 direct_light(Surface s, Shading_Point p, float3 normal, float4 position) 
 	ByteAddressBuffer indices = cn_buffer(frame.cluster_indices);
 	for (uint j = 0; j < range.y; j++) {
 		uint index = indices.Load((range.x + j) * 4);
-		color += shade_direct(s, p, light_at(load_light(index), p.position, normal, position));
+		color += shade_light(s, p, load_light(index), normal, position);
 	}
 	return color;
 }

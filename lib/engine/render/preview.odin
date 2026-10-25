@@ -296,6 +296,9 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 		shadow_sampler           = gpu.sampler_index(r.shadows.sampler),
 		screen_size              = {f32(desc.size.x), f32(desc.size.y)},
 		exposure                 = gpu.read_index(r.post.unit_exposure),
+		ltc_matrix               = gpu.read_index(r.lights.ltc_matrix),
+		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
+		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 	}
 	pf.constants, ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {

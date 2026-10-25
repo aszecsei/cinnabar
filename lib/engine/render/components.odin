@@ -13,6 +13,9 @@ POINT_LIGHT_ID :: ecs.Component_Id(35)
 SPOT_LIGHT_ID :: ecs.Component_Id(36)
 VIEW_MODEL_ID :: ecs.Component_Id(37)
 FOG_ID :: ecs.Component_Id(38)
+QUAD_LIGHT_ID :: ecs.Component_Id(39)
+DISK_LIGHT_ID :: ecs.Component_Id(40)
+LINE_LIGHT_ID :: ecs.Component_Id(41)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -46,6 +49,8 @@ Mesh_Renderer :: struct {
 // The lights' defaults for a field left at 0, as a component added in the editor leaves them.
 DEFAULT_LIGHT_RANGE :: 10
 DEFAULT_SPOT_OUTER :: math.PI / 4
+// In meters, for an area light's width, height or length.
+DEFAULT_AREA_SIZE :: 1
 
 // Directional_Light lights the world from far away, along its entity's +z, as the sun does. Its light is color times
 // intensity, in the same units as the sky's. A color of 0 means white. See docs/rendering.md#lights-and-clusters.
@@ -75,6 +80,45 @@ Spot_Light :: struct {
 	cast_shadows: bool,
 }
 
+// The area lights (see docs/rendering.md#area-lights) have a size in meters, and their intensity is as a point light's
+// would be along their +z: a bigger light spreads the same light over more of its surface. Each reaches 0 at its range
+// beyond its size (0 means DEFAULT_LIGHT_RANGE), and casts shadows from its center, as a point light does.
+
+// Quad_Light is a rectangle of light, width by height along its entity's x and y (0 means DEFAULT_AREA_SIZE), that
+// shines along its +z, or both ways when two_sided.
+Quad_Light :: struct {
+	color:        [3]f32,
+	intensity:    f32,
+	width:        f32 `editor:"range=0,100"`,
+	height:       f32 `editor:"range=0,100"`,
+	range:        f32 `editor:"range=0,1000"`,
+	two_sided:    bool,
+	cast_shadows: bool,
+}
+
+// Disk_Light is a disk of light, width and height across along its entity's x and y, so an ellipse when they differ (0
+// means DEFAULT_AREA_SIZE), that shines along its +z, or both ways when two_sided.
+Disk_Light :: struct {
+	color:        [3]f32,
+	intensity:    f32,
+	width:        f32 `editor:"range=0,100"`,
+	height:       f32 `editor:"range=0,100"`,
+	range:        f32 `editor:"range=0,1000"`,
+	two_sided:    bool,
+	cast_shadows: bool,
+}
+
+// Line_Light is a tube of light along its entity's x, length long (0 means DEFAULT_AREA_SIZE), with round ends. A radius
+// of 0 is an ideal line.
+Line_Light :: struct {
+	color:        [3]f32,
+	intensity:    f32,
+	length:       f32 `editor:"range=0,100"`,
+	radius:       f32 `editor:"range=0,10"`,
+	range:        f32 `editor:"range=0,1000"`,
+	cast_shadows: bool,
+}
+
 // Fog fills the world with volumetric fog (see docs/rendering.md#volumetric-fog): the frame takes the first visible
 // entity's. Its density is the share of light that a meter of fog takes away, at and below its entity's height, and
 // falls off above it. A density of 0 is no fog.
@@ -98,6 +142,9 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
 	ecs.register_component(r, View_Model, VIEW_MODEL_ID)
 	ecs.register_component(r, Fog, FOG_ID)
+	ecs.register_component(r, Quad_Light, QUAD_LIGHT_ID)
+	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID)
+	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
 }
 
 // camera_view is the view from a Camera entity: its presented pose, and its field of view and near plane. It fails if
