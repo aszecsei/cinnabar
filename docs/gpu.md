@@ -95,6 +95,7 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 - On a hot reload, the game updates its pipelines in `on_reload`, so the old shaders draw until the new ones compile.
 - Blending uses presets (`Opaque`, `Alpha`, `Premultiplied`, `Additive`), one per color target.
 - **Depth bias and clamping:** `depth_bias` and `slope_bias` add a constant and a slope-scaled offset to each fragment's depth, and `depth_clamp` clamps depth to the viewport's range instead of clipping. Shadow maps use them (see [Rendering](rendering.md#shadows)).
+- **Stencil:** a pipeline's `stencil` (`Stencil_State`) holds the test, its operations and its masks, the same for both faces, and `cmd_set_stencil_reference` sets the reference value, 0 at each pass's start. A pipeline that uses the stencil needs `D32_Float_S8_Uint`, whose attachment loads, clears (`Depth_Attachment.stencil_clear`) and stores the stencil with the depth. A sampled `D32_Float_S8_Uint` texture's stencil has its own view, at `gpu.stencil_index`, the write slot that a depth texture does not use; HLSL reads it with `cn_stencil_texture`, in g.
 - **Comparison samplers:** a `Sampler_Desc` whose `compare` is not `Always` makes a comparison sampler, which shaders get with `cn_comparison_sampler` and use with `SampleCmp`.
 
 ## Command buffers

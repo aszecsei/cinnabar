@@ -311,6 +311,7 @@ validate_rules :: proc(t: ^testing.T) {
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_index_buffer(cb, PLAIN, .U16)}, .Bad_Buffer_Usage, 1},
 		{proc(cb: ^Command_Buffer) {cmd_set_index_buffer(cb, INDICES, .U16)}, .State_Outside_Pass, 0},
 		{proc(cb: ^Command_Buffer) {cmd_set_scissor(cb, {}, {1, 1})}, .State_Outside_Pass, 0},
+		{proc(cb: ^Command_Buffer) {cmd_set_stencil_reference(cb, 1)}, .State_Outside_Pass, 0},
 		{proc(cb: ^Command_Buffer) {cmd_set_pass_constants(cb, {buffer = {index = 9, generation = 1}})}, .Invalid_Buffer, 0},
 	}
 	for c, i in cases {
@@ -688,6 +689,11 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, amplification = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
 	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}), Desc_Error.Missing_Shader)
 	testing.expect_value(t, pipeline_info({mesh = shader}).kind, Pipeline_Kind.Mesh)
+	// A stencil test or stencil writes need a depth format with a stencil.
+	stencil := Stencil_State{compare = .Equal, read_mask = 1}
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = stencil}), Desc_Error.Bad_Format)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float_S8_Uint, stencil = stencil}), Desc_Error.None)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = {read_mask = 1}}), Desc_Error.None)
 }
 
 @(test)

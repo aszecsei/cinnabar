@@ -305,6 +305,12 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		}
 		srv.Texture2D.MipLevels = desc.mip_count
 		dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.texture_read_index(texture)))
+		// The stencil plane's view takes the write slot, which a depth texture does not use (see gpu.stencil_index).
+		if gpu.has_stencil(desc.format) {
+			srv.Format = .X32_TYPELESS_G8X24_UINT
+			srv.Texture2D.PlaneSlice = 1
+			dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.stencil_index(texture)))
+		}
 	}
 	if .Storage in desc.usage {
 		uav := d3d.UNORDERED_ACCESS_VIEW_DESC {

@@ -200,7 +200,7 @@ validate :: proc(
 				return .Bad_Buffer_Usage, packet
 			}
 			index_buffer_set = true
-		case .Set_Viewport, .Set_Scissor:
+		case .Set_Viewport, .Set_Scissor, .Set_Stencil_Reference:
 			if !in_pass {
 				return .State_Outside_Pass, packet
 			}
@@ -729,6 +729,9 @@ validate_graphics_pipeline_desc :: proc(desc: Graphics_Pipeline_Desc) -> Desc_Er
 		}
 	}
 	if desc.depth_format != .Unknown && !is_depth_format(desc.depth_format) {
+		return .Bad_Format
+	}
+	if stencil_used(desc.stencil) && !has_stencil(desc.depth_format) {
 		return .Bad_Format
 	}
 	return .None

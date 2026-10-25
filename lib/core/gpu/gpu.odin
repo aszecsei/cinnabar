@@ -74,6 +74,12 @@ texture_write_index :: proc(texture: Texture) -> u32 {
 	return TEXTURE_WRITE_BASE + texture.index
 }
 
+// stencil_index is the view of a sampled D32_Float_S8_Uint texture's stencil plane, a Texture2D<uint2> whose g is the
+// stencil (cn_stencil_texture in HLSL). A depth texture has no write view, so its write slot holds this one.
+stencil_index :: proc(texture: Texture) -> u32 {
+	return TEXTURE_WRITE_BASE + texture.index
+}
+
 // Shaders trace only against top-level structures, but every acceleration structure has a view.
 accel_read_index :: proc(accel: Accel_Struct) -> u32 {
 	return ACCEL_READ_BASE + accel.index
@@ -123,6 +129,10 @@ is_depth_format :: proc(format: Format) -> bool {
 		return true
 	}
 	return false
+}
+
+has_stencil :: proc(format: Format) -> bool {
+	return format == .D32_Float_S8_Uint
 }
 
 is_srgb_format :: proc(format: Format) -> bool {
@@ -387,6 +397,34 @@ Compare_Op :: enum u8 {
 	Not_Equal,
 }
 
+Stencil_Op :: enum u8 {
+	Keep,
+	Zero,
+	// Writes the reference value, from cmd_set_stencil_reference.
+	Replace,
+	Increment_Clamp,
+	Decrement_Clamp,
+	Invert,
+}
+
+// Stencil_State is the stencil test and its writes, the same for front and back faces. The test compares the
+// reference value with the stencil, both masked by read_mask, by compare: it passes when reference compare stencil.
+// The zero state does nothing: Always, and no writes. A pipeline with a stencil test or writes needs a depth format
+// with a stencil.
+Stencil_State :: struct {
+	compare:    Compare_Op,
+	pass:       Stencil_Op,
+	fail:       Stencil_Op,
+	depth_fail: Stencil_Op,
+	read_mask:  u8,
+	write_mask: u8,
+}
+
+// stencil_used is whether a stencil state tests or writes.
+stencil_used :: proc(s: Stencil_State) -> bool {
+	return s.compare != .Always || s.write_mask != 0
+}
+
 Blend :: enum u8 {
 	Opaque,
 	Alpha,
@@ -420,6 +458,7 @@ Graphics_Pipeline_Desc :: struct {
 	// Clamps depth to the viewport's range instead of clipping, so geometry in front of the near plane still writes
 	// depth there, as directional shadow maps need.
 	depth_clamp:   bool,
+	stencil:       Stencil_State,
 	topology:      Topology,
 	cull:          Cull_Mode,
 	scope:         Scope,

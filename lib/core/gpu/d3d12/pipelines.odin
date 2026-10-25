@@ -489,6 +489,11 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 			DepthEnable = d3d.BOOL(desc.depth_format != .Unknown && (desc.depth_compare != .Always || desc.depth_write)),
 			DepthWriteMask = desc.depth_write ? .ALL : .ZERO,
 			DepthFunc = COMPARE[desc.depth_compare],
+			StencilEnable = d3d.BOOL(gpu.stencil_used(desc.stencil)),
+			StencilReadMask = desc.stencil.read_mask,
+			StencilWriteMask = desc.stencil.write_mask,
+			FrontFace = stencil_face(desc.stencil),
+			BackFace = stencil_face(desc.stencil),
 		},
 		PrimitiveTopologyType = TOPOLOGY_TYPE[desc.topology],
 		NumRenderTargets = u32(len(desc.colors)),
@@ -744,6 +749,19 @@ CULL := [gpu.Cull_Mode]d3d.CULL_MODE {
 	.None  = .NONE,
 	.Back  = .BACK,
 	.Front = .FRONT,
+}
+
+@(private = "file")
+stencil_face :: proc(s: gpu.Stencil_State) -> d3d.DEPTH_STENCILOP_DESC {
+	OP := [gpu.Stencil_Op]d3d.STENCIL_OP {
+		.Keep            = .KEEP,
+		.Zero            = .ZERO,
+		.Replace         = .REPLACE,
+		.Increment_Clamp = .INCR_SAT,
+		.Decrement_Clamp = .DECR_SAT,
+		.Invert          = .INVERT,
+	}
+	return {StencilFailOp = OP[s.fail], StencilDepthFailOp = OP[s.depth_fail], StencilPassOp = OP[s.pass], StencilFunc = COMPARE[s.compare]}
 }
 
 @(private)
