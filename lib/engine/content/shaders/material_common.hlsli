@@ -17,6 +17,9 @@ struct Frame_Constants {
 	float4x4 cluster_view_projection;
 	float4 camera_offset;
 	float4 previous_camera_offset;
+	// The camera's offset from the render origin in every view's copy, the view model's included, so a point's position
+	// relative to the origin is its position relative to the camera plus this (see world_position).
+	float4 origin_offset;
 	// The ambient light from above and from below, until global illumination.
 	float4 sky_color;
 	float4 ground_color;
@@ -95,9 +98,11 @@ struct Instance_Record {
 	uint2 padding;
 };
 
-// What a material's evaluate reads. position is relative to the camera, and the directions are in the world.
+// What a material's evaluate reads. position is relative to the camera, object_position is in the mesh's own space,
+// and the directions are in the world.
 struct Material_Inputs {
 	float3 position;
+	float3 object_position;
 	float3 normal;
 	// The bitangent is cross(normal, tangent.xyz) * tangent.w.
 	float4 tangent;
@@ -159,6 +164,13 @@ struct Indirect {
 };
 
 static const float PI = 3.14159265;
+
+// world_position is a point's position relative to the render origin, which snaps to a grid of 1024 m, from its
+// position relative to the camera. It stays where it is while the camera moves, and a pattern whose period divides
+// 1024 m goes on without a seam when the origin moves (see docs/rendering.md#gpu-scene).
+float3 world_position(Material_Inputs inputs) {
+	return inputs.position + frame.origin_offset.xyz;
+}
 
 // cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a later path that
 // shades without derivatives (a visibility buffer) can give its own.

@@ -11,6 +11,8 @@
 struct Material_Vertex {
 	float3 world;
 	float3 previous;
+	// In the mesh's own space, before the instance's pose.
+	float3 local;
 	float3 normal;
 	float4 tangent;
 	float2 uv0;
@@ -24,6 +26,7 @@ struct Material_Vertex {
 struct Varyings {
 	float4 position : SV_Position;
 	float3 world : POSITION1;
+	float3 local : POSITION2;
 	float3 normal : NORMAL;
 	float4 tangent : TANGENT;
 	float2 uv0 : TEXCOORD0;
@@ -79,6 +82,7 @@ Material_Vertex load_vertex(uint vertex_id) {
 	Material_Vertex v;
 	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
 	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
+	v.local = local;
 	v.normal = transform_direction(instance.rows, normal);
 	v.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
 	v.uv0 = uv0;
@@ -99,6 +103,7 @@ Varyings vertex_varyings(Material_Vertex v) {
 	Varyings o;
 	o.position = clip_position(v.world);
 	o.world = v.world;
+	o.local = v.local;
 	o.normal = v.normal;
 	o.tangent = v.tangent;
 	o.uv0 = v.uv0;
@@ -114,6 +119,7 @@ Material_Inputs material_inputs(Varyings i, bool front) {
 	params = cn_buffer(frame.materials).Load<Params>(frame.materials_offset + i.material);
 	Material_Inputs inputs;
 	inputs.position = i.world;
+	inputs.object_position = i.local;
 	inputs.normal = normalize(i.normal);
 	inputs.tangent = float4(normalize(i.tangent.xyz), i.tangent.w);
 	inputs.uv0 = i.uv0;

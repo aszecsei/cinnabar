@@ -294,3 +294,21 @@ previews_cook_unsaved_text_into_the_preview_area :: proc(t: ^testing.T) {
 		testing.expect_value(t, problems.list[0].text, "the material has no parameter named tnit")
 	}
 }
+
+@(test)
+position_nodes_read_the_world_and_the_object :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
+			{"content/stripes.material", "material 1\nshading = lit\nnode 1 output\n\tbase_color = @4.out\nnode 2 position\nnode 3 object_position\nnode 4 add\n\ta = @2.position\n\tb = @3.position\n"},
+		},
+	)
+	defer remove_tree(tree)
+	expect_no_errors(t, cook(graph_options(t, tree), {.Material}))
+	source := generated(tree)
+	// The world position is relative to the render origin, not the camera, so it stays put while the camera moves.
+	testing.expect(t, strings.contains(source, "float3 n2_position = world_position(inputs);"))
+	testing.expect(t, strings.contains(source, "float3 n3_position = inputs.object_position;"))
+}

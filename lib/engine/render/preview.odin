@@ -272,6 +272,8 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 		view_projection          = view_projection,
 		previous_view_projection = view_projection,
 		cluster_view_projection  = view_projection,
+		// The preview's world has its origin at the mesh's middle.
+		origin_offset            = {camera.x, camera.y, camera.z, 0},
 		sky_color                = {DEFAULT_AMBIENT.sky.r, DEFAULT_AMBIENT.sky.g, DEFAULT_AMBIENT.sky.b, 0},
 		ground_color             = {DEFAULT_AMBIENT.ground.r, DEFAULT_AMBIENT.ground.g, DEFAULT_AMBIENT.ground.b, 0},
 		instances                = gpu.read_index(r.previews.instances),

@@ -41,6 +41,7 @@ Frame_Constants :: struct {
 	cluster_view_projection:  matrix[4, 4]f32,
 	camera_offset:            [4]f32,
 	previous_camera_offset:   [4]f32,
+	origin_offset:            [4]f32,
 	sky_color:                [4]f32,
 	ground_color:             [4]f32,
 	cascade_splits:           [4]f32,
@@ -161,7 +162,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 368)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 384)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -407,6 +408,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		cluster_view_projection  = f.view_projection,
 		camera_offset            = {camera_offset.x, camera_offset.y, camera_offset.z, 0},
 		previous_camera_offset   = {previous_offset.x, previous_offset.y, previous_offset.z, 0},
+		origin_offset            = {camera_offset.x, camera_offset.y, camera_offset.z, 0},
 		sky_color                = {ambient.sky.r, ambient.sky.g, ambient.sky.b, 0},
 		ground_color             = {ambient.ground.r, ambient.ground.g, ambient.ground.b, 0},
 		cascade_splits           = shadows.cascade_splits,
