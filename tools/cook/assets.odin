@@ -10,13 +10,14 @@ import "core:strings"
 import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
-// IMPORTERS gives the extension of each kind of asset that the cooker cooks. Other files in the content roots are not
-// assets.
-IMPORTERS :: [format.Asset_Kind]string {
-	.None   = "",
-	.Script = SCRIPT_EXTENSION,
-	.Scene  = format.SCENE_EXTENSION,
-	.Shader = format.SHADER_EXTENSION,
+// IMPORTERS gives the extensions of each kind of asset that the cooker cooks, lowercase, the first one for new assets.
+// Other files in the content roots are not assets.
+IMPORTERS :: [format.Asset_Kind][]string {
+	.None    = nil,
+	.Script  = {SCRIPT_EXTENSION},
+	.Scene   = {format.SCENE_EXTENSION},
+	.Shader  = {format.SHADER_EXTENSION},
+	.Texture = TEXTURE_EXTENSIONS,
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -42,6 +43,20 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 	#partial switch kind {
 	case .Script:
 		return SCRIPT_SETTINGS
+	case .Texture:
+		return TEXTURE_SETTINGS
+	}
+	return nil
+}
+
+// initial_settings are the import settings that the cooker writes in a new asset's .meta file: those that it guesses
+// from the file, which then stay as they are when the file is renamed.
+initial_settings :: proc(kind: format.Asset_Kind, path: string) -> []format.Meta_Setting {
+	#partial switch kind {
+	case .Texture:
+		settings := make([]format.Meta_Setting, 1, context.temp_allocator)
+		settings[0] = {"usage", texture_usage_for(path)}
+		return settings
 	}
 	return nil
 }
@@ -74,7 +89,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -220,18 +235,33 @@ found_assets :: proc(
 
 // kind_of is the kind of asset that a file name is, or .None.
 kind_of :: proc(name: string) -> format.Asset_Kind {
-	for extension, kind in IMPORTERS {
-		if kind != .None && strings.has_suffix(name, extension) {
-			return kind
-		}
-	}
-	return .None
+	kind, _ := importer_of(name)
+	return kind
 }
 
-// extension_of is the extension of a kind of asset's sources, such as ".luau".
+// extension_in is the importer's extension that a file name ends in, as the name has it, such as ".PNG", or "".
+extension_in :: proc(name: string) -> string {
+	_, extension := importer_of(name)
+	return extension
+}
+
+@(private = "file")
+importer_of :: proc(name: string) -> (kind: format.Asset_Kind, extension: string) {
+	lower := strings.to_lower(name, context.temp_allocator)
+	for extensions, k in IMPORTERS {
+		for e in extensions {
+			if strings.has_suffix(lower, e) {
+				return k, name[len(name) - len(e):]
+			}
+		}
+	}
+	return .None, ""
+}
+
+// extension_of is the extension of a kind of asset's new sources, such as ".luau".
 extension_of :: proc(kind: format.Asset_Kind) -> string {
 	importers := IMPORTERS
-	return importers[kind]
+	return importers[kind][0] if len(importers[kind]) > 0 else ""
 }
 
 // link_kind is a kind of asset as the cook link names it.
@@ -241,6 +271,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Scene
 	case .Shader:
 		return .Shader
+	case .Texture:
+		return .Texture
 	}
 	return .Script
 }
@@ -267,7 +299,7 @@ read_asset :: proc(a: ^Asset_Source, problems: ^Problems) -> bool {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
 	if meta_err == .Not_Exist {
-		text, _ := new_meta(nil)
+		text, _ := new_meta(initial_settings(a.kind, a.path))
 		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
 			report_error(problems, meta_path, 0, 0, "%v", write_err)
 			return false

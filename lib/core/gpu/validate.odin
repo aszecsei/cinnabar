@@ -690,6 +690,15 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 	if .Storage in desc.usage && is_srgb_format(desc.format) {
 		return .Bad_Usage
 	}
+	// Block-compressed textures are only sampled, and mip 0 is whole blocks.
+	if is_block_format(desc.format) {
+		if desc.usage - {.Sampled, .Streamed} != {} {
+			return .Bad_Usage
+		}
+		if desc.size.x % 4 != 0 || desc.size.y % 4 != 0 {
+			return .Bad_Size
+		}
+	}
 	// The copy queue writes a streamed texture, and copy queues cannot change layouts.
 	if .Streamed in desc.usage && (desc.usage != {.Sampled, .Streamed} || data != nil) {
 		return .Bad_Usage
@@ -697,7 +706,7 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 	if desc.mip_count > mip_count(desc.size) {
 		return .Bad_Mip_Count
 	}
-	if data != nil && (.Sampled not_in desc.usage || len(data) != int(desc.size.x * desc.size.y) * format_size(desc.format)) {
+	if data != nil && (.Sampled not_in desc.usage || len(data) != surface_size(desc.format, desc.size.x, desc.size.y)) {
 		return .Bad_Data_Size
 	}
 	return .None

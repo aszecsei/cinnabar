@@ -1,3 +1,7 @@
 [submodule "vendor/luau"]
 	path = vendor/luau
 	url = https://github.com/luau-lang/luau.git
+[submodule "vendor/compressonator"]
+	path = vendor/compressonator
+	url = https://github.com/GPUOpen-Tools/compressonator
+	update = none

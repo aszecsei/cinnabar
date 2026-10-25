@@ -96,6 +96,7 @@ Asset_Kind :: enum u8 {
 	Script,
 	Scene,
 	Shader,
+	Texture,
 }
 
 Asset_Status :: enum u8 {

@@ -283,7 +283,6 @@ The design needs these changes in `lib/core/gpu` and the render graph:
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
 - **History textures** in the render graph (see [Later features](#later-features)).
 - **An HDR frame target** from `core`, for HDR output.
-- **Block-compressed formats** (phase 0): `BC1`, `BC4`, `BC5`, `BC6H` and `BC7`, with sRGB variants of `BC1` and `BC7`. `format_size` becomes a block size, and `mip_chain_size` and the copies count 4×4 blocks, so a mip smaller than a block still takes one.
 ## Assets and components
 
 The renderer draws shader, texture and mesh assets, which the cooker makes (see [Content pipeline](content-pipeline.md#shaders)).

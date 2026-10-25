@@ -256,16 +256,16 @@ handle_messages :: proc(d: ^Daemon) {
 @(private = "file")
 importers :: proc() -> []cook_link.Importer {
 	result := make([dynamic]cook_link.Importer, context.temp_allocator)
-	for extension, kind in IMPORTERS {
-		if kind == .None {
-			continue
-		}
+	for extensions, kind in IMPORTERS {
 		settings := import_settings(kind)
 		infos := make([]cook_link.Setting_Info, len(settings), context.temp_allocator)
 		for s, i in settings {
 			infos[i] = {s.key, s.values, s.default, s.description}
 		}
-		append(&result, cook_link.Importer{kind = link_kind(kind), extension = extension, settings = infos})
+		// An importer with several extensions is one entry for each, and the first is the one for new assets.
+		for extension in extensions {
+			append(&result, cook_link.Importer{kind = link_kind(kind), extension = extension, settings = infos})
+		}
 	}
 	return result[:]
 }

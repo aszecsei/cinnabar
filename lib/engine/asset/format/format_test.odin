@@ -110,3 +110,30 @@ shader_blobs_round_trip :: proc(t: ^testing.T) {
 	_, ok = shader_view(data)
 	testing.expect(t, !ok)
 }
+
+@(test)
+texture_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	// 8x4 BC7: two blocks, then 4x2 and 2x1 at one block each.
+	mips := make([]byte, texture_chain_size(.BC7_Unorm_Srgb, {8, 4}, 3), context.temp_allocator)
+	testing.expect_value(t, len(mips), (2 + 1 + 1) * 16)
+	mips[0] = 9
+	contents := Texture_Contents{guid = guid, key = 3, format = .BC7_Unorm_Srgb, usage = .Color, size = {8, 4}, mip_count = 3, mips = mips, source_path = "game/a.png"}
+	data := aligned(texture_write(contents, context.temp_allocator))
+
+	blob, ok := texture_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.size, [2]u32{8, 4})
+	testing.expect_value(t, blob.mips.offset % BLOB_ALIGN, 0)
+	testing.expect_value(t, blob_bytes(data, blob.mips)[0], 9)
+	testing.expect_value(t, blob_string(data, blob.source_path), "game/a.png")
+	testing.expect_value(t, texture_mip_size(.RGBA8_Unorm, 3, 2), 24)
+
+	// Mips of the wrong size are not a texture.
+	(^Texture_Blob)(raw_data(data)).mip_count = 2
+	_, ok = texture_view(data)
+	testing.expect(t, !ok)
+}

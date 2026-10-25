@@ -148,7 +148,7 @@ rename_asset :: proc(roots: []Root, index: ^Index, op: cook_link.Rename_Asset) -
 	if !found {
 		return failed("no asset has the GUID %s", op.guid)
 	}
-	extension := extension_of(kind_of(from))
+	extension := extension_in(from)
 	name := strings.trim_suffix(strings.trim_space(op.name), extension)
 	if !valid_name(name) {
 		return failed("%q is not a name for a file", op.name)
@@ -228,7 +228,7 @@ duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_A
 		if !found {
 			return failed("no asset has the GUID %s", guid)
 		}
-		extension := extension_of(kind_of(from))
+		extension := extension_in(from)
 		stem := strings.trim_suffix(name_of(from), extension)
 		to: string
 		for n := 1;; n += 1 {

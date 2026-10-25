@@ -622,6 +622,20 @@ view_format :: proc(format: gpu.Format) -> dxgi.FORMAT {
 		return .D32_FLOAT
 	case .D32_Float_S8_Uint:
 		return .D32_FLOAT_S8X24_UINT
+	case .BC1_Unorm:
+		return .BC1_UNORM
+	case .BC1_Unorm_Srgb:
+		return .BC1_UNORM_SRGB
+	case .BC4_Unorm:
+		return .BC4_UNORM
+	case .BC5_Unorm:
+		return .BC5_UNORM
+	case .BC6H_Ufloat:
+		return .BC6H_UF16
+	case .BC7_Unorm:
+		return .BC7_UNORM
+	case .BC7_Unorm_Srgb:
+		return .BC7_UNORM_SRGB
 	}
 	return .UNKNOWN
 }

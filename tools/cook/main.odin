@@ -14,6 +14,7 @@ import format "cinnabar:engine/asset/format"
 
 USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...
        cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
        cook --emit-link-schema <file>`
@@ -31,6 +32,10 @@ main :: proc() {
 	case "scenes":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Scene)
+		}
+	case "textures":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Texture)
 		}
 	case "shaders":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -105,6 +110,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "scenes"
 	case .Shader:
 		return "shaders"
+	case .Texture:
+		return "textures"
 	}
 	return "assets"
 }

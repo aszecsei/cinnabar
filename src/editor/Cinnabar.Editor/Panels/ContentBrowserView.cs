@@ -311,6 +311,7 @@ public sealed class ContentBrowserView : DockPanel
     {
         AssetKind.Scene => "scene",
         AssetKind.Shader => "shader",
+        AssetKind.Texture => "texture",
         _ => "script",
     };
 

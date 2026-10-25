@@ -23,8 +23,9 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 - **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs. Otherwise two cooks could both give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes. A dev batch cook that finds the lock held leaves the cache to the cook daemon, which keeps it up to date, so `just build` works while the editor is open. Any other cook stops with an error.
 - **Problems:** each error and warning names its file (the asset's source or `.meta` file, or another file such as the definition file), and its line and column when it has them. A batch cook logs each one as `cook: <file>:<line>:<column>: <text>`.
 - **Kinds:** scripts, scenes, shaders, textures and meshes. Each kind has an importer: its extensions, its import settings and its cook (see the sections below).
-- **Slow kinds cook in parallel.** Textures and meshes can take seconds each, so a pass cooks them on worker threads, beside the scripts and scenes, which stay serial. A pass reports the assets that it has left while it runs, so the editor can show progress.
-- **Third-party code** for the importers is in `vendor/`, built with CMake into `build/` like Luau, and linked into `tools/cook` only: Compressonator's `CMP_Core` for block compression, and meshoptimizer for meshes. Odin's `vendor:stb/image`, `vendor:OpenEXRCore` and `vendor:cgltf` read the source files. The runtime links none of them.
+- **Slow kinds use every core.** A texture can take seconds, so block compression spreads each mip's rows of blocks over the CPU's threads. A 2048×2048 color texture with its mips cooks in about 1 s for development and 3 s for release. *Cooking several textures at once, and a pass that reports the assets that it has left so the editor can show progress, come when content grows.*
+- **Third-party code** for the importers is in `vendor/`, built with CMake into `build/` like Luau, and linked into `tools/cook` only: Compressonator's `CMP_Core` for block compression, and meshoptimizer for meshes. Odin's `vendor:stb/image` and `vendor:cgltf` read the source files. The runtime links none of them.
+- **Compressonator** is a submodule pinned to a release, but its repository is over 700 MB, so `vendor/compressonator` is a blobless clone that checks out only `cmp_core`, `license` and `applications/_libs/cmp_math`. `.gitmodules` marks it `update = none`, so `git submodule update` never checks out the rest, and `just install-compressonator` makes the sparse clone at the pinned commit. `just update-compressonator <tag>` moves the pin. `tools/cook/compressonator` builds `CMP_Core` with its own CMake project, and `cn_compress.cpp` gives the cooker a C API that compresses a whole mip, because `CMP_Core`'s API is C++ and compresses one block at a time.
 
 ### Scripts
 
@@ -65,7 +66,7 @@ Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shader
 
 ### Textures
 
-Textures are `.png`, `.jpg`, `.tga` and `.hdr` files (with `vendor:stb/image`), and `.exr` files (with `vendor:OpenEXRCore`).
+Textures are `.png`, `.jpg`, `.tga` and `.hdr` files, read with `vendor:stb/image`. `just textures` runs `cook textures --cache build/cache --config dev|release` with the roots. *`.exr` files, with `vendor:OpenEXRCore`, come later.*
 
 | Setting | Values | Default | Effect |
 |---|---|---|---|
@@ -76,15 +77,17 @@ Textures are `.png`, `.jpg`, `.tga` and `.hdr` files (with `vendor:stb/image`), 
 
 | Usage | Format | Mips |
 |---|---|---|
-| `color` | BC7, sRGB. Alpha is kept. | Filtered in linear light. Alpha-tested textures keep their coverage. |
+| `color` | BC7, sRGB. Alpha is kept. | Filtered in linear light. *Keeping an alpha-tested texture's coverage in its mips comes later.* |
 | `normal` | BC5 (x and y; shaders compute z) | Filtered, then normalized again |
 | `mask` | BC4 (one channel: roughness, occlusion, height) | Filtered |
 | `hdr` | BC6H, unsigned | Filtered |
 | `data` | `RGBA8_Unorm`, not compressed | Filtered |
 
 - **The default usage** comes from the file when the cooker writes its `.meta` file: `.hdr` and `.exr` are `hdr`, a name ending in `_n` or `_normal` is `normal`, a name ending in `_r`, `_rough`, `_ao`, `_m`, `_metal` or `_mask` is `mask`, and everything else is `color`. The setting is then written in the `.meta` file, so a rename does not change it.
-- **Mips** use a Kaiser filter. The cooker filters in floating point, and compresses each mip after all are made.
-- **Quality:** development compresses at Compressonator's fast quality, and release at its high quality. The configuration is in the key, so release textures cook again in a release cook.
+- **Size:** a texture larger than `max_size` halves until it fits. Mip 0 of a block-compressed texture is whole 4×4 blocks on the GPU (see [GPU](gpu.md)), so a texture whose sides are not multiples of 4 is resized up to the next ones.
+- **Mips** use a Kaiser-windowed sinc filter, which widens with the scale when it shrinks, in floating point. Each mip filters from the one before it, and normal maps are normalized again after each step.
+- **BC6H** interpolates its endpoints' half-float bits, which are close to logarithmic, so a 4×4 block that holds both 0 and bright values has coarse steps between them.
+- **Quality:** development compresses at Compressonator's quality 0.05, and release at 0.5. The configuration is in the key, so release textures cook again in a release cook.
 - **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file.
 - *Cube maps and texture arrays come with environment lighting (see [Rendering](rendering.md)).*
 

@@ -27,8 +27,13 @@ dev_defines := "-define:LUAU_SHARED=true " + luau_features
 # lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
 luau_dir := build_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
+compressonator_dir := build_dir + "/compressonator"
+# What tools/cook/compressonator builds from vendor/compressonator, which is checked out sparsely.
+compressonator_paths := "cmp_core license applications/_libs/cmp_math"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
 luau_version := `git -C vendor/luau describe --tags --always`
+# The cooker puts this in every texture's cache key, so a Compressonator update cooks every texture again.
+compressonator_version := `git -C vendor/compressonator describe --tags --always 2>/dev/null || echo unknown`
 content_root := "samples/" + game + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
@@ -51,8 +56,28 @@ default:
 # =================================
 
 # Install dependencies
-install: install-agility install-dxc
+install: install-agility install-dxc install-compressonator
     git submodule update --init --recursive
+
+# Fetch Compressonator's block compression core at the commit that the repository pins. The repository is over 700 MB,
+# so this is a blobless clone that checks out only what tools/cook/compressonator builds. .gitmodules marks the
+# submodule `update = none`, so `git submodule update` never checks out the rest.
+[script]
+install-compressonator:
+    set -euo pipefail
+    dir=vendor/compressonator
+    commit=$(git ls-files --stage "$dir" | awk '{print $2}')
+    if [ ! -e "$dir/.git" ]; then
+        rmdir "$dir" 2>/dev/null || true
+        git clone --quiet --filter=blob:none --no-checkout --sparse "$(git config -f .gitmodules submodule.$dir.url)" "$dir"
+        git submodule absorbgitdirs "$dir"
+    fi
+    git -C "$dir" sparse-checkout set --cone {{compressonator_paths}}
+    if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
+        git -C "$dir" fetch --quiet --filter=blob:none origin "$commit"
+        git -C "$dir" -c advice.detachedHead=false checkout --quiet "$commit"
+    fi
+    echo "✓ Compressonator $(git -C "$dir" describe --tags --always)"
 
 # Download the D3D12 Agility SDK runtime
 [script]
@@ -84,7 +109,7 @@ setup: install
     echo "✓ Project ready"
 
 # Update all vendored submodules
-update: update-luau
+update: update-luau update-compressonator
 
 # Update Luau to a release tag (default: latest)
 [script]
@@ -97,6 +122,17 @@ update-luau tag="":
     git add vendor/luau
     echo "✓ Luau at $tag"
 
+# Update Compressonator to a release tag (default: latest)
+[script]
+update-compressonator tag="": install-compressonator
+    set -euo pipefail
+    git -C vendor/compressonator fetch --tags --quiet --filter=blob:none
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/compressonator tag --list 'V*' --sort=-v:refname | head -n 1)
+    git -C vendor/compressonator -c advice.detachedHead=false checkout --quiet "$tag"
+    git add vendor/compressonator
+    echo "✓ Compressonator at $tag"
+
 # =================================
 # Development
 # =================================
@@ -104,7 +140,7 @@ update-luau tag="":
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders
+build: host game-dll script-types scripts scenes shaders textures
 
 # Build the development host
 host: agility-runtime luau
@@ -125,10 +161,15 @@ luau:
     # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
     cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
 
+# Build Compressonator's block compression core for the cooker
+compressonator: install-compressonator
+    [ -f "{{compressonator_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/compressonator -B "{{compressonator_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
+    cmake --build "{{compressonator_dir}}" --config Release -- -m -nologo -v:quiet
+
 # Build the cooker
-cook: luau
+cook: luau compressonator
     mkdir -p "{{build_dir}}"
-    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
 
 # Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
@@ -146,6 +187,11 @@ watch: cook install-dxc
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
+
+# Cook the game's textures and the engine's into the loose cache, build/cache/<config>. A texture without a .meta file
+# gets one, with its usage guessed from its name: commit it.
+textures config="dev": cook
+    "./{{build_dir}}/cook.exe" textures --cache "{{cache_dir}}" --config {{config}} {{roots}}
 
 # Cook the game's shaders and the engine's into the loose cache, build/cache/<config>: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
@@ -202,7 +248,7 @@ edit: build editor
         --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Build the statically linked release executable
-release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release")
+release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
@@ -231,8 +277,8 @@ fmt:
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
+test: luau compressonator link-schema install-dxc
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor

@@ -103,6 +103,15 @@ Format :: enum u8 {
 	RGBA32_Float,
 	D32_Float,
 	D32_Float_S8_Uint,
+	// Block-compressed formats store 4x4 blocks of texels (see docs/content-pipeline.md#textures). They are only
+	// sampled, and mip 0 of a texture in one has sides that are multiples of 4.
+	BC1_Unorm,
+	BC1_Unorm_Srgb,
+	BC4_Unorm,
+	BC5_Unorm,
+	BC6H_Ufloat,
+	BC7_Unorm,
+	BC7_Unorm_Srgb,
 }
 
 // The frame target is written through an sRGB view.
@@ -117,10 +126,32 @@ is_depth_format :: proc(format: Format) -> bool {
 }
 
 is_srgb_format :: proc(format: Format) -> bool {
-	return format == .RGBA8_Unorm_Srgb || format == .BGRA8_Unorm_Srgb
+	#partial switch format {
+	case .RGBA8_Unorm_Srgb, .BGRA8_Unorm_Srgb, .BC1_Unorm_Srgb, .BC7_Unorm_Srgb:
+		return true
+	}
+	return false
 }
 
-// format_size is the size of one texel in bytes.
+// is_block_format is true for the block-compressed formats, which store 4x4 blocks of texels.
+is_block_format :: proc(format: Format) -> bool {
+	#partial switch format {
+	case .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
+		return true
+	}
+	return false
+}
+
+// surface_size is the size of a width x height surface of the format, tightly packed: rows of texels, or rows of 4x4
+// blocks, where a partial block takes a whole one.
+surface_size :: proc(format: Format, width, height: u32) -> int {
+	if is_block_format(format) {
+		return int((width + 3) / 4) * int((height + 3) / 4) * format_size(format)
+	}
+	return int(width) * int(height) * format_size(format)
+}
+
+// format_size is the size of one texel in bytes, or of one 4x4 block for a block-compressed format.
 format_size :: proc(format: Format) -> int {
 	switch format {
 	case .Unknown:
@@ -131,9 +162,9 @@ format_size :: proc(format: Format) -> int {
 		return 2
 	case .RGBA8_Unorm, .RGBA8_Unorm_Srgb, .BGRA8_Unorm, .BGRA8_Unorm_Srgb, .RGB10A2_Unorm, .RG11B10_Float, .RG16_Float, .R32_Uint, .R32_Float, .D32_Float:
 		return 4
-	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint:
+	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint, .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm:
 		return 8
-	case .RGBA32_Float:
+	case .RGBA32_Float, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
 		return 16
 	}
 	return 0
@@ -566,8 +597,7 @@ Transfer :: distinct u64
 mip_chain_size :: proc(desc: Texture_Desc) -> int {
 	size := 0
 	for mip in 0 ..< max(desc.mip_count, 1) {
-		width, height := max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1)
-		size += int(width * height) * format_size(desc.format)
+		size += surface_size(desc.format, max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1))
 	}
 	return size
 }
