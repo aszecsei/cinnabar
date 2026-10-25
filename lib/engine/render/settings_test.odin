@@ -43,12 +43,14 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	testing.expect_value(t, s.ambient, DEFAULT_AMBIENT)
 	testing.expect_value(t, s.fog.density, 0)
 	testing.expect_value(t, s.post.paper_white, 0)
+	testing.expect_value(t, s.shadows, Shadow_Settings{SHADOW_DISTANCE, SHADOW_SPLIT_LAMBDA})
 
 	base := ecs.spawn(w)
 	ecs.add(w, base, ecs.TRANSFORM_IDENTITY)
 	ecs.add(w, base, volume.Volume{shape = .Global})
 	ecs.add(w, base, Environment{background = {true, {0.02, 0.02, 0.035}}})
 	ecs.add(w, base, Fog{density = {true, 0.1}, base_height = {true, 2}})
+	ecs.add(w, base, Shadows{distance = {true, 30}})
 	// A box over part of the world turns bloom off and fogs less, and leaves the rest to the global volume.
 	local := ecs.spawn(w)
 	ecs.add(w, local, ecs.Transform{position = ecs.position_offset({}, {10, 0, 0}), rotation = 1, scale = 1})
@@ -59,6 +61,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	s = resolve_settings(r, w, {})
 	testing.expect_value(t, s.background, [3]f32{0.02, 0.02, 0.035})
 	testing.expect_value(t, s.fog.density, 0.1)
+	testing.expect_value(t, s.shadows, Shadow_Settings{30, SHADOW_SPLIT_LAMBDA})
 	testing.expect(t, !s.post.no_bloom)
 
 	s = resolve_settings(r, w, ecs.position_offset({}, {10, 0, 0}))

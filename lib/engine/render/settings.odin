@@ -14,6 +14,7 @@ BLOOM_ID :: ecs.Component_Id(46)
 AMBIENT_OCCLUSION_ID :: ecs.Component_Id(47)
 GLOBAL_ILLUMINATION_ID :: ecs.Component_Id(48)
 ENVIRONMENT_ID :: ecs.Component_Id(49)
+SHADOWS_ID :: ecs.Component_Id(50)
 
 // Anti_Aliasing is the temporal AA (see docs/rendering.md#post-processing).
 Anti_Aliasing :: struct {
@@ -80,6 +81,15 @@ Environment :: struct {
 	ground:     volume.Value([3]f32) `editor:"color"`,
 }
 
+// Shadows are the directional lights' cascades: how far they reach, and how their depths split, between even (toward
+// 0) and exponential (1), which gives the near ones more texels.
+Shadows :: struct {
+	// In meters from the camera. 0 gives SHADOW_DISTANCE.
+	distance:     volume.Value(f32) `editor:"range=1,1000"`,
+	// 0 gives SHADOW_SPLIT_LAMBDA.
+	split_lambda: volume.Value(f32) `editor:"range=0,1"`,
+}
+
 // Fog fills the world with volumetric fog (see docs/rendering.md#volumetric-fog). Its density is the share of light
 // that a meter of fog takes away, at and below its base height, and falls off above it. A density of 0 is no fog.
 Fog :: struct {
@@ -120,6 +130,16 @@ DEFAULT_ENVIRONMENT :: Environment {
 DEFAULT_FOG :: Fog {
 	albedo = {value = {1, 1, 1}},
 }
+DEFAULT_SHADOWS :: Shadows {
+	distance = {value = SHADOW_DISTANCE},
+	split_lambda = {value = SHADOW_SPLIT_LAMBDA},
+}
+
+// Shadow_Settings are a frame's cascades, from the Shadows settings. Zero gives the defaults.
+Shadow_Settings :: struct {
+	distance:     f32,
+	split_lambda: f32,
+}
 
 // Fog_Settings are a frame's fog, from the Fog settings. A density of 0 is no fog.
 Fog_Settings :: struct {
@@ -137,6 +157,7 @@ Frame_Settings :: struct {
 	ambient_occlusion: Ao_Settings,
 	gi:                Gi_Settings,
 	fog:               Fog_Settings,
+	shadows:           Shadow_Settings,
 	// The world pass clears the scene to this, which is not pre-exposed.
 	background:        [3]f32,
 	ambient:           Ambient,
@@ -153,6 +174,7 @@ register_settings_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Global_Illumination, GLOBAL_ILLUMINATION_ID)
 	ecs.register_component(r, Environment, ENVIRONMENT_ID)
 	ecs.register_component(r, Fog, FOG_ID)
+	ecs.register_component(r, Shadows, SHADOWS_ID)
 }
 
 // resolve_settings takes the frame's settings from the volumes at a position, usually the camera's, leaving out the
@@ -167,6 +189,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 	gi, _ := volume.blend(w, &inf, Global_Illumination, Global_Illumination{})
 	env, _ := volume.blend(w, &inf, Environment, DEFAULT_ENVIRONMENT)
 	fog, _ := volume.blend(w, &inf, Fog, DEFAULT_FOG)
+	shadows, _ := volume.blend(w, &inf, Shadows, DEFAULT_SHADOWS)
 	return {
 		post = {
 			no_temporal_aa = aa.off.value,
@@ -193,6 +216,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 			height_falloff = fog.height_falloff.value,
 			anisotropy = fog.anisotropy.value,
 		},
+		shadows = {distance = shadows.distance.value, split_lambda = shadows.split_lambda.value},
 		background = env.background.value,
 		ambient = {sky = env.sky.value, ground = env.ground.value},
 		effects = resolve_effects(r, w, &inf),

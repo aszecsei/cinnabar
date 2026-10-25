@@ -57,7 +57,7 @@ Renderer :: struct {
 	materials:       Materials,
 	scene:           Gpu_Scene,
 	lights:          Lights,
-	shadows:         Shadows,
+	shadows:         Shadow_Passes,
 	previews:        Previews,
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
@@ -134,6 +134,8 @@ Frame :: struct {
 	view:                     View,
 	size:                     [2]u32,
 	debug_view:               Debug_View,
+	// The directional lights' cascades (see Shadows).
+	shadow_settings:          Shadow_Settings,
 	// How the frame target reaches the display (see docs/rendering.md#hdr-output).
 	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
@@ -329,6 +331,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if !debug_view_shaded(desc.debug_view) {
 		f.post.raw, f.post.exposure, f.post.exposure_auto = true, false, false
 	}
+	f.shadow_settings = settings.shadows
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {

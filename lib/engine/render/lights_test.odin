@@ -36,6 +36,9 @@ cascades_split_between_even_and_exponential :: proc(t: ^testing.T) {
 	testing.expect(t, abs(splits[SHADOW_CASCADES - 1] - SHADOW_DISTANCE) < 1e-3)
 	// The first cascade is nearer than an even split's, so near shadows get more texels.
 	testing.expect(t, splits[0] < SHADOW_DISTANCE / SHADOW_CASCADES)
+	// A volume's Shadows set the reach and the split: evenly, the cascades are a quarter each.
+	even := cascade_splits(0.1, 40, 1e-6)
+	testing.expect(t, abs(even[0] - (0.1 + 39.9 / 4)) < 1e-3 && abs(even[SHADOW_CASCADES - 1] - 40) < 1e-3)
 }
 
 @(private = "file")
