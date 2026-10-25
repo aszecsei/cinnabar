@@ -46,13 +46,15 @@ sealed class FieldEditor : IFieldEditor
     readonly string _label;
     readonly EditKind _kind;
     readonly Func<ulong, SceneValue?, Operation> _operation;
+    // For a volume's setting, the operation that sets its override flag, or with null, removes it, so the value overrides.
+    readonly Func<ulong, SceneValue?, Operation>? _flag;
     readonly ulong[] _entities;
     readonly SceneValue?[] _currents;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
     SceneValue?[]? _starts;
 
-    FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null)
+    FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null)
     {
         _shell = shell;
         _entities = entities;
@@ -60,6 +62,7 @@ sealed class FieldEditor : IFieldEditor
         _label = label;
         _kind = kind;
         _operation = operation;
+        _flag = flag;
         _range = range;
         _enum = enumValues ?? [];
         Options = [.. _enum.Select(v => FieldValues.Humanize(v.Name))];
@@ -92,22 +95,26 @@ sealed class FieldEditor : IFieldEditor
             return null;
         }
         Operation Set(ulong id, SceneValue? v) => new SetField(id, component, field.Name, v);
+        Func<ulong, SceneValue?, Operation>? flag = field.HasOverride ? (id, v) => new SetField(id, component, field.Name + OverrideSuffix, v) : null;
         var label = $"Set {FieldValues.Humanize(field.Name)}";
         return field.Kind switch
         {
-            FieldKind.Bool => new FieldEditor(shell, sceneIds, label, EditKind.Bool, Set),
-            FieldKind.F32 => new FieldEditor(shell, sceneIds, label, EditKind.F32, Set),
-            FieldKind.F64 => new FieldEditor(shell, sceneIds, label, EditKind.F64, Set),
-            FieldKind.Enum => new FieldEditor(shell, sceneIds, label, EditKind.Enum, Set, Range(field.EnumBase), field.EnumValues),
-            FieldKind.Vector2 => new FieldEditor(shell, sceneIds, label, EditKind.Vector2, Set),
-            FieldKind.Vector3 => new FieldEditor(shell, sceneIds, label, EditKind.Vector3, Set),
-            FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set),
-            FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set),
-            FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set),
-            FieldKind.Asset => new FieldEditor(shell, sceneIds, label, EditKind.Asset, Set),
-            _ => new FieldEditor(shell, sceneIds, label, EditKind.Integer, Set, Range(field.Kind)),
+            FieldKind.Bool => new FieldEditor(shell, sceneIds, label, EditKind.Bool, Set, flag: flag),
+            FieldKind.F32 => new FieldEditor(shell, sceneIds, label, EditKind.F32, Set, flag: flag),
+            FieldKind.F64 => new FieldEditor(shell, sceneIds, label, EditKind.F64, Set, flag: flag),
+            FieldKind.Enum => new FieldEditor(shell, sceneIds, label, EditKind.Enum, Set, Range(field.EnumBase), field.EnumValues, flag),
+            FieldKind.Vector2 => new FieldEditor(shell, sceneIds, label, EditKind.Vector2, Set, flag: flag),
+            FieldKind.Vector3 => new FieldEditor(shell, sceneIds, label, EditKind.Vector3, Set, flag: flag),
+            FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set, flag: flag),
+            FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set, flag: flag),
+            FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set, flag: flag),
+            FieldKind.Asset => new FieldEditor(shell, sceneIds, label, EditKind.Asset, Set, flag: flag),
+            _ => new FieldEditor(shell, sceneIds, label, EditKind.Integer, Set, Range(field.Kind), flag: flag),
         };
     }
+
+    /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world.md#volumes).</summary>
+    public const string OverrideSuffix = ".override";
 
     /// <summary>An editor for a behaviour's field, or null for a kind that the editor cannot set.</summary>
     public static FieldEditor? ForBehaviour(EditorShell shell, ulong sceneId, string script, BehaviourField field)
@@ -128,18 +135,41 @@ sealed class FieldEditor : IFieldEditor
 
     // One operation for each entity, with the value that each gets.
     Operation[] Operations(Func<SceneValue?, SceneValue?> value) =>
-        [.. _entities.Select((id, i) => (id, v: value(_currents[i]))).Where(x => x.v != null).Select(x => _operation(x.id, x.v))];
+        [.. _entities.Select((id, i) => (id, v: value(_currents[i]))).Where(x => x.v != null).SelectMany(x => Set(x.id, x.v!))];
 
-    Operation[] Operations(SceneValue value) => [.. _entities.Select(id => _operation(id, value))];
+    Operation[] Operations(SceneValue value) => [.. _entities.SelectMany(id => Set(id, value))];
+
+    // Setting a volume's setting overrides it, so the value that shows is the one in effect.
+    IEnumerable<Operation> Set(ulong id, SceneValue value) =>
+        _flag == null ? [_operation(id, value)] : [_operation(id, value), _flag(id, null)];
 
     /// <summary>
     /// Sets the field of every entity to the value that it has, so the scene sets it: for a volume's setting, the
-    /// volume then overrides it (see docs/world.md#volumes).
+    /// volume then overrides it with the value that it kept, or its default (see docs/world.md#volumes).
     /// </summary>
     public void Override() => _shell.Edit($"Override {_label["Set ".Length..]}", Operations(current => current));
 
-    /// <summary>Resets the field of every entity, so the scene no longer sets it.</summary>
-    public void Reset() => _shell.Edit($"Reset {_label["Set ".Length..]}", [.. _entities.Select(id => _operation(id, null))]);
+    /// <summary>
+    /// For a volume's setting, stops overriding it in every entity and keeps its value, so overriding it again brings
+    /// that back.
+    /// </summary>
+    public void StopOverriding()
+    {
+        if (_flag is { } flag)
+        {
+            _shell.Edit($"Stop Overriding {_label["Set ".Length..]}", [.. _entities.Select(id => flag(id, SceneValue.Of(false)))]);
+        }
+    }
+
+    /// <summary>
+    /// Resets the field of every entity, so the scene no longer sets it: a volume's setting goes back to its default,
+    /// not overridden.
+    /// </summary>
+    public void Reset() => _shell.Edit($"Reset {_label["Set ".Length..]}", [.. _entities.SelectMany(Unset)]);
+
+    // The flag first, so the value's reset, which clears it, comes last.
+    IEnumerable<Operation> Unset(ulong id) =>
+        _flag == null ? [_operation(id, null)] : [_flag(id, null), _operation(id, null)];
 
     static (Int128, Int128) Range(FieldKind kind) => kind switch
     {
@@ -296,7 +326,7 @@ sealed class FieldEditor : IFieldEditor
             EditKind.Position => Moved(start, axis, m => m + pixels * MeterStep * scale),
             _ => null,
         };
-        var ops = _entities.Select((id, i) => Value(starts[i]!) is { } v ? _operation(id, v) : null).OfType<Operation>().ToList();
+        var ops = _entities.SelectMany((id, i) => Value(starts[i]!) is { } v ? Set(id, v) : []).ToList();
         if (ops.Count > 0)
         {
             _shell.PreviewEdit(ops);

@@ -37,21 +37,19 @@ Post_Effect :: struct {
 	order:     i32,
 	component: ecs.Component_Id,
 	type:      ^runtime.Type_Info,
-	defaults:  [ecs.MAX_COMPONENT_SIZE]byte,
 	add:       Post_Effect_Proc,
 }
 
 // register_post_effect adds an effect that runs at a point, after the effects there with a lower order, and those with
-// the same order registered before it. T is its settings component, registered in the world, and defaults its settings
-// with the defaults that 0 stands for, which volumes blend from. The effect runs only where a volume with T reaches the
-// camera. Call it after renderer_init and after renderer_reload.
-register_post_effect :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, $T: typeid, defaults: T, add: Post_Effect_Proc, order: i32 = 0) -> bool {
-	d := defaults
-	return register_post_effect_raw(r, w, name, point, type_info_of(T), &d, add, order)
+// the same order registered before it. T is its settings component, registered in the world with the defaults that
+// volumes blend from (see ecs.register_component). The effect runs only where a volume with T reaches the camera. Call
+// it after renderer_init and after renderer_reload.
+register_post_effect :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, $T: typeid, add: Post_Effect_Proc, order: i32 = 0) -> bool {
+	return register_post_effect_raw(r, w, name, point, type_info_of(T), add, order)
 }
 
-// register_post_effect_raw is register_post_effect with the settings' type and defaults as runtime values.
-register_post_effect_raw :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, type: ^runtime.Type_Info, defaults: rawptr, add: Post_Effect_Proc, order: i32 = 0) -> bool {
+// register_post_effect_raw is register_post_effect with the settings' type as a runtime value.
+register_post_effect_raw :: proc(r: ^Renderer, w: ^ecs.World, name: string, point: Post_Point, type: ^runtime.Type_Info, add: Post_Effect_Proc, order: i32 = 0) -> bool {
 	info := ecs.registry_find_type(&w.registry, type.id)
 	if info == nil {
 		log.errorf("render: the post effect %q's settings %v are not a registered component", name, type.id)
@@ -63,7 +61,6 @@ register_post_effect_raw :: proc(r: ^Renderer, w: ^ecs.World, name: string, poin
 	}
 	e := &r.effects[r.effect_count]
 	e^ = {name = name, point = point, order = order, component = info.id, type = type, add = add}
-	mem.copy(&e.defaults, defaults, type.size)
 	r.effect_count += 1
 	// Stable, so effects with the same order keep their registration order.
 	slice.stable_sort_by(r.effects[:r.effect_count], proc(a, b: Post_Effect) -> bool {
@@ -86,7 +83,7 @@ resolve_effects :: proc(r: ^Renderer, w: ^ecs.World, inf: ^volume.Influences) ->
 		if err != nil {
 			continue
 		}
-		if volume.blend_raw(w, inf, e.component, e.type, &e.defaults, data) {
+		if volume.blend_raw(w, inf, e.component, data) {
 			out[i].settings = data
 		}
 	}

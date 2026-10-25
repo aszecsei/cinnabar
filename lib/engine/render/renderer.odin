@@ -341,10 +341,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	assign_shadows(f)
 	upload_lights(f)
-	ambient := settings.ambient == {} ? DEFAULT_AMBIENT : settings.ambient
 	begin_fog(f, settings.fog)
-	begin_gi(f, settings.gi, ambient)
-	add_scene_passes(f, ambient)
+	begin_gi(f, settings.gi, settings.ambient)
+	add_scene_passes(f, settings.ambient)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
 

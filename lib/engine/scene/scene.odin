@@ -4,6 +4,7 @@
 package scene
 
 import "core:fmt"
+import "core:hash"
 import "core:log"
 import "core:mem"
 
@@ -13,6 +14,10 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
 SCENE_ENTITY_ID :: ecs.Component_Id(8)
+
+// A volume setting's override flag is a field of its own in a scene, <field>.override, which only false needs: a
+// scene that sets the setting overrides it, unless it also sets the flag to false (see docs/world.md#volumes).
+OVERRIDE_SUFFIX :: ".override"
 
 // Scene_Entity marks an entity that a scene made, with its scene ID. Entities that the game spawns have none.
 Scene_Entity :: struct {
@@ -51,10 +56,10 @@ load_asset :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Asset
 // the world cannot use, such as a component that the game no longer registers or a field that it no longer has, is
 // skipped with a warning: the scene keeps it, so a broken build never deletes scene data.
 //
-// Fields that a scene does not set are zero. Previous_Transform starts equal to Transform, so nothing interpolates
-// from where the old world was. The behaviours wake in the next script phase. scripts can be nil, and then the
-// behaviours are skipped. handles, if given, is cleared and gets the entity of each scene ID. problems, if given,
-// gets each warning, in frame memory.
+// Fields that a scene does not set have the component's registered defaults, or are zero. Previous_Transform starts
+// equal to Transform, so nothing interpolates from where the old world was. The behaviours wake in the next script
+// phase. scripts can be nil, and then the behaviours are skipped. handles, if given, is cleared and gets the entity of
+// each scene ID. problems, if given, gets each warning, in frame memory.
 load :: proc(w: ^ecs.World, scripts: ^script.Runtime, s: format.Scene, handles: ^map[u64]ecs.Entity = nil, problems: ^[dynamic]Problem = nil) {
 	ecs.despawn_all(w)
 	local: map[u64]ecs.Entity
@@ -146,9 +151,13 @@ add_component :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, c: format.Scen
 	return added
 }
 
-// set_field sets one field of a component of the entity with scene ID id, or with reset, zeroes it, as a scene
-// without the field would leave it. It returns false, with a problem, when the entity has no such component or
-// field, or the value does not fit.
+// set_field sets one field of a component of the entity with scene ID id, or with reset, sets it back to its default,
+// as a scene without the field would leave it. It returns false, with a problem, when the entity has no such component
+// or field, or the value does not fit.
+//
+// For a volume's setting, setting the value leaves its override flag as it is, and a reset clears the flag. The flag
+// itself is the field <field>.override: setting it sets the flag, and a reset sets it to true, as a scene without the
+// line that sets the value has it. The editor sends the value and the flag together.
 set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f: format.Scene_Field, reset: bool, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> bool {
 	l := loader(w, handles, problems)
 	l.entity = id
@@ -158,21 +167,31 @@ set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f:
 		warn(&l, "it has no component %d, so its field %s is not set", component, f.name)
 		return false
 	}
-	field := find_field(&l, info, f.hash)
+	field, is_flag := find_field(&l, info, f.hash)
 	if field == nil {
 		warn(&l, "%s has no field %s, so it is not set", info.name, f.name)
 		return false
 	}
-	dst := rawptr(uintptr(data) + uintptr(field.offset))
-	if reset {
-		zero_field(dst, field^)
-	} else if expected := write_field(&l, dst, field^, f.value); expected != "" {
-		warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
-		return false
-	}
-	// A setting that the scene sets is overridden, and a reset one is not.
-	if field.has_override {
-		(^bool)(uintptr(data) + uintptr(field.override_offset))^ = !reset
+	flag := (^bool)(uintptr(data) + uintptr(field.override_offset))
+	switch {
+	case is_flag && reset:
+		flag^ = true
+	case is_flag:
+		if f.value.kind != .Bool {
+			warn(&l, "%s.%s takes true or false, so it is not set", info.name, f.name)
+			return false
+		}
+		flag^ = f.value.ints[0] != 0
+	case reset:
+		reset_field(data, ecs.registry_defaults(&w.registry, info), field^)
+		if field.has_override {
+			flag^ = false
+		}
+	case:
+		if expected := write_field(&l, rawptr(uintptr(data) + uintptr(field.offset)), field^, f.value); expected != "" {
+			warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
+			return false
+		}
 	}
 	if ecs.Component_Id(component) == ecs.TRANSFORM_ID {
 		settle(w, entity)
@@ -237,19 +256,24 @@ warn :: proc(l: ^Loader, message: string, args: ..any) {
 	}
 }
 
+// find_field finds the field whose name has the hash, or the volume setting whose override flag it is.
 @(private = "file")
-find_field :: proc(l: ^Loader, info: ^ecs.Component_Info, hash: u64) -> ^Field {
+find_field :: proc(l: ^Loader, info: ^ecs.Component_Info, name_hash: u64) -> (field: ^Field, is_flag: bool) {
 	fields, known := l.fields[info.id]
 	if !known {
 		fields = component_fields(info.type, l.world.platform.frame_allocator)
 		l.fields[info.id] = fields
 	}
 	for &candidate in fields {
-		if format.scene_field_hash(candidate.name) == hash {
-			return &candidate
+		h := format.scene_field_hash(candidate.name)
+		if h == name_hash {
+			return &candidate, false
+		}
+		if candidate.has_override && hash.fnv64a(transmute([]byte)string(OVERRIDE_SUFFIX), h) == name_hash {
+			return &candidate, true
 		}
 	}
-	return nil
+	return nil, false
 }
 
 @(private = "file")
@@ -265,16 +289,30 @@ add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Compone
 		return false
 	}
 	data := make([]byte, info.size, l.world.platform.frame_allocator)
-	for f in c.fields {
-		field := find_field(l, info, f.hash)
-		if field == nil {
-			warn(l, "%s has no field %s, so it is skipped", info.name, f.name)
-			continue
-		}
-		if expected := write_field(l, raw_data(data[field.offset:]), field^, f.value); expected != "" {
-			warn(l, "%s.%s takes %s, so it is skipped", info.name, f.name, expected)
-		} else if field.has_override {
-			data[field.override_offset] = 1
+	if defaults := ecs.registry_defaults(&l.world.registry, info); defaults != nil {
+		mem.copy(raw_data(data), defaults, info.size)
+	}
+	// The values first: a setting that the scene sets is overridden, unless its flag, in any order, says otherwise.
+	for is_flags in ([2]bool{false, true}) {
+		for f in c.fields {
+			field, is_flag := find_field(l, info, f.hash)
+			switch {
+			case field == nil:
+				if !is_flags {
+					warn(l, "%s has no field %s, so it is skipped", info.name, f.name)
+				}
+			case is_flag != is_flags:
+			case is_flag && f.value.kind != .Bool:
+				warn(l, "%s.%s takes true or false, so it is skipped", info.name, f.name)
+			case is_flag:
+				data[field.override_offset] = u8(f.value.ints[0] != 0)
+			case:
+				if expected := write_field(l, raw_data(data[field.offset:]), field^, f.value); expected != "" {
+					warn(l, "%s.%s takes %s, so it is skipped", info.name, f.name, expected)
+				} else if field.has_override {
+					data[field.override_offset] = 1
+				}
+			}
 		}
 	}
 	ecs.add_raw(l.world, entity, id, data)
@@ -368,32 +406,40 @@ write_field :: proc(l: ^Loader, dst: rawptr, field: Field, v: format.Scene_Value
 	return ""
 }
 
-// zero_field zeroes a field's bytes.
+// reset_field sets a field of a component's data back to its bytes in the component's defaults, or zeroes it without.
 @(private = "file")
-zero_field :: proc(dst: rawptr, field: Field) {
-	size: int
+reset_field :: proc(data, defaults: rawptr, field: Field) {
+	dst := rawptr(uintptr(data) + uintptr(field.offset))
+	if defaults != nil {
+		mem.copy(dst, rawptr(uintptr(defaults) + uintptr(field.offset)), field_size(field))
+	} else {
+		mem.zero(dst, field_size(field))
+	}
+}
+
+@(private = "file")
+field_size :: proc(field: Field) -> int {
 	switch field.kind {
 	case .Bool, .I8, .U8:
-		size = 1
+		return 1
 	case .I16, .U16:
-		size = 2
+		return 2
 	case .I32, .U32, .F32:
-		size = 4
+		return 4
 	case .I64, .U64, .F64, .Entity, .Vector2:
-		size = 8
+		return 8
 	case .Enum:
-		zero_field(dst, Field{kind = field.enum_base})
-		return
+		return field_size(Field{kind = field.enum_base})
 	case .Vector3:
-		size = 12
+		return 12
 	case .Quaternion:
-		size = 16
+		return 16
 	case .Position:
-		size = 24
+		return 24
 	case .Asset:
-		size = size_of(format.Guid)
+		return size_of(format.Guid)
 	}
-	mem.zero(dst, size)
+	return 0
 }
 
 // put_integer writes an integer of the kind, and returns false, writing nothing, if it does not fit. A u64 beyond

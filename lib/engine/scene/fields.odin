@@ -60,8 +60,8 @@ Field :: struct {
 	// From the struct tag editor:"color", for a Vector3 that holds a linear color.
 	color:           bool,
 	// A setting that a volume can override (see docs/world.md#volumes): a struct of exactly override: bool and
-	// value: T. The field is the value, and override_offset is where its override flag is. A scene that sets the field
-	// sets the flag, and a reset clears it.
+	// value: T. The field is the value, and override_offset is where its override flag is, which a scene sets as
+	// <name>.override (see OVERRIDE_SUFFIX). A scene that sets the field sets the flag, unless it sets that to false.
 	has_override:    bool,
 	override_offset: u32,
 	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", as the cook link names
