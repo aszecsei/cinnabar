@@ -334,7 +334,7 @@ draw_preview :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 	gpu.cmd_set_pass_constants(cb, pf.constants)
 	if pass == .Forward {
 		white := gpu.read_index(pf.renderer.materials.defaults[.White])
-		push := Material_Push{shadow_atlas = white, shadow_mask = white}
+		push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white}
 		gpu.cmd_push_constants(cb, &push)
 	}
 	gpu.cmd_draw_indirect(cb, gpu_buffer(ctx.graph, pf.arguments), 0, pf.draw_count)

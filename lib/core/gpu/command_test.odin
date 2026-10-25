@@ -871,6 +871,16 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad.usage = {.Streamed}
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
 
+	// A 3D texture is only sampled and written in shaders, with one mip.
+	volume := Texture_Desc{size = {16, 8}, depth = 4, format = .RGBA16_Float, usage = {.Sampled, .Storage}}
+	testing.expect_value(t, validate_texture_desc(volume, nil), Desc_Error.None)
+	bad = volume
+	bad.usage += {.Render_Target}
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
+	bad = volume
+	bad.mip_count = 2
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Mip_Count)
+
 	data := make([]byte, mip_chain_size(streamed), allocator)
 	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
 	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)

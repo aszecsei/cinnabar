@@ -9,21 +9,27 @@
 // Match CLUSTER_TILE and CLUSTER_SLICES in lib/engine/render/lights.odin.
 static const uint CLUSTER_TILE = 64;
 static const uint CLUSTER_SLICES = 32;
+// Matches FOG_SLICES in lib/engine/render/fog.odin: the fog volume halves each of the clusters' depth slices.
+static const uint FOG_SLICES = CLUSTER_SLICES * 2;
 
 Light_Record load_light(uint index) {
 	return cn_buffer(frame.lights).Load<Light_Record>(frame.lights_offset + index * sizeof(Light_Record));
+}
+
+// cluster_at is the cluster of a point at a view depth.
+uint cluster_at(float3 p, float depth) {
+	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
+	float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
+	uint2 tile = min(uint2(max(pixel, 0)) / CLUSTER_TILE, uint2(frame.cluster_columns, frame.cluster_rows) - 1);
+	uint slice = uint(clamp(log2(depth) * frame.slice_scale + frame.slice_bias, 0, CLUSTER_SLICES - 1));
+	return (slice * frame.cluster_rows + tile.y) * frame.cluster_columns + tile.x;
 }
 
 // cluster_of is the cluster of a point: its tile of the screen as the camera's projection places it, and the depth
 // slice of its view depth, which slices exponentially from the near plane. The view model's pixels are elsewhere on the
 // screen than the camera's projection would place their points, so the tile comes from the point, not the pixel.
 uint cluster_of(float3 p, float4 position) {
-	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
-	float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
-	uint2 tile = min(uint2(max(pixel, 0)) / CLUSTER_TILE, uint2(frame.cluster_columns, frame.cluster_rows) - 1);
-	float depth = frame.near / max(position.z, 1e-7);
-	uint slice = uint(clamp(log2(depth) * frame.slice_scale + frame.slice_bias, 0, CLUSTER_SLICES - 1));
-	return (slice * frame.cluster_rows + tile.y) * frame.cluster_columns + tile.x;
+	return cluster_at(p, frame.near / max(position.z, 1e-7));
 }
 
 float4 shadow_clip(Shadow_View view, float3 p) {
@@ -61,25 +67,21 @@ float shadow_map(uint view_index, float3 p, float3 normal) {
 	return lit * 0.25;
 }
 
-// light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1.
-float light_shadow(Light_Record light, float3 p, float3 normal, float4 position) {
-	if (light.mask >= 0) {
-		return cn_texture(push.shadow_mask).Load(int3(position.xy, 0))[light.mask];
-	}
+// shadow_view is the shadow map view of a light at a point at a view depth, or -1 for none: a directional light's first
+// cascade that reaches the depth, none beyond the last, or a point light's cube face.
+int shadow_view(Light_Record light, float3 p, float depth) {
 	if (light.shadow < 0) {
-		return 1;
+		return -1;
 	}
-	uint view = uint(light.shadow);
+	int view = light.shadow;
 	switch (light.type) {
 	case LIGHT_DIRECTIONAL: {
-		// The first cascade that reaches the point's depth; beyond the last, no shadow.
-		float depth = frame.near / max(position.z, 1e-7);
-		uint cascade = 0;
+		int cascade = 0;
 		[unroll] for (uint c = 0; c < 4; c++) {
 			cascade += depth > frame.cascade_splits[c] ? 1 : 0;
 		}
 		if (cascade >= 4) {
-			return 1;
+			return -1;
 		}
 		view += cascade;
 		break;
@@ -88,17 +90,26 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float4 position)
 		// The cube face of the direction from the light: +x, -x, +y, -y, +z, -z.
 		float3 d = p - light.position;
 		float3 a = abs(d);
-		uint face = a.x >= a.y && a.x >= a.z ? (d.x >= 0 ? 0 : 1) : (a.y >= a.z ? (d.y >= 0 ? 2 : 3) : (d.z >= 0 ? 4 : 5));
+		int face = a.x >= a.y && a.x >= a.z ? (d.x >= 0 ? 0 : 1) : (a.y >= a.z ? (d.y >= 0 ? 2 : 3) : (d.z >= 0 ? 4 : 5));
 		view += face;
 		break;
 	}
 	}
-	return shadow_map(view, p, normal);
+	return view;
 }
 
-// light_at is one light as it reaches a point: the direction toward it, and its light there after its falloff and
-// its shadow. A punctual light falls off with the square of the distance, windowed to 0 at its range.
-Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
+// light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1.
+float light_shadow(Light_Record light, float3 p, float3 normal, float4 position) {
+	if (light.mask >= 0) {
+		return cn_texture(push.shadow_mask).Load(int3(position.xy, 0))[light.mask];
+	}
+	int view = shadow_view(light, p, frame.near / max(position.z, 1e-7));
+	return view < 0 ? 1 : shadow_map(uint(view), p, normal);
+}
+
+// light_falloff is one light as it reaches a point, before its shadow: the direction toward it, and its light there.
+// A punctual light falls off with the square of the distance, windowed to 0 at its range.
+Light light_falloff(Light_Record l, float3 p) {
 	Light light;
 	if (l.type == LIGHT_DIRECTIONAL) {
 		light.direction = -l.direction;
@@ -115,6 +126,12 @@ Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
 		}
 		light.color = l.color * falloff;
 	}
+	return light;
+}
+
+// light_at is one light as it reaches a point, after its falloff and its shadow.
+Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
+	Light light = light_falloff(l, p);
 	if (any(light.color > 0) && dot(normal, light.direction) > 0) {
 		light.color *= light_shadow(l, p, normal, position);
 	}

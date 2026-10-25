@@ -1,6 +1,6 @@
 # The scene that mygame loads at start: the camera, the two large triangles, two meshes of models/shapes.gltf over a
-# ground, a sun, a point light and a spot light that cast shadows, and a long rod held by the camera as its view model,
-# which reaches through the triangles but draws over them. Positions are raw World_Position values in units of 2^-24 m,
+# ground, a sun, a point light and a spot light that cast shadows, low fog, and a long rod held by the camera as its
+# view model, which reaches through the triangles but draws over them. Positions are raw World_Position values in units of 2^-24 m,
 # so 2516582400000000000 is 1.5e11 m. The editor writes this file; see docs/editor.md#scenes.
 scene 1
 
@@ -88,6 +88,17 @@ component 33 Mesh_Renderer
 	cast_shadows = true
 component 1001 Spin
 	speed = 0.6
+
+entity b3f1c2d4e5a69788
+name = "Fog"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 38 Fog
+	density = 0.12
+	height_falloff = 0.8
+	anisotropy = 0.6
 
 entity d27d73a73aa143ec
 name = "Point Light"

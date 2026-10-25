@@ -431,7 +431,8 @@ add_post_passes :: proc(f: ^Frame) {
 	}
 }
 
-@(private = "file")
+// groups is the thread groups of a dispatch over a size.
+@(private)
 groups :: proc(size: [2]u32, group: u32) -> [3]u32 {
 	return {(size.x + group - 1) / group, (size.y + group - 1) / group, 1}
 }

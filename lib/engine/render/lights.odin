@@ -250,7 +250,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 }
 
 // light_pose is a light's presented pose, unless its entity is hidden.
-@(private = "file")
+@(private)
 light_pose :: proc(w: ^ecs.World, view: ecs.Chunk_View, i: int, hidden: []u32, e: ecs.Entity) -> (pose: ecs.Transform, ok: bool) {
 	if is_hidden(hidden, e) {
 		return

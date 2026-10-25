@@ -12,6 +12,7 @@ DIRECTIONAL_LIGHT_ID :: ecs.Component_Id(34)
 POINT_LIGHT_ID :: ecs.Component_Id(35)
 SPOT_LIGHT_ID :: ecs.Component_Id(36)
 VIEW_MODEL_ID :: ecs.Component_Id(37)
+FOG_ID :: ecs.Component_Id(38)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -74,6 +75,20 @@ Spot_Light :: struct {
 	cast_shadows: bool,
 }
 
+// Fog fills the world with volumetric fog (see docs/rendering.md#volumetric-fog): the frame takes the first visible
+// entity's. Its density is the share of light that a meter of fog takes away, at and below its entity's height, and
+// falls off above it. A density of 0 is no fog.
+Fog :: struct {
+	density:        f32 `editor:"range=0,1"`,
+	// The share of the light that the fog takes away that it scatters rather than absorbs, per channel. 0 means white.
+	albedo:         [3]f32,
+	// How fast the density falls with height above the entity, per meter. 0 keeps it the same everywhere.
+	height_falloff: f32 `editor:"range=0,10"`,
+	// Where the fog scatters light: above 0 forward, so it glows around a light that the camera looks toward, and below
+	// 0 back toward the light.
+	anisotropy:     f32 `editor:"range=-0.9,0.9"`,
+}
+
 // register_components registers the render components. Call it with the engine's components, in init and on_reload.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Camera, CAMERA_ID)
@@ -82,6 +97,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)
 	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
 	ecs.register_component(r, View_Model, VIEW_MODEL_ID)
+	ecs.register_component(r, Fog, FOG_ID)
 }
 
 // camera_view is the view from a Camera entity: its presented pose, and its field of view and near plane. It fails if

@@ -57,6 +57,8 @@ Renderer :: struct {
 	lights:          Lights,
 	shadows:         Shadows,
 	previews:        Previews,
+	ao:              Ambient_Occlusion,
+	fog:             Volumetric_Fog,
 	post:            Post,
 	output_pipeline: Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
@@ -70,22 +72,24 @@ Renderer :: struct {
 
 // Frame_Desc is what a game gives draw_frame each frame. It lives in frame memory, and so do its hooks' data.
 Frame_Desc :: struct {
-	view:        View,
-	size:        [2]u32,
+	view:              View,
+	size:              [2]u32,
 	// Keeps the IDs and the depth after the frame's passes need them, for the editor's picking and outline.
-	keep_ids:    bool,
+	keep_ids:          bool,
 	// The entity slots not to draw, a bit each, as the editor hides them. nil hides nothing.
-	hidden:      []u32,
+	hidden:            []u32,
 	// Temporal AA, bloom, the exposure and the tone mapping (see docs/rendering.md#post-processing).
-	post:        Post_Settings,
+	post:              Post_Settings,
+	// See docs/rendering.md#ambient-occlusion. The fog is a component (see Fog).
+	ambient_occlusion: Ao_Settings,
 	// The world pass clears the scene to this, which is not pre-exposed.
-	clear_color: [4]f32,
+	clear_color:       [4]f32,
 	// The light from everything else until global illumination. Zero gives DEFAULT_AMBIENT.
-	ambient:     Ambient,
-	hooks:       Frame_Hooks,
+	ambient:           Ambient,
+	hooks:             Frame_Hooks,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering.md#material-previews). draw_frame sets each one's complete.
-	previews:    []Preview_Desc,
+	previews:          []Preview_Desc,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -134,6 +138,9 @@ Frame :: struct {
 	depth:                    Texture,
 	normals:                  Texture,
 	velocity:                 Texture,
+	// The ambient occlusion in r, which the forward pass reads, and the integrated fog volume: zero without them.
+	ambient_occlusion:        Texture,
+	fog_volume:               Texture,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:                       Texture,
 	debug:                    Texture,
@@ -146,6 +153,9 @@ Frame :: struct {
 	// The tone mapping lookup table (see LUT_SIZE).
 	lut:                      Texture,
 	post:                     ^Post_Frame,
+	ao:                       ^Ao_Frame,
+	// nil without fog.
+	fog:                      ^Fog_Frame,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -208,6 +218,8 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	lights_init(&r.lights, platform, w)
 	shadows_init(&r.shadows, platform)
 	previews_init(&r.previews, r)
+	ao_init(&r.ao)
+	fog_init(&r.fog, w)
 	post_init(&r.post, platform)
 	r.residency.accels = r.shadows.ray_query
 }
@@ -223,6 +235,7 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
 	lights_register(&r.lights, w)
+	fog_register(&r.fog, w)
 	r.reloaded = true
 	residency_reload(&r.residency, platform)
 	materials_reload(&r.materials)
@@ -237,6 +250,8 @@ renderer_destroy :: proc(r: ^Renderer) {
 	lights_destroy(&r.lights, r.platform)
 	shadows_destroy(&r.shadows, r.platform)
 	previews_destroy(&r.previews, r)
+	ao_destroy(&r.ao, r.platform)
+	fog_destroy(&r.fog, r.platform)
 	post_destroy(&r.post, r.platform)
 	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
@@ -272,6 +287,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.lights = extract_lights(f, w, desc.hidden)
 	assign_shadows(f)
 	upload_lights(f)
+	begin_fog(f, w, desc.hidden)
 	add_scene_passes(f, desc.ambient == {} ? DEFAULT_AMBIENT : desc.ambient)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
@@ -291,14 +307,17 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.after_prepass != nil {
 		desc.hooks.after_prepass(f)
 	}
+	add_ao_passes(f, desc.ambient_occlusion)
 	add_cluster_passes(f)
 	add_shadow_passes(f)
+	add_fog_passes(f)
 
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, desc.clear_color)
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids ? .Store : .Discard)
-	// The debug layer tests against the depth, the editor reads it, and so do temporal AA and the exposure.
-	depth(&g, p, f.depth, .Load, store = desc.keep_ids || has_debug || reads_depth(f) ? .Store : .Discard)
+	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, temporal AA
+	// and the exposure.
+	depth(&g, p, f.depth, .Load, store = desc.keep_ids || has_debug || f.fog != nil || reads_depth(f) ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	read(&g, p, f.exposure)
 	if f.lights.clustered {
@@ -311,9 +330,16 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if f.shadows.mask != 0 {
 		read(&g, p, f.shadows.mask)
 	}
+	if f.ambient_occlusion != 0 {
+		read(&g, p, f.ambient_occlusion)
+	}
+	if f.fog_volume != 0 {
+		read(&g, p, f.fog_volume)
+	}
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
+	add_fog_background(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
 	}
@@ -380,6 +406,8 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 	assets := r.residency.assets
 	sync_graphics_pipeline(&r.output_pipeline, r.platform, assets, {.Vertex, .Pixel}, OUTPUT_PIPELINE, force)
 	sync_post_pipelines(r, force)
+	sync_ao_pipelines(r, force)
+	sync_fog_pipelines(r, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
 		depth_format = DEPTH_FORMAT,

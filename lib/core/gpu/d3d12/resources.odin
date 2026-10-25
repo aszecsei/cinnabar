@@ -240,10 +240,10 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		Type = .DEFAULT,
 	}
 	resource_desc := d3d.RESOURCE_DESC1 {
-		Dimension        = .TEXTURE2D,
+		Dimension        = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
 		Width            = u64(desc.size.x),
 		Height           = desc.size.y,
-		DepthOrArraySize = 1,
+		DepthOrArraySize = u16(max(desc.depth, 1)),
 		MipLevels        = u16(stored.mip_count),
 		Format           = resource_format(desc.format),
 		SampleDesc       = {Count = 1},
@@ -304,6 +304,10 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 			Shader4ComponentMapping = d3d.DEFAULT_SHADER_4_COMPONENT_MAPPING,
 		}
 		srv.Texture2D.MipLevels = desc.mip_count
+		if desc.depth > 0 {
+			srv.ViewDimension = .TEXTURE3D
+			srv.Texture3D = {MipLevels = 1}
+		}
 		dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.texture_read_index(texture)))
 		// The stencil plane's view takes the write slot, which a depth texture does not use (see gpu.stencil_index).
 		if gpu.has_stencil(desc.format) {
@@ -316,6 +320,10 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		uav := d3d.UNORDERED_ACCESS_VIEW_DESC {
 			Format        = view_format(desc.format),
 			ViewDimension = .TEXTURE2D,
+		}
+		if desc.depth > 0 {
+			uav.ViewDimension = .TEXTURE3D
+			uav.Texture3D = {WSize = desc.depth}
 		}
 		dev.device->CreateUnorderedAccessView(entry.resource, nil, &uav, resource_handle(gpu.texture_write_index(texture)))
 	}

@@ -72,14 +72,21 @@ Frame_Constants :: struct {
 	// The camera's jitter, which view_projection has, and the exposure buffer.
 	jitter:                   [2]f32,
 	exposure:                 u32,
+	// Whether Material_Push has the fog volume, its sampler, and the share of its width and height that the screen
+	// covers.
+	fog:                      u32,
+	fog_sampler:              u32,
+	fog_scale:                [2]f32,
 	padding:                  u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
-// frame records.
+// frame records. ambient_occlusion is white without it, and fog is read only when Frame_Constants.fog says so.
 Material_Push :: struct {
-	shadow_atlas: u32,
-	shadow_mask:  u32,
+	shadow_atlas:      u32,
+	shadow_mask:       u32,
+	ambient_occlusion: u32,
+	fog:               u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -166,7 +173,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 400)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 416)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -386,17 +393,21 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
 		s.previous_view_model = view_model
 	}
-	if len(sf.items) == 0 {
+	// The fog's injection reads the camera's constants, so they are written without draws too.
+	has_items := len(sf.items) > 0
+	if !has_items && f.fog == nil {
 		return
 	}
 	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
-	ensure_draw_buffers(r, len(sf.items) * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
-	zeros := make([]byte, len(sf.bin_pipelines) * sf.view_count * 4, platform.frame_allocator)
 	ok: bool
-	sf.zero_upload, ok = upload_bytes(platform, zeros)
-	if !ok {
-		sf.items = nil
-		return
+	if has_items {
+		ensure_draw_buffers(r, len(sf.items) * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
+		zeros := make([]byte, len(sf.bin_pipelines) * sf.view_count * 4, platform.frame_allocator)
+		sf.zero_upload, ok = upload_bytes(platform, zeros)
+		if !ok {
+			sf.items = nil
+			return
+		}
 	}
 
 	camera_offset := ecs.position_sub(f.view.position, s.origin)
@@ -441,6 +452,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		screen_size              = {f32(f.size.x), f32(f.size.y)},
 		exposure                 = gpu.read_index(r.post.exposure),
 	}
+	if f.fog != nil {
+		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
+	}
 	if lf.clustered {
 		constants.clusters = gpu.read_index(r.lights.clusters)
 		constants.cluster_indices = gpu.read_index(r.lights.indices)
@@ -478,6 +492,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			return
 		}
 		(^Frame_Constants)(raw_data(sf.view_constants[v].data))^ = c
+	}
+	if !has_items {
+		return
 	}
 	view_upload: gpu.Upload
 	view_upload, ok = upload_bytes(platform, slice.to_bytes(views))
@@ -698,7 +715,13 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	push: Material_Push
 	if pass == .Forward {
 		white := gpu.read_index(f.renderer.materials.defaults[.White])
-		push = {shadow_atlas = white, shadow_mask = white}
+		push = {shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white}
+		if f.ambient_occlusion != 0 {
+			push.ambient_occlusion = gpu.read_index(gpu_texture(g, f.ambient_occlusion))
+		}
+		if f.fog_volume != 0 {
+			push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
+		}
 		if f.shadows.atlas != 0 {
 			push.shadow_atlas = gpu.read_index(gpu_texture(g, f.shadows.atlas))
 		}

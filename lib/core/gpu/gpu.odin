@@ -242,6 +242,9 @@ Texture_Usages :: bit_set[Texture_Usage;u8]
 // A texture created with data starts in the sampled layout. See initial_layout.
 Texture_Desc :: struct {
 	size:      [2]u32,
+	// A 3D texture's depth in texels. 0 means a 2D texture. A 3D texture has one mip and no data, and is only sampled
+	// and written in shaders.
+	depth:     u32,
 	format:    Format,
 	// 0 means 1.
 	mip_count: u32,

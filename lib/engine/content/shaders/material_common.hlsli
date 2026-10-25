@@ -61,17 +61,29 @@ struct Frame_Constants {
 	// The exposure that pre-exposes the scene's colors: the float at 0 of this buffer (see
 	// docs/rendering.md#post-processing).
 	uint exposure;
-	uint frame_padding;
+	// Whether the fog volume in Material_Push exists, the bilinear sampler that it is read with, and the share of the
+	// volume's width and height that the screen covers (see fog_at).
+	uint fog;
+	uint fog_sampler;
+	float2 fog_scale;
+	uint fog_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
-// passes record, so the forward pass pushes them. The shadow maps' atlas, and the ray-traced shadow mask.
+// passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient
+// occlusion in r, and the integrated fog volume (see docs/rendering.md#volumetric-fog). A compute pass that includes the
+// light loop defines MATERIAL_PUSH as its own push constants, which start with shadow_atlas and shadow_mask.
+#ifndef MATERIAL_PUSH
 struct Material_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
+	uint ambient_occlusion;
+	uint fog;
 };
-CN_PUSH_CONSTANTS(Material_Push, push);
+#define MATERIAL_PUSH Material_Push
+#endif
+CN_PUSH_CONSTANTS(MATERIAL_PUSH, push);
 
 // Matches Draw_Record in lib/engine/render/scene.odin: one indirect draw, by its draw ID. material is the byte offset
 // of the draw's parameter block in the material table.

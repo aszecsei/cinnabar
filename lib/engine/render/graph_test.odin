@@ -587,6 +587,49 @@ copies_order_with_their_readers :: proc(t: ^testing.T) {
 }
 
 @(test)
+compute_queue_reads_change_layouts_on_the_other_queue :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// Ambient occlusion's shape: the compute queue reads the prepass's depth, which the world pass then tests against.
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	scene_depth := create_texture(&g, {size = SIZE, format = .D32_Float, label = "depth"})
+	occlusion := create_texture(&g, {size = SIZE, format = .R16_Float, label = "occlusion"})
+	p := add_render_pass(&g, "prepass", nothing)
+	depth(&g, p, scene_depth, .Clear)
+	p = add_compute_pass(&g, "occlusion", nothing, queue = .Compute)
+	read(&g, p, scene_depth)
+	write(&g, p, occlusion)
+	p = add_render_pass(&g, "world", nothing)
+	depth(&g, p, scene_depth, .Load, store = .Discard)
+	read(&g, p, occlusion)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(subs), 3)
+	if len(subs) != 3 {
+		return
+	}
+	// The prepass leaves the depth readable after its work, since the compute queue cannot leave the depth layout.
+	prepass := inspect(subs[0].buffers[:], f.platform.frame_allocator)
+	testing.expect_value(t, len(prepass.textures), 2)
+	if len(prepass.textures) == 2 {
+		after := prepass.textures[1]
+		testing.expect_value(t, after.layout_before, gpu.Texture_Layout.Depth_Stencil_Write)
+		testing.expect_value(t, after.layout_after, gpu.Texture_Layout.Shader_Resource)
+	}
+	testing.expect_value(t, subs[1].wait_for, gpu.Queues{.Graphics})
+	testing.expect_value(t, subs[2].wait_for, gpu.Queues{.Compute})
+	for s in subs {
+		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
+	}
+}
+
+@(test)
 history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
 	f: Fixture

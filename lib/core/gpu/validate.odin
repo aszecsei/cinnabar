@@ -706,6 +706,14 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 	if desc.mip_count > mip_count(desc.size) {
 		return .Bad_Mip_Count
 	}
+	if desc.depth > 0 {
+		if desc.usage - {.Sampled, .Storage} != {} || is_block_format(desc.format) || data != nil {
+			return .Bad_Usage
+		}
+		if desc.mip_count > 1 {
+			return .Bad_Mip_Count
+		}
+	}
 	if data != nil && (.Sampled not_in desc.usage || len(data) != surface_size(desc.format, desc.size.x, desc.size.y)) {
 		return .Bad_Data_Size
 	}

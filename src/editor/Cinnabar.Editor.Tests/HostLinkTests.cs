@@ -163,7 +163,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == "Renamed"));
         Assert.Equal(
-            ["Box", "Camera", "Child", "Ground", "Icosphere", "Point Light", "Renamed", "Spot Light", "Sun", "View Model Rod"],
+            ["Box", "Camera", "Child", "Fog", "Ground", "Icosphere", "Point Light", "Renamed", "Spot Light", "Sun", "View Model Rod"],
             loaded.Entities.Select(e => e.Name).Order(StringComparer.Ordinal));
         var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
         Assert.Equal(front.Id, renamed.SceneId);
@@ -301,7 +301,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         editor.Link.Send(new RunGameCommand("mygame.world_report"));
         var report = await editor.Next<GameCommandResult>(r => r.Id == "mygame.world_report");
-        Assert.Contains("10 entities", report.Message);
+        Assert.Contains("11 entities", report.Message);
         Assert.Empty(report.Operations);
 
         // A command that edits sends operations by scene ID, and leaves the world as it is.
