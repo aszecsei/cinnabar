@@ -1,143 +1,128 @@
-# The scene that mygame loads at start: the camera, the two large triangles, two meshes of models/shapes.gltf over a
-# ground, a sun, a point light and a spot light that cast shadows, low fog, and a long rod held by the camera as its
-# view model, which reaches through the triangles but draws over them. Positions are raw World_Position values in units of 2^-24 m,
-# so 2516582400000000000 is 1.5e11 m. The editor writes this file; see docs/editor.md#scenes.
+# The scene that mygame loads at start: a Cornell box. A closed room 2 m wide and high and 3.65 m deep, white with a
+# red left wall and a green right wall, a tall box and a short one, and a quad light just under a glowing panel in the
+# ceiling. The camera is inside, and the room closes behind it, so the room fills the view. Positions are raw
+# World_Position values in units of 2^-24 m, so 2516582400000000000 is 1.5e11 m. The editor writes this file; see
+# docs/editor.md#scenes.
 scene 1
 
-entity 19aff7c6d7314d6a
-name = "Sun"
+entity 03928c3a696c52b2
+name = "Light Panel"
 component 1 Transform
-	position = [2516582400000000000, 33554432, 0]
-	rotation = [0.3574508, 0.203472, 0, 0.9114977]
-	scale = [1, 1, 1]
-component 34 Directional_Light
-	color = [1, 0.97, 0.9]
-	intensity = 3
-	cast_shadows = true
+	position = [2516582400000000000, 33470546, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [0.5, 0.01, 0.4]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $b0de249d5bae464988ec7b909fbcac41
 
 entity 1ce040845e87f2d4
 name = "Camera"
 component 1 Transform
-	position = [2516582400000000000, 0, -16777216]
+	position = [2516582400000000000, 16777216, -41104179]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 32 Camera
-	vertical_fov = 1.2217305
+	vertical_fov = 0.8726646
 	near = 0.05
-	view_model_fov = 0.9
-	view_model_near = 0.01
 
-entity 324276ba1ddc48f7
-name = "Ground"
+entity 294f29a7187efef1
+name = "Front Wall"
 component 1 Transform
-	position = [2516582400000000000, -8388608, 13421772]
+	position = [2516582400000000000, 16777216, -44879053]
 	rotation = [0, 0, 0, 1]
-	scale = [4, 0.04, 3]
+	scale = [2.1, 2.1, 0.05]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
 
-entity 37e9612990eb05d0
-name = "Front Triangle"
+entity 2db8fb9c8b30d338
+name = "Short Box"
 component 1 Transform
-	position = [2516582400000000000, 0, 6710886]
-	rotation = [0, 0, 0, 1]
-	scale = [1, 1, 1]
-component 4 Previous_Transform
-component 1001 Spin
-	speed = 1
-component 1002 Triangle
-	brightness = 3
-behaviour 7142e05b3941bc44849ed0379727e60b
-
-entity 5d3a8e17c9b04f62
-name = "Icosphere"
-component 1 Transform
-	position = [2516582399987417088, 1677722, 8388608]
-	rotation = [0, 0, 0, 1]
-	scale = [0.18, 0.18, 0.18]
-component 33 Mesh_Renderer
-	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-	cast_shadows = true
-
-entity 8c15900f0aab4d79
-name = "Back Triangle"
-component 1 Transform
-	position = [2516582400000000000, 0, 10066330]
-	rotation = [0, 0, 0, 1]
-	scale = [1.5, 1.5, 1.5]
-component 4 Previous_Transform
-component 1001 Spin
-	speed = -0.7
-component 1002 Triangle
-	brightness = 0.6
-behaviour 7142e05b3941bc44849ed0379727e60b
-	rate = 0.75
-
-entity a41c6f0e2b7d9358
-name = "Box"
-component 1 Transform
-	position = [2516582400012582912, -1677722, 8388608]
-	rotation = [0.2, 0.3, 0, 0.9327379]
-	scale = [0.25, 0.25, 0.25]
-component 4 Previous_Transform
+	position = [2516582400006710886, 5033165, -4194304]
+	rotation = [0, -0.1478094, 0, 0.9890159]
+	scale = [0.6, 0.6, 0.6]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f7eadea8bd278c0ae71b61b681352a82
-	cast_shadows = true
-component 1001 Spin
-	speed = 0.6
-
-entity b3f1c2d4e5a69788
-name = "Fog"
-component 1 Transform
-	position = [2516582400000000000, -8388608, 0]
-	rotation = [0, 0, 0, 1]
-	scale = [1, 1, 1]
-component 38 Fog
-	density = 0.12
-	height_falloff = 0.8
-	anisotropy = 0.6
-
-entity d27d73a73aa143ec
-name = "Point Light"
-component 1 Transform
-	position = [2516582399994966836, 4194304, 3355443]
-	rotation = [0, 0, 0, 1]
-	scale = [1, 1, 1]
-component 35 Point_Light
-	color = [1, 0.55, 0.25]
-	intensity = 0.3
-	range = 3
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
 
-entity d718b09dcc0e417c
-name = "Spot Light"
+entity 52f2b689117aa80c
+name = "Tall Box"
 component 1 Transform
-	position = [2516582400012582912, 13421772, 5033164]
-	rotation = [0.5786405, 0, 0, 0.8155827]
-	scale = [1, 1, 1]
-component 36 Spot_Light
-	color = [0.35, 0.6, 1]
-	intensity = 1.5
-	range = 4
-	inner_angle = 0.35
-	outer_angle = 0.5
-	cast_shadows = true
-
-entity fd425e3c5dd24547
-name = "View Model Rod"
-parent = @1ce040845e87f2d4
-component 1 Transform
-	position = [2516582400002382365, 768397, 486539]
-	rotation = [-0.0984, -0.0292, 0, 0.9947]
-	scale = [0.05, 0.05, 2]
-component 2 Local_Transform
-	offset = [0.142, 0.0458, 1.029]
-	rotation = [-0.0984, -0.0292, 0, 0.9947]
-	scale = [0.05, 0.05, 2]
+	position = [2516582399994127974, 10066330, 5872026]
+	rotation = [0, 0.1564345, 0, 0.9876883]
+	scale = [0.6, 1.2, 0.6]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
-component 37 View_Model
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 7820834ecb6da56e
+name = "Floor"
+component 1 Transform
+	position = [2516582400000000000, -419430, -13841203]
+	rotation = [0, 0, 0, 1]
+	scale = [2.1, 0.05, 3.75]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 8924777c300a5120
+name = "Ceiling Light"
+component 1 Transform
+	position = [2516582400000000000, 33302774, 0]
+	rotation = [0.7071068, 0, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 39 Quad_Light
+	color = [1, 0.85, 0.65]
+	intensity = 4
+	width = 0.5
+	height = 0.4
+	range = 6
+	cast_shadows = true
+
+entity 938af77bbcde9068
+name = "Left Wall"
+component 1 Transform
+	position = [2516582399982803354, 16777216, -13841203]
+	rotation = [0, 0, 0, 1]
+	scale = [0.05, 2.1, 3.75]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+
+entity c9b706a32c7d85e9
+name = "Back Wall"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 17196646]
+	rotation = [0, 0, 0, 1]
+	scale = [2.1, 2.1, 0.05]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity e866f298b9011e28
+name = "Right Wall"
+component 1 Transform
+	position = [2516582400017196646, 16777216, -13841203]
+	rotation = [0, 0, 0, 1]
+	scale = [0.05, 2.1, 3.75]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $0633d94a72554cf9947b0f8c9911055c
+	cast_shadows = true
+
+entity ef8d3faf035648e4
+name = "Ceiling"
+component 1 Transform
+	position = [2516582400000000000, 33973862, -13841203]
+	rotation = [0, 0, 0, 1]
+	scale = [2.1, 0.05, 3.75]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true

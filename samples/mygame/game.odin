@@ -54,10 +54,10 @@ Shadow_Mode :: enum u8 {
 	Pipeline,
 }
 
-// The large triangles come from content/scenes/main.scene: a bright one in front, and a larger, dimmer one behind it
-// that turns the other way, so the depth test hides the part of it that the first one covers. The scene is about 1 AU
-// from the world origin. Fixed-point positions keep it exact there: the camera-relative transforms that the GPU sees
-// are small. The acceleration structure holds at most this many.
+// The large triangles are the scene's entities with a Triangle, which the editor's Add Triangle command makes; the
+// sample's own scene, a Cornell box, has none. Scenes are about 1 AU from the world origin. Fixed-point positions keep
+// them exact there: the camera-relative transforms that the GPU sees are small. The acceleration structure holds at
+// most this many.
 MAX_TRIANGLES :: 2
 
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh

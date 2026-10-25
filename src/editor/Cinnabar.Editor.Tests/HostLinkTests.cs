@@ -131,16 +131,16 @@ public sealed class HostLinkTests : IAsyncDisposable
         var types = await editor.Next<ComponentTypes>();
         var transform = Assert.Single(types.Types, t => t.Name == "Transform");
         Assert.Equal(["position", "rotation", "scale"], transform.Fields.Select(f => f.Name));
-        var snapshot = await editor.Next<EntitySnapshot>();
-        // The game's own scene has a camera at scale 1.
-        var placed = Assert.Single(snapshot.Entities, e => e.Name == "Camera");
+        await editor.Next<EntitySnapshot>();
+        var snapshot = await Load(editor, Scene(Entity(1, "Placed", scale: 2)));
+        var placed = Assert.Single(snapshot.Entities);
         Assert.Contains(transform.Id, placed.Components);
 
         editor.Link.Send(new WatchEntity(placed.Entity));
         var values = await editor.Next<EntityValues>(v => v.Entity == placed.Entity);
         var data = Assert.Single(values.Components, c => c.Id == transform.Id).Data;
         Assert.Equal((int)transform.Size, data.Length);
-        Assert.Equal("(1, 1, 1)", Model.FieldValues.Format(transform.Fields[2], data));
+        Assert.Equal("(2, 2, 2)", Model.FieldValues.Format(transform.Fields[2], data));
     }
 
     [Fact]
@@ -148,29 +148,19 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        var first = await editor.Next<EntitySnapshot>();
-        Assert.Contains(first.Entities, e => e.Name == "Front Triangle");
+        await editor.Next<EntitySnapshot>();
 
-        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
-        var (scene, problems) = Document.SceneFile.Parse(File.ReadAllText(path));
-        Assert.NotNull(scene);
-        Assert.Empty(problems);
-        var front = scene.Entities.Single(e => e.Name == "Front Triangle");
-        front.Name = "Renamed";
-        scene.Entities.Remove(scene.Entities.Single(e => e.Name == "Back Triangle"));
-        scene.Entities.Add(new Document.SceneEntity(0x1234) { Name = "Child", Parent = front.Id });
-        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
+        var parent = Pulsing(1, "Parent");
+        var child = Entity(2, "Child");
+        child.Parent = parent.Id;
+        var loaded = await Load(editor, Scene(parent, child));
+        Assert.Equal(["Child", "Parent"], loaded.Entities.Select(e => e.Name).Order(StringComparer.Ordinal));
+        var loadedParent = loaded.Entities.Single(e => e.Name == "Parent");
+        Assert.Equal(parent.Id, loadedParent.SceneId);
+        Assert.Equal(loadedParent.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
 
-        var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == "Renamed"));
-        Assert.Equal(
-            ["Box", "Camera", "Child", "Fog", "Ground", "Icosphere", "Point Light", "Renamed", "Spot Light", "Sun", "View Model Rod"],
-            loaded.Entities.Select(e => e.Name).Order(StringComparer.Ordinal));
-        var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
-        Assert.Equal(front.Id, renamed.SceneId);
-        Assert.Equal(renamed.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
-
-        // In Edit, the game's own two behaviours end with their entities, without their callbacks, and the scene's
-        // one is left.
+        // In Edit, the game's own behaviours end with their entities, without their callbacks, and the scene's one is
+        // left.
         await editor.Next<GameStats>(s => s.Behaviours == 1);
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
@@ -180,21 +170,22 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
-        var document = new Document.SceneDocument(path, Document.SceneFile.Parse(File.ReadAllText(path)).Scene!);
+        var spinner = Spinning(1, "Spinner");
+        var path = Path.Combine(Path.GetTempPath(), $"cinnabar-test-{Guid.NewGuid():N}.scene");
+        var document = new Document.SceneDocument(path, Scene(spinner));
         document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire())]));
         await editor.Next<EntitySnapshot>();
-        var front = document.Scene.Entities.Single(e => e.Name == "Front Triangle");
+        await Load(editor, document.Scene);
 
-        document.Apply("Rename", new Document.Rename(front.Id, "Edited"));
-        document.Apply("Bad field", new Document.SetField(front.Id, 1001, "no_such_field", Document.SceneValue.Of(true)));
+        document.Apply("Rename", new Document.Rename(spinner.Id, "Edited"));
+        document.Apply("Bad field", new Document.SetField(spinner.Id, SpinId, "no_such_field", Document.SceneValue.Of(true)));
 
         var problems = await editor.Next<EditProblems>(p => !p.Snapshot);
         var problem = Assert.Single(problems.Problems);
-        Assert.Equal(front.Id, problem.Entity);
+        Assert.Equal(spinner.Id, problem.Entity);
         Assert.Contains("no_such_field", problem.Message);
         // The rename arrives with the next entity delta.
-        await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.SceneId == front.Id && e.Name == "Edited"));
+        await editor.Next<EntityDelta>(d => d.Changed.Any(e => e.SceneId == spinner.Id && e.Name == "Edited"));
     }
 
     [Fact]
@@ -206,41 +197,40 @@ public sealed class HostLinkTests : IAsyncDisposable
         await editor.Next<EntitySnapshot>();
         var target = await editor.Next<FrameTarget>();
 
-        // The scene's camera: 1 m in front of the front triangle, which is 0.2 m in front of the back one.
-        editor.Link.Send(new EditorCamera([2516582400000000000, 0, -16777216], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
-        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
-        var center = await editor.Next<PickResult>(r => r.Id == 7);
-        var hit = Assert.Single(center.Hits);
-        Assert.Equal(0x37e9612990eb05d0UL, hit.SceneId);
-        Assert.InRange(center.Depth, 1.35f, 1.45f);
+        // Two boxes ahead of the camera: a small one whose face is 1.2 m away, in front of a larger one whose face is
+        // 1.5 m away.
+        var near = Box(1, "Near", z: 0.4, scale: 0.4);
+        var far = Box(2, "Far", z: 1, scale: 1);
+        var loaded = await Load(editor, Scene(near, far), "Far");
+        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
 
-        // A box over the whole frame finds both triangles, both meshes, the ground and the view model's rod, and nothing
-        // at the edge finds nothing. A mesh draws once its buffers have streamed in, so the box is picked again until
-        // the meshes are there.
-        ulong[] everything =
-        [
-            0x324276ba1ddc48f7UL, 0x37e9612990eb05d0UL, 0x5d3a8e17c9b04f62UL, 0x8c15900f0aab4d79UL, 0xa41c6f0e2b7d9358UL,
-            0xfd425e3c5dd24547UL,
-        ];
+        // A pick over the whole frame finds both, once their mesh has streamed in, so it is picked again until it has.
+        ulong[] both = [near.Id, far.Id];
         ulong[] found = [];
-        for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(everything); attempt++)
+        for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(both); attempt++)
         {
             editor.Link.Send(new PickRequest(100 + attempt, 0, 0, target.Width, target.Height));
             var all = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
             found = [.. all.Hits.Select(h => h.SceneId).Order()];
         }
-        Assert.Equal(everything, found);
+        Assert.Equal(both, found);
+
+        // The middle finds the near box at its depth, and the corner finds nothing.
+        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        var center = await editor.Next<PickResult>(r => r.Id == 7);
+        Assert.Equal(near.Id, Assert.Single(center.Hits).SceneId);
+        Assert.InRange(center.Depth, 1.15f, 1.25f);
         editor.Link.Send(new PickRequest(9, 0, 0, 1, 1));
         var corner = await editor.Next<PickResult>(r => r.Id == 9);
         Assert.Empty(corner.Hits);
         Assert.Equal(0, corner.Depth);
 
-        // A hidden entity is not drawn, so the pick sees through it to the back triangle.
-        editor.Link.Send(new SetHidden([hit.Entity]));
+        // A hidden entity is not drawn, so the pick sees through it to the far box.
+        editor.Link.Send(new SetHidden([loaded.Entities.Single(e => e.SceneId == near.Id).Entity]));
         editor.Link.Send(new PickRequest(10, target.Width / 2, target.Height / 2, 1, 1));
         var behind = await editor.Next<PickResult>(r => r.Id == 10);
-        Assert.Equal(0x8c15900f0aab4d79UL, Assert.Single(behind.Hits).SceneId);
-        Assert.InRange(behind.Depth, 1.55f, 1.65f);
+        Assert.Equal(far.Id, Assert.Single(behind.Hits).SceneId);
+        Assert.InRange(behind.Depth, 1.45f, 1.55f);
     }
 
     [Fact]
@@ -248,16 +238,16 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         await using var editor = await Connect();
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
-        var snapshot = await editor.Next<EntitySnapshot>();
-        // The front triangle spins in a Fixed system, and its script pulses its brightness.
-        var front = Assert.Single(snapshot.Entities, e => e.Name == "Front Triangle").Entity;
+        await editor.Next<EntitySnapshot>();
+        // It spins in a Fixed system, so its Transform changes only while the world runs.
+        var spinner = Assert.Single((await Load(editor, Scene(Spinning(1, "Spinner")))).Entities).Entity;
         // The values as they are now: a watch sends them at once, and values that stream while the world runs are
         // dropped before the next look.
         async Task<string> Values()
         {
-            editor.Link.Send(new WatchEntity(front));
-            var values = await editor.Next<EntityValues>(v => v.Entity == front);
-            editor.Link.Send(new UnwatchEntity(front));
+            editor.Link.Send(new WatchEntity(spinner));
+            var values = await editor.Next<EntityValues>(v => v.Entity == spinner);
+            editor.Link.Send(new UnwatchEntity(spinner));
             await Task.Delay(100, TestContext.Current.CancellationToken);
             editor.Drain();
             return string.Join(";", values.Components.Select(c => Convert.ToHexString(c.Data)));
@@ -290,27 +280,27 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
         var commands = await editor.Next<GameCommands>();
         Assert.Contains(commands.Commands, c => c.Id == "mygame.add_triangle" && c.Edits && c.Tab == "Game");
-        var snapshot = await editor.Next<EntitySnapshot>();
+        await editor.Next<EntitySnapshot>();
+        var snapshot = await Load(editor, Scene(Spinning(1, "Spinner"), Pulsing(2, "Pulsing")));
 
         var host = await editor.Next<HostStats>();
         Assert.True(host.Frames > 0 && host.Buffers > 0 && host.Pipelines > 0 && host.PermanentBytes > 0);
-        var game = await editor.Next<GameStats>();
-        Assert.Equal((uint)snapshot.Entities.Length, game.Entities);
-        Assert.True(game.Behaviours >= 2);
+        // The game's own behaviours end with its world, and the scene's one is left.
+        var game = await editor.Next<GameStats>(s => s.Entities == 2 && s.Behaviours == 1);
         Assert.Contains(game.Modules, m => m.Name == "game/scripts/pulse.luau" && m.Bytes > 0);
 
         editor.Link.Send(new RunGameCommand("mygame.world_report"));
         var report = await editor.Next<GameCommandResult>(r => r.Id == "mygame.world_report");
-        Assert.Contains("11 entities", report.Message);
+        Assert.Contains("2 entities", report.Message);
         Assert.Empty(report.Operations);
 
         // A command that edits sends operations by scene ID, and leaves the world as it is.
-        var front = Assert.Single(snapshot.Entities, e => e.Name == "Front Triangle");
-        editor.Link.Send(new SetSelection([front.Entity]));
+        var spinner = Assert.Single(snapshot.Entities, e => e.Name == "Spinner");
+        editor.Link.Send(new SetSelection([spinner.Entity]));
         editor.Link.Send(new RunGameCommand("mygame.reverse_spin"));
         var reversed = await editor.Next<GameCommandResult>(r => r.Id == "mygame.reverse_spin");
         var op = Assert.Single(reversed.Operations);
-        Assert.Equal((OperationKind.SetField, front.SceneId, 1001UL), (op.Kind, op.Entity, op.Component));
+        Assert.Equal((OperationKind.SetField, spinner.SceneId, SpinId), (op.Kind, op.Entity, op.Component));
         Assert.Equal(-1.0, Assert.Single(op.Fields).Value.Floats[0]);
     }
 
@@ -501,6 +491,76 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
 
         public ValueTask DisposeAsync() => Link.DisposeAsync();
+    }
+
+    // The tests' scenes are built here, each with only what its test looks at, so that they do not depend on the
+    // sample's scene. They sit 1.5e11 m along x, in World_Position's units of 2^-24 m, as the sample's scenes do.
+    const long Origin = 2516582400000000000;
+    const long Meter = 1 << 24;
+    // The sample's box mesh (models/shapes.gltf, 1 m across) and scripts/pulse.luau, which pulses a Triangle.
+    const string BoxMesh = "89fc38c8aa19f0cf0cc161d2ab5e015b";
+    const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
+    // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
+    const ulong MeshRendererId = 33;
+    const ulong SpinId = 1001;
+    const ulong TriangleId = 1002;
+
+    static Document.Scene Scene(params Document.SceneEntity[] entities)
+    {
+        var scene = new Document.Scene();
+        scene.Entities.AddRange(entities);
+        return scene;
+    }
+
+    // Entity is an entity with only a Transform, z meters ahead of the origin.
+    static Document.SceneEntity Entity(ulong id, string name, double z = 0, double scale = 1)
+    {
+        var entity = new Document.SceneEntity(id) { Name = name };
+        entity.Components.Add(new Document.SceneComponent(1, "Transform",
+        [
+            Field("position", Document.SceneValue.Of(Number(Origin), Number(0), Number((long)(z * Meter)))),
+            Field("rotation", Document.SceneValue.Of(Number(0), Number(0), Number(0), Number(1))),
+            Field("scale", Document.SceneValue.Of(Number(scale), Number(scale), Number(scale))),
+        ]));
+        return entity;
+    }
+
+    static Document.SceneEntity Box(ulong id, string name, double z, double scale)
+    {
+        var entity = Entity(id, name, z, scale);
+        entity.Components.Add(new Document.SceneComponent(MeshRendererId, "Mesh_Renderer", [Field("mesh", Document.SceneValue.AssetRef(BoxMesh))]));
+        return entity;
+    }
+
+    // Spinning turns at 1 radian per second while the world runs.
+    static Document.SceneEntity Spinning(ulong id, string name)
+    {
+        var entity = Entity(id, name);
+        entity.Components.Add(new Document.SceneComponent(SpinId, "Spin", [Field("speed", Document.SceneValue.Of(Number(1.0)))]));
+        return entity;
+    }
+
+    // Pulsing is a triangle with the pulse behaviour.
+    static Document.SceneEntity Pulsing(ulong id, string name)
+    {
+        var entity = Entity(id, name);
+        entity.Components.Add(new Document.SceneComponent(TriangleId, "Triangle", [Field("brightness", Document.SceneValue.Of(Number(1.0)))]));
+        entity.Behaviours.Add(new Document.SceneBehaviour(PulseScript, []));
+        return entity;
+    }
+
+    static Document.SceneField Field(string name, Document.SceneValue value) => new(name, value);
+
+    static Document.SceneNumber Number(long value) => Document.SceneNumber.Of(value);
+
+    static Document.SceneNumber Number(double value) => Document.SceneNumber.Of(value);
+
+    /// <summary>Replaces the game's world with a scene, as the editor does, and gives the world once it has loaded.</summary>
+    static async Task<EntitySnapshot> Load(Editor editor, Document.Scene scene, string? name = null)
+    {
+        name ??= scene.Entities[0].Name;
+        editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
+        return await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == name) && s.Entities.Length == scene.Entities.Count);
     }
 
     static string RepositoryRoot()
