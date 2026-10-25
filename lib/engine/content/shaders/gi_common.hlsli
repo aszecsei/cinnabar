@@ -1,0 +1,156 @@
+// What the global illumination's shaders share (see docs/rendering.md#global-illumination): their constants, the
+// cascades' layout and the probes' positions. The cascades are screen-space radiance cascades. Cascade k has a probe
+// every GI_SPACING << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
+// so every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long
+// as the cascade before's, and its texels hold the light that they found and the share of light from beyond that gets
+// through. The cascades are one texture, each in its own rows.
+#ifndef GI_COMMON_HLSLI
+#define GI_COMMON_HLSLI
+
+#include "cinnabar.hlsli"
+
+// Matches Gi_Constants in lib/engine/render/gi.odin. previous maps a position relative to the camera to last frame's
+// clip space, the camera's motion included. right, up and forward are the view's axes in the world; projection holds
+// the camera's x and y scales and its near plane. region is the size of one cascade's rows, and cascade the cascade
+// that a merge pass writes.
+struct Gi_Constants {
+	float4x4 previous;
+	float4 right;
+	float4 up;
+	float4 forward;
+	float4 projection;
+	float4 sky;
+	float4 ground;
+	uint depth;
+	uint stencil;
+	uint normals;
+	uint velocity;
+	uint lit;
+	uint lit_valid;
+	uint cascades;
+	uint sampler_index;
+	uint history_diffuse;
+	uint history_specular;
+	uint out_diffuse;
+	uint out_specular;
+	uint valid;
+	uint frame;
+	uint cascade;
+	uint cascade_count;
+	uint2 size;
+	uint2 lit_size;
+	uint2 region;
+	uint scene;
+	uint exposure;
+	float interval_scale;
+	float max_frames;
+	uint2 padding;
+};
+CN_PASS_CONSTANTS(Gi_Constants, constants);
+
+// Match GI_SPACING and GI_DIRECTIONS in lib/engine/render/gi.odin, and VIEW_MODEL_STENCIL in renderer.odin.
+static const uint GI_SPACING = 8;
+static const uint GI_DIRECTIONS = 4;
+static const uint VIEW_MODEL_STENCIL = 1;
+
+uint cascade_spacing(uint k) {
+	return GI_SPACING << k;
+}
+
+uint cascade_directions(uint k) {
+	return GI_DIRECTIONS << k;
+}
+
+uint2 cascade_probes(uint k) {
+	uint spacing = cascade_spacing(k);
+	return (constants.size + spacing - 1) / spacing;
+}
+
+// The texel of a cascade's probe and direction, in the cascades' texture.
+uint2 cascade_texel(uint k, uint2 probe, uint2 direction) {
+	return probe * cascade_directions(k) + direction + uint2(0, k * constants.region.y);
+}
+
+float3 octahedral(float2 p) {
+	float3 n = float3(p, 1 - abs(p.x) - abs(p.y));
+	if (n.z < 0) {
+		float2 sign_xy = float2(n.x >= 0 ? 1 : -1, n.y >= 0 ? 1 : -1);
+		n.xy = (1 - abs(n.yx)) * sign_xy;
+	}
+	return normalize(n);
+}
+
+float2 octahedral_encode(float3 n) {
+	n /= abs(n.x) + abs(n.y) + abs(n.z);
+	float2 p = n.xy;
+	if (n.z < 0) {
+		float2 sign_xy = float2(p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1);
+		p = (1 - abs(p.yx)) * sign_xy;
+	}
+	return p;
+}
+
+// direction_of is the direction in the world at a place in a direction texel, each coordinate in [0, 1).
+float3 direction_of(uint2 texel, uint directions, float2 within) {
+	return octahedral((float2(texel) + within) / directions * 2 - 1);
+}
+
+// The ambient light from a direction: the sky's from above and the ground's from below.
+float3 sky_light(float3 direction) {
+	return lerp(constants.ground.rgb, constants.sky.rgb, direction.y * 0.5 + 0.5);
+}
+
+float interleaved_noise(float2 pixel) {
+	return frac(52.9829189 * frac(dot(pixel, float2(0.06711056, 0.00583715))));
+}
+
+// A pixel's surface: its position relative to the camera and its view depth. It has none where nothing drew, and the
+// view model's pixels have none either: the view model is not where it seems to be in the world.
+bool surface_at(int2 pixel, out float3 position, out float z) {
+	float depth = cn_texture(constants.depth).Load(int3(pixel, 0)).r;
+	bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(pixel, 0)).g & VIEW_MODEL_STENCIL) != 0;
+	z = constants.projection.z / max(depth, 1e-7);
+	float2 ndc = float2((pixel.x + 0.5) / constants.size.x * 2 - 1, 1 - (pixel.y + 0.5) / constants.size.y * 2);
+	float2 xy = ndc / constants.projection.xy * z;
+	position = constants.right.xyz * xy.x + constants.up.xyz * xy.y + constants.forward.xyz * z;
+	return depth > 0 && !view_model;
+}
+
+// probe_pixel is the pixel that a cascade's probe sits on: its tile's center, inside the screen.
+int2 probe_pixel(uint k, uint2 probe) {
+	uint spacing = cascade_spacing(k);
+	return min(int2(probe * spacing + spacing / 2), int2(constants.size) - 1);
+}
+
+// PLANE_TOLERANCE is how far from a surface's tangent plane, as a share of its view depth, another probe's surface can
+// be and still count as the same surface, so probes on a slanted face count as fully as those on one facing the camera.
+static const float PLANE_TOLERANCE = 0.03;
+
+// probe_weight is how much a probe's light counts at a surface: fully on the same surface, and very little elsewhere,
+// so a surface where no probe matches still takes its nearest probes' light rather than none.
+float probe_weight(float3 position, float3 normal, float z, int2 probe_pixel) {
+	float3 probe_position;
+	float probe_z;
+	if (!surface_at(probe_pixel, probe_position, probe_z)) {
+		return 0;
+	}
+	return abs(dot(probe_position - position, normal)) <= PLANE_TOLERANCE * z ? 1 : 1e-4;
+}
+
+// pixel_meters is the size of a pixel at a view depth.
+float pixel_meters(float z) {
+	return 2 * z / (constants.size.y * constants.projection.y);
+}
+
+// The distance at which cascade k's interval starts: they grow four times longer each, from a length that scales
+// with the probe's depth, so a cascade covers about as many pixels at every depth.
+float interval_start(uint k, float z) {
+	float base = constants.interval_scale * GI_SPACING * pixel_meters(z);
+	return base * ((float)(1u << (2 * k)) - 1) / 3;
+}
+
+float3 octahedral_normal(int2 pixel) {
+	return octahedral(cn_texture(constants.normals).Load(int3(pixel, 0)).xy);
+}
+
+#endif

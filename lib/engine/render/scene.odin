@@ -77,16 +77,20 @@ Frame_Constants :: struct {
 	fog:                      u32,
 	fog_sampler:              u32,
 	fog_scale:                [2]f32,
-	padding:                  u32,
+	// Whether Material_Push has the global illumination.
+	gi:                       u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
-// frame records. ambient_occlusion is white without it, and fog is read only when Frame_Constants.fog says so.
+// frame records. ambient_occlusion is white without it, fog is read only when Frame_Constants.fog says so, and the global
+// illumination only when Frame_Constants.gi does.
 Material_Push :: struct {
 	shadow_atlas:      u32,
 	shadow_mask:       u32,
 	ambient_occlusion: u32,
 	fog:               u32,
+	gi_diffuse:        u32,
+	gi_specular:       u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -452,6 +456,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		screen_size              = {f32(f.size.x), f32(f.size.y)},
 		exposure                 = gpu.read_index(r.post.exposure),
 	}
+	constants.gi = u32(f.gi != nil)
 	if f.fog != nil {
 		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
 	}
@@ -715,7 +720,11 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	push: Material_Push
 	if pass == .Forward {
 		white := gpu.read_index(f.renderer.materials.defaults[.White])
-		push = {shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white}
+		push = {shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
+		if f.gi_diffuse != 0 {
+			push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
+			push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))
+		}
 		if f.ambient_occlusion != 0 {
 			push.ambient_occlusion = gpu.read_index(gpu_texture(g, f.ambient_occlusion))
 		}

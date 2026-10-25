@@ -58,6 +58,7 @@ Renderer :: struct {
 	shadows:         Shadows,
 	previews:        Previews,
 	ao:              Ambient_Occlusion,
+	gi:              Global_Illumination,
 	fog:             Volumetric_Fog,
 	post:            Post,
 	output_pipeline: Shader_Pipeline,
@@ -82,6 +83,8 @@ Frame_Desc :: struct {
 	post:              Post_Settings,
 	// See docs/rendering.md#ambient-occlusion. The fog is a component (see Fog).
 	ambient_occlusion: Ao_Settings,
+	// See docs/rendering.md#global-illumination.
+	gi:                Gi_Settings,
 	// The world pass clears the scene to this, which is not pre-exposed.
 	clear_color:       [4]f32,
 	// The light from everything else until global illumination. Zero gives DEFAULT_AMBIENT.
@@ -141,6 +144,9 @@ Frame :: struct {
 	// The ambient occlusion in r, which the forward pass reads, and the integrated fog volume: zero without them.
 	ambient_occlusion:        Texture,
 	fog_volume:               Texture,
+	// The global illumination's diffuse and specular light, zero without it.
+	gi_diffuse:               Texture,
+	gi_specular:              Texture,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:                       Texture,
 	debug:                    Texture,
@@ -154,6 +160,8 @@ Frame :: struct {
 	lut:                      Texture,
 	post:                     ^Post_Frame,
 	ao:                       ^Ao_Frame,
+	// nil without global illumination.
+	gi:                       ^Gi_Frame,
 	// nil without fog.
 	fog:                      ^Fog_Frame,
 	scene_frame:              ^Scene_Frame,
@@ -219,6 +227,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	shadows_init(&r.shadows, platform)
 	previews_init(&r.previews, r)
 	ao_init(&r.ao)
+	gi_init(&r.gi)
 	fog_init(&r.fog, w)
 	post_init(&r.post, platform)
 	r.residency.accels = r.shadows.ray_query
@@ -251,6 +260,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	shadows_destroy(&r.shadows, r.platform)
 	previews_destroy(&r.previews, r)
 	ao_destroy(&r.ao, r.platform)
+	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	post_destroy(&r.post, r.platform)
 	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
@@ -287,8 +297,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.lights = extract_lights(f, w, desc.hidden)
 	assign_shadows(f)
 	upload_lights(f)
+	ambient := desc.ambient == {} ? DEFAULT_AMBIENT : desc.ambient
 	begin_fog(f, w, desc.hidden)
-	add_scene_passes(f, desc.ambient == {} ? DEFAULT_AMBIENT : desc.ambient)
+	begin_gi(f, desc.gi, ambient)
+	add_scene_passes(f, ambient)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
 
@@ -308,6 +320,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		desc.hooks.after_prepass(f)
 	}
 	add_ao_passes(f, desc.ambient_occlusion)
+	add_gi_passes(f)
 	add_cluster_passes(f)
 	add_shadow_passes(f)
 	add_fog_passes(f)
@@ -336,10 +349,15 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if f.fog_volume != 0 {
 		read(&g, p, f.fog_volume)
 	}
+	if f.gi_diffuse != 0 {
+		read(&g, p, f.gi_diffuse)
+		read(&g, p, f.gi_specular)
+	}
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
 	add_fog_background(f)
+	add_gi_lit(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
 	}
@@ -407,6 +425,7 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 	sync_graphics_pipeline(&r.output_pipeline, r.platform, assets, {.Vertex, .Pixel}, OUTPUT_PIPELINE, force)
 	sync_post_pipelines(r, force)
 	sync_ao_pipelines(r, force)
+	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},

@@ -46,13 +46,20 @@ Targets ps_forward(Varyings i, bool front : SV_IsFrontFace) {
 	p.view = inputs.view;
 	p.normal = shading_normal(inputs, s);
 	color += direct_light(s, p, inputs.normal, i.position);
-	// The sky's light from above and the ground's from below, until global illumination, which the ambient occlusion
-	// takes away from.
+	// The global illumination's light, or without it the sky's light from above and the ground's from below, which the
+	// ambient occlusion takes away from.
 	float occlusion = saturate(cn_texture(push.ambient_occlusion).Load(int3(i.position.xy, 0)).r);
 	Indirect indirect;
-	indirect.diffuse = lerp(frame.ground_color.rgb, frame.sky_color.rgb, p.normal.y * 0.5 + 0.5) * occlusion;
-	float3 reflected = reflect(-p.view, p.normal);
-	indirect.specular = lerp(frame.ground_color.rgb, frame.sky_color.rgb, reflected.y * 0.5 + 0.5) * occlusion;
+	if (frame.gi != 0) {
+		indirect.diffuse = cn_texture(push.gi_diffuse).Load(int3(i.position.xy, 0)).rgb;
+		indirect.specular = cn_texture(push.gi_specular).Load(int3(i.position.xy, 0)).rgb;
+	} else {
+		indirect.diffuse = lerp(frame.ground_color.rgb, frame.sky_color.rgb, p.normal.y * 0.5 + 0.5);
+		float3 reflected = reflect(-p.view, p.normal);
+		indirect.specular = lerp(frame.ground_color.rgb, frame.sky_color.rgb, reflected.y * 0.5 + 0.5);
+	}
+	indirect.diffuse *= occlusion;
+	indirect.specular *= occlusion;
 	color += shade_indirect(s, p, indirect);
 #endif
 	if (frame.fog != 0) {

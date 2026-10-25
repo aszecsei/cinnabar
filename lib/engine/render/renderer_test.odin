@@ -20,7 +20,7 @@ import "cinnabar:engine/ecs"
 Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
-	bloom, history_valid, occlusion, fog:               bool,
+	bloom, history_valid, occlusion, fog, gi:           bool,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
 	post:                                               Texture,
@@ -165,7 +165,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec := (^Hook_Record)(f.data)
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
-				rec.occlusion, rec.fog = f.ambient_occlusion != 0, f.fog_volume != 0
+				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
 				read(f.graph, p, f.ids)
@@ -186,9 +186,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	testing.expect(t, draw_frame(r, w, {view = desc.view, size = desc.size}))
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
-	// With the pipelines of post-processing, the ambient occlusion and the fog, which the test's cache cannot cook,
-	// every pass runs: the frames after the first read their histories, and the lookup table bakes once. The ambient
-	// occlusion runs on the compute queue. The null backend checks every barrier and wait.
+	// With the pipelines of post-processing, the ambient occlusion, the global illumination and the fog, which the
+	// test's cache cannot cook, every pass runs: the frames after the first read their histories, and the lookup table
+	// bakes once. The ambient occlusion and the global illumination run on the compute queue. The null backend checks every barrier and wait.
 	code := []byte{1}
 	compute := []^Shader_Pipeline {
 		&r.post.temporal_aa,
@@ -198,6 +198,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.post.tone_lut,
 		&r.ao.gtao,
 		&r.ao.denoise,
+		&r.gi.trace,
+		&r.gi.merge,
+		&r.gi.gather,
+		&r.gi.lit,
 		&r.fog.inject,
 		&r.fog.integrate,
 		&r.fog.background,
@@ -207,7 +211,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	}
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
-		testing.expect(t, record.bloom && record.occlusion && record.fog)
+		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi)
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
 	}

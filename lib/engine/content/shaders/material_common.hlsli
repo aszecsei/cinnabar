@@ -66,13 +66,15 @@ struct Frame_Constants {
 	uint fog;
 	uint fog_sampler;
 	float2 fog_scale;
-	uint fog_padding;
+	// Whether Material_Push has the global illumination.
+	uint gi;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
 // passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient
-// occlusion in r, and the integrated fog volume (see docs/rendering.md#volumetric-fog). A compute pass that includes the
+// occlusion in r, the integrated fog volume (see docs/rendering.md#volumetric-fog), and the global illumination's diffuse
+// and specular light (see docs/rendering.md#global-illumination). A compute pass that includes the
 // light loop defines MATERIAL_PUSH as its own push constants, which start with shadow_atlas and shadow_mask.
 #ifndef MATERIAL_PUSH
 struct Material_Push {
@@ -80,6 +82,8 @@ struct Material_Push {
 	uint shadow_mask;
 	uint ambient_occlusion;
 	uint fog;
+	uint gi_diffuse;
+	uint gi_specular;
 };
 #define MATERIAL_PUSH Material_Push
 #endif
