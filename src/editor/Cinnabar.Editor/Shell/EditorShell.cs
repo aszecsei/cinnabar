@@ -57,8 +57,11 @@ public sealed partial class EditorShell : IDisposable
 
     public event Action? PaletteRequested;
 
+    readonly EditorOptions _options;
+
     public EditorShell(EditorOptions options, EditorSettings settings)
     {
+        _options = options;
         Settings = settings;
         Host = new HostSession(options);
         Cook = new CookSession(options.Cook, Assets);
@@ -213,6 +216,7 @@ public sealed partial class EditorShell : IDisposable
 
     public void Dispose()
     {
+        StopGame();
         Host.Dispose();
         Cook.Dispose();
         Viewport.Dispose();

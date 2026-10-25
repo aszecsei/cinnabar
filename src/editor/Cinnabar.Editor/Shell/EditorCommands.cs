@@ -67,6 +67,10 @@ static class EditorCommands
     public const string ExposureUp = "view.exposureUp";
     public const string ExposureDown = "view.exposureDown";
     public const string ExposureReset = "view.exposureReset";
+    public const string RunGame = "game.run";
+    public const string StopGame = "game.stop";
+    public const string ProjectOutput = "project.output";
+    public const string UserOutput = "project.userOutput";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -356,6 +360,37 @@ static class EditorCommands
             Icon = "scale",
         });
         RegisterRendering(shell);
+        RegisterGameWindow(shell);
+    }
+
+    // The game in its own window, and the project's output mode, which shows only there (see
+    // docs/architecture.md#project-settings).
+    static void RegisterGameWindow(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(RunGame, "Run Game", shell.RunGame)
+        {
+            Description = "Open the game in its own window, with the scene that it loads itself, as just dev does. It shows the output mode, such as HDR, which the viewport cannot.",
+            Icon = "play",
+            Shortcut = "Ctrl+F5",
+        });
+        commands.Register(new Command(StopGame, "Close Game", shell.StopGame)
+        {
+            Description = "Close the game's own window.",
+            Icon = "stop",
+            CanExecuteWhen = () => shell.GameWindowRunning,
+        });
+        string[] modes = [.. EditorShell.OutputModes.Select(m => m.Label)];
+        commands.Register(new ChoiceCommand(ProjectOutput, "Output", modes, () => shell.ProjectOutput, option => shell.ProjectOutput = option)
+        {
+            Description = "The project's output mode for the game's window, in its settings file: Auto is HDR10 on a display in HDR and SDR otherwise. A running game takes it at once.",
+            Icon = "viewport",
+        });
+        commands.Register(new ChoiceCommand(UserOutput, "On This PC", [EditorShell.ProjectOutputLabel, .. modes], () => shell.UserOutput, option => shell.UserOutput = option)
+        {
+            Description = "The output mode on this machine, which replaces the project's, for a display that HDR does not suit. It is in the project's user settings file, which is not committed.",
+            Icon = "viewport",
+        });
     }
 
     // The viewport's rendering (see docs/editor.md#viewport): what it shows in place of the lit scene, the features

@@ -62,6 +62,8 @@ flowchart TB
 | `lib/engine/render` | Game | The render graph, render extraction, and the built-in renderer: views, layers, materials and the frame's passes. |
 | `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, watched values, scene snapshots and edit operations, and the viewport tools' passes: picking from the entity ID buffer, the selection outline and the gizmo. |
 | `lib/engine/wire` | Shared | The transport of the editor link and the cook link: framing, the wire format and the schema writer, for any union of messages. |
+| `lib/engine/volume` | Game | Volumes: settings components that change with where a point is, such as the post-processing at the camera (see [World](world.md#volumes)). |
+| `lib/engine/project` | Game | The project's settings file and the user's file beside it, which the game reads again when they change (see [Project settings](#project-settings)). |
 | `lib/engine/editor/link` | Shared | The editor link's messages, and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |
 | `lib/engine/asset/cook_link` | Shared | The cook link's messages, between the editor and the cook daemon, and the schema that the editor's C# is generated from. `tools/cook` imports it. |
@@ -178,6 +180,18 @@ flowchart LR
 - The editor owns the scene being edited, and the host's world mirrors it. A host crash or a soft restart therefore loses no edits: the editor sends the scene again.
 
 Details: [Editor](editor.md).
+
+## Project settings
+
+A project's settings are a text file beside the game, such as `samples/mygame/project.settings`: `key = value` lines, with blank lines and `#` comments, as `.meta` files have. They are settings of the game as a whole, not of a scene.
+
+- **The user's file** beside it, `project.user.settings`, replaces the project's values on one machine, for a display or a GPU that the project's choice does not suit. Version control ignores `*.user.settings`.
+- **Reading:** `lib/engine/project` reads both files, the project's first. The game reads them when it starts, and looks for a change twice a second (`project.refresh`), so an edit in the editor shows in a running game at once. An unknown key or a value that does not fit is a warning, and the setting keeps its default. The sample finds the file at `CINNABAR_PROJECT` (by default `samples/mygame/project.settings`), relative to the working directory, as it finds its content cache.
+- **The editor** edits both: the Home tab's Game Window group sets the project's output and this machine's, and Run Game opens the game in its own window, which shows what the viewport cannot.
+
+| Key | Values | Default | What it sets |
+|---|---|---|---|
+| `output` | `Auto`, `Sdr`, `Hdr10`, `Scrgb` | `Auto` | The window's output mode (see [Rendering](rendering.md#hdr-output)): `Auto` is HDR10 on a display in HDR, and SDR otherwise. `CINNABAR_OUTPUT` replaces it. The sample's F8 cycles it until the files change. |
 
 ## Content pipeline
 

@@ -40,6 +40,12 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode]),
                         new SmallStack([EditorCommands.FreeCamera]),
                     ]),
+                    new RibbonGroup("Game Window",
+                    [
+                        new SplitButton(EditorCommands.RunGame, [EditorCommands.RunGame, EditorCommands.StopGame]),
+                        new ComboBox(EditorCommands.ProjectOutput),
+                        new ComboBox(EditorCommands.UserOutput),
+                    ]),
                     new RibbonGroup("Host",
                     [
                         new SplitButton(EditorCommands.RestartHost, [EditorCommands.RestartHost, EditorCommands.StopHost]),

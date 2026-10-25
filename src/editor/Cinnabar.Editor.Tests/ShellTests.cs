@@ -58,6 +58,32 @@ public sealed class ShellTests : IDisposable
         Assert.Empty(Problems(again));
     }
 
+[Fact]
+    public void TheOutputModeIsTheProjectsUnlessThisMachineReplacesIt()
+    {
+        var project = Path.Combine(_settingsDirectory, "game", "project.settings");
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        File.WriteAllText(project, "# The window.\noutput = Auto\n");
+        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll") { ProjectPath = project }, new EditorSettings(_settingsDirectory));
+        var output = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ProjectOutput);
+        var mine = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.UserOutput);
+        Assert.Equal("Auto", output.Selected);
+        Assert.Equal(EditorShell.ProjectOutputLabel, mine.Selected);
+
+        // The project's file keeps its comment, and the game reads the setting's name.
+        output.Select("SDR");
+        Assert.Equal("# The window.\noutput = Sdr\n", File.ReadAllText(project));
+
+        var user = Document.ProjectSettings.UserPath(project);
+        Assert.EndsWith("project.user.settings", user);
+        mine.Select("HDR10");
+        Assert.Equal("Hdr10", Document.ProjectSettings.Get(user, "output"));
+        // Leaving it to the project again removes the user's file.
+        mine.Select(EditorShell.ProjectOutputLabel);
+        Assert.False(File.Exists(user));
+        Assert.Empty(Problems(shell));
+    }
+
     [Fact]
     public void EveryPanelStartsOpen()
     {
