@@ -23,18 +23,15 @@ import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
-TRIANGLE_VS :: #load("shaders/triangle.vs.dxil")
-TRIANGLE_PS :: #load("shaders/triangle.ps.dxil")
-OBJECTS_VS :: #load("shaders/objects.vs.dxil")
-OBJECTS_AS :: #load("shaders/objects.as.dxil")
-OBJECTS_MS :: #load("shaders/objects.ms.dxil")
-OBJECTS_PS :: #load("shaders/objects.ps.dxil")
-CULL_CS :: #load("shaders/cull.cs.dxil")
-POST_CS :: #load("shaders/post.cs.dxil")
-SHADOWS_CS :: #load("shaders/shadows.cs.dxil")
-SHADOWS_RT_LIB :: #load("shaders/shadows_rt.lib.dxil")
-COMPOSITE_VS :: #load("shaders/composite.vs.dxil")
-COMPOSITE_PS :: #load("shaders/composite.ps.dxil")
+// The shaders are assets, which the cooker compiles (see docs/content-pipeline.md#shaders). The game finds them by the
+// GUIDs in their .meta files.
+TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
+OBJECTS_SHADER :: #load("content/shaders/objects.hlsl.meta", string)
+CULL_SHADER :: #load("content/shaders/cull.hlsl.meta", string)
+POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
+SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
+SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
+COMPOSITE_SHADER :: #load("content/shaders/composite.hlsl.meta", string)
 // The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
@@ -43,11 +40,11 @@ MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
 
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 DEPTH_FORMAT :: gpu.Format.D32_Float
-// Matches numthreads in shaders/post.hlsl.
+// Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
-// Matches numthreads in shaders/cull.hlsl.
+// Matches numthreads in content/shaders/cull.hlsl.
 CULL_GROUP_SIZE :: 64
-// Matches numthreads in shaders/shadows.hlsl.
+// Matches numthreads in content/shaders/shadows.hlsl.
 SHADOW_GROUP_SIZE :: 8
 
 // The large triangles cast ray-traced shadows. Ray_Tracing_Pipeline traces them with a ray tracing pipeline, and
@@ -75,7 +72,7 @@ CAMERA_NEAR :: 0.05
 OBJECT_COLUMNS :: 64
 OBJECT_ROWS :: 36
 OBJECT_COUNT :: OBJECT_COLUMNS * OBJECT_ROWS
-// Matches OBJECTS_PER_GROUP in shaders/objects.hlsl.
+// Matches OBJECTS_PER_GROUP in content/shaders/objects.hlsl.
 OBJECTS_PER_GROUP :: 32
 #assert(OBJECT_COUNT % OBJECTS_PER_GROUP == 0)
 
@@ -91,14 +88,14 @@ RINGS_SIZE :: 256
 RINGS_MIPS :: 9
 STREAM_FRAME :: 60
 
-// Matches Vertex in shaders/triangle.hlsl and shaders/objects.hlsl.
+// Matches Vertex in content/shaders/triangle.hlsl and shaders/objects.hlsl.
 Vertex :: struct {
 	position: [2]f32,
 	uv:       [2]f32,
 	color:    [4]f32,
 }
 
-// Matches Push in shaders/triangle.hlsl.
+// Matches Push in content/shaders/triangle.hlsl.
 Scene_Constants :: struct {
 	vertices:        u32,
 	texture:         u32,
@@ -107,7 +104,7 @@ Scene_Constants :: struct {
 	instance_offset: u32,
 }
 
-// Matches Instance in shaders/triangle.hlsl.
+// Matches Instance in content/shaders/triangle.hlsl.
 Triangle_Instance :: struct {
 	rows:       [3][4]f32,
 	brightness: f32,
@@ -134,7 +131,7 @@ Triangle :: struct {
 // Camera marks the entity that the frame is drawn from.
 Camera :: struct {}
 
-// Matches Push in shaders/objects.hlsl.
+// Matches Push in content/shaders/objects.hlsl.
 Object_Constants :: struct {
 	vertices:     u32,
 	visible:      u32,
@@ -144,7 +141,7 @@ Object_Constants :: struct {
 	object_count: u32,
 }
 
-// Matches Push in shaders/cull.hlsl.
+// Matches Push in content/shaders/cull.hlsl.
 Cull_Constants :: struct {
 	arguments:    u32,
 	count:        u32,
@@ -153,7 +150,7 @@ Cull_Constants :: struct {
 	grid:         [2]u32,
 }
 
-// Matches Push in shaders/post.hlsl.
+// Matches Push in content/shaders/post.hlsl.
 Post_Constants :: struct {
 	input:       u32,
 	output:      u32,
@@ -162,20 +159,20 @@ Post_Constants :: struct {
 	has_shadows: u32,
 }
 
-// Matches Push in shaders/shadows.hlsl.
+// Matches Push in content/shaders/shadows.hlsl.
 Shadow_Constants :: struct {
 	accel:  u32,
 	output: u32,
 	size:   [2]u32,
 }
 
-// Matches Push in shaders/composite.hlsl.
+// Matches Push in content/shaders/composite.hlsl.
 Composite_Constants :: struct {
 	input:   u32,
 	sampler: u32,
 }
 
-// Matches Pass in shaders/pass.hlsli.
+// Matches Pass in content/shaders/pass.hlsli.
 Pass_Constants :: struct {
 	view_projection: matrix[4, 4]f32,
 	right:           [4]f32,
@@ -231,15 +228,16 @@ Game_State :: struct {
 }
 
 Pipelines :: struct {
-	scene:       gpu.Pipeline,
-	objects:     gpu.Pipeline,
-	// Nil without mesh shaders.
-	mesh:        gpu.Pipeline,
-	cull:        gpu.Pipeline,
-	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and nil otherwise.
-	shadows:     gpu.Pipeline,
-	post:        gpu.Pipeline,
-	composite:   gpu.Pipeline,
+	scene:     render.Shader_Pipeline,
+	objects:   render.Shader_Pipeline,
+	// Not created without mesh shaders.
+	mesh:      render.Shader_Pipeline,
+	cull:      render.Shader_Pipeline,
+	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and not created
+	// otherwise.
+	shadows:   render.Shader_Pipeline,
+	post:      render.Shader_Pipeline,
+	composite: render.Shader_Pipeline,
 }
 
 // Frame is what the pass procedures need. It lives in frame memory.
@@ -275,7 +273,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
-	editor.init(&s.editor, platform)
+	editor.init(&s.editor, platform, &s.assets)
 	register_editor_commands(s)
 
 	vertices := [3]Vertex {
@@ -339,13 +337,22 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		s.blas = platform.gpu_create_accel({kind = .Bottom, geometries = {triangle}, label = "triangle"})
 		s.tlas = platform.gpu_create_accel({kind = .Top, max_instances = MAX_TRIANGLES, label = "scene"})
 	}
-	s.pipelines = create_pipelines(platform, s.mesh_path, s.shadow_mode)
+	s.pipelines = {
+		scene     = render.shader_pipeline(TRIANGLE_SHADER),
+		objects   = render.shader_pipeline(OBJECTS_SHADER),
+		mesh      = render.shader_pipeline(OBJECTS_SHADER),
+		cull      = render.shader_pipeline(CULL_SHADER),
+		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
+		post      = render.shader_pipeline(POST_SHADER),
+		composite = render.shader_pipeline(COMPOSITE_SHADER),
+	}
 
 	if !ecs.init(&s.world, platform) {
 		log.panic("mygame: cannot create the world")
 	}
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
+	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
 	}
@@ -455,6 +462,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 
 	find_camera(s)
+	sync_pipelines(s)
 	// A minimized window has no size, and nothing is rendered.
 	size := s.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
@@ -702,7 +710,7 @@ trace_shadows :: proc(ctx: ^render.Pass_Context) {
 		output = gpu.write_index(render.gpu_texture(g, frame.shadows)),
 		size   = frame.size,
 	}
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.shadows)
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.shadows.pipeline)
 	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 	gpu.cmd_push_constants(cb, &constants)
 	if frame.state.shadow_mode == .Pipeline {
@@ -734,7 +742,7 @@ cull_objects :: proc(ctx: ^render.Pass_Context) {
 		object_count = OBJECT_COUNT,
 		grid         = {OBJECT_COLUMNS, OBJECT_ROWS},
 	}
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.cull)
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.cull.pipeline)
 	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_dispatch(cb, {(OBJECT_COUNT + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, 1, 1})
@@ -758,7 +766,7 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 			instances       = gpu.read_index(frame.triangles.buffer),
 			instance_offset = frame.triangles.offset,
 		}
-		gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene)
+		gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene.pipeline)
 		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 		gpu.cmd_push_constants(cb, &constants)
 		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
@@ -772,14 +780,14 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 			object_count = OBJECT_COUNT,
 		}
 		if frame.state.mesh_path {
-			gpu.cmd_set_pipeline(cb, frame.state.pipelines.mesh)
+			gpu.cmd_set_pipeline(cb, frame.state.pipelines.mesh.pipeline)
 			gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 			gpu.cmd_push_constants(cb, &constants)
 			gpu.cmd_draw_mesh_indirect(cb, render.gpu_buffer(g, frame.mesh_draw), 0, 1)
 			return
 		}
 		constants.visible = gpu.read_index(render.gpu_buffer(g, frame.visible))
-		gpu.cmd_set_pipeline(cb, frame.state.pipelines.objects)
+		gpu.cmd_set_pipeline(cb, frame.state.pipelines.objects.pipeline)
 		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 		gpu.cmd_push_constants(cb, &constants)
 		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
@@ -800,7 +808,7 @@ run_post :: proc(ctx: ^render.Pass_Context) {
 		constants.has_shadows = 1
 	}
 	groups := (frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.post)
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.post.pipeline)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
@@ -812,7 +820,7 @@ draw_composite :: proc(ctx: ^render.Pass_Context) {
 		input   = gpu.read_index(render.gpu_texture(g, frame.post)),
 		sampler = gpu.sampler_index(frame.state.linear),
 	}
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.composite)
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.composite.pipeline)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_draw(cb, 3)
 }
@@ -824,7 +832,7 @@ shutdown :: proc(state: rawptr) {
 	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
-	destroy_pipelines(s.platform, s.pipelines)
+	destroy_pipelines(s.platform, &s.pipelines)
 	s.platform.gpu_destroy_sampler(s.linear)
 	s.platform.gpu_destroy_sampler(s.nearest)
 	s.platform.gpu_destroy_accel(s.tlas)
@@ -840,8 +848,8 @@ shutdown :: proc(state: rawptr) {
 	log.info("mygame: shutdown")
 }
 
-// on_reload updates the pipelines, because the new DLL may embed new shaders. The old versions keep drawing until
-// the new ones compile. An update that changes a pipeline's formats is refused, so that pipeline is created again.
+// on_reload updates the pipelines, because the new DLL may describe them differently. The old versions keep drawing
+// until the new ones compile.
 on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
@@ -851,58 +859,28 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
 	register_editor_commands(s)
-	reload_graphics_pipeline(platform, &s.pipelines.scene, SCENE_PIPELINE)
-	reload_graphics_pipeline(platform, &s.pipelines.objects, OBJECTS_PIPELINE)
-	if s.mesh_path {
-		reload_graphics_pipeline(platform, &s.pipelines.mesh, OBJECTS_MESH_PIPELINE)
-	}
-	reload_graphics_pipeline(platform, &s.pipelines.composite, COMPOSITE_PIPELINE)
-	reload_compute_pipeline(platform, &s.pipelines.cull, CULL_PIPELINE)
-	reload_compute_pipeline(platform, &s.pipelines.post, POST_PIPELINE)
-	switch s.shadow_mode {
-	case .None:
-	case .Inline:
-		reload_compute_pipeline(platform, &s.pipelines.shadows, SHADOWS_PIPELINE)
-	case .Pipeline:
-		if !platform.gpu_update_ray_tracing_pipeline(s.pipelines.shadows, SHADOWS_RT_PIPELINE) {
-			platform.gpu_destroy_pipeline(s.pipelines.shadows)
-			s.pipelines.shadows = platform.gpu_create_ray_tracing_pipeline(SHADOWS_RT_PIPELINE)
-		}
-	}
+	sync_pipelines(s, force = true)
 	log.infof("mygame: reloaded at frame %d", s.frame_count)
 }
 
-reload_graphics_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) {
-	if !platform.gpu_update_graphics_pipeline(pipeline^, desc) {
-		platform.gpu_destroy_pipeline(pipeline^)
-		pipeline^ = platform.gpu_create_graphics_pipeline(desc)
+// sync_pipelines creates the pipelines from their shader assets, and updates each one whose shader the cooker
+// compiled again, so a shader change shows in the next frame without a code reload. force updates them all.
+sync_pipelines :: proc(s: ^Game_State, force := false) {
+	p, platform, assets := &s.pipelines, s.platform, &s.assets
+	render.sync_graphics_pipeline(&p.scene, platform, assets, {.Vertex, .Pixel}, SCENE_PIPELINE, force)
+	render.sync_graphics_pipeline(&p.objects, platform, assets, {.Vertex, .Pixel}, OBJECTS_PIPELINE, force)
+	if s.mesh_path {
+		render.sync_graphics_pipeline(&p.mesh, platform, assets, {.Amplification, .Mesh, .Pixel}, OBJECTS_MESH_PIPELINE, force)
 	}
-}
-
-reload_compute_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) {
-	if !platform.gpu_update_compute_pipeline(pipeline^, desc) {
-		platform.gpu_destroy_pipeline(pipeline^)
-		pipeline^ = platform.gpu_create_compute_pipeline(desc)
-	}
-}
-
-create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_mode: Shadow_Mode) -> Pipelines {
-	shadows: gpu.Pipeline
-	switch shadow_mode {
+	render.sync_compute_pipeline(&p.cull, platform, assets, CULL_PIPELINE, force)
+	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
+	render.sync_graphics_pipeline(&p.composite, platform, assets, {.Vertex, .Pixel}, COMPOSITE_PIPELINE, force)
+	switch s.shadow_mode {
 	case .None:
 	case .Inline:
-		shadows = platform.gpu_create_compute_pipeline(SHADOWS_PIPELINE)
+		render.sync_compute_pipeline(&p.shadows, platform, assets, SHADOWS_PIPELINE, force)
 	case .Pipeline:
-		shadows = platform.gpu_create_ray_tracing_pipeline(SHADOWS_RT_PIPELINE)
-	}
-	return {
-		scene = platform.gpu_create_graphics_pipeline(SCENE_PIPELINE),
-		objects = platform.gpu_create_graphics_pipeline(OBJECTS_PIPELINE),
-		mesh = mesh_path ? platform.gpu_create_graphics_pipeline(OBJECTS_MESH_PIPELINE) : {},
-		cull = platform.gpu_create_compute_pipeline(CULL_PIPELINE),
-		shadows = shadows,
-		post = platform.gpu_create_compute_pipeline(POST_PIPELINE),
-		composite = platform.gpu_create_graphics_pipeline(COMPOSITE_PIPELINE),
+		render.sync_ray_tracing_pipeline(&p.shadows, platform, assets, SHADOWS_RT_PIPELINE, force)
 	}
 }
 
@@ -910,8 +888,6 @@ create_pipelines :: proc(platform: ^core.Platform_API, mesh_path: bool, shadow_m
 SCENE_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT}, {format = editor.ID_FORMAT}}
 
 SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	vertex        = TRIANGLE_VS,
-	pixel         = TRIANGLE_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Greater,
@@ -920,8 +896,6 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 }
 
 OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	vertex        = OBJECTS_VS,
-	pixel         = OBJECTS_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Greater,
@@ -930,9 +904,6 @@ OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 }
 
 OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	amplification = OBJECTS_AS,
-	mesh          = OBJECTS_MS,
-	pixel         = OBJECTS_PS,
 	colors        = SCENE_COLORS,
 	depth_format  = DEPTH_FORMAT,
 	depth_compare = .Greater,
@@ -941,17 +912,14 @@ OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 }
 
 CULL_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = CULL_CS,
 	label   = "cull",
 }
 
 SHADOWS_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = SHADOWS_CS,
 	label   = "shadows",
 }
 
 SHADOWS_RT_PIPELINE :: gpu.Ray_Tracing_Pipeline_Desc {
-	library          = SHADOWS_RT_LIB,
 	ray_generation   = "ray_generation",
 	miss             = {"miss"},
 	hit_groups       = {{name = "hit", closest_hit = "closest_hit"}},
@@ -960,25 +928,22 @@ SHADOWS_RT_PIPELINE :: gpu.Ray_Tracing_Pipeline_Desc {
 }
 
 POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = POST_CS,
 	label   = "post",
 }
 
 COMPOSITE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	vertex = COMPOSITE_VS,
-	pixel  = COMPOSITE_PS,
 	colors = {{format = gpu.FRAME_TARGET_FORMAT}},
 	label  = "composite",
 }
 
-destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: Pipelines) {
-	platform.gpu_destroy_pipeline(pipelines.scene)
-	platform.gpu_destroy_pipeline(pipelines.objects)
-	platform.gpu_destroy_pipeline(pipelines.mesh)
-	platform.gpu_destroy_pipeline(pipelines.cull)
-	platform.gpu_destroy_pipeline(pipelines.shadows)
-	platform.gpu_destroy_pipeline(pipelines.post)
-	platform.gpu_destroy_pipeline(pipelines.composite)
+destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
+	render.destroy_shader_pipeline(&pipelines.scene, platform)
+	render.destroy_shader_pipeline(&pipelines.objects, platform)
+	render.destroy_shader_pipeline(&pipelines.mesh, platform)
+	render.destroy_shader_pipeline(&pipelines.cull, platform)
+	render.destroy_shader_pipeline(&pipelines.shadows, platform)
+	render.destroy_shader_pipeline(&pipelines.post, platform)
+	render.destroy_shader_pipeline(&pipelines.composite, platform)
 }
 
 gpu_bytes :: proc(data: ^$T) -> []byte {

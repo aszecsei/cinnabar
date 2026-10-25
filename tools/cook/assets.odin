@@ -7,6 +7,7 @@ import "core:os"
 import "core:slice"
 import "core:strings"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // IMPORTERS gives the extension of each kind of asset that the cooker cooks. Other files in the content roots are not
@@ -15,6 +16,7 @@ IMPORTERS :: [format.Asset_Kind]string {
 	.None   = "",
 	.Script = SCRIPT_EXTENSION,
 	.Scene  = format.SCENE_EXTENSION,
+	.Shader = format.SHADER_EXTENSION,
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -72,7 +74,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -230,6 +232,17 @@ kind_of :: proc(name: string) -> format.Asset_Kind {
 extension_of :: proc(kind: format.Asset_Kind) -> string {
 	importers := IMPORTERS
 	return importers[kind]
+}
+
+// link_kind is a kind of asset as the cook link names it.
+link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
+	#partial switch kind {
+	case .Scene:
+		return .Scene
+	case .Shader:
+		return .Shader
+	}
+	return .Script
 }
 
 // assets_of is the indices of the assets of one kind, in the scan's order.

@@ -127,13 +127,17 @@ public sealed class ContentTests : IDisposable
     [Fact]
     public void TheCommandLineNamesTheCookDaemonAndTheRoots()
     {
-        var options = EditorOptions.Parse(["--cook", "tools/cook.exe", "--cache", "cache", "--definitions", "types.d.luau", "--root", "game=content", "--root", "engine=lib/content"]);
+        var options = EditorOptions.Parse(
+            ["--cook", "tools/cook.exe", "--cache", "cache", "--definitions", "types.d.luau", "--dxc", "dxc/dxc.exe", "--include", "shaders", "--root", "game=content", "--root", "engine=lib/content"]);
 
         Assert.Equal(Path.GetFullPath("tools/cook.exe"), options.Cook.CookPath);
         Assert.Equal(Path.GetFullPath("cache"), options.Cook.CachePath);
         Assert.Equal(Path.GetFullPath("types.d.luau"), options.Cook.DefinitionsPath);
         Assert.Equal([("game", Path.GetFullPath("content")), ("engine", Path.GetFullPath("lib/content"))], options.Cook.Roots);
-        Assert.Equal("game", Assert.Single(EditorOptions.Parse([]).Cook.Roots).Name);
+        Assert.Equal(Path.GetFullPath("dxc/dxc.exe"), options.Cook.DxcPath);
+        Assert.Equal([Path.GetFullPath("shaders")], options.Cook.Includes);
+        // Without roots, the daemon cooks the sample's content and the engine's.
+        Assert.Equal(["game", "engine"], EditorOptions.Parse([]).Cook.Roots.Select(r => r.Name));
     }
 
     [Fact]

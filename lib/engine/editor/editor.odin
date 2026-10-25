@@ -9,6 +9,7 @@ import "core:log"
 import "core:strings"
 
 import "cinnabar:core"
+import "cinnabar:engine/asset"
 import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
@@ -27,6 +28,8 @@ MAX_WATCHED :: 64
 // a code reload, and a soft restart starts a new one, which sends everything again.
 Editor :: struct {
 	platform:    ^core.Platform_API,
+	// The game's asset runtime, in Game_State, which the viewport tools load their shaders from.
+	assets:      ^asset.Assets,
 	// The connection that this state is for. Another one means a new editor, which gets everything.
 	connection:  u64,
 	types_sent:  bool,
@@ -69,9 +72,12 @@ Watched :: struct {
 	sent:   u64,
 }
 
-init :: proc(e: ^Editor, platform: ^core.Platform_API) {
+// init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
+// editor; without them (nil), the tools stay off.
+init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets) {
 	e^ = {
 		platform    = platform,
+		assets      = assets,
 		known       = make([dynamic]Known, platform.heap_allocator),
 		watched     = make([dynamic]Watched, platform.heap_allocator),
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
@@ -90,7 +96,7 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.platform = platform
 	e.types_sent = false
 	clear(&e.commands)
-	reload_viewport_gpu(e)
+	sync_viewport_pipelines(e, force = true)
 }
 
 destroy :: proc(e: ^Editor) {

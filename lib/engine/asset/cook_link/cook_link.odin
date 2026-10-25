@@ -95,6 +95,7 @@ Log :: struct {
 Asset_Kind :: enum u8 {
 	Script,
 	Scene,
+	Shader,
 }
 
 Asset_Status :: enum u8 {
@@ -166,12 +167,17 @@ Problem :: struct {
 	text:   string,
 }
 
+Cooked_Count :: struct {
+	kind:  Asset_Kind,
+	count: u32,
+}
+
 // Daemon to editor: a cook is done.
 Cook_Finished :: struct {
 	// The cache's generation after the cook.
 	generation:   u64,
-	scripts:      u32,
-	scenes:       u32,
+	// The assets that the cook wrote, for each kind that it wrote any of.
+	cooked:       []Cooked_Count,
 	failed:       u32,
 	milliseconds: f32,
 }

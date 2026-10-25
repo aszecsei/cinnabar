@@ -3,7 +3,6 @@
 package cook
 
 import "core:fmt"
-import "core:log"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -24,6 +23,11 @@ Cook_Options :: struct {
 	definitions: string,
 	// The daemon's port for the cook link, or 0 for none.
 	link:        int,
+	// DXC's absolute path and its version, or "" when shaders cannot cook.
+	dxc:         string,
+	dxc_version: string,
+	// The directories that shader includes resolve in after the including file's own: absolute, with forward slashes.
+	includes:    [dynamic]string,
 }
 
 // Pass is what one cook did, and what it found, in the temporary allocator.
@@ -43,10 +47,12 @@ Pass :: struct {
 	force:      map[format.Guid]bool,
 }
 
-// parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir>...`. The daemon
-// always cooks the dev configuration, so it takes no --config, and it takes `--link <port>`.
+// parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...
+// --root <name>=<dir>...`. The daemon always cooks the dev configuration, so it takes no --config, and it takes
+// `--link <port>`.
 parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Options, ok: bool) {
 	options.roots = make([dynamic]Root, context.temp_allocator)
+	options.includes = make([dynamic]string, context.temp_allocator)
 	config_set := daemon
 	for i := 0; i < len(args); i += 1 {
 		if i + 1 >= len(args) {
@@ -58,6 +64,23 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 			options.cache = value
 		case "--definitions":
 			options.definitions = value
+		case "--dxc":
+			// Starting a process needs the executable's full path on Windows.
+			dxc, err := os.get_absolute_path(value, context.temp_allocator)
+			if err != nil {
+				return
+			}
+			version, version_ok := dxc_version(dxc)
+			if !version_ok {
+				return
+			}
+			options.dxc, options.dxc_version = dxc, version
+		case "--include":
+			dir, err := os.get_absolute_path(value, context.temp_allocator)
+			if err != nil {
+				return
+			}
+			append(&options.includes, forward_slashes(dir))
 		case "--link":
 			port, port_ok := strconv.parse_int(value)
 			if !daemon || !port_ok || port <= 0 || port > 65535 {
@@ -109,6 +132,9 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	}
 	if .Scene in kinds {
 		pass.ok = cook_scenes(options, pass.assets, &pass) && pass.ok
+	}
+	if .Shader in kinds {
+		pass.ok = cook_shaders(options, pass.assets, &pass) && pass.ok
 	}
 	written := 0
 	for n in pass.cooked {

@@ -55,6 +55,10 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 		}
 		append(&dirs, dir)
 	}
+	// A change to an include cooks the shaders that include it again.
+	for include in d.options.includes {
+		append(&dirs, include)
+	}
 	watcher_open(&d.watcher, dirs[:]) or_return
 	defer watcher_close(&d.watcher)
 	if d.options.link != 0 {
@@ -120,14 +124,16 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	for a in pass.assets {
 		failed += int(a.failed)
 	}
-	if pass.cooked[.Script] + pass.cooked[.Scene] > 0 {
-		log.infof(
-			"cook: %d scripts compiled and %d scenes cooked in %v, generation %d",
-			pass.cooked[.Script],
-			pass.cooked[.Scene],
-			elapsed,
-			pass.generation,
-		)
+	cooked := make([dynamic]cook_link.Cooked_Count, context.temp_allocator)
+	parts := make([dynamic]string, context.temp_allocator)
+	for count, kind in pass.cooked {
+		if count > 0 {
+			append(&cooked, cook_link.Cooked_Count{link_kind(kind), u32(count)})
+			append(&parts, fmt.tprintf("%d %s", count, kind_plural(kind)))
+		}
+	}
+	if len(parts) > 0 {
+		log.infof("cook: cooked %s in %v, generation %d", strings.join(parts[:], ", ", context.temp_allocator), elapsed, pass.generation)
 	}
 	if d.linked_connection == 0 {
 		return
@@ -143,8 +149,7 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 		d.linked_connection,
 		cook_link.Cook_Finished {
 			generation = pass.generation,
-			scripts = u32(pass.cooked[.Script]),
-			scenes = u32(pass.cooked[.Scene]),
+			cooked = cooked[:],
 			failed = u32(failed),
 			milliseconds = f32(time.duration_milliseconds(elapsed)),
 		},
@@ -260,7 +265,7 @@ importers :: proc() -> []cook_link.Importer {
 		for s, i in settings {
 			infos[i] = {s.key, s.values, s.default, s.description}
 		}
-		append(&result, cook_link.Importer{kind = kind == .Scene ? .Scene : .Script, extension = extension, settings = infos})
+		append(&result, cook_link.Importer{kind = link_kind(kind), extension = extension, settings = infos})
 	}
 	return result[:]
 }
@@ -271,10 +276,16 @@ clone_options :: proc(options: Cook_Options, allocator := context.allocator) -> 
 		config      = options.config,
 		definitions = strings.clone(options.definitions, allocator),
 		link        = options.link,
+		dxc         = strings.clone(options.dxc, allocator),
+		dxc_version = strings.clone(options.dxc_version, allocator),
 		roots       = make([dynamic]Root, 0, len(options.roots), allocator),
+		includes    = make([dynamic]string, 0, len(options.includes), allocator),
 	}
 	for root in options.roots {
 		append(&result.roots, Root{strings.clone(root.name, allocator), strings.clone(root.dir, allocator)})
+	}
+	for include in options.includes {
+		append(&result.includes, strings.clone(include, allocator))
 	}
 	return result
 }

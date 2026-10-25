@@ -83,3 +83,30 @@ script_view_rejects_bad_blobs :: proc(t: ^testing.T) {
 	_, ok = script_view(other)
 	testing.expect(t, !ok)
 }
+
+@(test)
+shader_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	entries := []Shader_Code{{.Vertex, .DXIL, {1, 2, 3}}, {.Pixel, .DXIL, {4, 5}}}
+	data := aligned(shader_write({guid = guid, key = 7, entries = entries, source_path = "game/x.hlsl"}, context.temp_allocator))
+
+	blob, ok := shader_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.header.guid, guid)
+	testing.expect_value(t, blob.header.key, 7)
+	testing.expect_value(t, shader_stages(data, blob), Shader_Stages{.Vertex, .Pixel})
+	testing.expect_value(t, len(shader_code(data, blob, .Vertex)), 3)
+	testing.expect_value(t, shader_code(data, blob, .Pixel)[1], 5)
+	testing.expect(t, shader_code(data, blob, .Compute) == nil)
+	for e in shader_entries(data, blob) {
+		testing.expect_value(t, e.code.offset % BLOB_ALIGN, 0)
+	}
+	testing.expect_value(t, blob_string(data, blob.source_path), "game/x.hlsl")
+
+	(^Shader_Blob)(raw_data(data)).entries.size = 1 << 20
+	_, ok = shader_view(data)
+	testing.expect(t, !ok)
+}

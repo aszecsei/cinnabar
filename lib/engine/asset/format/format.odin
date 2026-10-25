@@ -133,6 +133,7 @@ Asset_Kind :: enum u32 {
 	None,
 	Script,
 	Scene,
+	Shader,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

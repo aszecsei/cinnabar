@@ -293,8 +293,8 @@ public sealed class ContentBrowserView : DockPanel
         var failed = last is { Failed: > 0 } ? $"{last.Failed} {Plural(last.Failed, "asset")} failed to cook" : "";
         _status.Text = cook.State switch
         {
-            CookState.Linked when last is { Scripts: > 0 } or { Scenes: > 0 } =>
-                $"Cooked {last.Scripts} {Plural(last.Scripts, "script")} and {last.Scenes} {Plural(last.Scenes, "scene")} in {last.Milliseconds:0} ms"
+            CookState.Linked when last is { Cooked.Length: > 0 } =>
+                $"Cooked {string.Join(", ", last.Cooked.Select(c => $"{c.Count} {Plural(c.Count, KindNoun(c.Kind))}"))} in {last.Milliseconds:0} ms"
                 + (failed == "" ? "" : $", {failed}"),
             CookState.Linked when failed != "" => failed,
             CookState.Linked => "Up to date",
@@ -305,6 +305,14 @@ public sealed class ContentBrowserView : DockPanel
     }
 
     static string Plural(uint count, string noun) => count == 1 ? noun : noun + "s";
+
+    // A kind's name in messages, which is also its icon's.
+    static string KindNoun(AssetKind kind) => kind switch
+    {
+        AssetKind.Scene => "scene",
+        AssetKind.Shader => "shader",
+        _ => "script",
+    };
 
     // Problems that belong to no asset, such as a broken definition file, show over the browser.
     void ShowGeneralProblems()
@@ -586,7 +594,7 @@ public sealed class ContentBrowserView : DockPanel
     Control AssetView(Asset asset)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        if (CommandViews.Icon(asset.Kind == AssetKind.Scene ? "scene" : "script", 14) is { } icon)
+        if (CommandViews.Icon(KindNoun(asset.Kind), 14) is { } icon)
         {
             line.Children.Add(icon);
         }

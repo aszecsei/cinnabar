@@ -52,7 +52,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		root := roots[a.root]
 		entry := cook_link.Asset {
 			guid      = guids[i],
-			kind      = a.kind == .Scene ? .Scene : .Script,
+			kind      = link_kind(a.kind),
 			root      = clone(root.name, allocator),
 			path      = clone(a.name[len(root.name) + 1:], allocator),
 			status    = a.failed ? .Failed : .Current,

@@ -28,12 +28,11 @@ PICK_HEADER :: 16
 @(private)
 PICK_RESULTS_SIZE :: PICK_HEADER + ecs.MAX_ENTITIES / 8
 
+// The tools' shaders are engine content (see docs/content-pipeline.md#shaders).
 @(private)
-PICK_CS :: #load("shaders/pick.cs.dxil")
+PICK_SHADER :: #load("../content/shaders/pick.hlsl.meta", string)
 @(private)
-OVERLAY_VS :: #load("shaders/overlay.vs.dxil")
-@(private)
-OVERLAY_PS :: #load("shaders/overlay.ps.dxil")
+OVERLAY_SHADER :: #load("../content/shaders/overlay.hlsl.meta", string)
 
 // Viewport is the editor's camera, selection and gizmo, and the picks that wait for the GPU. It lives in Editor.
 Viewport :: struct {
@@ -53,8 +52,8 @@ Viewport :: struct {
 	// The GPU objects, made at the first frame that draws the tools. If they cannot be made, the tools stay off.
 	gpu_ready:        bool,
 	gpu_failed:       bool,
-	pick_pipeline:    gpu.Pipeline,
-	overlay_pipeline: gpu.Pipeline,
+	pick_pipeline:    render.Shader_Pipeline,
+	overlay_pipeline: render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
 }
@@ -105,6 +104,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	if !active(e) || !create_viewport_gpu(e) {
 		return
 	}
+	sync_viewport_pipelines(e)
 	platform := e.platform
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
@@ -121,7 +121,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			mem.zero_slice(zeros.data)
 			pick := new(Pick_Pass, platform.frame_allocator)
 			pick^ = {
-				pipeline = v.pick_pipeline,
+				pipeline = v.pick_pipeline.pipeline,
 				ids      = frame.ids,
 				depth    = frame.depth,
 				results  = render.import_buffer(g, v.results),
@@ -150,7 +150,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 
 	overlay := new(Overlay_Pass, platform.frame_allocator)
 	overlay^ = {
-		pipeline = v.overlay_pipeline,
+		pipeline = v.overlay_pipeline.pipeline,
 		ids = frame.ids,
 		depth = frame.depth,
 		slots = slots,
@@ -359,11 +359,11 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 		return v.gpu_ready
 	}
 	platform := e.platform
-	v.pick_pipeline = platform.gpu_create_compute_pipeline(PICK_PIPELINE)
-	v.overlay_pipeline = platform.gpu_create_graphics_pipeline(OVERLAY_PIPELINE)
+	v.pick_pipeline = render.shader_pipeline(PICK_SHADER)
+	v.overlay_pipeline = render.shader_pipeline(OVERLAY_SHADER)
 	v.results = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"}, nil)
 	v.readback = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"}, nil)
-	v.gpu_ready = v.pick_pipeline != {} && v.overlay_pipeline != {} && v.results != {} && v.readback != {}
+	v.gpu_ready = e.assets != nil && v.results != {} && v.readback != {}
 	if !v.gpu_ready {
 		log.error("editor: cannot create the viewport tools' GPU objects")
 		destroy_viewport_gpu(e)
@@ -376,42 +376,34 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 destroy_viewport_gpu :: proc(e: ^Editor) {
 	v := &e.viewport
 	platform := e.platform
-	platform.gpu_destroy_pipeline(v.pick_pipeline)
-	platform.gpu_destroy_pipeline(v.overlay_pipeline)
+	render.destroy_shader_pipeline(&v.pick_pipeline, platform)
+	render.destroy_shader_pipeline(&v.overlay_pipeline, platform)
 	platform.gpu_destroy_buffer(v.results)
 	platform.gpu_destroy_buffer(v.readback)
 	v.pick_pipeline, v.overlay_pipeline, v.results, v.readback = {}, {}, {}, {}
 	v.gpu_ready = false
 }
 
-// reload_viewport_gpu updates the pipelines after a code reload, which may bring new shaders.
+// sync_viewport_pipelines creates the pipelines from their shaders, and updates them when the cooker compiles the
+// shaders again, or when force is set after a code reload, which may bring new descriptions. Until a pipeline is
+// ready, the passes that use it record nothing.
 @(private)
-reload_viewport_gpu :: proc(e: ^Editor) {
+sync_viewport_pipelines :: proc(e: ^Editor, force := false) {
 	v := &e.viewport
 	if !v.gpu_ready {
 		return
 	}
-	platform := e.platform
-	if !platform.gpu_update_compute_pipeline(v.pick_pipeline, PICK_PIPELINE) {
-		platform.gpu_destroy_pipeline(v.pick_pipeline)
-		v.pick_pipeline = platform.gpu_create_compute_pipeline(PICK_PIPELINE)
-	}
-	if !platform.gpu_update_graphics_pipeline(v.overlay_pipeline, OVERLAY_PIPELINE) {
-		platform.gpu_destroy_pipeline(v.overlay_pipeline)
-		v.overlay_pipeline = platform.gpu_create_graphics_pipeline(OVERLAY_PIPELINE)
-	}
+	render.sync_compute_pipeline(&v.pick_pipeline, e.platform, e.assets, PICK_PIPELINE, force)
+	render.sync_graphics_pipeline(&v.overlay_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, OVERLAY_PIPELINE, force)
 }
 
 @(private)
 PICK_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = PICK_CS,
-	label   = "editor pick",
+	label = "editor pick",
 }
 
 @(private)
 OVERLAY_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	vertex = OVERLAY_VS,
-	pixel  = OVERLAY_PS,
 	colors = {{format = gpu.FRAME_TARGET_FORMAT, blend = .Alpha}},
 	label  = "editor overlay",
 }

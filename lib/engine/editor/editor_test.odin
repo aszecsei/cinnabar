@@ -69,7 +69,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	ecs.register_engine_components(&f.world.registry)
 	scene.register_components(&f.world.registry)
 	ecs.register_component(&f.world.registry, Tuned)
-	init(&f.editor, &f.platform)
+	init(&f.editor, &f.platform, nil)
 	return f
 }
 

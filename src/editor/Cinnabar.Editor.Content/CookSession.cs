@@ -17,10 +17,17 @@ public enum CookState
 }
 
 /// <summary>
-/// How the editor runs the cook daemon: its executable, the cache, the definition file, and the content roots by
-/// name. Paths are relative to <see cref="WorkingDirectory"/>.
+/// How the editor runs the cook daemon: its executable, the cache, the definition file, the content roots by name, and
+/// what it compiles shaders with: DXC and the include directories. Paths are relative to <see cref="WorkingDirectory"/>.
 /// </summary>
-public sealed record CookOptions(string CookPath, string CachePath, string? DefinitionsPath, IReadOnlyList<(string Name, string Dir)> Roots, string WorkingDirectory);
+public sealed record CookOptions(
+    string CookPath,
+    string CachePath,
+    string? DefinitionsPath,
+    IReadOnlyList<(string Name, string Dir)> Roots,
+    string WorkingDirectory,
+    string? DxcPath = null,
+    IReadOnlyList<string>? Includes = null);
 
 /// <summary>
 /// The cook daemon's lifetime and its cook link (see docs/editor.md#processes): start, stop, restart, crashes, and the
@@ -87,6 +94,14 @@ public sealed class CookSession : IDisposable
         if (_options.DefinitionsPath != null)
         {
             args.AddRange(["--definitions", _options.DefinitionsPath]);
+        }
+        if (_options.DxcPath != null)
+        {
+            args.AddRange(["--dxc", _options.DxcPath]);
+        }
+        foreach (var include in _options.Includes ?? [])
+        {
+            args.AddRange(["--include", include]);
         }
         foreach (var (name, dir) in _options.Roots)
         {

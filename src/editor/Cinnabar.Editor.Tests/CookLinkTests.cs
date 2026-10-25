@@ -110,7 +110,7 @@ public sealed class CookLinkTests : IDisposable
         Assert.Equal("", (await session.Request(new SetImportSettings(gate, [new Setting("native", "true")]))).Error);
         Assert.Equal([new Setting("native", "true")], index.Find(gate)!.Settings);
         Assert.Equal("", (await session.Request(new Reimport([gate]))).Error);
-        Assert.Equal(1u, session.LastCook?.Scripts);
+        Assert.Equal([new CookedCount(AssetKind.Script, 1)], session.LastCook!.Cooked);
 
         // A refused operation changes nothing, and says why.
         var refused = await session.Request(new RenameAsset(copy, "portcullis"));

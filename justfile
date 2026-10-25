@@ -13,7 +13,7 @@ gpu_backend := "d3d12"
 # The D3D12 Agility SDK. Its minor version must match AGILITY_SDK_VERSION in lib/core/gpu/d3d12.
 agility_version := "1.619.6"
 agility_dir := "vendor/agility/" + agility_version
-# DXC compiles shaders until tools/cook exists.
+# The cooker compiles shaders with this DXC release.
 dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
@@ -30,6 +30,10 @@ cmake_generator := "Visual Studio 17 2022"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
 luau_version := `git -C vendor/luau describe --tags --always`
 content_root := "samples/" + game + "/content"
+# Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
+roots := "--root game=" + content_root + " --root engine=lib/engine/content"
+# What the cooker compiles shaders with: DXC, and the directory of the fixed header, cinnabar.hlsli.
+shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
@@ -100,7 +104,7 @@ update-luau tag="":
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes
+build: host game-dll script-types scripts scenes shaders
 
 # Build the development host
 host: agility-runtime luau
@@ -128,28 +132,28 @@ cook: luau
 
 # Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
-    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" --root game="{{content_root}}"
+    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" {{roots}}
 
 # Cook the game's scenes into the loose cache, build/cache/<config>. A scene without a .meta file gets one: commit it.
 scenes config="dev": cook
-    "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} --root game="{{content_root}}"
+    "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} {{roots}}
 
-# Run the cook daemon, which cooks the game's scripts and scenes into build/cache/dev whenever they change, until it is
+# Run the cook daemon, which cooks the game's and the engine's content into build/cache/dev whenever they change, until it is
 # stopped. A running game swaps the new blobs (see docs/content-pipeline.md#cook-daemon).
-watch: cook
-    "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" --root game="{{content_root}}"
+watch: cook install-dxc
+    "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
 
-# Cook the game's shaders and the engine's: each <name>.hlsl becomes <name>.<stage>.dxil, or <name>.lib.dxil for a ray
-# tracing library. Only changed shaders recompile (see tools/cook).
-shaders: install-dxc cook
-    for dir in lib/engine/editor/shaders "samples/{{game}}/shaders"; do "./{{build_dir}}/cook.exe" shaders --dxc "{{dxc}}" --include lib/core/gpu/shaders "$dir" || exit 1; done
+# Cook the game's shaders and the engine's into the loose cache, build/cache/<config>: each <name>.hlsl becomes one blob
+# with an entry for each stage. A shader without a .meta file gets one: commit it.
+shaders config="dev": install-dxc cook
+    "./{{build_dir}}/cook.exe" shaders --cache "{{cache_dir}}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: shaders luau
+game-dll: luau
     mkdir -p "{{build_dir}}/pdb"
     odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{build_dir}}/{{game}}.dll" \
@@ -195,10 +199,10 @@ editor: link-schema
 # Build everything and run the game in the editor
 edit: build editor
     "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene" \
-        --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" --root game="{{content_root}}"
+        --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Build the statically linked release executable
-release: agility-runtime shaders luau script-types (scripts "release") (scenes "release")
+release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
@@ -210,14 +214,13 @@ run-release: release
 # Code Quality
 # =================================
 
-# The game embeds its compiled shaders, so checks need them too.
-check: shaders
+check:
     for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point || exit 1; done
 
-vet: shaders
+vet:
     for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point -vet -vet-tabs -vet-style -vet-semicolon || exit 1; done
 
-lint: shaders
+lint:
     for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point -vet -vet-tabs -vet-style -strict-style -warnings-as-errors || exit 1; done
 
 fmt:
@@ -227,8 +230,8 @@ fmt:
 # Testing
 # =================================
 
-# lib/engine/editor embeds its compiled shaders, so its tests need them.
-test: luau link-schema shaders
+# The cooker's tests compile shaders, so they need DXC.
+test: luau link-schema install-dxc
     for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true

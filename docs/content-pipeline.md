@@ -59,6 +59,7 @@ Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shader
 - **Configurations:** development compiles with debug information embedded (`-Zi -Qembed_debug`), so PIX shows the source. Release strips it.
 - **Problems:** the cooker parses DXC's messages into problems with their file, line and column. A message in an include belongs to the include's file, and to no asset, as other files' problems do. A shader that fails keeps its old blob, so the running game keeps drawing with the last good version.
 - **The cache key** covers the cooker version, the DXC version, the configuration, the source path, the source, the `.meta` file, and the source of every file that it includes, directly or not.
+- **One process at a time:** Windows children inherit every inheritable handle, so a DXC started on one thread can hold the pipes of one that another thread started, which then waits forever. The cooker runs its child processes one at a time.
 - **Engine shaders** are in the engine's content root, `lib/engine/content/shaders/`, with committed `.meta` files and fixed GUIDs: the editor tools' overlay and pick shaders first, and the renderer's later.
 - A port adds SPIR-V from DXC or a metallib from `metal-shaderconverter` as more entries in the same blob.
 
@@ -113,7 +114,9 @@ Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
 
-`cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...`
+`cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir>...`
+
+Without `--dxc`, every shader fails with a problem that says so.
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
 - **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms.
