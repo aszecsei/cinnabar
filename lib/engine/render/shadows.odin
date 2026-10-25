@@ -294,7 +294,7 @@ slot_viewport :: proc(slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
 @(private = "file")
 add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 	s := f.shadow_settings
-	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda > 0 ? s.split_lambda : SHADOW_SPLIT_LAMBDA)
+	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda)
 	sf.cascade_splits = splits
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)

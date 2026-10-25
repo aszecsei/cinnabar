@@ -62,7 +62,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	register_components(&f.world.registry)
-	ecs.register_component(&f.world.registry, Tone, ecs.Component_Id(500))
+	ecs.register_component(&f.world.registry, Tone, ecs.Component_Id(500), TONE_DEFAULTS)
 	register(&f.volumes, &f.world)
 	return f
 }
@@ -161,29 +161,42 @@ settings_blend_by_weight :: proc(t: ^testing.T) {
 
 	// Nothing reaches the point: the defaults, overriding nothing.
 	inf := gather(&f.volumes, &f.world, {})
-	result, touched := blend(&f.world, &inf, Tone, TONE_DEFAULTS)
+	result, touched := blend(&f.world, &inf, Tone)
 	testing.expect(t, !touched)
 	testing.expect_value(t, result, TONE_DEFAULTS)
 
 	base := spawn(f, {shape = .Global})
 	ecs.add(&f.world, base, Tone{gain = {true, 3}, mode = {true, .Hard}})
 	local := spawn(f, {shape = .Global, priority = 1, weight = 0.25})
-	// tint overrides with 0, its default; inner.depth does not override.
+	// tint overrides with black, which is not its default; inner.depth keeps 9 but does not override it.
 	ecs.add(&f.world, local, Tone{gain = {true, 7}, tint = {true, {}}, mode = {true, .Soft}, inner = {depth = {false, 9}}})
 
 	inf = gather(&f.volumes, &f.world, {})
-	result, touched = blend(&f.world, &inf, Tone, TONE_DEFAULTS)
+	result, touched = blend(&f.world, &inf, Tone)
 	testing.expect(t, touched)
 	// 3, then a quarter of the way to 7.
 	testing.expect_value(t, result.gain, Value(f32){true, 4})
-	testing.expect_value(t, result.tint, Value([3]f32){true, {1, 1, 1}})
+	testing.expect_value(t, result.tint, Value([3]f32){true, {0.75, 0.75, 0.75}})
 	// Below a half, a choice keeps what is below it.
 	testing.expect_value(t, result.mode, Value(Mode){true, .Hard})
 	testing.expect_value(t, result.inner.depth, Value(f32){false, 2})
 
 	ecs.get(&f.world, local, Volume).weight = 0.5
 	inf = gather(&f.volumes, &f.world, {})
-	result, _ = blend(&f.world, &inf, Tone, TONE_DEFAULTS)
+	result, _ = blend(&f.world, &inf, Tone)
 	testing.expect_value(t, result.mode.value, Mode.Soft)
-	testing.expect_value(t, sample(&f.volumes, &f.world, Tone, {}, TONE_DEFAULTS).gain.value, 5)
+	testing.expect_value(t, sample(&f.volumes, &f.world, Tone, {}).gain.value, 5)
+}
+
+@(test)
+an_override_of_zero_is_zero :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	e := spawn(f, {shape = .Global})
+	ecs.add(&f.world, e, Tone{gain = {true, 0}, inner = {depth = {true, 0}}})
+	inf := gather(&f.volumes, &f.world, {})
+	result, _ := blend(&f.world, &inf, Tone)
+	testing.expect_value(t, result.gain, Value(f32){true, 0})
+	testing.expect_value(t, result.inner.depth, Value(f32){true, 0})
+	testing.expect_value(t, result.tint, TONE_DEFAULTS.tint)
 }

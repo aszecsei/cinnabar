@@ -191,20 +191,40 @@ public sealed class EditingTests : IDisposable
     }
 
     [Fact]
-    public void OverridingASettingSetsItsValueAndClearingResetsIt()
+    public void ASettingKeepsItsValueWhileItIsNotOverridden()
     {
         using var shell = NewShell(out _);
         var gain = FieldEditor.ForComponent(shell, 1, 1, TestFields.Of(FieldKind.F32, name: "gain", overrideOffset: 0))!;
-        Document.SceneField? Gain() => shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == 1).Fields.SingleOrDefault(f => f.Name == "gain");
+        Document.SceneField? Line(string name) => shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == 1).Fields.SingleOrDefault(f => f.Name == name);
 
         // The value that shows becomes the volume's own.
         gain.Current = SceneEdits.Floats(0.5);
         gain.Override();
         Assert.Equal("Override Gain", shell.Scene!.History[^1].Label);
-        Assert.Equal(0.5, Gain()!.Value.Numbers[0].Float);
+        Assert.Equal(0.5, Line("gain")!.Value.Numbers[0].Float);
+        Assert.Null(Line("gain.override"));
 
+        // Clearing the override keeps the value, to compare against what is below.
+        gain.StopOverriding();
+        Assert.Equal("Stop Overriding Gain", shell.Scene.History[^1].Label);
+        Assert.Equal(0.5, Line("gain")!.Value.Numbers[0].Float);
+        Assert.False(Line("gain.override")!.Value.Bool);
+        shell.Scene.Undo();
+        Assert.Null(Line("gain.override"));
+        gain.StopOverriding();
+
+        // Changing the value overrides it again.
+        gain.SetNumbers([0]);
+        Assert.Equal(0.0, Line("gain")!.Value.Numbers[0].Float);
+        Assert.Null(Line("gain.override"));
+
+        // A reset forgets both, so the setting has its default.
+        gain.StopOverriding();
         gain.Reset();
-        Assert.Null(Gain());
+        Assert.Null(Line("gain"));
+        Assert.Null(Line("gain.override"));
+        shell.Scene.Undo();
+        Assert.False(Line("gain.override")!.Value.Bool);
     }
 
     [Fact]

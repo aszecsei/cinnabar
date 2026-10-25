@@ -3,6 +3,7 @@ package ecs
 import "base:runtime"
 import "core:hash"
 import "core:log"
+import "core:mem"
 import "core:slice"
 
 import "cinnabar:core/layout"
@@ -11,17 +12,21 @@ MAX_COMPONENTS :: 256
 // Larger components fit too few rows in a chunk. Keep large data in an asset or a side table.
 MAX_COMPONENT_SIZE :: CHUNK_SIZE / 16
 MAX_COMPONENT_ALIGN :: 64
+// The registry holds the defaults of every component that registers some, together in this many bytes.
+MAX_DEFAULTS_SIZE :: 8 * 1024
 
 // Component_Id is the stable ID of a component type. Cooked scenes, the editor link and scripts use it.
 Component_Id :: distinct u64
 
 Component_Info :: struct {
-	id:     Component_Id,
-	type:   typeid,
-	name:   string,
-	size:   int,
-	align:  int,
-	layout: u64,
+	id:       Component_Id,
+	type:     typeid,
+	name:     string,
+	size:     int,
+	align:    int,
+	layout:   u64,
+	// Where the component's defaults are in Registry.defaults, or -1 for a component without, which starts as zeros.
+	defaults: int,
 }
 
 // Registry maps component types to their stable IDs. It holds typeids and strings from the DLL image, so it is
@@ -30,8 +35,10 @@ Component_Info :: struct {
 // Build it with one procedure that the game calls from init, on_reload and layout_hash. layout_hash has no state,
 // so it builds a Registry on the stack and mixes in registry_layout_hash.
 Registry :: struct {
-	infos: [MAX_COMPONENTS]Component_Info,
-	count: int,
+	infos:         [MAX_COMPONENTS]Component_Info,
+	count:         int,
+	defaults:      [MAX_DEFAULTS_SIZE]byte,
+	defaults_used: int,
 }
 
 // component_id is the ID of a name. A registered type's default name is "package.Type".
@@ -40,8 +47,10 @@ component_id :: proc "contextless" (name: string) -> Component_Id {
 }
 
 // register_component adds T to the registry. The ID is the hash of T's package-qualified name, unless id is given.
-// A type without a name needs an explicit id. A duplicate type or ID is a programming error and panics.
-register_component :: proc(r: ^Registry, $T: typeid, id := Component_Id(0)) -> Component_Id {
+// A type without a name needs an explicit id. A duplicate type or ID is a programming error and panics. defaults, if
+// given, are what a scene starts the component from and what a reset field goes back to (see registry_defaults);
+// otherwise those are zeros.
+register_component :: proc(r: ^Registry, $T: typeid, id := Component_Id(0), defaults: Maybe(T) = nil) -> Component_Id {
 	ti := type_info_of(T)
 	name := "(unnamed)"
 	component := id
@@ -68,16 +77,31 @@ register_component :: proc(r: ^Registry, $T: typeid, id := Component_Id(0)) -> C
 			log.panicf("ecs: component %s conflicts with %s", name, info.name)
 		}
 	}
+	at := -1
+	if value, has := defaults.?; has {
+		at = r.defaults_used
+		if at + size_of(T) > MAX_DEFAULTS_SIZE {
+			log.panicf("ecs: the defaults of component %s do not fit in MAX_DEFAULTS_SIZE", name)
+		}
+		mem.copy(&r.defaults[at], &value, size_of(T))
+		r.defaults_used = at + size_of(T)
+	}
 	r.infos[r.count] = {
-		id     = component,
-		type   = T,
-		name   = name,
-		size   = size_of(T),
-		align  = align_of(T),
-		layout = layout.hash(T),
+		id       = component,
+		type     = T,
+		name     = name,
+		size     = size_of(T),
+		align    = align_of(T),
+		layout   = layout.hash(T),
+		defaults = at,
 	}
 	r.count += 1
 	return component
+}
+
+// registry_defaults is a registered component's defaults, info.size bytes, or nil for a component without.
+registry_defaults :: proc "contextless" (r: ^Registry, info: ^Component_Info) -> rawptr {
+	return info.defaults >= 0 ? &r.defaults[info.defaults] : nil
 }
 
 registry_find :: proc "contextless" (r: ^Registry, id: Component_Id) -> ^Component_Info {

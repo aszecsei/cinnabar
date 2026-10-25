@@ -22,8 +22,8 @@ component 1 Transform
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 32 Camera
-	vertical_fov = 0.8726646
-	near = 0.05
+	vertical_fov = 0.1
+	near = 0.001
 
 entity 294f29a7187efef1
 name = "Front Wall"
@@ -69,6 +69,8 @@ component 42 Volume
 component 49 Environment
 	background = [0.02, 0.02, 0.035]
 component 1003 Lens
+	vignette = 1.6
+	chromatic_aberration = 24.0
 
 entity 7820834ecb6da56e
 name = "Floor"
@@ -94,6 +96,7 @@ component 39 Quad_Light
 	height = 0.4
 	range = 6
 	cast_shadows = true
+	two_sided = false
 
 entity 938af77bbcde9068
 name = "Left Wall"
