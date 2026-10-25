@@ -32,6 +32,9 @@ Accel_Entry :: struct {
 state: struct {
 	frame_start:   time.Tick,
 	frame_target:  gpu.Texture,
+	// The null backend has no display, so Auto gives Sdr, but the other requests change the frame target's format.
+	request:       gpu.Output_Request,
+	output:        gpu.Output,
 	buffers:       gpu.Pool(gpu.Buffer, gpu.Buffer_Desc),
 	textures:      gpu.Pool(gpu.Texture, gpu.Texture_Desc),
 	samplers:      gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
@@ -53,6 +56,7 @@ state: struct {
 init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	state = {
 		frame_start = time.tick_now(),
+		output      = {format = gpu.FRAME_TARGET_FORMAT},
 	}
 	gpu.pool_init(&state.buffers, gpu.MAX_BUFFERS)
 	gpu.pool_init(&state.textures, gpu.MAX_TEXTURES)
@@ -107,6 +111,15 @@ frame_target :: proc() -> gpu.Texture {
 	return state.frame_target
 }
 
+output :: proc() -> gpu.Output {
+	return state.output
+}
+
+// request_output changes the output from the next frame on.
+request_output :: proc(request: gpu.Output_Request) {
+	state.request = request
+}
+
 // The null backend has no shared target, so these do nothing.
 shared_target :: proc() -> (prefix: string, generation: u32, size: [2]i32) {
 	return
@@ -116,11 +129,27 @@ pace_shared_frames :: proc(paced: bool) {}
 
 acknowledge_shared_frame :: proc(generation: u32, frame: u64) {}
 
+preview_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
+	return
+}
+
+release_preview_target :: proc(id: int) {}
+
+acknowledge_preview_frame :: proc(id: int, generation: u32, frame: u64) {}
+
+// Nothing compiles, so a pipeline is ready once it exists.
+pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+	_, ok := gpu.pool_lookup(&state.pipelines, pipeline)
+	return ok
+}
+
 begin_frame :: proc(size: [2]i32) {
 	if elapsed := time.tick_since(state.frame_start); elapsed < FRAME_TIME {
 		time.sleep(FRAME_TIME - elapsed)
 	}
 	state.frame_start = time.tick_now()
+	mode := gpu.output_mode(state.request, {})
+	state.output = {mode = mode, format = gpu.output_format(mode)}
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
 	state.upload_peak = max(state.upload_peak, state.upload_offset)
@@ -400,7 +429,7 @@ upload :: proc(size, align: int) -> (gpu.Upload, bool) {
 
 @(private = "file")
 frame_target_desc :: proc(size: [2]i32) -> gpu.Texture_Desc {
-	return {size = {u32(max(size.x, 1)), u32(max(size.y, 1))}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, scope = .Permanent}
+	return {size = {u32(max(size.x, 1)), u32(max(size.y, 1))}, format = state.output.format, usage = {.Render_Target}, scope = .Permanent}
 }
 
 @(private)

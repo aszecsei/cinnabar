@@ -279,6 +279,17 @@ update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracin
 	return start_update(pipeline, task, {info = {kind = .Ray_Tracing}})
 }
 
+// pipeline_ready is whether a pipeline's latest version is compiled and in use: false while a compile job that
+// creates or updates it runs, and after its first compile failed.
+pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+	sync.guard(&dev.pipeline_mutex)
+	entry := gpu.pool_get(&dev.pipeline_pool, pipeline)
+	if entry == nil || pipeline_compiling(pipeline.index) {
+		return false
+	}
+	return sync.atomic_load(&entry.pso) != nil || sync.atomic_load(&entry.program) != nil
+}
+
 destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	sync.guard(&dev.pipeline_mutex)
 	if entry, ok := gpu.pool_remove(&dev.pipeline_pool, pipeline); ok {
@@ -481,12 +492,19 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 		RasterizerState = {
 			FillMode = .SOLID,
 			CullMode = CULL[desc.cull],
-			DepthClipEnable = true,
+			DepthBias = desc.depth_bias,
+			SlopeScaledDepthBias = desc.slope_bias,
+			DepthClipEnable = d3d.BOOL(!desc.depth_clamp),
 		},
 		DepthStencilState = {
 			DepthEnable = d3d.BOOL(desc.depth_format != .Unknown && (desc.depth_compare != .Always || desc.depth_write)),
 			DepthWriteMask = desc.depth_write ? .ALL : .ZERO,
 			DepthFunc = COMPARE[desc.depth_compare],
+			StencilEnable = d3d.BOOL(gpu.stencil_used(desc.stencil)),
+			StencilReadMask = desc.stencil.read_mask,
+			StencilWriteMask = desc.stencil.write_mask,
+			FrontFace = stencil_face(desc.stencil),
+			BackFace = stencil_face(desc.stencil),
 		},
 		PrimitiveTopologyType = TOPOLOGY_TYPE[desc.topology],
 		NumRenderTargets = u32(len(desc.colors)),
@@ -745,6 +763,19 @@ CULL := [gpu.Cull_Mode]d3d.CULL_MODE {
 }
 
 @(private = "file")
+stencil_face :: proc(s: gpu.Stencil_State) -> d3d.DEPTH_STENCILOP_DESC {
+	OP := [gpu.Stencil_Op]d3d.STENCIL_OP {
+		.Keep            = .KEEP,
+		.Zero            = .ZERO,
+		.Replace         = .REPLACE,
+		.Increment_Clamp = .INCR_SAT,
+		.Decrement_Clamp = .DECR_SAT,
+		.Invert          = .INVERT,
+	}
+	return {StencilFailOp = OP[s.fail], StencilDepthFailOp = OP[s.depth_fail], StencilPassOp = OP[s.pass], StencilFunc = COMPARE[s.compare]}
+}
+
+@(private)
 COMPARE := [gpu.Compare_Op]d3d.COMPARISON_FUNC {
 	.Always        = .ALWAYS,
 	.Never         = .NEVER,

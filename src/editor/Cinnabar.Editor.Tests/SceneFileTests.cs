@@ -140,6 +140,27 @@ public class SceneFileTests
         Assert.Equal(1L, SceneSnapshot.Value(SceneValue.Of(true)).Ints[0]);
     }
 
+    [Fact]
+    public void AssetReferencesRoundTripAndCrossTheWire()
+    {
+        const string guid = "9db8150cc7215ffc2708d20d77cf60bf";
+        var text = $"scene 1\n\nentity 0000000000000001\ncomponent 7 Renderer\n\tmesh = ${guid}\n\tnone = $0\n";
+        var scene = Parse(text);
+        var fields = scene.Entities[0].Components[0].Fields;
+        Assert.Equal(SceneValue.AssetRef(guid), fields[0].Value);
+        Assert.Equal(SceneValue.AssetRef(""), fields[1].Value);
+        Assert.Equal(text, SceneFile.Write(scene));
+
+        var wire = SceneSnapshot.Value(fields[0].Value);
+        Assert.Equal(Convert.FromHexString(guid), wire.Asset);
+        Assert.Equal(fields[0].Value, SceneSnapshot.FromWire(wire));
+        Assert.Equal(new byte[16], SceneSnapshot.Value(fields[1].Value).Asset);
+        Assert.Equal(fields[1].Value, SceneSnapshot.FromWire(SceneSnapshot.Value(fields[1].Value)));
+
+        var (_, problems) = SceneFile.Parse("scene 1\nentity 0000000000000001\ncomponent 7 R\n\tmesh = $12\n");
+        Assert.Contains(problems, p => p.IsError && p.Message.Contains("32 hex digits after $"));
+    }
+
     static string RepositoryRoot()
     {
         for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)

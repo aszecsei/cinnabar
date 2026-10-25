@@ -110,13 +110,51 @@ public sealed class CookLinkTests : IDisposable
         Assert.Equal("", (await session.Request(new SetImportSettings(gate, [new Setting("native", "true")]))).Error);
         Assert.Equal([new Setting("native", "true")], index.Find(gate)!.Settings);
         Assert.Equal("", (await session.Request(new Reimport([gate]))).Error);
-        Assert.Equal(1u, session.LastCook?.Scripts);
+        Assert.Equal([new CookedCount(AssetKind.Script, 1)], session.LastCook!.Cooked);
 
         // A refused operation changes nothing, and says why.
         var refused = await session.Request(new RenameAsset(copy, "portcullis"));
         Assert.Contains("already exists", refused.Error);
         Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
         Assert.Contains("root", (await session.Request(new DeleteAssets([], [new Folder("game", "")]))).Error);
+    }
+
+    [Fact]
+    public async Task TheDaemonDescribesMaterialGraphsAndCooksPreviews()
+    {
+        var root = RepositoryRoot();
+        var dxc = Path.Combine(root, "vendor", "dxc", "1.9.2609", "dxc.exe");
+        if (!File.Exists(_cook) || !File.Exists(dxc))
+        {
+            Assert.Skip("build/cook.exe or DXC is missing");
+        }
+        Write("shading/lit.shading", File.ReadAllText(Path.Combine(root, "lib", "engine", "content", "shading", "lit.shading")));
+        Write("shading/lit.hlsli", File.ReadAllText(Path.Combine(root, "lib", "engine", "content", "shading", "lit.hlsli")));
+        const string Graph = "material 1\nshading = lit\nparam tint color = [1, 0, 0, 1]\n\nnode 1 output\n\tposition = [0, 0]\n\tbase_color = @2.value\nnode 2 parameter\n\tposition = [-200, 0]\n\tname = \"tint\"\n";
+        Write("red.material", Graph);
+        var index = new AssetIndex();
+        var includes = new[] { Path.Combine(root, "lib", "core", "gpu", "shaders"), Path.Combine(root, "lib", "engine", "content", "shaders") };
+        using var session = new CookSession(new CookOptions(_cook, Path.Combine(_dir, "cache"), null, [("game", _content)], _dir, dxc, includes), index);
+        session.Start();
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Material) && index.ShadingModels.Count == 1, session, output);
+
+        Assert.Contains(index.Nodes, n => n.Kind == "output" && n.PinsFrom == NodePinsFrom.ShadingModel);
+        Assert.Contains(index.Nodes, n => n.Kind == "texture_sample" && n.Inputs.Any(p => p.Name == "uv" && p.DefaultLabel == "UV0"));
+        var lit = Assert.Single(index.ShadingModels);
+        Assert.Equal("lit", lit.Name);
+        Assert.Contains(lit.Inputs, p => p.Name == "base_color" && p.Type == PinType.Float3);
+        var red = index.Assets.Values.Single(a => a.Kind == AssetKind.Material);
+        Assert.Equal(1u, red.Permutations);
+
+        // An unsaved graph cooks into the preview area, and its problems come back with its lines.
+        var cooked = await session.CookPreview(red.Guid, Graph.Replace("[1, 0, 0, 1]", "[0, 1, 0, 1]"));
+        Assert.Equal("", cooked.Error);
+        Assert.True(File.Exists(Path.Combine(_dir, "cache", "dev", "preview", red.Guid + ".blob")));
+        var broken = await session.CookPreview(red.Guid, Graph.Replace("@2.value", "@3.value"));
+        Assert.NotEqual("", broken.Error);
+        Assert.Equal(7u, Assert.Single(broken.Problems).Line);
     }
 
     [Fact]

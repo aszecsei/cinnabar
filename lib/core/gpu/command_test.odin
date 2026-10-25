@@ -311,6 +311,7 @@ validate_rules :: proc(t: ^testing.T) {
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_set_index_buffer(cb, PLAIN, .U16)}, .Bad_Buffer_Usage, 1},
 		{proc(cb: ^Command_Buffer) {cmd_set_index_buffer(cb, INDICES, .U16)}, .State_Outside_Pass, 0},
 		{proc(cb: ^Command_Buffer) {cmd_set_scissor(cb, {}, {1, 1})}, .State_Outside_Pass, 0},
+		{proc(cb: ^Command_Buffer) {cmd_set_stencil_reference(cb, 1)}, .State_Outside_Pass, 0},
 		{proc(cb: ^Command_Buffer) {cmd_set_pass_constants(cb, {buffer = {index = 9, generation = 1}})}, .Invalid_Buffer, 0},
 	}
 	for c, i in cases {
@@ -688,6 +689,11 @@ validate_mesh_draws :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, amplification = shader, pixel = shader, colors = colors}), Desc_Error.Bad_Stages)
 	testing.expect_value(t, validate_graphics_pipeline_desc({amplification = shader, pixel = shader, colors = colors}), Desc_Error.Missing_Shader)
 	testing.expect_value(t, pipeline_info({mesh = shader}).kind, Pipeline_Kind.Mesh)
+	// A stencil test or stencil writes need a depth format with a stencil.
+	stencil := Stencil_State{compare = .Equal, read_mask = 1}
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = stencil}), Desc_Error.Bad_Format)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float_S8_Uint, stencil = stencil}), Desc_Error.None)
+	testing.expect_value(t, validate_graphics_pipeline_desc({vertex = shader, depth_format = .D32_Float, stencil = {read_mask = 1}}), Desc_Error.None)
 }
 
 @(test)
@@ -865,6 +871,16 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad.usage = {.Streamed}
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
 
+	// A 3D texture is only sampled and written in shaders, with one mip.
+	volume := Texture_Desc{size = {16, 8}, depth = 4, format = .RGBA16_Float, usage = {.Sampled, .Storage}}
+	testing.expect_value(t, validate_texture_desc(volume, nil), Desc_Error.None)
+	bad = volume
+	bad.usage += {.Render_Target}
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
+	bad = volume
+	bad.mip_count = 2
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Mip_Count)
+
 	data := make([]byte, mip_chain_size(streamed), allocator)
 	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
 	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)
@@ -881,4 +897,40 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_stream_buffer(buffer, 32, data[:32]), Desc_Error.None)
 	testing.expect_value(t, validate_stream_buffer(buffer, 48, data[:32]), Desc_Error.Bad_Data_Size)
 	testing.expect_value(t, validate_stream_buffer(buffer, 2, data[:8]), Desc_Error.Bad_Data_Size)
+}
+
+@(test)
+block_formats_count_whole_blocks :: proc(t: ^testing.T) {
+	testing.expect(t, is_block_format(.BC7_Unorm_Srgb) && is_srgb_format(.BC7_Unorm_Srgb))
+	testing.expect(t, !is_block_format(.RGBA8_Unorm))
+	testing.expect_value(t, surface_size(.BC1_Unorm, 8, 8), 4 * 8)
+	testing.expect_value(t, surface_size(.BC7_Unorm, 8, 8), 4 * 16)
+	// A mip smaller than a block takes a whole block.
+	testing.expect_value(t, surface_size(.BC5_Unorm, 2, 1), 16)
+	bc7 := Texture_Desc{size = {16, 8}, format = .BC7_Unorm, mip_count = 5, usage = {.Sampled, .Streamed}}
+	// 16x8, 8x4, 4x2, 2x1 and 1x1: 8, 2, 1, 1 and 1 blocks.
+	testing.expect_value(t, mip_chain_size(bc7), (8 + 2 + 1 + 1 + 1) * 16)
+	testing.expect_value(t, validate_texture_desc(bc7, nil), Desc_Error.None)
+
+	render_target := bc7
+	render_target.usage = {.Sampled, .Render_Target}
+	testing.expect_value(t, validate_texture_desc(render_target, nil), Desc_Error.Bad_Usage)
+	partial := Texture_Desc{size = {10, 8}, format = .BC4_Unorm, usage = {.Sampled}}
+	testing.expect_value(t, validate_texture_desc(partial, nil), Desc_Error.Bad_Size)
+	with_data := Texture_Desc{size = {8, 8}, format = .BC4_Unorm, usage = {.Sampled}}
+	data: [4 * 8]byte
+	testing.expect_value(t, validate_texture_desc(with_data, data[:]), Desc_Error.None)
+	testing.expect_value(t, validate_texture_desc(with_data, data[:16]), Desc_Error.Bad_Data_Size)
+}
+
+@(test)
+output_modes_follow_the_request_and_the_display :: proc(t: ^testing.T) {
+	sdr, hdr := Display{}, Display{hdr = true, max_luminance = 1000}
+	testing.expect_value(t, output_mode(.Auto, sdr), Output_Mode.Sdr)
+	testing.expect_value(t, output_mode(.Auto, hdr), Output_Mode.Hdr10)
+	testing.expect_value(t, output_mode(.Sdr, hdr), Output_Mode.Sdr)
+	testing.expect_value(t, output_mode(.Scrgb, sdr), Output_Mode.Scrgb)
+	testing.expect_value(t, output_format(.Sdr), FRAME_TARGET_FORMAT)
+	testing.expect_value(t, output_format(.Hdr10), Format.RGB10A2_Unorm)
+	testing.expect_value(t, output_format(.Scrgb), Format.RGBA16_Float)
 }

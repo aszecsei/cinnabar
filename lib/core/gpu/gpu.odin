@@ -74,6 +74,12 @@ texture_write_index :: proc(texture: Texture) -> u32 {
 	return TEXTURE_WRITE_BASE + texture.index
 }
 
+// stencil_index is the view of a sampled D32_Float_S8_Uint texture's stencil plane, a Texture2D<uint2> whose g is the
+// stencil (cn_stencil_texture in HLSL). A depth texture has no write view, so its write slot holds this one.
+stencil_index :: proc(texture: Texture) -> u32 {
+	return TEXTURE_WRITE_BASE + texture.index
+}
+
 // Shaders trace only against top-level structures, but every acceleration structure has a view.
 accel_read_index :: proc(accel: Accel_Struct) -> u32 {
 	return ACCEL_READ_BASE + accel.index
@@ -103,10 +109,97 @@ Format :: enum u8 {
 	RGBA32_Float,
 	D32_Float,
 	D32_Float_S8_Uint,
+	// Block-compressed formats store 4x4 blocks of texels (see docs/content-pipeline.md#textures). They are only
+	// sampled, and mip 0 of a texture in one has sides that are multiples of 4.
+	BC1_Unorm,
+	BC1_Unorm_Srgb,
+	BC4_Unorm,
+	BC5_Unorm,
+	BC6H_Ufloat,
+	BC7_Unorm,
+	BC7_Unorm_Srgb,
 }
 
-// The frame target is written through an sRGB view.
+// The frame target is written through an sRGB view in the Sdr output mode, as the preview targets always are.
 FRAME_TARGET_FORMAT :: Format.RGBA8_Unorm_Srgb
+
+// Output_Mode is how the frame target's colors reach the display (see docs/gpu.md#presentation).
+Output_Mode :: enum u8 {
+	// sRGB, in FRAME_TARGET_FORMAT.
+	Sdr,
+	// HDR10: RGB10A2_Unorm, Rec. 2020 primaries encoded with the PQ curve of SMPTE ST 2084, where 1 is 10000 nits.
+	Hdr10,
+	// scRGB: RGBA16_Float, linear with Rec. 709 primaries, where 1 is 80 nits.
+	Scrgb,
+}
+
+// Output_Request is the output mode that a game asks for. Auto is Hdr10 while the display is in HDR mode, and Sdr
+// otherwise.
+Output_Request :: enum u8 {
+	Auto,
+	Sdr,
+	Hdr10,
+	Scrgb,
+}
+
+// Display is what the backend knows of the display that shows most of the window. Luminances are in nits, 0 when
+// unknown.
+Display :: struct {
+	// The desktop is in HDR on this display.
+	hdr:                      bool,
+	min_luminance:            f32,
+	max_luminance:            f32,
+	max_full_frame_luminance: f32,
+	// The brightness that Windows gives SDR content on the display in HDR, which its settings set.
+	sdr_white:                f32,
+}
+
+// Output is a frame's output: its mode, the frame target's format, which follows from the mode, and the display.
+Output :: struct {
+	mode:    Output_Mode,
+	format:  Format,
+	display: Display,
+}
+
+// output_format is the frame target's format in an output mode.
+output_format :: proc(mode: Output_Mode) -> Format {
+	switch mode {
+	case .Hdr10:
+		return .RGB10A2_Unorm
+	case .Scrgb:
+		return .RGBA16_Float
+	case .Sdr:
+	}
+	return FRAME_TARGET_FORMAT
+}
+
+// output_mode is the mode that a request gives on a display.
+output_mode :: proc(request: Output_Request, display: Display) -> Output_Mode {
+	switch request {
+	case .Sdr:
+		return .Sdr
+	case .Hdr10:
+		return .Hdr10
+	case .Scrgb:
+		return .Scrgb
+	case .Auto:
+	}
+	return display.hdr ? .Hdr10 : .Sdr
+}
+
+// The editor's previews render into shared targets of their own beside the frame target, at most this many, each at
+// most this large on a side (see docs/rendering.md#material-previews).
+MAX_PREVIEW_TARGETS :: 4
+MAX_PREVIEW_SIZE :: 1024
+
+// Preview_Target is a frame of a preview target: its texture, in the render target layout until the frame ends, in
+// FRAME_TARGET_FORMAT, its shared objects' name prefix, in temporary memory, its generation and its size.
+Preview_Target :: struct {
+	texture:    Texture,
+	prefix:     string,
+	generation: u32,
+	size:       [2]u32,
+}
 
 is_depth_format :: proc(format: Format) -> bool {
 	#partial switch format {
@@ -116,11 +209,37 @@ is_depth_format :: proc(format: Format) -> bool {
 	return false
 }
 
-is_srgb_format :: proc(format: Format) -> bool {
-	return format == .RGBA8_Unorm_Srgb || format == .BGRA8_Unorm_Srgb
+has_stencil :: proc(format: Format) -> bool {
+	return format == .D32_Float_S8_Uint
 }
 
-// format_size is the size of one texel in bytes.
+is_srgb_format :: proc(format: Format) -> bool {
+	#partial switch format {
+	case .RGBA8_Unorm_Srgb, .BGRA8_Unorm_Srgb, .BC1_Unorm_Srgb, .BC7_Unorm_Srgb:
+		return true
+	}
+	return false
+}
+
+// is_block_format is true for the block-compressed formats, which store 4x4 blocks of texels.
+is_block_format :: proc(format: Format) -> bool {
+	#partial switch format {
+	case .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
+		return true
+	}
+	return false
+}
+
+// surface_size is the size of a width x height surface of the format, tightly packed: rows of texels, or rows of 4x4
+// blocks, where a partial block takes a whole one.
+surface_size :: proc(format: Format, width, height: u32) -> int {
+	if is_block_format(format) {
+		return int((width + 3) / 4) * int((height + 3) / 4) * format_size(format)
+	}
+	return int(width) * int(height) * format_size(format)
+}
+
+// format_size is the size of one texel in bytes, or of one 4x4 block for a block-compressed format.
 format_size :: proc(format: Format) -> int {
 	switch format {
 	case .Unknown:
@@ -131,9 +250,9 @@ format_size :: proc(format: Format) -> int {
 		return 2
 	case .RGBA8_Unorm, .RGBA8_Unorm_Srgb, .BGRA8_Unorm, .BGRA8_Unorm_Srgb, .RGB10A2_Unorm, .RG11B10_Float, .RG16_Float, .R32_Uint, .R32_Float, .D32_Float:
 		return 4
-	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint:
+	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint, .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm:
 		return 8
-	case .RGBA32_Float:
+	case .RGBA32_Float, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
 		return 16
 	}
 	return 0
@@ -187,6 +306,9 @@ Texture_Usages :: bit_set[Texture_Usage;u8]
 // A texture created with data starts in the sampled layout. See initial_layout.
 Texture_Desc :: struct {
 	size:      [2]u32,
+	// A 3D texture's depth in texels. 0 means a 2D texture. A 3D texture has one mip and no data, and is only sampled
+	// and written in shaders.
+	depth:     u32,
 	format:    Format,
 	// 0 means 1.
 	mip_count: u32,
@@ -324,6 +446,9 @@ Sampler_Desc :: struct {
 	address:    Address_Mode,
 	// 0 or 1 disables anisotropic filtering. The maximum is 16.
 	anisotropy: u8,
+	// Anything but Always makes a comparison sampler: SampleCmp compares its reference value with each texel by this,
+	// and filters the results, as shadow maps need. Shaders get it with cn_comparison_sampler.
+	compare:    Compare_Op,
 	scope:      Scope,
 	label:      string,
 }
@@ -353,6 +478,34 @@ Compare_Op :: enum u8 {
 	Not_Equal,
 }
 
+Stencil_Op :: enum u8 {
+	Keep,
+	Zero,
+	// Writes the reference value, from cmd_set_stencil_reference.
+	Replace,
+	Increment_Clamp,
+	Decrement_Clamp,
+	Invert,
+}
+
+// Stencil_State is the stencil test and its writes, the same for front and back faces. The test compares the
+// reference value with the stencil, both masked by read_mask, by compare: it passes when reference compare stencil.
+// The zero state does nothing: Always, and no writes. A pipeline with a stencil test or writes needs a depth format
+// with a stencil.
+Stencil_State :: struct {
+	compare:    Compare_Op,
+	pass:       Stencil_Op,
+	fail:       Stencil_Op,
+	depth_fail: Stencil_Op,
+	read_mask:  u8,
+	write_mask: u8,
+}
+
+// stencil_used is whether a stencil state tests or writes.
+stencil_used :: proc(s: Stencil_State) -> bool {
+	return s.compare != .Always || s.write_mask != 0
+}
+
 Blend :: enum u8 {
 	Opaque,
 	Alpha,
@@ -378,6 +531,15 @@ Graphics_Pipeline_Desc :: struct {
 	// Always disables the depth test.
 	depth_compare: Compare_Op,
 	depth_write:   bool,
+	// Added to each fragment's depth: a constant in units of the depth format's precision near the fragment, and a
+	// factor of the triangle's slope. Shadow maps use them against acne. With reversed depth, a negative bias moves
+	// a fragment away from the camera.
+	depth_bias:    i32,
+	slope_bias:    f32,
+	// Clamps depth to the viewport's range instead of clipping, so geometry in front of the near plane still writes
+	// depth there, as directional shadow maps need.
+	depth_clamp:   bool,
+	stencil:       Stencil_State,
 	topology:      Topology,
 	cull:          Cull_Mode,
 	scope:         Scope,
@@ -566,8 +728,7 @@ Transfer :: distinct u64
 mip_chain_size :: proc(desc: Texture_Desc) -> int {
 	size := 0
 	for mip in 0 ..< max(desc.mip_count, 1) {
-		width, height := max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1)
-		size += int(width * height) * format_size(desc.format)
+		size += surface_size(desc.format, max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1))
 	}
 	return size
 }

@@ -1,0 +1,5 @@
+shading 1
+# Unlit: a color that emits as it is, with no light.
+flag no_lighting
+input color float3 = [1, 1, 1]
+input opacity float = 1

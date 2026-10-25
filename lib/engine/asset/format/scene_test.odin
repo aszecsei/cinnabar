@@ -89,6 +89,23 @@ scene_blobs_round_trip :: proc(t: ^testing.T) {
 }
 
 @(test)
+asset_values_are_guids :: proc(t: ^testing.T) {
+	text := "scene 1\nentity 0000000000000001\ncomponent 1 T\n\tmesh = $9db8150cc7215ffc2708d20d77cf60bf\n\tnone = $0\n"
+	scene, _, ok := scene_parse(text, context.temp_allocator)
+	testing.expect(t, ok)
+	fields := scene.entities[0].components[0].fields
+	testing.expect_value(t, fields[0].value.kind, Scene_Value_Kind.Asset)
+	testing.expect_value(t, fields[0].value.asset, guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
+	testing.expect_value(t, fields[1].value, Scene_Value{kind = .Asset})
+
+	// The GUID survives the blob.
+	data := aligned(scene_write(scene, {}, 0, context.temp_allocator))
+	read, read_ok := scene_read(data, context.temp_allocator)
+	testing.expect(t, read_ok)
+	testing.expect_value(t, read.entities[0].components[0].fields[0].value.asset, fields[0].value.asset)
+}
+
+@(test)
 scene_errors_name_their_line :: proc(t: ^testing.T) {
 	cases := [?]struct {
 		text, fragment: string,
@@ -103,6 +120,7 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = \"a\\q\"\n", "not an escape", 4},
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\ncomponent 1 T\n", "twice", 4},
 		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = 1.2.3\n", "not a number", 4},
+		{"scene 1\nentity 0000000000000001\ncomponent 1 T\n\tx = $12\n", "32 hex digits after $", 4},
 	}
 	for c in cases {
 		_, problems, ok := scene_parse(c.text, context.temp_allocator)

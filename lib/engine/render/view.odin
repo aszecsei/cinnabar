@@ -14,18 +14,31 @@ View :: struct {
 	// Vertical, in radians.
 	vertical_fov: f32,
 	// The near plane's distance in meters. The far plane is at infinity.
-	near:         f32,
+	near:           f32,
+	// The view model's projection (see docs/rendering.md#view-model): its vertical field of view and its near plane.
+	// 0 in either means the view's own.
+	view_model_fov:  f32,
+	view_model_near: f32,
+}
+
+// view_model_view is the view that the view model draws with: the view's pose, with the view model's projection.
+view_model_view :: proc(view: View) -> View {
+	v := view
+	v.vertical_fov = view.view_model_fov > 0 ? view.view_model_fov : view.vertical_fov
+	v.near = view.view_model_near > 0 ? view.view_model_near : view.near
+	return v
 }
 
 // view_projection maps a position relative to the view's position, as extract and pose_rows give them, to clip
-// space. Depth is 1 - near / z for a view-space z, so 0 at the near plane and 1 at infinity: a depth test of Less
-// against a clear of 1 suits it.
+// space. Depth is reversed: near / z for a view-space z, so 1 at the near plane and 0 at infinity. A float depth
+// buffer has most of its precision near 0, so reversing puts it in the distance, where it is needed. A depth test of
+// Greater against a clear of 0 suits it.
 view_projection :: proc(view: View, aspect: f32) -> matrix[4, 4]f32 {
 	f := 1 / math.tan(view.vertical_fov * 0.5)
 	projection := matrix[4, 4]f32{
 		f / aspect, 0, 0, 0,
 		0, f, 0, 0,
-		0, 0, 1, -view.near,
+		0, 0, 0, view.near,
 		0, 0, 1, 0,
 	}
 	return projection * linalg.matrix4_from_quaternion_f32(conj(view.rotation))
@@ -33,7 +46,7 @@ view_projection :: proc(view: View, aspect: f32) -> matrix[4, 4]f32 {
 
 // view_depth is the view-space z, the distance along the view's axis, of a depth that view_projection wrote.
 view_depth :: proc(depth, near: f32) -> f32 {
-	return near / max(1 - depth, 1e-7)
+	return near / max(depth, 1e-7)
 }
 
 // view_axes are the view's right, up and forward directions in the world.

@@ -1,0 +1,27 @@
+material 1
+# The box's material: a checker texture under a tint, lit. A graph, which the material editor edits.
+shading = lit
+param tint color = [1, 1, 1, 1]
+param roughness float = 0.55
+param albedo texture = $6ae47342be33cfa451b9f6643231fd24
+
+node 1 output
+	position = [360, -40]
+	base_color = @4.out
+	roughness = @5.value
+node 2 parameter
+	position = [-240, -160]
+	name = "tint"
+node 3 texture_sample
+	position = [-240, -40]
+	texture = @6.value
+node 4 multiply
+	position = [60, -100]
+	a = @2.value
+	b = @3.rgba
+node 5 parameter
+	position = [60, 60]
+	name = "roughness"
+node 6 parameter
+	position = [-480, -10]
+	name = "albedo"

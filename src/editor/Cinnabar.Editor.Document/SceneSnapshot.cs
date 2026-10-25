@@ -41,6 +41,7 @@ public static class SceneSnapshot
         Wire.SceneValueKind.String => SceneValue.String(v.Text),
         Wire.SceneValueKind.Name => SceneValue.Name(v.Text),
         Wire.SceneValueKind.Entity => SceneValue.EntityRef(v.Entity),
+        Wire.SceneValueKind.Asset => SceneValue.AssetRef(v.Asset.All(b => b == 0) ? "" : Convert.ToHexStringLower(v.Asset)),
         _ => SceneValue.Of([.. Enumerable.Range(0, Math.Min((int)v.Count, 4))
             .Select(i => (v.Integer & (1 << i)) != 0 ? SceneNumber.Of(v.Ints[i]) : SceneNumber.Of(v.Floats[i]))]),
     };
@@ -72,6 +73,7 @@ public static class SceneSnapshot
             ints,
             floats,
             v.Text,
-            v.Entity);
+            v.Entity,
+            v.Asset == "" ? new byte[16] : Convert.FromHexString(v.Asset));
     }
 }

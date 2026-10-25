@@ -32,6 +32,15 @@ public sealed class EditorLayout
     /// <summary>A panel opened, closed or moved.</summary>
     public event Action? Changed;
 
+    /// <summary>The document dock's active document changed: the viewport or a material editor.</summary>
+    public event Action<IDockable?>? ActiveDocumentChanged;
+
+    /// <summary>Asks whether a document may close. A document that it refuses stays open.</summary>
+    public Func<IDockable, bool>? DocumentClosing { get; set; }
+
+    /// <summary>A document closed.</summary>
+    public event Action<IDockable>? DocumentClosed;
+
     public IEnumerable<PanelTool> Panels => _panels.Values;
 
     public EditorLayout(IEnumerable<PanelTool> panels, ViewportDocument viewport)
@@ -44,7 +53,70 @@ public sealed class EditorLayout
         Factory.DockableClosed += (_, _) => Changed?.Invoke();
         Factory.DockableMoved += (_, _) => Changed?.Invoke();
         Factory.WindowClosed += (_, _) => Changed?.Invoke();
+        Factory.ActiveDockableChanged += (_, e) =>
+        {
+            if (e.Dockable is ViewportDocument or MaterialEditorDocument)
+            {
+                ActiveDocumentChanged?.Invoke(e.Dockable);
+            }
+        };
+        Factory.DockableClosing += (_, e) =>
+        {
+            if (e.Dockable is MaterialEditorDocument && DocumentClosing?.Invoke(e.Dockable) == false)
+            {
+                e.Cancel = true;
+            }
+        };
+        Factory.DockableClosed += (_, e) =>
+        {
+            if (e.Dockable is MaterialEditorDocument document)
+            {
+                DocumentClosed?.Invoke(document);
+                // The viewport is the document again once the last material editor closes.
+                if (Documents()?.ActiveDockable is not MaterialEditorDocument)
+                {
+                    ActiveDocumentChanged?.Invoke(Documents()?.ActiveDockable);
+                }
+            }
+        };
     }
+
+    IDocumentDock? Documents() => Walk(Root).OfType<IDocumentDock>().FirstOrDefault();
+
+    /// <summary>Adds a material editor's document beside the viewport, and shows it.</summary>
+    public void OpenDocument(MaterialEditorDocument document)
+    {
+        if (Documents() is not { } dock)
+        {
+            return;
+        }
+        Factory.AddDockable(dock, document);
+        Factory.SetActiveDockable(document);
+        Factory.SetFocusedDockable(dock, document);
+        ActiveDocumentChanged?.Invoke(document);
+    }
+
+    /// <summary>Shows a material editor's open document.</summary>
+    public void ShowDocument(Shell.MaterialEditor editor)
+    {
+        if (FindDocument(editor) is { Owner: IDock dock } document)
+        {
+            Factory.SetActiveDockable(document);
+            Factory.SetFocusedDockable(dock, document);
+            ActiveDocumentChanged?.Invoke(document);
+        }
+    }
+
+    public void CloseDocument(Shell.MaterialEditor editor)
+    {
+        if (FindDocument(editor) is { } document)
+        {
+            Factory.CloseDockable(document);
+        }
+    }
+
+    MaterialEditorDocument? FindDocument(Shell.MaterialEditor editor) =>
+        Walk(Root).OfType<MaterialEditorDocument>().FirstOrDefault(d => d.Editor == editor);
 
     /// <summary>The outliner on the left, the viewport in the middle, the properties on the right, and the console below.</summary>
     IRootDock CreateDefault()

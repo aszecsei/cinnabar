@@ -16,24 +16,23 @@ import "cinnabar:engine/render"
 // around the selection and the gizmo over the frame. The game's scene pass also writes an entity ID buffer, and a
 // pick reads it and the depth, and copies the result to the CPU.
 
-// The entity ID buffer's format. Each pixel holds entity_id of the entity drawn there, or 0.
-ID_FORMAT :: gpu.Format.R32_Uint
+// The entity ID buffer's format, which the renderer draws (see render.ID_FORMAT).
+ID_FORMAT :: render.ID_FORMAT
 // At most this many picks wait for the GPU. The editor waits for each answer, so it sends one or two at a time.
 MAX_PICKS :: 16
 
-// The pick results: the pick's ticket, the ID and depth at the rectangle's origin, and padding, then a bit for each
-// entity slot. Matches HEADER_SIZE in shaders/pick.hlsl.
+// The pick results: the pick's ticket, the ID, depth and stencil at the rectangle's origin, then a bit for each entity
+// slot. Matches HEADER_SIZE in shaders/pick.hlsl.
 @(private)
 PICK_HEADER :: 16
 @(private)
 PICK_RESULTS_SIZE :: PICK_HEADER + ecs.MAX_ENTITIES / 8
 
+// The tools' shaders are engine content (see docs/content-pipeline.md#shaders).
 @(private)
-PICK_CS :: #load("shaders/pick.cs.dxil")
+PICK_SHADER :: #load("../content/shaders/pick.hlsl.meta", string)
 @(private)
-OVERLAY_VS :: #load("shaders/overlay.vs.dxil")
-@(private)
-OVERLAY_PS :: #load("shaders/overlay.ps.dxil")
+OVERLAY_SHADER :: #load("../content/shaders/overlay.hlsl.meta", string)
 
 // Viewport is the editor's camera, selection and gizmo, and the picks that wait for the GPU. It lives in Editor.
 Viewport :: struct {
@@ -47,14 +46,16 @@ Viewport :: struct {
 	// picks[0] was rendered with this ticket, and its results come back through the readback buffer.
 	picking:          bool,
 	ticket:           u32,
-	// What the pick needs to read its results: the words of entity bits and the near plane that it was drawn with.
+	// What the pick needs to read its results: the words of entity bits, and the near planes that the world and the
+	// view model were drawn with.
 	pick_words:       u32,
 	pick_near:        f32,
+	pick_view_model_near: f32,
 	// The GPU objects, made at the first frame that draws the tools. If they cannot be made, the tools stay off.
 	gpu_ready:        bool,
 	gpu_failed:       bool,
-	pick_pipeline:    gpu.Pipeline,
-	overlay_pipeline: gpu.Pipeline,
+	pick_pipeline:    render.Shader_Pipeline,
+	overlay_pipeline: render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
 }
@@ -63,7 +64,7 @@ Viewport :: struct {
 Viewport_Frame :: struct {
 	view:   render.View,
 	size:   [2]u32,
-	// The frame target, which the tools draw over.
+	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering.md#debug).
 	target: render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
 	ids:    render.Texture,
@@ -95,7 +96,7 @@ view :: proc(e: ^Editor) -> (render.View, bool) {
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.
 entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
-	return ecs.entity_index(entity) + 1
+	return render.entity_id(entity)
 }
 
 // add_viewport_passes adds the pick and the overlay to the frame's graph. Add them after the passes that write the
@@ -105,6 +106,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	if !active(e) || !create_viewport_gpu(e) {
 		return
 	}
+	sync_viewport_pipelines(e)
 	platform := e.platform
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
@@ -118,10 +120,11 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			v.picking = true
 			v.pick_words = words
 			v.pick_near = frame.view.near
+			v.pick_view_model_near = render.view_model_view(frame.view).near
 			mem.zero_slice(zeros.data)
 			pick := new(Pick_Pass, platform.frame_allocator)
 			pick^ = {
-				pipeline = v.pick_pipeline,
+				pipeline = v.pick_pipeline.pipeline,
 				ids      = frame.ids,
 				depth    = frame.depth,
 				results  = render.import_buffer(g, v.results),
@@ -150,7 +153,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 
 	overlay := new(Overlay_Pass, platform.frame_allocator)
 	overlay^ = {
-		pipeline = v.overlay_pipeline,
+		pipeline = v.overlay_pipeline.pipeline,
 		ids = frame.ids,
 		depth = frame.depth,
 		slots = slots,
@@ -191,6 +194,7 @@ Pick_Constants :: struct {
 	size:        [2]u32,
 	target_size: [2]u32,
 	slots:       u32,
+	stencil:     u32,
 }
 
 @(private)
@@ -219,6 +223,7 @@ run_pick :: proc(ctx: ^render.Pass_Context) {
 	constants := pick.constants
 	constants.ids = gpu.read_index(render.gpu_texture(g, pick.ids))
 	constants.depth = gpu.read_index(render.gpu_texture(g, pick.depth))
+	constants.stencil = gpu.stencil_index(render.gpu_texture(g, pick.depth))
 	constants.results = gpu.write_index(render.gpu_buffer(g, pick.results))
 	gpu.cmd_set_pipeline(ctx.cb, pick.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &constants)
@@ -245,6 +250,7 @@ Overlay_Constants :: struct {
 	vertex_offset:    u32,
 	mode:             u32,
 	depth:            u32,
+	stencil:          u32,
 }
 
 @(private)
@@ -267,6 +273,7 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 		view_projection = o.view_projection,
 		ids             = gpu.read_index(render.gpu_texture(ctx.graph, o.ids)),
 		depth           = gpu.read_index(render.gpu_texture(ctx.graph, o.depth)),
+		stencil         = gpu.stencil_index(render.gpu_texture(ctx.graph, o.depth)),
 		slots           = o.slots,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, o.pipeline)
@@ -359,11 +366,11 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 		return v.gpu_ready
 	}
 	platform := e.platform
-	v.pick_pipeline = platform.gpu_create_compute_pipeline(PICK_PIPELINE)
-	v.overlay_pipeline = platform.gpu_create_graphics_pipeline(OVERLAY_PIPELINE)
+	v.pick_pipeline = render.shader_pipeline(PICK_SHADER)
+	v.overlay_pipeline = render.shader_pipeline(OVERLAY_SHADER)
 	v.results = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"}, nil)
 	v.readback = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"}, nil)
-	v.gpu_ready = v.pick_pipeline != {} && v.overlay_pipeline != {} && v.results != {} && v.readback != {}
+	v.gpu_ready = e.assets != nil && v.results != {} && v.readback != {}
 	if !v.gpu_ready {
 		log.error("editor: cannot create the viewport tools' GPU objects")
 		destroy_viewport_gpu(e)
@@ -376,43 +383,35 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 destroy_viewport_gpu :: proc(e: ^Editor) {
 	v := &e.viewport
 	platform := e.platform
-	platform.gpu_destroy_pipeline(v.pick_pipeline)
-	platform.gpu_destroy_pipeline(v.overlay_pipeline)
+	render.destroy_shader_pipeline(&v.pick_pipeline, platform)
+	render.destroy_shader_pipeline(&v.overlay_pipeline, platform)
 	platform.gpu_destroy_buffer(v.results)
 	platform.gpu_destroy_buffer(v.readback)
 	v.pick_pipeline, v.overlay_pipeline, v.results, v.readback = {}, {}, {}, {}
 	v.gpu_ready = false
 }
 
-// reload_viewport_gpu updates the pipelines after a code reload, which may bring new shaders.
+// sync_viewport_pipelines creates the pipelines from their shaders, and updates them when the cooker compiles the
+// shaders again, or when force is set after a code reload, which may bring new descriptions. Until a pipeline is
+// ready, the passes that use it record nothing.
 @(private)
-reload_viewport_gpu :: proc(e: ^Editor) {
+sync_viewport_pipelines :: proc(e: ^Editor, force := false) {
 	v := &e.viewport
 	if !v.gpu_ready {
 		return
 	}
-	platform := e.platform
-	if !platform.gpu_update_compute_pipeline(v.pick_pipeline, PICK_PIPELINE) {
-		platform.gpu_destroy_pipeline(v.pick_pipeline)
-		v.pick_pipeline = platform.gpu_create_compute_pipeline(PICK_PIPELINE)
-	}
-	if !platform.gpu_update_graphics_pipeline(v.overlay_pipeline, OVERLAY_PIPELINE) {
-		platform.gpu_destroy_pipeline(v.overlay_pipeline)
-		v.overlay_pipeline = platform.gpu_create_graphics_pipeline(OVERLAY_PIPELINE)
-	}
+	render.sync_compute_pipeline(&v.pick_pipeline, e.platform, e.assets, PICK_PIPELINE, force)
+	render.sync_graphics_pipeline(&v.overlay_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, OVERLAY_PIPELINE, force)
 }
 
 @(private)
 PICK_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	compute = PICK_CS,
-	label   = "editor pick",
+	label = "editor pick",
 }
 
 @(private)
 OVERLAY_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	vertex = OVERLAY_VS,
-	pixel  = OVERLAY_PS,
-	colors = {{format = gpu.FRAME_TARGET_FORMAT, blend = .Alpha}},
+	colors = {{format = render.DEBUG_FORMAT, blend = .Alpha}},
 	label  = "editor overlay",
 }
 
@@ -478,12 +477,12 @@ finish_pick :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: r
 	}
 	request := v.picks[0]
 	ordered_remove(&v.picks, 0)
-	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, allocator))
+	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, v.pick_view_model_near, allocator))
 }
 
 // pick_result reads a pick's results: the header and the bits of entity slots.
 @(private)
-pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, near: f32, allocator: runtime.Allocator) -> link.Pick_Result {
+pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, near, view_model_near: f32, allocator: runtime.Allocator) -> link.Pick_Result {
 	hits := make([dynamic]link.Pick_Hit, allocator)
 	for word, i in words[PICK_HEADER / 4:] {
 		for bit in 0 ..< u32(32) {
@@ -497,7 +496,8 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, nea
 	}
 	depth: f32
 	if request.width <= 1 && request.height <= 1 && words[1] != 0 {
-		depth = render.view_depth(transmute(f32)words[2], near)
+		// The view model's pixels have the view model's near plane (see docs/rendering.md#view-model).
+		depth = render.view_depth(transmute(f32)words[2], words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_near : near)
 	}
 	return {id = request.id, hits = hits[:], depth = depth}
 }

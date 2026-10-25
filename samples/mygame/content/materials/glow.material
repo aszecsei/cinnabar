@@ -1,0 +1,11 @@
+material 1
+# A color that glows as it is, unlit: the Cornell box's light panel.
+shading = unlit
+param color color = [1, 0.85, 0.65, 1]
+param intensity float = 8
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.color = params.color.rgb * params.intensity;
+	return s;
+}

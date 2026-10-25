@@ -83,3 +83,167 @@ script_view_rejects_bad_blobs :: proc(t: ^testing.T) {
 	_, ok = script_view(other)
 	testing.expect(t, !ok)
 }
+
+@(test)
+shader_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	entries := []Shader_Code{{.Vertex, .DXIL, {1, 2, 3}}, {.Pixel, .DXIL, {4, 5}}}
+	data := aligned(shader_write({guid = guid, key = 7, entries = entries, source_path = "game/x.hlsl"}, context.temp_allocator))
+
+	blob, ok := shader_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.header.guid, guid)
+	testing.expect_value(t, blob.header.key, 7)
+	testing.expect_value(t, shader_stages(data, blob), Shader_Stages{.Vertex, .Pixel})
+	testing.expect_value(t, len(shader_code(data, blob, .Vertex)), 3)
+	testing.expect_value(t, shader_code(data, blob, .Pixel)[1], 5)
+	testing.expect(t, shader_code(data, blob, .Compute) == nil)
+	for e in shader_entries(data, blob) {
+		testing.expect_value(t, e.code.offset % BLOB_ALIGN, 0)
+	}
+	testing.expect_value(t, blob_string(data, blob.source_path), "game/x.hlsl")
+
+	(^Shader_Blob)(raw_data(data)).entries.size = 1 << 20
+	_, ok = shader_view(data)
+	testing.expect(t, !ok)
+}
+
+@(test)
+texture_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	// 8x4 BC7: two blocks, then 4x2 and 2x1 at one block each.
+	mips := make([]byte, texture_chain_size(.BC7_Unorm_Srgb, {8, 4}, 3), context.temp_allocator)
+	testing.expect_value(t, len(mips), (2 + 1 + 1) * 16)
+	mips[0] = 9
+	contents := Texture_Contents{guid = guid, key = 3, format = .BC7_Unorm_Srgb, usage = .Color, size = {8, 4}, mip_count = 3, mips = mips, source_path = "game/a.png"}
+	data := aligned(texture_write(contents, context.temp_allocator))
+
+	blob, ok := texture_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.size, [2]u32{8, 4})
+	testing.expect_value(t, blob.mips.offset % BLOB_ALIGN, 0)
+	testing.expect_value(t, blob_bytes(data, blob.mips)[0], 9)
+	testing.expect_value(t, blob_string(data, blob.source_path), "game/a.png")
+	testing.expect_value(t, texture_mip_size(.RGBA8_Unorm, 3, 2), 24)
+
+	// Mips of the wrong size are not a texture.
+	(^Texture_Blob)(raw_data(data)).mip_count = 2
+	_, ok = texture_view(data)
+	testing.expect(t, !ok)
+}
+
+@(test)
+meta_files_name_their_subassets :: proc(t: ^testing.T) {
+	other :: "ffeeddccbbaa99887766554433221100"
+	meta, ok := meta_parse("guid = " + TEST_GUID + "\ncombine = false\nmesh.Door Frame = " + other + "\n", context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(meta.settings), 1)
+	testing.expect_value(t, len(meta.subassets), 1)
+	guid, found := meta_subasset(meta, "mesh", "Door Frame")
+	testing.expect(t, found)
+	testing.expect_value(t, guid, guid_parse(other) or_else {})
+	_, found = meta_subasset(meta, "texture", "Door Frame")
+	testing.expect(t, !found)
+	// A sub-asset's value must be a GUID.
+	_, ok = meta_parse("guid = " + TEST_GUID + "\nmesh.door = 12\n", context.temp_allocator)
+	testing.expect(t, !ok)
+}
+
+@(test)
+mesh_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	positions := make([]byte, 3 * 12, context.temp_allocator)
+	attributes := make([]byte, 3 * int(mesh_attribute_stride({.Color})), context.temp_allocator)
+	indices := []u16{0, 1, 2}
+	meshlets := []Meshlet{{vertex_count = 3, triangle_count = 1, radius = 1}}
+	contents := Mesh_Contents {
+		guid              = guid,
+		key               = 5,
+		flags             = {.Color},
+		vertex_count      = 3,
+		index_count       = 3,
+		submeshes         = {{name = "stone", index_count = 3, meshlet_count = 1}},
+		positions         = positions,
+		attributes        = attributes,
+		indices           = mem.slice_to_bytes(indices),
+		meshlets          = meshlets,
+		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
+		meshlet_triangles = {0, 1, 2},
+		name              = "Door",
+		source_path       = "game/door.glb",
+	}
+	data := aligned(mesh_write(contents, context.temp_allocator))
+	blob, ok := mesh_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, mesh_attribute_stride(blob.flags), 20)
+	testing.expect_value(t, blob.positions.offset % BLOB_ALIGN, 0)
+	testing.expect_value(t, blob.attributes.offset % BLOB_ALIGN, 0)
+	submeshes := mesh_submeshes(data, blob)
+	testing.expect_value(t, len(submeshes), 1)
+	testing.expect_value(t, blob_string(data, submeshes[0].name), "stone")
+	testing.expect_value(t, mesh_meshlets(data, blob)[0].triangle_count, 1)
+	testing.expect_value(t, blob_string(data, blob.name), "Door")
+
+	// A submesh past the mesh's indices is not a mesh.
+	(^Mesh_Submesh)(&data[blob.submeshes.offset]).index_count = 6
+	_, ok = mesh_view(data)
+	testing.expect(t, !ok)
+}
+
+@(test)
+material_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	block := make([]byte, 32, context.temp_allocator)
+	block[0] = 7
+	textures := []Material_Texture{{offset = 16, default = .Normal}}
+	contents := Material_Contents {
+		guid             = guid,
+		flags            = {.Two_Sided},
+		blend            = .Masked,
+		cutoff           = 0.5,
+		params           = {{"tint", .Color, 0}, {"albedo", .Texture, 16}},
+		switches         = {"use_detail"},
+		default_switches = 1,
+		block            = block,
+		textures         = textures,
+		variants         = {{1, .Forward, .Vertex, {1, 2}}, {1, .Forward, .Pixel, {3}}},
+		source_path      = "game/rock.material",
+	}
+	data := aligned(material_write(contents, context.temp_allocator))
+	blob, ok := material_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.blend, Material_Blend.Masked)
+	testing.expect_value(t, blob_string(data, material_params(data, blob)[1].name), "albedo")
+	testing.expect_value(t, blob_string(data, material_switches(data, blob)[0]), "use_detail")
+	testing.expect_value(t, material_textures(data, blob)[0].default, Material_Texture_Default.Normal)
+	testing.expect_value(t, len(material_code(data, blob, 1, .Forward, .Vertex)), 2)
+	testing.expect(t, material_code(data, blob, 0, .Forward, .Vertex) == nil)
+	testing.expect_value(t, blob_bytes(data, blob.block)[0], 7)
+
+	instance := aligned(material_instance_write({guid = guid, material = guid, switches = 0, block = block, textures = textures, source_path = "game/rock_mossy.material_instance"}, context.temp_allocator))
+	view, view_ok := material_instance_view(instance)
+	testing.expect(t, view_ok)
+	if view_ok {
+		testing.expect_value(t, view.material, guid)
+		testing.expect_value(t, instance_textures(instance, view)[0].offset, 16)
+	}
+
+	// A texture past the block is not a material.
+	bad := textures
+	bad[0].offset = 32
+	contents.textures = bad
+	_, ok = material_view(aligned(material_write(contents, context.temp_allocator)))
+	testing.expect(t, !ok)
+}

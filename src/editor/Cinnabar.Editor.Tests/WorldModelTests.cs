@@ -106,7 +106,7 @@ public class WorldModelTests
     }
 
     static FieldInfo Field(FieldKind kind, uint offset = 0, FieldKind enumBase = FieldKind.U8, params EnumValue[] values) =>
-        new("f", offset, kind, enumBase, values, false, false, 0, 0);
+        new("f", offset, kind, enumBase, values, false, false, 0, 0, "");
 
     [Fact]
     public void FieldsDecodeEachKind()
@@ -133,6 +133,13 @@ public class WorldModelTests
         Assert.Equal("Very Busy", FieldValues.Format(Field(FieldKind.Enum, 48, FieldKind.U8, new EnumValue("Idle", 0), new EnumValue("Very_Busy", 5)), data));
         Assert.True(FieldValues.Display(Field(FieldKind.Bool, 49), data).Flag);
         Assert.Equal("-70,000", FieldValues.Format(Field(FieldKind.I32, 52), data));
+
+        // An asset field's 16 bytes are its GUID, and zero is none.
+        var asset = new byte[16];
+        Assert.Equal(DisplayKind.Asset, FieldValues.Display(Field(FieldKind.Asset), asset).Kind);
+        Assert.Equal("", FieldValues.Display(Field(FieldKind.Asset), asset).Text);
+        asset[0] = 0x9d;
+        Assert.Equal("9d" + new string('0', 30), FieldValues.Display(Field(FieldKind.Asset), asset).Text);
         Assert.Equal("none", FieldValues.Format(Field(FieldKind.Entity, 56), data));
     }
 

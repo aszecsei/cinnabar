@@ -137,7 +137,7 @@ public sealed class EditingTests : IDisposable
     public void TypedValuesBecomeSceneValues()
     {
         using var shell = NewShell(out _);
-        FieldInfo Field(FieldKind kind, EnumValue[]? values = null) => new("f", 0, kind, FieldKind.U8, values ?? [], false, false, 0, 0);
+        FieldInfo Field(FieldKind kind, EnumValue[]? values = null) => new("f", 0, kind, FieldKind.U8, values ?? [], false, false, 0, 0, "");
 
         var position = FieldEditor.ForComponent(shell, 1, 1, Field(FieldKind.Position))!;
         position.Current = SceneValue.Of(SceneNumber.Of(2516582400000000000L), SceneNumber.Of(5L), SceneNumber.Of(0L));
@@ -161,7 +161,7 @@ public sealed class EditingTests : IDisposable
         var mode = FieldEditor.ForComponent(shell, 1, 1, Field(FieldKind.Enum, [new EnumValue("Idle", 0), new EnumValue("Very_Busy", 5)]))!;
         Assert.Equal(["Idle", "Very Busy"], mode.Options);
 
-        Assert.Null(FieldEditor.ForComponent(shell, 1, 1, new FieldInfo("f", 0, FieldKind.F32, FieldKind.U8, [], true, false, 0, 0)));
+        Assert.Null(FieldEditor.ForComponent(shell, 1, 1, new FieldInfo("f", 0, FieldKind.F32, FieldKind.U8, [], true, false, 0, 0, "")));
     }
 
     [Fact]

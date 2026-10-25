@@ -1,10 +1,12 @@
 package scene
 
 import "base:runtime"
+import "core:fmt"
 import "core:reflect"
 import "core:strconv"
 import "core:strings"
 
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 Field_Kind :: enum u8 {
@@ -29,6 +31,8 @@ Field_Kind :: enum u8 {
 	Position,
 	// An entity handle.
 	Entity,
+	// An asset's GUID, format.Guid. asset_kind names the kind of asset that it takes.
+	Asset,
 }
 
 Enum_Value :: struct {
@@ -51,11 +55,17 @@ Field :: struct {
 	has_range:   bool,
 	range_min:   f64,
 	range_max:   f64,
+	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", as the cook link names
+	// kinds in lowercase, such as "mesh". "" takes any asset.
+	asset_kind:  string,
 }
 
 // component_fields lists the fields of a component type. A nested struct that is not a kind of its own adds its
 // fields with its name and a dot in front. The struct tag editor:"-" hides a field, editor:"read" makes it and what
-// is in it read-only, and editor:"range=min,max" gives a number's range. Other field types are hidden.
+// is in it read-only, and editor:"range=min,max" gives a number's range. A format.Guid field is an asset reference,
+// and asset:"<kind>" names the kind of asset that it takes (see docs/rendering.md#asset-fields). A fixed array of
+// asset references is a field for each element, named for the array and the index, such as materials.0. Other field
+// types are hidden.
 component_fields :: proc(type: typeid, allocator: runtime.Allocator) -> []Field {
 	fields := make([dynamic]Field, allocator)
 	add_fields(&fields, type_info_of(type), "", 0, false, allocator)
@@ -87,8 +97,20 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 				field.has_range, field.range_min, field.range_max = true, min_value, max_value
 			}
 		}
+		asset_kind := reflect.struct_tag_get(reflect.Struct_Tag(s.tags[i]), "asset")
 		if field_kind(s.types[i], &field, allocator) {
+			if field.kind == .Asset {
+				field.asset_kind = asset_kind
+			}
 			append(fields, field)
+		} else if array, is_array := runtime.type_info_base(s.types[i]).variant.(runtime.Type_Info_Array); is_array && array.elem.id == format.Guid {
+			for index in 0 ..< array.count {
+				element := field
+				element.name = fmt.aprintf("%s.%d", name, index, allocator = allocator)
+				element.offset += u32(index * array.elem_size)
+				element.kind, element.asset_kind = .Asset, asset_kind
+				append(fields, element)
+			}
 		} else {
 			add_fields(fields, s.types[i], name, base + s.offsets[i], field.read_only, allocator)
 		}
@@ -104,6 +126,9 @@ field_kind :: proc(ti: ^runtime.Type_Info, field: ^Field, allocator: runtime.All
 		return true
 	case ecs.Entity:
 		field.kind = .Entity
+		return true
+	case format.Guid:
+		field.kind = .Asset
 		return true
 	}
 	#partial switch v in runtime.type_info_base(ti).variant {

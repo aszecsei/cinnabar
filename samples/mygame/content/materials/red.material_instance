@@ -1,0 +1,5 @@
+material_instance 1
+# The Cornell box's left wall.
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [0.63, 0.065, 0.05, 1]
+roughness = 0.8

@@ -24,6 +24,7 @@ enum EditKind
     /// <summary>Edited in meters, with m, km, Mm or Gm, and stored raw.</summary>
     Position,
     Entity,
+    Asset,
     Text,
 }
 
@@ -101,6 +102,7 @@ sealed class FieldEditor : IFieldEditor
             FieldKind.Quaternion => new FieldEditor(shell, sceneIds, label, EditKind.Quaternion, Set),
             FieldKind.Position => new FieldEditor(shell, sceneIds, label, EditKind.Position, Set),
             FieldKind.Entity => new FieldEditor(shell, sceneIds, label, EditKind.Entity, Set),
+            FieldKind.Asset => new FieldEditor(shell, sceneIds, label, EditKind.Asset, Set),
             _ => new FieldEditor(shell, sceneIds, label, EditKind.Integer, Set, Range(field.Kind)),
         };
     }
@@ -185,6 +187,8 @@ sealed class FieldEditor : IFieldEditor
                 return SceneValue.Of([.. longs.Select(SceneNumber.Of)]);
             case FieldKind.Entity:
                 return SceneValue.EntityRef(sceneIdOf(BinaryPrimitives.ReadUInt64LittleEndian(data)));
+            case FieldKind.Asset:
+                return SceneValue.AssetRef(FieldValues.AssetGuid(data));
             case FieldKind.Enum:
                 var value = Integer(kind, data);
                 var name = field.EnumValues.FirstOrDefault(v => v.Value == value)?.Name;
@@ -243,6 +247,8 @@ sealed class FieldEditor : IFieldEditor
         _shell.Edit(_label, Operations(SceneValue.EntityRef(sceneId)));
     }
 
+    public void SetAsset(string guid) => _shell.Edit(_label, Operations(SceneValue.AssetRef(guid)));
+
     public void Choose(string option)
     {
         var index = Options.ToList().IndexOf(option);
@@ -254,7 +260,7 @@ sealed class FieldEditor : IFieldEditor
 
     public void BeginScrub(int axis)
     {
-        if (_currents.Any(c => c == null) || _kind is EditKind.Bool or EditKind.Enum or EditKind.Entity or EditKind.Text)
+        if (_currents.Any(c => c == null) || _kind is EditKind.Bool or EditKind.Enum or EditKind.Entity or EditKind.Asset or EditKind.Text)
         {
             return;
         }

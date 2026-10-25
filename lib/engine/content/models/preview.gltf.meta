@@ -1,0 +1,5 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).
+guid = 794b001092254066ae00bc760312723d
+mesh.Sphere = 8f5f7b591d2d4b6eb9bf8d2bbb750989
+mesh.Cube = 507bb4a374444f91b8e822e2d2e8fac7
+mesh.Plane = 13877e2ae98b45509db3145676f75e28

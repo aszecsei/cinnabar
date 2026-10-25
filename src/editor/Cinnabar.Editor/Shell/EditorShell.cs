@@ -121,6 +121,9 @@ public sealed partial class EditorShell : IDisposable
         // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
         World.EntitiesChanged += SendHidden;
         Layout.Changed += Commands.InvalidateAll;
+        Layout.ActiveDocumentChanged += OnActiveDocumentChanged;
+        Layout.DocumentClosing = OnDocumentClosing;
+        Layout.DocumentClosed += OnDocumentClosed;
         // Commands such as Delete act on the selected entities.
         Selection.Changed += (_, _) => Commands.InvalidateAll();
         Camera.Changed += SendCamera;
@@ -145,6 +148,8 @@ public sealed partial class EditorShell : IDisposable
         {
             OpenScene(options.ScenePath);
         }
+        _pendingMaterials.AddRange(options.MaterialPaths);
+        Assets.Changed += OpenPendingMaterials;
     }
 
     public void RequestPalette() => PaletteRequested?.Invoke();
@@ -167,11 +172,13 @@ public sealed partial class EditorShell : IDisposable
             ResetMode();
             SendScene();
             SendViewportTools();
+            SendPreviews();
         }
         _linked = Host.Linked;
         if (!Host.Linked)
         {
             Viewport.Disconnect();
+            DisconnectPreviews();
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -209,5 +216,9 @@ public sealed partial class EditorShell : IDisposable
         Host.Dispose();
         Cook.Dispose();
         Viewport.Dispose();
+        foreach (var editor in _materials)
+        {
+            editor.Dispose();
+        }
     }
 }

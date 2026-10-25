@@ -59,6 +59,7 @@ flowchart TB
 | `lib/engine/script` | Game | Script bindings, behaviours, the coroutine scheduler and script hot reload. |
 | `lib/engine/asset` | Game | The asset runtime: loading by GUID, handles and the sources of blobs. |
 | `lib/engine/scene` | Game | The scene loader, which replaces the world with a cooked scene or the editor's snapshot, and the walk over a component's fields that scenes and the editor share. |
+| `lib/engine/render` | Game | The render graph, render extraction, and the built-in renderer: views, layers, materials and the frame's passes. |
 | `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, watched values, scene snapshots and edit operations, and the viewport tools' passes: picking from the entity ID buffer, the selection outline and the gizmo. |
 | `lib/engine/wire` | Shared | The transport of the editor link and the cook link: framing, the wire format and the schema writer, for any union of messages. |
 | `lib/engine/editor/link` | Shared | The editor link's messages, and the schema that the editor's C# is generated from. The host and the game both import it. |
@@ -138,7 +139,9 @@ With this boundary, rendering does not call across the DLL once per draw. The bo
 
 Resource binding is bindless, and barriers come from a render graph in `lib/engine`. The backend translates commands and does not track state.
 
-Details: [GPU](gpu.md).
+The built-in renderer is clustered forward with a depth and normal prepass. It draws the world and a first-person view model in linear HDR, and the UI and debug drawing in their own targets, which one output pass combines after tone mapping. Materials pick a shading model, and the cooker compiles them from node graphs.
+
+Details: [GPU](gpu.md), [Rendering](rendering.md).
 
 ## Scripting
 

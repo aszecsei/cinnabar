@@ -43,6 +43,8 @@ public sealed class ContentBrowserView : DockPanel
     readonly Border _general = new() { Classes = { "problems" }, Margin = new Thickness(4, 0, 4, 4) };
     readonly ListBox _folders = new() { Classes = { "outliner" } };
     readonly ListBox _assets = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
+    // The files whose sub-assets show under them, by GUID.
+    readonly HashSet<string> _expandedFiles = [];
     readonly StackPanel _details = new() { Spacing = 2, Margin = new Thickness(8, 4) };
     readonly TextBlock _empty = new()
     {
@@ -262,7 +264,16 @@ public sealed class ContentBrowserView : DockPanel
         }
         else if (_folder is { } folder)
         {
-            assets = [.. _index.AssetsIn(folder.Root, folder.Path)];
+            // An expanded file shows its sub-assets under it.
+            assets = [];
+            foreach (var asset in _index.AssetsIn(folder.Root, folder.Path))
+            {
+                assets.Add(asset);
+                if (_expandedFiles.Contains(asset.Guid))
+                {
+                    assets.AddRange(_index.SubassetsOf(asset.Guid));
+                }
+            }
             _location.Text = folder.Path == "" ? folder.Root : $"{folder.Root} › {folder.Path.Replace("/", " › ")}";
         }
         else
@@ -293,8 +304,8 @@ public sealed class ContentBrowserView : DockPanel
         var failed = last is { Failed: > 0 } ? $"{last.Failed} {Plural(last.Failed, "asset")} failed to cook" : "";
         _status.Text = cook.State switch
         {
-            CookState.Linked when last is { Scripts: > 0 } or { Scenes: > 0 } =>
-                $"Cooked {last.Scripts} {Plural(last.Scripts, "script")} and {last.Scenes} {Plural(last.Scenes, "scene")} in {last.Milliseconds:0} ms"
+            CookState.Linked when last is { Cooked.Length: > 0 } =>
+                $"Cooked {string.Join(", ", last.Cooked.Select(c => $"{c.Count} {Plural(c.Count, KindNoun(c.Kind))}"))} in {last.Milliseconds:0} ms"
                 + (failed == "" ? "" : $", {failed}"),
             CookState.Linked when failed != "" => failed,
             CookState.Linked => "Up to date",
@@ -305,6 +316,21 @@ public sealed class ContentBrowserView : DockPanel
     }
 
     static string Plural(uint count, string noun) => count == 1 ? noun : noun + "s";
+
+    // A kind's name in messages, which is also its icon's.
+    static string KindNoun(AssetKind kind) => kind switch
+    {
+        AssetKind.Scene => "scene",
+        AssetKind.Shader => "shader",
+        AssetKind.Texture => "texture",
+        AssetKind.Model => "model",
+        AssetKind.Mesh => "mesh",
+        AssetKind.ShadingModel => "shading model",
+        AssetKind.Material => "material",
+        AssetKind.MaterialInstance => "material instance",
+        AssetKind.MaterialFunction => "material function",
+        _ => "script",
+    };
 
     // Problems that belong to no asset, such as a broken definition file, show over the browser.
     void ShowGeneralProblems()
@@ -548,7 +574,10 @@ public sealed class ContentBrowserView : DockPanel
             menu.Items.Clear();
             var linked = _shell.CanChangeContent && (row != null || _folder != null);
             foreach (var (label, template) in new (string, AssetTemplate?)[]
-                { ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene), ("New Folder", null) })
+                {
+                    ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
+                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Folder", null),
+                })
             {
                 menu.Items.Add(new MenuItem
                 {
@@ -586,18 +615,44 @@ public sealed class ContentBrowserView : DockPanel
     Control AssetView(Asset asset)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        if (CommandViews.Icon(asset.Kind == AssetKind.Scene ? "scene" : "script", 14) is { } icon)
+        var searching = !string.IsNullOrEmpty(_search.Text?.Trim());
+        var subasset = AssetIndex.IsSubasset(asset);
+        // A file with sub-assets expands in place to show them, indented under it. Search lists them as they are.
+        var hasSubassets = !subasset && _index.SubassetsOf(asset.Guid).Any();
+        var expander = new TextBlock
+        {
+            Text = hasSubassets && !searching ? (_expandedFiles.Contains(asset.Guid) ? "▾" : "▸") : "",
+            Width = 12,
+            Margin = new Thickness(subasset && !searching ? 18 : 0, 0, 0, 0),
+            Classes = { "dim" },
+            Cursor = hasSubassets ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
+        };
+        if (hasSubassets && !searching)
+        {
+            expander.PointerPressed += (_, e) =>
+            {
+                if (!_expandedFiles.Remove(asset.Guid))
+                {
+                    _expandedFiles.Add(asset.Guid);
+                }
+                e.Handled = true;
+                ShowAssets();
+            };
+        }
+        line.Children.Add(expander);
+        if (CommandViews.Icon(KindNoun(asset.Kind).Replace(' ', '-'), 14) is { } icon)
         {
             line.Children.Add(icon);
         }
-        line.Children.Add(new TextBlock { Text = AssetIndex.Name(asset.Path) });
+        line.Children.Add(new TextBlock { Text = AssetIndex.DisplayName(asset) });
         if (asset.Behaviour != "")
         {
             line.Children.Add(new Border { Classes = { "badge", "script" }, Margin = new Thickness(0), Child = new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) } });
         }
-        if (!string.IsNullOrEmpty(_search.Text?.Trim()))
+        if (searching)
         {
-            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{AssetIndex.Parent(asset.Path)}", Classes = { "dim" } });
+            var where = subasset ? asset.Path : AssetIndex.Parent(asset.Path);
+            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{where}", Classes = { "dim" } });
         }
         if (asset.Errors > 0 || asset.Status == AssetStatus.Failed)
         {
@@ -661,7 +716,10 @@ public sealed class ContentBrowserView : DockPanel
                 _assets.SelectedItem = _assets.ItemsSource?.OfType<Asset>().FirstOrDefault(a => a.Guid == asset.Guid);
             }
         };
-        menu.Items.Add(new MenuItem { Header = asset.Kind == AssetKind.Scene ? "Open Scene" : "Open in Script Editor", Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
+        if (EditorShell.CanOpen(asset))
+        {
+            menu.Items.Add(new MenuItem { Header = _shell.OpenLabel(asset), Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
+        }
         if (path != null)
         {
             menu.Items.Add(new MenuItem { Header = "Show in Explorer", Command = new RelayCommand(() => _shell.ShowInExplorer(path)) });

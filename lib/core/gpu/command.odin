@@ -30,6 +30,7 @@ Packet_Kind :: enum u16 {
 	Set_Index_Buffer,
 	Set_Viewport,
 	Set_Scissor,
+	Set_Stencil_Reference,
 	Draw,
 	Draw_Indexed,
 	Dispatch,
@@ -68,12 +69,14 @@ Color_Attachment :: struct {
 	clear:   [4]f32,
 }
 
-// A nil texture means the pass has no depth attachment.
+// A nil texture means the pass has no depth attachment. A format with a stencil loads, clears and stores the stencil
+// with the depth.
 Depth_Attachment :: struct {
-	texture: Texture,
-	load:    Load_Op,
-	store:   Store_Op,
-	clear:   f32,
+	texture:       Texture,
+	load:          Load_Op,
+	store:         Store_Op,
+	clear:         f32,
+	stencil_clear: u8,
 }
 
 // A split pass is one pass recorded as pieces in consecutive command buffers of one submission. Each piece but
@@ -142,6 +145,10 @@ Set_Viewport :: struct {
 Set_Scissor :: struct {
 	position: [2]i32,
 	size:     [2]i32,
+}
+
+Set_Stencil_Reference :: struct {
+	reference: u32,
 }
 
 Draw :: struct {
@@ -264,6 +271,7 @@ Packet_Format :: struct {
 	set_index_buffer:   Set_Index_Buffer,
 	set_viewport:       Set_Viewport,
 	set_scissor:        Set_Scissor,
+	set_stencil_ref:    Set_Stencil_Reference,
 	draw:               Draw,
 	draw_indexed:       Draw_Indexed,
 	dispatch:           Dispatch,
@@ -369,6 +377,11 @@ cmd_set_viewport :: proc(cb: ^Command_Buffer, position, size: [2]f32, min_depth:
 
 cmd_set_scissor :: proc(cb: ^Command_Buffer, position, size: [2]i32) {
 	push(cb, .Set_Scissor, Set_Scissor{position, size})
+}
+
+// cmd_set_stencil_reference sets the reference value of the stencil test and of Replace. Each pass starts with 0.
+cmd_set_stencil_reference :: proc(cb: ^Command_Buffer, reference: u8) {
+	push(cb, .Set_Stencil_Reference, Set_Stencil_Reference{u32(reference)})
 }
 
 cmd_draw :: proc(cb: ^Command_Buffer, vertex_count: u32, instance_count: u32 = 1, first_vertex: u32 = 0, first_instance: u32 = 0) {

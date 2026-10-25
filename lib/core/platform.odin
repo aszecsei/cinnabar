@@ -17,6 +17,9 @@ import script_host "cinnabar:core/script"
 // A comma-separated list of gpu.Feature names that core hides from the game, to test fallback paths on hardware
 // that has the features. For example: CINNABAR_DISABLE_FEATURES=Mesh_Shaders.
 DISABLE_FEATURES_VARIABLE :: "CINNABAR_DISABLE_FEATURES"
+// A gpu.Output_Request name that replaces the game's requests, to see an output mode without the game's settings. For
+// example: CINNABAR_OUTPUT=Scrgb.
+OUTPUT_VARIABLE :: "CINNABAR_OUTPUT"
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
@@ -36,6 +39,8 @@ Platform :: struct {
 	// In shared mode, the size that the reader asked for, which replaces the hidden window's. Zero until it asks.
 	shared_size: [2]i32,
 	disabled_features: gpu.Features,
+	// From OUTPUT_VARIABLE, which then ignores the game's requests.
+	output_override: Maybe(gpu.Output_Request),
 	// The game's virtual memory reservations, released at a soft restart.
 	reservations: [dynamic][]byte,
 	reservations_mutex: sync.Mutex,
@@ -77,6 +82,10 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 	}
 
 	platform.disabled_features = read_disabled_features()
+	platform.output_override = read_output_override()
+	if request, ok := platform.output_override.?; ok {
+		backend.request_output(request)
+	}
 	platform.reservations = make([dynamic][]byte)
 
 	platform.start = time.tick_now()
@@ -102,6 +111,11 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		jobs_worker_count            = jobs.worker_count,
 		gpu_features                 = gpu_features,
 		gpu_frame_target             = backend.frame_target,
+		gpu_output                   = backend.output,
+		gpu_request_output           = gpu_request_output,
+		gpu_preview_target           = backend.preview_target,
+		gpu_release_preview_target   = backend.release_preview_target,
+		gpu_pipeline_ready           = backend.pipeline_ready,
 		gpu_submit                   = backend.submit,
 		gpu_upload                   = backend.upload,
 		gpu_stream_buffer            = backend.stream_buffer,
@@ -211,6 +225,28 @@ gpu_features :: proc() -> gpu.Features {
 }
 
 @(private = "file")
+gpu_request_output :: proc(request: gpu.Output_Request) {
+	if platform.output_override == nil {
+		backend.request_output(request)
+	}
+}
+
+@(private = "file")
+read_output_override :: proc() -> Maybe(gpu.Output_Request) {
+	value := strings.trim_space(os.get_env(OUTPUT_VARIABLE, context.temp_allocator))
+	if value == "" {
+		return nil
+	}
+	request, ok := reflect.enum_from_name(gpu.Output_Request, value)
+	if !ok {
+		log.warnf("core: %s: unknown output %q", OUTPUT_VARIABLE, value)
+		return nil
+	}
+	log.infof("core: output %v", request)
+	return request
+}
+
+@(private = "file")
 read_disabled_features :: proc() -> (disabled: gpu.Features) {
 	value := os.get_env(DISABLE_FEATURES_VARIABLE, context.temp_allocator)
 	for name in strings.split_iterator(&value, ",") {
@@ -261,6 +297,10 @@ pace_shared_frames :: backend.pace_shared_frames
 
 // acknowledge_shared_frame records that the reader has finished with a frame of a generation.
 acknowledge_shared_frame :: backend.acknowledge_shared_frame
+
+// acknowledge_preview_frame records that the reader has finished with a frame of a generation of a preview target
+// (see docs/rendering.md#material-previews).
+acknowledge_preview_frame :: backend.acknowledge_preview_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

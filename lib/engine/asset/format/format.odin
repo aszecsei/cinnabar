@@ -55,20 +55,44 @@ META_EXTENSION :: ".meta"
 // runtime checks the blobs it has loaded only when the file changes (see docs/content-pipeline.md#loading).
 GENERATION_FILE :: ".generation"
 
-// Meta is a parsed .meta file: lines of `key = value`, with `#` comments. Every .meta has a guid. The other keys are
-// the asset's import settings.
+// Meta is a parsed .meta file: lines of `key = value`, with `#` comments. Every .meta has a guid. A key with a dot,
+// `<kind>.<name>`, gives the GUID of a sub-asset that the file makes (see docs/content-pipeline.md#identity). The other
+// keys are the asset's import settings.
 Meta :: struct {
-	guid:     Guid,
-	settings: []Meta_Setting,
+	guid:      Guid,
+	settings:  []Meta_Setting,
+	subassets: []Meta_Subasset,
 }
 
 Meta_Setting :: struct {
 	key, value: string,
 }
 
-// meta_parse parses a .meta file. The settings point into text. It fails on a malformed line or a missing guid.
+// Meta_Subasset is a sub-asset's line: its kind's name, such as "mesh", its name and its GUID.
+Meta_Subasset :: struct {
+	kind, name: string,
+	guid:       Guid,
+}
+
+// meta_subasset is the GUID of a sub-asset of a kind and a name.
+meta_subasset :: proc(meta: Meta, kind, name: string) -> (guid: Guid, ok: bool) {
+	for s in meta.subassets {
+		if s.kind == kind && s.name == name {
+			return s.guid, true
+		}
+	}
+	return
+}
+
+// meta_parse parses a .meta file. The settings and sub-assets point into text. It fails on a malformed line, a
+// sub-asset without a GUID, or a missing guid.
 meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta, ok: bool) {
 	settings := make([dynamic]Meta_Setting, allocator)
+	subassets := make([dynamic]Meta_Subasset, allocator)
+	defer if !ok {
+		delete(settings)
+		delete(subassets)
+	}
 	has_guid := false
 	rest := text
 	for line in strings.split_lines_iterator(&rest) {
@@ -78,7 +102,6 @@ meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta,
 		}
 		equals := strings.index_byte(trimmed, '=')
 		if equals < 0 {
-			delete(settings)
 			return
 		}
 		key := strings.trim_space(trimmed[:equals])
@@ -86,18 +109,23 @@ meta_parse :: proc(text: string, allocator := context.allocator) -> (meta: Meta,
 		if key == "guid" {
 			meta.guid, has_guid = guid_parse(value)
 			if !has_guid {
-				delete(settings)
 				return
 			}
+		} else if dot := strings.index_byte(key, '.'); dot > 0 {
+			guid, guid_ok := guid_parse(value)
+			if !guid_ok {
+				return
+			}
+			append(&subassets, Meta_Subasset{key[:dot], key[dot + 1:], guid})
 		} else {
 			append(&settings, Meta_Setting{key, value})
 		}
 	}
 	if !has_guid {
-		delete(settings)
 		return
 	}
 	meta.settings = settings[:]
+	meta.subassets = subassets[:]
 	return meta, true
 }
 
@@ -133,6 +161,17 @@ Asset_Kind :: enum u32 {
 	None,
 	Script,
 	Scene,
+	Shader,
+	Texture,
+	// A glTF file, which has no blob: its meshes are Mesh sub-assets.
+	Model,
+	Mesh,
+	// A lighting model's declaration, which materials compile with. It has no blob.
+	Shading_Model,
+	Material,
+	Material_Instance,
+	// A graph that materials call as a node, which they compile in. It has no blob.
+	Material_Function,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

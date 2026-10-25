@@ -78,6 +78,8 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			v := gpu.payload(p, gpu.Set_Viewport)
 			viewport := d3d.VIEWPORT{v.position.x, v.position.y, v.size.x, v.size.y, v.min_depth, v.max_depth}
 			list->RSSetViewports(1, &viewport)
+		case .Set_Stencil_Reference:
+			list->OMSetStencilRef(gpu.payload(p, gpu.Set_Stencil_Reference).reference)
 		case .Set_Scissor:
 			s := gpu.payload(p, gpu.Set_Scissor)
 			rect := d3d.RECT{s.position.x, s.position.y, s.position.x + s.size.x, s.position.y + s.size.y}
@@ -170,13 +172,17 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 		entry := texture_entry(pass.depth.texture)
 		size = entry.desc.size
 		clear: d3d.CLEAR_VALUE
-		clear.DepthStencil = {Depth = pass.depth.clear}
+		clear.DepthStencil = {Depth = pass.depth.clear, Stencil = pass.depth.stencil_clear}
 		depth = {
 			cpuDescriptor = entry.dsv,
 			DepthBeginningAccess = beginning_access(pass.depth.load, entry.desc.format, clear),
 			DepthEndingAccess = {Type = ending_access(pass.depth.store)},
 			StencilBeginningAccess = {Type = .NO_ACCESS},
 			StencilEndingAccess = {Type = .NO_ACCESS},
+		}
+		if gpu.has_stencil(entry.desc.format) {
+			depth.StencilBeginningAccess = beginning_access(pass.depth.load, entry.desc.format, clear)
+			depth.StencilEndingAccess = {Type = ending_access(pass.depth.store)}
 		}
 		depth_ptr = &depth
 	}
@@ -203,6 +209,7 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 	list->RSSetViewports(1, &viewport)
 	list->RSSetScissorRects(1, &scissor)
 	list->SetGraphicsRoot32BitConstant(ROOT_DRAW_ID, 0, 0)
+	list->OMSetStencilRef(0)
 }
 
 @(private = "file")

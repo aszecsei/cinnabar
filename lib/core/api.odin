@@ -55,6 +55,19 @@ Platform_API :: struct {
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target: proc() -> gpu.Texture,
+	// The frame's output: how the frame target's colors reach the display, the frame target's format, which follows
+	// from it, and the display (see docs/gpu.md#presentation). gpu_request_output asks for an output mode from the
+	// next frame on; Auto, the default, is HDR10 while the display is in HDR mode. Shared mode is always Sdr.
+	gpu_output:         proc() -> gpu.Output,
+	gpu_request_output: proc(request: gpu.Output_Request),
+	// The editor's previews render into shared targets of their own beside the frame target (see
+	// docs/rendering.md#material-previews). gpu_preview_target gives target id's texture for this frame at a size, at
+	// most gpu.MAX_PREVIEW_SIZE on a side, in the render target layout, which the game must leave it in; the frame's end
+	// gives it to the reader. It gives false outside shared mode, and while the reader may still read the texture that
+	// the frame would draw into. id is below gpu.MAX_PREVIEW_TARGETS. gpu_release_preview_target releases a target's
+	// shared objects.
+	gpu_preview_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
+	gpu_release_preview_target: proc(id: int),
 	// gpu_submit runs the command buffers on a queue, in order after the queue's earlier submissions in the frame.
 	// They start after the earlier submissions of the wait_for queues finish. It returns false if the backend
 	// rejected the command buffers. See docs/gpu.md#queues.
@@ -83,6 +96,8 @@ Platform_API :: struct {
 	// formats or the topology: create a new pipeline for those.
 	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
 	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
+	// Whether a pipeline's latest version is compiled, so draws with it draw.
+	gpu_pipeline_ready:           proc(pipeline: gpu.Pipeline) -> bool,
 	// Ray tracing pipelines need Ray_Tracing_Pipeline.
 	gpu_create_ray_tracing_pipeline: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline,
 	gpu_update_ray_tracing_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool,

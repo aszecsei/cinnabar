@@ -1,0 +1,9 @@
+shading 1
+# Lit: metallic and roughness, with GGX specular and Lambert diffuse. The engine's standard model.
+input base_color float3 = [0.8, 0.8, 0.8]
+input metallic float = 0
+input roughness float = 0.5
+# Tangent-space, as a normal map gives it. The forward pass maps it to the world.
+input normal float3 = [0, 0, 1]
+input emission float3 = [0, 0, 0]
+input opacity float = 1

@@ -17,10 +17,17 @@ public enum CookState
 }
 
 /// <summary>
-/// How the editor runs the cook daemon: its executable, the cache, the definition file, and the content roots by
-/// name. Paths are relative to <see cref="WorkingDirectory"/>.
+/// How the editor runs the cook daemon: its executable, the cache, the definition file, the content roots by name, and
+/// what it compiles shaders with: DXC and the include directories. Paths are relative to <see cref="WorkingDirectory"/>.
 /// </summary>
-public sealed record CookOptions(string CookPath, string CachePath, string? DefinitionsPath, IReadOnlyList<(string Name, string Dir)> Roots, string WorkingDirectory);
+public sealed record CookOptions(
+    string CookPath,
+    string CachePath,
+    string? DefinitionsPath,
+    IReadOnlyList<(string Name, string Dir)> Roots,
+    string WorkingDirectory,
+    string? DxcPath = null,
+    IReadOnlyList<string>? Includes = null);
 
 /// <summary>
 /// The cook daemon's lifetime and its cook link (see docs/editor.md#processes): start, stop, restart, crashes, and the
@@ -44,6 +51,7 @@ public sealed class CookSession : IDisposable
     readonly Stopwatch _uptime = new();
     // The operations that wait for the daemon's answer, by request ID.
     readonly Dictionary<uint, TaskCompletionSource<OperationResult>> _requests = [];
+    readonly Dictionary<uint, TaskCompletionSource<PreviewResult>> _previews = [];
     uint _nextRequest;
 
     public CookSession(CookOptions options, AssetIndex index)
@@ -88,6 +96,14 @@ public sealed class CookSession : IDisposable
         {
             args.AddRange(["--definitions", _options.DefinitionsPath]);
         }
+        if (_options.DxcPath != null)
+        {
+            args.AddRange(["--dxc", _options.DxcPath]);
+        }
+        foreach (var include in _options.Includes ?? [])
+        {
+            args.AddRange(["--include", include]);
+        }
         foreach (var (name, dir) in _options.Roots)
         {
             args.AddRange(["--root", $"{name}={dir}"]);
@@ -122,16 +138,35 @@ public sealed class CookSession : IDisposable
         {
             return Task.FromResult(new OperationResult("The cook daemon is not running, so the content cannot change.", []));
         }
-        var request = ++_nextRequest;
-        if (request == 0)
-        {
-            // Request 0 is a message that wants no answer.
-            request = ++_nextRequest;
-        }
+        var request = NextRequest();
         var answer = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
         _requests[request] = answer;
         _link.Send(operation, request);
         return answer.Task;
+    }
+
+    /// <summary>
+    /// Asks the daemon to cook a material's unsaved text into the cache's preview area (see
+    /// docs/rendering.md#material-previews), and completes with its answer. Without the cook link, it fails at once.
+    /// </summary>
+    public Task<PreviewResult> CookPreview(string guid, string text)
+    {
+        if (_link == null || State != CookState.Linked)
+        {
+            return Task.FromResult(new PreviewResult("The cook daemon is not running.", []));
+        }
+        var request = NextRequest();
+        var answer = new TaskCompletionSource<PreviewResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _previews[request] = answer;
+        _link.Send(new CookPreview(guid, text), request);
+        return answer.Task;
+    }
+
+    uint NextRequest()
+    {
+        var request = ++_nextRequest;
+        // Request 0 is a message that wants no answer.
+        return request == 0 ? ++_nextRequest : request;
     }
 
     public void Stop()
@@ -207,6 +242,12 @@ public sealed class CookSession : IDisposable
                     answer.SetResult(result);
                 }
                 break;
+            case PreviewResult preview:
+                if (_previews.Remove(request, out var cooked))
+                {
+                    cooked.SetResult(preview);
+                }
+                break;
             case Hello:
                 Output?.Invoke("editor: the cook daemon sent a message that only the editor sends: Hello");
                 break;
@@ -279,6 +320,11 @@ public sealed class CookSession : IDisposable
             answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", []));
         }
         _requests.Clear();
+        foreach (var answer in _previews.Values)
+        {
+            answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", []));
+        }
+        _previews.Clear();
     }
 
     void SetState(CookState state, int exitCode = 0)

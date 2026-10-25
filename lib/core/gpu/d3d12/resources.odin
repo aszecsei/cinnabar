@@ -240,10 +240,10 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		Type = .DEFAULT,
 	}
 	resource_desc := d3d.RESOURCE_DESC1 {
-		Dimension        = .TEXTURE2D,
+		Dimension        = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
 		Width            = u64(desc.size.x),
 		Height           = desc.size.y,
-		DepthOrArraySize = 1,
+		DepthOrArraySize = u16(max(desc.depth, 1)),
 		MipLevels        = u16(stored.mip_count),
 		Format           = resource_format(desc.format),
 		SampleDesc       = {Count = 1},
@@ -304,12 +304,26 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 			Shader4ComponentMapping = d3d.DEFAULT_SHADER_4_COMPONENT_MAPPING,
 		}
 		srv.Texture2D.MipLevels = desc.mip_count
+		if desc.depth > 0 {
+			srv.ViewDimension = .TEXTURE3D
+			srv.Texture3D = {MipLevels = 1}
+		}
 		dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.texture_read_index(texture)))
+		// The stencil plane's view takes the write slot, which a depth texture does not use (see gpu.stencil_index).
+		if gpu.has_stencil(desc.format) {
+			srv.Format = .X32_TYPELESS_G8X24_UINT
+			srv.Texture2D.PlaneSlice = 1
+			dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.stencil_index(texture)))
+		}
 	}
 	if .Storage in desc.usage {
 		uav := d3d.UNORDERED_ACCESS_VIEW_DESC {
 			Format        = view_format(desc.format),
 			ViewDimension = .TEXTURE2D,
+		}
+		if desc.depth > 0 {
+			uav.ViewDimension = .TEXTURE3D
+			uav.Texture3D = {WSize = desc.depth}
 		}
 		dev.device->CreateUnorderedAccessView(entry.resource, nil, &uav, resource_handle(gpu.texture_write_index(texture)))
 	}
@@ -361,6 +375,14 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 	if desc.anisotropy > 1 {
 		sampler_desc.Filter = .ANISOTROPIC
 		sampler_desc.MaxAnisotropy = u32(min(desc.anisotropy, 16))
+	}
+	if desc.compare != .Always {
+		COMPARISON_FILTER := [gpu.Filter][gpu.Filter]d3d.FILTER {
+			.Nearest = {.Nearest = .COMPARISON_MIN_MAG_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_POINT_MIP_LINEAR},
+			.Linear = {.Nearest = .COMPARISON_MIN_MAG_LINEAR_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_MIP_LINEAR},
+		}
+		sampler_desc.Filter = COMPARISON_FILTER[desc.filter][desc.mip_filter]
+		sampler_desc.ComparisonFunc = COMPARE[desc.compare]
 	}
 	dev.device->CreateSampler(&sampler_desc, sampler_handle(gpu.sampler_index(sampler)))
 	return sampler
@@ -622,6 +644,20 @@ view_format :: proc(format: gpu.Format) -> dxgi.FORMAT {
 		return .D32_FLOAT
 	case .D32_Float_S8_Uint:
 		return .D32_FLOAT_S8X24_UINT
+	case .BC1_Unorm:
+		return .BC1_UNORM
+	case .BC1_Unorm_Srgb:
+		return .BC1_UNORM_SRGB
+	case .BC4_Unorm:
+		return .BC4_UNORM
+	case .BC5_Unorm:
+		return .BC5_UNORM
+	case .BC6H_Ufloat:
+		return .BC6H_UF16
+	case .BC7_Unorm:
+		return .BC7_UNORM
+	case .BC7_Unorm_Srgb:
+		return .BC7_UNORM_SRGB
 	}
 	return .UNKNOWN
 }

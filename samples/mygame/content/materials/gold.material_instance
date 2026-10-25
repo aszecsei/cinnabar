@@ -1,0 +1,6 @@
+material_instance 1
+# The icosphere's: the engine's default material as polished gold.
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [1, 0.76, 0.34, 1]
+roughness = 0.28
+metallic = 1

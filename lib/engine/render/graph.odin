@@ -106,6 +106,8 @@ Texture_Node :: struct {
 	// The layout an imported texture has between frames.
 	resting:  gpu.Texture_Layout,
 	state:    State,
+	// The index of the last live pass that used it, once touched.
+	last:     int,
 	// Culling: a later live pass reads the contents.
 	needed:   bool,
 	used:     bool,
@@ -150,8 +152,10 @@ Pass_Node :: struct {
 	keep:           bool,
 	live:           bool,
 	piece_count:    int,
-	// Computed in order before the passes record. The first piece records them.
+	// Computed in order before the passes record. The first piece records barriers, and the last piece records after
+	// once the pass's work is recorded: the layout changes that a later pass on the compute queue cannot make.
 	barriers:       Barriers,
+	after:          [dynamic]gpu.Texture_Barrier,
 	cbs:            []gpu.Command_Buffer,
 	graph:          ^Graph,
 }
@@ -219,6 +223,28 @@ import_accel :: proc(g: ^Graph, accel: gpu.Accel_Struct) -> Accel {
 	return Accel(len(g.buffers))
 }
 
+// History is a history texture in one frame (see history_texture): current, which a pass writes this frame, and
+// previous, which holds what current held in the last frame. previous holds nothing when valid is false.
+History :: struct {
+	current:  Texture,
+	previous: Texture,
+	valid:    bool,
+}
+
+// history_texture adds a pair of textures that the graph's cache keeps between frames and swaps every frame, as
+// temporal passes need (see docs/gpu.md#render-graph). A pass writes current in shaders, and the pass after it may
+// read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
+// Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history, or when
+// desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
+// zero History when the cache has no room or the backend cannot create the textures.
+history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
+	current, previous, valid, ok := cache_history(g.cache, g.platform, desc)
+	if !ok {
+		return {}
+	}
+	return {current = import_texture(g, current, .Storage), previous = import_texture(g, previous, .Storage), valid = valid}
+}
+
 // create_texture adds a transient texture. Its contents are undefined until a pass writes them.
 // The graph adds the usages that the passes need to desc.usage.
 create_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> Texture {
@@ -265,7 +291,8 @@ color :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear:
 	p.color_count += 1
 }
 
-depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: f32 = 1, store := gpu.Store_Op.Store) {
+// depth declares the pass's depth attachment. The clear is 0, the far end of reversed depth (see view_projection).
+depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear: f32 = 0, store := gpu.Store_Op.Store) {
 	p := &g.passes[pass - 1]
 	assert(p.kind == .Render, "render: a depth attachment needs a render pass")
 	assert(p.depth_texture == 0, "render: a pass has one depth attachment")
@@ -458,7 +485,7 @@ add_to_submission :: proc(g: ^Graph, submissions: ^[dynamic]Submission, buffers:
 // compute_barriers walks the live passes in order and gives each pass the barriers before it.
 @(private = "file")
 compute_barriers :: proc(g: ^Graph) -> bool {
-	for &pass in g.passes {
+	for &pass, pass_index in g.passes {
 		if !pass.live {
 			continue
 		}
@@ -482,6 +509,18 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 				continue
 			}
 			node := &g.textures[use.index]
+			if node.touched && node.queue != pass.queue && pass.queue == .Compute && node.state.layout != use.state.layout && !compute_layout(node.state.layout) {
+				// The compute queue cannot leave this layout, as after a render pass, so the texture's last pass changes
+				// it after its work, and the wait for that queue orders the change.
+				last := &g.passes[node.last]
+				if last.after == nil {
+					last.after = make([dynamic]gpu.Texture_Barrier, g.allocator)
+				}
+				s := node.state
+				append(&last.after, gpu.Texture_Barrier{node.texture, s.sync, use.state.sync, s.access, use.state.access, s.layout, use.state.layout})
+				node.state = use.state
+			}
+			node.last = pass_index
 			cross_queue(&pass, &node.state, &node.queue, &node.touched)
 			if node.state.layout == .Undefined && use.state.layout == .Shader_Resource {
 				log.errorf("render: pass %q samples texture %q before a pass writes it", pass.name, node.desc.label)
@@ -501,6 +540,12 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 // record_piece records one piece of a pass. Only the first piece of a render pass loads or clears the attachments,
 // and only the last one stores them. Commands between suspended and resumed pieces are not allowed, so a split
 // render pass has its debug marker inside each piece.
+// compute_layout is whether a compute-queue barrier may change a texture from or to a layout.
+@(private = "file")
+compute_layout :: proc(layout: gpu.Texture_Layout) -> bool {
+	return layout == .Undefined || layout == .Shader_Resource || layout == .Unordered_Access
+}
+
 // cross_queue handles a use on another queue than the resource's last use this frame. The pass waits for that
 // queue's earlier work, and the fence makes the earlier accesses complete and visible, so only a layout change is
 // left for a barrier.
@@ -568,6 +613,9 @@ record_piece :: proc(data: rawptr) {
 	}
 	if !split_render {
 		gpu.cmd_end_marker(cb)
+	}
+	if i == last && len(pass.after) > 0 {
+		gpu.cmd_barriers(cb, nil, pass.after[:])
 	}
 }
 

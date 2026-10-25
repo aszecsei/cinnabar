@@ -585,3 +585,95 @@ copies_order_with_their_readers :: proc(t: ^testing.T) {
 		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
 	}
 }
+
+@(test)
+compute_queue_reads_change_layouts_on_the_other_queue :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// Ambient occlusion's shape: the compute queue reads the prepass's depth, which the world pass then tests against.
+	g := begin(&f.platform, &f.cache)
+	target := import_texture(&g, null.frame_target(), .Color)
+	scene_depth := create_texture(&g, {size = SIZE, format = .D32_Float, label = "depth"})
+	occlusion := create_texture(&g, {size = SIZE, format = .R16_Float, label = "occlusion"})
+	p := add_render_pass(&g, "prepass", nothing)
+	depth(&g, p, scene_depth, .Clear)
+	p = add_compute_pass(&g, "occlusion", nothing, queue = .Compute)
+	read(&g, p, scene_depth)
+	write(&g, p, occlusion)
+	p = add_render_pass(&g, "world", nothing)
+	depth(&g, p, scene_depth, .Load, store = .Discard)
+	read(&g, p, occlusion)
+	color(&g, p, target, .Clear)
+
+	subs, ok := record(&g)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(subs), 3)
+	if len(subs) != 3 {
+		return
+	}
+	// The prepass leaves the depth readable after its work, since the compute queue cannot leave the depth layout.
+	prepass := inspect(subs[0].buffers[:], f.platform.frame_allocator)
+	testing.expect_value(t, len(prepass.textures), 2)
+	if len(prepass.textures) == 2 {
+		after := prepass.textures[1]
+		testing.expect_value(t, after.layout_before, gpu.Texture_Layout.Depth_Stencil_Write)
+		testing.expect_value(t, after.layout_after, gpu.Texture_Layout.Shader_Resource)
+	}
+	testing.expect_value(t, subs[1].wait_for, gpu.Queues{.Graphics})
+	testing.expect_value(t, subs[2].wait_for, gpu.Queues{.Compute})
+	for s in subs {
+		testing.expect(t, null.submit(s.buffers[:], s.queue, s.wait_for))
+	}
+}
+
+@(test)
+history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	// One frame of a temporal pass: it reads last frame's history and writes this frame's, which the output reads.
+	frame :: proc(t: ^testing.T, f: ^Fixture, size: [2]u32) -> (current, previous: gpu.Texture, valid: bool) {
+		g := begin(&f.platform, &f.cache)
+		target := import_texture(&g, null.frame_target(), .Color)
+		h := history_texture(&g, {size = size, format = .RGBA16_Float, label = "taa"})
+		testing.expect(t, h.current != 0 && h.previous != 0)
+		p := add_compute_pass(&g, "temporal", nothing)
+		read(&g, p, h.previous)
+		write(&g, p, h.current)
+		p = add_render_pass(&g, "output", nothing)
+		read(&g, p, h.current)
+		color(&g, p, target, .Clear)
+		subs, ok := record(&g)
+		testing.expect(t, ok)
+		testing.expect(t, null.submit(all_buffers(subs)))
+		null.end_frame()
+		current, previous, valid = gpu_texture(&g, h.current), gpu_texture(&g, h.previous), h.valid
+		virtual.arena_free_all(&f.arena)
+		return
+	}
+	skip :: proc(f: ^Fixture) {
+		_ = begin(&f.platform, &f.cache)
+		virtual.arena_free_all(&f.arena)
+	}
+
+	a, b, valid := frame(t, &f, SIZE)
+	testing.expect(t, !valid, "the first frame has no history")
+	c, d, valid2 := frame(t, &f, SIZE)
+	testing.expect(t, valid2)
+	testing.expect_value(t, c, b)
+	testing.expect_value(t, d, a)
+	// A frame without the history leaves it stale.
+	skip(&f)
+	_, _, valid3 := frame(t, &f, SIZE)
+	testing.expect(t, !valid3, "a skipped frame clears the history")
+	_, _, valid4 := frame(t, &f, SIZE)
+	testing.expect(t, valid4)
+	// A new size makes the pair again.
+	_, _, valid5 := frame(t, &f, {32, 32})
+	testing.expect(t, !valid5, "a new size clears the history")
+}

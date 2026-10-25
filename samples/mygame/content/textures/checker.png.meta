@@ -1,0 +1,3 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).
+guid = 6ae47342be33cfa451b9f6643231fd24
+usage = color

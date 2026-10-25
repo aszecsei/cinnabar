@@ -33,7 +33,14 @@ Texture2D<float4> cn_texture(uint index) { return ResourceDescriptorHeap[index];
 // A texture of an unsigned integer format, such as R32_Uint.
 Texture2D<uint> cn_uint_texture(uint index) { return ResourceDescriptorHeap[index]; }
 RWTexture2D<float4> cn_rw_texture(uint index) { return ResourceDescriptorHeap[index]; }
+// A 3D texture, whose Texture_Desc has a depth.
+Texture3D<float4> cn_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
+RWTexture3D<float4> cn_rw_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
+// The stencil plane of a D32_Float_S8_Uint texture, from gpu.stencil_index. The stencil is in g.
+Texture2D<uint2> cn_stencil_texture(uint index) { return ResourceDescriptorHeap[index]; }
 SamplerState cn_sampler(uint index) { return SamplerDescriptorHeap[index]; }
+// A sampler whose Sampler_Desc has a compare op, for SampleCmp.
+SamplerComparisonState cn_comparison_sampler(uint index) { return SamplerDescriptorHeap[index]; }
 // A top-level acceleration structure, from gpu.read_index(accel).
 RaytracingAccelerationStructure cn_accel(uint index) { return ResourceDescriptorHeap[index]; }
 

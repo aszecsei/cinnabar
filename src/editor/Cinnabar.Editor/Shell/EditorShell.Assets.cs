@@ -33,6 +33,12 @@ public sealed partial class EditorShell
     /// <summary>The GUIDs of the content browser's selected assets.</summary>
     public IReadOnlyList<string> SelectedAssets { get; private set; } = [];
 
+    /// <summary>
+    /// Whether the selection holds a sub-asset. A sub-asset changes only with its file, so the file operations do not
+    /// take it (see docs/content-pipeline.md#asset-operations).
+    /// </summary>
+    public bool SelectionHasSubassets => SelectedAssets.Any(g => Assets.Find(g) is { } a && AssetIndex.IsSubasset(a));
+
     /// <summary>The cook daemon is linked, so the content can change.</summary>
     public bool CanChangeContent => Cook.State == CookState.Linked;
 
@@ -50,6 +56,9 @@ public sealed partial class EditorShell
 
     /// <summary>The cook daemon refused an operation, with its reason. The window shows it.</summary>
     public event Action<string>? OperationFailed;
+
+    /// <summary>Shows an asset in the content browser, selected in its folder.</summary>
+    public void RevealAsset(string guid) => ContentRevealed?.Invoke(new ContentItem(guid, null));
 
     /// <summary>The content browser's folder or selection changed.</summary>
     public void SelectContent(ContentFolder? folder, IReadOnlyList<string> assets)
@@ -90,6 +99,8 @@ public sealed partial class EditorShell
             AssetTemplate.Script => "new_script",
             AssetTemplate.Behaviour => "new_behaviour",
             AssetTemplate.Scene => "new_scene",
+            AssetTemplate.Material => "new_material",
+            AssetTemplate.MaterialFunction => "new_function",
             _ => "new_folder",
         };
         if (ContentFolder is not { } folder || Assets.FindRoot(folder.Root) is not { } root)
@@ -99,6 +110,8 @@ public sealed partial class EditorShell
         var extension = template switch
         {
             AssetTemplate.Scene => Assets.ExtensionOf(AssetKind.Scene),
+            AssetTemplate.Material => Assets.ExtensionOf(AssetKind.Material),
+            AssetTemplate.MaterialFunction => Assets.ExtensionOf(AssetKind.MaterialFunction),
             null => "",
             _ => Assets.ExtensionOf(AssetKind.Script),
         };

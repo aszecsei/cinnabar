@@ -391,6 +391,9 @@ public sealed partial class EditorShell
             case Link.Protocol.HostStats host:
                 Stats.Apply(host);
                 return;
+            case Link.Protocol.PreviewTarget target:
+                OnPreviewTarget(target);
+                return;
         }
         if (message is not EditProblems problems)
         {

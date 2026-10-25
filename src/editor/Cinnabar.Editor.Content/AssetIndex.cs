@@ -15,6 +15,8 @@ public sealed class AssetIndex
     readonly Dictionary<string, Asset> _assets = [];
     readonly HashSet<Folder> _folders = [];
     readonly Dictionary<string, Problem[]> _problems = [];
+    readonly List<NodeInfo> _nodes = [];
+    readonly List<ShadingModelInfo> _shadingModels = [];
 
     public IReadOnlyList<Root> Roots => _roots;
 
@@ -25,6 +27,12 @@ public sealed class AssetIndex
     public IReadOnlyDictionary<string, Asset> Assets => _assets;
 
     public IReadOnlyCollection<Folder> Folders => _folders;
+
+    /// <summary>The kinds of node of material graphs, which the daemon's cooker knows (see docs/content-pipeline.md#material-graphs).</summary>
+    public IReadOnlyList<NodeInfo> Nodes => _nodes;
+
+    /// <summary>The shading models that cook, by name.</summary>
+    public IReadOnlyList<ShadingModelInfo> ShadingModels => _shadingModels;
 
     /// <summary>The cook link is up, so the index is the daemon's latest.</summary>
     public bool Linked { get; private set; }
@@ -42,6 +50,12 @@ public sealed class AssetIndex
                 _roots.AddRange(welcome.Roots);
                 _importers.Clear();
                 _importers.AddRange(welcome.Importers);
+                _nodes.Clear();
+                _nodes.AddRange(welcome.Nodes);
+                break;
+            case ShadingModels models:
+                _shadingModels.Clear();
+                _shadingModels.AddRange(models.Models);
                 break;
             case AssetSnapshot snapshot:
                 _assets.Clear();
@@ -135,7 +149,17 @@ public sealed class AssetIndex
 
     /// <summary>The assets directly in a folder of a root, by name.</summary>
     public IEnumerable<Asset> AssetsIn(string root, string folder) =>
-        _assets.Values.Where(a => a.Root == root && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+        _assets.Values.Where(a => a.Root == root && a.Parent == "" && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content-pipeline.md#identity).</summary>
+    public IEnumerable<Asset> SubassetsOf(string guid) =>
+        _assets.Values.Where(a => a.Parent == guid).OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether an asset is a sub-asset, which changes only with its file.</summary>
+    public static bool IsSubasset(Asset asset) => asset.Parent != "";
+
+    /// <summary>What the content browser calls an asset: a file's name, or a sub-asset's name in its file.</summary>
+    public static string DisplayName(Asset asset) => IsSubasset(asset) ? asset.Subasset : Name(asset.Path);
 
     /// <summary>The assets that depend on an asset.</summary>
     public IEnumerable<Asset> Dependents(string guid) =>
@@ -163,7 +187,7 @@ public sealed class AssetIndex
         {
             return string.Equals(word["kind:".Length..], asset.Kind.ToString(), StringComparison.OrdinalIgnoreCase);
         }
-        return Name(asset.Path).Contains(word, StringComparison.OrdinalIgnoreCase)
+        return DisplayName(asset).Contains(word, StringComparison.OrdinalIgnoreCase)
             || asset.Behaviour.Contains(word, StringComparison.OrdinalIgnoreCase);
     }
 

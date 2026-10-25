@@ -8,6 +8,8 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 
 - A GUID is 128 random bits, written as 32 hex digits. Engine content (such as the script prelude) has fixed GUIDs in committed `.meta` files.
 - A `.meta` file has lines of `key = value`, and `#` comments. `guid` is required. The other keys are import settings. When the cooker finds an asset without a `.meta` file, it writes one. Commit it with the asset.
+- **Sub-assets:** one source file can make several assets, such as the meshes of a glTF file. Each sub-asset has its own GUID and its own blob, and loads like any other asset. Its GUID is in its file's `.meta` file, on a line `<kind>.<name> = <guid>`, such as `mesh.Door_Frame = 3f9c...`. The cooker writes the line when it first makes the sub-asset, and finds it again by kind and name, so a re-import keeps every reference. The file itself is the parent, and has a GUID of its own but no blob when it makes only sub-assets.
+- **A renamed sub-asset** (a mesh renamed in the modelling tool) gets a new GUID, with a warning that names the old one. The old line stays in the `.meta` file, as a warning, until the asset is re-imported, so a rename back in the modelling tool restores it.
 - Two assets with the same GUID, of any kinds, are a cook error, and neither cooks. This happens when an asset is copied with its `.meta` file. Delete the copy's `.meta` file to give it a new GUID.
 - Each game has one content root, `samples/<game>/content/`. Engine content is in `lib/engine/content/`. The cooker takes each root with a name, such as `--root game=samples/mygame/content`, and an asset's source path is the root's name and its path in the root, such as `game/scripts/hello.luau`.
 - At runtime, a loaded asset is a generational handle in the asset runtime's table. Persistent state holds handles or GUIDs, never pointers into blobs (see [Hot reload](hot-reload.md#rules)).
@@ -20,7 +22,10 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 - **The cache's generation:** after a cook writes blobs, it adds one to the counter in `<cache>/<config>/.generation` (see [Loading](#loading)).
 - **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs. Otherwise two cooks could both give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes. A dev batch cook that finds the lock held leaves the cache to the cook daemon, which keeps it up to date, so `just build` works while the editor is open. Any other cook stops with an error.
 - **Problems:** each error and warning names its file (the asset's source or `.meta` file, or another file such as the definition file), and its line and column when it has them. A batch cook logs each one as `cook: <file>:<line>:<column>: <text>`.
-- **Shaders** are HLSL. `tools/cook` compiles them with DXC to DXIL for D3D12. A Vulkan port adds SPIR-V from DXC, and a Metal port adds a metallib from `metal-shaderconverter`. All shaders use one fixed bindless root signature (see [GPU](gpu.md#binding-model)), and the cooker rejects a shader that does not fit it. The runtime never compiles or reflects shaders. The DXC version is part of the cache key. For now the cooker cooks only shaders, and writes each output next to its source with its cache key in `<output>.key` (see [GPU](gpu.md#shaders)).
+- **Kinds:** scripts, scenes, shaders, textures and meshes. Each kind has an importer: its extensions, its import settings and its cook (see the sections below).
+- **Slow kinds use every core.** A texture can take seconds, so block compression spreads each mip's rows of blocks over the CPU's threads. A 2048×2048 color texture with its mips cooks in about 1 s for development and 3 s for release. *Cooking several textures at once, and a pass that reports the assets that it has left so the editor can show progress, come when content grows.*
+- **Third-party code** for the importers is in `vendor/`, built with CMake into `build/` like Luau, and linked into `tools/cook` only: Compressonator's `CMP_Core` for block compression, and meshoptimizer for meshes. Odin's `vendor:stb/image` and `vendor:cgltf` read the source files. The runtime links none of them.
+- **Compressonator** is a submodule pinned to a release, but its repository is over 700 MB, so `vendor/compressonator` is a blobless clone that checks out only `cmp_core`, `license` and `applications/_libs/cmp_math`. `.gitmodules` marks it `update = none`, so `git submodule update` never checks out the rest, and `just install-compressonator` makes the sparse clone at the pinned commit. `just update-compressonator <tag>` moves the pin. `tools/cook/compressonator` builds `CMP_Core` with its own CMake project, and `cn_compress.cpp` gives the cooker a C API that compresses a whole mip, because `CMP_Core`'s API is C++ and compresses one block at a time.
 
 ### Scripts
 
@@ -45,15 +50,221 @@ Script import settings in `.meta`: `native = true` compiles the module to machin
 
 Scenes are `.scene` text files (see [Editor](editor.md#scenes)). `just scenes` runs `cook scenes --cache build/cache --config dev|release --root game=<content root>`. The cooker cannot lay out native components, because their types exist only in the game DLL, so it checks only the file: its syntax, and that the scene IDs and the script GUIDs that it names exist. A missing one is a warning. A scene with an error keeps its old blob. The cache key covers the cooker version, the configuration, the source path, the source and the `.meta` file.
 
+### Shaders
+
+Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shaders --cache build/cache --config dev|release --root game=<content root> --root engine=lib/engine/content --include lib/core/gpu/shaders`, and the daemon cooks them like any other kind.
+
+- **One asset per file.** The cooker compiles each of the file's `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points into one blob. A file with `[shader("...")]` attributes is a ray tracing library and has one library entry (see [GPU](gpu.md#shaders)).
+- **Includes are not assets.** `.hlsli` files have no GUID and no `.meta` file. The cooker resolves an include next to the including file first, then in each `--include` directory. The daemon also watches the `--include` directories.
+- **The fixed root signature** is attached to every stage, so DXC rejects a shader that does not fit it (see [GPU](gpu.md#binding-model)). The runtime never compiles or reflects shaders.
+- **Configurations:** development compiles with debug information embedded (`-Zi -Qembed_debug`), so PIX shows the source. Release strips it.
+- **Problems:** the cooker parses DXC's messages into problems with their file, line and column. A message in an include belongs to the include's file, and to no asset, as other files' problems do. A shader that fails keeps its old blob, so the running game keeps drawing with the last good version.
+- **The cache key** covers the cooker version, the DXC version, the configuration, the source path, the source, the `.meta` file, and the source of every file that it includes, directly or not.
+- **One process at a time:** Windows children inherit every inheritable handle, so a DXC started on one thread can hold the pipes of one that another thread started, which then waits forever. The cooker runs its child processes one at a time.
+- **Engine shaders** are in the engine's content root, `lib/engine/content/shaders/`, with committed `.meta` files and fixed GUIDs: the editor tools' overlay and pick shaders first, and the renderer's later.
+- A port adds SPIR-V from DXC or a metallib from `metal-shaderconverter` as more entries in the same blob.
+
+### Textures
+
+Textures are `.png`, `.jpg`, `.tga` and `.hdr` files, read with `vendor:stb/image`. `just textures` runs `cook textures --cache build/cache --config dev|release` with the roots. *`.exr` files, with `vendor:OpenEXRCore`, come later.*
+
+| Setting | Values | Default | Effect |
+|---|---|---|---|
+| `usage` | `color`, `normal`, `mask`, `hdr`, `data` | From the name, see below | Selects the format and the mip filter |
+| `mips` | `true`, `false` | `true` | Make the full mip chain |
+| `max_size` | `256` to `16384` | `16384` | Halve the texture until its larger side fits |
+| `wrap` | `repeat`, `clamp` | `repeat` | The edge mode of the mip filter. The sampler is the material's choice. |
+
+| Usage | Format | Mips |
+|---|---|---|
+| `color` | BC7, sRGB. Alpha is kept. | Filtered in linear light. *Keeping an alpha-tested texture's coverage in its mips comes later.* |
+| `normal` | BC5 (x and y; shaders compute z) | Filtered, then normalized again |
+| `mask` | BC4 (one channel: roughness, occlusion, height) | Filtered |
+| `hdr` | BC6H, unsigned | Filtered |
+| `data` | `RGBA8_Unorm`, not compressed | Filtered |
+
+- **The default usage** comes from the file when the cooker writes its `.meta` file: `.hdr` and `.exr` are `hdr`, a name ending in `_n` or `_normal` is `normal`, a name ending in `_r`, `_rough`, `_ao`, `_m`, `_metal` or `_mask` is `mask`, and everything else is `color`. The setting is then written in the `.meta` file, so a rename does not change it.
+- **Size:** a texture larger than `max_size` halves until it fits. Mip 0 of a block-compressed texture is whole 4×4 blocks on the GPU (see [GPU](gpu.md)), so a texture whose sides are not multiples of 4 is resized up to the next ones.
+- **Mips** use a Kaiser-windowed sinc filter, which widens with the scale when it shrinks, in floating point. Each mip filters from the one before it, and normal maps are normalized again after each step.
+- **BC6H** interpolates its endpoints' half-float bits, which are close to logarithmic, so a 4×4 block that holds both 0 and bright values has coarse steps between them.
+- **Quality:** development compresses at Compressonator's quality 0.05, and release at 0.5. The configuration is in the key, so release textures cook again in a release cook.
+- **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file.
+- *Cube maps and texture arrays come with environment lighting (see [Rendering](rendering.md)).*
+
+### Meshes
+
+Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a `Model` asset, which has no blob of its own: its meshes are `Mesh` sub-assets (see [Identity](#identity)), each with its GUID on a `mesh.<name>` line of the model's `.meta` file. `just models` runs `cook models --cache build/cache --config dev|release` with the roots.
+
+- **One mesh asset per glTF mesh**, named for the glTF mesh, in its own space with its own pivot. Node transforms are not baked in, so a mesh that many nodes use is one asset. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh, and each submesh has a material slot named for its glTF material.
+- **Unnamed meshes** are named for the first node that uses them, then `mesh_<index>`.
+- **Names** are keys in the `.meta` file, so an `=` in a name becomes `_`, and two meshes of one name get `_2` and on.
+- **`combine = true`** makes one mesh asset, named for the file without its extension, instead: the cooker walks the default scene's nodes and bakes their transforms into the vertices. This suits a file that is one prop exported in pieces. The default is `false`.
+- *Later, a model also makes a prefab of its node hierarchy that places its meshes, and its textures and materials become sub-assets too (texture assets and material instances). That is importing a glTF file as a scene, and it waits for prefabs.*
+- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding, so front faces are clockwise on screen, as `lib/core/gpu` takes them, and back faces cull. The mirror flips the tangent frame's handedness, so a tangent from the file has its bitangent sign flipped too.
+- **Missing attributes:** a primitive without normals gets its faces' normals, as glTF specifies. A primitive that is not triangles is left out, with a warning.
+- **Vertices** are two streams, so that depth and shadow passes read only positions:
+
+| Stream | Contents | Size |
+|---|---|---|
+| Positions | `f32` x, y, z | 12 bytes |
+| Attributes | The normal, octahedral in a `snorm16` pair; the tangent, octahedral in a `unorm16` pair whose second value's lowest bit is the bitangent's sign (set is -1); the first UV set in `f32`; then the second UV set in `f32` and the vertex color in `unorm8`, when the file has them | 16 to 28 bytes |
+
+- **Processing** with meshoptimizer: weld identical vertices, order each submesh's triangles for the vertex cache and the mesh's vertices for fetching, and build each submesh's meshlets of at most 64 vertices and 124 triangles, each with a bounding sphere and a normal cone for culling. Indices are 16-bit when the mesh has fewer than 65 536 vertices. The Khronos DamagedHelmet sample, 14 556 vertices and 15 452 triangles, cooks into 246 meshlets in a few milliseconds.
+- **Tangents** come from the file, or from `meshopt_generateTangents` in its MikkTSpace-compatible mode, which matches how normal maps are baked. A mesh with any primitive that has no tangents gets made tangents for all of them, so its frame is consistent.
+- **Bounds:** the mesh and each submesh have an axis-aligned box and a sphere.
+- **Not imported yet:** the node hierarchy (except with `combine`), the file's materials, textures, cameras, lights, skins and animations.
+- **Import settings:** `combine` (`true` or `false`, default `false`), `scale` (`0.001`, `0.01`, `0.0254`, `0.1`, `1`, `10` or `100`, default `1`: settings are checked against a list of values, so the scale is a choice of common units) and `tangents` (`file` or `generate`, default `file`). The settings apply to every mesh of the file.
+- **The cache key** is the model's: the cooker version, the meshoptimizer version, the source path, the source, the GUID and the import settings, and for a `.gltf` file the buffer files that it names. The `mesh.` lines are not in it, because the cooker writes them; a mesh's GUID is its blob's name instead, so a new GUID cooks it. A model is up to date when every one of its meshes has a blob with its key.
+- **All or nothing:** a model cooks every mesh into memory before it writes any blob, so a mesh that fails fails the model, and its meshes keep their old blobs together.
+- **New and renamed meshes:** the cooker gives a mesh that has no line a new GUID and writes it into the `.meta` file, which makes one more pass. A line whose mesh is gone is a warning and stays, so a mesh renamed back gets its GUID again. A re-import drops those lines.
+- **meshoptimizer** is the submodule `vendor/meshoptimizer`, pinned to a release, and `just meshoptimizer` builds it with its own CMake project. Its API is C, so the cooker binds it directly (`tools/cook/meshoptimizer.odin`). `just update-meshoptimizer <tag>` moves the pin.
+
+### Materials
+
+Shading models, materials, material instances and material functions are text files (see [Rendering](rendering.md#materials)). `just materials` runs `cook materials` with the shader tools and the roots; the daemon cooks them like any other kind. The four kinds cook together, because each depends on the others.
+
+A **shading model** is a `.shading` file, whose name is the file's, and an `.hlsli` beside it:
+
+```
+shading 1
+# Lit: metallic and roughness.
+input base_color float3 = [0.8, 0.8, 0.8]
+input roughness float = 0.5
+input normal float3 = [0, 0, 1]
+flag no_lighting
+```
+
+Inputs are `float` to `float4`, each with its default. A shading model has no blob; it is checked at each pass, and a material whose shading model has errors does not cook. Two shading models of one name, in any roots, are an error.
+
+A **material** is a `.material` file: settings and declarations, then its evaluate, as a graph of nodes (see [Material graphs](#material-graphs)) or in HLSL after a `---` line. The engine's built-in materials are HLSL:
+
+```
+material 1
+shading = lit
+blend = masked
+cutoff = 0.5
+two_sided = false
+cast_shadows = true
+param tint color = [1, 1, 1, 1]
+param roughness float = 0.5
+param albedo texture = white
+switch use_albedo = true
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = params.tint.rgb;
+#if use_albedo
+	s.base_color *= cn_sample(params.albedo, inputs.uv0).rgb;
+#endif
+	return s;
+}
+```
+
+- **Parameters** are `float` to `float4`, `color` (a `float4` that the editor shows as a color) and `texture`: a texture asset's GUID after `$`, or `white`, `black` or `normal` for none. A texture parameter that names an asset of another kind is an error. An indented `group = "<name>"` line after a parameter gives the group that the editor shows it in.
+- **Static switches** are `true` or `false`, at most 16. Parameters and switches share one set of names, which are HLSL identifiers.
+- **Variants:** the cooker generates a source for each combination of switches that the material or an instance uses, and compiles the entry points of each pass from it: `vs_forward` and `ps_forward`, `vs_prepass` and `ps_prepass`, and `vs_depth`, with `ps_depth` for a masked material. The forward pass compiles first; if it fails, the variant's other passes are not compiled, because they would fail the same way. The source defines the settings and the switches, has the shading model's `Surface`, includes its `.hlsli`, declares `Params` and `static Params params`, then the material's evaluate, then the engine's templates of every pass, `material_passes.hlsli`. HLSL after `---` follows a `#line` that names the material's file, and a graph's code has a `#line` before each node's, so DXC's messages name the material's own lines. The shader tools' `--include` gives the templates' directory, `lib/engine/content/shaders`.
+- **Hash-named sources:** a generated source is `<cache>/<config>/generated/<hash>.hlsl`, where the hash covers the source, every file that it includes, DXC and the configuration, and each entry's bytecode is beside it as `<hash>.hlsl.<pass>.<stage>.dxil`. Identical sources, as of two combinations of switches that a graph does not tell apart, compile once in a pass, and a later pass or preview of the same source reads the bytecode instead of compiling. A parameter's value is not in the source, so changing one cooks the blob again without DXC. The cooker never deletes old sources.
+- **The parameter block** packs the parameters in order, at 4 bytes, as a raw buffer's `Load<Params>` reads them, in a block of whole 16 bytes. A texture's place holds its bindless index, which the runtime writes.
+- **The cache key** covers the cooker version, DXC, the configuration, the path, the `.meta` file, the source file, every variant's generated source (which holds the declarations, the HLSL or the graph's code, and the material functions that the graph calls), and every file that they include.
+- **Dependencies:** its shading model, its textures, and the material functions that its graph calls.
+- **Reads time:** a material whose evaluate reads `frame.time`, as a graph's Time node does, has the blob flag `Reads_Time`, so the editor's previews draw it every frame.
+- **Permutations:** the index gives each material the number of combinations of switches that it and its instances use, which the material editor shows.
+
+A **material instance** is a `.material_instance` file:
+
+```
+material_instance 1
+parent = $00112233445566778899aabbccddeeff
+roughness = 0.9
+albedo = $11112222333344445555666677778888
+use_albedo = false
+```
+
+- Its parent is a material or another instance. It overrides parameters and switches by name, with the parameter's syntax; a name that its material does not have is an error, and so is a loop of parents.
+- Its blob holds its material (through every instance between), its switches, and its parameter block with every value resolved, so the runtime never walks the chain.
+- Its switches add a variant to its material, which cooks again. Its key covers the sources of it and every parent.
+
+### Material graphs
+
+A material without a `---` line defines its evaluate with nodes, after its settings and declarations. The editor's material editor writes them (see [Editor](editor.md#material-editor)), and `tools/cook/graphs.odin` reads them and generates HLSL:
+
+```
+material 1
+shading = lit
+param tint color = [1, 0.5, 0.25, 1]
+	group = "Surface"
+param albedo texture = $6ae47342be33cfa451b9f6643231fd24
+switch shiny = false
+
+node 1 output
+	position = [400, 0]
+	base_color = @3.out
+	roughness = @5.out
+	metallic = 0.25
+node 2 parameter
+	position = [-200, -100]
+	name = "tint"
+node 3 multiply
+	position = [100, 0]
+	a = @2.value
+	b = @4.rgb
+node 4 texture_sample
+	position = [-200, 50]
+	texture = @6.value
+node 5 switch
+	position = [100, 200]
+	switch = "shiny"
+	on = 0.1
+	off = 0.6
+node 6 parameter
+	position = [-400, 50]
+	name = "albedo"
+```
+
+- **A node** is `node <id> <kind>`, with an ID above 0 that no other node of the graph has, then its indented fields: its `position` in the editor's canvas, its inputs and its properties. A field that the file leaves out has its default.
+- **Values:** an input is a link, `@<node>.<output>`, or numbers: one, which fills every component, or an array of up to four. A property is numbers, a quoted string with `\"`, `\\`, `\n` and `\t`, a bare word for a choice, or an asset's GUID after `$`.
+- **Types:** inputs and outputs are `float` to `float4` or a texture. An `Any` input takes the widest of its node's `Any` inputs, and so does an `Any` output. A value of another width converts as it flows: a scalar fills every component, a wider value keeps its first components, and a narrower one gets zeros. A texture links only to a texture input, and a texture input must be linked: to a texture parameter, or in a function, to a texture input of the function.
+- **The output node:** a material's graph has one `output` node, whose inputs are its shading model's surface inputs. One without a link or a value keeps the shading model's default.
+- **Kinds of node:** the cooker's table in `graphs.odin` is the only list of them, and the cook link sends it to the editor (`Node_Info`). They are inputs (a parameter, constants and colors, UV sets, the vertex color, the world position relative to the render origin, the position in the mesh's own space, the normal, the tangent, the direction to the camera, the time, the face's side), texture samples and normal maps, math (add to divide, min, max, power, step, lerp, clamp, smoothstep, saturate, one minus, negate, abs, square root, floor, ceil, frac, sin, cos, normalize), vectors (dot, cross, length, distance, split, combine, Fresnel), a static switch, custom HLSL, and material functions with their inputs and outputs.
+- **Static switches:** a switch node takes its `on` or its `off` input by one of the material's switches. Each variant generates its source with its switches decided, so it keeps only the branch that it uses, and a graph that does not read a switch generates the same source for both of its values, which compiles once.
+- **Custom HLSL:** a custom node's `code` is an expression of its four `float4` inputs `a` to `d` and of `inputs`, the `Material_Inputs`, or a function's body that returns the value, of the width of its `type`. It becomes a function of its own before evaluate, after a `#line` that names its line of the file.
+- **Generated code:** evaluate gets a local for each output of each node that the output node reaches, in the order that they need each other, named `n<id>_<output>`. A node that its inputs reach again is a loop, which is an error with its line.
+- **Errors** name the material's file and the line of the node, or of its field.
+
+A **material function** is a `.material_function` file: only nodes, which materials call with a `function` node. It has no blob, and is checked at each pass, like a shading model.
+
+```
+material_function 1
+node 1 function_input
+	position = [0, 0]
+	name = "power"
+	type = float
+	default = [3, 0, 0, 0]
+node 2 fresnel
+	position = [200, 0]
+	exponent = @1.value
+node 3 function_output
+	position = [400, 0]
+	name = "rim"
+	type = float3
+	value = @2.out
+```
+
+- Its `function_input` nodes are its inputs, by their names, types and defaults, and its `function_output` nodes its outputs. A call whose input has no link or value gives the input's default.
+- It has no parameters, switches or output node. A function that calls itself through its nodes is an error.
+- Each material that calls it gets it as a function of its own, `mf<n>`, before evaluate. The material's generated source holds it, so a change to the function cooks the materials that call it again.
+
 ## Cook daemon
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
 
-`cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...`
+`cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir>...`
+
+Without `--dxc`, every shader fails with a problem that says so.
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
-- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms. Shaders are not assets yet, so the daemon does not cook them.
-- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names) and problems, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms.
+- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names), problems, and for a sub-asset its parent, and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
 - **Removed assets:** when an asset leaves the index, the daemon deletes its blob, so a game that starts later does not load it. A running game keeps the modules that it has loaded. An asset that only shares its GUID with a copy keeps its blob.
 - **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
@@ -67,9 +278,11 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 - **All or nothing:** an operation checks everything first: the root, the folder, each name, and that no file is in the way. It then fails without changing anything, or does all of it. A move that fails halfway moves back what it moved.
 - **Names** are what Windows takes and the scan does not skip: no `<>:"/\|?*`, no name that starts with a dot or ends with a dot or a space, and no device name such as `CON`. An asset's name is without its extension, which the daemon adds.
 - **Then a pass:** after the operations that the editor sent, the daemon makes a pass, sends what changed, and then answers each operation. The editor's index therefore has the change when the answer comes. The watcher's events for the operation make one more pass, which finds nothing to cook.
-- **Create** makes an asset from a template, with a new `.meta` file: a script that returns a table, a behaviour whose class is named for its file (`door_bell.luau` defines `Door_Bell`), or an empty scene. A folder's parent must exist.
+- **Create** makes an asset from a template, with a new `.meta` file: a script that returns a table, a behaviour whose class is named for its file (`door_bell.luau` defines `Door_Bell`), an empty scene, a lit material graph with only its output node, or a material function whose one input is linked to its one output. A folder's parent must exist.
+- **Saving a material** is the editor's, as saving a scene is: the material editor writes the graph's text.
+- **Sub-assets** move, rename, duplicate, delete and re-import only with their file, because their GUIDs are in its `.meta` file. The operations take files, never sub-assets: an operation given a sub-asset's GUID fails with a reason that names its file, and the editor disables the file operations while the selection holds a sub-asset. Changing a model's import settings keeps its `mesh.` lines.
 - **Move and rename** move the `.meta` file, then the source. They never replace a file, and a rename that changes only the case works. A file moves to another drive too. Folders have no `.meta` files and no GUIDs. A folder renames with everything in it, on its drive.
-- **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings.
+- **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings. Its sub-assets get new GUIDs at the next pass, as a new file's do.
 - **Delete** sends sources with their `.meta` files, and folders with everything in them, to the Recycle Bin. A root cannot be deleted. The editor finds the assets that use what a delete takes in its index, and shows them in the confirmation.
 - **Import settings:** the daemon checks new settings with the asset's importer, writes the `.meta` file through a temporary file, and cooks the asset again, because the settings are part of its key. The `.meta` file keeps its comments. A setting that the importer does not know stays as the file has it, but the editor cannot add one. **Re-import** cooks assets again with the same settings, also when their keys say that they are up to date.
 - **Saving a scene** is the editor's. Save As writes the scene's text where the user picks, and a new scene in a root gets its `.meta` file at the daemon's next pass, as any new file does.
@@ -84,16 +297,18 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 
 - **One transport:** `lib/engine/wire` has the framing, the wire format and the schema writer, for any union of messages. `lib/engine/editor/link` and `lib/engine/asset/cook_link` each give a union of messages. Neither imports anything from core or engine.
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
-- **Handshake:** `Hello`, then `Welcome` with the roots, the configuration and the importers, each with its extension and import settings, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
-- **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed. It sends `Cook_Finished` after every pass.
-- **An entry has everything that the editor shows,** the import settings and the behaviour class included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
+- **Handshake:** `Hello`, then `Welcome` with the roots, the configuration, the importers, each with its extension and import settings, and the kinds of node of material graphs, then the whole index as an `Asset_Snapshot`, an `Asset_Problems` for each asset that has problems, and the `Shading_Models` with their surface inputs. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
+- **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed, and `Shading_Models` when a shading model changed. It sends `Cook_Finished` after every pass.
+- **An entry has everything that the editor shows,** the import settings, the behaviour class, a sub-asset's parent and name, and a material's permutations included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
+- **Previews:** `Cook_Preview` gives the text of a material that the editor has not saved. The daemon scans the roots, cooks the text as the material with that GUID, for its default switches only, into the preview area of the cache, `<cache>/dev/preview/<guid>.blob`, and answers with a `Preview_Result` of the same request ID: the first error, or `""`, and the problems with the lines of the text. A preview cooks between passes, writes no generation and changes no index; its problems go in the answer and not to the log. The daemon deletes the preview area when it starts (see [Rendering](rendering.md#material-previews)).
 - **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
 
 | Group | Messages |
 |---|---|
 | Session | `Hello`, `Welcome`, `Refused`, `Log` |
-| Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the changed and removed assets and the folders that came and went |
+| Index | `Asset_Snapshot` with every asset and folder, then `Asset_Delta` with the changed and removed assets and the folders that came and went, and `Shading_Models` |
 | Cooking | `Asset_Problems` with each problem's file, line, column and text, and `Cook_Finished` with the generation, the counts and the time |
+| Previews | `Cook_Preview`, a request answered with a `Preview_Result` of the same request ID |
 | Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made |
 
 ### Implementation phases
@@ -101,7 +316,8 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](editor.md#implementation-phases)).
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
-4. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
+4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](rendering.md#implementation-phases), phase 0).
+5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Blob format
 
@@ -121,6 +337,16 @@ A script blob holds:
 
 A scene blob holds a table of entities: the scene ID, the parent's scene ID, the name, the active flag, and slices of component and behaviour records. A component record has the stable ID and the name. A behaviour record has the script's GUID. Each has a slice of field records: the hash of the field's name, the name for messages, and the tagged value. The loader in `lib/engine/scene` matches the hashes to the fields of the registered types.
 
+A shader blob holds a table of entries. Each entry has a stage (`Vertex`, `Pixel`, `Compute`, `Amplification`, `Mesh` or `Library`), a target (`DXIL` first) and a slice of bytecode. It ends with the source path.
+
+A texture blob holds the format, the size, the mip count, the usage, and the whole mip chain: each mip tightly packed, mip 0 first. That is the layout that `gpu_stream_texture` takes (see [GPU](gpu.md#streaming)), so the blob's data streams without a copy.
+
+A material blob holds its flags (two-sided, casts shadows, no lighting, reads time), its blend and cutoff, its parameters (name, type and offset), its switches' names and defaults, its default parameter block and its textures (each one's offset, its asset or its default), and its variants: each has a switch mask, a pass (`Forward`, `Prepass` or `Depth`) and a stage, and its bytecode. A material instance blob holds its material's GUID, its switches, and its resolved block and textures.
+
+A mesh blob holds its flags (a second UV set, a vertex color, 32-bit indices), the vertex and index counts, the bounds, a table of submeshes (the material slot's name, the index range, the meshlet range and the bounds), then the position stream, the attribute stream, the indices, and the meshlets: their vertex lists, their triangles packed as three bytes each, and their spheres and cones, with the cone in `snorm8`. It ends with the mesh's name and the model's path. Each stream starts at 16 bytes, so each streams straight into a buffer. A model has no blob.
+
+The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
+
 ## Loading
 
 - **Two sources, one format:** the asset runtime (`lib/engine/asset`) reads through `asset.Source`, a union with two backends, so it holds no procedure pointers. `Loose_Cache` is used in development and `Bundle` is used in release. Both read the same blob format. *Until bundles exist, release builds read the release loose cache.*
@@ -128,4 +354,5 @@ A scene blob holds a table of entities: the scene ID, the parent's scene ID, the
 - **Handles:** `asset.load` returns a generational handle, and the same handle for an asset that is already loaded. A handle to an unloaded asset is detected. The asset table lives in `Game_State`, so a code reload keeps every loaded asset. A soft restart loads them again.
 - **Bundles** (`*.cbb`) contain a header, a table of contents sorted by GUID, and aligned blobs. A bundle is a load unit (global, per-level, or a streaming chunk), and it lists the bundles it depends on.
 - **Asset hot reload:** in development, after a cook writes blobs, it writes a counter to `build/cache/<config>/.generation`, through a temporary file and a rename. The cook daemon and the batch commands both do this. The game calls `asset.poll` at the end of each frame, and `poll` checks the counter's modification time. When the counter changes, `poll` checks the modification time of each loaded blob, and swaps every new blob behind its generational handle in that frame. A script and the modules that it requires therefore change together. The game learns of new blobs only through the cache, so it needs no connection to the daemon, and hot reload works with or without the editor. The game passes `poll`'s result to `script.reload_changed`, which reloads the scripts among the swapped blobs (see [Scripting](scripting.md#script-hot-reload)).
+- **GPU data:** the asset runtime keeps blobs on the CPU and knows nothing about the GPU. The renderer keeps a residency table (see [Rendering](rendering.md#gpu-residency)), which creates and streams the GPU resources of texture and mesh assets.
 - **Scripts load on demand.** A script blob stays loaded while its module is loaded. The VM holds the module's result, not the blob, so the blob can be swapped under it.

@@ -6,15 +6,15 @@ namespace Cinnabar.Editor.Tests;
 public class AssetIndexTests
 {
     static Asset Script(string guid, string path, string behaviour = "", AssetStatus status = AssetStatus.Current, params string[] dependencies) =>
-        new(guid, AssetKind.Script, "game", path, status, 0, 0, behaviour, [], dependencies);
+        new(guid, AssetKind.Script, "game", path, status, 0, 0, behaviour, [], dependencies, "", "", 0);
 
     static Asset Scene(string guid, string path, params string[] dependencies) =>
-        new(guid, AssetKind.Scene, "game", path, AssetStatus.Current, 0, 0, "", [], dependencies);
+        new(guid, AssetKind.Scene, "game", path, AssetStatus.Current, 0, 0, "", [], dependencies, "", "", 0);
 
     static AssetIndex Index(Asset[] assets, params string[] folders)
     {
         var index = new AssetIndex();
-        index.Apply(new Welcome(1, "dev", [new Root("game", "E:/game/content")], []));
+        index.Apply(new Welcome(1, "dev", [new Root("game", "E:/game/content")], [], []));
         index.Apply(new AssetSnapshot(assets, [.. folders.Select(f => new Folder("game", f))]));
         return index;
     }
@@ -33,6 +33,28 @@ public class AssetIndexTests
         Assert.Equal(["01"], index.AssetsIn("game", "scripts").Select(a => a.Guid));
         Assert.Equal(Path.GetFullPath("E:/game/content/scripts/door.luau"), index.FullPath(index.Find("01")!));
         Assert.Equal("01", index.FindByPath("E:\\game\\content\\scripts\\door.luau")?.Guid);
+    }
+
+    static Asset Model(string guid, string path) =>
+        new(guid, AssetKind.Model, "game", path, AssetStatus.Current, 0, 0, "", [], [], "", "", 0);
+
+    static Asset Mesh(string guid, Asset model, string name) =>
+        new(guid, AssetKind.Mesh, model.Root, model.Path, model.Status, 0, 0, "", [], [], model.Guid, name, 0);
+
+    [Fact]
+    public void SubassetsListUnderTheirFile()
+    {
+        var kit = Model("10", "props/kit.glb");
+        var index = Index([kit, Mesh("11", kit, "Wall"), Mesh("12", kit, "Door Frame"), Script("01", "props/door.luau")], "props");
+
+        // The folder lists files only, and each file its sub-assets, by name.
+        Assert.Equal(["01", "10"], index.AssetsIn("game", "props").Select(a => a.Guid));
+        Assert.Equal(["12", "11"], index.SubassetsOf("10").Select(a => a.Guid));
+        Assert.Equal("Door Frame", AssetIndex.DisplayName(index.Find("12")!));
+        Assert.Equal("kit.glb", AssetIndex.DisplayName(kit));
+        Assert.True(AssetIndex.IsSubasset(index.Find("11")!));
+        // Search finds a sub-asset by its own name.
+        Assert.Equal(["12"], index.Search("frame").Select(a => a.Guid));
     }
 
     [Fact]

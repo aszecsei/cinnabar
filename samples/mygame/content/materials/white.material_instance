@@ -1,0 +1,5 @@
+material_instance 1
+# The Cornell box's white walls, floor, ceiling and boxes.
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [0.73, 0.73, 0.73, 1]
+roughness = 0.8

@@ -28,6 +28,9 @@ Message :: union {
 	Set_Import_Settings,
 	Reimport,
 	Operation_Result,
+	Shading_Models,
+	Cook_Preview,
+	Preview_Result,
 }
 
 // Editor to daemon, first: the editor's protocol version and its name.
@@ -36,13 +39,17 @@ Hello :: struct {
 	editor:   string,
 }
 
-// Daemon to editor, the answer to a Hello with the same protocol version. An Asset_Snapshot follows it.
+// Daemon to editor, the answer to a Hello with the same protocol version. An Asset_Snapshot and the Shading_Models
+// follow it.
 Welcome :: struct {
 	protocol:  u64,
 	// The configuration that the daemon cooks, "dev".
 	config:    string,
 	roots:     []Root,
 	importers: []Importer,
+	// The kinds of node that material graphs have, which the editor's node editor shows (see
+	// docs/content-pipeline.md#material-graphs).
+	nodes:     []Node_Info,
 }
 
 // A content root, by its name, such as "game", and its directory: absolute, with forward slashes.
@@ -95,6 +102,14 @@ Log :: struct {
 Asset_Kind :: enum u8 {
 	Script,
 	Scene,
+	Shader,
+	Texture,
+	Model,
+	Mesh,
+	Shading_Model,
+	Material,
+	Material_Instance,
+	Material_Function,
 }
 
 Asset_Status :: enum u8 {
@@ -121,6 +136,13 @@ Asset :: struct {
 	settings:     []Setting,
 	// The GUIDs of the assets that it depends on: a script's requires, and the scripts that a scene names.
 	dependencies: []string,
+	// For a sub-asset, such as a mesh of a glTF file, the GUID of the file that makes it and its name in the file. Its
+	// root and path are the file's. "" for a file.
+	parent:       string,
+	subasset:     string,
+	// For a material, the combinations of static switches that it and its instances use, which each compile its
+	// shaders. 0 for other kinds.
+	permutations: u32,
 }
 
 Setting :: struct {
@@ -166,12 +188,17 @@ Problem :: struct {
 	text:   string,
 }
 
+Cooked_Count :: struct {
+	kind:  Asset_Kind,
+	count: u32,
+}
+
 // Daemon to editor: a cook is done.
 Cook_Finished :: struct {
 	// The cache's generation after the cook.
 	generation:   u64,
-	scripts:      u32,
-	scenes:       u32,
+	// The assets that the cook wrote, for each kind that it wrote any of.
+	cooked:       []Cooked_Count,
 	failed:       u32,
 	milliseconds: f32,
 }
@@ -189,6 +216,10 @@ Asset_Template :: enum u8 {
 	Behaviour,
 	// An empty scene.
 	Scene,
+	// A material graph with a Lit output and nothing linked to it.
+	Material,
+	// A material function with one input and one output, linked.
+	Material_Function,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.
@@ -256,6 +287,118 @@ Operation_Result :: struct {
 	error: string,
 	// The GUIDs of the assets that it made, if any.
 	guids: []string,
+}
+
+// Material graphs (see docs/content-pipeline.md#material-graphs). The daemon gives the editor the kinds of node and
+// the shading models, whose surface inputs are the inputs of a graph's output node, and cooks the graphs that the
+// editor has not saved, for its previews.
+
+// The type of a node's input or output. Any takes the widest of the node's Any inputs, and a scalar fits any width.
+Pin_Type :: enum u8 {
+	Float,
+	Float2,
+	Float3,
+	Float4,
+	Any,
+	// A texture parameter's bindless index, which only texture inputs take.
+	Texture,
+}
+
+// An input or an output of a kind of node. An input that is not linked and has no value of its own takes default, or
+// with a default_label, a value that the shaders give, such as the mesh's first UV set.
+Node_Pin :: struct {
+	name:          string,
+	type:          Pin_Type,
+	default:       [4]f32,
+	default_label: string,
+}
+
+Property_Kind :: enum u8 {
+	Number,
+	Vector2,
+	Vector3,
+	Vector4,
+	Color,
+	// A quoted string.
+	Text,
+	// HLSL, a quoted string.
+	Code,
+	// One of choices, as a bare word.
+	Choice,
+	// The name of one of the material's parameters, quoted.
+	Parameter,
+	// The name of one of the material's static switches, quoted.
+	Switch,
+	// A material function's GUID after $.
+	Function,
+}
+
+// A setting of a node that is not an input, such as the parameter that a parameter node reads. default is as a
+// .material file writes it.
+Node_Property :: struct {
+	name:    string,
+	kind:    Property_Kind,
+	choices: []string,
+	default: string,
+}
+
+// Where a kind of node's inputs and outputs come from, besides its lists.
+Node_Pins_From :: enum u8 {
+	// Its lists only.
+	Kind,
+	// The inputs of the material's shading model: the output node.
+	Shading_Model,
+	// The inputs and outputs of the material function that it calls.
+	Function,
+}
+
+// Which graphs a kind of node is in.
+Node_Scope :: enum u8 {
+	Both,
+	Material,
+	Function,
+}
+
+// A kind of node of material graphs, by its name in a .material file, such as "multiply".
+Node_Info :: struct {
+	kind:        string,
+	label:       string,
+	category:    string,
+	description: string,
+	inputs:      []Node_Pin,
+	outputs:     []Node_Pin,
+	properties:  []Node_Property,
+	pins_from:   Node_Pins_From,
+	scope:       Node_Scope,
+}
+
+// A shading model, by its name, such as "lit", and the surface inputs that its .shading file declares.
+Shading_Model_Info :: struct {
+	name:        string,
+	guid:        string,
+	inputs:      []Node_Pin,
+	no_lighting: bool,
+}
+
+// Daemon to editor: every shading model that cooks. It follows the Asset_Snapshot, and comes again after a pass that
+// changed any.
+Shading_Models :: struct {
+	models: []Shading_Model_Info,
+}
+
+// Editor to daemon: the text of a material that the editor has not saved, as a request. The daemon cooks it as the
+// material with this GUID, into the preview area of the cache, <cache>/dev/preview/<guid>.blob, which the host's
+// previews load. The material's own blob does not change. A Preview_Result with the request's ID answers it.
+Cook_Preview :: struct {
+	guid: string,
+	text: string,
+}
+
+// Daemon to editor: the answer to a Cook_Preview. error is "" when the preview cooked, and problems are its errors and
+// warnings, with the lines of the text that it was given.
+Preview_Result :: struct {
+	error:    string,
+	problems: []Problem,
 }
 
 Header :: wire.Header

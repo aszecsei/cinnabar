@@ -18,6 +18,8 @@ Index :: struct {
 	folders:  []cook_link.Folder,
 	// By GUID, with "" for the problems that belong to no asset. An asset without problems has no entry.
 	problems: map[string][]cook_link.Problem,
+	// The shading models that cook, by name.
+	shading:  cook_link.Shading_Models,
 }
 
 // index_build makes an index from a pass, in memory of its own.
@@ -52,11 +54,12 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		root := roots[a.root]
 		entry := cook_link.Asset {
 			guid      = guids[i],
-			kind      = a.kind == .Scene ? .Scene : .Script,
+			kind      = link_kind(a.kind),
 			root      = clone(root.name, allocator),
 			path      = clone(a.name[len(root.name) + 1:], allocator),
 			status    = a.failed ? .Failed : .Current,
 			behaviour = clone(a.behaviour, allocator),
+			permutations = u32(a.permutations),
 		}
 		for p in index.problems[guids[i]] {
 			if p.error {
@@ -77,12 +80,40 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		}
 		entry.dependencies = dependencies
 		index.assets[entry.guid] = entry
+		// A sub-asset shares its file's root, path and status. Its problems are the file's.
+		for s in a.subassets {
+			buffer: [32]u8
+			sub := cook_link.Asset {
+				guid     = clone(format.guid_format(s.guid, &buffer), allocator),
+				kind     = link_kind(s.kind),
+				root     = entry.root,
+				path     = entry.path,
+				status   = entry.status,
+				parent   = entry.guid,
+				subasset = clone(s.name, allocator),
+			}
+			index.assets[sub.guid] = sub
+		}
 	}
 	folders := make([]cook_link.Folder, len(pass.folders), allocator)
 	for f, i in pass.folders {
 		folders[i] = {clone(roots[f.root].name, allocator), clone(f.path, allocator)}
 	}
 	index.folders = folders
+	models := make([dynamic]cook_link.Shading_Model_Info, allocator)
+	for decl in pass.shadings {
+		if !decl.ok {
+			continue
+		}
+		inputs := make([]cook_link.Node_Pin, len(decl.inputs), allocator)
+		for input, i in decl.inputs {
+			d := input.default
+			inputs[i] = {name = clone(input.name, allocator), type = cook_link.Pin_Type(input.count - 1), default = {f32(d.x), f32(d.y), f32(d.z), f32(d.w)}}
+		}
+		append(&models, cook_link.Shading_Model_Info{name = clone(decl.name, allocator), guid = guids[decl.asset], inputs = inputs, no_lighting = decl.no_lighting})
+	}
+	slice.sort_by(models[:], proc(a, b: cook_link.Shading_Model_Info) -> bool {return a.name < b.name})
+	index.shading = {models[:]}
 }
 
 index_destroy :: proc(index: ^Index) {
@@ -95,6 +126,7 @@ Index_Changes :: struct {
 	delta:    cook_link.Asset_Delta,
 	// The assets whose problems changed, each with its new list, which is empty when they are gone.
 	problems: []cook_link.Asset_Problems,
+	shading:  bool,
 }
 
 index_changed :: proc(c: Index_Changes) -> bool {
@@ -137,7 +169,21 @@ index_diff :: proc(old, new: ^Index) -> (changes: Index_Changes) {
 	}
 	slice.sort_by(problems[:], proc(a, b: cook_link.Asset_Problems) -> bool {return a.guid < b.guid})
 	changes.problems = problems[:]
+	changes.shading = !shading_equal(old.shading.models, new.shading.models)
 	return
+}
+
+@(private = "file")
+shading_equal :: proc(a, b: []cook_link.Shading_Model_Info) -> bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for m, i in a {
+		if m.name != b[i].name || m.guid != b[i].guid || m.no_lighting != b[i].no_lighting || !slice.equal(m.inputs, b[i].inputs) {
+			return false
+		}
+	}
+	return true
 }
 
 // index_snapshot is the whole index, for an editor that has just linked.
@@ -168,7 +214,7 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour {
+	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations {
 		return false
 	}
 	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies)

@@ -33,7 +33,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		},
 		Asset_Delta{changed = {{guid = "01", kind = .Scene}}, removed = {"02"}, added_folders = {{"game", "a"}}, removed_folders = {{"game", "b"}}},
 		Asset_Problems{guid = "01", problems = {{file = "E:/x.luau", line = 3, column = 4, error = true, text = "oops"}}},
-		Cook_Finished{generation = 7, scripts = 2, scenes = 1, failed = 1, milliseconds = 9.5},
+		Cook_Finished{generation = 7, cooked = {{.Script, 2}, {.Shader, 1}}, failed = 1, milliseconds = 9.5},
 		Create_Asset{template = .Behaviour, root = "game", folder = "scripts", name = "door"},
 		Create_Folder{root = "game", path = "scripts/ui"},
 		Move_Assets{guids = {"01", "02"}, root = "game", folder = "a"},

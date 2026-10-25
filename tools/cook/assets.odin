@@ -7,14 +7,23 @@ import "core:os"
 import "core:slice"
 import "core:strings"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
-// IMPORTERS gives the extension of each kind of asset that the cooker cooks. Other files in the content roots are not
-// assets.
-IMPORTERS :: [format.Asset_Kind]string {
-	.None   = "",
-	.Script = SCRIPT_EXTENSION,
-	.Scene  = format.SCENE_EXTENSION,
+// IMPORTERS gives the extensions of each kind of asset that the cooker cooks, lowercase, the first one for new assets.
+// Other files in the content roots are not assets.
+IMPORTERS :: [format.Asset_Kind][]string {
+	.None    = nil,
+	.Script  = {SCRIPT_EXTENSION},
+	.Scene   = {format.SCENE_EXTENSION},
+	.Shader  = {format.SHADER_EXTENSION},
+	.Texture = TEXTURE_EXTENSIONS,
+	.Model   = MODEL_EXTENSIONS,
+	.Mesh    = nil,
+	.Shading_Model = {format.SHADING_EXTENSION},
+	.Material = {format.MATERIAL_EXTENSION},
+	.Material_Instance = {format.MATERIAL_INSTANCE_EXTENSION},
+	.Material_Function = {format.MATERIAL_FUNCTION_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -40,6 +49,22 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 	#partial switch kind {
 	case .Script:
 		return SCRIPT_SETTINGS
+	case .Texture:
+		return TEXTURE_SETTINGS
+	case .Model:
+		return MODEL_SETTINGS
+	}
+	return nil
+}
+
+// initial_settings are the import settings that the cooker writes in a new asset's .meta file: those that it guesses
+// from the file, which then stay as they are when the file is renamed.
+initial_settings :: proc(kind: format.Asset_Kind, path: string) -> []format.Meta_Setting {
+	#partial switch kind {
+	case .Texture:
+		settings := make([]format.Meta_Setting, 1, context.temp_allocator)
+		settings[0] = {"usage", texture_usage_for(path)}
+		return settings
 	}
 	return nil
 }
@@ -72,7 +97,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Shading_Model, .Material, .Material_Instance, .Material_Function}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -92,6 +117,17 @@ Asset_Source :: struct {
 	dependencies: [dynamic]format.Guid,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
+	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content-pipeline.md#identity).
+	subassets:    [dynamic]Subasset,
+	// For a material, the combinations of static switches that it and its instances use.
+	permutations: int,
+}
+
+// Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.
+Subasset :: struct {
+	kind: format.Asset_Kind,
+	name: string,
+	guid: format.Guid,
 }
 
 // Folder is a directory in a root, by the root's index and its path in the root, such as "scripts/ui".
@@ -171,6 +207,7 @@ found_entry :: proc(
 		path = path,
 		name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
 		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+		subassets = make([dynamic]Subasset, context.temp_allocator),
 	}
 	if !read_asset(&a, problems) {
 		return false
@@ -193,23 +230,37 @@ found_assets :: proc(
 ) {
 	ok = scanned
 	slice.sort_by(found[:], proc(a, b: Asset_Source) -> bool {return a.path < b.path})
-	// Assets that share a GUID would write the same blob, so none of them cooks.
+	// Assets that share a GUID would write the same blob, so none of them cooks. A sub-asset's GUID counts as its
+	// file's.
 	first := make(map[format.Guid]int, len(found), context.temp_allocator)
 	shared := make(map[format.Guid]bool, context.temp_allocator)
 	for a, i in found {
-		if j, seen := first[a.meta.guid]; seen {
-			report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
-			shared[a.meta.guid] = true
-			ok = false
-			continue
+		guids := make([dynamic]format.Guid, 0, 1 + len(a.meta.subassets), context.temp_allocator)
+		append(&guids, a.meta.guid)
+		for s in a.meta.subassets {
+			append(&guids, s.guid)
 		}
-		first[a.meta.guid] = i
+		for guid in guids {
+			if j, seen := first[guid]; seen {
+				report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
+				shared[guid] = true
+				ok = false
+				continue
+			}
+			first[guid] = i
+		}
 	}
 	unique := make([dynamic]Asset_Source, 0, len(found), context.temp_allocator)
-	for a in found {
-		if !shared[a.meta.guid] {
-			append(&unique, a)
+	outer: for a in found {
+		if shared[a.meta.guid] {
+			continue
 		}
+		for s in a.meta.subassets {
+			if shared[s.guid] {
+				continue outer
+			}
+		}
+		append(&unique, a)
 	}
 	slice.sort_by(found_folders[:], proc(a, b: Folder) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
 	keys, _ := slice.map_keys(shared, context.temp_allocator)
@@ -218,18 +269,58 @@ found_assets :: proc(
 
 // kind_of is the kind of asset that a file name is, or .None.
 kind_of :: proc(name: string) -> format.Asset_Kind {
-	for extension, kind in IMPORTERS {
-		if kind != .None && strings.has_suffix(name, extension) {
-			return kind
-		}
-	}
-	return .None
+	kind, _ := importer_of(name)
+	return kind
 }
 
-// extension_of is the extension of a kind of asset's sources, such as ".luau".
+// extension_in is the importer's extension that a file name ends in, as the name has it, such as ".PNG", or "".
+extension_in :: proc(name: string) -> string {
+	_, extension := importer_of(name)
+	return extension
+}
+
+@(private = "file")
+importer_of :: proc(name: string) -> (kind: format.Asset_Kind, extension: string) {
+	lower := strings.to_lower(name, context.temp_allocator)
+	for extensions, k in IMPORTERS {
+		for e in extensions {
+			if strings.has_suffix(lower, e) {
+				return k, name[len(name) - len(e):]
+			}
+		}
+	}
+	return .None, ""
+}
+
+// extension_of is the extension of a kind of asset's new sources, such as ".luau".
 extension_of :: proc(kind: format.Asset_Kind) -> string {
 	importers := IMPORTERS
-	return importers[kind]
+	return importers[kind][0] if len(importers[kind]) > 0 else ""
+}
+
+// link_kind is a kind of asset as the cook link names it.
+link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
+	#partial switch kind {
+	case .Scene:
+		return .Scene
+	case .Shader:
+		return .Shader
+	case .Texture:
+		return .Texture
+	case .Model:
+		return .Model
+	case .Mesh:
+		return .Mesh
+	case .Shading_Model:
+		return .Shading_Model
+	case .Material:
+		return .Material
+	case .Material_Instance:
+		return .Material_Instance
+	case .Material_Function:
+		return .Material_Function
+	}
+	return .Script
 }
 
 // assets_of is the indices of the assets of one kind, in the scan's order.
@@ -254,7 +345,7 @@ read_asset :: proc(a: ^Asset_Source, problems: ^Problems) -> bool {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
 	if meta_err == .Not_Exist {
-		text, _ := new_meta(nil)
+		text, _ := new_meta(initial_settings(a.kind, a.path))
 		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
 			report_error(problems, meta_path, 0, 0, "%v", write_err)
 			return false
@@ -281,9 +372,9 @@ new_meta :: proc(settings: []format.Meta_Setting) -> (text: string, guid: format
 	return meta_with(guid, "", settings), guid
 }
 
-// meta_with is the text of a .meta file with a GUID and import settings. It keeps the comments of an old .meta file,
-// or starts with one that says what the file is.
-meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting) -> string {
+// meta_with is the text of a .meta file with a GUID, import settings and sub-assets. It keeps the comments of an old
+// .meta file, or starts with one that says what the file is. With no sub-assets given, it keeps the old file's.
+meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting, subassets: Maybe([]format.Meta_Subasset) = nil) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	rest := old_text
 	for line in strings.split_lines_iterator(&rest) {
@@ -298,6 +389,14 @@ meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_S
 	fmt.sbprintfln(&b, "guid = %s", format.guid_format(guid, &buffer))
 	for s in settings {
 		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
+	}
+	lines, given := subassets.?
+	if !given {
+		old, _ := format.meta_parse(old_text, context.temp_allocator)
+		lines = old.subassets
+	}
+	for s in lines {
+		fmt.sbprintfln(&b, "%s.%s = %s", s.kind, s.name, format.guid_format(s.guid, &buffer))
 	}
 	return strings.to_string(b)
 }

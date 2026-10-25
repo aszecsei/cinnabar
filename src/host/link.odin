@@ -302,7 +302,7 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Editor_Input):
+	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Editor_Input):
 		return true
 	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats):
 		// Only the host sends these, so handle_message reports them.
@@ -338,6 +338,10 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if l.linked {
 			core.acknowledge_shared_frame(m.generation, m.frame)
 		}
+	case link.Preview_Acknowledged:
+		if l.linked {
+			core.acknowledge_preview_frame(int(m.id), m.generation, m.frame)
+		}
 	case link.Editor_Input:
 		if l.linked {
 			events := make([]core.Input_Event, len(m.events), context.temp_allocator)
@@ -348,7 +352,7 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		}
 	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target:
 		// is_host_message sends these to the game.
 	}
 }

@@ -19,16 +19,53 @@ public sealed class ContentTests : IDisposable
         File.WriteAllText(scenePath, "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n\nentity 0000000000000002\nname = \"Gate\"\n");
         var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
             new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])]));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript]),
-            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], []),
+            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", "", 0),
+            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], [], "", "", 0),
         ], [new Folder("game", "lib")]));
         return shell;
     }
 
     static readonly SettingInfo Native = new("native", ["true", "false"], "false", "Compile to machine code.");
+
+    [Fact]
+    public void TheFileOperationsLeaveSubassetsToTheirFile()
+    {
+        using var shell = NewShell();
+        shell.Assets.Apply(new AssetDelta(
+        [
+            new Asset("10", AssetKind.Model, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "", "", 0),
+            new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0),
+        ], [], [], []));
+
+        shell.SelectContent(null, ["10", DoorScript]);
+        Assert.False(shell.SelectionHasSubassets);
+        shell.SelectContent(null, ["10", "11"]);
+        Assert.True(shell.SelectionHasSubassets);
+
+        // A mesh field takes the model's mesh and nothing else. A field without a kind takes any asset.
+        var meshes = new Panels.AssetContext(shell.Assets, "mesh", _ => { });
+        Assert.Equal(["11"], meshes.Choices.Select(a => a.Guid));
+        Assert.False(meshes.Takes(shell.Assets.Find(DoorScript)!));
+        Assert.True(new Panels.AssetContext(shell.Assets, "", _ => { }).Takes(shell.Assets.Find(DoorScript)!));
+    }
+
+    [Fact]
+    public void AMaterialFieldTakesMaterialsAndTheirInstances()
+    {
+        using var shell = NewShell();
+        shell.Assets.Apply(new AssetDelta(
+        [
+            new Asset("20", AssetKind.Material, "game", "rock.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 0),
+            new Asset("21", AssetKind.MaterialInstance, "game", "mossy.material_instance", AssetStatus.Current, 0, 0, "", [], ["20"], "", "", 0),
+            new Asset("22", AssetKind.ShadingModel, "game", "lit.shading", AssetStatus.Current, 0, 0, "", [], [], "", "", 0),
+        ], [], [], []));
+
+        var materials = new Panels.AssetContext(shell.Assets, "material", _ => { });
+        Assert.Equal(["21", "20"], materials.Choices.Select(a => a.Guid));
+    }
 
     [Fact]
     public void ADeleteShowsTheAssetsThatUseWhatItTakes()
@@ -127,13 +164,17 @@ public sealed class ContentTests : IDisposable
     [Fact]
     public void TheCommandLineNamesTheCookDaemonAndTheRoots()
     {
-        var options = EditorOptions.Parse(["--cook", "tools/cook.exe", "--cache", "cache", "--definitions", "types.d.luau", "--root", "game=content", "--root", "engine=lib/content"]);
+        var options = EditorOptions.Parse(
+            ["--cook", "tools/cook.exe", "--cache", "cache", "--definitions", "types.d.luau", "--dxc", "dxc/dxc.exe", "--include", "shaders", "--root", "game=content", "--root", "engine=lib/content"]);
 
         Assert.Equal(Path.GetFullPath("tools/cook.exe"), options.Cook.CookPath);
         Assert.Equal(Path.GetFullPath("cache"), options.Cook.CachePath);
         Assert.Equal(Path.GetFullPath("types.d.luau"), options.Cook.DefinitionsPath);
         Assert.Equal([("game", Path.GetFullPath("content")), ("engine", Path.GetFullPath("lib/content"))], options.Cook.Roots);
-        Assert.Equal("game", Assert.Single(EditorOptions.Parse([]).Cook.Roots).Name);
+        Assert.Equal(Path.GetFullPath("dxc/dxc.exe"), options.Cook.DxcPath);
+        Assert.Equal([Path.GetFullPath("shaders")], options.Cook.Includes);
+        // Without roots, the daemon cooks the sample's content and the engine's.
+        Assert.Equal(["game", "engine"], EditorOptions.Parse([]).Cook.Roots.Select(r => r.Name));
     }
 
     [Fact]
