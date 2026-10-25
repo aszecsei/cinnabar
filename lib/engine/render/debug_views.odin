@@ -89,13 +89,13 @@ apply_debug :: proc(s: ^Frame_Settings, view: Debug_View, disable: Features, exp
 // Debug_View_Push matches Push in debug_view.hlsl.
 @(private = "file")
 Debug_View_Push :: struct {
-	view:     u32,
-	source:   u32,
-	output:   u32,
-	exposure: u32,
-	size:     [2]u32,
-	near:     f32,
-	padding:  u32,
+	view:          u32,
+	source:        u32,
+	output:        u32,
+	exposure:      u32,
+	size:          [2]u32,
+	near:          f32,
+	mask_channels: u32,
 }
 
 // Debug_View_Frame is the pass of a view from the frame's textures, in frame memory.
@@ -159,6 +159,9 @@ run_debug_view :: proc(ctx: ^Pass_Context) {
 		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
 		size     = f.size,
 		near     = f.view.near,
+	}
+	if f.shadows != nil {
+		push.mask_channels = u32(f.shadows.mask_count)
 	}
 	if dv.source != 0 {
 		push.source = gpu.read_index(gpu_texture(g, dv.source))

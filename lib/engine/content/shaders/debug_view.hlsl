@@ -11,7 +11,8 @@ struct Push {
 	uint exposure;
 	uint2 size;
 	float near;
-	uint padding;
+	// The shadow mask's channels that hold a light.
+	uint mask_channels;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -91,8 +92,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		color = cn_texture(push.source).Load(pixel).rgb * exposure;
 		break;
 	case DEBUG_SHADOW_MASK: {
-		// Each light's channel in its own color: red, green, blue and yellow.
-		float4 mask = cn_texture(push.source).Load(pixel);
+		// Each light's channel in its own color: red, green, blue and yellow. A channel without a light is black.
+		float4 mask = cn_texture(push.source).Load(pixel) * float4(push.mask_channels > 0, push.mask_channels > 1, push.mask_channels > 2, push.mask_channels > 3);
 		color = saturate(mask.r * float3(1, 0, 0) + mask.g * float3(0, 1, 0) + mask.b * float3(0, 0, 1) + mask.a * float3(1, 1, 0));
 		break;
 	}

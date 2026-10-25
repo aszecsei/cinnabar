@@ -60,6 +60,15 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection]),
                         new ComboBox(EditorCommands.ViewportScale),
                     ]),
+                    new RibbonGroup("Rendering",
+                    [
+                        new ComboBox(EditorCommands.DebugView),
+                        new SmallStack([EditorCommands.TemporalAa, EditorCommands.Bloom, EditorCommands.ToneMapping]),
+                        new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
+                        new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
+                        new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
+                    ]),
+                    new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
             ]);

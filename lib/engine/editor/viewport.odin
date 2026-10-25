@@ -58,6 +58,8 @@ Viewport :: struct {
 	overlay_pipeline: render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
+	// How the editor wants the viewport drawn, from Viewport_Settings.
+	settings:         link.Viewport_Settings,
 }
 
 // Viewport_Frame is what the game drew that the tools draw on and pick from.
@@ -91,6 +93,40 @@ view :: proc(e: ^Editor) -> (render.View, bool) {
 			near = c.near,
 		},
 		true
+}
+
+// Render_Overrides are what the editor's viewport changes in the frame, for render.Frame_Desc.
+Render_Overrides :: struct {
+	debug_view:      render.Debug_View,
+	disable:         render.Features,
+	exposure_offset: f32,
+}
+
+// render_overrides gives the viewport's debug view, the features that it turns off and its exposure offset while an
+// editor is linked, and none otherwise.
+render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
+	if !active(e) {
+		return
+	}
+	s := e.viewport.settings
+	o.debug_view = render.Debug_View(s.debug_view)
+	o.exposure_offset = s.exposure_offset
+	flags := [render.Feature]bool {
+		.Temporal_Aa       = s.no_temporal_aa,
+		.Bloom             = s.no_bloom,
+		.Tone_Mapping      = s.no_tone_mapping,
+		.Fog               = s.no_fog,
+		.Ambient_Occlusion = s.no_ambient_occlusion,
+		.Gi                = s.no_gi,
+		.Shadows           = s.no_shadows,
+		.Post_Effects      = s.no_post_effects,
+	}
+	for off, feature in flags {
+		if off {
+			o.disable += {feature}
+		}
+	}
+	return
 }
 
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
@@ -435,6 +471,8 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Gizmo_State:
 		v.gizmo = m
+	case link.Viewport_Settings:
+		v.settings = m
 	case link.Pick_Request:
 		if len(v.picks) == MAX_PICKS {
 			log.warnf("editor: more than %d picks wait for the GPU, so pick %d is dropped", MAX_PICKS, m.id)
@@ -452,7 +490,7 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 @(private)
 reset_viewport :: proc(e: ^Editor) {
 	v := &e.viewport
-	v.camera, v.has_camera, v.gizmo, v.picking = {}, false, {}, false
+	v.camera, v.has_camera, v.gizmo, v.picking, v.settings = {}, false, {}, false, {}
 	clear(&v.selection)
 	clear(&v.hidden)
 	clear(&v.picks)

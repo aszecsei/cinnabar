@@ -647,14 +647,19 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	}
 	extract_triangles(frame)
 	editing := editor.active(&s.editor)
+	// The editor's viewport settings (see docs/editor.md#viewport), or none without an editor.
+	overrides := editor.render_overrides(&s.editor)
 	desc := render.Frame_Desc {
-		view        = view,
-		size        = size,
-		keep_ids    = editing,
-		hidden      = editor.visibility(&s.editor, &s.world).hidden,
+		view            = view,
+		size            = size,
+		keep_ids        = editing,
+		hidden          = editor.visibility(&s.editor, &s.world).hidden,
+		debug_view      = overrides.debug_view,
+		disable         = overrides.disable,
+		exposure_offset = overrides.exposure_offset,
 		// The material editor's previews (see docs/rendering.md#material-previews).
-		previews    = editor.previews(&s.editor),
-		hooks       = {
+		previews        = editor.previews(&s.editor),
+		hooks           = {
 			data         = frame,
 			before_world = before_world,
 			world_uses   = world_uses,

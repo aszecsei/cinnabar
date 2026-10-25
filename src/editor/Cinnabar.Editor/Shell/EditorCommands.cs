@@ -52,6 +52,20 @@ static class EditorCommands
     public const string FrameSelected = "viewport.frameSelected";
     public const string FrameScene = "viewport.frameScene";
     public const string OrbitSelection = "viewport.orbitSelection";
+    public const string DebugView = "view.debugView";
+    public const string TemporalAa = "view.temporalAa";
+    public const string Bloom = "view.bloom";
+    public const string ToneMapping = "view.toneMapping";
+    public const string Fog = "view.fog";
+    public const string AmbientOcclusion = "view.ambientOcclusion";
+    public const string GlobalIllumination = "view.globalIllumination";
+    public const string Shadows = "view.shadows";
+    public const string PostEffects = "view.postEffects";
+    public const string Icons = "view.icons";
+    public const string Helpers = "view.helpers";
+    public const string ExposureUp = "view.exposureUp";
+    public const string ExposureDown = "view.exposureDown";
+    public const string ExposureReset = "view.exposureReset";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -333,6 +347,61 @@ static class EditorCommands
         {
             Description = "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             Icon = "scale",
+        });
+        RegisterRendering(shell);
+    }
+
+    // The viewport's rendering (see docs/editor.md#viewport): what it shows in place of the lit scene, the features
+    // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
+    static void RegisterRendering(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new ChoiceCommand(DebugView, "View", EditorShell.DebugViewNames,
+            () => EditorShell.DebugViewName(shell.ViewportSettings.DebugView), shell.SetDebugView)
+        {
+            Description = "Show the lit scene, or a debug view of what makes it: the lighting, the albedo, the normals, the light complexity and more.",
+            Icon = "viewport",
+        });
+        void Feature(string id, string label, string description, Func<Link.Protocol.ViewportSettings, bool> off,
+            Func<Link.Protocol.ViewportSettings, bool, Link.Protocol.ViewportSettings> set) =>
+            commands.Register(new Command(id, label, () => shell.ViewportSettings = set(shell.ViewportSettings, !off(shell.ViewportSettings)))
+            {
+                Description = description,
+                IsCheckedWhen = () => !off(shell.ViewportSettings),
+            });
+        Feature(TemporalAa, "Temporal AA", "Smooth edges with temporal AA in the viewport.", s => s.NoTemporalAa, (s, v) => s with { NoTemporalAa = v });
+        Feature(Bloom, "Bloom", "Draw bloom in the viewport.", s => s.NoBloom, (s, v) => s with { NoBloom = v });
+        Feature(ToneMapping, "Tone Mapping", "Tone map and grade the viewport; off, a plain roll-off to white.", s => s.NoToneMapping, (s, v) => s with { NoToneMapping = v });
+        Feature(Fog, "Fog", "Draw the volumes' fog in the viewport.", s => s.NoFog, (s, v) => s with { NoFog = v });
+        Feature(AmbientOcclusion, "Ambient Occlusion", "Darken the indirect light where surfaces meet.", s => s.NoAmbientOcclusion, (s, v) => s with { NoAmbientOcclusion = v });
+        Feature(GlobalIllumination, "Global Illumination", "Light the viewport with the light that bounces; off, with the environment's ambient light.", s => s.NoGi, (s, v) => s with { NoGi = v });
+        Feature(Shadows, "Shadows", "Draw the lights' shadows in the viewport.", s => s.NoShadows, (s, v) => s with { NoShadows = v });
+        Feature(PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
+        commands.Register(new Command(Icons, "Icons", () => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = !shell.ViewportSettings.ShowIcons })
+        {
+            Description = "Show icons for the lights, volumes and cameras, which select them when clicked.",
+            Icon = "visible",
+            IsCheckedWhen = () => shell.ViewportSettings.ShowIcons,
+        });
+        commands.Register(new ChoiceCommand(Helpers, "Shapes", ["None", "Selected", "All"],
+            () => shell.ViewportSettings.Helpers.ToString(),
+            option => shell.ViewportSettings = shell.ViewportSettings with { Helpers = Enum.Parse<Link.Protocol.HelperMode>(option) })
+        {
+            Description = "Draw the shapes of lights, volumes and cameras: their ranges, cones and bounds, for the selection or for all of them.",
+            Icon = "frame",
+        });
+        commands.Register(new Command(ExposureUp, "Brighter", () => shell.ChangeExposure(1))
+        {
+            Description = "Add half a stop to the viewport's exposure.",
+        });
+        commands.Register(new Command(ExposureDown, "Darker", () => shell.ChangeExposure(-1))
+        {
+            Description = "Take half a stop from the viewport's exposure.",
+        });
+        commands.Register(new Command(ExposureReset, "Reset Exposure", () => shell.ChangeExposure(0))
+        {
+            Description = "Show the exposure that the volumes give, with no offset.",
+            CanExecuteWhen = () => shell.ViewportSettings.ExposureOffset != 0,
         });
     }
 }

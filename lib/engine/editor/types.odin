@@ -4,6 +4,7 @@ import "base:runtime"
 
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 
 // component_types describes every registered component, with the fields that scenes can set. Strings and slices are
@@ -45,3 +46,6 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(int(scene.Field_Kind.Enum) == int(link.Field_Kind.Enum))
 #assert(int(scene.Field_Kind.Asset) == int(link.Field_Kind.Asset))
 #assert(int(scene.Field_Kind.Vector2) == int(link.Field_Kind.Vector2))
+#assert(len(render.Debug_View) == len(link.Debug_View))
+#assert(int(render.Debug_View.Shadow_Cascades) == int(link.Debug_View.Shadow_Cascades))
+#assert(int(render.Debug_View.Luminance) == int(link.Debug_View.Luminance))

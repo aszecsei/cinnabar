@@ -24,6 +24,41 @@ public sealed class ShellTests : IDisposable
     }
 
     [Fact]
+    public void TheViewportsRenderingCommandsChangeItsSettingsAndTheyStay()
+    {
+        using (var shell = NewShell())
+        {
+            Assert.Equal(EditorShell.DefaultViewportSettings, shell.ViewportSettings);
+            var bloom = shell.Commands.Get(EditorCommands.Bloom);
+            Assert.True(bloom.IsChecked);
+            Assert.True(bloom.Execute());
+            Assert.False(bloom.IsChecked);
+            Assert.True(shell.ViewportSettings.NoBloom);
+
+            var view = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.DebugView);
+            Assert.Equal("Lit", view.Selected);
+            Assert.Contains("Lighting Only", view.Options);
+            view.Select("Light Complexity");
+            Assert.Equal(Link.Protocol.DebugView.LightComplexity, shell.ViewportSettings.DebugView);
+
+            shell.Commands.Get(EditorCommands.ExposureUp).Execute();
+            shell.Commands.Get(EditorCommands.ExposureUp).Execute();
+            Assert.Equal(1, shell.ViewportSettings.ExposureOffset);
+            Assert.True(shell.Commands.Get(EditorCommands.ExposureReset).Execute());
+            Assert.Equal(0, shell.ViewportSettings.ExposureOffset);
+
+            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.Helpers)).Select("All");
+        }
+
+        // The next session starts with them.
+        using var again = NewShell();
+        Assert.True(again.ViewportSettings.NoBloom);
+        Assert.Equal(Link.Protocol.DebugView.LightComplexity, again.ViewportSettings.DebugView);
+        Assert.Equal(Link.Protocol.HelperMode.All, again.ViewportSettings.Helpers);
+        Assert.Empty(Problems(again));
+    }
+
+    [Fact]
     public void EveryPanelStartsOpen()
     {
         using var shell = NewShell();

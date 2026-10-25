@@ -138,7 +138,7 @@ The editor link is a message connection between the editor and the host. It uses
 | Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result` |
+| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result`, `Viewport_Settings` |
 | Mode | `Set_Mode`, `Step_Frame`, and `Editor_Input`, which the host handles |
 | Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
 | Previews | `Open_Preview`, `Preview_Settings`, `Close_Preview`, `Preview_Target`, and `Preview_Acknowledged`, which the host handles (see [Rendering](rendering.md#material-previews)) |
@@ -178,6 +178,7 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 - **Several entities:** a drag moves the selected entities that have no selected ancestor, about the primary entity: a move moves each by the same amount, a turn turns each about the primary entity, and a scale scales each and its distance from it along the gizmo's axes. Each step of a drag replaces the one before for each field, so a drag of any number of entities is one undo entry. Escape cancels a drag.
 - **Tools and space:** Q, W, E and R pick Select, Move, Rotate and Scale while the viewport has focus, X switches between the world's axes and the entity's, F frames the selection, and H hides it. These keys belong to the viewport, so typing in a box never changes tools. The tools are also commands, on the ribbon's Home tab and in the tool palette. Select has no gizmo. Scale always uses the entity's axes.
 - **Snapping** rounds a drag's change to 0.25 m, 15° or 0.1 of scale. The Snap command turns it on, and Ctrl during a drag does the opposite of the setting.
+- **Rendering:** the View tab's Rendering group picks what the viewport shows: the lit scene or a debug view (see [Rendering](rendering.md#debug-views)), such as the lighting only, the albedo, the normals, the light complexity or the luminance. Its toggles turn temporal AA, bloom, the tone mapping, the fog, the ambient occlusion, the global illumination, the shadows and the game's post effects off in the viewport, and Brighter and Darker move its exposure by half a stop. The Helpers group shows the icons and the shapes of lights, volumes and cameras. These are the user's, not the scene's, so they do not change the game: the editor sends them as `Viewport_Settings` when they change and when the link connects, and keeps them in `viewport.json` (see [Shell](#shell)). The game passes them to its frame with `editor.render_overrides` while an editor is linked.
 - **Overlays:** the tool palette, the camera's speed with the tool and space, the box of a box selection and the stats overlay are Avalonia controls over the viewport.
 - **Input:** while the viewport has focus in play mode, the editor sends keyboard and mouse input, and the host gives it to the game as `core.Input` (see [Modes](#modes) and [Core](core.md#input)).
 - The editor does not reparent the host's window into its own. Windows attaches the input queues of a cross-process parent and child window, so a stall in the game would freeze the editor UI.
@@ -320,7 +321,8 @@ The material editor edits a material's graph or a material function (see [Conten
 9. **Resource monitor and game commands:** the host's and the game's stats, script memory by module, and the game's commands in the ribbon.
 10. **Content browser:** after the cook daemon's first phase (see [Content pipeline](content-pipeline.md#implementation-phases)), `Cinnabar.Editor.Content`, the cook link and its schema in the generator, the daemon's log and problems in the console, and the read-only content browser: the index, search, opening scenes and scripts, and dragging a script to add a behaviour.
 11. **Asset operations:** create from a template, folders, rename, move, duplicate, delete with its dependents, import settings, and re-import.
-12. **Later:** prefabs, which are their own design.
+12. **Rendering parity:** field tags as lists, colors with a picker, sliders for ranged numbers and two-number fields; volume settings with override check boxes; the viewport's debug views, feature toggles and exposure (see [Rendering](rendering.md#implementation-phases)).
+13. **Later:** prefabs, which are their own design.
 
 ## Deferred
 

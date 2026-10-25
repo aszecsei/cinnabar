@@ -695,3 +695,20 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 	step(f, 1, link.Close_Preview{id = 0})
 	testing.expect_value(t, len(previews(&f.editor)), 0)
 }
+
+@(test)
+the_viewports_settings_reach_the_frame_while_an_editor_is_linked :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+
+	step(f)
+	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
+	step(f, 1, link.Viewport_Settings{debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5})
+	o := render_overrides(&f.editor)
+	testing.expect_value(t, o.debug_view, render.Debug_View.Normals)
+	testing.expect_value(t, o.disable, render.Features{.Bloom, .Shadows})
+	testing.expect_value(t, o.exposure_offset, -1.5)
+	// Without an editor, the frame is the game's own.
+	step(f, 0)
+	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
+}

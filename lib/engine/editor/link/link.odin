@@ -77,6 +77,7 @@ Message :: union {
 	Close_Preview,
 	Preview_Target,
 	Preview_Acknowledged,
+	Viewport_Settings,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -514,6 +515,53 @@ Pick_Result :: struct {
 // and after each Entity_Snapshot.
 Set_Hidden :: struct {
 	entities: []u64,
+}
+
+// What the viewport shows in place of the lit scene (see docs/rendering.md#debug-views). Matches render.Debug_View.
+Debug_View :: enum u8 {
+	Lit,
+	Lighting_Only,
+	Direct_Light,
+	Indirect_Light,
+	Fog,
+	Albedo,
+	Light_Complexity,
+	Shadow_Cascades,
+	Normals,
+	Depth,
+	Velocity,
+	Ambient_Occlusion,
+	Gi_Diffuse,
+	Gi_Specular,
+	Shadow_Mask,
+	Entity_Ids,
+	Luminance,
+}
+
+// Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
+Helper_Mode :: enum u8 {
+	None,
+	Selected,
+	All,
+}
+
+// Editor to game: how the viewport draws while an editor is linked (see docs/editor.md#viewport). The editor sends it
+// when it changes, and when the link connects. The features are the ones that the viewport turns off.
+Viewport_Settings :: struct {
+	debug_view:           Debug_View,
+	no_temporal_aa:       bool,
+	no_bloom:             bool,
+	no_tone_mapping:      bool,
+	no_fog:               bool,
+	no_ambient_occlusion: bool,
+	no_gi:                bool,
+	no_shadows:           bool,
+	no_post_effects:      bool,
+	// Stops added to the exposure.
+	exposure_offset:      f32,
+	// Icons for the lights, volumes and cameras, which pick them.
+	show_icons:           bool,
+	helpers:              Helper_Mode,
 }
 
 // Modes (see docs/editor.md#modes).
