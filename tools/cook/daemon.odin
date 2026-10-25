@@ -71,6 +71,8 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	defer server_stop(&d.server)
 	defer index_destroy(&d.index)
 	log.infof("cook: watching %s", strings.join(dirs[:], ", ", context.temp_allocator))
+	// Previews are of a running editor's unsaved materials, so an earlier editor's are stale.
+	clear_previews(d.options)
 
 	daemon_pass(&d)
 	for {
@@ -144,6 +146,9 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 			server_send(&d.server, d.linked_connection, p)
 		}
 	}
+	if changes.shading {
+		server_send(&d.server, d.linked_connection, next.shading)
+	}
 	server_send(
 		&d.server,
 		d.linked_connection,
@@ -215,15 +220,21 @@ handle_messages :: proc(d: ^Daemon) {
 				roots[i] = {r.name, r.dir}
 			}
 			// The Welcome and the index go out before the first log line, so the editor has them first.
-			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers()})
+			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers(), nodes = node_infos()})
 			snapshot, problems := index_snapshot(&d.index)
 			server_send(&d.server, connection, snapshot)
 			for p in problems {
 				server_send(&d.server, connection, p)
 			}
+			server_send(&d.server, connection, d.index.shading)
 			d.linked_connection = connection
 			server_log_to_editor(&d.server, true)
 			log.infof("cook: linked to %s", msg.editor)
+		case cook_link.Cook_Preview:
+			if connection != d.linked_connection {
+				continue
+			}
+			server_send(&d.server, connection, preview(d.options, msg), m.header.request)
 		case:
 			if connection != d.linked_connection {
 				log.warnf("cook: cook link: the editor sent a message of kind %d before its Hello", m.header.kind)
@@ -249,6 +260,46 @@ handle_messages :: proc(d: ^Daemon) {
 	daemon_pass(d, force)
 	for a in answers {
 		server_send(&d.server, d.linked_connection, a.result, a.request)
+	}
+}
+
+// preview cooks a material that the editor has not saved into the cache's preview area (see cook_preview). Its
+// problems go to the editor in the answer, and not to the log: the material editor shows them on its nodes.
+@(private = "file")
+preview :: proc(options: Cook_Options, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
+	guid, guid_ok := format.guid_parse(msg.guid)
+	if !guid_ok {
+		return {error = fmt.tprintf("%q is not a GUID", msg.guid)}
+	}
+	problems, ok := cook_preview(options, guid, msg.text)
+	result := cook_link.Preview_Result {
+		problems = make([]cook_link.Problem, len(problems.list), context.temp_allocator),
+	}
+	for p, i in problems.list {
+		result.problems[i] = {p.file, u32(p.line), u32(p.column), p.error, p.text}
+	}
+	if !ok {
+		result.error = "the material did not cook"
+		for p in problems.list {
+			if p.error {
+				result.error = p.text
+				break
+			}
+		}
+	}
+	return result
+}
+
+// clear_previews deletes the preview area of the cache.
+@(private = "file")
+clear_previews :: proc(options: Cook_Options) {
+	dir := fmt.tprintf("%s/preview", config_dir(options))
+	infos, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+	if err != nil {
+		return
+	}
+	for info in infos {
+		os.remove(info.fullpath)
 	}
 }
 

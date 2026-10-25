@@ -61,7 +61,17 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 	if error != "" {
 		return failed("%s", error)
 	}
-	kind: format.Asset_Kind = op.template == .Scene ? .Scene : .Script
+	kind: format.Asset_Kind
+	switch op.template {
+	case .Script, .Behaviour:
+		kind = .Script
+	case .Scene:
+		kind = .Scene
+	case .Material:
+		kind = .Material
+	case .Material_Function:
+		kind = .Material_Function
+	}
 	name := strings.trim_suffix(strings.trim_space(op.name), extension_of(kind))
 	if !valid_name(name) {
 		return failed("%q is not a name for a file", op.name)
@@ -370,6 +380,10 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 		)
 	case .Scene:
 		return "scene 1\n"
+	case .Material:
+		return "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\n"
+	case .Material_Function:
+		return "material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n"
 	}
 	return ""
 }

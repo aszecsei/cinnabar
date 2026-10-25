@@ -135,6 +135,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "materials"
 	case .Material_Instance:
 		return "material instances"
+	case .Material_Function:
+		return "material functions"
 	}
 	return "assets"
 }

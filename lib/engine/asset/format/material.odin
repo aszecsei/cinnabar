@@ -11,6 +11,7 @@ import "cinnabar:core/layout"
 SHADING_EXTENSION :: ".shading"
 MATERIAL_EXTENSION :: ".material"
 MATERIAL_INSTANCE_EXTENSION :: ".material_instance"
+MATERIAL_FUNCTION_EXTENSION :: ".material_function"
 // At most this many static switches, a bit each in a variant's mask.
 MAX_MATERIAL_SWITCHES :: 16
 
@@ -25,6 +26,9 @@ Material_Flag :: enum u32 {
 	Cast_Shadows,
 	// The shading model only emits, so the template skips the light loop.
 	No_Lighting,
+	// The material reads the frame's time, so its look changes from frame to frame without a change of its own. The
+	// editor's previews draw it every frame.
+	Reads_Time,
 }
 
 Material_Flags :: bit_set[Material_Flag;u32]

@@ -23,6 +23,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Shading_Model = {format.SHADING_EXTENSION},
 	.Material = {format.MATERIAL_EXTENSION},
 	.Material_Instance = {format.MATERIAL_INSTANCE_EXTENSION},
+	.Material_Function = {format.MATERIAL_FUNCTION_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -96,7 +97,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Shading_Model, .Material, .Material_Instance}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Shading_Model, .Material, .Material_Instance, .Material_Function}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -118,6 +119,8 @@ Asset_Source :: struct {
 	behaviour:    string,
 	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content-pipeline.md#identity).
 	subassets:    [dynamic]Subasset,
+	// For a material, the combinations of static switches that it and its instances use.
+	permutations: int,
 }
 
 // Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.
@@ -314,6 +317,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Material
 	case .Material_Instance:
 		return .Material_Instance
+	case .Material_Function:
+		return .Material_Function
 	}
 	return .Script
 }
