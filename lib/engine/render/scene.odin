@@ -10,8 +10,9 @@ import "cinnabar:engine/ecs"
 
 // The GPU scene (see docs/rendering.md#gpu-scene): every Mesh_Renderer's instance at a stable slot of a persistent
 // buffer, its pose relative to a render origin that snaps to a 1024 m grid. Each frame writes every slot, then culls
-// each submesh of each instance on the GPU, for the camera and each shadow view, into the bin of its material's
-// pipelines. The prepass, the shadow maps and the forward pass each draw a bin with one indirect draw.
+// each submesh of each instance on the GPU, for the camera, the view model and each shadow view, into the bin of its
+// material's pipelines. The view model's instances are relative to the camera, not the origin (see
+// docs/rendering.md#view-model). The prepass, the shadow maps and the forward pass each draw a bin with one indirect draw.
 
 // The render origin snaps to cells of 1024 m: 2^34 units of 2^-24 m.
 ORIGIN_CELL_BITS :: 34
@@ -27,11 +28,17 @@ CULL_GROUP_SIZE :: 64
 // CULL_SHADER is the engine's culling shader (lib/engine/content/shaders/cull_draws.hlsl), by its .meta file.
 CULL_SHADER :: #load("../content/shaders/cull_draws.hlsl.meta", string)
 
+// The culling's views: the camera, the view model, then the shadow views.
+VIEW_CAMERA :: 0
+VIEW_VIEW_MODEL :: 1
+FIRST_SHADOW_VIEW :: 2
+
 // Frame_Constants matches Frame_Constants in material_common.hlsli: the material passes' constants. A shadow view's
-// copy differs in its view_projection.
+// copy differs in its view_projection, and the view model's in its projections, its offsets and its near plane.
 Frame_Constants :: struct {
 	view_projection:          matrix[4, 4]f32,
 	previous_view_projection: matrix[4, 4]f32,
+	cluster_view_projection:  matrix[4, 4]f32,
 	camera_offset:            [4]f32,
 	previous_camera_offset:   [4]f32,
 	sky_color:                [4]f32,
@@ -60,7 +67,7 @@ Frame_Constants :: struct {
 	shadow_views:             u32,
 	shadow_views_offset:      u32,
 	clustered:                u32,
-	padding:                  [2]u32,
+	screen_size:              [2]f32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -104,6 +111,8 @@ Instance_Record :: struct {
 
 // An item that casts shadows: its Mesh_Renderer's cast_shadows, and its material's.
 ITEM_CASTS_SHADOWS :: 1
+// An item of the view model, whose instance is relative to the camera.
+ITEM_VIEW_MODEL :: 2
 
 // Cull_Item matches Item in cull_draws.hlsl.
 Cull_Item :: struct {
@@ -118,12 +127,16 @@ Cull_Item :: struct {
 	sphere:      [4]f32,
 }
 
-// A view that draws only the items that cast shadows.
+// A view that draws only the items that cast shadows, and the view that draws only the view model's items, which every
+// other view leaves out.
 VIEW_CASTERS :: 1
+VIEW_MODEL :: 2
 
-// Cull_View matches Cull_View in cull_draws.hlsl: a view's planes relative to the camera, and its first draw.
+// Cull_View matches Cull_View in cull_draws.hlsl: a view's planes relative to the camera, the camera's offset from the
+// space of the view's instances, and its first draw.
 Cull_View :: struct {
 	planes:     [6][4]f32,
+	offset:     [4]f32,
 	first_draw: u32,
 	flags:      u32,
 	padding:    [2]u32,
@@ -131,7 +144,6 @@ Cull_View :: struct {
 
 // Cull_Constants matches Cull_Constants in cull_draws.hlsl.
 Cull_Constants :: struct {
-	camera_offset:      [4]f32,
 	item_count:         u32,
 	// The items, the bins' first draws and the views are in the upload ring, at these offsets of its buffer.
 	items:              u32,
@@ -145,10 +157,11 @@ Cull_Constants :: struct {
 	views:              u32,
 	views_offset:       u32,
 	bin_count:          u32,
+	padding:            [3]u32,
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 112 && size_of(Frame_Constants) == 304)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 368)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -164,9 +177,10 @@ Gpu_Scene :: struct {
 	// Slots below this have been used.
 	high:                     u32,
 	frame:                    u64,
-	// Last frame's camera and projection, for the velocities.
+	// Last frame's camera and projections, for the velocities.
 	previous_position:        ecs.World_Position,
 	previous_view_projection: matrix[4, 4]f32,
+	previous_view_model:      matrix[4, 4]f32,
 	has_previous:             bool,
 	instances:                gpu.Buffer,
 	// This frame's indirect draws and draw records, and each view's bins' counts, which grow with the frame's draws.
@@ -186,7 +200,7 @@ Scene_Frame :: struct {
 	bin_pipelines:   []int,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
-	// The camera, then each shadow view.
+	// The camera, the view model, then each shadow view.
 	view_count:      int,
 	instance_upload: gpu.Upload,
 	instance_bytes:  int,
@@ -261,6 +275,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		current := ecs.column(view, 0, ecs.Transform)
 		previous := ecs.column(view, 1, ecs.Previous_Transform)
 		renderers := ecs.column(view, EXTRACT_TERMS, Mesh_Renderer)
+		view_model := len(ecs.column(view, EXTRACT_TERMS + 1, View_Model)) > 0
 		for e, i in entities {
 			slot, slot_ok := scene_slot(s, e)
 			if !slot_ok {
@@ -271,13 +286,19 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
 			}
 			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
-			records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
+			if view_model {
+				// Relative to the camera, and last frame's relative to last frame's camera.
+				last_camera := s.has_previous ? s.previous_position : f.view.position
+				records[slot] = {rows = pose_rows(pose, f.view.position), previous_rows = pose_rows(last, last_camera), id = entity_id(e)}
+			} else {
+				records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
+			}
 			s.previous[slot], s.seen[slot] = pose, s.frame
 			if is_hidden(hidden, e) {
 				continue
 			}
-			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, renderers[i], slot)
-			if mesh != nil && mesh.accel != {} && renderers[i].cast_shadows {
+			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, renderers[i], slot, view_model)
+			if mesh != nil && mesh.accel != {} && renderers[i].cast_shadows && !view_model {
 				reference := r.platform.gpu_accel_reference(mesh.accel)
 				append(&accel_instances, gpu.accel_instance(records[slot].rows, reference, id = slot, flags = {.Force_Opaque}))
 			}
@@ -353,13 +374,15 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	lf := f.lights
 	shadows := f.shadows
 	platform := r.platform
+	view_model := view_projection(view_model_view(f.view), f32(f.size.x) / f32(max(f.size.y, 1)))
 	defer {
 		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
+		s.previous_view_model = view_model
 	}
 	if len(sf.items) == 0 {
 		return
 	}
-	sf.view_count = 1 + len(shadows.views)
+	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
 	ensure_draw_buffers(r, len(sf.items) * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
 	zeros := make([]byte, len(sf.bin_pipelines) * sf.view_count * 4, platform.frame_allocator)
 	ok: bool
@@ -372,13 +395,16 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	camera_offset := ecs.position_sub(f.view.position, s.origin)
 	previous_offset := camera_offset
 	previous_projection := f.view_projection
+	previous_view_model := view_model
 	if s.has_previous {
 		previous_offset = ecs.position_sub(s.previous_position, s.origin)
 		previous_projection = s.previous_view_projection
+		previous_view_model = s.previous_view_model
 	}
 	constants := Frame_Constants {
 		view_projection          = f.view_projection,
 		previous_view_projection = previous_projection,
+		cluster_view_projection  = f.view_projection,
 		camera_offset            = {camera_offset.x, camera_offset.y, camera_offset.z, 0},
 		previous_camera_offset   = {previous_offset.x, previous_offset.y, previous_offset.z, 0},
 		sky_color                = {ambient.sky.r, ambient.sky.g, ambient.sky.b, 0},
@@ -403,6 +429,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		shadow_views             = gpu.read_index(shadows.views_upload.buffer),
 		shadow_views_offset      = shadows.views_upload.offset,
 		clustered                = u32(lf.clustered),
+		screen_size              = {f32(f.size.x), f32(f.size.y)},
 	}
 	if lf.clustered {
 		constants.clusters = gpu.read_index(r.lights.clusters)
@@ -413,14 +440,23 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	for v in 0 ..< sf.view_count {
 		c := constants
 		views[v].first_draw = u32(v * len(sf.items))
-		if v == 0 {
-			planes := frustum_planes(f.view_projection)
+		views[v].offset = constants.camera_offset
+		switch v {
+		case VIEW_CAMERA, VIEW_VIEW_MODEL:
+			if v == VIEW_VIEW_MODEL {
+				// The view model's instances are relative to the camera already.
+				c.view_projection, c.previous_view_projection = view_model, previous_view_model
+				c.camera_offset, c.previous_camera_offset = {}, {}
+				c.near = view_model_view(f.view).near
+				views[v].offset, views[v].flags = {}, VIEW_MODEL
+			}
+			planes := frustum_planes(c.view_projection)
 			copy(views[v].planes[:], planes[:])
-			// The camera's far plane is at infinity.
+			// The far plane is at infinity.
 			views[v].planes[5] = {0, 0, 0, 1}
-		} else {
-			c.view_projection = shadows.matrices[v - 1]
-			views[v].planes = shadows.planes[v - 1]
+		case:
+			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
+			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]
 			views[v].flags = VIEW_CASTERS
 		}
 		sf.view_constants[v], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
@@ -443,7 +479,6 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	sf.draws = import_buffer(g, s.draws)
 	sf.counts = import_buffer(g, s.counts)
 	cull := Cull_Constants {
-		camera_offset      = constants.camera_offset,
 		item_count         = u32(len(sf.items)),
 		items              = gpu.read_index(sf.item_upload.buffer),
 		items_offset       = sf.item_upload.offset,
@@ -532,6 +567,7 @@ add_items :: proc(
 	items: ^[dynamic]Cull_Item,
 	renderer: Mesh_Renderer,
 	slot: u32,
+	view_model: bool,
 ) -> ^Resident_Mesh {
 	mesh, ready := resident_mesh(&r.residency, renderer.mesh)
 	if !ready {
@@ -559,8 +595,9 @@ add_items :: proc(
 		if !ok {
 			continue
 		}
-		flags: u32
-		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows {
+		// The view model casts no shadows: its pose is not its place in the world.
+		flags: u32 = view_model ? ITEM_VIEW_MODEL : 0
+		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows && !view_model {
 			flags |= ITEM_CASTS_SHADOWS
 		}
 		b := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
@@ -633,9 +670,10 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(sf.view_count), 1})
 }
 
-// draw_scene_view draws each bin of a view with one indirect draw, with its material's pipeline for a pass: view 0 is
-// the camera, and the shadow views follow. A bin whose pipeline is not compiled yet draws nothing. The forward pass
-// pushes the frame's shadow textures.
+// draw_scene_view draws each bin of a view with one indirect draw, with its material's pipeline for a pass (see
+// VIEW_CAMERA). A bin whose pipeline is not compiled yet draws nothing. The forward pass pushes the frame's shadow
+// textures. The prepass and the forward pass draw with the view model's stencil bit as the reference: set for the view
+// model, clear for the world (see docs/rendering.md#view-model).
 @(private)
 draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass) {
 	sf := f.scene_frame
@@ -654,6 +692,9 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		if f.shadows.mask != 0 {
 			push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
 		}
+	}
+	if pass != .Depth {
+		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)
 	for pipeline_index, bin in sf.bin_pipelines {

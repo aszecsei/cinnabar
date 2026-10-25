@@ -14,10 +14,13 @@ Light_Record load_light(uint index) {
 	return cn_buffer(frame.lights).Load<Light_Record>(frame.lights_offset + index * sizeof(Light_Record));
 }
 
-// cluster_of is the cluster of a pixel: its tile of the screen, and the depth slice of its view depth, which slices
-// exponentially from the near plane.
-uint cluster_of(float4 position) {
-	uint2 tile = min(uint2(position.xy) / CLUSTER_TILE, uint2(frame.cluster_columns, frame.cluster_rows) - 1);
+// cluster_of is the cluster of a point: its tile of the screen as the camera's projection places it, and the depth
+// slice of its view depth, which slices exponentially from the near plane. The view model's pixels are elsewhere on the
+// screen than the camera's projection would place their points, so the tile comes from the point, not the pixel.
+uint cluster_of(float3 p, float4 position) {
+	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
+	float2 pixel = (clip.xy / max(clip.w, 1e-7) * float2(0.5, -0.5) + 0.5) * frame.screen_size;
+	uint2 tile = min(uint2(max(pixel, 0)) / CLUSTER_TILE, uint2(frame.cluster_columns, frame.cluster_rows) - 1);
 	float depth = frame.near / max(position.z, 1e-7);
 	uint slice = uint(clamp(log2(depth) * frame.slice_scale + frame.slice_bias, 0, CLUSTER_SLICES - 1));
 	return (slice * frame.cluster_rows + tile.y) * frame.cluster_columns + tile.x;
@@ -128,7 +131,7 @@ float3 direct_light(Surface s, Shading_Point p, float3 normal, float4 position) 
 	if (frame.clustered == 0) {
 		return color;
 	}
-	uint2 range = cn_buffer(frame.clusters).Load2(cluster_of(position) * 8);
+	uint2 range = cn_buffer(frame.clusters).Load2(cluster_of(p.position, position) * 8);
 	ByteAddressBuffer indices = cn_buffer(frame.cluster_indices);
 	for (uint j = 0; j < range.y; j++) {
 		uint index = indices.Load((range.x + j) * 4);

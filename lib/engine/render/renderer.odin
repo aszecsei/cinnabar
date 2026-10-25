@@ -14,11 +14,19 @@ import "cinnabar:engine/ecs"
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 // Each pixel holds entity_id of the entity drawn there, or 0. The editor picks from it.
 ID_FORMAT :: gpu.Format.R32_Uint
-DEPTH_FORMAT :: gpu.Format.D32_Float
+// The scene's depth has a stencil, whose bit VIEW_MODEL_STENCIL marks the view model's pixels.
+DEPTH_FORMAT :: gpu.Format.D32_Float_S8_Uint
+VIEW_MODEL_STENCIL :: 1
 UI_FORMAT :: gpu.Format.RGBA8_Unorm
 DEBUG_FORMAT :: gpu.Format.RGBA8_Unorm_Srgb
 // The world pass's color targets, which a game's pipelines that draw in it use.
 WORLD_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT}, {format = ID_FORMAT}}
+// The stencil test of a game's pipelines that draw in the world pass, so they never cover the view model, as the
+// renderer's draws never do (see docs/rendering.md#view-model).
+WORLD_STENCIL :: gpu.Stencil_State {
+	compare   = .Equal,
+	read_mask = VIEW_MODEL_STENCIL,
+}
 
 // Debug lines are this many pixels wide, and the part that the scene hides draws with this alpha.
 DEBUG_LINE_WIDTH :: 2
@@ -50,6 +58,8 @@ Renderer :: struct {
 	output_pipeline: Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
 	debug_hidden:    Shader_Pipeline,
+	// Tested lines where the view model is, whose depth they cannot compare with.
+	debug_behind:    Shader_Pipeline,
 	debug_overlay:   Shader_Pipeline,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
@@ -159,6 +169,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.output_pipeline = shader_pipeline(OUTPUT_SHADER)
 	r.debug_tested = shader_pipeline(DEBUG_SHADER)
 	r.debug_hidden = shader_pipeline(DEBUG_SHADER)
+	r.debug_behind = shader_pipeline(DEBUG_SHADER)
 	r.debug_overlay = shader_pipeline(DEBUG_SHADER)
 	residency_init(&r.residency, platform, assets)
 	debug.init(&r.debug, platform.heap_allocator)
@@ -172,7 +183,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 // mesh_extractor selects the entities with a Mesh_Renderer.
 @(private = "file")
 mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
-	return extractor(w, {ecs.read(w, Mesh_Renderer)})
+	return extractor(w, {ecs.read(w, Mesh_Renderer), ecs.optional(ecs.read(w, View_Model))})
 }
 
 // renderer_reload keeps the renderer after a code reload, and makes its registrations again.
@@ -193,7 +204,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	scene_destroy(&r.scene, r.platform)
 	lights_destroy(&r.lights, r.platform)
 	shadows_destroy(&r.shadows, r.platform)
-	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_overlay}) {
+	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
@@ -233,8 +244,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
 	}
+	// The view model first, which sets its stencil bit, then the world, which draws only where the bit is clear.
 	p := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
-		draw_scene_view((^Frame)(ctx.data), ctx.cb, 0, .Prepass)
+		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_VIEW_MODEL, .Prepass)
+		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass)
 	}, f)
 	color(&g, p, f.normals, .Clear)
 	color(&g, p, f.velocity, .Clear)
@@ -314,10 +327,16 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
 		depth_format = DEPTH_FORMAT,
 	}
+	// Tested lines compare depth only with the world's pixels. The view model always hides them, as it hides the world.
+	debug_desc.stencil = WORLD_STENCIL
 	debug_desc.depth_compare, debug_desc.label = .Greater_Equal, "debug lines"
 	sync_graphics_pipeline(&r.debug_tested, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
 	debug_desc.depth_compare, debug_desc.label = .Less, "debug lines (hidden)"
 	sync_graphics_pipeline(&r.debug_hidden, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	debug_desc.stencil.compare = .Not_Equal
+	debug_desc.depth_compare, debug_desc.label = .Always, "debug lines (behind the view model)"
+	sync_graphics_pipeline(&r.debug_behind, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
+	debug_desc.stencil = {}
 	debug_desc.depth_compare, debug_desc.label = .Always, "debug lines (overlay)"
 	sync_graphics_pipeline(&r.debug_overlay, r.platform, assets, {.Vertex, .Pixel}, debug_desc, force)
 }
@@ -332,7 +351,8 @@ OUTPUT_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 draw_world :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	if ctx.piece == 0 {
-		draw_scene_view(f, ctx.cb, 0, .Forward)
+		draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Forward)
+		draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Forward)
 	}
 	if f.hooks.world_draw != nil {
 		f.hooks.world_draw(f, ctx)
@@ -395,6 +415,7 @@ draw_debug_lines :: proc(ctx: ^Pass_Context) {
 		gpu.cmd_draw(cb, u32(count * 6))
 	}
 	draw(ctx.cb, r.debug_hidden.pipeline, &push, 0, f.tested_lines, DEBUG_HIDDEN_ALPHA)
+	draw(ctx.cb, r.debug_behind.pipeline, &push, 0, f.tested_lines, DEBUG_HIDDEN_ALPHA)
 	draw(ctx.cb, r.debug_tested.pipeline, &push, 0, f.tested_lines, 1)
 	draw(ctx.cb, r.debug_overlay.pipeline, &push, f.tested_lines, f.overlay_lines, 1)
 }

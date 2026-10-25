@@ -1,12 +1,12 @@
-// Culls the frame's draw items against each view's frustum: the camera's, then each shadow view's (see
-// docs/rendering.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is its
-// own index, and the draw record at that index, which the material's vertex shader reads. A dispatch row is a view.
+// Culls the frame's draw items against each view's frustum: the camera's, the view model's, then each shadow view's
+// (see docs/rendering.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is
+// its own index, and the draw record at that index, which the material's vertex shader reads. A dispatch row is a
+// view.
 #include "cinnabar.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
 // upload ring, at these offsets of its buffer.
 struct Cull_Constants {
-	float4 camera_offset;
 	uint item_count;
 	uint items;
 	uint items_offset;
@@ -19,15 +19,19 @@ struct Cull_Constants {
 	uint views;
 	uint views_offset;
 	uint bin_count;
+	uint3 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
-// Matches Cull_View in lib/engine/render/scene.odin. The planes are relative to the camera, which is camera_offset
-// from the render origin: a point is inside when dot(plane.xyz, p) + plane.w >= 0 for every one. A view's draws start
-// at first_draw. A shadow view draws only the items that cast shadows.
+// Matches Cull_View in lib/engine/render/scene.odin. The planes are relative to the camera, which is offset from the
+// space of the view's instances: a point is inside when dot(plane.xyz, p) + plane.w >= 0 for every one. A view's draws
+// start at first_draw. A shadow view draws only the items that cast shadows. The view model's view draws only the view
+// model's items, which are relative to the camera, and every other view leaves them out.
 static const uint VIEW_CASTERS = 1;
+static const uint VIEW_MODEL = 2;
 struct Cull_View {
 	float4 planes[6];
+	float4 offset;
 	uint first_draw;
 	uint flags;
 	uint2 padding;
@@ -36,6 +40,7 @@ struct Cull_View {
 // Matches Cull_Item in lib/engine/render/scene.odin: one submesh of one instance, its bin, and its bounding sphere in
 // the mesh's space.
 static const uint ITEM_CASTS_SHADOWS = 1;
+static const uint ITEM_VIEW_MODEL = 2;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -67,9 +72,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if ((view.flags & VIEW_CASTERS) != 0 && (item.flags & ITEM_CASTS_SHADOWS) == 0) {
 		return;
 	}
+	if (((view.flags & VIEW_MODEL) != 0) != ((item.flags & ITEM_VIEW_MODEL) != 0)) {
+		return;
+	}
 	Instance_Record instance = cn_buffer(cull.instances).Load<Instance_Record>(item.instance * sizeof(Instance_Record));
 	float4 center = float4(item.sphere.xyz, 1);
-	float3 p = float3(dot(instance.rows[0], center), dot(instance.rows[1], center), dot(instance.rows[2], center)) - cull.camera_offset.xyz;
+	float3 p = float3(dot(instance.rows[0], center), dot(instance.rows[1], center), dot(instance.rows[2], center)) - view.offset.xyz;
 	// The largest scale of the rows scales the radius.
 	float scale = sqrt(max(dot(instance.rows[0].xyz, instance.rows[0].xyz), max(dot(instance.rows[1].xyz, instance.rows[1].xyz), dot(instance.rows[2].xyz, instance.rows[2].xyz))));
 	float radius = item.sphere.w * scale;

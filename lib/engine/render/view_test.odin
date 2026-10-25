@@ -44,3 +44,14 @@ views_turn_with_their_rotation :: proc(t: ^testing.T) {
 	testing.expect(t, abs(ahead.x) < 1e-6 && ahead.z > 0)
 	testing.expect(t, project(m, {4, 0, 2}).x < 0)
 }
+
+@(test)
+the_view_model_takes_the_views_projection_unless_it_has_its_own :: proc(t: ^testing.T) {
+	view := View{rotation = 1, vertical_fov = 1.2, near = 0.05}
+	testing.expect_value(t, view_model_view(view), view)
+	view.view_model_fov, view.view_model_near = 0.9, 0.01
+	own := view_model_view(view)
+	testing.expect_value(t, own.vertical_fov, 0.9)
+	testing.expect_value(t, own.near, 0.01)
+	testing.expect_value(t, own.rotation, view.rotation)
+}

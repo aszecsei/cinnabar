@@ -15,6 +15,7 @@ import "cinnabar:engine/ecs"
 // The atlas is square. Cascades take cells of SHADOW_CELL pixels; spot lights and point lights' faces take slots of
 // SHADOW_SLOT, four to a cell.
 SHADOW_ATLAS_SIZE :: 4096
+SHADOW_FORMAT :: gpu.Format.D32_Float
 SHADOW_CELL :: 1024
 SHADOW_SLOT :: 512
 SHADOW_CASCADES :: 4
@@ -59,6 +60,7 @@ Mask_Constants :: struct {
 	up:            [4]f32,
 	forward:       [4]f32,
 	projection:    [4]f32,
+	view_model:    [4]f32,
 	camera_offset: [4]f32,
 	light_index:   [4]u32,
 	depth:         u32,
@@ -68,6 +70,8 @@ Mask_Constants :: struct {
 	lights:        u32,
 	lights_offset: u32,
 	size:          [2]u32,
+	stencil:       u32,
+	padding:       [3]u32,
 }
 
 // Shadows is the shadows' state between frames, in the Renderer.
@@ -395,7 +399,7 @@ add_shadow_passes :: proc(f: ^Frame) {
 	sf := f.shadows
 	g := f.graph
 	if len(sf.views) > 0 {
-		sf.atlas = create_texture(g, {size = SHADOW_ATLAS_SIZE, format = DEPTH_FORMAT, label = "shadow atlas"})
+		sf.atlas = create_texture(g, {size = SHADOW_ATLAS_SIZE, format = SHADOW_FORMAT, label = "shadow atlas"})
 		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = len(sf.views))
 		depth(g, p, sf.atlas, .Clear)
 		declare_scene_draws(f, p)
@@ -453,8 +457,7 @@ draw_shadow_maps :: proc(ctx: ^Pass_Context) {
 	viewport := f.shadows.viewports[ctx.piece]
 	gpu.cmd_set_viewport(ctx.cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
 	gpu.cmd_set_scissor(ctx.cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
-	// The camera is view 0 of the culling, and the shadow views follow it.
-	draw_scene_view(f, ctx.cb, ctx.piece + 1, .Depth)
+	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + ctx.piece, .Depth)
 }
 
 @(private = "file")
@@ -468,12 +471,15 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 	}
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)
+	view_model := view_model_view(f.view)
+	view_model_scale := projection_scale(view_projection(view_model, f32(f.size.x) / f32(max(f.size.y, 1))))
 	offset := ecs.position_sub(f.view.position, f.renderer.scene.origin)
 	constants := Mask_Constants {
 		right         = {right.x, right.y, right.z, 0},
 		up            = {up.x, up.y, up.z, 0},
 		forward       = {forward.x, forward.y, forward.z, 0},
 		projection    = {scale.x, scale.y, f.view.near, 0},
+		view_model    = {view_model_scale.x, view_model_scale.y, view_model.near, 0},
 		camera_offset = {offset.x, offset.y, offset.z, 0},
 		light_index   = {max(u32), max(u32), max(u32), max(u32)},
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),
@@ -483,6 +489,7 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 		lights        = gpu.read_index(f.lights.upload.buffer),
 		lights_offset = f.lights.upload.offset,
 		size          = f.size,
+		stencil       = gpu.stencil_index(gpu_texture(g, f.depth)),
 	}
 	for c in 0 ..< sf.mask_count {
 		constants.light_index[c] = sf.mask_lights[c]

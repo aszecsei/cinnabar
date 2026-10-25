@@ -217,11 +217,29 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 	cull: gpu.Cull_Mode = two_sided ? .None : .Back
 	label := format.blob_string(data, blob.source_path)
 	descs := [format.Material_Pass]gpu.Graphics_Pipeline_Desc {
-		// The prepass wrote this depth, so the forward pass shades each pixel once.
-		.Forward = {colors = WORLD_COLORS, depth_format = DEPTH_FORMAT, depth_compare = .Equal, cull = cull, label = label},
-		.Prepass = {colors = PREPASS_COLORS, depth_format = DEPTH_FORMAT, depth_compare = .Greater, depth_write = true, cull = cull, label = label},
-		.Depth = {
+		// The prepass wrote this depth, so the forward pass shades each pixel once, where the stencil bit is the
+		// reference's.
+		.Forward = {
+			colors = WORLD_COLORS,
 			depth_format = DEPTH_FORMAT,
+			depth_compare = .Equal,
+			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL},
+			cull = cull,
+			label = label,
+		},
+		// The view model draws with the bit as its reference, which passes everywhere and sets it. The world draws with
+		// 0, which passes only where the bit is clear (see docs/rendering.md#view-model).
+		.Prepass = {
+			colors = PREPASS_COLORS,
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_write = true,
+			stencil = {compare = .Greater_Equal, pass = .Replace, read_mask = VIEW_MODEL_STENCIL, write_mask = VIEW_MODEL_STENCIL},
+			cull = cull,
+			label = label,
+		},
+		.Depth = {
+			depth_format = SHADOW_FORMAT,
 			depth_compare = .Greater,
 			depth_write = true,
 			depth_bias = SHADOW_DEPTH_BIAS,

@@ -11,6 +11,7 @@ MESH_RENDERER_ID :: ecs.Component_Id(33)
 DIRECTIONAL_LIGHT_ID :: ecs.Component_Id(34)
 POINT_LIGHT_ID :: ecs.Component_Id(35)
 SPOT_LIGHT_ID :: ecs.Component_Id(36)
+VIEW_MODEL_ID :: ecs.Component_Id(37)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -22,8 +23,16 @@ Camera :: struct {
 	// In radians.
 	vertical_fov: f32 `editor:"range=0.1,3"`,
 	// In meters. The far plane is at infinity.
-	near:         f32 `editor:"range=0.001,10"`,
+	near:            f32 `editor:"range=0.001,10"`,
+	// The view model's projection, in radians and meters (see View_Model). 0 means the camera's own.
+	view_model_fov:  f32 `editor:"range=0,3"`,
+	view_model_near: f32 `editor:"range=0,10"`,
 }
+
+// View_Model marks an entity of the first-person view model: it draws with the camera's view model projection, over
+// the world, which never covers it, and it casts no shadows (see docs/rendering.md#view-model). Its pose is in the
+// world, usually as a child of the camera.
+View_Model :: struct {}
 
 // Mesh_Renderer draws a mesh asset at its entity's Transform, each of its first submeshes with the material or
 // instance in its slot, or the default material without one.
@@ -72,6 +81,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Directional_Light, DIRECTIONAL_LIGHT_ID)
 	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)
 	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
+	ecs.register_component(r, View_Model, VIEW_MODEL_ID)
 }
 
 // camera_view is the view from a Camera entity: its presented pose, and its field of view and near plane. It fails if
@@ -87,6 +97,8 @@ camera_view :: proc(w: ^ecs.World, entity: ecs.Entity) -> (view: View, ok: bool)
 			rotation = pose.rotation,
 			vertical_fov = camera.vertical_fov > 0 ? camera.vertical_fov : DEFAULT_VERTICAL_FOV,
 			near = camera.near > 0 ? camera.near : DEFAULT_NEAR,
+			view_model_fov = camera.view_model_fov,
+			view_model_near = camera.view_model_near,
 		},
 		true
 }

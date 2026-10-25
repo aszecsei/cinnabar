@@ -14,7 +14,19 @@ View :: struct {
 	// Vertical, in radians.
 	vertical_fov: f32,
 	// The near plane's distance in meters. The far plane is at infinity.
-	near:         f32,
+	near:           f32,
+	// The view model's projection (see docs/rendering.md#view-model): its vertical field of view and its near plane.
+	// 0 in either means the view's own.
+	view_model_fov:  f32,
+	view_model_near: f32,
+}
+
+// view_model_view is the view that the view model draws with: the view's pose, with the view model's projection.
+view_model_view :: proc(view: View) -> View {
+	v := view
+	v.vertical_fov = view.view_model_fov > 0 ? view.view_model_fov : view.vertical_fov
+	v.near = view.view_model_near > 0 ? view.view_model_near : view.near
+	return v
 }
 
 // view_projection maps a position relative to the view's position, as extract and pose_rows give them, to clip

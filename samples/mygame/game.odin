@@ -935,6 +935,7 @@ sync_pipelines :: proc(s: ^Game_State, force := false) {
 SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors        = render.WORLD_COLORS,
 	depth_format  = render.DEPTH_FORMAT,
+	stencil       = render.WORLD_STENCIL,
 	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "scene",
@@ -943,6 +944,7 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors        = render.WORLD_COLORS,
 	depth_format  = render.DEPTH_FORMAT,
+	stencil       = render.WORLD_STENCIL,
 	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "objects",
@@ -951,6 +953,7 @@ OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors        = render.WORLD_COLORS,
 	depth_format  = render.DEPTH_FORMAT,
+	stencil       = render.WORLD_STENCIL,
 	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "objects (mesh)",

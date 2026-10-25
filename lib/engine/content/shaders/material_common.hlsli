@@ -7,11 +7,14 @@
 
 // Matches Frame_Constants in lib/engine/render/scene.odin. Positions in the GPU scene are relative to the render
 // origin, and the view's are relative to the camera, which is camera_offset from the origin. A shadow view's copy has
-// its own view_projection, which also takes positions relative to the camera.
+// its own view_projection, which also takes positions relative to the camera. The view model's copy has its projection,
+// and offsets of 0, because its instances are relative to the camera already.
 struct Frame_Constants {
 	float4x4 view_projection;
 	// Last frame's, and last frame's camera relative to this frame's origin, for the velocities.
 	float4x4 previous_view_projection;
+	// The camera's projection, whose screen tiles the clusters are, in every view's copy.
+	float4x4 cluster_view_projection;
 	float4 camera_offset;
 	float4 previous_camera_offset;
 	// The ambient light from above and from below, until global illumination.
@@ -47,7 +50,8 @@ struct Frame_Constants {
 	uint shadow_views_offset;
 	// Whether the clusters were made this frame; without them, the punctual lights are left out.
 	uint clustered;
-	uint2 padding;
+	// The frame's size in pixels.
+	float2 screen_size;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

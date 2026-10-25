@@ -162,7 +162,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == "Renamed"));
         Assert.Equal(
-            ["Box", "Camera", "Child", "Ground", "Icosphere", "Point Light", "Renamed", "Spot Light", "Sun"],
+            ["Box", "Camera", "Child", "Ground", "Icosphere", "Point Light", "Renamed", "Spot Light", "Sun", "View Model Rod"],
             loaded.Entities.Select(e => e.Name).Order(StringComparer.Ordinal));
         var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
         Assert.Equal(front.Id, renamed.SceneId);
@@ -213,9 +213,14 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.Equal(0x37e9612990eb05d0UL, hit.SceneId);
         Assert.InRange(center.Depth, 1.35f, 1.45f);
 
-        // A box over the whole frame finds both triangles, both meshes and the ground, and nothing at the edge finds
-        // nothing. A mesh draws once its buffers have streamed in, so the box is picked again until the meshes are there.
-        ulong[] everything = [0x324276ba1ddc48f7UL, 0x37e9612990eb05d0UL, 0x5d3a8e17c9b04f62UL, 0x8c15900f0aab4d79UL, 0xa41c6f0e2b7d9358UL];
+        // A box over the whole frame finds both triangles, both meshes, the ground and the view model's rod, and nothing
+        // at the edge finds nothing. A mesh draws once its buffers have streamed in, so the box is picked again until
+        // the meshes are there.
+        ulong[] everything =
+        [
+            0x324276ba1ddc48f7UL, 0x37e9612990eb05d0UL, 0x5d3a8e17c9b04f62UL, 0x8c15900f0aab4d79UL, 0xa41c6f0e2b7d9358UL,
+            0xfd425e3c5dd24547UL,
+        ];
         ulong[] found = [];
         for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(everything); attempt++)
         {
@@ -295,7 +300,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         editor.Link.Send(new RunGameCommand("mygame.world_report"));
         var report = await editor.Next<GameCommandResult>(r => r.Id == "mygame.world_report");
-        Assert.Contains("9 entities", report.Message);
+        Assert.Contains("10 entities", report.Message);
         Assert.Empty(report.Operations);
 
         // A command that edits sends operations by scene ID, and leaves the world as it is.

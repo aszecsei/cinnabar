@@ -5,12 +5,15 @@
 
 // Matches Mask_Constants in lib/engine/render/shadows.odin. The view's axes and its projection rebuild each pixel's
 // position relative to the camera from its depth; camera_offset moves it into the acceleration structure's space, which
-// is the render origin's. light_index holds the light of each channel, or ~0.
+// is the render origin's. A pixel with the view model's stencil bit uses the view model's projection. light_index holds
+// the light of each channel, or ~0.
 struct Mask_Constants {
 	float4 right;
 	float4 up;
 	float4 forward;
+	// The x and y scales and the near plane of the camera's projection, and of the view model's.
 	float4 projection;
+	float4 view_model_projection;
 	float4 camera_offset;
 	uint4 light_index;
 	uint depth;
@@ -20,6 +23,8 @@ struct Mask_Constants {
 	uint lights;
 	uint lights_offset;
 	uint2 size;
+	uint stencil;
+	uint3 padding;
 };
 CN_PASS_CONSTANTS(Mask_Constants, constants);
 
@@ -38,6 +43,8 @@ struct Light_Record {
 };
 
 static const uint LIGHT_DIRECTIONAL = 0;
+// Matches VIEW_MODEL_STENCIL in lib/engine/render/renderer.odin.
+static const uint VIEW_MODEL_STENCIL = 1;
 // Directional rays stop this far away, in meters.
 static const float DIRECTIONAL_DISTANCE = 10000;
 
@@ -59,9 +66,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float4 result = 1;
 	if (depth > 0) {
 		// The pixel's position relative to the camera, from its view depth.
-		float z = constants.projection.z / depth;
+		bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(id.xy, 0)).g & VIEW_MODEL_STENCIL) != 0;
+		float3 projection = view_model ? constants.view_model_projection.xyz : constants.projection.xyz;
+		float z = projection.z / depth;
 		float2 ndc = float2((id.x + 0.5) / constants.size.x * 2 - 1, 1 - (id.y + 0.5) / constants.size.y * 2);
-		float2 xy = ndc / constants.projection.xy * z;
+		float2 xy = ndc / projection.xy * z;
 		float3 p = constants.right.xyz * xy.x + constants.up.xyz * xy.y + constants.forward.xyz * z;
 		float3 normal = octahedral(cn_texture(constants.normals).Load(int3(id.xy, 0)).xy);
 		// The ray starts off the surface by an amount that grows with the distance, as depth's precision falls.
