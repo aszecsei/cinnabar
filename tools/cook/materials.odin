@@ -2,7 +2,7 @@
 // .shading declaration of its surface inputs, with its implementation in the .hlsli beside it. A material picks a
 // shading model, declares its parameters and static switches, and defines evaluate in HLSL after a `---` line. The
 // cooker generates a source for each combination of switches that the material or an instance uses, and compiles
-// each with the engine's forward template. An instance names its parent and overrides values; its blob holds the
+// each with the engine's templates of every pass. An instance names its parent and overrides values; its blob holds the
 // values resolved through every parent.
 package cook
 
@@ -18,7 +18,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 1"
+MATERIAL_COOK_VERSION :: "materials 2"
 
 Shading_Input :: struct {
 	name:    string,
@@ -695,8 +695,9 @@ hlsl_type :: proc(type: format.Material_Param_Type) -> string {
 }
 
 // generate_source is the HLSL of one variant: the settings and switches as defines, the shading model's Surface and
-// its implementation, the Params struct, the material's evaluate, and the forward template. A #line before evaluate
-// makes DXC's messages name the material's own lines.
+// its implementation, the Params struct, the material's evaluate, and the templates of every pass, which compile by
+// their entry points (see material_passes.hlsli). A #line before evaluate makes DXC's messages name the material's
+// own lines.
 @(private = "file")
 generate_source :: proc(a: Asset_Source, decl: ^Material_Decl, shading: ^Shading_Decl, switches: u32) -> string {
 	b := strings.builder_make(context.temp_allocator)
@@ -737,8 +738,33 @@ generate_source :: proc(a: Asset_Source, decl: ^Material_Decl, shading: ^Shading
 	strings.write_string(&b, "};\nstatic Params params;\n\n")
 	fmt.sbprintfln(&b, "#line %d \"%s\"", decl.body_line, a.path)
 	strings.write_string(&b, decl.body)
-	strings.write_string(&b, "\n#include \"material_forward.hlsli\"\n")
+	strings.write_string(&b, "\n#include \"material_passes.hlsli\"\n")
 	return strings.to_string(b)
+}
+
+@(private = "file")
+Material_Entry :: struct {
+	pass:   format.Material_Pass,
+	target: Target,
+}
+
+// material_entries are the entry points that each variant compiles, the forward pass's first. A masked material's
+// depth pass discards in a pixel shader; an opaque one's has none.
+@(private = "file")
+material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
+	entries := make([dynamic]Material_Entry, context.temp_allocator)
+	append(
+		&entries,
+		Material_Entry{.Forward, {.Vertex, "vs_" + SHADER_MODEL, "vs_forward"}},
+		Material_Entry{.Forward, {.Pixel, "ps_" + SHADER_MODEL, "ps_forward"}},
+		Material_Entry{.Prepass, {.Vertex, "vs_" + SHADER_MODEL, "vs_prepass"}},
+		Material_Entry{.Prepass, {.Pixel, "ps_" + SHADER_MODEL, "ps_prepass"}},
+		Material_Entry{.Depth, {.Vertex, "vs_" + SHADER_MODEL, "vs_depth"}},
+	)
+	if decl.blend == .Masked {
+		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
+	}
+	return entries[:]
 }
 
 // cook_material generates and compiles the material's variants, and writes its blob if its key changed.
@@ -795,14 +821,15 @@ cook_material :: proc(
 			report_error(problems, a.path, 0, 0, "cannot write %s: %v", paths[i], err)
 			return false
 		}
-		for target in ([2]Target{{.Vertex, "vs_" + SHADER_MODEL, "vs_main"}, {.Pixel, "ps_" + SHADER_MODEL, "ps_main"}}) {
-			temporary := fmt.tprintf("%s.%v.dxil.tmp", paths[i], target.stage)
-			code, code_ok := compile_file(options, paths[i], target, temporary, problems, a.path)
+		// The forward pass first: an error in evaluate fails it, and the other passes would only fail the same way.
+		variant: for entry in material_entries(decl) {
+			temporary := fmt.tprintf("%s.%v.%v.dxil.tmp", paths[i], entry.pass, entry.target.stage)
+			code, code_ok := compile_file(options, paths[i], entry.target, temporary, problems, a.path)
 			if !code_ok {
 				compiled = false
-				continue
+				break variant
 			}
-			append(&entries, format.Material_Variant_Entry{mask, .Forward, target.stage, code})
+			append(&entries, format.Material_Variant_Entry{mask, entry.pass, entry.target.stage, code})
 		}
 	}
 	if !compiled {

@@ -54,20 +54,22 @@ flowchart TB
 
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
-- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor and its pipelines, and later the material table, the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
-- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the sun and the ambient light until phase 3's lights (`Sun`, `DEFAULT_SUN` when zero), and the hooks.
+- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the shadows' acceleration structure, and later the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the ambient light until global illumination (`Ambient`, `DEFAULT_AMBIENT` when zero), and the hooks. The lights are components (see [Lights and clusters](#lights-and-clusters)).
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
 
 | Hook | When | What it does |
 |---|---|---|
-| `before_world` | Before the world pass | Adds passes, such as culling on the compute queue |
+| `before_world` | Before the prepass | Adds passes, such as culling on the compute queue |
+| `after_prepass` | After the prepass | Adds passes that read `Frame.depth`, `Frame.normals` and `Frame.velocity` |
 | `world_uses` | When the world pass is declared | Declares what `world_draw` reads |
-| `world_draw` | In the world pass, `world_pieces` pieces, after the meshes in piece 0 | Records draws into the world's targets |
+| `world_draw` | In the world pass, the forward pass, `world_pieces` pieces, after the meshes in piece 0 | Records draws into the world's targets |
 | `after_world` | After the world pass | Adds passes, such as post effects; a pass that makes a new scene color sets `Frame.scene` to it |
 | `ui` | After a pass that clears the UI target | Adds passes that draw the UI; they load it |
 | `debug` | After the debug lines | Adds passes that draw into the debug layer, such as the editor's tools |
 
-- The hooks are procedures in the game DLL, so they are never stored in `Game_State`. *Later phases add hooks at their own points: after the prepass (phase 3) and before post (phase 6).*
+- The hooks are procedures in the game DLL, so they are never stored in `Game_State`. *Phase 6 adds a hook before post.*
+- **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals or velocities, no shadows from the renderer and no clusters' lights unless their shaders read them.
 - **Missing shaders:** a pass whose pipeline does not exist yet, because its shader is not cooked, records nothing, so the frame still validates.
 
 ### Views
@@ -86,9 +88,10 @@ The GPU scene holds every instance's record in a persistent buffer, `Gpu_Scene` 
 - **Camera-relative records.** The view model and the debug shapes are not in the GPU scene. Extraction writes them relative to the camera every frame, as it does now (see [World](world.md#render-extraction)). The view model is within a meter of the camera, where the render origin's error would show as about a pixel of jitter at the near plane.
 - **Updates.** Every frame writes every slot, relative to the render origin, into the upload ring, and a copy moves them into the persistent buffer: 112 bytes per instance with both poses. Last frame's pose is the slot's presented pose of the frame before, or this frame's for a new slot. Every GPU-side consumer has its final layout. *Later, extraction writes only the slots that changed (see [Future work](#future-work)).*
 - **Draw items** are one per submesh of each visible `Mesh_Renderer` whose mesh is resident: its slot, its mesh's record, its indices, its material's block, its bin, and its submesh's bounding sphere. Hidden entities (`Frame_Desc.hidden`) keep their slots but have no items.
-- **Culling** is a compute pass, `cull_draws.hlsl`: each item's sphere, moved by its instance's rows, against the view's frustum, whose far plane is at infinity. A visible item takes the next place in its bin with an atomic add, and writes there both its indirect draw, whose draw ID is that place, and its draw record. *Occlusion culling, and culling on the compute queue, come later.*
-- **Drawing:** the world pass draws each bin with one `cmd_draw_indirect` and the bin's count. The vertex shader reads its draw record by its draw ID, and pulls its index from the mesh's index buffer, then its vertex: every mesh has buffers of its own, so no one index buffer could be bound for a bin. *The mesh shader path draws meshlets instead, later.*
-- **The frame's constants** (`Frame_Constants`, the pass constants of every material pass) hold the view's projection, the camera's offset from the origin, the sun and the ambient light, the records' bindless indices, and the offsets in the upload ring of the mesh records and the material table.
+- **Culling** is a compute pass, `cull_draws.hlsl`, with a row of the dispatch for each view: the camera, then each shadow view (see [Shadows](#shadows)). It tests each item's sphere, moved by its instance's rows, against the view's six planes; the camera's far plane is at infinity, and a shadow view takes only the items that cast shadows (the `Mesh_Renderer`'s `cast_shadows` and the material's). A visible item takes the next place in its bin of that view with an atomic add, and writes there both its indirect draw, whose draw ID is that place, and its draw record. Each view has room for every item, and each bin has the same range in every view. *Occlusion culling, and culling on the compute queue, come later.*
+- **Drawing:** the prepass, the shadow maps and the forward pass each draw a bin of their view with one `cmd_draw_indirect` and the bin's count, with the bin's material's pipeline for their pass. The vertex shader reads its draw record by its draw ID, and pulls its index from the mesh's index buffer, then its vertex: every mesh has buffers of its own, so no one index buffer could be bound for a bin. *The mesh shader path draws meshlets instead, later.*
+- **The frame's constants** (`Frame_Constants`, the pass constants of every material pass) hold the view's projection and last frame's, the camera's offset from the origin and last frame's camera's, the ambient light, the cascades' splits, the records' bindless indices and their offsets in the upload ring (mesh records, material table, lights, shadow views), and the clusters' grid. Each shadow view has a copy with its own projection, which takes positions relative to the camera too, so the depth pass places vertices with the same code. The forward pass pushes the shadow atlas and the shadow mask (`Material_Push`), which exist only once the frame records.
+- **The acceleration structure.** With `Ray_Query`, each instance whose `Mesh_Renderer` casts shadows is an instance of the GPU scene's top-level acceleration structure, in the render origin's space, with its slot as its ID. It is built again every frame that traces shadows.
 
 ## Layers
 
@@ -154,15 +157,19 @@ Forward shading with a prepass is the default and only path at first.
 
 ### Prepass
 
-- Writes depth, the stencil bits, the normal (octahedral, `RG16_Float`), the velocity (`RG16_Float`) and, while an editor is linked, the entity IDs (see [Editor](editor.md#viewport)). The forward pass no longer writes IDs.
-- The normal is the material's normal, normal maps included. The material compiler keeps only the graph nodes that the normal, the opacity mask and the vertex offset need (see [Permutations](#permutations)).
-- Opaque materials with no vertex offset and no mask share one prepass pipeline for depth, and one with normals for each normal source. Most draws therefore use a few pipelines.
-- **Occlusion culling** is two-phase: draw what was visible last frame, build a depth pyramid, then test everything else against it and draw what passes.
+- Writes depth, the normal in the world (folded into the octahedron, `NORMAL_FORMAT`, `RG16_Float`) and the velocity: how far the surface moved on the screen since last frame, in UV (`VELOCITY_FORMAT`, `RG16_Float`), from the instance's last pose and last frame's camera and projection. *The stencil bits come with the view model (phase 4).*
+- **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
+- The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
+- The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
+- *Later:* opaque materials with no vertex offset and no mask share one prepass pipeline for depth, and one with normals for each normal source, so most draws use a few pipelines. That needs bins by pass, not only by material.
+- *Later:* **occlusion culling** is two-phase: draw what was visible last frame, build a depth pyramid, then test everything else against it and draw what passes.
 
 ### Lights and clusters
 
-- Light components: `Directional_Light`, `Point_Light`, `Spot_Light`, later area lights. Extraction writes them camera-relative into a light buffer each frame.
-- A compute pass assigns lights to clusters: a grid in screen tiles of 64 pixels and 32 exponential depth slices. Each cluster has an offset and a count into one index list.
+- **Light components:** `Directional_Light`, `Point_Light` and `Spot_Light` (see [Components](#components)), later area lights. Each frame, `extract_lights` writes them relative to the camera into the upload ring (`Light_Record`), the directional ones first, at most `MAX_LIGHTS` (1024), of which `MAX_DIRECTIONAL_LIGHTS` (4). The editor's hidden entities light nothing.
+- **A light's falloff:** its color times its intensity. A punctual light falls off with the square of the distance, windowed to 0 at its range: `saturate(1 - (d / range)^4)^2 / d^2`. A spot light's cone also falls off from 1 at its inner angle to 0 at its outer angle, squared.
+- **Clusters:** a compute pass (`cluster_lights.hlsl`) assigns the punctual lights to clusters: tiles of `CLUSTER_TILE` (64) pixels, in `CLUSTER_SLICES` (32) depth slices, exponential from the near plane to `CLUSTER_FAR` (500 m); the last slice reaches on to infinity. A thread for each cluster tests each light's sphere against the cluster's box in view space, so a spot light counts as its whole sphere. It takes room for its lights in one index list with an atomic add, and writes its offset and count. The list has room for `CLUSTER_AVERAGE_LIGHTS` (32) lights per cluster on average; a cluster that finds it full gets fewer. The clusters' buffers live in the `Renderer` and grow with the frame's size.
+- **The forward pass** finds its pixel's cluster from its position and its depth (`cluster_of`), and calls the shading model's `shade_direct` for each directional light, then for each light of its cluster, with the light's shadow (`material_lighting.hlsli`). Until the cluster pipeline exists, the forward pass leaves the punctual lights out.
 - The directional lights are not clustered. Every pixel loops over them.
 
 ### Shadows
@@ -172,10 +179,16 @@ Forward shading with a prepass is the default and only path at first.
 | Directional | A screen-space mask: a compute pass traces from the prepass depth | Cascaded shadow maps |
 | Spot, point | A mask for the few most important; maps for the rest | A shadow atlas |
 
-- A shadow mask is a screen-space texture with one channel for each traced light, at most four. The light records which channel it has, and the forward pass reads it. This is the sample's ray-traced shadow, made general.
-- The forward pass can also trace in the pixel shader with `RayQuery`, for transparent surfaces, which have no prepass depth.
-- The ray-tracing pipeline path stays the sample's alternative (see [GPU](gpu.md#ray-tracing)). Every ray-traced path has the shadow map fallback.
-- The shadow passes use each material's depth pipeline, so masked and offset materials cast the right shadows.
+- **Which lights:** the lights that cast shadows take them in order: the directional lights, then the punctual lights by how much light they bring to the view (their brightest channel over their squared distance), leaving out those whose spheres miss the view (`assign_shadows`). With `Ray_Query`, the first `MAX_MASK_LIGHTS` (4) take the mask's channels. The others take shadow maps while the atlas has room. Only one directional light has cascades; another without a mask channel has no shadow.
+- **The shadow mask** is a screen-space texture, `RGBA8_Unorm`, with one channel for each traced light. A compute pass (`shadow_mask.hlsl`) rebuilds each pixel's position from the prepass's depth, moves it off the surface along the prepass's normal, and traces one ray toward each light with `RayQuery`, accepting the first hit. A light records its channel, and the forward pass reads the channel at its pixel. The shadows are hard. This is the sample's ray-traced shadow, made general.
+- **Acceleration structures:** a mesh's bottom-level structure holds all its triangles, opaque, and the residency table creates it when the mesh becomes ready (see [GPU residency](#gpu-residency)). The frame that next traces builds it, then the top-level structure (see [GPU scene](#gpu-scene)).
+- **The atlas:** one `D32_Float` texture of `SHADOW_ATLAS_SIZE` (4096), a frame's transient. A cascade takes a cell of `SHADOW_CELL` (1024) pixels, from the first cells; a spot light takes a slot of `SHADOW_SLOT` (512), four to a cell, and a point light six slots, one for each face of its cube.
+- **Cascades:** four, which cover the view to `SHADOW_DISTANCE` (100 m), split between even and exponential by `SHADOW_SPLIT_LAMBDA` (0.75). Each is an orthographic view of the bounding sphere of its slice of the view's frustum. The sphere's radius is rounded up to sixteenths of a meter, and its center snaps to the cascade's texels in the render origin's space, so the shadow's edges stay still as the camera moves and turns. Depth is clamped, not clipped, and culling has no plane toward the light, so casters between the light and the view still cast.
+- **Spot and point lights:** a perspective view with reversed depth from `SHADOW_NEAR` (5 cm), as wide as the spot light's cone or 90° for each cube face, culled at the light's range.
+- **The depth pass:** the shadow maps are one render pass with a piece for each view, each with its own viewport of the atlas. Each draws its view's bins with each material's depth pipeline, so masked materials cast the right shadows. The pipelines have a depth bias and a slope bias against acne, `SHADOW_DEPTH_BIAS` and `SHADOW_SLOPE_BIAS`.
+- **Sampling:** the forward pass moves the point along its normal by one and a half texels of the view, projects it, and takes four bilinear comparisons a half texel apart with a comparison sampler, which filter a 3x3 neighbourhood. The taps stay inside the view's rectangle. A directional light picks the first cascade that reaches the pixel's depth; beyond the last, it casts no shadow. A point light picks the face of the direction from the light.
+- *Later:* the forward pass traces in the pixel shader with `RayQuery` for transparent surfaces, which have no prepass depth. Soft shadows from traced lights, with a denoiser. Cached shadow maps for static lights and casters.
+- The ray-tracing pipeline path stays the sample's alternative (see [GPU](gpu.md#ray-tracing)). Every ray-traced path has the shadow map fallback: a device without `Ray_Query`, and the lights after the mask's four, take shadow maps.
 
 ### Transparency
 
@@ -219,9 +232,8 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 
 - **The engine's:** `lib/engine/content/shading/lit` (GGX specular with Smith visibility and Schlick's Fresnel, Lambert diffuse, and Karis's fit of the environment BRDF for indirect specular) and `unlit` (its color, as it is).
 - **A tangent-space normal:** a shading model whose inputs include a `float3 normal` takes it in tangent space, as a normal map gives it, and the template maps it to the world before shading.
-- *Until phase 3,* the light loop is one directional light from `Frame_Desc` (`sun_direction`, `sun_color`), and the indirect light is the sky's color from above and the ground's from below (`sky_color`, `ground_color`). Shadows, when phase 3 brings them, multiply into `shade_direct`'s light.
-
-- The engine's forward template owns the light loop. For each light in the pixel's cluster and each directional light, it calls `shade_direct`. Then it calls `shade_indirect` with the GI and the ambient occlusion, and adds the emission. `Unlit` has `No_Lighting` and only emits.
+- The engine's forward template owns the light loop. For each directional light and each light in the pixel's cluster, it calls `shade_direct` with the light's color after its falloff and its shadow (see [Lights and clusters](#lights-and-clusters)). Then it calls `shade_indirect`, and adds the emission. `Unlit` has `No_Lighting` and only emits.
+- *Until global illumination,* the indirect light is the ambient light: the sky's color from above and the ground's from below (`Frame_Desc.ambient`). *Later,* `shade_indirect` gets the GI and the ambient occlusion.
 - The material graph's output node has one input for each surface input of its shading model. The cook link sends the shading models to the editor with the importers, so the editor shows the right inputs.
 - Fog, exposure and the shadow mask are applied by the template, not by shading models.
 
@@ -243,11 +255,11 @@ The cooker compiles each material for each pass and each vertex path:
 
 | Axis | Values |
 |---|---|
-| Pass | Depth (prepass and shadows), Prepass with normals, Forward |
-| Vertex path | Mesh shader, vertex fallback (see [GPU](gpu.md#mesh-shaders)); skinned later |
+| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps) |
+| Vertex path | Vertex pulling; the mesh shader path and skinning later (see [GPU](gpu.md#mesh-shaders)) |
 | Static switches | Each combination that the material or an instance uses |
 
-- For each pass, the cooker keeps only the nodes that the pass's outputs need. The depth pass of an opaque material without a vertex offset needs no material code at all, and uses the shared pipeline.
+- One generated source holds every pass, each by its entry points (see [Content pipeline](content-pipeline.md#materials)). DXC keeps only what each pass's outputs need: the depth pass of an opaque material has no pixel shader and no material code. *Later,* such materials share one depth pipeline.
 - The cooker names each shader by the hash of its generated HLSL, so identical permutations compile once and share a pipeline.
 
 ### Material instance
@@ -264,7 +276,7 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 ### Runtime
 
 - **One table.** Each frame uploads a table with a block for each material or instance that it draws (`Material_Table`, in `lib/engine/render/materials.odin`). A block holds the parameters in the layout that the material's blob gives, with each texture's bindless index written: the resident texture, or the default for its parameter (white, black or a flat normal) until it is resident. Each draw record holds its block's offset. *A persistent table that writes only what changed comes with larger scenes.*
-- **Pipelines by material.** The renderer creates a pipeline for each material and switch combination that a draw needs, from the material's blob, at most `MAX_MATERIAL_PIPELINES`. Instances with the same switches share it. A two-sided material culls no faces.
+- **Pipelines by material.** The renderer creates the pipelines of each material and switch combination that a draw needs, one for each pass, from the material's blob, at most `MAX_MATERIAL_PIPELINES` combinations. Instances with the same switches share them. A two-sided material culls no faces. The forward pipeline tests depth `Equal` and does not write it.
 - **The default material.** A submesh without a material, or whose material cannot draw (not cooked, or without the variant that its instance needs), draws with the engine's default material, `lib/engine/content/materials/default.material`.
 - **Bins.** Culling writes each visible draw into the bin of its pipeline. Each bin is one indirect draw with a count buffer (see [GPU](gpu.md#gpu-driven-rendering)).
 - **Hot reload.** A new material blob updates its pipelines with `update_graphics_pipeline`, so the old shaders draw until the new ones compile. A new instance blob rewrites its parameter block. Both come through `asset.poll` (see [Content pipeline](content-pipeline.md#loading)).
@@ -308,6 +320,7 @@ All post passes before tone mapping work in linear HDR at the scene's resolution
 
 The design needs these changes in `lib/core/gpu` and the render graph:
 
+- *Done in phase 3:* depth bias and clamping, and comparison samplers (see [GPU](gpu.md#pipelines)).
 - **Stencil state** in `Graphics_Pipeline_Desc`: test, operations, read and write masks, and the reference value in a command. `D32_Float_S8_Uint` exists already.
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
 - **History textures** in the render graph (see [Later features](#later-features)).
@@ -328,7 +341,8 @@ The asset runtime keeps blobs on the CPU. The renderer's residency table, in `Re
 - **The table** is `render.Residency`: a fixed array of `MAX_RESIDENT` entries in `Game_State`, found by GUID. `residency_update`, once a frame before drawing, swaps in what finished streaming and starts streaming each asset whose blob `asset.poll` swapped. A mesh keeps its position, attribute and index buffers, and the index ranges of its first `MAX_SUBMESHES` submeshes; 16-bit indices are padded to whole words.
 - **Failures:** an asset that is not cooked, or whose blob is not of its kind, is logged once and tried again every `RESIDENT_RETRY_FRAMES` frames, or when a newer blob arrives.
 - **Unused assets** stay resident. Unloading by use, and streaming mips by distance, come with larger scenes.
-- *Later:* the meshlet streams, for the mesh shader path, and bottom-level acceleration structures, built on a mesh's first draw with `Ray_Query`.
+- **Acceleration structures:** with `Ray_Query` (`Residency.accels`), a mesh that becomes ready gets a bottom-level acceleration structure of all its triangles, which the renderer builds the next frame that traces shadows (`unbuilt_accels`).
+- *Later:* the meshlet streams, for the mesh shader path.
 
 ### Asset fields
 
@@ -344,7 +358,11 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 
 - **`Camera`** (stable ID 32): the vertical field of view in radians and the near plane in meters; 0 in either means 60° or 5 cm. The camera's pose is its entity's presented `Transform`, and `render.camera_view` gives the view. `Game_State` holds the active camera's entity, as world-wide state (see [World](world.md)). The game's view comes from it, unless an editor is linked (see [Editor](editor.md#viewport)).
 - **`Mesh_Renderer`** (stable ID 33): a mesh, a material or instance for each of its mesh's first `MAX_MATERIAL_SLOTS` (8) submeshes (`materials.0` and on), and whether it casts shadows. `render.register_components` registers both. The renderer draws every `Mesh_Renderer` through the [GPU scene](#gpu-scene).
-- **Later:** the light components (phase 3) and `View_Model` (phase 4).
+- **`Directional_Light`** (stable ID 34): a color, an intensity and whether it casts shadows. It shines along its entity's +z.
+- **`Point_Light`** (35): a color, an intensity, a range in meters, and whether it casts shadows.
+- **`Spot_Light`** (36): a point light in a cone along its entity's +z, with inner and outer half angles in radians.
+- **Defaults:** a light's color of 0 means white, a range of 0 means `DEFAULT_LIGHT_RANGE` (10 m), an outer angle of 0 means `DEFAULT_SPOT_OUTER` (45°), and an inner angle of 0 means the outer angle. An intensity of 0 is a light that is off.
+- **Later:** `View_Model` (phase 4).
 
 ## Implementation phases
 
@@ -353,7 +371,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 0 | *Done.* In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
 | 1 | *Done.* The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
 | 2 | *Done.* The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
-| 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |
+| 3 | *Done.* Clustered forward: the prepass with normals and velocities, the forward pass with `Equal` depth, the light components, clusters, shadow maps in an atlas with cascades, and ray-traced shadow masks with the GPU scene's acceleration structures. The sample's scene has a sun, a point light and a spot light. |
 | 4 | The view model, with the stencil additions. |
 | 5 | The material graph: the `.material` graph format, the cooker's code generation and permutations, the editor's node editor, and material previews with `Cook_Preview`. |
 | 6 | Post: history textures, temporal AA, bloom, exposure, the tone mapping lookup table. |

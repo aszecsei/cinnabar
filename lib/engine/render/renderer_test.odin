@@ -20,6 +20,7 @@ import "cinnabar:engine/ecs"
 Hook_Record :: struct {
 	before_world, world_uses, after_world, ui, debug: bool,
 	world_pieces:                                       int,
+	shadow_views:                                       int,
 	post:                                               Texture,
 	problems:                                           [dynamic]string,
 	mutex:                                              sync.Mutex,
@@ -61,6 +62,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		},
 		memory_commit                = proc(ptr: rawptr, size: int) -> bool {return virtual.commit(ptr, uint(size)) == nil},
 		memory_release               = proc(ptr: rawptr, size: int) {virtual.release(ptr, uint(size))},
+		gpu_features                 = null.features,
+		gpu_create_accel             = null.create_accel,
+		gpu_destroy_accel            = null.destroy_accel,
+		gpu_accel_reference          = null.accel_reference,
 		gpu_frame_target             = null.frame_target,
 		gpu_submit                   = null.submit,
 		gpu_upload                   = null.upload,
@@ -102,6 +107,14 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	defer free(r)
 	renderer_init(r, &platform, &assets, w)
 	defer renderer_destroy(r)
+	// Lights that cast shadows. The test's cache has no shaders, so there is no mask to trace into, and they take
+	// shadow maps: the sun's cascades and the lamp's six faces.
+	sun := ecs.spawn(w)
+	ecs.add(w, sun, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, sun, Directional_Light{intensity = 1, cast_shadows = true})
+	lamp := ecs.spawn(w)
+	ecs.add(w, lamp, ecs.Transform{position = ecs.position_offset({}, {0, 0, 2}), rotation = 1, scale = 1})
+	ecs.add(w, lamp, Point_Light{intensity = 1, cast_shadows = true})
 	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 0, 1}), {1, 0, 0, 1})
 	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 1, 0}), {0, 1, 0, 1}, mode = .Overlay)
 
@@ -113,6 +126,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 			data = &record,
 			before_world = proc(f: ^Frame) {
 				(^Hook_Record)(f.data).before_world = true
+				(^Hook_Record)(f.data).shadow_views = len(f.shadows.views)
 			},
 			world_uses = proc(f: ^Frame, pass: Pass) {
 				(^Hook_Record)(f.data).world_uses = true
@@ -151,6 +165,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 	testing.expect(t, record.before_world && record.world_uses && record.after_world && record.ui && record.debug)
 	testing.expect_value(t, record.world_pieces, 2)
+	testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
 	testing.expect(t, record.post != 0)
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 	// Lines of this frame only are gone after it.

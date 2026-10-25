@@ -6,16 +6,19 @@
 #include "cinnabar.hlsli"
 
 // Matches Frame_Constants in lib/engine/render/scene.odin. Positions in the GPU scene are relative to the render
-// origin, and the view's are relative to the camera, which is camera_offset from the origin.
+// origin, and the view's are relative to the camera, which is camera_offset from the origin. A shadow view's copy has
+// its own view_projection, which also takes positions relative to the camera.
 struct Frame_Constants {
 	float4x4 view_projection;
+	// Last frame's, and last frame's camera relative to this frame's origin, for the velocities.
+	float4x4 previous_view_projection;
 	float4 camera_offset;
-	// Toward the sun, in the world, and its light.
-	float4 sun_direction;
-	float4 sun_color;
-	// The ambient light from above and from below.
+	float4 previous_camera_offset;
+	// The ambient light from above and from below, until global illumination.
 	float4 sky_color;
 	float4 ground_color;
+	// The view depth at which each shadow cascade ends.
+	float4 cascade_splits;
 	// Bindless indices: the GPU scene's instances, this frame's draw records, the mesh records and the material table.
 	uint instances;
 	uint draws;
@@ -23,11 +26,38 @@ struct Frame_Constants {
 	uint materials;
 	uint sampler_index;
 	float time;
-	// The mesh records and the material table are in the upload ring, at these offsets of its buffer.
+	// The mesh records, the material table and the lights are in the upload ring, at these offsets of its buffer.
 	uint meshes_offset;
 	uint materials_offset;
+	// The lights: the directional ones first, then the punctual ones that the clusters index.
+	uint lights;
+	uint lights_offset;
+	uint directional_count;
+	// Each cluster's offset and count in the index list, by its tile and its depth slice (see cluster_of).
+	uint clusters;
+	uint cluster_indices;
+	uint cluster_columns;
+	uint cluster_rows;
+	float slice_scale;
+	float slice_bias;
+	float near;
+	// The shadow maps' comparison sampler and their views.
+	uint shadow_sampler;
+	uint shadow_views;
+	uint shadow_views_offset;
+	// Whether the clusters were made this frame; without them, the punctual lights are left out.
+	uint clustered;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
+
+// Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
+// passes record, so the forward pass pushes them. The shadow maps' atlas, and the ray-traced shadow mask.
+struct Material_Push {
+	uint shadow_atlas;
+	uint shadow_mask;
+};
+CN_PUSH_CONSTANTS(Material_Push, push);
 
 // Matches Draw_Record in lib/engine/render/scene.odin: one indirect draw, by its draw ID. material is the byte offset
 // of the draw's parameter block in the material table.
@@ -75,6 +105,36 @@ struct Material_Inputs {
 	bool front_facing;
 };
 
+// Matches Light_Record in lib/engine/render/lights.odin. position is relative to the camera, and direction is where
+// the light travels. A spot light's falloff is saturate(cos * spot_scale + spot_offset), squared. shadow is the light's
+// first shadow view, and mask its channel of the shadow mask, or -1 for none.
+static const uint LIGHT_DIRECTIONAL = 0;
+static const uint LIGHT_POINT = 1;
+static const uint LIGHT_SPOT = 2;
+struct Light_Record {
+	float3 position;
+	float range;
+	float3 color;
+	uint type;
+	float3 direction;
+	float spot_scale;
+	float spot_offset;
+	int shadow;
+	int mask;
+	float padding;
+};
+
+// Matches Shadow_View in lib/engine/render/shadows.odin: a shadow map's projection of positions relative to the
+// camera, as the rows of its matrix, its rectangle of the atlas in UV (offset, scale), and the size of one of its
+// texels: in meters for an orthographic view, at a distance of 1 m for a perspective one (perspective is 1).
+struct Shadow_View {
+	float4 rows[4];
+	float4 rect;
+	float texel;
+	uint perspective;
+	float2 padding;
+};
+
 // What a shading model shades: the point, its normal after the material's normal map, and the direction to the camera.
 struct Shading_Point {
 	float3 position;
@@ -116,6 +176,17 @@ float3 octahedral(float2 p) {
 		n.xy = (1 - abs(n.yx)) * sign_xy;
 	}
 	return normalize(n);
+}
+
+// octahedral_encode folds a unit vector into the square [-1, 1]², as octahedral unfolds it.
+float2 octahedral_encode(float3 n) {
+	n /= abs(n.x) + abs(n.y) + abs(n.z);
+	float2 p = n.xy;
+	if (n.z < 0) {
+		float2 sign_xy = float2(p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1);
+		p = (1 - abs(p.yx)) * sign_xy;
+	}
+	return p;
 }
 
 float2 snorm16(uint word) {

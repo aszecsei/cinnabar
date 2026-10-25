@@ -39,15 +39,21 @@ Material_Ref :: struct {
 	failed_at: u64,
 }
 
-// Material_Pipeline is the forward pipeline of one material and switch combination, made from the material's blob,
-// and updated when the blob changes.
+// Material_Pipeline is the pipelines of one material and switch combination, one for each pass, made from the
+// material's blob, and updated when the blob changes.
 Material_Pipeline :: struct {
-	material:  format.Guid,
-	switches:  u32,
-	pipeline:  gpu.Pipeline,
-	version:   u32,
-	two_sided: bool,
+	material:     format.Guid,
+	switches:     u32,
+	pipelines:    [format.Material_Pass]gpu.Pipeline,
+	version:      u32,
+	two_sided:    bool,
+	cast_shadows: bool,
 }
+
+// The prepass's targets: the surface's normal in the world, folded into the octahedron, and the velocity in UV.
+NORMAL_FORMAT :: gpu.Format.RG16_Float
+VELOCITY_FORMAT :: gpu.Format.RG16_Float
+PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}}
 
 // Material_Table is one frame's material table: a parameter block for each material or instance that the frame draws,
 // with its textures' bindless indices written. It is in frame memory, and the frame uploads it.
@@ -77,7 +83,9 @@ materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 
 materials_destroy :: proc(m: ^Materials, platform: ^core.Platform_API) {
 	for p in m.pipelines[:m.pipeline_count] {
-		platform.gpu_destroy_pipeline(p.pipeline)
+		for pipeline in p.pipelines {
+			platform.gpu_destroy_pipeline(pipeline)
+		}
 	}
 	for t in m.defaults {
 		platform.gpu_destroy_texture(t)
@@ -184,7 +192,7 @@ material_data :: proc(r: ^Renderer, guid: format.Guid) -> (data: []byte, ok: boo
 	return asset.data(r.residency.assets, ref.handle)
 }
 
-// material_pipeline gives the pipeline of a material and switch combination, which it makes, or updates when the
+// material_pipeline gives the pipelines of a material and switch combination, which it makes, or updates when the
 // material's blob changed. It fails if the material has no such variant, as before the cooker compiles it.
 @(private = "file")
 material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (index: int, ok: bool) {
@@ -202,21 +210,30 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 	if index >= 0 && m.pipelines[index].version == ref_version {
 		return index, true
 	}
-	vertex := format.material_code(data, blob, switches, .Forward, .Vertex)
-	pixel := format.material_code(data, blob, switches, .Forward, .Pixel)
-	if vertex == nil || pixel == nil {
+	if format.material_code(data, blob, switches, .Forward, .Vertex) == nil {
 		return -1, false
 	}
 	two_sided := .Two_Sided in blob.flags
-	desc := gpu.Graphics_Pipeline_Desc {
-		vertex        = vertex,
-		pixel         = pixel,
-		colors        = WORLD_COLORS,
-		depth_format  = DEPTH_FORMAT,
-		depth_compare = .Greater,
-		depth_write   = true,
-		cull          = two_sided ? .None : .Back,
-		label         = format.blob_string(data, blob.source_path),
+	cull: gpu.Cull_Mode = two_sided ? .None : .Back
+	label := format.blob_string(data, blob.source_path)
+	descs := [format.Material_Pass]gpu.Graphics_Pipeline_Desc {
+		// The prepass wrote this depth, so the forward pass shades each pixel once.
+		.Forward = {colors = WORLD_COLORS, depth_format = DEPTH_FORMAT, depth_compare = .Equal, cull = cull, label = label},
+		.Prepass = {colors = PREPASS_COLORS, depth_format = DEPTH_FORMAT, depth_compare = .Greater, depth_write = true, cull = cull, label = label},
+		.Depth = {
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_write = true,
+			depth_bias = SHADOW_DEPTH_BIAS,
+			slope_bias = SHADOW_SLOPE_BIAS,
+			depth_clamp = true,
+			cull = cull,
+			label = label,
+		},
+	}
+	for &desc, pass in descs {
+		desc.vertex = format.material_code(data, blob, switches, pass, .Vertex)
+		desc.pixel = format.material_code(data, blob, switches, pass, .Pixel)
 	}
 	platform := r.platform
 	if index < 0 {
@@ -226,13 +243,22 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 		}
 		index = m.pipeline_count
 		m.pipeline_count += 1
-		m.pipelines[index] = {material = guid, switches = switches, pipeline = platform.gpu_create_graphics_pipeline(desc)}
-	} else if !platform.gpu_update_graphics_pipeline(m.pipelines[index].pipeline, desc) {
-		platform.gpu_destroy_pipeline(m.pipelines[index].pipeline)
-		m.pipelines[index].pipeline = platform.gpu_create_graphics_pipeline(desc)
+		m.pipelines[index] = {material = guid, switches = switches}
 	}
-	m.pipelines[index].version = ref_version
-	m.pipelines[index].two_sided = two_sided
+	p := &m.pipelines[index]
+	for desc, pass in descs {
+		// A blob from before the pass existed has no code for it, and draws nothing in it.
+		if desc.vertex == nil {
+			platform.gpu_destroy_pipeline(p.pipelines[pass])
+			p.pipelines[pass] = {}
+		} else if p.pipelines[pass] == {} || !platform.gpu_update_graphics_pipeline(p.pipelines[pass], desc) {
+			platform.gpu_destroy_pipeline(p.pipelines[pass])
+			p.pipelines[pass] = platform.gpu_create_graphics_pipeline(desc)
+		}
+	}
+	p.version = ref_version
+	p.two_sided = two_sided
+	p.cast_shadows = .Cast_Shadows in blob.flags
 	return index, true
 }
 

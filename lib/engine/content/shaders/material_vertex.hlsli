@@ -1,14 +1,26 @@
-// The forward pass of every material (see docs/rendering.md#materials). The cooker includes it after the shading
-// model, the Params struct and the material's evaluate, with these defined:
-//   MATERIAL_TWO_SIDED, MATERIAL_MASKED and MATERIAL_CUTOFF: the material's settings.
-//   SHADING_NO_LIGHTING: the shading model only emits.
-//   SHADING_HAS_NORMAL: the shading model's Surface has a tangent-space normal, which this pass maps to the world.
-// The vertex shader pulls the draw's vertex through its draw record, so one indirect draw draws a whole bin.
-#ifndef MATERIAL_FORWARD_HLSLI
-#define MATERIAL_FORWARD_HLSLI
+// The vertex side of every material pass (see docs/rendering.md#materials): the draw's vertex, pulled through its
+// draw record, so one indirect draw draws a whole bin, and the inputs that a material's evaluate reads. The prepass
+// and the forward pass place vertices with the same code, so their depths are equal.
+#ifndef MATERIAL_VERTEX_HLSLI
+#define MATERIAL_VERTEX_HLSLI
 
 #include "material_common.hlsli"
 
+// A vertex as a material pass sees it. world is relative to the camera, and previous is the same point last frame,
+// relative to last frame's camera.
+struct Material_Vertex {
+	float3 world;
+	float3 previous;
+	float3 normal;
+	float4 tangent;
+	float2 uv0;
+	float2 uv1;
+	float4 color;
+	uint material;
+	uint id;
+};
+
+// What every pass but an opaque depth pass interpolates.
 struct Varyings {
 	float4 position : SV_Position;
 	float3 world : POSITION1;
@@ -21,24 +33,18 @@ struct Varyings {
 	nointerpolation uint id : ENTITY;
 };
 
-// The scene's HDR colors, and the entity IDs that the editor picks from.
-struct Targets {
-	float4 color : SV_Target0;
-	uint id : SV_Target1;
-};
-
 float3 transform_point(float4 rows[3], float3 p) {
 	float4 v = float4(p, 1);
 	return float3(dot(rows[0], v), dot(rows[1], v), dot(rows[2], v));
 }
 
-// The rows' rotation and scale turn a direction. A scale that is not uniform bends normals a little, which this pass
-// does not correct.
+// The rows' rotation and scale turn a direction. A scale that is not uniform bends normals a little, which the passes
+// do not correct.
 float3 transform_direction(float4 rows[3], float3 d) {
 	return float3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
 }
 
-Varyings vs_main(uint vertex_id : SV_VertexID) {
+Material_Vertex load_vertex(uint vertex_id) {
 	Draw_Record d = cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
 	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + d.mesh * sizeof(Mesh_Record));
 	uint corner = d.first_index + vertex_id;
@@ -70,21 +76,41 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	}
 
 	Instance_Record instance = cn_buffer(frame.instances).Load<Instance_Record>(d.instance * sizeof(Instance_Record));
-	float3 world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
+	Material_Vertex v;
+	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
+	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
+	v.normal = transform_direction(instance.rows, normal);
+	v.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
+	v.uv0 = uv0;
+	v.uv1 = uv1;
+	v.color = color;
+	v.material = d.material;
+	v.id = instance.id;
+	return v;
+}
+
+// clip_position is where every pass places a vertex. It is precise, so each pass computes the same depth.
+float4 clip_position(float3 world) {
+	precise float4 position = mul(frame.view_projection, float4(world, 1));
+	return position;
+}
+
+Varyings vertex_varyings(Material_Vertex v) {
 	Varyings o;
-	o.position = mul(frame.view_projection, float4(world, 1));
-	o.world = world;
-	o.normal = transform_direction(instance.rows, normal);
-	o.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
-	o.uv0 = uv0;
-	o.uv1 = uv1;
-	o.color = color;
-	o.material = d.material;
-	o.id = instance.id;
+	o.position = clip_position(v.world);
+	o.world = v.world;
+	o.normal = v.normal;
+	o.tangent = v.tangent;
+	o.uv0 = v.uv0;
+	o.uv1 = v.uv1;
+	o.color = v.color;
+	o.material = v.material;
+	o.id = v.id;
 	return o;
 }
 
-Targets ps_main(Varyings i, bool front : SV_IsFrontFace) {
+// material_inputs loads the draw's parameters, and gives what evaluate reads.
+Material_Inputs material_inputs(Varyings i, bool front) {
 	params = cn_buffer(frame.materials).Load<Params>(frame.materials_offset + i.material);
 	Material_Inputs inputs;
 	inputs.position = i.world;
@@ -101,37 +127,19 @@ Targets ps_main(Varyings i, bool front : SV_IsFrontFace) {
 		inputs.normal = -inputs.normal;
 	}
 #endif
-	Surface s = evaluate(inputs);
-#if MATERIAL_MASKED
-	clip(shade_opacity(s) - MATERIAL_CUTOFF);
-#endif
-	float3 color = shade_emission(s);
-#if !SHADING_NO_LIGHTING
-	Shading_Point p;
-	p.position = i.world;
-	p.view = inputs.view;
+	return inputs;
+}
+
+// shading_normal is the surface's normal in the world: the shading model's tangent-space normal mapped by the
+// interpolated tangent frame, or the interpolated normal.
+float3 shading_normal(Material_Inputs inputs, Surface s) {
 #if SHADING_HAS_NORMAL
 	float3 t = normalize(inputs.tangent.xyz - inputs.normal * dot(inputs.tangent.xyz, inputs.normal));
 	float3 b = cross(inputs.normal, t) * inputs.tangent.w;
-	p.normal = normalize(t * s.normal.x + b * s.normal.y + inputs.normal * s.normal.z);
+	return normalize(t * s.normal.x + b * s.normal.y + inputs.normal * s.normal.z);
 #else
-	p.normal = inputs.normal;
+	return inputs.normal;
 #endif
-	Light sun;
-	sun.direction = frame.sun_direction.xyz;
-	sun.color = frame.sun_color.rgb;
-	color += shade_direct(s, p, sun);
-	// The sky's light from above and the ground's from below, until global illumination.
-	Indirect indirect;
-	indirect.diffuse = lerp(frame.ground_color.rgb, frame.sky_color.rgb, p.normal.y * 0.5 + 0.5);
-	float3 reflected = reflect(-p.view, p.normal);
-	indirect.specular = lerp(frame.ground_color.rgb, frame.sky_color.rgb, reflected.y * 0.5 + 0.5);
-	color += shade_indirect(s, p, indirect);
-#endif
-	Targets o;
-	o.color = float4(color, 1);
-	o.id = i.id;
-	return o;
 }
 
 #endif

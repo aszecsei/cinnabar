@@ -9,7 +9,7 @@ import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 
 // The frame's targets (see docs/rendering.md#layers). The world draws into linear HDR colors, the editor's entity IDs
-// and reversed depth. The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
+// and reversed depth, which the prepass writes with the normals and the velocities (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
 // sRGB view, so it blends in linear light, and the output pass encodes it.
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 // Each pixel holds entity_id of the entity drawn there, or 0. The editor picks from it.
@@ -45,6 +45,8 @@ Renderer :: struct {
 	meshes:          Extractor,
 	materials:       Materials,
 	scene:           Gpu_Scene,
+	lights:          Lights,
+	shadows:         Shadows,
 	output_pipeline: Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
 	debug_hidden:    Shader_Pipeline,
@@ -64,25 +66,9 @@ Frame_Desc :: struct {
 	// Scales the scene before tone mapping. 0 means 1.
 	exposure:    f32,
 	clear_color: [4]f32,
-	// The light until phase 3's lights: one directional light and the ambient light. Zero gives DEFAULT_SUN.
-	sun:         Sun,
+	// The light from everything else until global illumination. Zero gives DEFAULT_AMBIENT.
+	ambient:     Ambient,
 	hooks:       Frame_Hooks,
-}
-
-// Sun is the frame's light until the clustered lights: the direction toward the sun and its light, and the ambient
-// light from the sky above and the ground below.
-Sun :: struct {
-	direction: [3]f32,
-	color:     [3]f32,
-	sky:       [3]f32,
-	ground:    [3]f32,
-}
-
-DEFAULT_SUN :: Sun {
-	direction = {-0.37, 0.65, -0.66},
-	color     = {3, 2.9, 2.7},
-	sky       = {0.3, 0.36, 0.45},
-	ground    = {0.14, 0.12, 0.1},
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -90,8 +76,10 @@ DEFAULT_SUN :: Sun {
 Frame_Hooks :: struct {
 	// Given to every hook as Frame.data.
 	data:         rawptr,
-	// Adds passes before the world pass, such as culling.
-	before_world: proc(f: ^Frame),
+	// Adds passes before the prepass, such as culling.
+	before_world:  proc(f: ^Frame),
+	// Adds passes after the prepass, which can read Frame.depth, Frame.normals and Frame.velocity.
+	after_prepass: proc(f: ^Frame),
 	// Declares the world pass's other uses, such as the buffers that world_draw reads.
 	world_uses:   proc(f: ^Frame, pass: Pass),
 	// Records draws into the world pass, after the Mesh_Renderers in piece 0. The pass has world_pieces pieces.
@@ -117,12 +105,16 @@ Frame :: struct {
 	scene:           Texture,
 	ids:             Texture,
 	depth:           Texture,
+	normals:         Texture,
+	velocity:        Texture,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:              Texture,
 	debug:           Texture,
 	hooks:           Frame_Hooks,
 	exposure:        f32,
 	scene_frame:     ^Scene_Frame,
+	lights:          ^Light_Frame,
+	shadows:         ^Shadow_Frame,
 	debug_lines:     gpu.Upload,
 	tested_lines:    int,
 	overlay_lines:   int,
@@ -172,6 +164,9 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	debug.init(&r.debug, platform.heap_allocator)
 	materials_init(&r.materials, platform)
 	scene_init(&r.scene, platform)
+	lights_init(&r.lights, platform, w)
+	shadows_init(&r.shadows, platform)
+	r.residency.accels = r.shadows.ray_query
 }
 
 // mesh_extractor selects the entities with a Mesh_Renderer.
@@ -184,6 +179,7 @@ mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
 renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.World) {
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	lights_register(&r.lights, w)
 	r.reloaded = true
 	residency_reload(&r.residency, platform)
 	materials_reload(&r.materials)
@@ -195,13 +191,16 @@ renderer_destroy :: proc(r: ^Renderer) {
 	debug.destroy(&r.debug)
 	materials_destroy(&r.materials, r.platform)
 	scene_destroy(&r.scene, r.platform)
+	lights_destroy(&r.lights, r.platform)
+	shadows_destroy(&r.shadows, r.platform)
 	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
 
 // draw_frame draws a frame into the frame target: the world, the UI and the debug layer, combined by the output pass
-// (see docs/rendering.md#frame). It returns false if the graph could not execute.
+// (see docs/rendering.md#frame). The world draws in a prepass, then in the forward pass with the lights' clusters and
+// the shadows. It returns false if the graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	residency_update(&r.residency)
 	sync_frame_pipelines(r)
@@ -221,23 +220,47 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.scene = create_texture(&g, {size = desc.size, format = SCENE_FORMAT, label = "scene"})
 	f.ids = create_texture(&g, {size = desc.size, format = ID_FORMAT, label = "entity ids"})
 	f.depth = create_texture(&g, {size = desc.size, format = DEPTH_FORMAT, label = "scene depth"})
-	build_scene(f, w, desc.hidden, desc.sun == {} ? DEFAULT_SUN : desc.sun)
+	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
+	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
+	build_scene(f, w, desc.hidden)
+	f.lights = extract_lights(f, w, desc.hidden)
+	assign_shadows(f)
+	upload_lights(f)
+	add_scene_passes(f, desc.ambient == {} ? DEFAULT_AMBIENT : desc.ambient)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
 
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
 	}
-	p := add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
+	p := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
+		draw_scene_view((^Frame)(ctx.data), ctx.cb, 0, .Prepass)
+	}, f)
+	color(&g, p, f.normals, .Clear)
+	color(&g, p, f.velocity, .Clear)
+	depth(&g, p, f.depth, .Clear)
+	declare_scene_draws(f, p)
+	if desc.hooks.after_prepass != nil {
+		desc.hooks.after_prepass(f)
+	}
+	add_cluster_passes(f)
+	add_shadow_passes(f)
+
+	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, desc.clear_color)
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids ? .Store : .Discard)
 	// The debug layer tests against the depth, and the editor reads it.
-	depth(&g, p, f.depth, .Clear, store = desc.keep_ids || has_debug ? .Store : .Discard)
-	if sf := f.scene_frame; len(sf.items) > 0 {
-		indirect_buffer(&g, p, sf.arguments)
-		indirect_buffer(&g, p, sf.counts)
-		read(&g, p, sf.draws)
-		read(&g, p, sf.instances)
+	depth(&g, p, f.depth, .Load, store = desc.keep_ids || has_debug ? .Store : .Discard)
+	declare_scene_draws(f, p)
+	if f.lights.clustered {
+		read(&g, p, f.lights.clusters)
+		read(&g, p, f.lights.indices)
+	}
+	if f.shadows.atlas != 0 {
+		read(&g, p, f.shadows.atlas)
+	}
+	if f.shadows.mask != 0 {
+		read(&g, p, f.shadows.mask)
 	}
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
@@ -309,7 +332,7 @@ OUTPUT_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 draw_world :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	if ctx.piece == 0 {
-		draw_scene_bins(f, ctx.cb)
+		draw_scene_view(f, ctx.cb, 0, .Forward)
 	}
 	if f.hooks.world_draw != nil {
 		f.hooks.world_draw(f, ctx)

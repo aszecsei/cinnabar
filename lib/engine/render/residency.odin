@@ -22,6 +22,7 @@ Resident_Mesh :: struct {
 	attributes:       gpu.Buffer,
 	indices:          gpu.Buffer,
 	index_format:     gpu.Index_Format,
+	index_count:      u32,
 	vertex_count:     u32,
 	attribute_stride: u32,
 	flags:            format.Mesh_Flags,
@@ -29,6 +30,10 @@ Resident_Mesh :: struct {
 	submesh_count:    u32,
 	submeshes:        [MAX_SUBMESHES]Resident_Submesh,
 	submesh_bounds:   [MAX_SUBMESHES]format.Mesh_Bounds,
+	// With Ray_Query, the bottom-level acceleration structure of every triangle, which the renderer builds the first
+	// frame after the mesh is ready (see docs/rendering.md#shadows).
+	accel:            gpu.Accel_Struct,
+	accel_built:      bool,
 }
 
 Resident_Submesh :: struct {
@@ -53,6 +58,8 @@ Residency :: struct {
 	entries:  [MAX_RESIDENT]Resident_Entry,
 	count:    int,
 	frame:    u64,
+	// Whether meshes get acceleration structures, which the renderer sets when the device has Ray_Query.
+	accels:   bool,
 }
 
 @(private)
@@ -113,6 +120,9 @@ residency_update :: proc(r: ^Residency) {
 			}
 			if done {
 				destroy_resources(r, e.kind, &e.current)
+				if e.kind == .Mesh && r.accels {
+					create_mesh_accel(r, &e.pending.mesh)
+				}
 				e.current, e.version, e.ready = e.pending, e.pending_version, true
 				e.pending, e.streaming = {}, false
 			}
@@ -219,6 +229,7 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.flags = blob.flags
 	m.bounds = blob.bounds
 	m.index_format = .Index32 in blob.flags ? .U32 : .U16
+	m.index_count = blob.index_count
 	submeshes := format.mesh_submeshes(data, blob)
 	m.submesh_count = u32(min(len(submeshes), MAX_SUBMESHES))
 	for s, i in submeshes[:m.submesh_count] {
@@ -229,6 +240,37 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.attributes = stream_buffer(r, e, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
 	m.indices = stream_buffer(r, e, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
 	return true
+}
+
+// create_mesh_accel creates a ready mesh's bottom-level acceleration structure, which unbuilt_accels then gives to the
+// renderer to build.
+@(private = "file")
+create_mesh_accel :: proc(r: ^Residency, m: ^Resident_Mesh) {
+	if m.index_count == 0 || m.index_count % 3 != 0 {
+		return
+	}
+	geometry := gpu.Accel_Geometry {
+		vertices      = m.positions,
+		vertex_stride = 12,
+		vertex_count  = m.vertex_count,
+		vertex_format = .RGB32_Float,
+		indices       = m.indices,
+		index_count   = m.index_count,
+		index_format  = m.index_format,
+		opaque        = true,
+	}
+	m.accel = r.platform.gpu_create_accel({kind = .Bottom, geometries = {geometry}, label = "mesh"})
+}
+
+// unbuilt_accels are the ready meshes whose acceleration structures have not been built, in frame memory.
+unbuilt_accels :: proc(r: ^Residency) -> []^Resident_Mesh {
+	meshes := make([dynamic]^Resident_Mesh, r.platform.frame_allocator)
+	for &e in r.entries[:r.count] {
+		if e.kind == .Mesh && e.ready && e.current.mesh.accel != {} && !e.current.mesh.accel_built {
+			append(&meshes, &e.current.mesh)
+		}
+	}
+	return meshes[:]
 }
 
 // stream_buffer creates a buffer for data and streams it in. Buffers are multiples of 4 bytes, so 16-bit indices are
@@ -312,6 +354,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		r.platform.gpu_destroy_buffer(m.positions)
 		r.platform.gpu_destroy_buffer(m.attributes)
 		r.platform.gpu_destroy_buffer(m.indices)
+		if m.accel != {} {
+			r.platform.gpu_destroy_accel(m.accel)
+		}
 	case .Texture:
 		r.platform.gpu_destroy_texture(resources.texture.texture)
 	}

@@ -31,6 +31,10 @@ Material_Flags :: bit_set[Material_Flag;u32]
 
 Material_Pass :: enum u32 {
 	Forward,
+	// Depth, the normal and the velocity, before the forward pass.
+	Prepass,
+	// Depth only, for the shadow maps. An opaque material's has no pixel stage.
+	Depth,
 }
 
 Material_Param_Type :: enum u32 {

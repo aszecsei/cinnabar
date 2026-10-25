@@ -83,9 +83,13 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		// The material's own switches (none) and its instances' (use_albedo): two variants of two stages.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 4)
+		// The material's own switches (none) and its instances' (use_albedo): two variants, each with the forward
+		// pass's and the prepass's two stages, and an opaque depth pass's vertex stage.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 10)
 		testing.expect(t, format.material_code(data, blob, 1, .Forward, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 1, .Prepass, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) != nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) == nil)
 		testing.expect_value(t, blob.default_switches, 0)
 		// tint, roughness, then the albedo's index: 16 + 4 + 4 bytes, in a block of 32.
 		testing.expect_value(t, len(format.blob_bytes(data, blob.block)), 32)
@@ -154,5 +158,26 @@ unlit_materials_skip_the_light :: proc(t: ^testing.T) {
 	testing.expect(t, pass.ok)
 	if blob, ok := format.material_view(tree_blob(t, tree, tree_guid(t, tree, "glow.material"))); ok {
 		testing.expect(t, .No_Lighting in blob.flags)
+	}
+}
+
+@(test)
+masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/leaf.material", "material 1\nshading = lit\nblend = masked\ncutoff = 0.3\nparam mask texture = white\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.opacity = cn_sample(params.mask, inputs.uv0).a;\n\treturn s;\n}\n"},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(material_options(t, tree), {.Material})
+	testing.expect(t, pass.ok)
+	data := tree_blob(t, tree, tree_guid(t, tree, "leaf.material"))
+	if blob, ok := format.material_view(data); ok {
+		// The shadow maps discard where the opacity is below the cutoff, so the depth pass has a pixel stage too.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 6)
+		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
 }
