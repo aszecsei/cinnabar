@@ -295,8 +295,11 @@ The asset runtime keeps blobs on the CPU. The renderer's residency table, in `Re
 - **Until a resource is ready**, a texture gives the default for its usage (white, a flat normal, black) and a mesh draws nothing. Nothing waits for a stream.
 - **Hot reload.** When `asset.poll` swaps a blob, the table streams the new data into new resources, and switches to them only when their transfers are done, so the old version draws until then. Then it destroys the old resources.
 - **Shaders** are not in the table. A `render.Shader_Pipeline` names its shader by the GUID in the shader's `.meta` file. `render.sync_graphics_pipeline`, `sync_compute_pipeline` and `sync_ray_tracing_pipeline`, called each frame, load the shader, create the pipeline from the blob's entries, and update it when `asset.poll` swaps the blob. On a code reload, `force` updates every pipeline with the new descriptions. A shader change therefore needs no code reload: the daemon cooks it, and the next frame's pipeline compiles from it.
-- **Lifetime.** Resident resources have the `Game` scope. A soft restart destroys them with the old game, and loads the assets again, as it loads every asset again (see [Content pipeline](content-pipeline.md#loading)). Bottom-level acceleration structures are built on a mesh's first draw with `Ray_Query`.
+- **Lifetime.** Resident resources have the `Game` scope. A soft restart destroys them with the old game, and loads the assets again, as it loads every asset again (see [Content pipeline](content-pipeline.md#loading)).
+- **The table** is `render.Residency`: a fixed array of `MAX_RESIDENT` entries in `Game_State`, found by GUID. `residency_update`, once a frame before drawing, swaps in what finished streaming and starts streaming each asset whose blob `asset.poll` swapped. A mesh keeps its position, attribute and index buffers, and the index ranges of its first `MAX_SUBMESHES` submeshes; 16-bit indices are padded to whole words.
+- **Failures:** an asset that is not cooked, or whose blob is not of its kind, is logged once and tried again every `RESIDENT_RETRY_FRAMES` frames, or when a newer blob arrives.
 - **Unused assets** stay resident. Unloading by use, and streaming mips by distance, come with larger scenes.
+- *Later:* the meshlet streams, for the mesh shader path, and bottom-level acceleration structures, built on a mesh's first draw with `Ray_Query`.
 
 ### Asset fields
 
@@ -310,15 +313,16 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 
 ### Components
 
-- **`Camera`:** the vertical field of view and the near plane. The camera's pose is its entity's presented `Transform`. `Game_State` holds the active camera's entity, as world-wide state (see [World](world.md)). The game's view comes from it, unless an editor is linked (see [Editor](editor.md#viewport)).
-- **`Mesh_Renderer`:** a mesh, whether it casts shadows, and later a material instance for each of the mesh's submeshes. Until materials exist (phase 2), every mesh draws with one built-in shader that shades by its normal and a fixed light.
+- **`Camera`** (stable ID 32): the vertical field of view in radians and the near plane in meters; 0 in either means 60° or 5 cm. The camera's pose is its entity's presented `Transform`, and `render.camera_view` gives the view. `Game_State` holds the active camera's entity, as world-wide state (see [World](world.md)). The game's view comes from it, unless an editor is linked (see [Editor](editor.md#viewport)).
+- **`Mesh_Renderer`** (stable ID 33): a mesh asset field, whether it casts shadows, and later a material instance for each of the mesh's submeshes. `render.register_components` registers both.
+- **Drawing until phase 2:** every mesh draws with the engine's mesh shader, `lib/engine/content/shaders/mesh.hlsl`, which pulls positions and octahedral normals from the resident buffers and shades them under a fixed light, into an HDR target and the editor's entity IDs. `render.extract_meshes` writes each `Mesh_Renderer`'s instance into the upload ring and gives a draw for each resident mesh; the game sets the editor IDs and leaves out hidden entities; `render.draw_meshes` records an indexed draw for each submesh. There is no culling: the GPU scene and culling into bins replace this in phase 2.
 - **Later:** the light components (phase 3) and `View_Model` (phase 4).
 
 ## Implementation phases
 
 | Phase | Result |
 |---|---|
-| 0 | In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
+| 0 | *Done.* In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
 | 1 | The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
 | 2 | The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
 | 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |

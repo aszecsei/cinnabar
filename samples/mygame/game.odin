@@ -61,11 +61,6 @@ Shadow_Mode :: enum u8 {
 // are small. The acceleration structure holds at most this many.
 MAX_TRIANGLES :: 2
 
-// The scene's camera: its vertical field of view, in radians, and its near plane in meters. In the editor, the
-// editor's camera is used instead (see docs/editor.md#viewport).
-CAMERA_FOV :: 70 * math.PI / 180
-CAMERA_NEAR :: 0.05
-
 // The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
 // shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
 // and an indexed indirect draw draws: the vertex fallback. CINNABAR_DISABLE_FEATURES=Mesh_Shaders forces it.
@@ -116,7 +111,6 @@ Triangle_Instance :: struct {
 // The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
-CAMERA_ID :: ecs.Component_Id(1003)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
@@ -127,9 +121,6 @@ Spin :: struct {
 Triangle :: struct {
 	brightness: f32,
 }
-
-// Camera marks the entity that the frame is drawn from.
-Camera :: struct {}
 
 // Matches Push in content/shaders/objects.hlsl.
 Object_Constants :: struct {
@@ -215,8 +206,12 @@ Game_State :: struct {
 	linear:      gpu.Sampler,
 	textures:    render.Texture_Cache,
 	world:       ecs.World,
-	// The scene's Camera entity. A new scene replaces it, so find_camera looks for it again.
+	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:      ecs.Entity,
+	// The GPU resources of the meshes that Mesh_Renderers draw (see docs/rendering.md#gpu-residency).
+	residency:   render.Residency,
+	// A registration, created again in on_reload.
+	meshes:      render.Extractor,
 	// A registration, created again in on_reload.
 	triangles:   render.Extractor,
 	assets:      asset.Assets,
@@ -238,6 +233,8 @@ Pipelines :: struct {
 	shadows:   render.Shader_Pipeline,
 	post:      render.Shader_Pipeline,
 	composite: render.Shader_Pipeline,
+	// The engine's mesh shader, which draws Mesh_Renderers in the scene pass.
+	meshes:    render.Shader_Pipeline,
 }
 
 // Frame is what the pass procedures need. It lives in frame memory.
@@ -259,6 +256,10 @@ Frame :: struct {
 	triangles:      gpu.Upload,
 	// The number of triangle instances. The acceleration structure holds at most MAX_TRIANGLES.
 	triangle_count: int,
+	// The Mesh_Renderers to draw, their instances, and the view's projection for them.
+	mesh_instances: gpu.Upload,
+	mesh_draws:     []render.Mesh_Draw,
+	view_projection: matrix[4, 4]f32,
 	checker:        render.Texture,
 	scene:          render.Texture,
 	// The editor's entity ID buffer (see editor.ID_FORMAT).
@@ -345,6 +346,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
 		post      = render.shader_pipeline(POST_SHADER),
 		composite = render.shader_pipeline(COMPOSITE_SHADER),
+		meshes    = render.shader_pipeline(render.MESH_SHADER),
 	}
 
 	if !ecs.init(&s.world, platform) {
@@ -352,6 +354,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
+	render.residency_init(&s.residency, platform, &s.assets)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
@@ -370,11 +373,11 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 // layout_hash on its own, so a component change restarts the game.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_engine_components(r)
+	render.register_components(r)
 	script.register_components(r)
 	scene.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
-	ecs.register_component(r, Camera, CAMERA_ID)
 }
 
 // register_world makes the world's registrations: components, systems and queries.
@@ -383,6 +386,7 @@ register_world :: proc(s: ^Game_State) {
 	register_components(&w.registry)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
+	s.meshes = render.mesh_extractor(w)
 }
 
 // find_camera finds the scene's camera, after a scene load replaced the one that the game knew.
@@ -391,7 +395,7 @@ find_camera :: proc(s: ^Game_State) {
 		return
 	}
 	cameras := make([dynamic]ecs.Entity, s.platform.frame_allocator)
-	ecs.collect(&s.world, {CAMERA_ID}, &cameras)
+	ecs.collect(&s.world, {render.CAMERA_ID}, &cameras)
 	s.camera = cameras[0] if len(cameras) > 0 else 0
 }
 
@@ -463,6 +467,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 
 	find_camera(s)
 	sync_pipelines(s)
+	render.residency_update(&s.residency)
 	// A minimized window has no size, and nothing is rendered.
 	size := s.platform.window_size()
 	if size.x <= 0 || size.y <= 0 {
@@ -494,11 +499,10 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	if view, ok := editor.view(&s.editor); ok {
 		return view
 	}
-	camera, ok := ecs.presented(&s.world, s.camera)
-	if !ok {
-		camera = ecs.TRANSFORM_IDENTITY
+	if view, ok := render.camera_view(&s.world, s.camera); ok {
+		return view
 	}
-	return {position = camera.position, rotation = camera.rotation, vertical_fov = CAMERA_FOV, near = CAMERA_NEAR}
+	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
 }
 
 // end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
@@ -561,6 +565,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	frame.depth = render.create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	frame.post = render.create_texture(&g, {size = size, format = SCENE_FORMAT, label = "post"})
 	extract_triangles(frame)
+	extract_meshes(frame)
 
 	// The mesh path culls in its amplification shaders, so only the vertex fallback has the compute passes.
 	if !s.mesh_path {
@@ -612,6 +617,27 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	if render.execute(&g) && building_blas {
 		s.blas_built = true
 	}
+}
+
+// extract_meshes gives the Mesh_Renderers whose meshes are resident, without those that the editor hides, with their
+// entities' IDs for the editor's picking.
+extract_meshes :: proc(frame: ^Frame) {
+	s := frame.state
+	instances, draws := render.extract_meshes(&s.world, &s.residency, s.meshes, frame.view.position)
+	records := render.mesh_instances(instances)
+	visibility := editor.visibility(&s.editor, &s.world)
+	kept := 0
+	for d in draws {
+		if !editor.is_visible(visibility, d.entity) {
+			continue
+		}
+		records[d.instance].id = editor.entity_id(d.entity)
+		draws[kept] = d
+		kept += 1
+	}
+	frame.mesh_instances = instances
+	frame.mesh_draws = draws[:kept]
+	frame.view_projection = render.view_projection(frame.view, f32(frame.size.x) / f32(max(frame.size.y, 1)))
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
@@ -771,6 +797,7 @@ draw_scene :: proc(ctx: ^render.Pass_Context) {
 		gpu.cmd_push_constants(cb, &constants)
 		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
 		gpu.cmd_draw_indexed(cb, 3, instance_count = u32(frame.triangle_count))
+		render.draw_meshes(cb, frame.state.pipelines.meshes.pipeline, frame.view_projection, frame.mesh_instances, frame.mesh_draws)
 	case 1:
 		constants := Object_Constants {
 			vertices     = vertices,
@@ -829,6 +856,7 @@ shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
 	editor.destroy(&s.editor)
 	script.destroy(&s.scripts)
+	render.residency_destroy(&s.residency)
 	asset.destroy(&s.assets)
 	ecs.destroy(&s.world)
 	render.cache_destroy(&s.textures, s.platform)
@@ -856,6 +884,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	ecs.reload(&s.world, platform)
 	register_world(s)
 	asset.reload(&s.assets, platform)
+	render.residency_reload(&s.residency, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
 	register_editor_commands(s)
@@ -875,6 +904,7 @@ sync_pipelines :: proc(s: ^Game_State, force := false) {
 	render.sync_compute_pipeline(&p.cull, platform, assets, CULL_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
 	render.sync_graphics_pipeline(&p.composite, platform, assets, {.Vertex, .Pixel}, COMPOSITE_PIPELINE, force)
+	render.sync_graphics_pipeline(&p.meshes, platform, assets, {.Vertex, .Pixel}, MESHES_PIPELINE, force)
 	switch s.shadow_mode {
 	case .None:
 	case .Inline:
@@ -931,6 +961,15 @@ POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	label   = "post",
 }
 
+// The engine's mesh shader in the scene pass, with its targets and depth.
+MESHES_PIPELINE :: gpu.Graphics_Pipeline_Desc {
+	colors        = SCENE_COLORS,
+	depth_format  = DEPTH_FORMAT,
+	depth_compare = .Greater,
+	depth_write   = true,
+	label         = "meshes",
+}
+
 COMPOSITE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors = {{format = gpu.FRAME_TARGET_FORMAT}},
 	label  = "composite",
@@ -944,6 +983,7 @@ destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
 	render.destroy_shader_pipeline(&pipelines.shadows, platform)
 	render.destroy_shader_pipeline(&pipelines.post, platform)
 	render.destroy_shader_pipeline(&pipelines.composite, platform)
+	render.destroy_shader_pipeline(&pipelines.meshes, platform)
 }
 
 gpu_bytes :: proc(data: ^$T) -> []byte {

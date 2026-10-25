@@ -161,7 +161,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
 
         var loaded = await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == "Renamed"));
-        Assert.Equal(["Camera", "Child", "Renamed"], loaded.Entities.Select(e => e.Name).Order());
+        Assert.Equal(["Box", "Camera", "Child", "Icosphere", "Renamed"], loaded.Entities.Select(e => e.Name).Order());
         var renamed = loaded.Entities.Single(e => e.Name == "Renamed");
         Assert.Equal(front.Id, renamed.SceneId);
         Assert.Equal(renamed.Entity, loaded.Entities.Single(e => e.Name == "Child").Parent);
@@ -211,11 +211,18 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.Equal(0x37e9612990eb05d0UL, hit.SceneId);
         Assert.InRange(center.Depth, 1.35f, 1.45f);
 
-        // A box over the whole frame finds both triangles, and nothing at the edge finds nothing.
-        editor.Link.Send(new PickRequest(8, 0, 0, target.Width, target.Height));
+        // A box over the whole frame finds both triangles and both meshes, and nothing at the edge finds nothing. A mesh
+        // draws once its buffers have streamed in, so the box is picked again until the meshes are there.
+        ulong[] everything = [0x37e9612990eb05d0UL, 0x5d3a8e17c9b04f62UL, 0x8c15900f0aab4d79UL, 0xa41c6f0e2b7d9358UL];
+        ulong[] found = [];
+        for (var attempt = 0u; attempt < 60 && !found.SequenceEqual(everything); attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, 0, 0, target.Width, target.Height));
+            var all = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
+            found = [.. all.Hits.Select(h => h.SceneId).Order()];
+        }
+        Assert.Equal(everything, found);
         editor.Link.Send(new PickRequest(9, 0, 0, 1, 1));
-        var all = await editor.Next<PickResult>(r => r.Id == 8);
-        Assert.Equal([0x37e9612990eb05d0UL, 0x8c15900f0aab4d79UL], all.Hits.Select(h => h.SceneId).Order());
         var corner = await editor.Next<PickResult>(r => r.Id == 9);
         Assert.Empty(corner.Hits);
         Assert.Equal(0, corner.Depth);
@@ -286,7 +293,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
         editor.Link.Send(new RunGameCommand("mygame.world_report"));
         var report = await editor.Next<GameCommandResult>(r => r.Id == "mygame.world_report");
-        Assert.Contains("3 entities", report.Message);
+        Assert.Contains("5 entities", report.Message);
         Assert.Empty(report.Operations);
 
         // A command that edits sends operations by scene ID, and leaves the world as it is.
