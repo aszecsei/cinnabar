@@ -279,6 +279,17 @@ update_ray_tracing_pipeline :: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracin
 	return start_update(pipeline, task, {info = {kind = .Ray_Tracing}})
 }
 
+// pipeline_ready is whether a pipeline's latest version is compiled and in use: false while a compile job that
+// creates or updates it runs, and after its first compile failed.
+pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+	sync.guard(&dev.pipeline_mutex)
+	entry := gpu.pool_get(&dev.pipeline_pool, pipeline)
+	if entry == nil || pipeline_compiling(pipeline.index) {
+		return false
+	}
+	return sync.atomic_load(&entry.pso) != nil || sync.atomic_load(&entry.program) != nil
+}
+
 destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	sync.guard(&dev.pipeline_mutex)
 	if entry, ok := gpu.pool_remove(&dev.pipeline_pool, pipeline); ok {

@@ -116,6 +116,20 @@ pace_shared_frames :: proc(paced: bool) {}
 
 acknowledge_shared_frame :: proc(generation: u32, frame: u64) {}
 
+preview_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
+	return
+}
+
+release_preview_target :: proc(id: int) {}
+
+acknowledge_preview_frame :: proc(id: int, generation: u32, frame: u64) {}
+
+// Nothing compiles, so a pipeline is ready once it exists.
+pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+	_, ok := gpu.pool_lookup(&state.pipelines, pipeline)
+	return ok
+}
+
 begin_frame :: proc(size: [2]i32) {
 	if elapsed := time.tick_since(state.frame_start); elapsed < FRAME_TIME {
 		time.sleep(FRAME_TIME - elapsed)

@@ -58,8 +58,10 @@ PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCIT
 // Material_Table is one frame's material table: a parameter block for each material or instance that the frame draws,
 // with its textures' bindless indices written. It is in frame memory, and the frame uploads it.
 Material_Table :: struct {
-	uses:  map[format.Guid]Material_Use,
-	bytes: [dynamic]byte,
+	uses:     map[format.Guid]Material_Use,
+	bytes:    [dynamic]byte,
+	// A texture of a block is not resident yet, so it samples its default.
+	waiting:  bool,
 }
 
 // Material_Use is a material or instance as the frame draws it: its pipeline, and its block's offset in the table.
@@ -122,35 +124,54 @@ use_material :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) ->
 @(private = "file")
 make_use :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) -> (use: Material_Use, ok: bool) {
 	data := material_data(r, guid) or_return
-	material_guid := guid
-	switches: u32
-	block: []byte
-	textures: []format.Material_Texture
+	b := material_block(data, guid) or_return
+	use.pipeline = material_pipeline(r, b.material, b.switches) or_return
+	use.block = add_block(r, table, b)
+	return use, true
+}
+
+// Material_Block is what a material's or an instance's blob gives a draw: its material, its switches, and its
+// parameter block with its textures.
+@(private)
+Material_Block :: struct {
+	material: format.Guid,
+	switches: u32,
+	block:    []byte,
+	textures: []format.Material_Texture,
+}
+
+@(private)
+material_block :: proc(data: []byte, guid: format.Guid) -> (b: Material_Block, ok: bool) {
 	if blob, is_material := format.material_view(data); is_material {
-		switches, block, textures = blob.default_switches, format.blob_bytes(data, blob.block), format.material_textures(data, blob)
-	} else if instance, is_instance := format.material_instance_view(data); is_instance {
-		material_guid, switches = instance.material, instance.switches
-		block, textures = format.blob_bytes(data, instance.block), format.instance_textures(data, instance)
-	} else {
-		return
+		return {guid, blob.default_switches, format.blob_bytes(data, blob.block), format.material_textures(data, blob)}, true
 	}
-	use.pipeline = material_pipeline(r, material_guid, switches) or_return
+	if instance, is_instance := format.material_instance_view(data); is_instance {
+		return {instance.material, instance.switches, format.blob_bytes(data, instance.block), format.instance_textures(data, instance)}, true
+	}
+	return
+}
+
+// add_block adds a parameter block to the table, with its textures' bindless indices, and gives its offset.
+@(private)
+add_block :: proc(r: ^Renderer, table: ^Material_Table, b: Material_Block) -> u32 {
 	// Blocks start at 16 bytes, so the Params struct loads aligned.
-	use.block = u32(len(table.bytes))
-	append(&table.bytes, ..block)
-	for _ in 0 ..< (16 - len(block) % 16) % 16 {
+	offset := u32(len(table.bytes))
+	append(&table.bytes, ..b.block)
+	for _ in 0 ..< (16 - len(b.block) % 16) % 16 {
 		append(&table.bytes, 0)
 	}
-	for t in textures {
+	for t in b.textures {
 		index := gpu.read_index(r.materials.defaults[t.default])
 		if t.guid != {} {
 			if texture, ready := resident_texture(&r.residency, t.guid); ready {
 				index = gpu.read_index(texture.texture)
+			} else {
+				table.waiting = true
 			}
 		}
-		(^u32)(&table.bytes[use.block + t.offset])^ = index
+		(^u32)(&table.bytes[offset + t.offset])^ = index
 	}
-	return use, true
+	return offset
 }
 
 // material_data loads a material's or an instance's blob. An asset that cannot load is logged once, and tried again
@@ -213,6 +234,23 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 	if format.material_code(data, blob, switches, .Forward, .Vertex) == nil {
 		return -1, false
 	}
+	if index < 0 {
+		if m.pipeline_count == MAX_MATERIAL_PIPELINES {
+			log.errorf("render: more than %d material pipelines", MAX_MATERIAL_PIPELINES)
+			return -1, false
+		}
+		index = m.pipeline_count
+		m.pipeline_count += 1
+		m.pipelines[index] = {material = guid, switches = switches}
+	}
+	make_pipelines(r, &m.pipelines[index], data, blob, switches)
+	m.pipelines[index].version = ref_version
+	return index, true
+}
+
+// make_pipelines creates or updates the pipelines of each pass of a material and switch combination from its blob.
+@(private)
+make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: ^format.Material_Blob, switches: u32) {
 	two_sided := .Two_Sided in blob.flags
 	cull: gpu.Cull_Mode = two_sided ? .None : .Back
 	label := format.blob_string(data, blob.source_path)
@@ -254,16 +292,6 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 		desc.pixel = format.material_code(data, blob, switches, pass, .Pixel)
 	}
 	platform := r.platform
-	if index < 0 {
-		if m.pipeline_count == MAX_MATERIAL_PIPELINES {
-			log.errorf("render: more than %d material pipelines", MAX_MATERIAL_PIPELINES)
-			return -1, false
-		}
-		index = m.pipeline_count
-		m.pipeline_count += 1
-		m.pipelines[index] = {material = guid, switches = switches}
-	}
-	p := &m.pipelines[index]
 	for desc, pass in descs {
 		// A blob from before the pass existed has no code for it, and draws nothing in it.
 		if desc.vertex == nil {
@@ -274,10 +302,8 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 			p.pipelines[pass] = platform.gpu_create_graphics_pipeline(desc)
 		}
 	}
-	p.version = ref_version
 	p.two_sided = two_sided
 	p.cast_shadows = .Cast_Shadows in blob.flags
-	return index, true
 }
 
 @(private = "file")

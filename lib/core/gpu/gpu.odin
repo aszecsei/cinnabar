@@ -123,6 +123,20 @@ Format :: enum u8 {
 // The frame target is written through an sRGB view.
 FRAME_TARGET_FORMAT :: Format.RGBA8_Unorm_Srgb
 
+// The editor's previews render into shared targets of their own beside the frame target, at most this many, each at
+// most this large on a side (see docs/rendering.md#material-previews).
+MAX_PREVIEW_TARGETS :: 4
+MAX_PREVIEW_SIZE :: 1024
+
+// Preview_Target is a frame of a preview target: its texture, in the render target layout until the frame ends, in
+// FRAME_TARGET_FORMAT, its shared objects' name prefix, in temporary memory, its generation and its size.
+Preview_Target :: struct {
+	texture:    Texture,
+	prefix:     string,
+	generation: u32,
+	size:       [2]u32,
+}
+
 is_depth_format :: proc(format: Format) -> bool {
 	#partial switch format {
 	case .D32_Float, .D32_Float_S8_Uint:

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
@@ -311,6 +312,78 @@ public sealed class HostLinkTests : IAsyncDisposable
         var op = Assert.Single(reversed.Operations);
         Assert.Equal((OperationKind.SetField, front.SceneId, 1001UL), (op.Kind, op.Entity, op.Component));
         Assert.Equal(-1.0, Assert.Single(op.Fields).Value.Floats[0]);
+    }
+
+    [Fact]
+    public async Task TheGameDrawsMaterialPreviewsWhenTheyChange()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<FrameTarget>();
+        // The sample's gold: an instance of the engine's default material.
+        editor.Link.Send(new OpenPreview(0, Convert.FromHexString("f6d3de3190e2dfb97d6834ed5101c4c0"), false));
+        editor.Link.Send(new PreviewSettings(0, PreviewMesh.Sphere, new byte[16], 0.6f, 0.3f, 2.5f, 128, 96));
+        var target = await editor.Next<PreviewTarget>();
+        Assert.Equal((0u, 0u, 128, 96), (target.Id, target.Generation, target.Width, target.Height));
+        Assert.EndsWith(".preview0.g0", target.Prefix);
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+
+        // The preview draws until its mesh, its pipelines and its textures are ready, and then stops, because gold does
+        // not read the time.
+        var last = await Settle(editor, frames, target);
+        Assert.True(last > 0);
+        var center = Pixel(device, frames.Texture(last), 64, 48);
+        var corner = Pixel(device, frames.Texture(last), 2, 2);
+        Assert.True(center.R > center.B + 40 && center.G > center.B, $"the sphere's middle is {center}, not gold");
+        Assert.True(corner.R < 40 && corner.G < 40 && corner.B < 40, $"the corner is {corner}, not the background");
+
+        // A new camera and mesh draw it again, and so does a new size, into a new generation.
+        editor.Link.Send(new PreviewSettings(0, PreviewMesh.Cube, new byte[16], 1.2f, 0.5f, 3f, 128, 96));
+        Assert.True(await Settle(editor, frames, target) > last);
+        editor.Link.Send(new PreviewSettings(0, PreviewMesh.Cube, new byte[16], 1.2f, 0.5f, 3f, 64, 64));
+        var resized = await editor.Next<PreviewTarget>(t => t.Generation == 1);
+        Assert.Equal((64, 64), (resized.Width, resized.Height));
+        editor.Link.Send(new ClosePreview(0));
+    }
+
+    // Settle acknowledges a preview's frames until it stops drawing, and gives its last frame.
+    static async Task<ulong> Settle(Editor editor, SharedFrames frames, PreviewTarget target)
+    {
+        var last = frames.Completed;
+        var still = 0;
+        for (var i = 0; i < 400 && still < 20; i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+            var completed = frames.Completed;
+            editor.Link.Send(new PreviewAcknowledged(target.Id, target.Generation, completed));
+            still = completed == last ? still + 1 : 0;
+            last = completed;
+        }
+        Assert.Equal(20, still);
+        return last;
+    }
+
+    // Pixel reads one pixel of a shared texture, as sRGB bytes.
+    static (byte R, byte G, byte B) Pixel(ViewportDevice device, Vortice.Direct3D11.ID3D11Texture2D texture, int x, int y)
+    {
+        var desc = texture.Description;
+        desc.Usage = Vortice.Direct3D11.ResourceUsage.Staging;
+        desc.BindFlags = Vortice.Direct3D11.BindFlags.None;
+        desc.CPUAccessFlags = Vortice.Direct3D11.CpuAccessFlags.Read;
+        desc.MiscFlags = Vortice.Direct3D11.ResourceOptionFlags.None;
+        using var staging = device.Device.CreateTexture2D(desc);
+        device.Context.CopyResource(staging, texture);
+        var mapped = device.Context.Map(staging, 0, Vortice.Direct3D11.MapMode.Read);
+        try
+        {
+            var at = (int)(y * mapped.RowPitch) + x * 4;
+            return (Marshal.ReadByte(mapped.DataPointer, at), Marshal.ReadByte(mapped.DataPointer, at + 1), Marshal.ReadByte(mapped.DataPointer, at + 2));
+        }
+        finally
+        {
+            device.Context.Unmap(staging, 0);
+        }
     }
 
     [Fact]

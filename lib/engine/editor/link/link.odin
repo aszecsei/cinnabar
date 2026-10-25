@@ -72,6 +72,11 @@ Message :: union {
 	Game_Commands,
 	Run_Game_Command,
 	Game_Command_Result,
+	Open_Preview,
+	Preview_Settings,
+	Close_Preview,
+	Preview_Target,
+	Preview_Acknowledged,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -640,4 +645,63 @@ Game_Command_Result :: struct {
 	id:         string,
 	operations: []Operation,
 	message:    string,
+}
+
+// Material previews (see docs/rendering.md#material-previews). The game renders each open preview into a shared
+// target of its own, beside the viewport's, when what it shows changes. The editor copies its frames as it copies the
+// viewport's, and acknowledges them to the host.
+
+Preview_Mesh :: enum u8 {
+	Sphere,
+	Cube,
+	Plane,
+	// The mesh asset that Preview_Settings names.
+	Asset,
+}
+
+// Editor to game: show a material or a material instance, by its GUID, in preview id, which is below
+// gpu.MAX_PREVIEW_TARGETS. With unsaved, the game loads the material from the preview area of the cache, where the
+// cook daemon cooks the editor's unsaved graph (Cook_Preview on the cook link), and not from its own blob. For an open
+// preview, it changes what the preview shows.
+Open_Preview :: struct {
+	id:       u32,
+	material: [16]u8,
+	unsaved:  bool,
+}
+
+// Editor to game: how preview id shows its material. The camera orbits the middle of the mesh: yaw turns it about the
+// world's up axis and pitch tilts it, in radians, at distance meters. The size is in pixels, which the game keeps
+// within gpu.MAX_PREVIEW_SIZE.
+Preview_Settings :: struct {
+	id:         u32,
+	mesh:       Preview_Mesh,
+	mesh_asset: [16]u8,
+	yaw:        f32,
+	pitch:      f32,
+	distance:   f32,
+	width:      i32,
+	height:     i32,
+}
+
+// Editor to game: preview id is closed, and its shared target can go.
+Close_Preview :: struct {
+	id: u32,
+}
+
+// Game to editor: the shared target that preview id renders into, named <prefix>.texture0..2 and <prefix>.fence, as
+// Frame_Target names the viewport's. Each size makes a new generation, whose frames count from 1 again.
+Preview_Target :: struct {
+	id:         u32,
+	prefix:     string,
+	generation: u32,
+	width:      i32,
+	height:     i32,
+}
+
+// Editor to host: the editor has finished copying this frame of this generation of preview id's target. The host
+// renders frame k of a preview only if k <= frame + 2, as it does the viewport's frames.
+Preview_Acknowledged :: struct {
+	id:         u32,
+	generation: u32,
+	frame:      u64,
 }

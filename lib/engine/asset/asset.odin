@@ -179,6 +179,31 @@ poll :: proc(a: ^Assets) -> []Handle {
 	return changed[:]
 }
 
+// preview_blob reads a material's blob from the preview area of the cache, <dir>/preview/<guid>.blob, where the cook
+// daemon cooks the editor's unsaved materials (see docs/rendering.md#material-previews), if it is newer than modified.
+// The data is in the asset allocator, and the caller frees it.
+preview_blob :: proc(a: ^Assets, guid: format.Guid, modified: i64) -> (data: []byte, newer: i64, changed: bool) {
+	buffer: [32]u8
+	path: string
+	switch &source in a.source {
+	case Loose_Cache:
+		path = fmt.aprintf("%s/preview/%s.blob", string(source.dir[:source.dir_len]), format.guid_format(guid, &buffer), allocator = a.platform.frame_allocator)
+	}
+	newer = a.platform.file_modified(path)
+	if newer == 0 || newer == modified {
+		return nil, modified, false
+	}
+	data = a.platform.file_read(path, format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
+	header, valid := format.blob_header(data)
+	if data == nil || !valid || header.guid != guid {
+		if data != nil {
+			delete(data, a.platform.asset_allocator)
+		}
+		return nil, modified, false
+	}
+	return data, newer, true
+}
+
 @(private)
 record :: proc(a: ^Assets, h: Handle) -> ^Record {
 	if h.index >= a.used || a.records[h.index].generation != h.generation || h.generation % 2 == 0 {

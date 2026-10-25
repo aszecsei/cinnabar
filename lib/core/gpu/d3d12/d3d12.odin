@@ -101,7 +101,7 @@ dev: struct {
 	recording:         bool,
 	// Shared mode renders into shared textures instead of the swapchain (see shared.odin).
 	shared_mode:       bool,
-	shared:            Shared_Target,
+	shared:            Shared_State,
 	using resources:   Resources,
 	using pipelines:   Pipelines,
 	using uploads:     Uploads,
@@ -361,7 +361,7 @@ translate_job :: proc(data: rawptr) {
 
 // acquire_list takes an open command list from the frame's pool, with the descriptor heaps and root signature
 // bound. The frame's fence has passed, so its lists are free to reset.
-@(private = "file")
+@(private)
 acquire_list :: proc(frame: ^Frame, queue: gpu.Queue) -> ^d3d.IGraphicsCommandList7 {
 	sync.lock(&dev.lists_mutex)
 	lists := &frame.lists[queue]
@@ -413,6 +413,9 @@ end_frame :: proc() {
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	list := acquire_list(frame, .Graphics)
 	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	if dev.shared_mode {
+		end_shared_previews(list)
+	}
 	check(list->Close(), "ICommandList.Close")
 
 	// The compute queue starts after the previous frame's end and this frame's uploads, and the graphics queue

@@ -102,6 +102,9 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		jobs_worker_count            = jobs.worker_count,
 		gpu_features                 = gpu_features,
 		gpu_frame_target             = backend.frame_target,
+		gpu_preview_target           = backend.preview_target,
+		gpu_release_preview_target   = backend.release_preview_target,
+		gpu_pipeline_ready           = backend.pipeline_ready,
 		gpu_submit                   = backend.submit,
 		gpu_upload                   = backend.upload,
 		gpu_stream_buffer            = backend.stream_buffer,
@@ -261,6 +264,10 @@ pace_shared_frames :: backend.pace_shared_frames
 
 // acknowledge_shared_frame records that the reader has finished with a frame of a generation.
 acknowledge_shared_frame :: backend.acknowledge_shared_frame
+
+// acknowledge_preview_frame records that the reader has finished with a frame of a generation of a preview target
+// (see docs/rendering.md#material-previews).
+acknowledge_preview_frame :: backend.acknowledge_preview_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

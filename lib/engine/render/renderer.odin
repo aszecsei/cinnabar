@@ -1,5 +1,6 @@
 package render
 
+import "core:math"
 import "core:mem"
 
 import "cinnabar:core"
@@ -55,6 +56,7 @@ Renderer :: struct {
 	scene:           Gpu_Scene,
 	lights:          Lights,
 	shadows:         Shadows,
+	previews:        Previews,
 	output_pipeline: Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
 	debug_hidden:    Shader_Pipeline,
@@ -79,6 +81,9 @@ Frame_Desc :: struct {
 	// The light from everything else until global illumination. Zero gives DEFAULT_AMBIENT.
 	ambient:     Ambient,
 	hooks:       Frame_Hooks,
+	// The editor's material previews that the frame also draws, each into its own target (see
+	// docs/rendering.md#material-previews). draw_frame sets each one's complete.
+	previews:    []Preview_Desc,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -177,6 +182,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	scene_init(&r.scene, platform)
 	lights_init(&r.lights, platform, w)
 	shadows_init(&r.shadows, platform)
+	previews_init(&r.previews, r)
 	r.residency.accels = r.shadows.ray_query
 }
 
@@ -204,6 +210,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	scene_destroy(&r.scene, r.platform)
 	lights_destroy(&r.lights, r.platform)
 	shadows_destroy(&r.shadows, r.platform)
+	previews_destroy(&r.previews, r)
 	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
@@ -310,9 +317,21 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	color(&g, p, target, .Discard)
 
+	for &preview in desc.previews {
+		add_preview_passes(f, &preview)
+	}
 	ok := execute(&g)
 	debug.end_frame(&r.debug)
 	return ok
+}
+
+// frame_time is the time that materials read, in seconds since the host started. It wraps every hour, so a float
+// keeps its precision.
+frame_time :: proc(r: ^Renderer) -> f32 {
+	if r.platform.time_seconds == nil {
+		return 0
+	}
+	return f32(math.mod(r.platform.time_seconds(), 3600))
 }
 
 // sync_frame_pipelines creates the renderer's pipelines from their shaders, and updates those whose shaders changed,

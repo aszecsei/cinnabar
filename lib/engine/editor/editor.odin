@@ -50,6 +50,9 @@ Editor :: struct {
 	last_stats:  f64,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
 	commands:    [dynamic]Command,
+	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
+	previews:     [MAX_PREVIEWS]Preview,
+	next_preview: int,
 }
 
 @(private)
@@ -107,6 +110,7 @@ destroy :: proc(e: ^Editor) {
 	delete(e.viewport.selection)
 	delete(e.viewport.hidden)
 	delete(e.viewport.picks)
+	close_previews(e)
 	if e.viewport.gpu_ready {
 		destroy_viewport_gpu(e)
 	}
@@ -123,6 +127,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		clear(&e.known)
 		clear(&e.watched)
 		reset_viewport(e)
+		close_previews(e)
 		e.mode, e.free_camera, e.steps = .Edit, false, 0
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
 		if scripts != nil {
@@ -177,12 +182,13 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				e.steps += 1
 			}
 		case:
-			if !handle_viewport_message(e, message) {
+			if !handle_preview_message(e, message) && !handle_viewport_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)
 			}
 		}
 	}
 	finish_pick(e, w, out, frame)
+	send_preview_targets(e, out)
 	if !e.types_sent {
 		link.write_message(out, component_types(w, frame))
 		link.write_message(out, command_infos(e, frame))

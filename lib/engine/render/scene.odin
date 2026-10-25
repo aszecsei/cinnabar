@@ -415,6 +415,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		meshes                   = gpu.read_index(sf.mesh_upload.buffer),
 		materials                = gpu.read_index(sf.table_upload.buffer),
 		sampler_index            = gpu.sampler_index(r.materials.sampler),
+		time                     = frame_time(r),
 		meshes_offset            = sf.mesh_upload.offset,
 		materials_offset         = sf.table_upload.offset,
 		lights                   = gpu.read_index(lf.upload.buffer),
