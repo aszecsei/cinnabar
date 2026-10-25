@@ -26,6 +26,7 @@ Probe :: struct {
 	at:     ecs.World_Position,
 	target: ecs.Entity,
 	model:  format.Guid `asset:"mesh"`,
+	skins:  [2]format.Guid `asset:"material"`,
 	inner:  struct {
 		amount: f64,
 	},
@@ -129,6 +130,7 @@ component 100 Probe
 	at = [1, -2, 3]
 	target = @00000000000000a1
 	model = $9db8150cc7215ffc2708d20d77cf60bf
+	skins.1 = $ffeeddccbbaa99887766554433221100
 	inner.amount = 7
 `
 	load(&f.world, nil, parse(t, text))
@@ -165,6 +167,7 @@ component 100 Probe
 	testing.expect_value(t, p.at.raw, [3]i64{1, -2, 3})
 	testing.expect_value(t, p.target, root)
 	testing.expect_value(t, p.model, format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
+	testing.expect_value(t, p.skins, [2]format.Guid{{}, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {}})
 	testing.expect_value(t, p.inner.amount, 7)
 }
 
@@ -205,9 +208,13 @@ fields_flatten_and_hide :: proc(t: ^testing.T) {
 	for field in fields {
 		append(&names, field.name)
 	}
-	testing.expect_value(t, len(fields), 11)
-	testing.expect_value(t, fields[10].name, "inner.amount")
-	testing.expect_value(t, fields[10].offset, u32(offset_of(Probe, inner)))
+	testing.expect_value(t, len(fields), 13)
+	testing.expect_value(t, fields[12].name, "inner.amount")
+	testing.expect_value(t, fields[12].offset, u32(offset_of(Probe, inner)))
+	// An array of asset references is a field for each element.
+	testing.expect_value(t, fields[11].name, "skins.1")
+	testing.expect_value(t, fields[11].offset, u32(offset_of(Probe, skins) + size_of(format.Guid)))
+	testing.expect_value(t, fields[11].asset_kind, "material")
 	testing.expect_value(t, fields[9].kind, Field_Kind.Asset)
 	testing.expect_value(t, fields[9].asset_kind, "mesh")
 	testing.expect_value(t, fields[4].kind, Field_Kind.Enum)
