@@ -8,6 +8,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/volume"
 
 // The frame's targets (see docs/rendering.md#layers). The world draws into linear HDR colors, the editor's entity IDs
 // and reversed depth, which the prepass writes with the normals and the velocities (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
@@ -50,15 +51,16 @@ Renderer :: struct {
 	textures:        Texture_Cache,
 	// The lines that debug draws, which the debug layer draws each frame.
 	debug:           debug.Draw,
-	// A registration, created again in renderer_reload.
+	// Registrations, created again in renderer_reload.
 	meshes:          Extractor,
+	volumes:         volume.Volumes,
 	materials:       Materials,
 	scene:           Gpu_Scene,
 	lights:          Lights,
 	shadows:         Shadows,
 	previews:        Previews,
-	ao:              Ambient_Occlusion,
-	gi:              Global_Illumination,
+	ao:              Ao_Passes,
+	gi:              Gi_Passes,
 	fog:             Volumetric_Fog,
 	post:            Post,
 	// The output pass's pipeline for each output mode's frame target format. Only the frame's mode's is made.
@@ -80,16 +82,9 @@ Frame_Desc :: struct {
 	keep_ids:          bool,
 	// The entity slots not to draw, a bit each, as the editor hides them. nil hides nothing.
 	hidden:            []u32,
-	// Temporal AA, bloom, the exposure and the tone mapping (see docs/rendering.md#post-processing).
-	post:              Post_Settings,
-	// See docs/rendering.md#ambient-occlusion. The fog is a component (see Fog).
-	ambient_occlusion: Ao_Settings,
-	// See docs/rendering.md#global-illumination.
-	gi:                Gi_Settings,
-	// The world pass clears the scene to this, which is not pre-exposed.
-	clear_color:       [4]f32,
-	// The light from everything else until global illumination. Zero gives DEFAULT_AMBIENT.
-	ambient:           Ambient,
+	// The frame's settings (see docs/rendering.md#settings). nil takes them from the volumes at the view, as
+	// resolve_settings does.
+	settings:          ^Frame_Settings,
 	hooks:             Frame_Hooks,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering.md#material-previews). draw_frame sets each one's complete.
@@ -221,6 +216,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	mem.zero_item(r)
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
 		p = shader_pipeline(OUTPUT_SHADER)
 	}
@@ -237,7 +233,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	previews_init(&r.previews, r)
 	ao_init(&r.ao)
 	gi_init(&r.gi)
-	fog_init(&r.fog, w)
+	fog_init(&r.fog)
 	post_init(&r.post, platform)
 	r.residency.accels = r.shadows.ray_query
 }
@@ -252,8 +248,8 @@ mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
 renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.World) {
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
-	fog_register(&r.fog, w)
 	r.reloaded = true
 	residency_reload(&r.residency, platform)
 	materials_reload(&r.materials)
@@ -306,14 +302,15 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.depth = create_texture(&g, {size = desc.size, format = DEPTH_FORMAT, label = "scene depth"})
 	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
 	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
-	begin_post(f, desc.post)
+	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
+	begin_post(f, settings.post)
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
 	assign_shadows(f)
 	upload_lights(f)
-	ambient := desc.ambient == {} ? DEFAULT_AMBIENT : desc.ambient
-	begin_fog(f, w, desc.hidden)
-	begin_gi(f, desc.gi, ambient)
+	ambient := settings.ambient == {} ? DEFAULT_AMBIENT : settings.ambient
+	begin_fog(f, settings.fog)
+	begin_gi(f, settings.gi, ambient)
 	add_scene_passes(f, ambient)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
@@ -333,14 +330,14 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.after_prepass != nil {
 		desc.hooks.after_prepass(f)
 	}
-	add_ao_passes(f, desc.ambient_occlusion)
+	add_ao_passes(f, settings.ambient_occlusion)
 	add_gi_passes(f)
 	add_cluster_passes(f)
 	add_shadow_passes(f)
 	add_fog_passes(f)
 
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
-	color(&g, p, f.scene, .Clear, desc.clear_color)
+	color(&g, p, f.scene, .Clear, {settings.background.r, settings.background.g, settings.background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, temporal AA
 	// and the exposure.

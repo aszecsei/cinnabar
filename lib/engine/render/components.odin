@@ -119,21 +119,9 @@ Line_Light :: struct {
 	cast_shadows: bool,
 }
 
-// Fog fills the world with volumetric fog (see docs/rendering.md#volumetric-fog): the frame takes the first visible
-// entity's. Its density is the share of light that a meter of fog takes away, at and below its entity's height, and
-// falls off above it. A density of 0 is no fog.
-Fog :: struct {
-	density:        f32 `editor:"range=0,1"`,
-	// The share of the light that the fog takes away that it scatters rather than absorbs, per channel. 0 means white.
-	albedo:         [3]f32 `editor:"color"`,
-	// How fast the density falls with height above the entity, per meter. 0 keeps it the same everywhere.
-	height_falloff: f32 `editor:"range=0,10"`,
-	// Where the fog scatters light: above 0 forward, so it glows around a light that the camera looks toward, and below
-	// 0 back toward the light.
-	anisotropy:     f32 `editor:"range=-0.9,0.9"`,
-}
-
-// register_components registers the render components. Call it with the engine's components, in init and on_reload.
+// register_components registers the render components, with the settings components that volumes carry (see Fog and
+// the others in settings.odin). Call it with the engine's components and volume.register_components, in init and
+// on_reload.
 register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Camera, CAMERA_ID)
 	ecs.register_component(r, Mesh_Renderer, MESH_RENDERER_ID)
@@ -141,10 +129,10 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Point_Light, POINT_LIGHT_ID)
 	ecs.register_component(r, Spot_Light, SPOT_LIGHT_ID)
 	ecs.register_component(r, View_Model, VIEW_MODEL_ID)
-	ecs.register_component(r, Fog, FOG_ID)
 	ecs.register_component(r, Quad_Light, QUAD_LIGHT_ID)
 	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID)
 	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
+	register_settings_components(r)
 }
 
 // camera_view is the view from a Camera entity: its presented pose, and its field of view and near plane. It fails if

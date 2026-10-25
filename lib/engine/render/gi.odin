@@ -27,14 +27,14 @@ GI_INTERVAL_SCALE :: 2
 // The histories average at most this many frames, so the light follows a change within a few.
 GI_HISTORY_FRAMES :: 12
 
-// Gi_Settings are a frame's global illumination, in Frame_Desc. Zero gives the defaults.
+// Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
 Gi_Settings :: struct {
-	// Without it, the indirect light is Frame_Desc.ambient.
+	// Without it, the indirect light is Frame_Settings.ambient.
 	off: bool,
 }
 
-// Global_Illumination is the global illumination's state between frames, in the Renderer.
-Global_Illumination :: struct {
+// Gi_Passes is the global illumination's state between frames, in the Renderer.
+Gi_Passes :: struct {
 	trace:  Shader_Pipeline,
 	merge:  Shader_Pipeline,
 	gather: Shader_Pipeline,
@@ -100,14 +100,14 @@ Gi_Merge :: struct {
 	cascade: u32,
 }
 
-gi_init :: proc(gi: ^Global_Illumination) {
+gi_init :: proc(gi: ^Gi_Passes) {
 	gi.trace = shader_pipeline(GI_TRACE_SHADER)
 	gi.merge = shader_pipeline(GI_MERGE_SHADER)
 	gi.gather = shader_pipeline(GI_GATHER_SHADER)
 	gi.lit = shader_pipeline(GI_LIT_SHADER)
 }
 
-gi_destroy :: proc(gi: ^Global_Illumination, platform: ^core.Platform_API) {
+gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&gi.trace, &gi.merge, &gi.gather, &gi.lit}) {
 		destroy_shader_pipeline(p, platform)
 	}

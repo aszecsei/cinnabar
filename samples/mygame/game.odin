@@ -572,7 +572,6 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		size        = size,
 		keep_ids    = editing,
 		hidden      = editor.visibility(&s.editor, &s.world).hidden,
-		clear_color = {0.02, 0.02, 0.035, 1},
 		// The material editor's previews (see docs/rendering.md#material-previews).
 		previews    = editor.previews(&s.editor),
 		hooks       = {

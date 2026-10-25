@@ -27,8 +27,6 @@ FOG_BLEND :: 0.1
 
 // Volumetric_Fog is the fog's state between frames, in the Renderer.
 Volumetric_Fog :: struct {
-	// A registration, created again in renderer_reload.
-	extractor:     Extractor,
 	inject:        Shader_Pipeline,
 	inject_traced: Shader_Pipeline,
 	integrate:     Shader_Pipeline,
@@ -103,18 +101,13 @@ Fog_Frame :: struct {
 	accel:    Accel,
 }
 
-fog_init :: proc(v: ^Volumetric_Fog, w: ^ecs.World) {
-	fog_register(v, w)
+fog_init :: proc(v: ^Volumetric_Fog) {
 	v.inject = shader_pipeline(FOG_INJECT_SHADER)
 	v.inject_traced = shader_pipeline(FOG_INJECT_TRACED_SHADER)
 	v.integrate = shader_pipeline(FOG_INTEGRATE_SHADER)
 	v.background = shader_pipeline(FOG_BACKGROUND_SHADER)
 }
 
-// fog_register makes the fog's extractor, in init and after a code reload.
-fog_register :: proc(v: ^Volumetric_Fog, w: ^ecs.World) {
-	v.extractor = extractor(w, {ecs.read(w, Fog)})
-}
 
 fog_destroy :: proc(v: ^Volumetric_Fog, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&v.inject, &v.inject_traced, &v.integrate, &v.background}) {
@@ -136,10 +129,10 @@ sync_fog_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&v.background, r.platform, assets, {label = "fog background"}, force)
 }
 
-// begin_fog finds the frame's fog, the first visible Fog entity with a density, and readies its volume, before the
-// scene's constants are written, which say whether there is fog. Without fog or its pipelines, Frame.fog stays nil.
+// begin_fog readies the frame's fog volume, from the Fog settings at the camera, before the scene's constants are
+// written, which say whether there is fog. Without fog or its pipelines, Frame.fog stays nil.
 @(private)
-begin_fog :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
+begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	r := f.renderer
 	v := &r.fog
 	platform := r.platform
@@ -147,21 +140,7 @@ begin_fog :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	if !pipeline_ready(platform, traced ? &v.inject_traced : &v.inject) || !pipeline_ready(platform, &v.integrate) {
 		return
 	}
-	fog: Fog
-	base: ecs.World_Position
-	found := false
-	it := ecs.query_iter(w, v.extractor.query)
-	search: for view in ecs.query_next(&it) {
-		for e, i in ecs.entities(view) {
-			pose, ok := light_pose(w, view, i, hidden, e)
-			component := ecs.column(view, EXTRACT_TERMS, Fog)[i]
-			if ok && component.density > 0 {
-				fog, base, found = component, pose.position, true
-				break search
-			}
-		}
-	}
-	if !found {
+	if fog.density <= 0 {
 		return
 	}
 	grid := [3]u32{(f.size.x + FOG_TILE - 1) / FOG_TILE, (f.size.y + FOG_TILE - 1) / FOG_TILE, FOG_SLICES}
@@ -185,7 +164,8 @@ begin_fog :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 			albedo = fog.albedo != {} ? fog.albedo : {1, 1, 1},
 			density = fog.density,
 			height_falloff = fog.height_falloff,
-			base_height = ecs.position_sub(base, f.view.position).y,
+			// Relative to the camera, in f64 so a camera far from the origin keeps it exact.
+			base_height = f32(f64(fog.base_height) - ecs.position_to_meters(f.view.position).y),
 			anisotropy = clamp(fog.anisotropy, -0.95, 0.95),
 			jitter = halton(v.frame % JITTER_SAMPLES + 1, 2),
 			grid = grid,

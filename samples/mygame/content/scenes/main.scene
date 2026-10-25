@@ -58,6 +58,17 @@ component 33 Mesh_Renderer
 	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
 
+entity 5e0c1d2b3a4f6789
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.02, 0.02, 0.035]
+
 entity 7820834ecb6da56e
 name = "Floor"
 component 1 Transform

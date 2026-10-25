@@ -66,7 +66,7 @@ Exposure_Mode :: enum u8 {
 	Manual,
 }
 
-// Post_Settings are a frame's post-processing, in Frame_Desc. Zero gives the defaults.
+// Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Zero gives the defaults.
 Post_Settings :: struct {
 	no_temporal_aa:        bool,
 	no_bloom:              bool,
