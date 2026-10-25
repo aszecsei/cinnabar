@@ -355,6 +355,9 @@ Sampler_Desc :: struct {
 	address:    Address_Mode,
 	// 0 or 1 disables anisotropic filtering. The maximum is 16.
 	anisotropy: u8,
+	// Anything but Always makes a comparison sampler: SampleCmp compares its reference value with each texel by this,
+	// and filters the results, as shadow maps need. Shaders get it with cn_comparison_sampler.
+	compare:    Compare_Op,
 	scope:      Scope,
 	label:      string,
 }
@@ -409,6 +412,14 @@ Graphics_Pipeline_Desc :: struct {
 	// Always disables the depth test.
 	depth_compare: Compare_Op,
 	depth_write:   bool,
+	// Added to each fragment's depth: a constant in units of the depth format's precision near the fragment, and a
+	// factor of the triangle's slope. Shadow maps use them against acne. With reversed depth, a negative bias moves
+	// a fragment away from the camera.
+	depth_bias:    i32,
+	slope_bias:    f32,
+	// Clamps depth to the viewport's range instead of clipping, so geometry in front of the near plane still writes
+	// depth there, as directional shadow maps need.
+	depth_clamp:   bool,
 	topology:      Topology,
 	cull:          Cull_Mode,
 	scope:         Scope,

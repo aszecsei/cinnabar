@@ -94,6 +94,8 @@ Pipelines have no input layout. Shaders read vertex data from byte-address buffe
 - An update must keep the attachment formats, the topology and the pipeline kind, because validation and translation use them before the new version is ready. Such an update returns false and changes nothing, and the game creates a new pipeline instead.
 - On a hot reload, the game updates its pipelines in `on_reload`, so the old shaders draw until the new ones compile.
 - Blending uses presets (`Opaque`, `Alpha`, `Premultiplied`, `Additive`), one per color target.
+- **Depth bias and clamping:** `depth_bias` and `slope_bias` add a constant and a slope-scaled offset to each fragment's depth, and `depth_clamp` clamps depth to the viewport's range instead of clipping. Shadow maps use them (see [Rendering](rendering.md#shadows)).
+- **Comparison samplers:** a `Sampler_Desc` whose `compare` is not `Always` makes a comparison sampler, which shaders get with `cn_comparison_sampler` and use with `SampleCmp`.
 
 ## Command buffers
 

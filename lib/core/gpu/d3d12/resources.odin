@@ -362,6 +362,14 @@ create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 		sampler_desc.Filter = .ANISOTROPIC
 		sampler_desc.MaxAnisotropy = u32(min(desc.anisotropy, 16))
 	}
+	if desc.compare != .Always {
+		COMPARISON_FILTER := [gpu.Filter][gpu.Filter]d3d.FILTER {
+			.Nearest = {.Nearest = .COMPARISON_MIN_MAG_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_POINT_MIP_LINEAR},
+			.Linear = {.Nearest = .COMPARISON_MIN_MAG_LINEAR_MIP_POINT, .Linear = .COMPARISON_MIN_MAG_MIP_LINEAR},
+		}
+		sampler_desc.Filter = COMPARISON_FILTER[desc.filter][desc.mip_filter]
+		sampler_desc.ComparisonFunc = COMPARE[desc.compare]
+	}
 	dev.device->CreateSampler(&sampler_desc, sampler_handle(gpu.sampler_index(sampler)))
 	return sampler
 }

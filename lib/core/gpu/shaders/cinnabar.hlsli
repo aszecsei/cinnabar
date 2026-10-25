@@ -34,6 +34,8 @@ Texture2D<float4> cn_texture(uint index) { return ResourceDescriptorHeap[index];
 Texture2D<uint> cn_uint_texture(uint index) { return ResourceDescriptorHeap[index]; }
 RWTexture2D<float4> cn_rw_texture(uint index) { return ResourceDescriptorHeap[index]; }
 SamplerState cn_sampler(uint index) { return SamplerDescriptorHeap[index]; }
+// A sampler whose Sampler_Desc has a compare op, for SampleCmp.
+SamplerComparisonState cn_comparison_sampler(uint index) { return SamplerDescriptorHeap[index]; }
 // A top-level acceleration structure, from gpu.read_index(accel).
 RaytracingAccelerationStructure cn_accel(uint index) { return ResourceDescriptorHeap[index]; }
 

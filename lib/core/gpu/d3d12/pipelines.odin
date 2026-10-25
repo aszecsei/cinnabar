@@ -481,7 +481,9 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 		RasterizerState = {
 			FillMode = .SOLID,
 			CullMode = CULL[desc.cull],
-			DepthClipEnable = true,
+			DepthBias = desc.depth_bias,
+			SlopeScaledDepthBias = desc.slope_bias,
+			DepthClipEnable = d3d.BOOL(!desc.depth_clamp),
 		},
 		DepthStencilState = {
 			DepthEnable = d3d.BOOL(desc.depth_format != .Unknown && (desc.depth_compare != .Always || desc.depth_write)),
@@ -744,7 +746,7 @@ CULL := [gpu.Cull_Mode]d3d.CULL_MODE {
 	.Front = .FRONT,
 }
 
-@(private = "file")
+@(private)
 COMPARE := [gpu.Compare_Op]d3d.COMPARISON_FUNC {
 	.Always        = .ALWAYS,
 	.Never         = .NEVER,
