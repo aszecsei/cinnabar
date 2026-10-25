@@ -45,7 +45,7 @@ shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -306,7 +306,7 @@ fmt:
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau compressonator meshoptimizer link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor
