@@ -40,7 +40,7 @@ float3 transform_direction(float4 rows[3], float3 d) {
 
 Varyings vs_main(uint vertex_id : SV_VertexID) {
 	Draw_Record d = cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
-	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(d.mesh * sizeof(Mesh_Record));
+	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + d.mesh * sizeof(Mesh_Record));
 	uint corner = d.first_index + vertex_id;
 	uint index;
 	if (m.flags & MESH_INDEX32) {
@@ -85,7 +85,7 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 }
 
 Targets ps_main(Varyings i, bool front : SV_IsFrontFace) {
-	params = cn_buffer(frame.materials).Load<Params>(i.material);
+	params = cn_buffer(frame.materials).Load<Params>(frame.materials_offset + i.material);
 	Material_Inputs inputs;
 	inputs.position = i.world;
 	inputs.normal = normalize(i.normal);

@@ -23,7 +23,9 @@ struct Frame_Constants {
 	uint materials;
 	uint sampler_index;
 	float time;
-	uint2 padding;
+	// The mesh records and the material table are in the upload ring, at these offsets of its buffer.
+	uint meshes_offset;
+	uint materials_offset;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

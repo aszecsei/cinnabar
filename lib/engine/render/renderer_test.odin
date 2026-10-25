@@ -68,6 +68,13 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		gpu_destroy_texture          = null.destroy_texture,
 		gpu_destroy_buffer           = null.destroy_buffer,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_buffer            = null.create_buffer,
+		gpu_create_sampler           = null.create_sampler,
+		gpu_destroy_sampler          = null.destroy_sampler,
+		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
+		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
+		gpu_create_compute_pipeline  = null.create_compute_pipeline,
+		gpu_update_compute_pipeline  = null.update_compute_pipeline,
 	}
 	record: Hook_Record
 	record.problems = make([dynamic]string)

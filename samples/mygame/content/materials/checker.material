@@ -1,0 +1,13 @@
+material 1
+# The box's material: a checker texture under a tint, lit.
+shading = lit
+param tint color = [1, 1, 1, 1]
+param roughness float = 0.55
+param albedo texture = $6ae47342be33cfa451b9f6643231fd24
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = params.tint.rgb * cn_sample(params.albedo, inputs.uv0).rgb;
+	s.roughness = params.roughness;
+	return s;
+}

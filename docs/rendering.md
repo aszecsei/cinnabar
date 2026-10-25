@@ -55,7 +55,7 @@ flowchart TB
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
 - The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor and its pipelines, and later the material table, the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
-- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, and the hooks.
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the sun and the ambient light until phase 3's lights (`Sun`, `DEFAULT_SUN` when zero), and the hooks.
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
 
 | Hook | When | What it does |
@@ -78,13 +78,17 @@ flowchart TB
 
 ## GPU scene
 
-The GPU scene holds every instance's record in a persistent buffer: its pose, its last frame's pose, its bounds, its mesh and its material slot.
+The GPU scene holds every instance's record in a persistent buffer, `Gpu_Scene` in `lib/engine/render/scene.odin`: its pose and its last frame's pose as the rows of 3x4 matrices, and its entity's ID for the editor. Each frame's draw items carry the rest: the mesh, the submesh's indices and bounds, and the material.
 
 - **Render origin.** Poses are relative to the render origin, a `World_Position` snapped to a grid of 1024 m. Snapping is an integer mask on the Q39.24 values, so the offset between two origins is exact. Shaders subtract the view's offset from the origin, so their error near the camera is about one `f32` unit at 1024 m, about 0.06 mm.
 - **Rebasing.** The origin moves when the camera is more than 1.5 cells from it, so a camera on a cell's edge does not move it back and forth. A rebase writes every record again, rebuilds the top-level acceleration structure, and moves every world-space history (last frame's poses, cached shadow maps, GI probes) by the exact offset.
-- **Stable slots.** Each rendered entity has a slot for its whole life. A free list gives slots, and a map from entity to slot lives in `Game_State`. A soft restart builds them again. Culling, the acceleration structure's instance IDs and the occlusion culling's visibility from the last frame all index by slot.
+- **Stable slots.** Each rendered entity has a slot for its whole life, at most `MAX_INSTANCES` (16 384). A free list gives slots, and a map from entity to slot, in host memory, lives in the `Renderer`. A slot whose entity has no `Mesh_Renderer` in a frame is free again. A soft restart builds them again. Culling, the acceleration structure's instance IDs and the occlusion culling's visibility from the last frame all index by slot.
 - **Camera-relative records.** The view model and the debug shapes are not in the GPU scene. Extraction writes them relative to the camera every frame, as it does now (see [World](world.md#render-extraction)). The view model is within a meter of the camera, where the render origin's error would show as about a pixel of jitter at the near plane.
-- **Updates.** At first, extraction writes every slot every frame, relative to the render origin. That costs what extraction costs now, about 96 bytes per instance per frame with both poses, but every GPU-side consumer has its final layout. *Later, extraction writes only the slots that changed (see [Future work](#future-work)).*
+- **Updates.** Every frame writes every slot, relative to the render origin, into the upload ring, and a copy moves them into the persistent buffer: 112 bytes per instance with both poses. Last frame's pose is the slot's presented pose of the frame before, or this frame's for a new slot. Every GPU-side consumer has its final layout. *Later, extraction writes only the slots that changed (see [Future work](#future-work)).*
+- **Draw items** are one per submesh of each visible `Mesh_Renderer` whose mesh is resident: its slot, its mesh's record, its indices, its material's block, its bin, and its submesh's bounding sphere. Hidden entities (`Frame_Desc.hidden`) keep their slots but have no items.
+- **Culling** is a compute pass, `cull_draws.hlsl`: each item's sphere, moved by its instance's rows, against the view's frustum, whose far plane is at infinity. A visible item takes the next place in its bin with an atomic add, and writes there both its indirect draw, whose draw ID is that place, and its draw record. *Occlusion culling, and culling on the compute queue, come later.*
+- **Drawing:** the world pass draws each bin with one `cmd_draw_indirect` and the bin's count. The vertex shader reads its draw record by its draw ID, and pulls its index from the mesh's index buffer, then its vertex: every mesh has buffers of its own, so no one index buffer could be bound for a bin. *The mesh shader path draws meshlets instead, later.*
+- **The frame's constants** (`Frame_Constants`, the pass constants of every material pass) hold the view's projection, the camera's offset from the origin, the sun and the ambient light, the records' bindless indices, and the offsets in the upload ring of the mesh records and the material table.
 
 ## Layers
 
@@ -259,11 +263,12 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 
 ### Runtime
 
-- **One table.** Every loaded material instance has a slot in a GPU buffer of parameter blocks. A block holds the parameters in the layout that the material's blob gives, with textures as bindless indices. Each draw record holds its slot.
-- **Pipelines by material.** The renderer creates a pipeline for each material permutation that a draw needs. Instances of a material share its pipelines.
+- **One table.** Each frame uploads a table with a block for each material or instance that it draws (`Material_Table`, in `lib/engine/render/materials.odin`). A block holds the parameters in the layout that the material's blob gives, with each texture's bindless index written: the resident texture, or the default for its parameter (white, black or a flat normal) until it is resident. Each draw record holds its block's offset. *A persistent table that writes only what changed comes with larger scenes.*
+- **Pipelines by material.** The renderer creates a pipeline for each material and switch combination that a draw needs, from the material's blob, at most `MAX_MATERIAL_PIPELINES`. Instances with the same switches share it. A two-sided material culls no faces.
+- **The default material.** A submesh without a material, or whose material cannot draw (not cooked, or without the variant that its instance needs), draws with the engine's default material, `lib/engine/content/materials/default.material`.
 - **Bins.** Culling writes each visible draw into the bin of its pipeline. Each bin is one indirect draw with a count buffer (see [GPU](gpu.md#gpu-driven-rendering)).
 - **Hot reload.** A new material blob updates its pipelines with `update_graphics_pipeline`, so the old shaders draw until the new ones compile. A new instance blob rewrites its parameter block. Both come through `asset.poll` (see [Content pipeline](content-pipeline.md#loading)).
-- **Missing pipelines.** A draw whose pipeline is not compiled yet uses its material's fallback: the default material in the same blend mode. Nothing pops in as a hole.
+- **Missing pipelines.** A bin whose pipeline is not compiled yet draws nothing until it is, which is the backend's rule for every pipeline. *Later, it draws with the default material in the same blend mode, so nothing pops in as a hole.*
 
 ### Material previews
 
@@ -338,8 +343,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 ### Components
 
 - **`Camera`** (stable ID 32): the vertical field of view in radians and the near plane in meters; 0 in either means 60° or 5 cm. The camera's pose is its entity's presented `Transform`, and `render.camera_view` gives the view. `Game_State` holds the active camera's entity, as world-wide state (see [World](world.md)). The game's view comes from it, unless an editor is linked (see [Editor](editor.md#viewport)).
-- **`Mesh_Renderer`** (stable ID 33): a mesh asset field, whether it casts shadows, and later a material instance for each of the mesh's submeshes. `render.register_components` registers both.
-- **Drawing until phase 2:** every mesh draws with the engine's mesh shader, `lib/engine/content/shaders/mesh.hlsl`, which pulls positions and octahedral normals from the resident buffers and shades them under a fixed light, into an HDR target and the editor's entity IDs. `render.extract_meshes` writes each `Mesh_Renderer`'s instance into the upload ring and gives a draw for each resident mesh; the game sets the editor IDs and leaves out hidden entities; `render.draw_meshes` records an indexed draw for each submesh. There is no culling: the GPU scene and culling into bins replace this in phase 2.
+- **`Mesh_Renderer`** (stable ID 33): a mesh, a material or instance for each of its mesh's first `MAX_MATERIAL_SLOTS` (8) submeshes (`materials.0` and on), and whether it casts shadows. `render.register_components` registers both. The renderer draws every `Mesh_Renderer` through the [GPU scene](#gpu-scene).
 - **Later:** the light components (phase 3) and `View_Model` (phase 4).
 
 ## Implementation phases
@@ -348,7 +352,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 |---|---|
 | 0 | *Done.* In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
 | 1 | *Done.* The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
-| 2 | The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
+| 2 | *Done.* The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
 | 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |
 | 4 | The view model, with the stencil additions. |
 | 5 | The material graph: the `.material` graph format, the cooker's code generation and permutations, the editor's node editor, and material previews with `Cook_Preview`. |

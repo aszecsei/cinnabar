@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:mem"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -27,6 +28,7 @@ Resident_Mesh :: struct {
 	bounds:           format.Mesh_Bounds,
 	submesh_count:    u32,
 	submeshes:        [MAX_SUBMESHES]Resident_Submesh,
+	submesh_bounds:   [MAX_SUBMESHES]format.Mesh_Bounds,
 }
 
 Resident_Submesh :: struct {
@@ -80,7 +82,9 @@ Resident_Resources :: struct {
 }
 
 residency_init :: proc(r: ^Residency, platform: ^core.Platform_API, assets: ^asset.Assets) {
-	r^ = {platform = platform, assets = assets}
+	// The table is too large for a temporary on the stack, so it is zeroed in place.
+	mem.zero_item(r)
+	r.platform, r.assets = platform, assets
 }
 
 // residency_reload keeps every resident asset after a code reload.
@@ -219,6 +223,7 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.submesh_count = u32(min(len(submeshes), MAX_SUBMESHES))
 	for s, i in submeshes[:m.submesh_count] {
 		m.submeshes[i] = {s.first_index, s.index_count}
+		m.submesh_bounds[i] = s.bounds
 	}
 	m.positions = stream_buffer(r, e, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
 	m.attributes = stream_buffer(r, e, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return

@@ -1,5 +1,7 @@
 package render
 
+import "core:mem"
+
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
@@ -41,7 +43,8 @@ Renderer :: struct {
 	debug:           debug.Draw,
 	// A registration, created again in renderer_reload.
 	meshes:          Extractor,
-	mesh_pipeline:   Shader_Pipeline,
+	materials:       Materials,
+	scene:           Gpu_Scene,
 	output_pipeline: Shader_Pipeline,
 	debug_tested:    Shader_Pipeline,
 	debug_hidden:    Shader_Pipeline,
@@ -61,7 +64,25 @@ Frame_Desc :: struct {
 	// Scales the scene before tone mapping. 0 means 1.
 	exposure:    f32,
 	clear_color: [4]f32,
+	// The light until phase 3's lights: one directional light and the ambient light. Zero gives DEFAULT_SUN.
+	sun:         Sun,
 	hooks:       Frame_Hooks,
+}
+
+// Sun is the frame's light until the clustered lights: the direction toward the sun and its light, and the ambient
+// light from the sky above and the ground below.
+Sun :: struct {
+	direction: [3]f32,
+	color:     [3]f32,
+	sky:       [3]f32,
+	ground:    [3]f32,
+}
+
+DEFAULT_SUN :: Sun {
+	direction = {-0.37, 0.65, -0.66},
+	color     = {3, 2.9, 2.7},
+	sky       = {0.3, 0.36, 0.45},
+	ground    = {0.14, 0.12, 0.1},
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -73,7 +94,7 @@ Frame_Hooks :: struct {
 	before_world: proc(f: ^Frame),
 	// Declares the world pass's other uses, such as the buffers that world_draw reads.
 	world_uses:   proc(f: ^Frame, pass: Pass),
-	// Records draws into the world pass, after the meshes in piece 0. The pass has world_pieces pieces.
+	// Records draws into the world pass, after the Mesh_Renderers in piece 0. The pass has world_pieces pieces.
 	world_draw:   proc(f: ^Frame, ctx: ^Pass_Context),
 	world_pieces: int,
 	// Adds passes after the world pass. A pass that makes a new scene color, such as post-processing, sets Frame.scene
@@ -101,8 +122,7 @@ Frame :: struct {
 	debug:           Texture,
 	hooks:           Frame_Hooks,
 	exposure:        f32,
-	mesh_instances:  gpu.Upload,
-	mesh_draws:      []Mesh_Draw,
+	scene_frame:     ^Scene_Frame,
 	debug_lines:     gpu.Upload,
 	tested_lines:    int,
 	overlay_lines:   int,
@@ -140,17 +160,24 @@ Output_Push :: struct {
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
 
 renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset.Assets, w: ^ecs.World) {
-	r^ = {
-		platform        = platform,
-		meshes          = mesh_extractor(w),
-		mesh_pipeline   = shader_pipeline(MESH_SHADER),
-		output_pipeline = shader_pipeline(OUTPUT_SHADER),
-		debug_tested    = shader_pipeline(DEBUG_SHADER),
-		debug_hidden    = shader_pipeline(DEBUG_SHADER),
-		debug_overlay   = shader_pipeline(DEBUG_SHADER),
-	}
+	// The Renderer is too large for a temporary on the stack, so it is zeroed in place.
+	mem.zero_item(r)
+	r.platform = platform
+	r.meshes = mesh_extractor(w)
+	r.output_pipeline = shader_pipeline(OUTPUT_SHADER)
+	r.debug_tested = shader_pipeline(DEBUG_SHADER)
+	r.debug_hidden = shader_pipeline(DEBUG_SHADER)
+	r.debug_overlay = shader_pipeline(DEBUG_SHADER)
 	residency_init(&r.residency, platform, assets)
 	debug.init(&r.debug, platform.heap_allocator)
+	materials_init(&r.materials, platform)
+	scene_init(&r.scene, platform)
+}
+
+// mesh_extractor selects the entities with a Mesh_Renderer.
+@(private = "file")
+mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
+	return extractor(w, {ecs.read(w, Mesh_Renderer)})
 }
 
 // renderer_reload keeps the renderer after a code reload, and makes its registrations again.
@@ -159,13 +186,16 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	r.meshes = mesh_extractor(w)
 	r.reloaded = true
 	residency_reload(&r.residency, platform)
+	materials_reload(&r.materials)
 }
 
 renderer_destroy :: proc(r: ^Renderer) {
 	residency_destroy(&r.residency)
 	cache_destroy(&r.textures, r.platform)
 	debug.destroy(&r.debug)
-	for p in ([]^Shader_Pipeline{&r.mesh_pipeline, &r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_overlay}) {
+	materials_destroy(&r.materials, r.platform)
+	scene_destroy(&r.scene, r.platform)
+	for p in ([]^Shader_Pipeline{&r.output_pipeline, &r.debug_tested, &r.debug_hidden, &r.debug_overlay}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
@@ -191,7 +221,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.scene = create_texture(&g, {size = desc.size, format = SCENE_FORMAT, label = "scene"})
 	f.ids = create_texture(&g, {size = desc.size, format = ID_FORMAT, label = "entity ids"})
 	f.depth = create_texture(&g, {size = desc.size, format = DEPTH_FORMAT, label = "scene depth"})
-	extract_frame_meshes(f, w, desc.hidden)
+	build_scene(f, w, desc.hidden, desc.sun == {} ? DEFAULT_SUN : desc.sun)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := len(lines) > 0 || desc.hooks.debug != nil
 
@@ -203,6 +233,12 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids ? .Store : .Discard)
 	// The debug layer tests against the depth, and the editor reads it.
 	depth(&g, p, f.depth, .Clear, store = desc.keep_ids || has_debug ? .Store : .Discard)
+	if sf := f.scene_frame; len(sf.items) > 0 {
+		indirect_buffer(&g, p, sf.arguments)
+		indirect_buffer(&g, p, sf.counts)
+		read(&g, p, sf.draws)
+		read(&g, p, sf.instances)
+	}
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
@@ -250,7 +286,6 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 	force := r.reloaded
 	r.reloaded = false
 	assets := r.residency.assets
-	sync_graphics_pipeline(&r.mesh_pipeline, r.platform, assets, {.Vertex, .Pixel}, MESH_PIPELINE, force)
 	sync_graphics_pipeline(&r.output_pipeline, r.platform, assets, {.Vertex, .Pixel}, OUTPUT_PIPELINE, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
@@ -265,45 +300,16 @@ sync_frame_pipelines :: proc(r: ^Renderer) {
 }
 
 @(private = "file")
-MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors        = WORLD_COLORS,
-	depth_format  = DEPTH_FORMAT,
-	depth_compare = .Greater,
-	depth_write   = true,
-	cull          = .Back,
-	label         = "meshes",
-}
-
-@(private = "file")
 OUTPUT_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors = {{format = gpu.FRAME_TARGET_FORMAT}},
 	label  = "output",
-}
-
-// extract_frame_meshes gives the frame's mesh draws, without the hidden entities, with their entity IDs.
-@(private = "file")
-extract_frame_meshes :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
-	r := f.renderer
-	instances, draws := extract_meshes(w, &r.residency, r.meshes, f.view.position)
-	records := mesh_instances(instances)
-	kept := 0
-	for d in draws {
-		index := ecs.entity_index(d.entity)
-		if int(index / 32) < len(hidden) && hidden[index / 32] & (1 << (index % 32)) != 0 {
-			continue
-		}
-		records[d.instance].id = entity_id(d.entity)
-		draws[kept] = d
-		kept += 1
-	}
-	f.mesh_instances, f.mesh_draws = instances, draws[:kept]
 }
 
 @(private = "file")
 draw_world :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	if ctx.piece == 0 {
-		draw_meshes(ctx.cb, f.renderer.mesh_pipeline.pipeline, f.view_projection, f.mesh_instances, f.mesh_draws)
+		draw_scene_bins(f, ctx.cb)
 	}
 	if f.hooks.world_draw != nil {
 		f.hooks.world_draw(f, ctx)

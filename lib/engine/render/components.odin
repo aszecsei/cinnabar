@@ -22,10 +22,11 @@ Camera :: struct {
 	near:         f32 `editor:"range=0.001,10"`,
 }
 
-// Mesh_Renderer draws a mesh asset at its entity's Transform. Until materials exist, every mesh draws with the engine's
-// mesh shader, which shades by the normal under a fixed light.
+// Mesh_Renderer draws a mesh asset at its entity's Transform, each of its first submeshes with the material or
+// instance in its slot, or the default material without one.
 Mesh_Renderer :: struct {
 	mesh:         format.Guid `asset:"mesh"`,
+	materials:    [MAX_MATERIAL_SLOTS]format.Guid `asset:"material"`,
 	cast_shadows: bool,
 }
 

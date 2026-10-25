@@ -34,6 +34,7 @@ component 1 Transform
 	scale = [0.18, 0.18, 0.18]
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
 
 entity 8c15900f0aab4d79
 name = "Back Triangle"
@@ -58,5 +59,6 @@ component 1 Transform
 component 4 Previous_Transform
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $f7eadea8bd278c0ae71b61b681352a82
 component 1001 Spin
 	speed = 0.6
