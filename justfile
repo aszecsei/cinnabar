@@ -71,6 +71,10 @@ install-compressonator:
         rmdir "$dir" 2>/dev/null || true
         git clone --quiet --filter=blob:none --no-checkout --sparse "$(git config -f .gitmodules submodule.$dir.url)" "$dir"
         git submodule absorbgitdirs "$dir"
+        git -C "$dir" sparse-checkout set --cone {{compressonator_paths}}
+        # The clone has an empty index, which an ordinary checkout would keep as the deletion of every file.
+        git -C "$dir" fetch --quiet --filter=blob:none origin "$commit"
+        git -C "$dir" -c advice.detachedHead=false checkout --quiet --force --detach "$commit"
     fi
     git -C "$dir" sparse-checkout set --cone {{compressonator_paths}}
     if [ "$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)" != "$commit" ]; then
