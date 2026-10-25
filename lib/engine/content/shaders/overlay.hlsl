@@ -13,8 +13,10 @@ struct Push {
 	uint vertex_offset;
 	// 0 draws the outline, 1 the gizmo.
 	uint mode;
-	// The scene's depth, which tells the selection's own edges from the edges of what is in front of it.
+	// The scene's depth, which tells the selection's own edges from the edges of what is in front of it, and its
+	// stencil, whose view model bit puts a pixel in front of every pixel of the world.
 	uint depth;
+	uint stencil;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -28,6 +30,8 @@ struct Vertex {
 static const float4 OUTLINE = float4(0.77, 0.06, 0.04, 1);
 // The outline reaches this many pixels from the selection's edge.
 static const int OUTLINE_RADIUS = 2;
+// Matches render.VIEW_MODEL_STENCIL.
+static const uint VIEW_MODEL_STENCIL = 1;
 
 struct Varyings {
 	float4 position : SV_Position;
@@ -68,6 +72,21 @@ float depth_at(int2 pixel) {
 	return cn_texture(push.depth).Load(int3(pixel, 0)).r;
 }
 
+bool view_model_at(int2 pixel) {
+	return (cn_stencil_texture(push.stencil).Load(int3(pixel, 0)).g & VIEW_MODEL_STENCIL) != 0;
+}
+
+// in_front is whether pixel a shows something in front of what pixel b shows. The view model draws over the world, so
+// it is in front of every world pixel, whatever their depths; otherwise the nearer depth is in front. Depth is
+// reversed: it shrinks with distance, and the background is 0.
+bool in_front(int2 a, int2 b) {
+	bool model_a = view_model_at(a), model_b = view_model_at(b);
+	if (model_a != model_b) {
+		return model_a;
+	}
+	return depth_at(a) > depth_at(b);
+}
+
 float4 ps_main(Varyings i) : SV_Target {
 	if (push.mode != 0) {
 		return i.color;
@@ -79,18 +98,15 @@ float4 ps_main(Varyings i) : SV_Target {
 	uint2 size;
 	cn_uint_texture(push.ids).GetDimensions(size.x, size.y);
 	bool inside = selected(pixel);
-	float here = depth_at(pixel);
 	for (int y = -OUTLINE_RADIUS; y <= OUTLINE_RADIUS; y++) {
 		for (int x = -OUTLINE_RADIUS; x <= OUTLINE_RADIUS; x++) {
 			int2 other = clamp(pixel + int2(x, y), 0, int2(size) - 1);
 			if (x * x + y * y > OUTLINE_RADIUS * OUTLINE_RADIUS || selected(other) == inside) {
 				continue;
 			}
-			float there = depth_at(other);
-			// Depth is reversed: it shrinks with distance, and the background is 0.
-			float selected_depth = inside ? here : there;
-			float other_depth = inside ? there : here;
-			if (other_depth <= selected_depth) {
+			int2 selection = inside ? pixel : other;
+			int2 rest = inside ? other : pixel;
+			if (!in_front(rest, selection)) {
 				return OUTLINE;
 			}
 		}

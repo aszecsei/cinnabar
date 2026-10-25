@@ -460,7 +460,7 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 		index := ecs.entity_index(e)
 		words[4 + index / 32] |= 1 << (index % 32)
 	}
-	result := pick_result(w, {id = 3, width = 1, height = 1}, words, 0.1, context.temp_allocator)
+	result := pick_result(w, {id = 3, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
 	testing.expect_value(t, result.id, 3)
 	// The dead entity's slot finds nothing, and the others come in slot order.
 	testing.expect_value(t, len(result.hits), 2)
@@ -469,7 +469,12 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 	// A depth of 0.5 is twice the near plane.
 	testing.expect(t, abs(result.depth - 0.2) < 1e-6)
 
-	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, context.temp_allocator)
+	// On the view model's stencil bit, the depth is the view model's near plane's.
+	words[3] = render.VIEW_MODEL_STENCIL
+	model := pick_result(w, {id = 5, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	testing.expect(t, abs(model.depth - 0.02) < 1e-6)
+
+	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, 0.01, context.temp_allocator)
 	testing.expect_value(t, rect.depth, 0)
 }
 

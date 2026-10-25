@@ -21,8 +21,8 @@ ID_FORMAT :: render.ID_FORMAT
 // At most this many picks wait for the GPU. The editor waits for each answer, so it sends one or two at a time.
 MAX_PICKS :: 16
 
-// The pick results: the pick's ticket, the ID and depth at the rectangle's origin, and padding, then a bit for each
-// entity slot. Matches HEADER_SIZE in shaders/pick.hlsl.
+// The pick results: the pick's ticket, the ID, depth and stencil at the rectangle's origin, then a bit for each entity
+// slot. Matches HEADER_SIZE in shaders/pick.hlsl.
 @(private)
 PICK_HEADER :: 16
 @(private)
@@ -46,9 +46,11 @@ Viewport :: struct {
 	// picks[0] was rendered with this ticket, and its results come back through the readback buffer.
 	picking:          bool,
 	ticket:           u32,
-	// What the pick needs to read its results: the words of entity bits and the near plane that it was drawn with.
+	// What the pick needs to read its results: the words of entity bits, and the near planes that the world and the
+	// view model were drawn with.
 	pick_words:       u32,
 	pick_near:        f32,
+	pick_view_model_near: f32,
 	// The GPU objects, made at the first frame that draws the tools. If they cannot be made, the tools stay off.
 	gpu_ready:        bool,
 	gpu_failed:       bool,
@@ -118,6 +120,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			v.picking = true
 			v.pick_words = words
 			v.pick_near = frame.view.near
+			v.pick_view_model_near = render.view_model_view(frame.view).near
 			mem.zero_slice(zeros.data)
 			pick := new(Pick_Pass, platform.frame_allocator)
 			pick^ = {
@@ -191,6 +194,7 @@ Pick_Constants :: struct {
 	size:        [2]u32,
 	target_size: [2]u32,
 	slots:       u32,
+	stencil:     u32,
 }
 
 @(private)
@@ -219,6 +223,7 @@ run_pick :: proc(ctx: ^render.Pass_Context) {
 	constants := pick.constants
 	constants.ids = gpu.read_index(render.gpu_texture(g, pick.ids))
 	constants.depth = gpu.read_index(render.gpu_texture(g, pick.depth))
+	constants.stencil = gpu.stencil_index(render.gpu_texture(g, pick.depth))
 	constants.results = gpu.write_index(render.gpu_buffer(g, pick.results))
 	gpu.cmd_set_pipeline(ctx.cb, pick.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &constants)
@@ -245,6 +250,7 @@ Overlay_Constants :: struct {
 	vertex_offset:    u32,
 	mode:             u32,
 	depth:            u32,
+	stencil:          u32,
 }
 
 @(private)
@@ -267,6 +273,7 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 		view_projection = o.view_projection,
 		ids             = gpu.read_index(render.gpu_texture(ctx.graph, o.ids)),
 		depth           = gpu.read_index(render.gpu_texture(ctx.graph, o.depth)),
+		stencil         = gpu.stencil_index(render.gpu_texture(ctx.graph, o.depth)),
 		slots           = o.slots,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, o.pipeline)
@@ -470,12 +477,12 @@ finish_pick :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: r
 	}
 	request := v.picks[0]
 	ordered_remove(&v.picks, 0)
-	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, allocator))
+	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, v.pick_view_model_near, allocator))
 }
 
 // pick_result reads a pick's results: the header and the bits of entity slots.
 @(private)
-pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, near: f32, allocator: runtime.Allocator) -> link.Pick_Result {
+pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, near, view_model_near: f32, allocator: runtime.Allocator) -> link.Pick_Result {
 	hits := make([dynamic]link.Pick_Hit, allocator)
 	for word, i in words[PICK_HEADER / 4:] {
 		for bit in 0 ..< u32(32) {
@@ -489,7 +496,8 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, nea
 	}
 	depth: f32
 	if request.width <= 1 && request.height <= 1 && words[1] != 0 {
-		depth = render.view_depth(transmute(f32)words[2], near)
+		// The view model's pixels have the view model's near plane (see docs/rendering.md#view-model).
+		depth = render.view_depth(transmute(f32)words[2], words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_near : near)
 	}
 	return {id = request.id, hits = hits[:], depth = depth}
 }
