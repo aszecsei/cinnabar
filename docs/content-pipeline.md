@@ -119,6 +119,68 @@ Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file
 - **New and renamed meshes:** the cooker gives a mesh that has no line a new GUID and writes it into the `.meta` file, which makes one more pass. A line whose mesh is gone is a warning and stays, so a mesh renamed back gets its GUID again. A re-import drops those lines.
 - **meshoptimizer** is the submodule `vendor/meshoptimizer`, pinned to a release, and `just meshoptimizer` builds it with its own CMake project. Its API is C, so the cooker binds it directly (`tools/cook/meshoptimizer.odin`). `just update-meshoptimizer <tag>` moves the pin.
 
+### Materials
+
+Shading models, materials and material instances are text files (see [Rendering](rendering.md#materials)). `just materials` runs `cook materials` with the shader tools and the roots; the daemon cooks them like any other kind. The three kinds cook together, because each depends on the others.
+
+A **shading model** is a `.shading` file, whose name is the file's, and an `.hlsli` beside it:
+
+```
+shading 1
+# Lit: metallic and roughness.
+input base_color float3 = [0.8, 0.8, 0.8]
+input roughness float = 0.5
+input normal float3 = [0, 0, 1]
+flag no_lighting
+```
+
+Inputs are `float` to `float4`, each with its default. A shading model has no blob; it is checked at each pass, and a material whose shading model has errors does not cook. Two shading models of one name, in any roots, are an error.
+
+A **material** is a `.material` file: settings and declarations, a `---` line, then its HLSL:
+
+```
+material 1
+shading = lit
+blend = masked
+cutoff = 0.5
+two_sided = false
+cast_shadows = true
+param tint color = [1, 1, 1, 1]
+param roughness float = 0.5
+param albedo texture = white
+switch use_albedo = true
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = params.tint.rgb;
+#if use_albedo
+	s.base_color *= cn_sample(params.albedo, inputs.uv0).rgb;
+#endif
+	return s;
+}
+```
+
+- **Parameters** are `float` to `float4`, `color` (a `float4` that the editor will show as a color) and `texture`: a texture asset's GUID after `$`, or `white`, `black` or `normal` for none. A texture parameter that names an asset of another kind is an error.
+- **Static switches** are `true` or `false`, at most 16. Parameters and switches share one set of names, which are HLSL identifiers.
+- **Variants:** the cooker generates a source for each combination of switches that the material or an instance uses, in `<cache>/<config>/generated/`, and compiles its `vs_main` and `ps_main`. The source defines the settings and the switches, has the shading model's `Surface`, includes its `.hlsli`, declares `Params` and `static Params params`, then the material's HLSL after a `#line` that names the material's file, so DXC's messages name the material's own lines, then the engine's forward template, `material_forward.hlsli`. The shader tools' `--include` gives the templates' directory, `lib/engine/content/shaders`.
+- **The parameter block** packs the parameters in order, at 4 bytes, as a raw buffer's `Load<Params>` reads them, in a block of whole 16 bytes. A texture's place holds its bindless index, which the runtime writes.
+- **The cache key** covers the cooker version, DXC, the configuration, the path, the `.meta` file, every variant's generated source (which holds the declarations and the HLSL), and every file that they include.
+- **Dependencies:** its shading model and its textures.
+
+A **material instance** is a `.material_instance` file:
+
+```
+material_instance 1
+parent = $00112233445566778899aabbccddeeff
+roughness = 0.9
+albedo = $11112222333344445555666677778888
+use_albedo = false
+```
+
+- Its parent is a material or another instance. It overrides parameters and switches by name, with the parameter's syntax; a name that its material does not have is an error, and so is a loop of parents.
+- Its blob holds its material (through every instance between), its switches, and its parameter block with every value resolved, so the runtime never walks the chain.
+- Its switches add a variant to its material, which cooks again. Its key covers the sources of it and every parent.
+
 ## Cook daemon
 
 In development, the cook daemon keeps the cache up to date while the sources change. It is `cook daemon`, in the same executable as the batch commands, so both use the same importers. The editor starts it (see [Editor](editor.md#processes)), and `just watch` runs it without the editor.
@@ -202,6 +264,8 @@ A scene blob holds a table of entities: the scene ID, the parent's scene ID, the
 A shader blob holds a table of entries. Each entry has a stage (`Vertex`, `Pixel`, `Compute`, `Amplification`, `Mesh` or `Library`), a target (`DXIL` first) and a slice of bytecode. It ends with the source path.
 
 A texture blob holds the format, the size, the mip count, the usage, and the whole mip chain: each mip tightly packed, mip 0 first. That is the layout that `gpu_stream_texture` takes (see [GPU](gpu.md#streaming)), so the blob's data streams without a copy.
+
+A material blob holds its flags (two-sided, casts shadows, no lighting), its blend and cutoff, its parameters (name, type and offset), its switches' names and defaults, its default parameter block and its textures (each one's offset, its asset or its default), and its variants: each has a switch mask, a pass (`Forward` now) and a stage, and its bytecode. A material instance blob holds its material's GUID, its switches, and its resolved block and textures.
 
 A mesh blob holds its flags (a second UV set, a vertex color, 32-bit indices), the vertex and index counts, the bounds, a table of submeshes (the material slot's name, the index range, the meshlet range and the bounds), then the position stream, the attribute stream, the indices, and the meshlets: their vertex lists, their triangles packed as three bytes each, and their spheres and cones, with the cone in `snorm8`. It ends with the mesh's name and the model's path. Each stream starts at 16 bytes, so each streams straight into a buffer. A model has no blob.
 

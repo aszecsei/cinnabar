@@ -53,6 +53,21 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void AMaterialFieldTakesMaterialsAndTheirInstances()
+    {
+        using var shell = NewShell();
+        shell.Assets.Apply(new AssetDelta(
+        [
+            new Asset("20", AssetKind.Material, "game", "rock.material", AssetStatus.Current, 0, 0, "", [], [], "", ""),
+            new Asset("21", AssetKind.MaterialInstance, "game", "mossy.material_instance", AssetStatus.Current, 0, 0, "", [], ["20"], "", ""),
+            new Asset("22", AssetKind.ShadingModel, "game", "lit.shading", AssetStatus.Current, 0, 0, "", [], [], "", ""),
+        ], [], [], []));
+
+        var materials = new Panels.AssetContext(shell.Assets, "material", _ => { });
+        Assert.Equal(["21", "20"], materials.Choices.Select(a => a.Guid));
+    }
+
+    [Fact]
     public void ADeleteShowsTheAssetsThatUseWhatItTakes()
     {
         using var shell = NewShell();

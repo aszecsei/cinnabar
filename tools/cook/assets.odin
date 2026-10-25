@@ -20,6 +20,9 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Texture = TEXTURE_EXTENSIONS,
 	.Model   = MODEL_EXTENSIONS,
 	.Mesh    = nil,
+	.Shading_Model = {format.SHADING_EXTENSION},
+	.Material = {format.MATERIAL_EXTENSION},
+	.Material_Instance = {format.MATERIAL_INSTANCE_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -93,7 +96,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Shading_Model, .Material, .Material_Instance}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -305,6 +308,12 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Model
 	case .Mesh:
 		return .Mesh
+	case .Shading_Model:
+		return .Shading_Model
+	case .Material:
+		return .Material
+	case .Material_Instance:
+		return .Material_Instance
 	}
 	return .Script
 }

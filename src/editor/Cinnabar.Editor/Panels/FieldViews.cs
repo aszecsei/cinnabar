@@ -382,8 +382,14 @@ sealed class EntityView : FieldView
 /// </summary>
 sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string> Reveal)
 {
-    /// <summary>Whether the field takes an asset: one in the index of the field's kind.</summary>
-    public bool Takes(Link.Cook.Asset asset) => Kind == "" || string.Equals(asset.Kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// Whether the field takes an asset: one in the index of the field's kind. A material field takes materials and their
+    /// instances alike, as a renderer draws either.
+    /// </summary>
+    public bool Takes(Link.Cook.Asset asset) =>
+        Kind == ""
+        || string.Equals(asset.Kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase)
+        || (Kind == "material" && asset.Kind == Link.Cook.AssetKind.MaterialInstance);
 
     /// <summary>The assets that the field takes, by name.</summary>
     public IEnumerable<Link.Cook.Asset> Choices =>

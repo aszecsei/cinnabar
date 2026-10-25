@@ -166,6 +166,10 @@ Asset_Kind :: enum u32 {
 	// A glTF file, which has no blob: its meshes are Mesh sub-assets.
 	Model,
 	Mesh,
+	// A lighting model's declaration, which materials compile with. It has no blob.
+	Shading_Model,
+	Material,
+	Material_Instance,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

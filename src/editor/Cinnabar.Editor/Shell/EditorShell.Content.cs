@@ -32,8 +32,8 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Opens an asset as a double click does: a scene in the editor, and a script or a shader in the script editor.
-    /// Textures, models and meshes have no editor yet.
+    /// Opens an asset as a double click does: a scene in the editor, and the text assets (scripts, shaders, shading
+    /// models, materials and their instances) in the script editor. Textures, models and meshes have no editor yet.
     /// </summary>
     public void OpenAsset(Link.Cook.Asset asset)
     {
@@ -46,14 +46,15 @@ public sealed partial class EditorShell
             case AssetKind.Scene:
                 RequestOpenScene(path);
                 break;
-            case AssetKind.Script or AssetKind.Shader:
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance:
                 OpenScript(path);
                 break;
         }
     }
 
     /// <summary>Whether a double click opens the asset (see <see cref="OpenAsset"/>).</summary>
-    public static bool CanOpen(Link.Cook.Asset asset) => asset.Kind is AssetKind.Scene or AssetKind.Script or AssetKind.Shader;
+    public static bool CanOpen(Link.Cook.Asset asset) =>
+        asset.Kind is AssetKind.Scene or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance;
 
     /// <summary>
     /// Opens a file in the script editor that the settings name (see <see cref="EditorSettings.ScriptEditor"/>), at a

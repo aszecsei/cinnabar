@@ -99,6 +99,9 @@ Asset_Kind :: enum u8 {
 	Texture,
 	Model,
 	Mesh,
+	Shading_Model,
+	Material,
+	Material_Instance,
 }
 
 Asset_Status :: enum u8 {

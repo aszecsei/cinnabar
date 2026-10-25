@@ -325,6 +325,9 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Texture => "texture",
         AssetKind.Model => "model",
         AssetKind.Mesh => "mesh",
+        AssetKind.ShadingModel => "shading model",
+        AssetKind.Material => "material",
+        AssetKind.MaterialInstance => "material instance",
         _ => "script",
     };
 
@@ -633,7 +636,7 @@ public sealed class ContentBrowserView : DockPanel
             };
         }
         line.Children.Add(expander);
-        if (CommandViews.Icon(KindNoun(asset.Kind), 14) is { } icon)
+        if (CommandViews.Icon(KindNoun(asset.Kind).Replace(' ', '-'), 14) is { } icon)
         {
             line.Children.Add(icon);
         }

@@ -202,13 +202,20 @@ flowchart LR
 
 A shading model is a lighting model: `Unlit`, `Lit` (metallic and roughness), later `Subsurface`, `Cloth`, `Toon`. It is two content files, so a game adds its own in its content root:
 
-- `<name>.shading` declares it: its name, its surface inputs with their types and defaults, and flags such as `No_Lighting` (skip the light loop) or `Needs_Shadow_Mask`.
-- `<name>.hlsl` implements it. The engine generates the `Surface` struct from the declaration, and the file defines:
+- `<name>.shading` declares it (see [Content pipeline](content-pipeline.md#materials)): its surface inputs with their types and defaults, and flags: `no_lighting` (skip the light loop), later `needs_shadow_mask`. Its name is the file's, such as `lit`.
+- `<name>.hlsli`, beside it, implements it. It is an include, not an asset. The cooker generates the `Surface` struct and `default_surface()` from the declaration, and the file defines:
 
 ```hlsl
-float3 shade_direct(Surface s, Shading_Point p, Light light, float shadow);
+float3 shade_emission(Surface s);
+float shade_opacity(Surface s);
+// Unless no_lighting:
+float3 shade_direct(Surface s, Shading_Point p, Light light);
 float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 ```
+
+- **The engine's:** `lib/engine/content/shading/lit` (GGX specular with Smith visibility and Schlick's Fresnel, Lambert diffuse, and Karis's fit of the environment BRDF for indirect specular) and `unlit` (its color, as it is).
+- **A tangent-space normal:** a shading model whose inputs include a `float3 normal` takes it in tangent space, as a normal map gives it, and the template maps it to the world before shading.
+- *Until phase 3,* the light loop is one directional light from `Frame_Desc` (`sun_direction`, `sun_color`), and the indirect light is the sky's color from above and the ground's from below (`sky_color`, `ground_color`). Shadows, when phase 3 brings them, multiply into `shade_direct`'s light.
 
 - The engine's forward template owns the light loop. For each light in the pixel's cluster and each directional light, it calls `shade_direct`. Then it calls `shade_indirect` with the GI and the ambient occlusion, and adds the emission. `Unlit` has `No_Lighting` and only emits.
 - The material graph's output node has one input for each surface input of its shading model. The cook link sends the shading models to the editor with the importers, so the editor shows the right inputs.
@@ -216,13 +223,13 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 
 ### Material
 
-A material is a `.material` text file that the editor's node graph writes, as it writes scenes. It has:
+A material is a `.material` text file (see [Content pipeline](content-pipeline.md#materials)). From phase 5, the editor's node graph writes it, as it writes scenes. It has:
 
-- **Settings:** the shading model, the blend mode (`Opaque`, `Masked`, `Transparent`, `Additive`), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows.
+- **Settings:** the shading model, the blend mode (`Opaque` and `Masked` now; `Transparent` and `Additive` with sorted transparent draws), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows.
 - **Parameters:** scalars, vectors, colors, textures and static switches, each with a name, a default and a group for the editor.
 - **The graph:** nodes and links. Nodes include math, texture samples, parameters, time, world position (relative to the camera), vertex attributes, material functions (other graph assets) and a custom HLSL node.
 
-The cooker turns the graph into an HLSL function, `evaluate(Material_Inputs) -> Surface`, and compiles it into each pass's template. A hand-written `.hlsl` material that defines `evaluate` cooks the same way, which is how the built-in materials exist before the graph editor does.
+The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inputs inputs)`, and compiles it into each pass's template. Until the graph (phase 5), a material's `evaluate` is HLSL written after a `---` line of the file, which is how the built-in materials exist. `evaluate` reads its parameters from the generated `params`, and its static switches as defines.
 
 **No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs. A later visibility buffer path can then fill the inputs from barycentrics and analytic derivatives without changing a material (see [Open questions](#open-questions)).
 

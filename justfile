@@ -40,8 +40,9 @@ meshoptimizer_version := `git -C vendor/meshoptimizer describe --tags --always 2
 content_root := "samples/" + game + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
-# What the cooker compiles shaders with: DXC, and the directory of the fixed header, cinnabar.hlsli.
-shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders"
+# What the cooker compiles shaders and materials with: DXC, the directory of the fixed header, cinnabar.hlsli, and the
+# engine's material templates.
+shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/engine/content/shaders"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
@@ -158,7 +159,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models
+build: host game-dll script-types scripts scenes shaders textures models materials
 
 # Build the development host
 host: agility-runtime luau
@@ -215,6 +216,11 @@ script-types: host game-dll
 # gets one, with its usage guessed from its name: commit it.
 textures config="dev": cook
     "./{{build_dir}}/cook.exe" textures --cache "{{cache_dir}}" --config {{config}} {{roots}}
+
+# Cook the shading models, materials and material instances of the game and the engine into the loose cache,
+# build/cache/<config>: each material compiles a variant for each set of static switches that it or an instance uses.
+materials config="dev": install-dxc cook
+    "./{{build_dir}}/cook.exe" materials --cache "{{cache_dir}}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Cook the game's models and the engine's into the loose cache, build/cache/<config>: each glTF mesh becomes a mesh with
 # its own GUID in its model's .meta file. A model without a .meta file gets one: commit it, with the GUIDs it gains.
@@ -276,7 +282,7 @@ edit: build editor
         --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Build the statically linked release executable
-release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release")
+release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -define:DEBUG_DRAW=false -out:"{{build_dir}}/{{game}}.exe" -o:speed
 

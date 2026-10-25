@@ -198,3 +198,52 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 	_, ok = mesh_view(data)
 	testing.expect(t, !ok)
 }
+
+@(test)
+material_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	block := make([]byte, 32, context.temp_allocator)
+	block[0] = 7
+	textures := []Material_Texture{{offset = 16, default = .Normal}}
+	contents := Material_Contents {
+		guid             = guid,
+		flags            = {.Two_Sided},
+		blend            = .Masked,
+		cutoff           = 0.5,
+		params           = {{"tint", .Color, 0}, {"albedo", .Texture, 16}},
+		switches         = {"use_detail"},
+		default_switches = 1,
+		block            = block,
+		textures         = textures,
+		variants         = {{1, .Forward, .Vertex, {1, 2}}, {1, .Forward, .Pixel, {3}}},
+		source_path      = "game/rock.material",
+	}
+	data := aligned(material_write(contents, context.temp_allocator))
+	blob, ok := material_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.blend, Material_Blend.Masked)
+	testing.expect_value(t, blob_string(data, material_params(data, blob)[1].name), "albedo")
+	testing.expect_value(t, blob_string(data, material_switches(data, blob)[0]), "use_detail")
+	testing.expect_value(t, material_textures(data, blob)[0].default, Material_Texture_Default.Normal)
+	testing.expect_value(t, len(material_code(data, blob, 1, .Forward, .Vertex)), 2)
+	testing.expect(t, material_code(data, blob, 0, .Forward, .Vertex) == nil)
+	testing.expect_value(t, blob_bytes(data, blob.block)[0], 7)
+
+	instance := aligned(material_instance_write({guid = guid, material = guid, switches = 0, block = block, textures = textures, source_path = "game/rock_mossy.material_instance"}, context.temp_allocator))
+	view, view_ok := material_instance_view(instance)
+	testing.expect(t, view_ok)
+	if view_ok {
+		testing.expect_value(t, view.material, guid)
+		testing.expect_value(t, instance_textures(instance, view)[0].offset, 16)
+	}
+
+	// A texture past the block is not a material.
+	bad := textures
+	bad[0].offset = 32
+	contents.textures = bad
+	_, ok = material_view(aligned(material_write(contents, context.temp_allocator)))
+	testing.expect(t, !ok)
+}

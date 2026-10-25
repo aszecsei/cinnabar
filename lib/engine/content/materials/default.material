@@ -1,0 +1,14 @@
+material 1
+# The material of a Mesh_Renderer whose submesh has none: a grey, rough, lit surface.
+shading = lit
+param base_color color = [0.8, 0.8, 0.8, 1]
+param roughness float = 0.6
+param metallic float = 0
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = params.base_color.rgb * inputs.color.rgb;
+	s.roughness = params.roughness;
+	s.metallic = params.metallic;
+	return s;
+}

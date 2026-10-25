@@ -14,6 +14,7 @@ import format "cinnabar:engine/asset/format"
 
 USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir> [--root <name>=<dir>]...
        cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook materials --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook models --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
@@ -33,6 +34,13 @@ main :: proc() {
 	case "scenes":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Scene)
+		}
+	case "materials":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = options.dxc != "" && cook_batch(options, .Material)
+			if options.dxc == "" {
+				log.error("cook: materials need --dxc")
+			}
 		}
 	case "models":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -121,6 +129,12 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "models"
 	case .Mesh:
 		return "meshes"
+	case .Shading_Model:
+		return "shading models"
+	case .Material:
+		return "materials"
+	case .Material_Instance:
+		return "material instances"
 	}
 	return "assets"
 }

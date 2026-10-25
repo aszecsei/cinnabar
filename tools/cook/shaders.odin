@@ -218,6 +218,10 @@ include_names :: proc(source: string) -> []Include {
 
 // resolve_include finds an included file. The result has forward slashes.
 resolve_include :: proc(name, from_dir: string, include_dirs: []string) -> (path: string, ok: bool) {
+	// Generated material sources include their shading model by its absolute path.
+	if filepath.is_abs(name) {
+		return forward_slashes(name), os.is_file(name)
+	}
 	candidate := fmt.tprintf("%s/%s", from_dir, name)
 	if os.is_file(candidate) {
 		return forward_slashes(candidate), true
@@ -246,7 +250,15 @@ dxc_version :: proc(dxc: string) -> (version: string, ok: bool) {
 compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir: string, problems: ^Problems) -> (code: []byte, ok: bool) {
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.%v.dxil.tmp", out_dir, format.guid_format(s.meta.guid, &buffer), target.stage)
+	return compile_file(options, s.path, target, output, problems)
+}
+
+// compile_file compiles a source file's entry into output, a temporary file that it removes, and gives its bytecode. A
+// failure without a message of its own is a problem of owner, the asset that the source is for, which is the source
+// itself unless it is generated.
+compile_file :: proc(options: Cook_Options, source_path: string, target: Target, output: string, problems: ^Problems, owner_path := "") -> (code: []byte, ok: bool) {
 	defer os.remove(output)
+	owner := owner_path if owner_path != "" else source_path
 	args := make([dynamic]string, context.temp_allocator)
 	append(&args, options.dxc, "-nologo", "-HV", "2021", "-T", target.profile, "-Fo", output)
 	if options.config == .Dev {
@@ -258,10 +270,10 @@ compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir:
 	for dir in options.includes {
 		append(&args, "-I", dir)
 	}
-	append(&args, s.path)
+	append(&args, source_path)
 	state, stdout, stderr, err := run_process(args[:])
 	if err != nil {
-		report_error(problems, s.path, 0, 0, "cannot run %s: %v", options.dxc, err)
+		report_error(problems, owner, 0, 0, "cannot run %s: %v", options.dxc, err)
 		return
 	}
 	failed := !state.exited || state.exit_code != 0
@@ -269,16 +281,16 @@ compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir:
 	errors := report_dxc_messages(output_text, problems)
 	if failed {
 		if errors == 0 {
-			report_error(problems, s.path, 0, 0, "%s did not compile:\n%s", target.profile, strings.trim_space(output_text))
-		} else if !has_error_in(problems, s.path) {
+			report_error(problems, owner, 0, 0, "%s did not compile:\n%s", target.profile, strings.trim_space(output_text))
+		} else if !has_error_in(problems, owner) {
 			// Every error is in an include, which belongs to no asset, so the shader says why it did not cook.
-			report_error(problems, s.path, 0, 0, "%s did not compile, because a file that it includes has errors", target.profile)
+			report_error(problems, owner, 0, 0, "%s did not compile, because a file that it includes has errors", target.profile)
 		}
 		return
 	}
 	data, read_err := os.read_entire_file(output, context.temp_allocator)
 	if read_err != nil {
-		report_error(problems, s.path, 0, 0, "%s: %v", output, read_err)
+		report_error(problems, owner, 0, 0, "%s: %v", output, read_err)
 		return
 	}
 	return data, true
