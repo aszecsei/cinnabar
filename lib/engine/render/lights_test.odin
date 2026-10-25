@@ -135,6 +135,8 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[3].range, DEFAULT_LIGHT_RANGE)
 	testing.expect_value(t, lf.records[4].type, Light_Type.Spot)
 
+	// As resolve_settings gives them without volumes.
+	frame.shadow_settings = {SHADOW_DISTANCE, SHADOW_SPLIT_LAMBDA}
 	assign_shadow_views(frame, trace = false)
 	sf := frame.shadows
 	testing.expect_value(t, lf.records[0].shadow, 0)

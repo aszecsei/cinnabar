@@ -76,7 +76,7 @@ flowchart TB
 
 ### Settings
 
-The settings that make the scene's look are settings components on [volumes](world.md#volumes) (`lib/engine/render/settings.odin`). The frame takes each from the volumes at the camera, so a box volume can change the look of one room. Each field is a `volume.Value`, which a volume overrides or leaves to the volumes below it, and 0 in a value means its default.
+The settings that make the scene's look are settings components on [volumes](world.md#volumes) (`lib/engine/render/settings.odin`). The frame takes each from the volumes at the camera, so a box volume can change the look of one room. Each field is a `volume.Value`, which a volume overrides or leaves to the volumes below it. An overridden value is used as it is: a saturation of 0 is grey.
 
 | Component | Stable ID | Settings |
 |---|---|---|
@@ -86,12 +86,12 @@ The settings that make the scene's look are settings components on [volumes](wor
 | `Bloom` | 46 | `off`, `intensity` |
 | `Ambient_Occlusion` | 47 | `off`, `radius`, `power` |
 | `Global_Illumination` | 48 | `off` |
-| `Environment` | 49 | The `background`, which the world pass clears the scene to and which is not pre-exposed, and the ambient light's `sky` and `ground` (`DEFAULT_AMBIENT` when zero) |
+| `Environment` | 49 | The `background`, which the world pass clears the scene to and which is not pre-exposed, and the ambient light's `sky` and `ground` (`DEFAULT_AMBIENT` by default) |
 | `Fog` | 38 | See [Volumetric fog](#volumetric-fog) |
 | `Shadows` | 50 | The directional cascades' `distance` (`SHADOW_DISTANCE`, 100 m) and `split_lambda` between even and exponential (`SHADOW_SPLIT_LAMBDA`, 0.75) |
 
 - **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Fog_Settings`, the background and the `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
-- **Defaults:** volumes blend from each component's `DEFAULT_*` value, which holds the defaults that 0 stands for, so a volume that reaches halfway sets a value halfway from the default. Paper white and the peak have no fixed default, the display's, so they blend from 0.
+- **Defaults:** each component registers its `DEFAULT_*` value (see [Volumes](world.md#volumes)). Volumes blend from it, so a volume that reaches halfway sets a value halfway from the default, and a component added in the editor starts from it. Paper white and the peak have no fixed default, the display's, so their default is 0, which gives the display's. The exposure, the exposure range, the adaptation speed, the shadow distance and the ambient occlusion's radius and power also take their defaults at 0 in `Frame_Settings`, where 0 would mean nothing.
 - **The sample's scene** has a Global Volume with its background.
 
 ### Views
@@ -383,7 +383,7 @@ The global illumination is screen-space radiance cascades, on the compute queue 
 
 The fog is a froxel volume: screen tiles of `FOG_TILE` (16) pixels, in `FOG_SLICES` (64) depth slices, two for each of the clusters' slices (`lib/engine/render/fog.odin`). Its texels are a 3D texture (see [GPU](gpu.md#resources)).
 
-- **The `Fog` settings** (stable ID 38, see [Settings](#settings)) give the frame its fog, from the volumes at the camera. `density` is the share of light that a meter of fog takes away, at and below `base_height`, a height in the world in meters. Above it, the density falls off by `height_falloff` per meter. `albedo` is the share of that light that the fog scatters, per channel (0 means white). `anisotropy` is Henyey-Greenstein's g: above 0, the fog glows around a light that the camera looks toward. Without a density, or without the fog's pipelines, the frame has no fog passes.
+- **The `Fog` settings** (stable ID 38, see [Settings](#settings)) give the frame its fog, from the volumes at the camera. `density` is the share of light that a meter of fog takes away, at and below `base_height`, a height in the world in meters. Above it, the density falls off by `height_falloff` per meter. `albedo` is the share of that light that the fog scatters, per channel (white by default). `anisotropy` is Henyey-Greenstein's g: above 0, the fog glows around a light that the camera looks toward. Without a density, or without the fog's pipelines, the frame has no fog passes.
 - **Injection** (`fog_inject.hlsli`, a compute pass after the clusters and the shadow maps): each froxel takes a point in its slice, which moves through 8 places from frame to frame. It writes the scattering and the extinction there, and the light that the point scatters toward the camera: every directional light, the punctual lights of its cluster with their falloff, each with Henyey-Greenstein's phase and its shadow maps, and the ambient light from every direction. A light with a channel of the shadow mask has no shadow maps, so with `Ray_Query` the traced shader (`fog_inject_traced.hlsl`) traces a ray toward it. A device without `Ray_Query` has no mask, and uses `fog_inject.hlsl`. Then the froxel blends 10% of this frame (`FOG_BLEND`) into its history, read where the point was in last frame's volume. The volume is not pre-exposed.
 - **Integration** (`fog_integrate.hlsl`) walks each tile's froxels from the camera outward. For each, it writes the light that the fog scatters toward the camera up to the slice's far end, and the share of light from there that reaches the camera. Each slice integrates its light as the fog dims it, so the result does not depend on the slices' thickness.
 - **The forward pass** reads the volume at each pixel's position, trilinearly: `color × transmittance + scattered`, before the exposure. The view model's pixels take their place from the camera's projection, as the clusters do.
@@ -439,7 +439,7 @@ The editor shows what makes the frame in its viewport (see [Editor](editor.md#vi
 
 A game adds its own post effects among the renderer's passes (`lib/engine/render/post_effects.odin`). Each is driven by a settings component on [volumes](world.md#volumes), as the renderer's settings are, so the editor shows it on a volume, and a volume turns it on where it reaches.
 
-- **Registering:** `register_post_effect(&renderer, &world, name, point, T, defaults, add, order)` after `renderer_init` and again after `renderer_reload`, which clears the effects, because their procedures were in the old code. `T` is a registered settings component, and `defaults` its settings with the defaults that 0 stands for. At most `MAX_POST_EFFECTS` (16).
+- **Registering:** `register_post_effect(&renderer, &world, name, point, T, add, order)` after `renderer_init` and again after `renderer_reload`, which clears the effects, because their procedures were in the old code. `T` is a settings component, registered with its defaults (see [Volumes](world.md#volumes)), which the volumes blend from. At most `MAX_POST_EFFECTS` (16).
 - **Points:** `Before_Temporal_Aa`, after the `before_post` hook; `After_Temporal_Aa`, before the exposure's histogram and bloom, so an effect changes both; and `Before_Tone_Mapping`, in linear HDR just before the output pass. The renderer's own passes keep their order. At a point, effects run by `order`, then in the order that they registered.
 - **When an effect runs:** where a volume with its component reaches the camera. Its procedure gets the `Frame` and its settings, blended from the volumes there. It reads `Frame.scene`, and a pass that makes a new scene color sets `Frame.scene` to it. `Frame.data` is the hooks' data. An effect whose pipeline is not ready (`pipeline_ready`) should add nothing, as the renderer's own passes do.
 - **Bloom first:** before the effects at `Before_Tone_Mapping`, a composite pass (`bloom.hlsl`'s composite mode) adds bloom into a new scene color, as the output pass would, so the effects see the scene as the display will. The output pass then adds no bloom. Without an effect there, the frame has no composite pass.

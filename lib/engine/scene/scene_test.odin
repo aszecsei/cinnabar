@@ -258,11 +258,17 @@ Knob :: struct {
 	level: Setting([3]f32) `editor:"color"`,
 }
 
+@(private = "file")
+KNOB_DEFAULTS :: Knob {
+	gain  = {value = 1},
+	level = {value = {1, 1, 1}},
+}
+
 @(test)
 a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	ecs.register_component(&f.world.registry, Knob, ecs.Component_Id(101))
+	ecs.register_component(&f.world.registry, Knob, ecs.Component_Id(101), KNOB_DEFAULTS)
 
 	fields := component_fields(Knob, context.temp_allocator)
 	testing.expect_value(t, len(fields), 2)
@@ -273,20 +279,43 @@ a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 	testing.expect_value(t, fields[0].override_offset, u32(offset_of(Knob, gain)))
 	testing.expect(t, fields[1].color && fields[1].has_override)
 
-	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain = 2\n"))
+	// What the scene does not set has the defaults, not overridden. A value of 0 is 0.
+	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain = 0\n"))
 	e := find(f, 1)
 	knob := ecs.get(&f.world, e, Knob)
-	testing.expect_value(t, knob.gain, Setting(f32){true, 2})
-	testing.expect_value(t, knob.level, Setting([3]f32){})
+	testing.expect_value(t, knob.gain, Setting(f32){true, 0})
+	testing.expect_value(t, knob.level, Setting([3]f32){false, {1, 1, 1}})
 
+	// Setting a value keeps the flag as it is: the editor sets the flag with it.
 	level := format.Scene_Field {
 		name = "level",
 		hash = format.scene_field_hash("level"),
 		value = {kind = .Number, count = 3, floats = {0.5, 0.5, 0.5, 0}},
 	}
 	testing.expect(t, set_field(&f.world, e, 1, 101, level, false, nil))
+	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){false, {0.5, 0.5, 0.5}})
+	level_flag := format.Scene_Field{name = "level.override", hash = format.scene_field_hash("level.override")}
+	testing.expect(t, set_field(&f.world, e, 1, 101, level_flag, true, nil))
 	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){true, {0.5, 0.5, 0.5}})
+	level_flag.value = {kind = .Bool, count = 1}
+	testing.expect(t, set_field(&f.world, e, 1, 101, level_flag, false, nil))
+	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){false, {0.5, 0.5, 0.5}})
+
+	// A reset goes back to the default, not overridden.
 	gain := format.Scene_Field{name = "gain", hash = format.scene_field_hash("gain")}
 	testing.expect(t, set_field(&f.world, e, 1, 101, gain, true, nil))
-	testing.expect_value(t, ecs.get(&f.world, e, Knob).gain, Setting(f32){})
+	testing.expect_value(t, ecs.get(&f.world, e, Knob).gain, Setting(f32){false, 1})
+}
+
+@(test)
+a_scene_keeps_a_setting_that_it_does_not_override :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	ecs.register_component(&f.world.registry, Knob, ecs.Component_Id(101), KNOB_DEFAULTS)
+
+	// The flag can come before the value.
+	load(&f.world, nil, parse(t, "scene 1\nentity 0000000000000001\ncomponent 101 Knob\n\tgain.override = false\n\tgain = 3\n\tlevel.override = true\n"))
+	knob := ecs.get(&f.world, find(f, 1), Knob)
+	testing.expect_value(t, knob.gain, Setting(f32){false, 3})
+	testing.expect_value(t, knob.level, Setting([3]f32){true, {1, 1, 1}})
 }

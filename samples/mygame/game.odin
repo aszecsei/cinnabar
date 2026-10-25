@@ -130,7 +130,7 @@ Triangle :: struct {
 }
 
 // Lens is the sample's post effect, on volumes (see docs/rendering.md#post-effects): chromatic aberration and a
-// vignette. 0 gives the defaults in DEFAULT_LENS.
+// vignette, from DEFAULT_LENS unless a volume overrides them.
 Lens :: struct {
 	// How far red and blue move apart toward the frame's edges, in pixels for each unit of the frame's size from its
 	// center.
@@ -425,13 +425,13 @@ register_components :: proc(r: ^ecs.Registry) {
 	volume.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
-	ecs.register_component(r, Lens, LENS_ID)
+	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
 }
 
 // register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
 // reaches the camera. init and on_reload call it after the renderer's.
 register_post_effects :: proc(s: ^Game_State) {
-	render.register_post_effect(&s.renderer, &s.world, "lens", .Before_Tone_Mapping, Lens, DEFAULT_LENS, add_lens)
+	render.register_post_effect(&s.renderer, &s.world, "lens", .Before_Tone_Mapping, Lens, add_lens)
 }
 
 // Lens_Pass is the lens's pass, in frame memory.

@@ -66,11 +66,11 @@ Exposure_Mode :: enum u8 {
 	Manual,
 }
 
-// Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Zero gives the defaults.
+// Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Where 0 would mean nothing, it gives the default.
 Post_Settings :: struct {
 	no_temporal_aa:        bool,
 	no_bloom:              bool,
-	// Bloom's share of the final color. 0 gives DEFAULT_BLOOM_INTENSITY.
+	// Bloom's share of the final color.
 	bloom_intensity:       f32,
 	exposure_mode:         Exposure_Mode,
 	// With Manual, the scale of the scene's colors. 0 means 1.
@@ -83,8 +83,8 @@ Post_Settings :: struct {
 	// With Auto, how fast the exposure adapts. 0 gives DEFAULT_ADAPTATION_SPEED.
 	adaptation_speed:      f32,
 	tone_mapper:           Tone_Mapper,
-	// Color grading, which the lookup table bakes with the tone mapper: contrast in stops around middle grey and
-	// saturation, 0 meaning 1 for both, and a tint that multiplies the scene, zero meaning white.
+	// Color grading, which the lookup table bakes with the tone mapper: contrast in stops around middle grey,
+	// saturation, and a tint that multiplies the scene. 1 and white leave the scene as it is.
 	contrast:              f32,
 	saturation:            f32,
 	tint:                  [3]f32,
@@ -445,7 +445,7 @@ add_post_passes :: proc(f: ^Frame) {
 			source = pf.bloom_up[level]
 		}
 		// Each level adds its share, so the chain's sum is about levels times the scene.
-		intensity := s.bloom_intensity > 0 ? s.bloom_intensity : DEFAULT_BLOOM_INTENSITY
+		intensity := s.bloom_intensity
 		f.bloom = source
 		f.bloom_scale = intensity / f32(pf.bloom_levels)
 		f.scene_scale = 1 - intensity
@@ -454,9 +454,9 @@ add_post_passes :: proc(f: ^Frame) {
 
 	pf.grading = {
 		tone_mapper = s.tone_mapper,
-		contrast    = s.contrast > 0 ? s.contrast : 1,
-		saturation  = s.saturation > 0 ? s.saturation : 1,
-		tint        = s.tint != {} ? s.tint : {1, 1, 1},
+		contrast    = s.contrast,
+		saturation  = s.saturation,
+		tint        = s.tint,
 	}
 	if f.output.mode != .Sdr {
 		display := f.output.display

@@ -161,7 +161,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 			right = {right.x, right.y, right.z, scale.x},
 			up = {up.x, up.y, up.z, scale.y},
 			forward = {forward.x, forward.y, forward.z, 0},
-			albedo = fog.albedo != {} ? fog.albedo : {1, 1, 1},
+			albedo = fog.albedo,
 			density = fog.density,
 			height_falloff = fog.height_falloff,
 			// Relative to the camera, in f64 so a camera far from the origin keeps it exact.

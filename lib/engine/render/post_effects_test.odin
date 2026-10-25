@@ -51,7 +51,7 @@ post_effects_run_in_order_where_their_volumes_reach :: proc(t: ^testing.T) {
 	ecs.register_engine_components(&w.registry)
 	volume.register_components(&w.registry)
 	register_components(&w.registry)
-	ecs.register_component(&w.registry, Grain, ecs.Component_Id(900))
+	ecs.register_component(&w.registry, Grain, ecs.Component_Id(900), Grain{amount = {value = 1}})
 	r := new(Renderer)
 	defer free(r)
 	volume.register(&r.volumes, w)
@@ -59,9 +59,9 @@ post_effects_run_in_order_where_their_volumes_reach :: proc(t: ^testing.T) {
 	late := proc(f: ^Frame, settings: rawptr) {note(f, "late", settings)}
 	early := proc(f: ^Frame, settings: rawptr) {note(f, "early", settings)}
 	other := proc(f: ^Frame, settings: rawptr) {note(f, "other", settings)}
-	testing.expect(t, register_post_effect(r, w, "late", .Before_Tone_Mapping, Grain, Grain{amount = {value = 1}}, late, order = 5))
-	testing.expect(t, register_post_effect(r, w, "early", .Before_Tone_Mapping, Grain, Grain{amount = {value = 1}}, early))
-	testing.expect(t, register_post_effect(r, w, "other", .After_Temporal_Aa, Grain, Grain{amount = {value = 1}}, other))
+	testing.expect(t, register_post_effect(r, w, "late", .Before_Tone_Mapping, Grain, late, order = 5))
+	testing.expect(t, register_post_effect(r, w, "early", .Before_Tone_Mapping, Grain, early))
+	testing.expect(t, register_post_effect(r, w, "other", .After_Temporal_Aa, Grain, other))
 
 	calls: Calls
 	pf: Post_Frame

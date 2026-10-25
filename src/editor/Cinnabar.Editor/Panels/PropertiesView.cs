@@ -164,10 +164,13 @@ public sealed class PropertiesView : ScrollViewer
             // A child's Transform is what propagation writes from its Local_Transform, so only the latter edits.
             var editable = inDocument != null && !WorldWritten.Contains(id) && !(id == SceneEdits.TransformId && node.Parent != 0);
             var owner = id.ToString("x16");
-            var fields = type.Fields.Select(f => FieldRow.Of(owner, f,
-                editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null,
-                editable && !f.ReadOnly ? () => inDocument!.Fields.Any(x => x.Name == f.Name) : null,
-                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetField(document!.Id, id, f.Name, null))));
+            var fields = type.Fields.Select(f =>
+            {
+                var editor = editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null;
+                return FieldRow.Of(owner, f, editor,
+                    editor != null ? () => InDocument(inDocument!, f) : null,
+                    () => editor?.Reset());
+            });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             _content.Children.Add(Group(title, fields,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
@@ -321,7 +324,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
                 return FieldRow.Of(owner, f, editor,
-                    editor != null ? () => inDocument!.Any(c => c!.Fields.Any(x => x.Name == f.Name)) : null,
+                    editor != null ? () => inDocument!.Any(c => InDocument(c!, f)) : null,
                     () => editor?.Reset());
             });
             _content.Children.Add(Group(title, fields, remove: remove));
@@ -525,6 +528,10 @@ public sealed class PropertiesView : ScrollViewer
         return header;
     }
 
+    // Whether the document sets a field, or for a volume's setting, its override flag.
+    static bool InDocument(SceneComponent component, Link.Protocol.FieldInfo f) =>
+        component.Fields.Any(x => x.Name == f.Name || (f.HasOverride && x.Name == f.Name + FieldEditor.OverrideSuffix));
+
     sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum, FieldEditor? Editor, Func<bool>? IsSet, Action Reset)
     {
         /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
@@ -536,12 +543,12 @@ public sealed class PropertiesView : ScrollViewer
         /// <summary>For a number, the range of its slider, from the game's editor:"range=min,max" tag.</summary>
         public (double Min, double Max)? Range { get; init; }
 
-        /// <summary>A volume's setting: a check box says whether the volume overrides it, in place of the reset button.</summary>
+        /// <summary>A volume's setting: a check box before its name says whether the volume overrides it.</summary>
         public bool HasOverride { get; init; }
 
         /// <summary>A component field's row, with what its field info says of how it shows.</summary>
         public static FieldRow Of(string owner, Link.Protocol.FieldInfo f, FieldEditor? editor, Func<bool>? isSet, Action reset) =>
-            new(owner, f.Name, FieldValues.DisplayKindOf(f), f.Kind == Link.Protocol.FieldKind.Enum, editor, f.HasOverride ? null : isSet, reset)
+            new(owner, f.Name, FieldValues.DisplayKindOf(f), f.Kind == Link.Protocol.FieldKind.Enum, editor, isSet, reset)
             {
                 AssetKind = f.AssetKind,
                 Axes = f.Kind == Link.Protocol.FieldKind.Vector2 ? 2 : 3,
@@ -605,9 +612,9 @@ public sealed class PropertiesView : ScrollViewer
         return Expander(title, content, badge, disabled, remove);
     }
 
-    // A volume's setting: a check box before its name, ticked when the volume overrides it. Ticking it sets the field to
-    // the value that shows, and clearing it resets the field, so the volumes below it give it. A setting that is not
-    // overridden is dim.
+    // A volume's setting: a check box before its name, ticked when the volume overrides it. Ticking it overrides with the
+    // value that shows, and clearing it leaves the setting to the volumes below it but keeps the value, so the two can be
+    // compared. A setting that is not overridden is dim, and the reset button sets it back to its default.
     Control OverrideLabel(FieldRow field, TextBlock name, FieldView view)
     {
         var check = new CheckBox { MinHeight = 0, Padding = new Thickness(0), Classes = { "value-check" }, VerticalAlignment = VerticalAlignment.Center };
@@ -626,7 +633,7 @@ public sealed class PropertiesView : ScrollViewer
             }
             else
             {
-                field.Editor.Reset();
+                field.Editor.StopOverriding();
             }
         };
         _overrides[(field.Owner, field.Field)] = entry;

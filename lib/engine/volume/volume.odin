@@ -43,9 +43,11 @@ Volume :: struct {
 	weight:         f32 `editor:"range=0,1"`,
 }
 
-// Value is a setting that a volume can override. Without override, the volumes below it, or the default, give it. A
-// scene that sets the field sets override, so a game that makes volumes in code sets it itself. A value of 0 means
-// the setting's default, as elsewhere.
+// Value is a setting that a volume can override. With override, the volume gives value, as it is. Without, the volume
+// keeps value but leaves the setting to the volumes below it, or the default, so turning override off and on compares
+// the two. A scene that sets the field sets override, unless it also sets <field>.override = false, so a game that
+// makes volumes in code sets override itself. The defaults are the settings component's registered defaults (see
+// ecs.register_component), which a component added in the editor starts from.
 Value :: struct($T: typeid) {
 	override: bool,
 	value:    T,
@@ -150,46 +152,53 @@ influence :: proc(v: Volume, pose: ecs.Transform, point: ecs.World_Position) -> 
 	return base * (1 - distance / v.blend_distance), size
 }
 
-// blend_raw blends a settings component of the volumes that reach a point into out, which has the type ti. It starts
-// from defaults, and each volume with the component, from the bottom, moves the settings that it overrides toward its
-// own by its weight: numbers and vectors in between, positions along the line, and everything else at a weight of a
-// half or more. A setting of 0 is its default, so the default stands in for it. out's override flags say which
-// settings a volume gave. touched is whether any volume with the component reaches the point.
-blend_raw :: proc(w: ^ecs.World, inf: ^Influences, component: ecs.Component_Id, ti: ^runtime.Type_Info, defaults, out: rawptr) -> (touched: bool) {
-	mem.copy(out, defaults, ti.size)
+// blend_raw blends a registered settings component of the volumes that reach a point into out, which has its type. It
+// starts from the component's defaults, and each volume with the component, from the bottom, moves the settings that it
+// overrides toward its own by its weight: numbers and vectors in between, positions along the line, and everything else
+// at a weight of a half or more. out's override flags say which settings a volume gave. touched is whether any volume
+// with the component reaches the point.
+blend_raw :: proc(w: ^ecs.World, inf: ^Influences, component: ecs.Component_Id, out: rawptr) -> (touched: bool) {
+	info := ecs.registry_find(&w.registry, component)
+	if info == nil {
+		return false
+	}
+	if defaults := ecs.registry_defaults(&w.registry, info); defaults != nil {
+		mem.copy(out, defaults, info.size)
+	} else {
+		mem.zero(out, info.size)
+	}
+	ti := type_info_of(info.type)
 	for item in inf.items[:inf.count] {
 		data := ecs.get_raw(w, item.entity, component)
 		if data == nil {
 			continue
 		}
 		touched = true
-		blend_struct(ti, uintptr(data), uintptr(defaults), uintptr(out), item.weight)
+		blend_struct(ti, uintptr(data), uintptr(out), item.weight)
 	}
 	return
 }
 
-// blend blends a settings component, as blend_raw does.
-blend :: proc(w: ^ecs.World, inf: ^Influences, $T: typeid, defaults: T) -> (result: T, touched: bool) {
+// blend blends a settings component, as blend_raw does. A component that is not registered gives zeros.
+blend :: proc(w: ^ecs.World, inf: ^Influences, $T: typeid) -> (result: T, touched: bool) {
 	info := ecs.registry_find_type(&w.registry, T)
 	if info == nil {
-		return defaults, false
+		return {}, false
 	}
-	d := defaults
-	touched = blend_raw(w, inf, info.id, type_info_of(T), &d, &result)
+	touched = blend_raw(w, inf, info.id, &result)
 	return
 }
 
 // sample is a settings component at a point: gather, then blend.
-sample :: proc(v: ^Volumes, w: ^ecs.World, $T: typeid, point: ecs.World_Position, defaults: T, hidden: []u32 = nil) -> T {
+sample :: proc(v: ^Volumes, w: ^ecs.World, $T: typeid, point: ecs.World_Position, hidden: []u32 = nil) -> T {
 	inf := gather(v, w, point, hidden)
-	result, _ := blend(w, &inf, T, defaults)
+	result, _ := blend(w, &inf, T)
 	return result
 }
 
-// blend_struct blends each Value field of a struct, and of the structs in it, at the same offsets in src, defaults and
-// out.
+// blend_struct blends each Value field of a struct, and of the structs in it, at the same offsets in src and out.
 @(private = "file")
-blend_struct :: proc(ti: ^runtime.Type_Info, src, defaults, out: uintptr, weight: f32) {
+blend_struct :: proc(ti: ^runtime.Type_Info, src, out: uintptr, weight: f32) {
 	s, is_struct := runtime.type_info_base(ti).variant.(runtime.Type_Info_Struct)
 	if !is_struct {
 		return
@@ -202,7 +211,7 @@ blend_struct :: proc(ti: ^runtime.Type_Info, src, defaults, out: uintptr, weight
 			continue
 		}
 		if inner.field_count != 2 || inner.names[0] != "override" || inner.names[1] != "value" || inner.types[0].id != bool {
-			blend_struct(field, src + offset, defaults + offset, out + offset, weight)
+			blend_struct(field, src + offset, out + offset, weight)
 			continue
 		}
 		if !(^bool)(src + offset + inner.offsets[0])^ {
@@ -210,12 +219,7 @@ blend_struct :: proc(ti: ^runtime.Type_Info, src, defaults, out: uintptr, weight
 		}
 		(^bool)(out + offset + inner.offsets[0])^ = true
 		at := offset + inner.offsets[1]
-		value_type := inner.types[1]
-		from := src + at
-		if mem.check_zero(([^]byte)(rawptr(from))[:value_type.size]) {
-			from = defaults + at
-		}
-		blend_value(value_type, rawptr(from), rawptr(out + at), weight)
+		blend_value(inner.types[1], rawptr(src + at), rawptr(out + at), weight)
 	}
 }
 
