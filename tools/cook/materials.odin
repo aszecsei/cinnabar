@@ -841,11 +841,13 @@ generate_source :: proc(
 	fmt.sbprintfln(&b, "#define MATERIAL_MASKED %d", int(decl.blend == .Masked))
 	fmt.sbprintfln(&b, "#define MATERIAL_CUTOFF %f", decl.cutoff)
 	fmt.sbprintfln(&b, "#define SHADING_NO_LIGHTING %d", int(shading.no_lighting))
-	has_normal := false
+	has_normal, has_base_color := false, false
 	for input in shading.inputs {
 		has_normal ||= input.name == "normal" && input.type == "float3"
+		has_base_color ||= input.name == "base_color" && input.type == "float3"
 	}
 	fmt.sbprintfln(&b, "#define SHADING_HAS_NORMAL %d", int(has_normal))
+	fmt.sbprintfln(&b, "#define SHADING_HAS_BASE_COLOR %d", int(has_base_color))
 	for s, i in decl.switches {
 		fmt.sbprintfln(&b, "#define %s %d", s.name, (switches >> u32(i)) & 1)
 	}

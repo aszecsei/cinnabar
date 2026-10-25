@@ -157,6 +157,9 @@ Post_Frame :: struct {
 	grading:          Grading,
 	// In HDR output, the UI's white in nits, which the output pass scales it to.
 	paper_white:      f32,
+	// A debug view that is not shaded is in the scene, which the output pass only encodes, and the tone mapping is off.
+	raw:              bool,
+	no_tone_mapping:  bool,
 	// The game's post effects run, with their settings, by their index in Renderer.effects.
 	effects:          bool,
 	effect_settings:  []Effect_Settings,

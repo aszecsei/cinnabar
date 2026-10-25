@@ -410,6 +410,30 @@ The post passes run after the `before_post` hook, in linear HDR at the scene's r
 - **The lookup table** (`tone_lut.hlsl`, `tone_lut.hlsli`) has 32 entries on each axis, its blue slices side by side in one 1024x32 `RGBA16_Float` texture, since textures are 2D. The entries cover -12.5 to +8 stops around middle grey on a log2 scale, so a scene color in any range has a place. Each holds the display color of its scene color, sRGB-encoded: the tint, the saturation and the contrast (`tint`, `saturation`, `contrast`), then the tone mapper. A compute pass bakes it in the first frame, and again when the grading or its shader changes. The output pass reads it with two bilinear samples. AgX rolls bright colors off to white with less saturation than Khronos PBR Neutral, and keeps dark colors a little brighter, so `tone_mapper = .Pbr_Neutral` gives the look that the fixed tone mapper had before.
 - *Later:* an upscaler in place of temporal AA, the exposure on the compute queue, a sky that counts in the histogram once it is pre-exposed, and velocities for a game's own draws.
 
+### Debug views
+
+The editor shows what makes the frame in its viewport (see [Editor](editor.md#viewport)): `Frame_Desc.debug_view` replaces the lit scene, `Frame_Desc.disable` turns features off, and `Frame_Desc.exposure_offset` adds stops to the exposure. A game passes them from the editor while it edits, and leaves them zero otherwise (`lib/engine/render/debug_views.odin`).
+
+| View | Drawn by | Shows | Shaded |
+|---|---|---|---|
+| `Lit` | The forward pass | The scene | Yes |
+| `Lighting_Only` | The forward pass | The lighting on a grey base color, without emission | Yes |
+| `Direct_Light`, `Indirect_Light` | The forward pass | Only the lights' light, or only the indirect light | Yes |
+| `Fog` | The forward pass | Only the light that the fog scatters toward the camera | Yes |
+| `Albedo` | The forward pass | The base color, or an unlit surface's color | No |
+| `Light_Complexity` | The forward pass | The lights that shade each pixel, as heat colors up to 16 | No |
+| `Shadow_Cascades` | The forward pass | Each directional cascade in its color: red, green, blue, yellow, then grey beyond | No |
+| `Normals`, `Depth`, `Velocity` | `debug_view.hlsl` | The prepass's: the world normal, the depth on a log scale to 1 km, the motion with grey where nothing moved | No |
+| `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color | No |
+| `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
+| `Entity_Ids` | `debug_view.hlsl` | Each entity in a color of its own | No |
+| `Luminance` | `debug_view.hlsl` | The scene's EV100 as heat colors, from -4 to 16 | No |
+
+- **In the forward pass:** `Frame_Constants.debug_view` drives a dynamic branch in the forward template, so the views need no permutations. The cooker defines `SHADING_HAS_BASE_COLOR` for a shading model with a `float3 base_color` input.
+- **From the frame's textures:** a compute pass after the `before_post` hook writes the view into a new scene color. A texture that the frame does not have, such as the global illumination's when it is off, gives black.
+- **Shaded views** are exposed and tone mapped as the scene is. The others are colors as they are: the output pass only encodes them (`Output_Push.raw`), they have no temporal AA, jitter or fog, and the exposure stays where it was, so the lit scene comes back as it was. Only `Lit` has bloom and the game's [post effects](#post-effects).
+- **Features** (`Features`) the viewport can turn off: temporal AA, bloom, the tone mapping (a plain roll-off to white in its place), the fog, the ambient occlusion, the global illumination, the shadows and the game's post effects. They change the settings after `resolve_settings`, so a volume cannot turn them back on.
+
 ### Post effects
 
 A game adds its own post effects among the renderer's passes (`lib/engine/render/post_effects.odin`). Each is driven by a settings component on [volumes](world.md#volumes), as the renderer's settings are, so the editor shows it on a volume, and a volume turns it on where it reaches.
@@ -500,6 +524,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 9 | *Done.* HDR output: HDR10 and scRGB frame targets from `core`, chosen by the display's HDR state; paper white from Windows' SDR white; a lookup table that opens the tone mapper's SDR colors up to the display's peak; and the output pass, which blends the UI at paper white and encodes for the display. |
 | 10 | *Done.* Settings on volumes: the settings components, `resolve_settings` at the camera, and `Fog` with a base height in the world. The sample's scene has a Global Volume. |
 | 11 | *Done.* Post effects: `register_post_effect` with three points among the post passes, settings on volumes, and the bloom composite before tone mapping. The sample's lens is one. |
+| 12 | *Done.* Debug views: the forward template's views of the albedo, the lighting, the light complexity and the cascades, the views from the frame's textures, the raw output, and the features that the editor turns off. |
 
 ## Future work
 

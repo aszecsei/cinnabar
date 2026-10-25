@@ -242,6 +242,19 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, r.post.lut_grading.peak, mode != .Sdr ? DEFAULT_PEAK : 0)
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Every debug view draws, and a view that is not shaded has no bloom. So does every feature turned off.
+	r.debug_view.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test debug view"})
+	for view in Debug_View {
+		desc.debug_view = view
+		testing.expectf(t, draw_frame(r, w, desc), "the frame with the %v view did not execute", view)
+		testing.expectf(t, !record.bloom || view == .Lit, "the %v view has bloom", view)
+	}
+	desc.debug_view = .Lit
+	desc.disable = ~Features{}
+	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")
+	testing.expect(t, !record.bloom && !record.occlusion && !record.fog && !record.gi)
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 	// The jitter cycles inside the pixel.
 	for n in u32(1) ..= JITTER_SAMPLES {
 		testing.expect(t, halton(n, 2) > 0 && halton(n, 2) < 1 && halton(n, 3) > 0 && halton(n, 3) < 1)

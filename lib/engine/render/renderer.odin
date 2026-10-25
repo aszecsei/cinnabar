@@ -73,6 +73,8 @@ Renderer :: struct {
 	// Tested lines where the view model is, whose depth they cannot compare with.
 	debug_behind:    Shader_Pipeline,
 	debug_overlay:   Shader_Pipeline,
+	// The debug views from the frame's textures (see Debug_View).
+	debug_view:      Shader_Pipeline,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
 }
@@ -88,6 +90,11 @@ Frame_Desc :: struct {
 	// The frame's settings (see docs/rendering.md#settings). nil takes them from the volumes at the view, as
 	// resolve_settings does.
 	settings:          ^Frame_Settings,
+	// The editor's debug view, the features that it turns off, and the stops that it adds to the exposure (see
+	// docs/rendering.md#debug-views).
+	debug_view:        Debug_View,
+	disable:           Features,
+	exposure_offset:   f32,
 	hooks:             Frame_Hooks,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering.md#material-previews). draw_frame sets each one's complete.
@@ -126,6 +133,7 @@ Frame :: struct {
 	data:                     rawptr,
 	view:                     View,
 	size:                     [2]u32,
+	debug_view:               Debug_View,
 	// How the frame target reaches the display (see docs/rendering.md#hdr-output).
 	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
@@ -210,6 +218,8 @@ Output_Push :: struct {
 	lut_hdr:       u32,
 	mode:          u32,
 	paper_white:   f32,
+	// The scene holds a debug view's colors as they are, which the pass only encodes.
+	raw:           u32,
 }
 
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
@@ -227,6 +237,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.debug_hidden = shader_pipeline(DEBUG_SHADER)
 	r.debug_behind = shader_pipeline(DEBUG_SHADER)
 	r.debug_overlay = shader_pipeline(DEBUG_SHADER)
+	r.debug_view = shader_pipeline(DEBUG_VIEW_SHADER)
 	residency_init(&r.residency, platform, assets)
 	debug.init(&r.debug, platform.heap_allocator)
 	materials_init(&r.materials, platform)
@@ -276,7 +287,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	for &p in r.output_pipelines {
 		destroy_shader_pipeline(&p, r.platform)
 	}
-	for p in ([]^Shader_Pipeline{&r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay}) {
+	for p in ([]^Shader_Pipeline{&r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay, &r.debug_view}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
@@ -300,6 +311,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		view_projection = view_projection(desc.view, f32(desc.size.x) / f32(max(desc.size.y, 1))),
 		hooks           = desc.hooks,
 		scene_scale     = 1,
+		debug_view      = desc.debug_view,
 	}
 	target := import_texture(&g, r.platform.gpu_frame_target(), .Color)
 	f.scene = create_texture(&g, {size = desc.size, format = SCENE_FORMAT, label = "scene"})
@@ -308,10 +320,22 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
 	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
+	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
 	begin_post(f, settings.post)
-	f.post.effects, f.post.effect_settings = true, settings.effects
+	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit
+	f.post.effect_settings = settings.effects
+	f.post.no_tone_mapping = .Tone_Mapping in desc.disable
+	// A view that is not shaded keeps the exposure where it was, so the lit scene comes back as it was.
+	if !debug_view_shaded(desc.debug_view) {
+		f.post.raw, f.post.exposure, f.post.exposure_auto = true, false, false
+	}
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
+	if .Shadows in desc.disable {
+		for &casts in f.lights.casts {
+			casts = false
+		}
+	}
 	assign_shadows(f)
 	upload_lights(f)
 	ambient := settings.ambient == {} ? DEFAULT_AMBIENT : settings.ambient
@@ -344,10 +368,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, {settings.background.r, settings.background.g, settings.background.b, 1})
-	color(&g, p, f.ids, .Clear, store = desc.keep_ids ? .Store : .Discard)
-	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, temporal AA
-	// and the exposure.
-	depth(&g, p, f.depth, .Load, store = desc.keep_ids || has_debug || f.fog != nil || reads_depth(f) ? .Store : .Discard)
+	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
+	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, temporal AA,
+	// the exposure and the depth's debug view.
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || reads_depth(f) || desc.debug_view == .Depth
+	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	read(&g, p, f.exposure)
 	if f.lights.clustered {
@@ -381,6 +406,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.before_post != nil {
 		desc.hooks.before_post(f)
 	}
+	add_debug_view_pass(f)
 	add_post_passes(f)
 
 	if desc.hooks.ui != nil {
@@ -448,6 +474,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
+	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
 		depth_format = DEPTH_FORMAT,
@@ -567,6 +594,10 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	if f.debug != 0 {
 		push.debug, push.has_debug = gpu.read_index(gpu_texture(g, f.debug)), 1
 	}
+	if f.post.no_tone_mapping {
+		push.has_lut = 0
+	}
+	push.raw = u32(f.post.raw)
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)

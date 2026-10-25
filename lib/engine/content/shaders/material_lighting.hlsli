@@ -32,6 +32,24 @@ uint cluster_of(float3 p, float4 position) {
 	return cluster_at(p, frame.near / max(position.z, 1e-7));
 }
 
+// light_count is how many lights shade a point: every directional light, and its cluster's.
+uint light_count(float3 p, float4 position) {
+	uint count = frame.directional_count;
+	if (frame.clustered != 0) {
+		count += cn_buffer(frame.clusters).Load2(cluster_of(p, position) * 8).y;
+	}
+	return count;
+}
+
+// cascade_at is the index of the directional lights' cascade that reaches a view depth, or 4 beyond the last.
+uint cascade_at(float depth) {
+	uint cascade = 0;
+	[unroll] for (uint c = 0; c < 4; c++) {
+		cascade += depth > frame.cascade_splits[c] ? 1 : 0;
+	}
+	return cascade;
+}
+
 float4 shadow_clip(Shadow_View view, float3 p) {
 	float4 v = float4(p, 1);
 	return float4(dot(view.rows[0], v), dot(view.rows[1], v), dot(view.rows[2], v), dot(view.rows[3], v));
@@ -76,10 +94,7 @@ int shadow_view(Light_Record light, float3 p, float depth) {
 	int view = light.shadow;
 	switch (light.type) {
 	case LIGHT_DIRECTIONAL: {
-		int cascade = 0;
-		[unroll] for (uint c = 0; c < 4; c++) {
-			cascade += depth > frame.cascade_splits[c] ? 1 : 0;
-		}
+		int cascade = int(cascade_at(depth));
 		if (cascade >= 4) {
 			return -1;
 		}
