@@ -100,7 +100,7 @@ Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file
 - **Names** are keys in the `.meta` file, so an `=` in a name becomes `_`, and two meshes of one name get `_2` and on.
 - **`combine = true`** makes one mesh asset, named for the file without its extension, instead: the cooker walks the default scene's nodes and bakes their transforms into the vertices. This suits a file that is one prop exported in pieces. The default is `false`.
 - *Later, a model also makes a prefab of its node hierarchy that places its meshes, and its textures and materials become sub-assets too (texture assets and material instances). That is importing a glTF file as a scene, and it waits for prefabs.*
-- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding, so front faces stay counterclockwise. The mirror flips the tangent frame's handedness, so a tangent from the file has its bitangent sign flipped too.
+- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding, so front faces are clockwise on screen, as `lib/core/gpu` takes them, and back faces cull. The mirror flips the tangent frame's handedness, so a tangent from the file has its bitangent sign flipped too.
 - **Missing attributes:** a primitive without normals gets its faces' normals, as glTF specifies. A primitive that is not triangles is left out, with a warning.
 - **Vertices** are two streams, so that depth and shadow passes read only positions:
 

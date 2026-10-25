@@ -16,8 +16,8 @@ import "cinnabar:engine/render"
 // around the selection and the gizmo over the frame. The game's scene pass also writes an entity ID buffer, and a
 // pick reads it and the depth, and copies the result to the CPU.
 
-// The entity ID buffer's format. Each pixel holds entity_id of the entity drawn there, or 0.
-ID_FORMAT :: gpu.Format.R32_Uint
+// The entity ID buffer's format, which the renderer draws (see render.ID_FORMAT).
+ID_FORMAT :: render.ID_FORMAT
 // At most this many picks wait for the GPU. The editor waits for each answer, so it sends one or two at a time.
 MAX_PICKS :: 16
 
@@ -62,7 +62,7 @@ Viewport :: struct {
 Viewport_Frame :: struct {
 	view:   render.View,
 	size:   [2]u32,
-	// The frame target, which the tools draw over.
+	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering.md#debug).
 	target: render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
 	ids:    render.Texture,
@@ -94,7 +94,7 @@ view :: proc(e: ^Editor) -> (render.View, bool) {
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.
 entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
-	return ecs.entity_index(entity) + 1
+	return render.entity_id(entity)
 }
 
 // add_viewport_passes adds the pick and the overlay to the frame's graph. Add them after the passes that write the
@@ -404,7 +404,7 @@ PICK_PIPELINE :: gpu.Compute_Pipeline_Desc {
 
 @(private)
 OVERLAY_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors = {{format = gpu.FRAME_TARGET_FORMAT, blend = .Alpha}},
+	colors = {{format = render.DEBUG_FORMAT, blend = .Alpha}},
 	label  = "editor overlay",
 }
 

@@ -278,7 +278,7 @@ edit: build editor
 # Build the statically linked release executable
 release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release")
     mkdir -p "{{build_dir}}"
-    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -define:DEBUG_DRAW=false -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release

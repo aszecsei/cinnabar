@@ -452,9 +452,9 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 }
 
 // read_primitive appends a primitive's triangles as corners. glTF is right-handed with +z the asset's front, and the
-// engine is left-handed with +z forward, so it negates x and reverses each triangle's winding, which keeps the front
-// faces counterclockwise. A primitive without normals gets its faces' normals, as glTF says. A primitive without
-// tangents makes generate true.
+// engine is left-handed with +z forward, so it negates x and reverses each triangle's winding, which leaves front
+// faces clockwise on screen, as lib/core/gpu takes them. A primitive without normals gets its faces' normals, as glTF
+// says. A primitive without tangents makes generate true.
 @(private = "file")
 read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^[dynamic]Vertex, flags: ^format.Mesh_Flags, generate: ^bool, problems: ^Problems) -> bool {
 	p := part.primitive
@@ -494,7 +494,7 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^
 	mirror := [3]f32{-1, 1, 1}
 	for t in 0 ..< count / 3 {
 		triangle: [3]Vertex
-		// Reversed, to keep the front faces counterclockwise after the mirror.
+		// Reversed, so front faces are clockwise on screen after the mirror, as lib/core/gpu takes them.
 		for corner, k in ([3]int{0, 2, 1}) {
 			i := uint(t * 3 + corner)
 			index := p.indices != nil ? cgltf.accessor_read_index(p.indices, i) : i

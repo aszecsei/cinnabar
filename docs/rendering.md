@@ -54,8 +54,21 @@ flowchart TB
 
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
-- The renderer owns a `Renderer` in `Game_State`: pipelines, the material table, the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)).
-- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory. It has the views, the settings for this frame, and optional `Pass_Hook`s for custom passes at named points: `After_Prepass`, `After_Opaque`, `Before_Post`, `After_Tone_Map`. The hooks are procedures in the game DLL, so they are never stored in `Game_State`.
+- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor and its pipelines, and later the material table, the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, and the hooks.
+- **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
+
+| Hook | When | What it does |
+|---|---|---|
+| `before_world` | Before the world pass | Adds passes, such as culling on the compute queue |
+| `world_uses` | When the world pass is declared | Declares what `world_draw` reads |
+| `world_draw` | In the world pass, `world_pieces` pieces, after the meshes in piece 0 | Records draws into the world's targets |
+| `after_world` | After the world pass | Adds passes, such as post effects; a pass that makes a new scene color sets `Frame.scene` to it |
+| `ui` | After a pass that clears the UI target | Adds passes that draw the UI; they load it |
+| `debug` | After the debug lines | Adds passes that draw into the debug layer, such as the editor's tools |
+
+- The hooks are procedures in the game DLL, so they are never stored in `Game_State`. *Later phases add hooks at their own points: after the prepass (phase 3) and before post (phase 6).*
+- **Missing shaders:** a pass whose pipeline does not exist yet, because its shader is not cooked, records nothing, so the frame still validates.
 
 ### Views
 
@@ -80,7 +93,9 @@ The GPU scene holds every instance's record in a persistent buffer: its pose, it
 | World | Scene color, `RGBA16_Float` | Linear HDR | Scene depth | Is the base |
 | View model | The world's targets | Linear HDR | Scene depth, its own projection, a stencil bit | In the forward pass |
 | UI | `RGBA8_Unorm`, premultiplied | sRGB-encoded, blended as encoded | None | In the output pass, over the tone-mapped scene |
-| Debug | `RGBA8_Unorm`, premultiplied | sRGB-encoded | Tested lines read scene depth; overlay lines ignore it | In the output pass, over the UI |
+| Debug | `RGBA8_Unorm_Srgb`, premultiplied | Linear, which the target's sRGB view encodes; the output pass blends it as encoded | Tested lines test scene depth; overlay lines ignore it | In the output pass, over the UI |
+
+- The renderer makes the UI target only with a `ui` hook, and the debug layer only with debug lines or a `debug` hook. Without them, the output pass reads neither.
 
 ### View model
 
@@ -100,21 +115,23 @@ The view model is a separate list of entities: those with the `View_Model` tag. 
 - The UI draws into its own target in sRGB-encoded values, and blends them as encoded values, as design tools do. A color that a designer picks is the color on the screen.
 - The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space and later scale the UI to the display's paper white for HDR output.
 - The UI target has the frame target's size. The scene can render at a lower resolution, and the UI stays sharp.
-- The UI renderer itself is not part of this design. It only has to write into the UI target.
+- The UI renderer itself is not part of this design. It only has to write into the UI target, through the `ui` hook. The sample draws a HUD panel there, with colors picked as sRGB values, and the `Premultiplied` blend.
 
 ### Debug
 
-- `debug` is an immediate API: `debug.line`, `debug.box`, `debug.sphere`, `debug.arrow`, `debug.axes`, and later text. Each takes `World_Position`s, a color, a duration (0 is this frame only) and a mode: `Tested` or `Overlay`.
-- Any job can call it. Each job appends to its own list in frame memory, and extraction merges them into one upload. Shapes with a duration live in `Game_State`.
+- `cinnabar:engine/debug` is an immediate API: `debug.line`, `debug.box`, `debug.sphere`, `debug.circle`, `debug.arrow`, `debug.axes`, and later text. Each takes a `debug.Draw` (the renderer's is `Renderer.debug`), `World_Position`s, a linear color, a duration in seconds (0 is this frame only) and a mode: `Tested` or `Overlay`. Every shape is lines.
+- Any job can call it: a line takes its slot in one array with an atomic add, and lines past `MAX_LINES` are dropped. The array is in host memory, so lines with a duration survive a code reload. `draw_frame` uploads the lines relative to the camera, the tested ones first, and `end_frame` then drops those of this frame only and those that expired.
+- Each line is a quad two pixels wide that the vertex shader makes, and a line that passes behind the camera is clipped where it does. Tested lines draw twice: with depth `Less` at `DEBUG_HIDDEN_ALPHA`, then with `Greater_Equal` at full alpha.
 - **Tested** shapes read scene depth. The hidden part draws with a lower alpha, so a shape inside a wall still shows where it is. **Overlay** shapes draw over everything.
 - The colors are exactly the colors given: no exposure, no tone mapping, no fog.
-- The editor's selection outline and gizmo move from their own pass on the frame target into the debug layer (see [Editor](editor.md#viewport)). Release builds compile the debug calls out.
+- The editor's selection outline and gizmo draw into the debug layer: the game adds `editor.add_viewport_passes` in its `debug` hook, with `Frame.debug` as the target (see [Editor](editor.md#viewport)).
+- Release builds compile the debug calls out: the justfile's release build sets `DEBUG_DRAW` false.
 
 ### Output
 
-The output pass is one full-screen pass that writes the frame target:
+The output pass is one full-screen pass that writes the frame target (`lib/engine/content/shaders/output.hlsl`):
 
-1. Read the tone-mapped scene, upscaled to the frame's size if the scene's resolution is lower.
+1. Read the scene, scaled by the exposure, and tone map it. Until the tone mapping lookup table (phase 6), the pass tone maps itself with Khronos PBR Neutral, which keeps colors up to 0.76 as they are. *Later, it reads the tone-mapped scene, upscaled to the frame's size if the scene's resolution is lower.*
 2. Encode it to sRGB.
 3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
 4. Write the result. The frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again.
@@ -323,7 +340,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | Phase | Result |
 |---|---|
 | 0 | *Done.* In order: reversed Z. Shader assets, and the sample's and the editor tools' shaders moved to them. The BC formats in `lib/core/gpu`, and texture assets. Mesh assets. Asset fields. The residency table, `Camera` and `Mesh_Renderer`, and the sample drawing a glTF mesh. |
-| 1 | The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
+| 1 | *Done.* The frame skeleton: one view, the world layer, a fixed tone mapper, the UI and debug targets, the output pass. The `debug` API, and the editor's overlay moved into the debug layer. |
 | 2 | The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
 | 3 | Clustered forward: the prepass, the light components, clusters, shadow maps and ray-traced shadow masks. |
 | 4 | The view model, with the stencil additions. |

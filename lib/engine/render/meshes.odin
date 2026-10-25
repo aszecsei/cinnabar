@@ -73,9 +73,10 @@ mesh_instances :: proc(instances: gpu.Upload) -> []Mesh_Instance {
 	return ([^]Mesh_Instance)(raw_data(instances.data))[:len(instances.data) / size_of(Mesh_Instance)]
 }
 
-// draw_meshes records the draws in a render pass, each submesh as an indexed draw with the engine's mesh shader.
+// draw_meshes records the draws in a render pass, each submesh as an indexed draw with the engine's mesh shader. It
+// records nothing until the pipeline exists, as when its shader is not cooked.
 draw_meshes :: proc(cb: ^gpu.Command_Buffer, pipeline: gpu.Pipeline, view_projection: matrix[4, 4]f32, instances: gpu.Upload, draws: []Mesh_Draw) {
-	if len(draws) == 0 {
+	if len(draws) == 0 || pipeline == {} {
 		return
 	}
 	gpu.cmd_set_pipeline(cb, pipeline)

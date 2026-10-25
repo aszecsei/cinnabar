@@ -93,7 +93,7 @@ Mesh_Blob :: struct {
 	positions:         Slice,
 	// mesh_attribute_stride bytes per vertex.
 	attributes:        Slice,
-	// u16 or u32 per index, by the Index32 flag, in counterclockwise triangles.
+	// u16 or u32 per index, by the Index32 flag, in triangles whose front faces are clockwise on screen.
 	indices:           Slice,
 	// Meshlet records.
 	meshlets:          Slice,
