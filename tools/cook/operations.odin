@@ -123,7 +123,7 @@ move_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Move_Assets) -> 
 	for guid in op.guids {
 		from, found := asset_path(roots, index, guid)
 		if !found {
-			return failed("no asset has the GUID %s", guid)
+			return not_found(index, guid)
 		}
 		to := fmt.tprintf("%s/%s", dir, name_of(from))
 		if to == from {
@@ -146,7 +146,7 @@ move_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Move_Assets) -> 
 rename_asset :: proc(roots: []Root, index: ^Index, op: cook_link.Rename_Asset) -> cook_link.Operation_Result {
 	from, found := asset_path(roots, index, op.guid)
 	if !found {
-		return failed("no asset has the GUID %s", op.guid)
+		return not_found(index, op.guid)
 	}
 	extension := extension_in(from)
 	name := strings.trim_suffix(strings.trim_space(op.name), extension)
@@ -226,7 +226,7 @@ duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_A
 	for guid in op.guids {
 		from, found := asset_path(roots, index, guid)
 		if !found {
-			return failed("no asset has the GUID %s", guid)
+			return not_found(index, guid)
 		}
 		extension := extension_in(from)
 		stem := strings.trim_suffix(name_of(from), extension)
@@ -274,7 +274,7 @@ delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets)
 	for guid in op.guids {
 		path, found := asset_path(roots, index, guid)
 		if !found {
-			return failed("no asset has the GUID %s", guid)
+			return not_found(index, guid)
 		}
 		append(&paths, path)
 		if os.exists(meta_of(path)) {
@@ -306,7 +306,7 @@ delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets)
 set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Import_Settings) -> cook_link.Operation_Result {
 	path, found := asset_path(roots, index, op.guid)
 	if !found {
-		return failed("no asset has the GUID %s", op.guid)
+		return not_found(index, op.guid)
 	}
 	entry := index.assets[op.guid]
 	known := import_settings(kind_of(path))
@@ -345,8 +345,8 @@ reimport :: proc(index: ^Index, op: cook_link.Reimport, force: ^map[format.Guid]
 	guids := make([dynamic]format.Guid, context.temp_allocator)
 	for guid in op.guids {
 		parsed, ok := format.guid_parse(guid)
-		if !ok || guid not_in index.assets {
-			return failed("no asset has the GUID %s", guid)
+		if !ok || guid not_in index.assets || index.assets[guid].parent != "" {
+			return not_found(index, guid)
 		}
 		append(&guids, parsed)
 	}
@@ -458,7 +458,8 @@ find_root :: proc(roots: []Root, name: string) -> (Root, bool) {
 @(private = "file")
 asset_path :: proc(roots: []Root, index: ^Index, guid: string) -> (path: string, ok: bool) {
 	entry, in_index := index.assets[guid]
-	if !in_index {
+	// A sub-asset lives in its file's .meta file, so the operations take the file instead.
+	if !in_index || entry.parent != "" {
 		return
 	}
 	root, root_found := find_root(roots, entry.root)
@@ -466,6 +467,16 @@ asset_path :: proc(roots: []Root, index: ^Index, guid: string) -> (path: string,
 		return
 	}
 	return fmt.tprintf("%s/%s", root.dir, entry.path), true
+}
+
+// not_found says why an operation cannot find an asset: no asset has the GUID, or it is a sub-asset, which changes only
+// with its file.
+@(private = "file")
+not_found :: proc(index: ^Index, guid: string) -> cook_link.Operation_Result {
+	if entry, found := index.assets[guid]; found && entry.parent != "" {
+		return failed("%s is part of %s, and changes with it: move, rename, duplicate, delete or re-import the file instead", entry.subasset, entry.path)
+	}
+	return failed("no asset has the GUID %s", guid)
 }
 
 // display is a path as the log shows it: the root's name and the path in the root, such as game/scripts/door.luau.

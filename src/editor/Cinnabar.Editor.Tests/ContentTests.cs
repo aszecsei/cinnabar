@@ -22,13 +22,29 @@ public sealed class ContentTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])]));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript]),
-            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], []),
+            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", ""),
+            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], [], "", ""),
         ], [new Folder("game", "lib")]));
         return shell;
     }
 
     static readonly SettingInfo Native = new("native", ["true", "false"], "false", "Compile to machine code.");
+
+    [Fact]
+    public void TheFileOperationsLeaveSubassetsToTheirFile()
+    {
+        using var shell = NewShell();
+        shell.Assets.Apply(new AssetDelta(
+        [
+            new Asset("10", AssetKind.Model, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "", ""),
+            new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall"),
+        ], [], [], []));
+
+        shell.SelectContent(null, ["10", DoorScript]);
+        Assert.False(shell.SelectionHasSubassets);
+        shell.SelectContent(null, ["10", "11"]);
+        Assert.True(shell.SelectionHasSubassets);
+    }
 
     [Fact]
     public void ADeleteShowsTheAssetsThatUseWhatItTakes()

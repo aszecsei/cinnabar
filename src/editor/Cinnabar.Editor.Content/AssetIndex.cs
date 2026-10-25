@@ -135,7 +135,17 @@ public sealed class AssetIndex
 
     /// <summary>The assets directly in a folder of a root, by name.</summary>
     public IEnumerable<Asset> AssetsIn(string root, string folder) =>
-        _assets.Values.Where(a => a.Root == root && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+        _assets.Values.Where(a => a.Root == root && a.Parent == "" && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content-pipeline.md#identity).</summary>
+    public IEnumerable<Asset> SubassetsOf(string guid) =>
+        _assets.Values.Where(a => a.Parent == guid).OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Whether an asset is a sub-asset, which changes only with its file.</summary>
+    public static bool IsSubasset(Asset asset) => asset.Parent != "";
+
+    /// <summary>What the content browser calls an asset: a file's name, or a sub-asset's name in its file.</summary>
+    public static string DisplayName(Asset asset) => IsSubasset(asset) ? asset.Subasset : Name(asset.Path);
 
     /// <summary>The assets that depend on an asset.</summary>
     public IEnumerable<Asset> Dependents(string guid) =>
@@ -163,7 +173,7 @@ public sealed class AssetIndex
         {
             return string.Equals(word["kind:".Length..], asset.Kind.ToString(), StringComparison.OrdinalIgnoreCase);
         }
-        return Name(asset.Path).Contains(word, StringComparison.OrdinalIgnoreCase)
+        return DisplayName(asset).Contains(word, StringComparison.OrdinalIgnoreCase)
             || asset.Behaviour.Contains(word, StringComparison.OrdinalIgnoreCase);
     }
 

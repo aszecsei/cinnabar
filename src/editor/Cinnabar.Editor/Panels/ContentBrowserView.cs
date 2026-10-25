@@ -43,6 +43,8 @@ public sealed class ContentBrowserView : DockPanel
     readonly Border _general = new() { Classes = { "problems" }, Margin = new Thickness(4, 0, 4, 4) };
     readonly ListBox _folders = new() { Classes = { "outliner" } };
     readonly ListBox _assets = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
+    // The files whose sub-assets show under them, by GUID.
+    readonly HashSet<string> _expandedFiles = [];
     readonly StackPanel _details = new() { Spacing = 2, Margin = new Thickness(8, 4) };
     readonly TextBlock _empty = new()
     {
@@ -262,7 +264,16 @@ public sealed class ContentBrowserView : DockPanel
         }
         else if (_folder is { } folder)
         {
-            assets = [.. _index.AssetsIn(folder.Root, folder.Path)];
+            // An expanded file shows its sub-assets under it.
+            assets = [];
+            foreach (var asset in _index.AssetsIn(folder.Root, folder.Path))
+            {
+                assets.Add(asset);
+                if (_expandedFiles.Contains(asset.Guid))
+                {
+                    assets.AddRange(_index.SubassetsOf(asset.Guid));
+                }
+            }
             _location.Text = folder.Path == "" ? folder.Root : $"{folder.Root} › {folder.Path.Replace("/", " › ")}";
         }
         else
@@ -312,6 +323,8 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Scene => "scene",
         AssetKind.Shader => "shader",
         AssetKind.Texture => "texture",
+        AssetKind.Model => "model",
+        AssetKind.Mesh => "mesh",
         _ => "script",
     };
 
@@ -595,18 +608,44 @@ public sealed class ContentBrowserView : DockPanel
     Control AssetView(Asset asset)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        var searching = !string.IsNullOrEmpty(_search.Text?.Trim());
+        var subasset = AssetIndex.IsSubasset(asset);
+        // A file with sub-assets expands in place to show them, indented under it. Search lists them as they are.
+        var hasSubassets = !subasset && _index.SubassetsOf(asset.Guid).Any();
+        var expander = new TextBlock
+        {
+            Text = hasSubassets && !searching ? (_expandedFiles.Contains(asset.Guid) ? "▾" : "▸") : "",
+            Width = 12,
+            Margin = new Thickness(subasset && !searching ? 18 : 0, 0, 0, 0),
+            Classes = { "dim" },
+            Cursor = hasSubassets ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
+        };
+        if (hasSubassets && !searching)
+        {
+            expander.PointerPressed += (_, e) =>
+            {
+                if (!_expandedFiles.Remove(asset.Guid))
+                {
+                    _expandedFiles.Add(asset.Guid);
+                }
+                e.Handled = true;
+                ShowAssets();
+            };
+        }
+        line.Children.Add(expander);
         if (CommandViews.Icon(KindNoun(asset.Kind), 14) is { } icon)
         {
             line.Children.Add(icon);
         }
-        line.Children.Add(new TextBlock { Text = AssetIndex.Name(asset.Path) });
+        line.Children.Add(new TextBlock { Text = AssetIndex.DisplayName(asset) });
         if (asset.Behaviour != "")
         {
             line.Children.Add(new Border { Classes = { "badge", "script" }, Margin = new Thickness(0), Child = new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) } });
         }
-        if (!string.IsNullOrEmpty(_search.Text?.Trim()))
+        if (searching)
         {
-            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{AssetIndex.Parent(asset.Path)}", Classes = { "dim" } });
+            var where = subasset ? asset.Path : AssetIndex.Parent(asset.Path);
+            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{where}", Classes = { "dim" } });
         }
         if (asset.Errors > 0 || asset.Status == AssetStatus.Failed)
         {
@@ -670,7 +709,10 @@ public sealed class ContentBrowserView : DockPanel
                 _assets.SelectedItem = _assets.ItemsSource?.OfType<Asset>().FirstOrDefault(a => a.Guid == asset.Guid);
             }
         };
-        menu.Items.Add(new MenuItem { Header = asset.Kind == AssetKind.Scene ? "Open Scene" : "Open in Script Editor", Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
+        if (EditorShell.CanOpen(asset))
+        {
+            menu.Items.Add(new MenuItem { Header = asset.Kind == AssetKind.Scene ? "Open Scene" : "Open in Script Editor", Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
+        }
         if (path != null)
         {
             menu.Items.Add(new MenuItem { Header = "Show in Explorer", Command = new RelayCommand(() => _shell.ShowInExplorer(path)) });

@@ -18,6 +18,8 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Scene   = {format.SCENE_EXTENSION},
 	.Shader  = {format.SHADER_EXTENSION},
 	.Texture = TEXTURE_EXTENSIONS,
+	.Model   = MODEL_EXTENSIONS,
+	.Mesh    = nil,
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -45,6 +47,8 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 		return SCRIPT_SETTINGS
 	case .Texture:
 		return TEXTURE_SETTINGS
+	case .Model:
+		return MODEL_SETTINGS
 	}
 	return nil
 }
@@ -89,7 +93,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -109,6 +113,15 @@ Asset_Source :: struct {
 	dependencies: [dynamic]format.Guid,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
+	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content-pipeline.md#identity).
+	subassets:    [dynamic]Subasset,
+}
+
+// Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.
+Subasset :: struct {
+	kind: format.Asset_Kind,
+	name: string,
+	guid: format.Guid,
 }
 
 // Folder is a directory in a root, by the root's index and its path in the root, such as "scripts/ui".
@@ -188,6 +201,7 @@ found_entry :: proc(
 		path = path,
 		name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
 		dependencies = make([dynamic]format.Guid, context.temp_allocator),
+		subassets = make([dynamic]Subasset, context.temp_allocator),
 	}
 	if !read_asset(&a, problems) {
 		return false
@@ -210,23 +224,37 @@ found_assets :: proc(
 ) {
 	ok = scanned
 	slice.sort_by(found[:], proc(a, b: Asset_Source) -> bool {return a.path < b.path})
-	// Assets that share a GUID would write the same blob, so none of them cooks.
+	// Assets that share a GUID would write the same blob, so none of them cooks. A sub-asset's GUID counts as its
+	// file's.
 	first := make(map[format.Guid]int, len(found), context.temp_allocator)
 	shared := make(map[format.Guid]bool, context.temp_allocator)
 	for a, i in found {
-		if j, seen := first[a.meta.guid]; seen {
-			report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
-			shared[a.meta.guid] = true
-			ok = false
-			continue
+		guids := make([dynamic]format.Guid, 0, 1 + len(a.meta.subassets), context.temp_allocator)
+		append(&guids, a.meta.guid)
+		for s in a.meta.subassets {
+			append(&guids, s.guid)
 		}
-		first[a.meta.guid] = i
+		for guid in guids {
+			if j, seen := first[guid]; seen {
+				report_error(problems, a.path, 0, 0, "has the same GUID as %s. Delete the .meta file of the copy.", found[j].path)
+				shared[guid] = true
+				ok = false
+				continue
+			}
+			first[guid] = i
+		}
 	}
 	unique := make([dynamic]Asset_Source, 0, len(found), context.temp_allocator)
-	for a in found {
-		if !shared[a.meta.guid] {
-			append(&unique, a)
+	outer: for a in found {
+		if shared[a.meta.guid] {
+			continue
 		}
+		for s in a.meta.subassets {
+			if shared[s.guid] {
+				continue outer
+			}
+		}
+		append(&unique, a)
 	}
 	slice.sort_by(found_folders[:], proc(a, b: Folder) -> bool {return a.root < b.root || (a.root == b.root && a.path < b.path)})
 	keys, _ := slice.map_keys(shared, context.temp_allocator)
@@ -273,6 +301,10 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Shader
 	case .Texture:
 		return .Texture
+	case .Model:
+		return .Model
+	case .Mesh:
+		return .Mesh
 	}
 	return .Script
 }
@@ -326,9 +358,9 @@ new_meta :: proc(settings: []format.Meta_Setting) -> (text: string, guid: format
 	return meta_with(guid, "", settings), guid
 }
 
-// meta_with is the text of a .meta file with a GUID and import settings. It keeps the comments of an old .meta file,
-// or starts with one that says what the file is.
-meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting) -> string {
+// meta_with is the text of a .meta file with a GUID, import settings and sub-assets. It keeps the comments of an old
+// .meta file, or starts with one that says what the file is. With no sub-assets given, it keeps the old file's.
+meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_Setting, subassets: Maybe([]format.Meta_Subasset) = nil) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	rest := old_text
 	for line in strings.split_lines_iterator(&rest) {
@@ -343,6 +375,14 @@ meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_S
 	fmt.sbprintfln(&b, "guid = %s", format.guid_format(guid, &buffer))
 	for s in settings {
 		fmt.sbprintfln(&b, "%s = %s", s.key, s.value)
+	}
+	lines, given := subassets.?
+	if !given {
+		old, _ := format.meta_parse(old_text, context.temp_allocator)
+		lines = old.subassets
+	}
+	for s in lines {
+		fmt.sbprintfln(&b, "%s.%s = %s", s.kind, s.name, format.guid_format(s.guid, &buffer))
 	}
 	return strings.to_string(b)
 }

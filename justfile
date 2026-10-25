@@ -28,12 +28,15 @@ dev_defines := "-define:LUAU_SHARED=true " + luau_features
 luau_dir := build_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := build_dir + "/compressonator"
+meshoptimizer_dir := build_dir + "/meshoptimizer"
 # What tools/cook/compressonator builds from vendor/compressonator, which is checked out sparsely.
 compressonator_paths := "cmp_core license applications/_libs/cmp_math"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
 luau_version := `git -C vendor/luau describe --tags --always`
 # The cooker puts this in every texture's cache key, so a Compressonator update cooks every texture again.
 compressonator_version := `git -C vendor/compressonator describe --tags --always 2>/dev/null || echo unknown`
+# The cooker puts this in every mesh's cache key, so a meshoptimizer update cooks every mesh again.
+meshoptimizer_version := `git -C vendor/meshoptimizer describe --tags --always 2>/dev/null || echo unknown`
 content_root := "samples/" + game + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
@@ -113,7 +116,7 @@ setup: install
     echo "✓ Project ready"
 
 # Update all vendored submodules
-update: update-luau update-compressonator
+update: update-luau update-compressonator update-meshoptimizer
 
 # Update Luau to a release tag (default: latest)
 [script]
@@ -125,6 +128,17 @@ update-luau tag="":
     git -C vendor/luau checkout --quiet "$tag"
     git add vendor/luau
     echo "✓ Luau at $tag"
+
+# Update meshoptimizer to a release tag (default: latest)
+[script]
+update-meshoptimizer tag="":
+    set -euo pipefail
+    git -C vendor/meshoptimizer fetch --tags --quiet
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/meshoptimizer tag --list 'v*' --sort=-v:refname | head -n 1)
+    git -C vendor/meshoptimizer -c advice.detachedHead=false checkout --quiet "$tag"
+    git add vendor/meshoptimizer
+    echo "✓ meshoptimizer at $tag"
 
 # Update Compressonator to a release tag (default: latest)
 [script]
@@ -144,7 +158,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures
+build: host game-dll script-types scripts scenes shaders textures models
 
 # Build the development host
 host: agility-runtime luau
@@ -170,10 +184,15 @@ compressonator: install-compressonator
     [ -f "{{compressonator_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/compressonator -B "{{compressonator_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
     cmake --build "{{compressonator_dir}}" --config Release -- -m -nologo -v:quiet
 
+# Build meshoptimizer for the cooker, with the static CRT that Odin links
+meshoptimizer:
+    [ -f "{{meshoptimizer_dir}}/CMakeCache.txt" ] || cmake -S vendor/meshoptimizer -B "{{meshoptimizer_dir}}" -G "{{cmake_generator}}" -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DMESHOPT_INSTALL=OFF > /dev/null
+    cmake --build "{{meshoptimizer_dir}}" --config Release -- -m -nologo -v:quiet
+
 # Build the cooker
-cook: luau compressonator
+cook: luau compressonator meshoptimizer
     mkdir -p "{{build_dir}}"
-    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
 
 # Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
@@ -196,6 +215,11 @@ script-types: host game-dll
 # gets one, with its usage guessed from its name: commit it.
 textures config="dev": cook
     "./{{build_dir}}/cook.exe" textures --cache "{{cache_dir}}" --config {{config}} {{roots}}
+
+# Cook the game's models and the engine's into the loose cache, build/cache/<config>: each glTF mesh becomes a mesh with
+# its own GUID in its model's .meta file. A model without a .meta file gets one: commit it, with the GUIDs it gains.
+models config="dev": cook
+    "./{{build_dir}}/cook.exe" models --cache "{{cache_dir}}" --config {{config}} {{roots}}
 
 # Cook the game's shaders and the engine's into the loose cache, build/cache/<config>: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
@@ -252,7 +276,7 @@ edit: build editor
         --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Build the statically linked release executable
-release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release")
+release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -out:"{{build_dir}}/{{game}}.exe" -o:speed
 
@@ -281,8 +305,8 @@ fmt:
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau compressonator link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" || exit 1; done
+test: luau compressonator meshoptimizer link-schema install-dxc
+    for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/editor lib/engine/editor/link tools/cook; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor

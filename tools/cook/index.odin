@@ -77,6 +77,20 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		}
 		entry.dependencies = dependencies
 		index.assets[entry.guid] = entry
+		// A sub-asset shares its file's root, path and status. Its problems are the file's.
+		for s in a.subassets {
+			buffer: [32]u8
+			sub := cook_link.Asset {
+				guid     = clone(format.guid_format(s.guid, &buffer), allocator),
+				kind     = link_kind(s.kind),
+				root     = entry.root,
+				path     = entry.path,
+				status   = entry.status,
+				parent   = entry.guid,
+				subasset = clone(s.name, allocator),
+			}
+			index.assets[sub.guid] = sub
+		}
 	}
 	folders := make([]cook_link.Folder, len(pass.folders), allocator)
 	for f, i in pass.folders {
@@ -168,7 +182,7 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour {
+	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset {
 		return false
 	}
 	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies)

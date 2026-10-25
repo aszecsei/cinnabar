@@ -33,6 +33,12 @@ public sealed partial class EditorShell
     /// <summary>The GUIDs of the content browser's selected assets.</summary>
     public IReadOnlyList<string> SelectedAssets { get; private set; } = [];
 
+    /// <summary>
+    /// Whether the selection holds a sub-asset. A sub-asset changes only with its file, so the file operations do not
+    /// take it (see docs/content-pipeline.md#asset-operations).
+    /// </summary>
+    public bool SelectionHasSubassets => SelectedAssets.Any(g => Assets.Find(g) is { } a && AssetIndex.IsSubasset(a));
+
     /// <summary>The cook daemon is linked, so the content can change.</summary>
     public bool CanChangeContent => Cook.State == CookState.Linked;
 

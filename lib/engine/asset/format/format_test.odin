@@ -137,3 +137,64 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 	_, ok = texture_view(data)
 	testing.expect(t, !ok)
 }
+
+@(test)
+meta_files_name_their_subassets :: proc(t: ^testing.T) {
+	other :: "ffeeddccbbaa99887766554433221100"
+	meta, ok := meta_parse("guid = " + TEST_GUID + "\ncombine = false\nmesh.Door Frame = " + other + "\n", context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(meta.settings), 1)
+	testing.expect_value(t, len(meta.subassets), 1)
+	guid, found := meta_subasset(meta, "mesh", "Door Frame")
+	testing.expect(t, found)
+	testing.expect_value(t, guid, guid_parse(other) or_else {})
+	_, found = meta_subasset(meta, "texture", "Door Frame")
+	testing.expect(t, !found)
+	// A sub-asset's value must be a GUID.
+	_, ok = meta_parse("guid = " + TEST_GUID + "\nmesh.door = 12\n", context.temp_allocator)
+	testing.expect(t, !ok)
+}
+
+@(test)
+mesh_blobs_round_trip :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	positions := make([]byte, 3 * 12, context.temp_allocator)
+	attributes := make([]byte, 3 * int(mesh_attribute_stride({.Color})), context.temp_allocator)
+	indices := []u16{0, 1, 2}
+	meshlets := []Meshlet{{vertex_count = 3, triangle_count = 1, radius = 1}}
+	contents := Mesh_Contents {
+		guid              = guid,
+		key               = 5,
+		flags             = {.Color},
+		vertex_count      = 3,
+		index_count       = 3,
+		submeshes         = {{name = "stone", index_count = 3, meshlet_count = 1}},
+		positions         = positions,
+		attributes        = attributes,
+		indices           = mem.slice_to_bytes(indices),
+		meshlets          = meshlets,
+		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
+		meshlet_triangles = {0, 1, 2},
+		name              = "Door",
+		source_path       = "game/door.glb",
+	}
+	data := aligned(mesh_write(contents, context.temp_allocator))
+	blob, ok := mesh_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, mesh_attribute_stride(blob.flags), 20)
+	testing.expect_value(t, blob.positions.offset % BLOB_ALIGN, 0)
+	testing.expect_value(t, blob.attributes.offset % BLOB_ALIGN, 0)
+	submeshes := mesh_submeshes(data, blob)
+	testing.expect_value(t, len(submeshes), 1)
+	testing.expect_value(t, blob_string(data, submeshes[0].name), "stone")
+	testing.expect_value(t, mesh_meshlets(data, blob)[0].triangle_count, 1)
+	testing.expect_value(t, blob_string(data, blob.name), "Door")
+
+	// A submesh past the mesh's indices is not a mesh.
+	(^Mesh_Submesh)(&data[blob.submeshes.offset]).index_count = 6
+	_, ok = mesh_view(data)
+	testing.expect(t, !ok)
+}

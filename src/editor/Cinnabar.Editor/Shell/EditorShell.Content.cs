@@ -31,22 +31,29 @@ public sealed partial class EditorShell
         OpenSceneFileRequested?.Invoke(path);
     }
 
-    /// <summary>Opens an asset as a double click does: a scene in the editor, and anything else in the script editor.</summary>
+    /// <summary>
+    /// Opens an asset as a double click does: a scene in the editor, and a script or a shader in the script editor.
+    /// Textures, models and meshes have no editor yet.
+    /// </summary>
     public void OpenAsset(Link.Cook.Asset asset)
     {
         if (Assets.FullPath(asset) is not { } path)
         {
             return;
         }
-        if (asset.Kind == AssetKind.Scene)
+        switch (asset.Kind)
         {
-            RequestOpenScene(path);
-        }
-        else
-        {
-            OpenScript(path);
+            case AssetKind.Scene:
+                RequestOpenScene(path);
+                break;
+            case AssetKind.Script or AssetKind.Shader:
+                OpenScript(path);
+                break;
         }
     }
+
+    /// <summary>Whether a double click opens the asset (see <see cref="OpenAsset"/>).</summary>
+    public static bool CanOpen(Link.Cook.Asset asset) => asset.Kind is AssetKind.Scene or AssetKind.Script or AssetKind.Shader;
 
     /// <summary>
     /// Opens a file in the script editor that the settings name (see <see cref="EditorSettings.ScriptEditor"/>), at a

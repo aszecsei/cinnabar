@@ -5,3 +5,6 @@
 	path = vendor/compressonator
 	url = https://github.com/GPUOpen-Tools/compressonator
 	update = none
+[submodule "vendor/meshoptimizer"]
+	path = vendor/meshoptimizer
+	url = https://github.com/zeux/meshoptimizer

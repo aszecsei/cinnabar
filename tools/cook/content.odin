@@ -139,6 +139,9 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	if .Texture in kinds {
 		pass.ok = cook_textures(options, pass.assets, &pass) && pass.ok
 	}
+	if .Model in kinds {
+		pass.ok = cook_models(options, pass.assets, &pass) && pass.ok
+	}
 	written := 0
 	for n in pass.cooked {
 		written += n

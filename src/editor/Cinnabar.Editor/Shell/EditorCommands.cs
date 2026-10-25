@@ -255,25 +255,25 @@ static class EditorCommands
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
         {
             Description = "Rename the asset selected in the content browser, with its .meta file. F2 in the content browser.",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count == 1,
+            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count == 1 && !shell.SelectionHasSubassets,
         });
         commands.Register(new Command(DuplicateAsset, "Duplicate Asset", () => _ = shell.DuplicateSelectedAssets())
         {
             Description = "Copy the assets selected in the content browser, each with a new GUID. Ctrl+D in the content browser.",
             Icon = "copy",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0,
+            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
         });
         commands.Register(new Command(DeleteAsset, "Delete Asset", shell.RequestDeleteSelected)
         {
             Description = "Send the assets selected in the content browser to the Recycle Bin, after showing what uses them. Delete in the content browser.",
             Icon = "delete",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0,
+            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
         });
         commands.Register(new Command(Reimport, "Re-import", () => _ = shell.ReimportSelectedAssets())
         {
             Description = "Cook the assets selected in the content browser again, also when they are up to date.",
             Icon = "restart",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0,
+            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
         });
         foreach (var panel in shell.Layout.Panels)
         {

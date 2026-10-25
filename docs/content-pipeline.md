@@ -93,25 +93,31 @@ Textures are `.png`, `.jpg`, `.tga` and `.hdr` files, read with `vendor:stb/imag
 
 ### Meshes
 
-Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a model: a parent whose meshes are sub-assets (see [Identity](#identity)).
+Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a `Model` asset, which has no blob of its own: its meshes are `Mesh` sub-assets (see [Identity](#identity)), each with its GUID on a `mesh.<name>` line of the model's `.meta` file. `just models` runs `cook models --cache build/cache --config dev|release` with the roots.
 
 - **One mesh asset per glTF mesh**, named for the glTF mesh, in its own space with its own pivot. Node transforms are not baked in, so a mesh that many nodes use is one asset. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh, and each submesh has a material slot named for its glTF material.
 - **Unnamed meshes** are named for the first node that uses them, then `mesh_<index>`.
-- **`combine = true`** makes one mesh asset, named for the file, instead: the cooker walks the default scene's nodes and bakes their transforms into the vertices. This suits a file that is one prop exported in pieces. The default is `false`.
+- **Names** are keys in the `.meta` file, so an `=` in a name becomes `_`, and two meshes of one name get `_2` and on.
+- **`combine = true`** makes one mesh asset, named for the file without its extension, instead: the cooker walks the default scene's nodes and bakes their transforms into the vertices. This suits a file that is one prop exported in pieces. The default is `false`.
 - *Later, a model also makes a prefab of its node hierarchy that places its meshes, and its textures and materials become sub-assets too (texture assets and material instances). That is importing a glTF file as a scene, and it waits for prefabs.*
-- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding.
+- **Axes:** glTF is right-handed, with +y up and +z the asset's front. The engine is left-handed, with +x right, +y up and +z forward. The cooker negates x and reverses each triangle's winding, so front faces stay counterclockwise. The mirror flips the tangent frame's handedness, so a tangent from the file has its bitangent sign flipped too.
+- **Missing attributes:** a primitive without normals gets its faces' normals, as glTF specifies. A primitive that is not triangles is left out, with a warning.
 - **Vertices** are two streams, so that depth and shadow passes read only positions:
 
 | Stream | Contents | Size |
 |---|---|---|
 | Positions | `f32` x, y, z | 12 bytes |
-| Attributes | Normal and tangent, octahedral in `snorm16` pairs, with the bitangent's sign; the first UV set in `f32`; the second UV set and the vertex color when the file has them | 16 to 28 bytes |
+| Attributes | The normal, octahedral in a `snorm16` pair; the tangent, octahedral in a `unorm16` pair whose second value's lowest bit is the bitangent's sign (set is -1); the first UV set in `f32`; then the second UV set in `f32` and the vertex color in `unorm8`, when the file has them | 16 to 28 bytes |
 
-- **Processing** with meshoptimizer: weld identical vertices, order the triangles for the vertex cache and the vertices for fetching, and build meshlets of at most 64 vertices and 124 triangles, each with a bounding sphere and a normal cone for culling. Indices are 16-bit when the mesh has fewer than 65 536 vertices.
+- **Processing** with meshoptimizer: weld identical vertices, order each submesh's triangles for the vertex cache and the mesh's vertices for fetching, and build each submesh's meshlets of at most 64 vertices and 124 triangles, each with a bounding sphere and a normal cone for culling. Indices are 16-bit when the mesh has fewer than 65 536 vertices. The Khronos DamagedHelmet sample, 14 556 vertices and 15 452 triangles, cooks into 246 meshlets in a few milliseconds.
+- **Tangents** come from the file, or from `meshopt_generateTangents` in its MikkTSpace-compatible mode, which matches how normal maps are baked. A mesh with any primitive that has no tangents gets made tangents for all of them, so its frame is consistent.
 - **Bounds:** the mesh and each submesh have an axis-aligned box and a sphere.
 - **Not imported yet:** the node hierarchy (except with `combine`), the file's materials, textures, cameras, lights, skins and animations.
-- **Import settings:** `combine` (`true` or `false`, default `false`), `scale` (a number, default `1`) and `tangents` (`file` or `generate`, default `file`: MikkTSpace tangents are made when the file has none). The settings apply to every mesh of the file.
-- **The cache key** is the model's: the cooker version, the meshoptimizer version, the source, the `.meta` file, and for a `.gltf` file the `.bin` files that it names. A model cooks all of its meshes together, and a mesh that fails fails the model, so its meshes keep their old blobs together.
+- **Import settings:** `combine` (`true` or `false`, default `false`), `scale` (`0.001`, `0.01`, `0.0254`, `0.1`, `1`, `10` or `100`, default `1`: settings are checked against a list of values, so the scale is a choice of common units) and `tangents` (`file` or `generate`, default `file`). The settings apply to every mesh of the file.
+- **The cache key** is the model's: the cooker version, the meshoptimizer version, the source path, the source, the GUID and the import settings, and for a `.gltf` file the buffer files that it names. The `mesh.` lines are not in it, because the cooker writes them; a mesh's GUID is its blob's name instead, so a new GUID cooks it. A model is up to date when every one of its meshes has a blob with its key.
+- **All or nothing:** a model cooks every mesh into memory before it writes any blob, so a mesh that fails fails the model, and its meshes keep their old blobs together.
+- **New and renamed meshes:** the cooker gives a mesh that has no line a new GUID and writes it into the `.meta` file, which makes one more pass. A line whose mesh is gone is a warning and stays, so a mesh renamed back gets its GUID again. A re-import drops those lines.
+- **meshoptimizer** is the submodule `vendor/meshoptimizer`, pinned to a release, and `just meshoptimizer` builds it with its own CMake project. Its API is C, so the cooker binds it directly (`tools/cook/meshoptimizer.odin`). `just update-meshoptimizer <tag>` moves the pin.
 
 ## Cook daemon
 
@@ -138,7 +144,7 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 - **Names** are what Windows takes and the scan does not skip: no `<>:"/\|?*`, no name that starts with a dot or ends with a dot or a space, and no device name such as `CON`. An asset's name is without its extension, which the daemon adds.
 - **Then a pass:** after the operations that the editor sent, the daemon makes a pass, sends what changed, and then answers each operation. The editor's index therefore has the change when the answer comes. The watcher's events for the operation make one more pass, which finds nothing to cook.
 - **Create** makes an asset from a template, with a new `.meta` file: a script that returns a table, a behaviour whose class is named for its file (`door_bell.luau` defines `Door_Bell`), or an empty scene. A folder's parent must exist.
-- **Sub-assets** move, rename and delete only with their file, because their GUIDs are in its `.meta` file. The operations take files, never sub-assets, and the editor offers them only on files.
+- **Sub-assets** move, rename, duplicate, delete and re-import only with their file, because their GUIDs are in its `.meta` file. The operations take files, never sub-assets: an operation given a sub-asset's GUID fails with a reason that names its file, and the editor disables the file operations while the selection holds a sub-asset. Changing a model's import settings keeps its `mesh.` lines.
 - **Move and rename** move the `.meta` file, then the source. They never replace a file, and a rename that changes only the case works. A file moves to another drive too. Folders have no `.meta` files and no GUIDs. A folder renames with everything in it, on its drive.
 - **Duplicate** copies the source to `<name>_copy`, or `<name>_copy_2` and on, and gives the copy a new `.meta` file with the same import settings. Its sub-assets get new GUIDs at the next pass, as a new file's do.
 - **Delete** sends sources with their `.meta` files, and folders with everything in them, to the Recycle Bin. A root cannot be deleted. The editor finds the assets that use what a delete takes in its index, and shows them in the confirmation.
@@ -157,7 +163,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
 - **Handshake:** `Hello`, then `Welcome` with the roots, the configuration and the importers, each with its extension and import settings, then the whole index as an `Asset_Snapshot` and an `Asset_Problems` for each asset that has problems. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed. It sends `Cook_Finished` after every pass.
-- **An entry has everything that the editor shows,** the import settings, the behaviour class and a sub-asset's parent included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
+- **An entry has everything that the editor shows,** the import settings, the behaviour class, and a sub-asset's parent and name included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
 - **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
 
 | Group | Messages |
@@ -197,7 +203,7 @@ A shader blob holds a table of entries. Each entry has a stage (`Vertex`, `Pixel
 
 A texture blob holds the format, the size, the mip count, the usage, and the whole mip chain: each mip tightly packed, mip 0 first. That is the layout that `gpu_stream_texture` takes (see [GPU](gpu.md#streaming)), so the blob's data streams without a copy.
 
-A mesh blob holds the bounds, the vertex count, the index size, a table of submeshes (the material slot's name, the index range, the meshlet range and the bounds), then the position stream, the attribute stream, the indices, and the meshlets: their vertex lists, their triangles packed as three bytes each, and their bounds and cones. Each stream starts at 16 bytes, so each streams straight into a buffer.
+A mesh blob holds its flags (a second UV set, a vertex color, 32-bit indices), the vertex and index counts, the bounds, a table of submeshes (the material slot's name, the index range, the meshlet range and the bounds), then the position stream, the attribute stream, the indices, and the meshlets: their vertex lists, their triangles packed as three bytes each, and their spheres and cones, with the cone in `snorm8`. It ends with the mesh's name and the model's path. Each stream starts at 16 bytes, so each streams straight into a buffer. A model has no blob.
 
 The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
 

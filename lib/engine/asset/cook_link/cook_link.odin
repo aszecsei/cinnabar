@@ -97,6 +97,8 @@ Asset_Kind :: enum u8 {
 	Scene,
 	Shader,
 	Texture,
+	Model,
+	Mesh,
 }
 
 Asset_Status :: enum u8 {
@@ -123,6 +125,10 @@ Asset :: struct {
 	settings:     []Setting,
 	// The GUIDs of the assets that it depends on: a script's requires, and the scripts that a scene names.
 	dependencies: []string,
+	// For a sub-asset, such as a mesh of a glTF file, the GUID of the file that makes it and its name in the file. Its
+	// root and path are the file's. "" for a file.
+	parent:       string,
+	subasset:     string,
 }
 
 Setting :: struct {
