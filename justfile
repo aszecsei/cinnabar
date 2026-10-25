@@ -174,8 +174,8 @@ luau:
         dir="{{luau_dir}}/$kind"
         shared=$([ "$kind" = shared ] && echo ON || echo OFF)
         [ -f "$dir/CMakeCache.txt" ] || cmake -S lib/core/luau -B "$dir" -G "{{cmake_generator}}" -A x64 -DCINNABAR_LUAU_SHARED=$shared > /dev/null
-        target=$([ "$kind" = shared ] && echo luau || echo luau_shim)
-        cmake --build "$dir" --config Release --target "$target" -- -m -nologo -v:quiet
+        targets=$([ "$kind" = shared ] && echo luau || echo "luau_shim luau_tools")
+        cmake --build "$dir" --config Release --target $targets -- -m -nologo -v:quiet
     done
     # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
     cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
