@@ -57,6 +57,8 @@ Scene_Value_Kind :: enum u8 {
 	Name,
 	// An entity's scene ID, or 0 for none.
 	Entity,
+	// An asset's GUID, or the zero GUID for none.
+	Asset,
 }
 
 // Scene_Value is a field's value as the file writes it. Only the members for its kind are set.
@@ -73,6 +75,7 @@ Scene_Value :: struct {
 	// String and Name.
 	text:    string,
 	entity:  u64,
+	asset:   Guid,
 }
 
 scene_field_hash :: proc "contextless" (name: string) -> u64 {
@@ -119,6 +122,7 @@ Scene_Field_Record :: struct {
 	floats:  [4]f64,
 	text:    Slice,
 	entity:  u64,
+	asset:   Guid,
 }
 
 scene_layout :: proc() -> u64 {
@@ -185,6 +189,7 @@ write_fields :: proc(buffer: ^[dynamic]byte, fields: []Scene_Field) -> Slice {
 			floats  = f.value.floats,
 			text    = append_bytes(buffer, transmute([]byte)f.value.text),
 			entity  = f.value.entity,
+			asset   = f.value.asset,
 		}
 		put_record(buffer, records, i, &record)
 	}
@@ -254,6 +259,7 @@ read_fields :: proc(data: []byte, s: Slice, allocator: mem.Allocator) -> (fields
 				floats = r.floats,
 				text = text(data, r.text) or_return,
 				entity = r.entity,
+				asset = r.asset,
 			},
 		}
 	}

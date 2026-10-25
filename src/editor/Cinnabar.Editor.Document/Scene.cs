@@ -81,6 +81,8 @@ public enum SceneValueKind
     Name,
     /// <summary>An entity's scene ID, or 0 for none.</summary>
     Entity,
+    /// <summary>An asset's GUID, or none.</summary>
+    Asset,
 }
 
 /// <summary>
@@ -105,6 +107,8 @@ public sealed record SceneValue
     /// <summary>The text of a String or a Name.</summary>
     public string Text { get; private init; } = "";
     public ulong Entity { get; private init; }
+    /// <summary>An asset's GUID as 32 lowercase hex digits, or "" for none.</summary>
+    public string Asset { get; private init; } = "";
 
     public static SceneValue Of(bool value) => new() { Kind = SceneValueKind.Bool, Bool = value };
 
@@ -119,9 +123,12 @@ public sealed record SceneValue
 
     public static SceneValue EntityRef(ulong id) => new() { Kind = SceneValueKind.Entity, Entity = id };
 
+    /// <summary>A reference to an asset by its GUID, or "" for none.</summary>
+    public static SceneValue AssetRef(string guid) => new() { Kind = SceneValueKind.Asset, Asset = guid.ToLowerInvariant() };
+
     public bool Equals(SceneValue? other) =>
-        other is not null && Kind == other.Kind && Bool == other.Bool && Text == other.Text && Entity == other.Entity
+        other is not null && Kind == other.Kind && Bool == other.Bool && Text == other.Text && Entity == other.Entity && Asset == other.Asset
         && Numbers.SequenceEqual(other.Numbers);
 
-    public override int GetHashCode() => HashCode.Combine(Kind, Bool, Text, Entity, Numbers.Count);
+    public override int GetHashCode() => HashCode.Combine(Kind, Bool, Text, Entity, Asset, Numbers.Count);
 }

@@ -164,7 +164,7 @@ public sealed class PropertiesView : ScrollViewer
             var fields = type.Fields.Select(f => new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), f.Kind == Link.Protocol.FieldKind.Enum,
                 editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null,
                 editable && !f.ReadOnly ? () => inDocument!.Fields.Any(x => x.Name == f.Name) : null,
-                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetField(document!.Id, id, f.Name, null))));
+                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetField(document!.Id, id, f.Name, null))) { AssetKind = f.AssetKind });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             _content.Children.Add(Group(title, fields,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
@@ -315,7 +315,7 @@ public sealed class PropertiesView : ScrollViewer
                 var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
                 return new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), f.Kind == Link.Protocol.FieldKind.Enum, editor,
                     editor != null ? () => inDocument!.Any(c => c!.Fields.Any(x => x.Name == f.Name)) : null,
-                    () => editor?.Reset());
+                    () => editor?.Reset()) { AssetKind = f.AssetKind };
             });
             _content.Children.Add(Group(title, fields, remove: remove));
         }
@@ -513,7 +513,11 @@ public sealed class PropertiesView : ScrollViewer
         return header;
     }
 
-    sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum, FieldEditor? Editor, Func<bool>? IsSet, Action Reset);
+    sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum, FieldEditor? Editor, Func<bool>? IsSet, Action Reset)
+    {
+        /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
+        public string AssetKind { get; init; } = "";
+    }
 
     Control Group(string title, IEnumerable<FieldRow> fields, string? badge = null, bool disabled = false, Action? remove = null, string? note = null)
     {
@@ -534,7 +538,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 FieldView.Scrubbable(name, field.Editor, 0);
             }
-            var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum);
+            var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(_shell.Assets, field.AssetKind, _shell.RevealAsset));
             Grid.SetRow(name, row);
             Grid.SetRow(view.Control, row);
             Grid.SetColumn(view.Control, 1);

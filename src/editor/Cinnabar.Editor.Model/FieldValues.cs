@@ -13,6 +13,8 @@ public enum DisplayKind
     Axes,
     Bool,
     Entity,
+    /// <summary>An asset reference: <see cref="FieldDisplay.Text"/> holds its GUID, or "" for none.</summary>
+    Asset,
 }
 
 /// <summary>
@@ -34,6 +36,7 @@ public static class FieldValues
     {
         FieldKind.Bool => DisplayKind.Bool,
         FieldKind.Entity => DisplayKind.Entity,
+        FieldKind.Asset => DisplayKind.Asset,
         FieldKind.Vector3 or FieldKind.Quaternion or FieldKind.Position => DisplayKind.Axes,
         FieldKind.Enum => DisplayKind.Text,
         _ => DisplayKind.Number,
@@ -63,6 +66,9 @@ public static class FieldValues
                 return Flag(data[0] != 0);
             case FieldKind.Entity:
                 return Entity(BinaryPrimitives.ReadUInt64LittleEndian(data));
+            case FieldKind.Asset:
+                var guid = AssetGuid(data);
+                return new FieldDisplay(DisplayKind.Asset, guid, [], false, 0, null);
             case FieldKind.Vector3:
                 return Axes(F32(data, 0), F32(data, 1), F32(data, 2), "", null);
             case FieldKind.Position:
@@ -115,6 +121,9 @@ public static class FieldValues
             ? BinaryPrimitives.ReadUInt64LittleEndian(component[(int)field.Offset..])
             : 0;
 
+    /// <summary>An asset reference's 16 bytes as 32 lowercase hex digits, or "" for the zero GUID, which is none.</summary>
+    public static string AssetGuid(ReadOnlySpan<byte> data) => data.IndexOfAnyExcept((byte)0) < 0 ? "" : Convert.ToHexStringLower(data);
+
     public static int Size(FieldKind kind) => kind switch
     {
         FieldKind.Bool or FieldKind.I8 or FieldKind.U8 => 1,
@@ -122,7 +131,7 @@ public static class FieldValues
         FieldKind.I32 or FieldKind.U32 or FieldKind.F32 => 4,
         FieldKind.I64 or FieldKind.U64 or FieldKind.F64 or FieldKind.Entity => 8,
         FieldKind.Vector3 => 12,
-        FieldKind.Quaternion => 16,
+        FieldKind.Quaternion or FieldKind.Asset => 16,
         FieldKind.Position => 24,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "not a field of fixed size"),
     };

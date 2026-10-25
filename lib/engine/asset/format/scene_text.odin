@@ -264,7 +264,8 @@ is_word_char :: proc(c: byte) -> bool {
 }
 
 // parse_value reads a value: true or false, a number, an array of up to four numbers, a quoted string, a scene ID
-// such as @1b04c7e95a2f3d88 (@0 for none), or a bare word.
+// such as @1b04c7e95a2f3d88 (@0 for none), an asset's GUID such as $9db8150cc7215ffc2708d20d77cf60bf ($0 for none),
+// or a bare word.
 @(private = "file")
 parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) {
 	switch {
@@ -282,6 +283,16 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 			return
 		}
 		return {kind = .Entity, entity = id}, true
+	case text[0] == '$':
+		if text == "$0" {
+			return {kind = .Asset}, true
+		}
+		guid, guid_ok := guid_parse(text[1:])
+		if !guid_ok {
+			problem(p, true, "an asset is 32 hex digits after $, or $0 for none, not %q", text)
+			return
+		}
+		return {kind = .Asset, asset = guid}, true
 	case text[0] == '[':
 		if text[len(text) - 1] != ']' {
 			problem(p, true, "an array ends with ], not %q", text)
@@ -306,7 +317,7 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 	}
 	for c in transmute([]byte)text {
 		if !is_word_char(c) {
-			problem(p, true, "a value is a number, an array, a quoted string, a scene ID or a word, not %q", text)
+			problem(p, true, "a value is a number, an array, a quoted string, a scene ID, an asset or a word, not %q", text)
 			return
 		}
 	}

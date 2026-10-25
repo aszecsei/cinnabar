@@ -382,3 +382,4 @@ find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 
 #assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))
 #assert(int(format.Scene_Value_Kind.Entity) == int(link.Scene_Value_Kind.Entity))
+#assert(int(format.Scene_Value_Kind.Asset) == int(link.Scene_Value_Kind.Asset))

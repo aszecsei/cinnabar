@@ -189,6 +189,7 @@ fields_of :: proc(fields: []link.Scene_Field, allocator: runtime.Allocator) -> [
 				floats = v.floats,
 				text = v.text,
 				entity = v.entity,
+				asset = format.Guid(v.asset),
 			},
 		}
 	}

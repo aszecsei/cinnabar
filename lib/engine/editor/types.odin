@@ -29,6 +29,7 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 				has_range   = f.has_range,
 				range_min   = f.range_min,
 				range_max   = f.range_max,
+				asset_kind  = f.asset_kind,
 			}
 		}
 		types[i] = {id = u64(info.id), name = info.name, size = u32(info.size), fields = infos}
@@ -39,3 +40,4 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(len(scene.Field_Kind) == len(link.Field_Kind))
 #assert(int(scene.Field_Kind.Entity) == int(link.Field_Kind.Entity))
 #assert(int(scene.Field_Kind.Enum) == int(link.Field_Kind.Enum))
+#assert(int(scene.Field_Kind.Asset) == int(link.Field_Kind.Asset))

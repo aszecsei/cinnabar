@@ -188,6 +188,8 @@ Field_Kind :: enum u8 {
 	Position,
 	// An entity handle, u64.
 	Entity,
+	// An asset's GUID, 16 bytes.
+	Asset,
 }
 
 Field_Info :: struct {
@@ -203,6 +205,9 @@ Field_Info :: struct {
 	has_range:   bool,
 	range_min:   f64,
 	range_max:   f64,
+	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", in lowercase as the
+	// cook link's Asset_Kind names it, such as "mesh". "" takes any asset.
+	asset_kind:  string,
 }
 
 Enum_Value :: struct {
@@ -327,6 +332,7 @@ Scene_Value_Kind :: enum u8 {
 	String,
 	Name,
 	Entity,
+	Asset,
 }
 
 // A field's value, as asset_format.Scene_Value describes it. Only the members for its kind are set.
@@ -342,6 +348,8 @@ Scene_Value :: struct {
 	text:    string,
 	// Entity: a scene ID, or 0 for none.
 	entity:  u64,
+	// Asset: a GUID, or zero for none.
+	asset:   [16]u8,
 }
 
 Operation_Kind :: enum u8 {

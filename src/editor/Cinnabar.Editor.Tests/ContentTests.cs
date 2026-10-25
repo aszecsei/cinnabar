@@ -44,6 +44,12 @@ public sealed class ContentTests : IDisposable
         Assert.False(shell.SelectionHasSubassets);
         shell.SelectContent(null, ["10", "11"]);
         Assert.True(shell.SelectionHasSubassets);
+
+        // A mesh field takes the model's mesh and nothing else. A field without a kind takes any asset.
+        var meshes = new Panels.AssetContext(shell.Assets, "mesh", _ => { });
+        Assert.Equal(["11"], meshes.Choices.Select(a => a.Guid));
+        Assert.False(meshes.Takes(shell.Assets.Find(DoorScript)!));
+        Assert.True(new Panels.AssetContext(shell.Assets, "", _ => { }).Takes(shell.Assets.Find(DoorScript)!));
     }
 
     [Fact]

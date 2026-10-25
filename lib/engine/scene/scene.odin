@@ -348,6 +348,11 @@ write_field :: proc(l: ^Loader, dst: rawptr, field: Field, v: format.Scene_Value
 			return "a scene ID, such as @1b04c7e95a2f3d88"
 		}
 		(^ecs.Entity)(dst)^ = resolve(l, v.entity)
+	case .Asset:
+		if v.kind != .Asset {
+			return "an asset's GUID, such as $9db8150cc7215ffc2708d20d77cf60bf"
+		}
+		(^format.Guid)(dst)^ = v.asset
 	}
 	return ""
 }
@@ -374,6 +379,8 @@ zero_field :: proc(dst: rawptr, field: Field) {
 		size = 16
 	case .Position:
 		size = 24
+	case .Asset:
+		size = size_of(format.Guid)
 	}
 	mem.zero(dst, size)
 }
@@ -447,6 +454,9 @@ behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.B
 		case v.kind == .Entity:
 			field.entity = resolve(l, v.entity)
 			field.kind = .Entity if field.entity != 0 else .Nil
+		case v.kind == .Asset:
+			warn(l, "a behaviour's field %s is an asset, which behaviours do not take yet", f.name)
+			continue
 		case:
 			warn(l, "a behaviour's field %s has %d numbers, which no field kind takes", f.name, v.count)
 			continue

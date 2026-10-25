@@ -25,6 +25,7 @@ Probe :: struct {
 	turn:   quaternion128,
 	at:     ecs.World_Position,
 	target: ecs.Entity,
+	model:  format.Guid `asset:"mesh"`,
 	inner:  struct {
 		amount: f64,
 	},
@@ -127,6 +128,7 @@ component 100 Probe
 	turn = [0, 0.7071068, 0, 0.7071068]
 	at = [1, -2, 3]
 	target = @00000000000000a1
+	model = $9db8150cc7215ffc2708d20d77cf60bf
 	inner.amount = 7
 `
 	load(&f.world, nil, parse(t, text))
@@ -162,6 +164,7 @@ component 100 Probe
 	testing.expect_value(t, jmag(p.turn), 0.7071068)
 	testing.expect_value(t, p.at.raw, [3]i64{1, -2, 3})
 	testing.expect_value(t, p.target, root)
+	testing.expect_value(t, p.model, format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {})
 	testing.expect_value(t, p.inner.amount, 7)
 }
 
@@ -202,9 +205,11 @@ fields_flatten_and_hide :: proc(t: ^testing.T) {
 	for field in fields {
 		append(&names, field.name)
 	}
-	testing.expect_value(t, len(fields), 10)
-	testing.expect_value(t, fields[9].name, "inner.amount")
-	testing.expect_value(t, fields[9].offset, u32(offset_of(Probe, inner)))
+	testing.expect_value(t, len(fields), 11)
+	testing.expect_value(t, fields[10].name, "inner.amount")
+	testing.expect_value(t, fields[10].offset, u32(offset_of(Probe, inner)))
+	testing.expect_value(t, fields[9].kind, Field_Kind.Asset)
+	testing.expect_value(t, fields[9].asset_kind, "mesh")
 	testing.expect_value(t, fields[4].kind, Field_Kind.Enum)
 	testing.expect_value(t, fields[4].enum_values[1], Enum_Value{"Busy", 5})
 	testing.expect_value(t, fields[7].kind, Field_Kind.Position)

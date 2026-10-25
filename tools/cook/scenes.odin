@@ -22,6 +22,14 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	for i in assets_of(assets, .Script) {
 		scripts[assets[i].meta.guid] = true
 	}
+	// Every asset that a field can name, with the sub-assets in the .meta files, which the scan has read.
+	known := make(map[format.Guid]bool, len(assets), context.temp_allocator)
+	for a in assets {
+		known[a.meta.guid] = true
+		for s in a.meta.subassets {
+			known[s.guid] = true
+		}
+	}
 	out_dir := config_dir(options)
 	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
 		report_error(problems, out_dir, 0, 0, "%v", err)
@@ -31,7 +39,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	for i in assets_of(assets, .Scene) {
 		s := &assets[i]
 		settings_ok := check_settings(s^, problems)
-		scene, scene_ok := parse_scene(s^, scripts, problems)
+		scene, scene_ok := parse_scene(s^, scripts, known, problems)
 		// A scene with errors keeps its old blob, so the running game keeps the last good version.
 		if !scene_ok || !settings_ok {
 			s.failed = true
@@ -69,9 +77,10 @@ scene_key :: proc(config: Script_Config, s: Asset_Source) -> u64 {
 	return hash.fnv64a(transmute([]byte)s.meta_text, key)
 }
 
-// parse_scene parses a scene and reports its problems. A reference to a scene ID or a script that does not exist is
-// a warning: the loader skips it, and the editor keeps it.
-parse_scene :: proc(s: Asset_Source, scripts: map[format.Guid]bool, problems: ^Problems) -> (scene: format.Scene, ok: bool) {
+// parse_scene parses a scene and reports its problems. A reference to a scene ID, a script or an asset that does not
+// exist is a warning: the loader skips it, and the editor keeps it. The cooker cannot check an asset's kind, because
+// field types exist only in the game DLL.
+parse_scene :: proc(s: Asset_Source, scripts, known: map[format.Guid]bool, problems: ^Problems) -> (scene: format.Scene, ok: bool) {
 	parsed: []format.Scene_Problem
 	scene, parsed, ok = format.scene_parse(string(s.source), context.temp_allocator)
 	for p in parsed {
@@ -99,6 +108,10 @@ parse_scene :: proc(s: Asset_Source, scripts: map[format.Guid]bool, problems: ^P
 			for f in c.fields {
 				if f.value.kind == .Entity {
 					check_reference(s, ids, e.id, fmt.tprintf("%s.%s", c.name, f.name), f.value.entity, problems)
+				}
+				if f.value.kind == .Asset && f.value.asset != {} && !known[f.value.asset] {
+					buffer: [32]u8
+					report_warning(problems, s.path, 0, 0, "entity %016x: %s.%s names the asset %s, which is not in the content", e.id, c.name, f.name, format.guid_format(f.value.asset, &buffer))
 				}
 			}
 		}

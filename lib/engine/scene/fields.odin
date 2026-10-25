@@ -5,6 +5,7 @@ import "core:reflect"
 import "core:strconv"
 import "core:strings"
 
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 Field_Kind :: enum u8 {
@@ -29,6 +30,8 @@ Field_Kind :: enum u8 {
 	Position,
 	// An entity handle.
 	Entity,
+	// An asset's GUID, format.Guid. asset_kind names the kind of asset that it takes.
+	Asset,
 }
 
 Enum_Value :: struct {
@@ -51,11 +54,16 @@ Field :: struct {
 	has_range:   bool,
 	range_min:   f64,
 	range_max:   f64,
+	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", as the cook link names
+	// kinds in lowercase, such as "mesh". "" takes any asset.
+	asset_kind:  string,
 }
 
 // component_fields lists the fields of a component type. A nested struct that is not a kind of its own adds its
 // fields with its name and a dot in front. The struct tag editor:"-" hides a field, editor:"read" makes it and what
-// is in it read-only, and editor:"range=min,max" gives a number's range. Other field types are hidden.
+// is in it read-only, and editor:"range=min,max" gives a number's range. A format.Guid field is an asset reference,
+// and asset:"<kind>" names the kind of asset that it takes (see docs/rendering.md#asset-fields). Other field types
+// are hidden.
 component_fields :: proc(type: typeid, allocator: runtime.Allocator) -> []Field {
 	fields := make([dynamic]Field, allocator)
 	add_fields(&fields, type_info_of(type), "", 0, false, allocator)
@@ -88,6 +96,9 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 			}
 		}
 		if field_kind(s.types[i], &field, allocator) {
+			if field.kind == .Asset {
+				field.asset_kind = reflect.struct_tag_get(reflect.Struct_Tag(s.tags[i]), "asset")
+			}
 			append(fields, field)
 		} else {
 			add_fields(fields, s.types[i], name, base + s.offsets[i], field.read_only, allocator)
@@ -104,6 +115,9 @@ field_kind :: proc(ti: ^runtime.Type_Info, field: ^Field, allocator: runtime.All
 		return true
 	case ecs.Entity:
 		field.kind = .Entity
+		return true
+	case format.Guid:
+		field.kind = .Asset
 		return true
 	}
 	#partial switch v in runtime.type_info_base(ti).variant {

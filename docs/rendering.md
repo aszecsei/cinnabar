@@ -300,7 +300,13 @@ The asset runtime keeps blobs on the CPU. The renderer's residency table, in `Re
 
 ### Asset fields
 
-A component refers to an asset by GUID, in a `format.Guid` field with an `asset` tag that names the kind: ``mesh: format.Guid `asset:"mesh"` ``. The scene format, the editor link and the properties panel get an `Asset` field kind: the editor shows the asset's name, picks from the content browser's assets of that kind, and accepts an asset dragged onto the field. A GUID that names no asset of that kind is a scene warning, like a missing script.
+A component refers to an asset by GUID, in a `format.Guid` field with an `asset` tag that names the kind as the cook link does, in lowercase: ``mesh: format.Guid `asset:"mesh"` ``. A field without the tag takes any asset.
+
+- **Field kind:** the field walker (`scene.component_fields`) gives such a field the `Asset` kind and its `asset_kind`, and the editor link's `Field_Info` carries both.
+- **Scenes** write the value as `$` and 32 hex digits, or `$0` for none (see [Editor](editor.md#scenes)), and the loader writes the GUID into the field. A component holds the GUID, never a loaded asset: the renderer resolves GUIDs through its residency table.
+- **Missing assets:** the cooker warns when a scene names a GUID that no asset or sub-asset in the content has, as it does for a missing script. Field types exist only in the game DLL, so the cooker cannot check the kind; the editor offers and accepts only assets of the field's kind.
+- **The properties panel** shows the asset's name, picks from the assets of the field's kind, and accepts one dragged from the content browser (see [Editor](editor.md#properties)).
+- *Not yet:* behaviour fields of assets, and asset fields in scripts, which skip them as they skip any field type that they do not know.
 
 ### Components
 

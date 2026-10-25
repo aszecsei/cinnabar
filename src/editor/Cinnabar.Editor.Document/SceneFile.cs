@@ -83,6 +83,7 @@ public static class SceneFile
         SceneValueKind.Number => "[" + string.Join(", ", value.Numbers.Select(FormatNumber)) + "]",
         SceneValueKind.String => Quote(value.Text),
         SceneValueKind.Name => value.Text,
+        SceneValueKind.Asset => value.Asset == "" ? "$0" : $"${value.Asset}",
         _ => value.Entity == 0 ? "@0" : $"@{value.Entity:x16}",
     };
 
@@ -330,6 +331,17 @@ public static class SceneFile
                         return null;
                     }
                     return SceneValue.EntityRef(id);
+                case '$':
+                    if (text == "$0")
+                    {
+                        return SceneValue.AssetRef("");
+                    }
+                    if (text.Length != 33 || !text.Skip(1).All(Uri.IsHexDigit))
+                    {
+                        Error($"an asset is 32 hex digits after $, or $0 for none, not \"{text}\"");
+                        return null;
+                    }
+                    return SceneValue.AssetRef(text[1..]);
                 case '[':
                     if (text[^1] != ']')
                     {

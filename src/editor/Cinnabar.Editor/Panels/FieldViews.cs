@@ -4,6 +4,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Model;
+using CommunityToolkit.Mvvm.Input;
 
 namespace Cinnabar.Editor.Panels;
 
@@ -20,6 +21,9 @@ interface IFieldEditor
 
     /// <summary>An entity reference, by handle, or 0 for none.</summary>
     void SetEntity(ulong handle);
+
+    /// <summary>An asset reference, by GUID, or "" for none.</summary>
+    void SetAsset(string guid);
 
     /// <summary>An enum's names, as the panel shows them, for a choice.</summary>
     IReadOnlyList<string> Options { get; }
@@ -46,12 +50,16 @@ abstract class FieldView
 
     public abstract void Show(FieldDisplay value);
 
-    /// <summary>A view for a kind of value. An entity shows as its <paramref name="label"/>, such as its name.</summary>
-    public static FieldView Create(DisplayKind kind, Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor, bool isEnum = false) => kind switch
+    /// <summary>
+    /// A view for a kind of value. An entity shows as its <paramref name="label"/>, such as its name, and an asset as
+    /// its name in <paramref name="assets"/>.
+    /// </summary>
+    public static FieldView Create(DisplayKind kind, Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor, bool isEnum = false, AssetContext? assets = null) => kind switch
     {
         DisplayKind.Axes => new AxesView(editor),
         DisplayKind.Bool => new BoolView(editor),
         DisplayKind.Entity => new EntityView(select, label, editor),
+        DisplayKind.Asset when assets != null => new AssetView(assets, editor),
         DisplayKind.Text when isEnum && editor != null => new ChoiceView(editor),
         DisplayKind.Number => new BoxView(numeric: true, editor),
         _ => new BoxView(numeric: false, editor),
@@ -364,6 +372,110 @@ sealed class EntityView : FieldView
         if (_clear != null)
         {
             _clear.IsVisible = _entity != 0;
+        }
+    }
+}
+
+/// <summary>
+/// What an asset field's view needs: the content's index, the kind of asset that the field takes, in lowercase as the
+/// cook link names it ("" for any), and how to show an asset in the content browser.
+/// </summary>
+sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string> Reveal)
+{
+    /// <summary>Whether the field takes an asset: one in the index of the field's kind.</summary>
+    public bool Takes(Link.Cook.Asset asset) => Kind == "" || string.Equals(asset.Kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The assets that the field takes, by name.</summary>
+    public IEnumerable<Link.Cook.Asset> Choices =>
+        Index.Assets.Values.Where(Takes).OrderBy(Content.AssetIndex.DisplayName, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// An asset reference (see docs/rendering.md#asset-fields): the asset's name, which shows it in the content browser, and
+/// with an editor, a button that picks from the assets of the field's kind, a drop of one from the content browser,
+/// and a button that clears it. An asset that is not in the content shows as missing, with its GUID.
+/// </summary>
+sealed class AssetView : FieldView
+{
+    readonly TextBlock _text = new() { Text = "…", TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+    readonly Control _control;
+    readonly AssetContext _assets;
+    readonly Button? _clear;
+    string _guid = "";
+
+    public AssetView(AssetContext assets, IFieldEditor? editor)
+    {
+        _assets = assets;
+        _text.PointerPressed += (_, e) =>
+        {
+            if (_guid != "" && assets.Index.Find(_guid) != null)
+            {
+                assets.Reveal(_guid);
+                e.Handled = true;
+            }
+        };
+        if (editor == null)
+        {
+            _control = _text;
+            return;
+        }
+        _clear = new Button { Content = "×", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
+        ToolTip.SetTip(_clear, "Clear the reference");
+        _clear.Click += (_, _) => editor.SetAsset("");
+        var pick = new Button { Content = "…", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
+        ToolTip.SetTip(pick, assets.Kind == "" ? "Pick an asset" : $"Pick a {assets.Kind}");
+        var menu = new MenuFlyout();
+        // The menu fills when it opens, so it has the assets of the latest cook.
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            foreach (var asset in assets.Choices)
+            {
+                var guid = asset.Guid;
+                var item = new MenuItem { Header = Content.AssetIndex.DisplayName(asset), Command = new RelayCommand(() => editor.SetAsset(guid)) };
+                ToolTip.SetTip(item, Content.AssetIndex.IsSubasset(asset) ? $"{asset.Root}/{asset.Path}" : $"{asset.Root}/{Content.AssetIndex.Parent(asset.Path)}");
+                menu.Items.Add(item);
+            }
+            if (menu.Items.Count == 0)
+            {
+                menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind} assets", IsEnabled = false });
+            }
+        };
+        pick.Flyout = menu;
+        DockPanel.SetDock(_clear, Avalonia.Controls.Dock.Right);
+        DockPanel.SetDock(pick, Avalonia.Controls.Dock.Right);
+        var box = new Border { Classes = { "value-box", "editable" }, Child = new DockPanel { Children = { _clear, pick, _text } } };
+        DragDrop.SetAllowDrop(box, true);
+        box.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = Dropped(e) != null ? DragDropEffects.Link : DragDropEffects.None);
+        box.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (Dropped(e) is { } guid)
+            {
+                editor.SetAsset(guid);
+            }
+        });
+        ToolTip.SetTip(box, assets.Kind == "" ? "Drag an asset here from the content browser" : $"Drag a {assets.Kind} here from the content browser");
+        _control = box;
+    }
+
+    // The dragged asset, if the field takes it.
+    string? Dropped(DragEventArgs e) =>
+        ContentBrowserView.Dropped(e) is { } guid && _assets.Index.Find(guid) is { } asset && _assets.Takes(asset) ? guid : null;
+
+    public override Control Control => _control;
+
+    public override void Show(FieldDisplay value)
+    {
+        _guid = value.Text;
+        var asset = _guid == "" ? null : _assets.Index.Find(_guid);
+        _text.Text = _guid == "" ? "None" : asset != null ? Content.AssetIndex.DisplayName(asset) : "Missing asset";
+        SetTooltip(_text, _guid == "" ? null : asset != null ? $"{asset.Root}/{asset.Path}\n{_guid}" : $"No asset in the content has the GUID {_guid}");
+        _text.Classes.Set("link", asset != null);
+        _text.Classes.Set("dim", asset == null);
+        _text.Cursor = asset != null ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+        if (_clear != null)
+        {
+            _clear.IsVisible = _guid != "";
         }
     }
 }

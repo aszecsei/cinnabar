@@ -1,6 +1,7 @@
 package cook
 
 import "core:fmt"
+import "core:strings"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -43,6 +44,28 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 	key := (^format.Blob_Header)(raw_data(blob)).key
 	testing.expect(t, cook(options, {.Scene}).ok)
 	testing.expect_value(t, cooked_key(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(guid)), .Scene, format.scene_layout()), key)
+}
+
+@(test)
+a_scene_that_names_a_missing_asset_warns :: proc(t: ^testing.T) {
+	kit_meta := "guid = 00112233445566778899aabbccddeeff\nmesh.Wall = 9db8150cc7215ffc2708d20d77cf60bf\n"
+	scene := "scene 1\nentity 0000000000000001\ncomponent 7 Renderer\n\tmesh = $9db8150cc7215ffc2708d20d77cf60bf\n\tskin = $ffeeddccbbaa99887766554433221100\n\tnone = $0\n"
+	tree := make_tree(t, {{"content/kit.glb", ""}, {"content/kit.glb.meta", kit_meta}, {"content/level.scene", scene}})
+	defer remove_tree(tree)
+
+	pass := cook(tree_options(tree), {.Scene})
+	testing.expect(t, pass.ok)
+	warnings := make([dynamic]string, context.temp_allocator)
+	for p in pass.problems.list {
+		if strings.contains(p.text, "which is not in the content") {
+			append(&warnings, p.text)
+		}
+	}
+	// A sub-asset in a .meta file counts, and so does none.
+	testing.expect_value(t, len(warnings), 1)
+	if len(warnings) == 1 {
+		testing.expect(t, strings.contains(warnings[0], "Renderer.skin"))
+	}
 }
 
 @(test)

@@ -57,6 +57,9 @@ public sealed partial class EditorShell
     /// <summary>The cook daemon refused an operation, with its reason. The window shows it.</summary>
     public event Action<string>? OperationFailed;
 
+    /// <summary>Shows an asset in the content browser, selected in its folder.</summary>
+    public void RevealAsset(string guid) => ContentRevealed?.Invoke(new ContentItem(guid, null));
+
     /// <summary>The content browser's folder or selection changed.</summary>
     public void SelectContent(ContentFolder? folder, IReadOnlyList<string> assets)
     {
