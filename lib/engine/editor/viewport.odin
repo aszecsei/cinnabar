@@ -56,8 +56,11 @@ Viewport :: struct {
 	gpu_failed:       bool,
 	pick_pipeline:    render.Shader_Pipeline,
 	overlay_pipeline: render.Shader_Pipeline,
+	icons_pipeline:   render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
+	// How the editor wants the viewport drawn, from Viewport_Settings.
+	settings:         link.Viewport_Settings,
 }
 
 // Viewport_Frame is what the game drew that the tools draw on and pick from.
@@ -93,6 +96,40 @@ view :: proc(e: ^Editor) -> (render.View, bool) {
 		true
 }
 
+// Render_Overrides are what the editor's viewport changes in the frame, for render.Frame_Desc.
+Render_Overrides :: struct {
+	debug_view:      render.Debug_View,
+	disable:         render.Features,
+	exposure_offset: f32,
+}
+
+// render_overrides gives the viewport's debug view, the features that it turns off and its exposure offset while an
+// editor is linked, and none otherwise.
+render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
+	if !active(e) {
+		return
+	}
+	s := e.viewport.settings
+	o.debug_view = render.Debug_View(s.debug_view)
+	o.exposure_offset = s.exposure_offset
+	flags := [render.Feature]bool {
+		.Temporal_Aa       = s.no_temporal_aa,
+		.Bloom             = s.no_bloom,
+		.Tone_Mapping      = s.no_tone_mapping,
+		.Fog               = s.no_fog,
+		.Ambient_Occlusion = s.no_ambient_occlusion,
+		.Gi                = s.no_gi,
+		.Shadows           = s.no_shadows,
+		.Post_Effects      = s.no_post_effects,
+	}
+	for off, feature in flags {
+		if off {
+			o.disable += {feature}
+		}
+	}
+	return
+}
+
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.
 entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
@@ -107,6 +144,8 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		return
 	}
 	sync_viewport_pipelines(e)
+	// The icons first, so the pick and the outline find them.
+	add_icons_pass(e, g, w, frame)
 	platform := e.platform
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
@@ -368,6 +407,7 @@ create_viewport_gpu :: proc(e: ^Editor) -> bool {
 	platform := e.platform
 	v.pick_pipeline = render.shader_pipeline(PICK_SHADER)
 	v.overlay_pipeline = render.shader_pipeline(OVERLAY_SHADER)
+	v.icons_pipeline = render.shader_pipeline(ICONS_SHADER)
 	v.results = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Storage}, label = "editor pick results"}, nil)
 	v.readback = platform.gpu_create_buffer({size = PICK_RESULTS_SIZE, usage = {.Readback}, label = "editor pick readback"}, nil)
 	v.gpu_ready = e.assets != nil && v.results != {} && v.readback != {}
@@ -385,9 +425,10 @@ destroy_viewport_gpu :: proc(e: ^Editor) {
 	platform := e.platform
 	render.destroy_shader_pipeline(&v.pick_pipeline, platform)
 	render.destroy_shader_pipeline(&v.overlay_pipeline, platform)
+	render.destroy_shader_pipeline(&v.icons_pipeline, platform)
 	platform.gpu_destroy_buffer(v.results)
 	platform.gpu_destroy_buffer(v.readback)
-	v.pick_pipeline, v.overlay_pipeline, v.results, v.readback = {}, {}, {}, {}
+	v.pick_pipeline, v.overlay_pipeline, v.icons_pipeline, v.results, v.readback = {}, {}, {}, {}, {}
 	v.gpu_ready = false
 }
 
@@ -402,6 +443,7 @@ sync_viewport_pipelines :: proc(e: ^Editor, force := false) {
 	}
 	render.sync_compute_pipeline(&v.pick_pipeline, e.platform, e.assets, PICK_PIPELINE, force)
 	render.sync_graphics_pipeline(&v.overlay_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, OVERLAY_PIPELINE, force)
+	render.sync_graphics_pipeline(&v.icons_pipeline, e.platform, e.assets, {.Vertex, .Pixel}, ICONS_PIPELINE, force)
 }
 
 @(private)
@@ -435,6 +477,8 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Gizmo_State:
 		v.gizmo = m
+	case link.Viewport_Settings:
+		v.settings = m
 	case link.Pick_Request:
 		if len(v.picks) == MAX_PICKS {
 			log.warnf("editor: more than %d picks wait for the GPU, so pick %d is dropped", MAX_PICKS, m.id)
@@ -452,7 +496,7 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 @(private)
 reset_viewport :: proc(e: ^Editor) {
 	v := &e.viewport
-	v.camera, v.has_camera, v.gizmo, v.picking = {}, false, {}, false
+	v.camera, v.has_camera, v.gizmo, v.picking, v.settings = {}, false, {}, false, {}
 	clear(&v.selection)
 	clear(&v.hidden)
 	clear(&v.picks)

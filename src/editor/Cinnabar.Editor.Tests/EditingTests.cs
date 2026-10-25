@@ -137,7 +137,7 @@ public sealed class EditingTests : IDisposable
     public void TypedValuesBecomeSceneValues()
     {
         using var shell = NewShell(out _);
-        FieldInfo Field(FieldKind kind, EnumValue[]? values = null) => new("f", 0, kind, FieldKind.U8, values ?? [], false, false, 0, 0, "");
+        FieldInfo Field(FieldKind kind, EnumValue[]? values = null) => TestFields.Of(kind, values: values);
 
         var position = FieldEditor.ForComponent(shell, 1, 1, Field(FieldKind.Position))!;
         position.Current = SceneValue.Of(SceneNumber.Of(2516582400000000000L), SceneNumber.Of(5L), SceneNumber.Of(0L));
@@ -161,7 +161,65 @@ public sealed class EditingTests : IDisposable
         var mode = FieldEditor.ForComponent(shell, 1, 1, Field(FieldKind.Enum, [new EnumValue("Idle", 0), new EnumValue("Very_Busy", 5)]))!;
         Assert.Equal(["Idle", "Very Busy"], mode.Options);
 
-        Assert.Null(FieldEditor.ForComponent(shell, 1, 1, new FieldInfo("f", 0, FieldKind.F32, FieldKind.U8, [], true, false, 0, 0, "")));
+        Assert.Null(FieldEditor.ForComponent(shell, 1, 1, TestFields.Of(FieldKind.F32, readOnly: true)));
+
+        var range = FieldEditor.ForComponent(shell, 1, 1, Field(FieldKind.Vector2))!;
+        range.Current = SceneEdits.Floats(-8, 4);
+        Assert.Equal([-8.0, 6.5], range.Parse(1, "6.5", out _)!.Numbers.Select(n => n.Float));
+    }
+
+    [Fact]
+    public void ASliderOrPickerDragIsOneUndoEntry()
+    {
+        using var shell = NewShell(out _);
+        var scale = FieldEditor.ForComponent(shell, 1, 1, TestFields.Of(FieldKind.Vector3, name: "scale"))!;
+        scale.Current = SceneEdits.Floats(1, 1, 1);
+
+        scale.BeginScrub(-1);
+        scale.SetNumbers([2, 2, 2]);
+        scale.SetNumbers([0.5, 0.25, 3]);
+        scale.EndScrub();
+
+        var entry = Assert.Single(shell.Scene!.History);
+        Assert.Equal("Drag Scale", entry.Label);
+        var value = shell.Scene.Scene.Find(1)!.Components.Single(c => c.Id == 1).Fields.Single(f => f.Name == "scale").Value;
+        Assert.Equal([0.5, 0.25, 3.0], value.Numbers.Select(n => n.Float));
+
+        // Outside a drag, each value is an edit of its own.
+        scale.SetNumbers([1, 1, 1]);
+        Assert.Equal(2, shell.Scene.History.Count);
+    }
+
+    [Fact]
+    public void OverridingASettingSetsItsValueAndClearingResetsIt()
+    {
+        using var shell = NewShell(out _);
+        var gain = FieldEditor.ForComponent(shell, 1, 1, TestFields.Of(FieldKind.F32, name: "gain", overrideOffset: 0))!;
+        Document.SceneField? Gain() => shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == 1).Fields.SingleOrDefault(f => f.Name == "gain");
+
+        // The value that shows becomes the volume's own.
+        gain.Current = SceneEdits.Floats(0.5);
+        gain.Override();
+        Assert.Equal("Override Gain", shell.Scene!.History[^1].Label);
+        Assert.Equal(0.5, Gain()!.Value.Numbers[0].Float);
+
+        gain.Reset();
+        Assert.Null(Gain());
+    }
+
+    [Fact]
+    public void ANewVolumeIsGlobalAndOneUndoEntry()
+    {
+        using var shell = NewShell(out _);
+
+        Assert.True(shell.Commands.Get(EditorCommands.CreateVolume).Execute());
+
+        var created = shell.Scene!.Scene.Entities.Single(e => e.Id != 1);
+        Assert.Equal("Volume", created.Name);
+        var volume = created.Components.Single(c => c.Id == SceneEdits.VolumeId);
+        Assert.Equal("Global", volume.Fields.Single(f => f.Name == "shape").Value.Text);
+        Assert.Contains(created.Components, c => c.Id == SceneEdits.TransformId);
+        Assert.Equal("Create Volume", Assert.Single(shell.Scene.History).Label);
     }
 
     [Fact]

@@ -72,8 +72,28 @@ struct Frame_Constants {
 	uint ltc_matrix;
 	uint ltc_amplitude;
 	uint ltc_sampler;
+	// The editor's debug view, a render.Debug_View (see docs/rendering.md#debug-views). The forward pass draws the
+	// views below; the others come from the frame's textures.
+	uint debug_view;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
+
+// Match render.Debug_View. The shaded views are exposed and tone mapped as the scene is; the others are colors as they
+// are.
+static const uint DEBUG_LIT = 0;
+static const uint DEBUG_LIGHTING_ONLY = 1;
+static const uint DEBUG_DIRECT_LIGHT = 2;
+static const uint DEBUG_INDIRECT_LIGHT = 3;
+static const uint DEBUG_FOG = 4;
+static const uint DEBUG_ALBEDO = 5;
+static const uint DEBUG_LIGHT_COMPLEXITY = 6;
+static const uint DEBUG_SHADOW_CASCADES = 7;
+
+// heat is a color for a value from 0 to 1: blue, cyan, green, yellow, red.
+float3 heat(float t) {
+	t = saturate(t);
+	return saturate(float3(1.5 - abs(4 * t - 3), 1.5 - abs(4 * t - 2), 1.5 - abs(4 * t - 1)));
+}
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
 // passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient

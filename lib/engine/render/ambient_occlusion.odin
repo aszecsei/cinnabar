@@ -23,7 +23,7 @@ DEFAULT_AO_POWER :: 2.2
 // The history averages at most this many frames.
 AO_HISTORY_FRAMES :: 16
 
-// Ao_Settings are a frame's ambient occlusion, in Frame_Desc. Zero gives the defaults.
+// Ao_Settings are a frame's ambient occlusion, in Frame_Settings, from the Ambient_Occlusion settings. Zero gives the defaults.
 Ao_Settings :: struct {
 	off:    bool,
 	// In meters. 0 gives DEFAULT_AO_RADIUS.
@@ -32,8 +32,8 @@ Ao_Settings :: struct {
 	power:  f32,
 }
 
-// Ambient_Occlusion is the ambient occlusion's state between frames, in the Renderer.
-Ambient_Occlusion :: struct {
+// Ao_Passes is the ambient occlusion's state between frames, in the Renderer.
+Ao_Passes :: struct {
 	gtao:    Shader_Pipeline,
 	denoise: Shader_Pipeline,
 	// Counts the frames, for the noise.
@@ -91,12 +91,12 @@ Ao_Frame :: struct {
 
 #assert(size_of(Ao_Push) <= 128)
 
-ao_init :: proc(a: ^Ambient_Occlusion) {
+ao_init :: proc(a: ^Ao_Passes) {
 	a.gtao = shader_pipeline(AO_SHADER)
 	a.denoise = shader_pipeline(AO_DENOISE_SHADER)
 }
 
-ao_destroy :: proc(a: ^Ambient_Occlusion, platform: ^core.Platform_API) {
+ao_destroy :: proc(a: ^Ao_Passes, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&a.gtao, platform)
 	destroy_shader_pipeline(&a.denoise, platform)
 }

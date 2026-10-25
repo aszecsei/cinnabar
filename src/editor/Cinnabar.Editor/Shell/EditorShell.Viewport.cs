@@ -341,6 +341,7 @@ public sealed partial class EditorShell
         SendCamera();
         SendSelection();
         ResendHidden();
+        SendViewportSettings();
     }
 
     void OnPickResult(PickResult result)

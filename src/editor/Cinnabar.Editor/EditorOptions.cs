@@ -5,7 +5,7 @@ namespace Cinnabar.Editor;
 /// <summary>
 /// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]...</c>. The daemon cooks shaders only with <c>--dxc</c>.
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon cooks shaders only with <c>--dxc</c>.
 /// Each <c>--material</c> opens in the material editor once the cook daemon's index has it.
 /// Paths are relative to the working directory, which is also the host's and the cook daemon's, so <c>just edit</c>
 /// runs the editor from the repository root. Without a scene, the host shows the scene that the game loads itself.
@@ -14,6 +14,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
 {
     /// <summary>Materials and material functions to open in the material editor, by their files' full paths.</summary>
     public IReadOnlyList<string> MaterialPaths { get; init; } = [];
+
+    /// <summary>The project's settings file, which the game reads (see docs/architecture.md#project-settings).</summary>
+    public string ProjectPath { get; init; } = Path.GetFullPath(Path.Combine("samples", "mygame", "project.settings"));
 
     /// <summary>Where autosaves go (see docs/editor.md#crash-recovery).</summary>
     public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
@@ -35,6 +38,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<(string Name, string Dir)> roots = [];
         List<string> includes = [];
         List<string> materials = [];
+        string? project = null;
         for (var i = 0; i < args.Count; i++)
         {
             switch (args[i])
@@ -63,6 +67,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--include" when i + 1 < args.Count:
                     includes.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--project" when i + 1 < args.Count:
+                    project = Path.GetFullPath(args[++i]);
+                    break;
                 case "--material" when i + 1 < args.Count:
                     materials.Add(Path.GetFullPath(args[++i]));
                     break;
@@ -83,6 +90,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        return new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials };
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials };
+        return project != null ? options with { ProjectPath = project } : options;
     }
 }

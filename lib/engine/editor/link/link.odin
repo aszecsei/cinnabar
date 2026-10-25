@@ -77,6 +77,7 @@ Message :: union {
 	Close_Preview,
 	Preview_Target,
 	Preview_Acknowledged,
+	Viewport_Settings,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -195,24 +196,32 @@ Field_Kind :: enum u8 {
 	Entity,
 	// An asset's GUID, 16 bytes.
 	Asset,
+	// [2]f32.
+	Vector2,
 }
 
 Field_Info :: struct {
-	name:        string,
+	name:            string,
 	// The byte offset in the component.
-	offset:      u32,
-	kind:        Field_Kind,
-	enum_base:   Field_Kind,
-	enum_values: []Enum_Value,
+	offset:          u32,
+	kind:            Field_Kind,
+	enum_base:       Field_Kind,
+	enum_values:     []Enum_Value,
 	// From the struct tag editor:"read".
-	read_only:   bool,
+	read_only:       bool,
 	// From the struct tag editor:"range=min,max".
-	has_range:   bool,
-	range_min:   f64,
-	range_max:   f64,
+	has_range:       bool,
+	range_min:       f64,
+	range_max:       f64,
+	// From the struct tag editor:"color": a Vector3 that holds a linear color.
+	color:           bool,
+	// A setting that a volume can override: the byte at override_offset is 1 when the component overrides it. A scene
+	// that sets the field overrides it.
+	has_override:    bool,
+	override_offset: u32,
 	// For an Asset field, the kind of asset that it takes, from the struct tag asset:"<kind>", in lowercase as the
 	// cook link's Asset_Kind names it, such as "mesh". "" takes any asset.
-	asset_kind:  string,
+	asset_kind:      string,
 }
 
 Enum_Value :: struct {
@@ -506,6 +515,53 @@ Pick_Result :: struct {
 // and after each Entity_Snapshot.
 Set_Hidden :: struct {
 	entities: []u64,
+}
+
+// What the viewport shows in place of the lit scene (see docs/rendering.md#debug-views). Matches render.Debug_View.
+Debug_View :: enum u8 {
+	Lit,
+	Lighting_Only,
+	Direct_Light,
+	Indirect_Light,
+	Fog,
+	Albedo,
+	Light_Complexity,
+	Shadow_Cascades,
+	Normals,
+	Depth,
+	Velocity,
+	Ambient_Occlusion,
+	Gi_Diffuse,
+	Gi_Specular,
+	Shadow_Mask,
+	Entity_Ids,
+	Luminance,
+}
+
+// Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
+Helper_Mode :: enum u8 {
+	None,
+	Selected,
+	All,
+}
+
+// Editor to game: how the viewport draws while an editor is linked (see docs/editor.md#viewport). The editor sends it
+// when it changes, and when the link connects. The features are the ones that the viewport turns off.
+Viewport_Settings :: struct {
+	debug_view:           Debug_View,
+	no_temporal_aa:       bool,
+	no_bloom:             bool,
+	no_tone_mapping:      bool,
+	no_fog:               bool,
+	no_ambient_occlusion: bool,
+	no_gi:                bool,
+	no_shadows:           bool,
+	no_post_effects:      bool,
+	// Stops added to the exposure.
+	exposure_offset:      f32,
+	// Icons for the lights, volumes and cameras, which pick them.
+	show_icons:           bool,
+	helpers:              Helper_Mode,
 }
 
 // Modes (see docs/editor.md#modes).

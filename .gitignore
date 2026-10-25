@@ -6,3 +6,4 @@ vendor/dxc
 *.dxil.key
 .vscode
 obj/
+*.user.settings

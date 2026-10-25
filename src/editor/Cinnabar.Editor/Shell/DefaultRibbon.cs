@@ -25,7 +25,7 @@ static class DefaultRibbon
                     new RibbonGroup("Entity",
                     [
                         new LargeButton(EditorCommands.CreateEntity),
-                        new SmallStack([EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
+                        new SmallStack([EditorCommands.CreateVolume, EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
                         new SmallStack([EditorCommands.HideSelected, EditorCommands.ShowAll, EditorCommands.LockSelected]),
                     ]),
                     new RibbonGroup("Tools",
@@ -39,6 +39,12 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.PlayMode),
                         new SmallStack([EditorCommands.PauseMode, EditorCommands.StepFrame, EditorCommands.StopMode]),
                         new SmallStack([EditorCommands.FreeCamera]),
+                    ]),
+                    new RibbonGroup("Game Window",
+                    [
+                        new SplitButton(EditorCommands.RunGame, [EditorCommands.RunGame, EditorCommands.StopGame]),
+                        new ComboBox(EditorCommands.ProjectOutput),
+                        new ComboBox(EditorCommands.UserOutput),
                     ]),
                     new RibbonGroup("Host",
                     [
@@ -60,6 +66,15 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.FrameSelected, EditorCommands.FrameScene, EditorCommands.OrbitSelection]),
                         new ComboBox(EditorCommands.ViewportScale),
                     ]),
+                    new RibbonGroup("Rendering",
+                    [
+                        new ComboBox(EditorCommands.DebugView),
+                        new SmallStack([EditorCommands.TemporalAa, EditorCommands.Bloom, EditorCommands.ToneMapping]),
+                        new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
+                        new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
+                        new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
+                    ]),
+                    new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
             ]);

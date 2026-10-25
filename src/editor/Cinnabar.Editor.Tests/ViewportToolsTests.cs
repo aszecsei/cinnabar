@@ -94,7 +94,7 @@ public sealed class ViewportToolsTests : IDisposable
     public void AFieldEditOfSeveralEntitiesKeepsEachOnesOtherAxes()
     {
         using var shell = NewShell();
-        var field = new FieldInfo("position", 0, FieldKind.Position, FieldKind.U8, [], false, false, 0, 0, "");
+        var field = TestFields.Of(FieldKind.Position, name: "position");
         var editor = FieldEditor.ForComponent(shell, [1, 2], SceneEdits.TransformId, field)!;
         editor.SetCurrent(0, SceneValue.Of(SceneNumber.Of(0L), SceneNumber.Of(0L), SceneNumber.Of(83886080L)));
         editor.SetCurrent(1, SceneValue.Of(SceneNumber.Of(16777216L), SceneNumber.Of(0L), SceneNumber.Of(83886080L)));

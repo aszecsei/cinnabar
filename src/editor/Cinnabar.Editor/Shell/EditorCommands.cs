@@ -15,6 +15,7 @@ static class EditorCommands
     public const string Undo = "edit.undo";
     public const string Redo = "edit.redo";
     public const string CreateEntity = "entity.create";
+    public const string CreateVolume = "entity.createVolume";
     public const string DuplicateEntity = "entity.duplicate";
     public const string DeleteEntity = "entity.delete";
     public const string RestartHost = "host.restart";
@@ -52,6 +53,24 @@ static class EditorCommands
     public const string FrameSelected = "viewport.frameSelected";
     public const string FrameScene = "viewport.frameScene";
     public const string OrbitSelection = "viewport.orbitSelection";
+    public const string DebugView = "view.debugView";
+    public const string TemporalAa = "view.temporalAa";
+    public const string Bloom = "view.bloom";
+    public const string ToneMapping = "view.toneMapping";
+    public const string Fog = "view.fog";
+    public const string AmbientOcclusion = "view.ambientOcclusion";
+    public const string GlobalIllumination = "view.globalIllumination";
+    public const string Shadows = "view.shadows";
+    public const string PostEffects = "view.postEffects";
+    public const string Icons = "view.icons";
+    public const string Helpers = "view.helpers";
+    public const string ExposureUp = "view.exposureUp";
+    public const string ExposureDown = "view.exposureDown";
+    public const string ExposureReset = "view.exposureReset";
+    public const string RunGame = "game.run";
+    public const string StopGame = "game.stop";
+    public const string ProjectOutput = "project.output";
+    public const string UserOutput = "project.userOutput";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -125,6 +144,12 @@ static class EditorCommands
             Description = "Add an entity with a Transform, where the selected entity is.",
             Icon = "add",
             Shortcut = "Ctrl+Shift+N",
+            CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
+        });
+        commands.Register(new Command(CreateVolume, "New Volume", shell.CreateVolume)
+        {
+            Description = "Add a global volume, where the selected entity is, for settings such as the post-processing and the fog. Add its settings components in the properties panel.",
+            Icon = "add",
             CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
         });
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
@@ -333,6 +358,92 @@ static class EditorCommands
         {
             Description = "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             Icon = "scale",
+        });
+        RegisterRendering(shell);
+        RegisterGameWindow(shell);
+    }
+
+    // The game in its own window, and the project's output mode, which shows only there (see
+    // docs/architecture.md#project-settings).
+    static void RegisterGameWindow(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(RunGame, "Run Game", shell.RunGame)
+        {
+            Description = "Open the game in its own window, with the scene that it loads itself, as just dev does. It shows the output mode, such as HDR, which the viewport cannot.",
+            Icon = "play",
+            Shortcut = "Ctrl+F5",
+        });
+        commands.Register(new Command(StopGame, "Close Game", shell.StopGame)
+        {
+            Description = "Close the game's own window.",
+            Icon = "stop",
+            CanExecuteWhen = () => shell.GameWindowRunning,
+        });
+        string[] modes = [.. EditorShell.OutputModes.Select(m => m.Label)];
+        commands.Register(new ChoiceCommand(ProjectOutput, "Output", modes, () => shell.ProjectOutput, option => shell.ProjectOutput = option)
+        {
+            Description = "The project's output mode for the game's window, in its settings file: Auto is HDR10 on a display in HDR and SDR otherwise. A running game takes it at once.",
+            Icon = "viewport",
+        });
+        commands.Register(new ChoiceCommand(UserOutput, "On This PC", [EditorShell.ProjectOutputLabel, .. modes], () => shell.UserOutput, option => shell.UserOutput = option)
+        {
+            Description = "The output mode on this machine, which replaces the project's, for a display that HDR does not suit. It is in the project's user settings file, which is not committed.",
+            Icon = "viewport",
+        });
+    }
+
+    // The viewport's rendering (see docs/editor.md#viewport): what it shows in place of the lit scene, the features
+    // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
+    static void RegisterRendering(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new ChoiceCommand(DebugView, "View", EditorShell.DebugViewNames,
+            () => EditorShell.DebugViewName(shell.ViewportSettings.DebugView), shell.SetDebugView)
+        {
+            Description = "Show the lit scene, or a debug view of what makes it: the lighting, the albedo, the normals, the light complexity and more.",
+            Icon = "viewport",
+        });
+        void Feature(string id, string label, string description, Func<Link.Protocol.ViewportSettings, bool> off,
+            Func<Link.Protocol.ViewportSettings, bool, Link.Protocol.ViewportSettings> set) =>
+            commands.Register(new Command(id, label, () => shell.ViewportSettings = set(shell.ViewportSettings, !off(shell.ViewportSettings)))
+            {
+                Description = description,
+                IsCheckedWhen = () => !off(shell.ViewportSettings),
+            });
+        Feature(TemporalAa, "Temporal AA", "Smooth edges with temporal AA in the viewport.", s => s.NoTemporalAa, (s, v) => s with { NoTemporalAa = v });
+        Feature(Bloom, "Bloom", "Draw bloom in the viewport.", s => s.NoBloom, (s, v) => s with { NoBloom = v });
+        Feature(ToneMapping, "Tone Mapping", "Tone map and grade the viewport; off, a plain roll-off to white.", s => s.NoToneMapping, (s, v) => s with { NoToneMapping = v });
+        Feature(Fog, "Fog", "Draw the volumes' fog in the viewport.", s => s.NoFog, (s, v) => s with { NoFog = v });
+        Feature(AmbientOcclusion, "Ambient Occlusion", "Darken the indirect light where surfaces meet.", s => s.NoAmbientOcclusion, (s, v) => s with { NoAmbientOcclusion = v });
+        Feature(GlobalIllumination, "Global Illumination", "Light the viewport with the light that bounces; off, with the environment's ambient light.", s => s.NoGi, (s, v) => s with { NoGi = v });
+        Feature(Shadows, "Shadows", "Draw the lights' shadows in the viewport.", s => s.NoShadows, (s, v) => s with { NoShadows = v });
+        Feature(PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
+        commands.Register(new Command(Icons, "Icons", () => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = !shell.ViewportSettings.ShowIcons })
+        {
+            Description = "Show icons for the lights, volumes and cameras, which select them when clicked.",
+            Icon = "visible",
+            IsCheckedWhen = () => shell.ViewportSettings.ShowIcons,
+        });
+        commands.Register(new ChoiceCommand(Helpers, "Shapes", ["None", "Selected", "All"],
+            () => shell.ViewportSettings.Helpers.ToString(),
+            option => shell.ViewportSettings = shell.ViewportSettings with { Helpers = Enum.Parse<Link.Protocol.HelperMode>(option) })
+        {
+            Description = "Draw the shapes of lights, volumes and cameras: their ranges, cones and bounds, for the selection or for all of them.",
+            Icon = "frame",
+        });
+        commands.Register(new Command(ExposureUp, "Brighter", () => shell.ChangeExposure(1))
+        {
+            Description = "Add half a stop to the viewport's exposure.",
+        });
+        commands.Register(new Command(ExposureDown, "Darker", () => shell.ChangeExposure(-1))
+        {
+            Description = "Take half a stop from the viewport's exposure.",
+        });
+        commands.Register(new Command(ExposureReset, "Reset Exposure", () => shell.ChangeExposure(0))
+        {
+            Description = "Show the exposure that the volumes give, with no offset.",
+            CanExecuteWhen = () => shell.ViewportSettings.ExposureOffset != 0,
         });
     }
 }

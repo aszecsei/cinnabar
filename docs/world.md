@@ -119,6 +119,17 @@ Rendering does not read the ECS. Each frame, before the render graph is built, e
 - Records are in query order. `extract` returns each chunk with the index of its first record, so the caller fills the rest of each record from its own columns. The caller's terms start at `EXTRACT_TERMS` in each chunk view.
 - Chunks are processed in parallel jobs. Run extraction after the `Late` stage, while no system runs.
 
+## Volumes
+
+Some settings change with where a point is: the post-processing and the fog at the camera, and later the wind at a tree. A volume gives them a place. `lib/engine/volume` has no other engine package below `ecs`, so any feature can use it.
+
+- **`Volume`** (stable ID 42) gives its entity a shape: `Global`, everywhere, or a `Box` or a `Sphere` at its presented pose. A box's extents are half its size along the entity's axes, times its scale. A sphere's radius is `extents.x` times the largest of its scale. An extent of 0 is `DEFAULT_EXTENT` (5 m).
+- **Weight:** inside the shape, the volume has its weight (0 means 1). Outside it, the weight falls off to 0 over the blend distance. To turn a volume off, deactivate its entity.
+- **Settings components** go on the same entity, such as the renderer's `Bloom` or `Fog`. Each setting is a `volume.Value(T)`: a value and whether the volume overrides it. A setting that a volume does not override comes from the volumes below it, or from the default. So a small volume can change one setting and keep the rest.
+- **Overrides in scenes:** the field walker shows a `Value` as one field with the value's kind, and the editor shows a check box before it. A scene that sets the field overrides it, and a reset clears the override, so the scene format has nothing new. A game that makes a volume in code sets `override` itself. Any struct of exactly `override: bool` and `value: T` is a setting this way.
+- **Order:** the volumes that reach a point apply from the bottom: by priority, then the global ones, then the larger before the smaller, then by entity index. Each moves the settings that it overrides toward its own by its weight. Numbers, vectors and colors move in between, a position along the line, and a bool, an enum or an integer changes at a weight of a half or more. A setting of 0 means its default, as elsewhere, so the default stands in for it.
+- **API:** `Volumes` is a registration, made again in `on_reload`. `gather` finds the volumes that reach a point, skipping the editor's hidden entities, and `blend` gives a settings component from them, with whether any of them has it. `sample` does both. They allocate nothing, so jobs can call them. At most `MAX_INFLUENCES` (64) volumes reach a point.
+
 ## The script view
 
 Details: [Scripting](scripting.md#the-entity-and-component-view).

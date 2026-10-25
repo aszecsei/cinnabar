@@ -20,9 +20,11 @@ import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/project"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/volume"
 
 // The shaders are assets, which the cooker compiles (see docs/content-pipeline.md#shaders). The game finds them by the
 // GUIDs in their .meta files.
@@ -30,11 +32,16 @@ TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
 OBJECTS_SHADER :: #load("content/shaders/objects.hlsl.meta", string)
 CULL_SHADER :: #load("content/shaders/cull.hlsl.meta", string)
 POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
+LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
 SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
 UI_SHADER :: #load("content/shaders/ui.hlsl.meta", string)
 // The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
+// The project's settings, which the editor edits, and the user's file beside them (see docs/architecture.md#project-settings).
+PROJECT_SETTINGS :: #config(CINNABAR_PROJECT, "samples/mygame/project.settings")
+// How often the game looks for a change to the settings' files, in seconds.
+PROJECT_CHECK_INTERVAL :: 0.5
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
@@ -110,6 +117,7 @@ Triangle_Instance :: struct {
 // The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
+LENS_ID :: ecs.Component_Id(1003)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
@@ -119,6 +127,21 @@ Spin :: struct {
 // Triangle marks one of the large triangles, with its HDR brightness.
 Triangle :: struct {
 	brightness: f32,
+}
+
+// Lens is the sample's post effect, on volumes (see docs/rendering.md#post-effects): chromatic aberration and a
+// vignette. 0 gives the defaults in DEFAULT_LENS.
+Lens :: struct {
+	// How far red and blue move apart toward the frame's edges, in pixels for each unit of the frame's size from its
+	// center.
+	chromatic_aberration: volume.Value(f32) `editor:"range=0,64"`,
+	// How fast the vignette darkens toward the corners.
+	vignette:             volume.Value(f32) `editor:"range=0,4"`,
+}
+
+DEFAULT_LENS :: Lens {
+	chromatic_aberration = {value = 24},
+	vignette = {value = 1.6},
 }
 
 // Matches Push in content/shaders/objects.hlsl.
@@ -147,6 +170,16 @@ Post_Constants :: struct {
 	size:        [2]u32,
 	shadows:     u32,
 	has_shadows: u32,
+}
+
+// Matches Push in content/shaders/lens.hlsl.
+Lens_Constants :: struct {
+	input:      u32,
+	output:     u32,
+	size:       [2]u32,
+	aberration: f32,
+	vignette:   f32,
+	_:          [2]u32,
 }
 
 // Matches Push in content/shaders/shadows.hlsl.
@@ -194,45 +227,50 @@ Pass_Constants :: struct {
 
 // Game_State is the root of all persistent game-side state. The host owns its memory.
 Game_State :: struct {
-	platform:    ^core.Platform_API,
-	frame_count: u64,
-	elapsed:     time.Duration,
-	next_report: time.Duration,
-	pipelines:   Pipelines,
+	platform:           ^core.Platform_API,
+	frame_count:        u64,
+	// The project's settings, read again when their files change.
+	project:            project.Watch,
+	next_project_check: f64,
+	// F8 cycles the output mode for this run, until the settings' files change.
+	output_override:    Maybe(gpu.Output_Request),
+	elapsed:            time.Duration,
+	next_report:        time.Duration,
+	pipelines:          Pipelines,
 	// True when the device has mesh shaders and the objects take the mesh path.
-	mesh_path:   bool,
-	vertices:    gpu.Buffer,
-	indices:     gpu.Buffer,
+	mesh_path:          bool,
+	vertices:           gpu.Buffer,
+	indices:            gpu.Buffer,
 	// The cull pass writes these on the compute queue each frame, and the scene pass reads them.
-	arguments:   gpu.Buffer,
-	draw_count:  gpu.Buffer,
-	visible:     gpu.Buffer,
+	arguments:          gpu.Buffer,
+	draw_count:         gpu.Buffer,
+	visible:            gpu.Buffer,
 	// The mesh path's one Draw_Mesh_Indirect_Args record.
-	mesh_draw:   gpu.Buffer,
-	shadow_mode: Shadow_Mode,
+	mesh_draw:          gpu.Buffer,
+	shadow_mode:        Shadow_Mode,
 	// The triangle, built once, and the two large triangles as its instances, built every frame.
-	blas:        gpu.Accel_Struct,
-	tlas:        gpu.Accel_Struct,
-	blas_built:  bool,
-	checker:     gpu.Texture,
-	rings:       gpu.Texture,
+	blas:               gpu.Accel_Struct,
+	tlas:               gpu.Accel_Struct,
+	blas_built:         bool,
+	checker:            gpu.Texture,
+	rings:              gpu.Texture,
 	// Zero until the rings are streamed, and rings_ready once the transfer is done.
-	rings_transfer: gpu.Transfer,
-	rings_ready: bool,
-	nearest:     gpu.Sampler,
-	world:       ecs.World,
+	rings_transfer:     gpu.Transfer,
+	rings_ready:        bool,
+	nearest:            gpu.Sampler,
+	world:              ecs.World,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
-	camera:      ecs.Entity,
+	camera:             ecs.Entity,
 	// The built-in renderer, which draws the frame (see docs/rendering.md#frame).
-	renderer:    render.Renderer,
+	renderer:           render.Renderer,
 	// A registration, created again in on_reload.
-	triangles:   render.Extractor,
-	assets:      asset.Assets,
-	scripts:     script.Runtime,
+	triangles:          render.Extractor,
+	assets:             asset.Assets,
+	scripts:            script.Runtime,
 	// content/scripts/hello.luau, which the scheduler runs.
-	hello:       script.Main_Script,
+	hello:              script.Main_Script,
 	// What the editor knows of the world (see docs/editor.md#world).
-	editor:      editor.Editor,
+	editor:             editor.Editor,
 }
 
 Pipelines :: struct {
@@ -245,6 +283,7 @@ Pipelines :: struct {
 	// otherwise.
 	shadows:   render.Shader_Pipeline,
 	post:      render.Shader_Pipeline,
+	lens:      render.Shader_Pipeline,
 	ui:        render.Shader_Pipeline,
 }
 
@@ -351,6 +390,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		cull      = render.shader_pipeline(CULL_SHADER),
 		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
 		post      = render.shader_pipeline(POST_SHADER),
+		lens      = render.shader_pipeline(LENS_SHADER),
 		ui        = render.shader_pipeline(UI_SHADER),
 	}
 
@@ -360,6 +400,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
+	register_post_effects(s)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
 		log.panic("mygame: cannot open the script VM")
@@ -381,8 +422,59 @@ register_components :: proc(r: ^ecs.Registry) {
 	render.register_components(r)
 	script.register_components(r)
 	scene.register_components(r)
+	volume.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
+	ecs.register_component(r, Lens, LENS_ID)
+}
+
+// register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
+// reaches the camera. init and on_reload call it after the renderer's.
+register_post_effects :: proc(s: ^Game_State) {
+	render.register_post_effect(&s.renderer, &s.world, "lens", .Before_Tone_Mapping, Lens, DEFAULT_LENS, add_lens)
+}
+
+// Lens_Pass is the lens's pass, in frame memory.
+Lens_Pass :: struct {
+	frame:  ^Frame,
+	lens:   Lens,
+	input:  render.Texture,
+	output: render.Texture,
+}
+
+add_lens :: proc(f: ^render.Frame, settings: rawptr) {
+	frame := (^Frame)(f.data)
+	if !render.pipeline_ready(f.renderer.platform, &frame.state.pipelines.lens) {
+		return
+	}
+	g := f.graph
+	pass := new(Lens_Pass, frame.state.platform.frame_allocator)
+	pass^ = {
+		frame  = frame,
+		lens   = (^Lens)(settings)^,
+		input  = f.scene,
+		output = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "lens"}),
+	}
+	p := render.add_compute_pass(g, "lens", run_lens, pass)
+	render.read(g, p, pass.input)
+	render.write(g, p, pass.output)
+	f.scene = pass.output
+}
+
+run_lens :: proc(ctx: ^render.Pass_Context) {
+	pass := (^Lens_Pass)(ctx.data)
+	g, cb := ctx.graph, ctx.cb
+	constants := Lens_Constants {
+		input      = gpu.read_index(render.gpu_texture(g, pass.input)),
+		output     = gpu.write_index(render.gpu_texture(g, pass.output)),
+		size       = pass.frame.size,
+		aberration = pass.lens.chromatic_aberration.value,
+		vignette   = pass.lens.vignette.value,
+	}
+	groups := (pass.frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
+	gpu.cmd_set_pipeline(cb, pass.frame.state.pipelines.lens.pipeline)
+	gpu.cmd_push_constants(cb, &constants)
+	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
 }
 
 // register_world makes the world's registrations: components, systems and queries.
@@ -441,6 +533,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
 	// despawns (see docs/editor.md#modes).
+	update_output(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
 	script.set_quiet(&s.scripts, !run)
 	if run {
@@ -565,15 +658,21 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	}
 	extract_triangles(frame)
 	editing := editor.active(&s.editor)
+	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor.md#viewport), or
+	// none without an editor.
+	overrides := editor.render_overrides(&s.editor)
+	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
 	desc := render.Frame_Desc {
-		view        = view,
-		size        = size,
-		keep_ids    = editing,
-		hidden      = editor.visibility(&s.editor, &s.world).hidden,
-		clear_color = {0.02, 0.02, 0.035, 1},
+		view            = view,
+		size            = size,
+		keep_ids        = editing,
+		hidden          = editor.visibility(&s.editor, &s.world).hidden,
+		debug_view      = overrides.debug_view,
+		disable         = overrides.disable,
+		exposure_offset = overrides.exposure_offset,
 		// The material editor's previews (see docs/rendering.md#material-previews).
-		previews    = editor.previews(&s.editor),
-		hooks       = {
+		previews        = editor.previews(&s.editor),
+		hooks           = {
 			data         = frame,
 			before_world = before_world,
 			world_uses   = world_uses,
@@ -635,7 +734,7 @@ world_uses :: proc(f: ^render.Frame, p: render.Pass) {
 	}
 }
 
-// after_world traces the triangles' shadows, and post-processes the scene into a new color that the renderer tone maps.
+// after_world traces the triangles' shadows, and multiplies them into a new scene color, before temporal AA.
 after_world :: proc(f: ^render.Frame) {
 	frame := (^Frame)(f.data)
 	s := frame.state
@@ -902,6 +1001,30 @@ shutdown :: proc(state: rawptr) {
 	log.info("mygame: shutdown")
 }
 
+// update_output asks for the output mode of the project's settings, and reads them again when their files change, so
+// the editor's change shows at once. F8 cycles the mode for this run.
+update_output :: proc(s: ^Game_State) {
+	now := s.platform.time_seconds()
+	changed := false
+	if now >= s.next_project_check {
+		s.next_project_check = now + PROJECT_CHECK_INTERVAL
+		if project.refresh(&s.project, s.platform, PROJECT_SETTINGS) {
+			changed = true
+			s.output_override = nil
+		}
+	}
+	if .F8 in s.platform.input().pressed {
+		current := s.output_override.? or_else s.project.settings.output
+		next := gpu.Output_Request((int(current) + 1) % len(gpu.Output_Request))
+		s.output_override = next
+		changed = true
+		log.infof("mygame: output %v until the project's settings change (F8 cycles it)", next)
+	}
+	if changed {
+		s.platform.gpu_request_output(s.output_override.? or_else s.project.settings.output)
+	}
+}
+
 // on_reload updates the pipelines, because the new DLL may describe them differently. The old versions keep drawing
 // until the new ones compile.
 on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
@@ -910,6 +1033,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	ecs.reload(&s.world, platform)
 	register_world(s)
 	render.renderer_reload(&s.renderer, platform, &s.world)
+	register_post_effects(s)
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
@@ -929,6 +1053,7 @@ sync_pipelines :: proc(s: ^Game_State, force := false) {
 	}
 	render.sync_compute_pipeline(&p.cull, platform, assets, CULL_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
+	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
 	render.sync_graphics_pipeline(&p.ui, platform, assets, {.Vertex, .Pixel}, UI_PIPELINE, force)
 	switch s.shadow_mode {
 	case .None:
@@ -987,6 +1112,10 @@ POST_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	label   = "post",
 }
 
+LENS_PIPELINE :: gpu.Compute_Pipeline_Desc {
+	label   = "lens",
+}
+
 // The HUD panel, blended into the UI layer.
 UI_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	colors = {{format = render.UI_FORMAT, blend = .Premultiplied}},
@@ -1000,6 +1129,7 @@ destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
 	render.destroy_shader_pipeline(&pipelines.cull, platform)
 	render.destroy_shader_pipeline(&pipelines.shadows, platform)
 	render.destroy_shader_pipeline(&pipelines.post, platform)
+	render.destroy_shader_pipeline(&pipelines.lens, platform)
 	render.destroy_shader_pipeline(&pipelines.ui, platform)
 }
 

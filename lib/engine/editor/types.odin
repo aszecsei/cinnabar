@@ -4,6 +4,7 @@ import "base:runtime"
 
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 
 // component_types describes every registered component, with the fields that scenes can set. Strings and slices are
@@ -20,16 +21,19 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 				values[k] = {name = v.name, value = v.value}
 			}
 			infos[j] = {
-				name        = f.name,
-				offset      = f.offset,
-				kind        = link.Field_Kind(f.kind),
-				enum_base   = link.Field_Kind(f.enum_base),
-				enum_values = values,
-				read_only   = f.read_only,
-				has_range   = f.has_range,
-				range_min   = f.range_min,
-				range_max   = f.range_max,
-				asset_kind  = f.asset_kind,
+				name            = f.name,
+				offset          = f.offset,
+				kind            = link.Field_Kind(f.kind),
+				enum_base       = link.Field_Kind(f.enum_base),
+				enum_values     = values,
+				read_only       = f.read_only,
+				has_range       = f.has_range,
+				range_min       = f.range_min,
+				range_max       = f.range_max,
+				color           = f.color,
+				has_override    = f.has_override,
+				override_offset = f.override_offset,
+				asset_kind      = f.asset_kind,
 			}
 		}
 		types[i] = {id = u64(info.id), name = info.name, size = u32(info.size), fields = infos}
@@ -41,3 +45,7 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(int(scene.Field_Kind.Entity) == int(link.Field_Kind.Entity))
 #assert(int(scene.Field_Kind.Enum) == int(link.Field_Kind.Enum))
 #assert(int(scene.Field_Kind.Asset) == int(link.Field_Kind.Asset))
+#assert(int(scene.Field_Kind.Vector2) == int(link.Field_Kind.Vector2))
+#assert(len(render.Debug_View) == len(link.Debug_View))
+#assert(int(render.Debug_View.Shadow_Cascades) == int(link.Debug_View.Shadow_Cascades))
+#assert(int(render.Debug_View.Luminance) == int(link.Debug_View.Luminance))

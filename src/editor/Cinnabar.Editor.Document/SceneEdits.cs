@@ -9,6 +9,8 @@ public static class SceneEdits
     public const ulong TransformId = 1;
     public const ulong LocalTransformId = 2;
     public const ulong PreviousTransformId = 4;
+    /// <summary>The engine's Volume (see docs/world.md#volumes).</summary>
+    public const ulong VolumeId = 42;
 
     /// <summary>Sets a field in a list, or removes it with a null value, and returns the old value or null.</summary>
     public static SceneValue? Put(List<SceneField> fields, string name, SceneValue? value)

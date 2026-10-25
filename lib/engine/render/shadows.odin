@@ -19,7 +19,8 @@ SHADOW_FORMAT :: gpu.Format.D32_Float
 SHADOW_CELL :: 1024
 SHADOW_SLOT :: 512
 SHADOW_CASCADES :: 4
-// The cascades cover the view to this depth, in meters, split between even and exponential by this much.
+// By default, the cascades cover the view to this depth, in meters, split between even and exponential by this much
+// (see Shadows).
 SHADOW_DISTANCE :: 100
 SHADOW_SPLIT_LAMBDA :: 0.75
 // The depth bias of the shadow maps' pipelines (see gpu.Graphics_Pipeline_Desc). Depth is reversed, so it is negative.
@@ -74,8 +75,8 @@ Mask_Constants :: struct {
 	padding:       [3]u32,
 }
 
-// Shadows is the shadows' state between frames, in the Renderer.
-Shadows :: struct {
+// Shadow_Passes is the shadows' state between frames, in the Renderer.
+Shadow_Passes :: struct {
 	// Whether the device traces rays in shaders, and the GPU scene's top-level acceleration structure then.
 	ray_query:     bool,
 	accel:         gpu.Accel_Struct,
@@ -103,7 +104,7 @@ Shadow_Frame :: struct {
 	mask_constants: gpu.Upload,
 }
 
-shadows_init :: proc(s: ^Shadows, platform: ^core.Platform_API) {
+shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.ray_query = .Ray_Query in platform.gpu_features()
 	if s.ray_query {
 		s.accel = platform.gpu_create_accel({kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"})
@@ -112,20 +113,21 @@ shadows_init :: proc(s: ^Shadows, platform: ^core.Platform_API) {
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
 }
 
-shadows_destroy :: proc(s: ^Shadows, platform: ^core.Platform_API) {
+shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	platform.gpu_destroy_accel(s.accel)
 	platform.gpu_destroy_sampler(s.sampler)
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
 }
 
 // cascade_splits are the view depths at which each cascade ends: between even and exponential splits of the range
-// from the near plane to SHADOW_DISTANCE.
-cascade_splits :: proc(near: f32) -> (splits: [SHADOW_CASCADES]f32) {
+// from the near plane to distance, lambda of the way to exponential.
+cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 = SHADOW_SPLIT_LAMBDA) -> (splits: [SHADOW_CASCADES]f32) {
+	far := max(distance, near * 2)
 	for &split, i in splits {
 		t := f32(i + 1) / SHADOW_CASCADES
-		exponential := near * math.pow(SHADOW_DISTANCE / near, t)
-		even := near + (SHADOW_DISTANCE - near) * t
-		split = SHADOW_SPLIT_LAMBDA * exponential + (1 - SHADOW_SPLIT_LAMBDA) * even
+		exponential := near * math.pow(far / near, t)
+		even := near + (far - near) * t
+		split = lambda * exponential + (1 - lambda) * even
 	}
 	return
 }
@@ -291,7 +293,8 @@ slot_viewport :: proc(slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
 // still write depth.
 @(private = "file")
 add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
-	splits := cascade_splits(f.view.near)
+	s := f.shadow_settings
+	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda > 0 ? s.split_lambda : SHADOW_SPLIT_LAMBDA)
 	sf.cascade_splits = splits
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)

@@ -6,6 +6,7 @@ using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
+using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Viewport;
 using Vortice.DXGI;
 
@@ -362,6 +363,84 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
     }
 
+    [Fact]
+    public async Task TheViewportDrawsTheVolumesSettingsAndItsDebugViews()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+
+        // A global volume whose environment's background is red, and nothing else, so the whole frame is background.
+        var volume = Entity(1, "Volume");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment", [Field("background", Document.SceneValue.Of(Number(1.0), Number(0.0), Number(0.0)))]));
+        await Load(editor, Scene(volume));
+        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+
+        var lit = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
+        Assert.True(lit.R > lit.G + 60 && lit.R > lit.B + 60, $"the background is {lit}, not the volume's red");
+
+        // The albedo view shows the background as it is, without the tone mapper, so the red is whole.
+        editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = DebugView.Albedo });
+        var albedo = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
+        Assert.True(albedo.R > 240 && albedo.G < 20 && albedo.B < 20, $"the albedo view's background is {albedo}");
+
+        // Where nothing drew, the prepass's normals are zero, which the normals view shows black. Every other view draws.
+        editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = DebugView.Normals });
+        var normals = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
+        Assert.True(normals.R < 20 && normals.G < 20 && normals.B < 20, $"the normals view's background is {normals}");
+        foreach (var view in Enum.GetValues<DebugView>())
+        {
+            editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = view, NoBloom = true, NoShadows = true, ExposureOffset = 1 });
+            await Latest(editor, frames, target);
+        }
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
+    public async Task ALightsIconPicksIt()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+
+        // A point light 2 m ahead of the camera, with nothing else to draw.
+        var lamp = Entity(1, "Lamp", z: 1);
+        lamp.Components.Add(new Document.SceneComponent(PointLightId, "Point_Light", [Field("intensity", Document.SceneValue.Of(Number(1.0)))]));
+        await Load(editor, Scene(lamp));
+        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(EditorShell.DefaultViewportSettings);
+
+        PickResult center = new(0, [], 0);
+        for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(100 + attempt, target.Width / 2, target.Height / 2, 1, 1));
+            center = await editor.Next<PickResult>(r => r.Id == 100 + attempt);
+        }
+        Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
+        Assert.InRange(center.Depth, 1.9f, 2.1f);
+
+        // Without the icons, the light is not drawn, so nothing is there.
+        editor.Link.Send(EditorShell.DefaultViewportSettings with { ShowIcons = false });
+        editor.Link.Send(new PickRequest(7, target.Width / 2, target.Height / 2, 1, 1));
+        Assert.Empty((await editor.Next<PickResult>(r => r.Id == 7)).Hits);
+    }
+
+    // Latest acknowledges the viewport's frames for a while, so the game draws with what it was sent, and gives the last.
+    static async Task<ulong> Latest(Editor editor, SharedFrames frames, FrameTarget target)
+    {
+        for (var i = 0; i < 20; i++)
+        {
+            await Task.Delay(25, TestContext.Current.CancellationToken);
+            editor.Link.Send(new FrameAcknowledged(target.Generation, frames.Completed));
+        }
+        return frames.Completed;
+    }
+
     // Settle acknowledges a preview's frames until it stops drawing, and gives its last frame.
     static async Task<ulong> Settle(Editor editor, SharedFrames frames, PreviewTarget target)
     {
@@ -502,6 +581,9 @@ public sealed class HostLinkTests : IAsyncDisposable
     const string PulseScript = "7142e05b3941bc44849ed0379727e60b";
     // The engine's Mesh_Renderer, and the game's Spin and Triangle (samples/mygame/game.odin).
     const ulong MeshRendererId = 33;
+    const ulong PointLightId = 35;
+    const ulong VolumeId = 42;
+    const ulong EnvironmentId = 49;
     const ulong SpinId = 1001;
     const ulong TriangleId = 1002;
 

@@ -37,6 +37,12 @@ interface IFieldEditor
     void Scrub(int axis, double pixels, KeyModifiers modifiers);
 
     void EndScrub();
+
+    /// <summary>
+    /// A number, or a vector's or color's numbers, from a slider or a picker: a step of the scrub while one is open,
+    /// and otherwise an edit of its own.
+    /// </summary>
+    void SetNumbers(double[] values);
 }
 
 /// <summary>
@@ -52,18 +58,57 @@ abstract class FieldView
 
     /// <summary>
     /// A view for a kind of value. An entity shows as its <paramref name="label"/>, such as its name, and an asset as
-    /// its name in <paramref name="assets"/>.
+    /// its name in <paramref name="assets"/>. Axes have <paramref name="axes"/> boxes, and an editable number with a
+    /// <paramref name="range"/> has a slider over it.
     /// </summary>
-    public static FieldView Create(DisplayKind kind, Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor, bool isEnum = false, AssetContext? assets = null) => kind switch
+    public static FieldView Create(DisplayKind kind, Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor, bool isEnum = false, AssetContext? assets = null, int axes = 3, (double Min, double Max)? range = null) => kind switch
     {
-        DisplayKind.Axes => new AxesView(editor),
+        DisplayKind.Axes => new AxesView(editor, axes),
+        DisplayKind.Color => new ColorView(editor),
         DisplayKind.Bool => new BoolView(editor),
         DisplayKind.Entity => new EntityView(select, label, editor),
         DisplayKind.Asset when assets != null => new AssetView(assets, editor),
         DisplayKind.Text when isEnum && editor != null => new ChoiceView(editor),
-        DisplayKind.Number => new BoxView(numeric: true, editor),
+        DisplayKind.Number => new BoxView(numeric: true, editor, editor != null ? range : null),
         _ => new BoxView(numeric: false, editor),
     };
+
+    /// <summary>A number as the panel shows it, such as 1,250.5, or null.</summary>
+    protected static double? ParseShown(string text) =>
+        double.TryParse(text.Replace(",", "").TrimEnd('°'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+
+    /// <summary>A slider over a range, whose drag is one scrub: one undo entry from press to release.</summary>
+    protected static Slider RangeSlider(IFieldEditor editor, double min, double max, Func<bool> showing)
+    {
+        var slider = new Slider { Minimum = min, Maximum = max, Classes = { "value-slider" }, VerticalAlignment = VerticalAlignment.Center };
+        var dragging = false;
+        slider.AddHandler(Avalonia.Controls.Primitives.Thumb.DragStartedEvent, (_, _) =>
+        {
+            dragging = true;
+            editor.BeginScrub(0);
+        });
+        slider.AddHandler(Avalonia.Controls.Primitives.Thumb.DragCompletedEvent, (_, _) =>
+        {
+            dragging = false;
+            editor.EndScrub();
+        });
+        slider.ValueChanged += (_, e) =>
+        {
+            if (!showing())
+            {
+                editor.SetNumbers([e.NewValue]);
+            }
+        };
+        slider.DetachedFromVisualTree += (_, _) =>
+        {
+            if (dragging)
+            {
+                dragging = false;
+                editor.EndScrub();
+            }
+        };
+        return slider;
+    }
 
     protected static void SetTooltip(Control control, string? tooltip) => ToolTip.SetTip(control, tooltip);
 
@@ -147,15 +192,27 @@ sealed class BoxView : FieldView
     readonly TextBlock? _text;
     readonly TextBox? _edit;
     readonly Border _box;
+    readonly Slider? _slider;
+    readonly Control _control;
     string _value = "…";
+    bool _showing;
 
-    public BoxView(bool numeric, IFieldEditor? editor)
+    public BoxView(bool numeric, IFieldEditor? editor, (double Min, double Max)? range = null)
     {
         if (editor != null)
         {
             _edit = EditBox(numeric, text => editor.Commit(-1, text), () => _value);
             _edit.Text = _value;
             _box = new Border { Classes = { "value-box", "editable" }, Child = _edit };
+            _control = _box;
+            // The range is the slider's, and a typed value can go beyond it.
+            if (range is { } r && r.Max > r.Min)
+            {
+                _slider = RangeSlider(editor, r.Min, r.Max, () => _showing);
+                _box.Width = 64;
+                DockPanel.SetDock(_box, Avalonia.Controls.Dock.Right);
+                _control = new DockPanel { Children = { _box, _slider } };
+            }
             return;
         }
         _text = new TextBlock
@@ -165,9 +222,10 @@ sealed class BoxView : FieldView
             TextAlignment = numeric ? TextAlignment.Right : TextAlignment.Left,
         };
         _box = new Border { Classes = { "value-box" }, Child = _text };
+        _control = _box;
     }
 
-    public override Control Control => _box;
+    public override Control Control => _control;
 
     public override void Show(FieldDisplay value)
     {
@@ -183,22 +241,35 @@ sealed class BoxView : FieldView
         {
             _edit.Text = _value;
         }
+        if (_slider != null && ParseShown(_value) is { } number)
+        {
+            _showing = true;
+            _slider.Value = Math.Clamp(number, _slider.Minimum, _slider.Maximum);
+            _showing = false;
+        }
         SetTooltip(_box, value.Tooltip ?? value.Text);
     }
 }
 
-/// <summary>Three boxes, marked red, green and blue for x, y and z, as in most 3D tools. A marker drags its axis.</summary>
+/// <summary>
+/// Two or three boxes, marked red, green and blue for x, y and z, as in most 3D tools. A marker drags its axis. A color's
+/// boxes are its red, green and blue, with the same markers.
+/// </summary>
 sealed class AxesView : FieldView
 {
-    readonly Grid _grid = new() { ColumnDefinitions = new ColumnDefinitions("*,*,*"), Classes = { "axes" } };
-    readonly TextBlock?[] _parts = new TextBlock?[3];
-    readonly TextBox?[] _edits = new TextBox?[3];
-    readonly string[] _values = ["…", "…", "…"];
+    readonly Grid _grid;
+    readonly TextBlock?[] _parts;
+    readonly TextBox?[] _edits;
+    readonly string[] _values;
 
-    public AxesView(IFieldEditor? editor)
+    public AxesView(IFieldEditor? editor, int count = 3)
     {
+        _grid = new Grid { ColumnDefinitions = new ColumnDefinitions(string.Join(",", Enumerable.Repeat("*", count))), Classes = { "axes" } };
+        _parts = new TextBlock?[count];
+        _edits = new TextBox?[count];
+        _values = [.. Enumerable.Repeat("…", count)];
         string[] axes = ["axis-x", "axis-y", "axis-z"];
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < count; i++)
         {
             var axis = i;
             var marker = new Border { Classes = { "axis-marker", axes[i] } };
@@ -227,7 +298,7 @@ sealed class AxesView : FieldView
 
     public override void Show(FieldDisplay value)
     {
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < _values.Length; i++)
         {
             _values[i] = i < value.Axes.Length ? value.Axes[i] : "";
             if (_parts[i] is { } part)
@@ -240,6 +311,158 @@ sealed class AxesView : FieldView
             }
         }
         SetTooltip(_grid, value.Tooltip ?? value.Text);
+    }
+}
+
+/// <summary>
+/// A linear color: a swatch, as the screen shows it, and the red, green and blue boxes. With an editor, clicking the
+/// swatch opens a picker of hue, saturation and value in sRGB, and a hex box, which edit the color while it is open, in
+/// one undo entry. A color brighter than white keeps its brightness: the picker edits the color at most 1, and scales
+/// it back. All zero is the default color, which shows hatched.
+/// </summary>
+sealed class ColorView : FieldView
+{
+    static readonly IBrush Hatch = new VisualBrush
+    {
+        TileMode = TileMode.Tile,
+        DestinationRect = new RelativeRect(0, 0, 6, 6, RelativeUnit.Absolute),
+        Visual = new Canvas
+        {
+            Width = 6,
+            Height = 6,
+            Background = Brushes.Gray,
+            Children = { new Avalonia.Controls.Shapes.Line { StartPoint = new Point(0, 6), EndPoint = new Point(6, 0), Stroke = Brushes.LightGray, StrokeThickness = 1 } },
+        },
+    };
+
+    readonly AxesView _axes;
+    readonly Border _swatch;
+    readonly DockPanel _panel;
+    double[] _values = [0, 0, 0];
+
+    public ColorView(IFieldEditor? editor)
+    {
+        _axes = new AxesView(editor);
+        _swatch = new Border
+        {
+            Width = 22,
+            CornerRadius = new CornerRadius(3),
+            BorderBrush = new SolidColorBrush(Color.Parse("#55555C")),
+            BorderThickness = new Thickness(1),
+            Margin = new Thickness(0, 1, 4, 1),
+        };
+        DockPanel.SetDock(_swatch, Avalonia.Controls.Dock.Left);
+        _panel = new DockPanel { Children = { _swatch, _axes.Control } };
+        if (editor != null)
+        {
+            _swatch.Cursor = new Cursor(StandardCursorType.Hand);
+            ToolTip.SetTip(_swatch, "Pick a color");
+            _swatch.PointerPressed += (_, e) =>
+            {
+                if (e.GetCurrentPoint(_swatch).Properties.IsLeftButtonPressed)
+                {
+                    Picker(editor).ShowAt(_swatch);
+                    e.Handled = true;
+                }
+            };
+        }
+    }
+
+    public override Control Control => _panel;
+
+    public override void Show(FieldDisplay value)
+    {
+        _values = value.Values.Length >= 3 ? value.Values : [0, 0, 0];
+        _axes.Show(value);
+        _swatch.Background = _values.All(v => v == 0) ? Hatch : Brush(_values);
+        SetTooltip(_swatch, value.Tooltip ?? LinearColor.Hex(_values));
+    }
+
+    static SolidColorBrush Brush(IReadOnlyList<double> linear)
+    {
+        static byte Encode(double v) => (byte)Math.Round(LinearColor.ToSrgb(v) * 255);
+        var (color, _) = LinearColor.Split(linear);
+        return new SolidColorBrush(Color.FromRgb(Encode(color[0]), Encode(color[1]), Encode(color[2])));
+    }
+
+    Flyout Picker(IFieldEditor editor)
+    {
+        var (start, scale) = LinearColor.Split(_values);
+        var (h, s, v) = LinearColor.Hsv(LinearColor.ToSrgb(start[0]), LinearColor.ToSrgb(start[1]), LinearColor.ToSrgb(start[2]));
+        var preview = new Border { Height = 24, CornerRadius = new CornerRadius(3), Background = Brush(start) };
+        var hex = new TextBox { Text = LinearColor.Hex(start), Classes = { "value-edit" } };
+        var updating = false;
+        Slider Channel(double max, double value) => new() { Minimum = 0, Maximum = max, Value = value, Width = 180 };
+        var hue = Channel(360, h);
+        var saturation = Channel(1, s);
+        var brightness = Channel(1, v);
+        void Apply(double[] linear)
+        {
+            preview.Background = Brush(linear);
+            editor.SetNumbers([.. linear.Select(c => c * scale)]);
+        }
+        void FromSliders()
+        {
+            if (updating)
+            {
+                return;
+            }
+            var linear = LinearColor.FromHsv(hue.Value, saturation.Value, brightness.Value).Select(LinearColor.FromSrgb).ToArray();
+            updating = true;
+            hex.Text = LinearColor.Hex(linear);
+            updating = false;
+            Apply(linear);
+        }
+        hue.ValueChanged += (_, _) => FromSliders();
+        saturation.ValueChanged += (_, _) => FromSliders();
+        brightness.ValueChanged += (_, _) => FromSliders();
+        void FromHex()
+        {
+            if (updating || LinearColor.ParseHex(hex.Text ?? "") is not { } linear)
+            {
+                return;
+            }
+            var (nh, ns, nv) = LinearColor.Hsv(LinearColor.ToSrgb(linear[0]), LinearColor.ToSrgb(linear[1]), LinearColor.ToSrgb(linear[2]));
+            updating = true;
+            (hue.Value, saturation.Value, brightness.Value) = (nh, ns, nv);
+            updating = false;
+            Apply(linear);
+        }
+        hex.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                FromHex();
+                e.Handled = true;
+            }
+        };
+        hex.LostFocus += (_, _) => FromHex();
+        Control Labeled(string name, Control control)
+        {
+            var label = new TextBlock { Text = name, Width = 70, VerticalAlignment = VerticalAlignment.Center, Classes = { "field-name" } };
+            return new StackPanel { Orientation = Orientation.Horizontal, Children = { label, control } };
+        }
+        var content = new StackPanel
+        {
+            Spacing = 4,
+            Width = 260,
+            Children =
+            {
+                preview,
+                Labeled("Hue", hue),
+                Labeled("Saturation", saturation),
+                Labeled("Value", brightness),
+                Labeled("Hex (sRGB)", new Border { Classes = { "value-box", "editable" }, Child = hex, Width = 90, HorizontalAlignment = HorizontalAlignment.Left }),
+            },
+        };
+        if (scale > 1)
+        {
+            content.Children.Add(new TextBlock { Text = $"Scaled by {FieldValues.Number(scale)}, as the color is brighter than white.", Classes = { "empty" }, TextWrapping = TextWrapping.Wrap });
+        }
+        var flyout = new Flyout { Content = content, Placement = PlacementMode.BottomEdgeAlignedLeft };
+        flyout.Opened += (_, _) => editor.BeginScrub(-1);
+        flyout.Closed += (_, _) => editor.EndScrub();
+        return flyout;
     }
 }
 

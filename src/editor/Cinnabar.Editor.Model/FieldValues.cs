@@ -9,8 +9,10 @@ public enum DisplayKind
 {
     Text,
     Number,
-    /// <summary>Three values, x, y and z: vectors, positions and rotations.</summary>
+    /// <summary>Two or three values, x, y and z: vectors, positions and rotations.</summary>
     Axes,
+    /// <summary>A linear color: red, green and blue in <see cref="FieldDisplay.Values"/> and <see cref="FieldDisplay.Axes"/>.</summary>
+    Color,
     Bool,
     Entity,
     /// <summary>An asset reference: <see cref="FieldDisplay.Text"/> holds its GUID, or "" for none.</summary>
@@ -23,6 +25,9 @@ public enum DisplayKind
 /// </summary>
 public sealed record FieldDisplay(DisplayKind Kind, string Text, string[] Axes, bool Flag, ulong Entity, string? Tooltip)
 {
+    /// <summary>A vector's or a color's numbers, as they are stored.</summary>
+    public double[] Values { get; init; } = [];
+
     public static FieldDisplay Missing { get; } = new(DisplayKind.Text, "?", ["?", "?", "?"], false, 0, "The value is shorter than its type says.");
 }
 
@@ -37,10 +42,14 @@ public static class FieldValues
         FieldKind.Bool => DisplayKind.Bool,
         FieldKind.Entity => DisplayKind.Entity,
         FieldKind.Asset => DisplayKind.Asset,
-        FieldKind.Vector3 or FieldKind.Quaternion or FieldKind.Position => DisplayKind.Axes,
+        FieldKind.Vector2 or FieldKind.Vector3 or FieldKind.Quaternion or FieldKind.Position => DisplayKind.Axes,
         FieldKind.Enum => DisplayKind.Text,
         _ => DisplayKind.Number,
     };
+
+    /// <summary>As <see cref="DisplayKindOf(FieldKind)"/>, and a color for a Vector3 that the game tags as one.</summary>
+    public static DisplayKind DisplayKindOf(FieldInfo field) =>
+        field.Color && field.Kind == FieldKind.Vector3 ? DisplayKind.Color : DisplayKindOf(field.Kind);
 
     public static DisplayKind DisplayKindOf(BehaviourFieldKind kind) => kind switch
     {
@@ -69,8 +78,13 @@ public static class FieldValues
             case FieldKind.Asset:
                 var guid = AssetGuid(data);
                 return new FieldDisplay(DisplayKind.Asset, guid, [], false, 0, null);
+            case FieldKind.Vector3 when field.Color:
+                double[] rgb = [F32(data, 0), F32(data, 1), F32(data, 2)];
+                return Axes(rgb, "", rgb.All(v => v == 0) ? "0 gives the default color" : null) with { Kind = DisplayKind.Color };
             case FieldKind.Vector3:
-                return Axes(F32(data, 0), F32(data, 1), F32(data, 2), "", null);
+                return Axes([F32(data, 0), F32(data, 1), F32(data, 2)], "", null);
+            case FieldKind.Vector2:
+                return Axes([F32(data, 0), F32(data, 1)], "", null);
             case FieldKind.Position:
                 double[] meters = [Meters(data, 0), Meters(data, 1), Meters(data, 2)];
                 string[] parts = [Distance(meters[0]), Distance(meters[1]), Distance(meters[2])];
@@ -79,7 +93,7 @@ public static class FieldValues
             case FieldKind.Quaternion:
                 var (x, y, z, w) = (F32(data, 0), F32(data, 1), F32(data, 2), F32(data, 3));
                 var euler = Euler(x, y, z, w);
-                return Axes(euler[0], euler[1], euler[2], "°",
+                return Axes(euler, "°",
                     $"Euler angles in degrees, applied z, then x, then y.\nQuaternion: ({Number(x)}, {Number(y)}, {Number(z)}, {Number(w)})");
             case FieldKind.Enum:
                 var value = ReadInteger(field.EnumBase, data);
@@ -101,7 +115,7 @@ public static class FieldValues
         BehaviourFieldKind.Number => Text(Number(field.Number), kind: DisplayKind.Number),
         BehaviourFieldKind.Boolean => Flag(field.Boolean),
         BehaviourFieldKind.String => Text($"\"{field.Text}\""),
-        BehaviourFieldKind.Vector => Axes(field.Vector[0], field.Vector[1], field.Vector[2], "", null),
+        BehaviourFieldKind.Vector => Axes([field.Vector[0], field.Vector[1], field.Vector[2]], "", null),
         BehaviourFieldKind.Entity => Entity(field.Entity),
         _ => Text("nil"),
     };
@@ -129,7 +143,7 @@ public static class FieldValues
         FieldKind.Bool or FieldKind.I8 or FieldKind.U8 => 1,
         FieldKind.I16 or FieldKind.U16 => 2,
         FieldKind.I32 or FieldKind.U32 or FieldKind.F32 => 4,
-        FieldKind.I64 or FieldKind.U64 or FieldKind.F64 or FieldKind.Entity => 8,
+        FieldKind.I64 or FieldKind.U64 or FieldKind.F64 or FieldKind.Entity or FieldKind.Vector2 => 8,
         FieldKind.Vector3 => 12,
         FieldKind.Quaternion or FieldKind.Asset => 16,
         FieldKind.Position => 24,
@@ -229,10 +243,10 @@ public static class FieldValues
 
     static FieldDisplay Entity(ulong entity) => new(DisplayKind.Entity, EntityNode.Format(entity), [], false, entity, null);
 
-    static FieldDisplay Axes(double x, double y, double z, string unit, string? tooltip)
+    static FieldDisplay Axes(double[] values, string unit, string? tooltip)
     {
-        string[] parts = [Number(x) + unit, Number(y) + unit, Number(z) + unit];
-        return new(DisplayKind.Axes, $"({string.Join(", ", parts)})", parts, false, 0, tooltip);
+        string[] parts = [.. values.Select(v => Number(v) + unit)];
+        return new(DisplayKind.Axes, $"({string.Join(", ", parts)})", parts, false, 0, tooltip) { Values = values };
     }
 
     static long ReadInteger(FieldKind kind, ReadOnlySpan<byte> data) => kind switch

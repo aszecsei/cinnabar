@@ -5,13 +5,15 @@ namespace Cinnabar.Editor.Shell;
 /// <summary>
 /// Each user's editor settings, in <c>%LOCALAPPDATA%\cinnabar\editor</c>: <c>layout.json</c>, which the editor
 /// writes when it closes, <c>keybindings.json</c>, an object from command ID to key gesture that the user writes, and
-/// <c>settings.json</c>, the user's other settings.
+/// <c>settings.json</c>, the user's other settings, and <c>viewport.json</c>, how the viewport draws.
 /// </summary>
 public sealed class EditorSettings(string directory)
 {
     public const string LayoutFileName = "layout.json";
     public const string KeyBindingsFileName = "keybindings.json";
     public const string SettingsFileName = "settings.json";
+    /// <summary>The viewport's debug view, features and helpers, which the editor writes when they change.</summary>
+    public const string ViewportFileName = "viewport.json";
 
     /// <summary>VS Code, at the file's line.</summary>
     public static readonly string[] DefaultScriptEditor = ["code", "-g", "{file}:{line}"];

@@ -24,6 +24,67 @@ public sealed class ShellTests : IDisposable
     }
 
     [Fact]
+    public void TheViewportsRenderingCommandsChangeItsSettingsAndTheyStay()
+    {
+        using (var shell = NewShell())
+        {
+            Assert.Equal(EditorShell.DefaultViewportSettings, shell.ViewportSettings);
+            var bloom = shell.Commands.Get(EditorCommands.Bloom);
+            Assert.True(bloom.IsChecked);
+            Assert.True(bloom.Execute());
+            Assert.False(bloom.IsChecked);
+            Assert.True(shell.ViewportSettings.NoBloom);
+
+            var view = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.DebugView);
+            Assert.Equal("Lit", view.Selected);
+            Assert.Contains("Lighting Only", view.Options);
+            view.Select("Light Complexity");
+            Assert.Equal(Link.Protocol.DebugView.LightComplexity, shell.ViewportSettings.DebugView);
+
+            shell.Commands.Get(EditorCommands.ExposureUp).Execute();
+            shell.Commands.Get(EditorCommands.ExposureUp).Execute();
+            Assert.Equal(1, shell.ViewportSettings.ExposureOffset);
+            Assert.True(shell.Commands.Get(EditorCommands.ExposureReset).Execute());
+            Assert.Equal(0, shell.ViewportSettings.ExposureOffset);
+
+            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.Helpers)).Select("All");
+        }
+
+        // The next session starts with them.
+        using var again = NewShell();
+        Assert.True(again.ViewportSettings.NoBloom);
+        Assert.Equal(Link.Protocol.DebugView.LightComplexity, again.ViewportSettings.DebugView);
+        Assert.Equal(Link.Protocol.HelperMode.All, again.ViewportSettings.Helpers);
+        Assert.Empty(Problems(again));
+    }
+
+[Fact]
+    public void TheOutputModeIsTheProjectsUnlessThisMachineReplacesIt()
+    {
+        var project = Path.Combine(_settingsDirectory, "game", "project.settings");
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        File.WriteAllText(project, "# The window.\noutput = Auto\n");
+        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll") { ProjectPath = project }, new EditorSettings(_settingsDirectory));
+        var output = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ProjectOutput);
+        var mine = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.UserOutput);
+        Assert.Equal("Auto", output.Selected);
+        Assert.Equal(EditorShell.ProjectOutputLabel, mine.Selected);
+
+        // The project's file keeps its comment, and the game reads the setting's name.
+        output.Select("SDR");
+        Assert.Equal("# The window.\noutput = Sdr\n", File.ReadAllText(project));
+
+        var user = Document.ProjectSettings.UserPath(project);
+        Assert.EndsWith("project.user.settings", user);
+        mine.Select("HDR10");
+        Assert.Equal("Hdr10", Document.ProjectSettings.Get(user, "output"));
+        // Leaving it to the project again removes the user's file.
+        mine.Select(EditorShell.ProjectOutputLabel);
+        Assert.False(File.Exists(user));
+        Assert.Empty(Problems(shell));
+    }
+
+    [Fact]
     public void EveryPanelStartsOpen()
     {
         using var shell = NewShell();

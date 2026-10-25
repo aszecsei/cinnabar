@@ -106,7 +106,7 @@ public class WorldModelTests
     }
 
     static FieldInfo Field(FieldKind kind, uint offset = 0, FieldKind enumBase = FieldKind.U8, params EnumValue[] values) =>
-        new("f", offset, kind, enumBase, values, false, false, 0, 0, "");
+        TestFields.Of(kind, offset, enumBase, values);
 
     [Fact]
     public void FieldsDecodeEachKind()
@@ -141,6 +141,42 @@ public class WorldModelTests
         asset[0] = 0x9d;
         Assert.Equal("9d" + new string('0', 30), FieldValues.Display(Field(FieldKind.Asset), asset).Text);
         Assert.Equal("none", FieldValues.Format(Field(FieldKind.Entity, 56), data));
+    }
+
+    [Fact]
+    public void TwoNumbersAndColorsShowAsAxes()
+    {
+        var data = new byte[12];
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(0), -8f);
+        BinaryPrimitives.WriteSingleLittleEndian(data.AsSpan(4), 4f);
+
+        var range = FieldValues.Display(TestFields.Of(FieldKind.Vector2), data);
+        Assert.Equal(DisplayKind.Axes, range.Kind);
+        Assert.Equal(["-8", "4"], range.Axes);
+        Assert.Equal(8, FieldValues.Size(FieldKind.Vector2));
+
+        var color = TestFields.Of(FieldKind.Vector3, color: true);
+        Assert.Equal(DisplayKind.Color, FieldValues.DisplayKindOf(color));
+        Assert.Equal([-8.0, 4.0, 0.0], FieldValues.Display(color, data).Values);
+        // Only a Vector3 is a color.
+        Assert.Equal(DisplayKind.Axes, FieldValues.DisplayKindOf(TestFields.Of(FieldKind.Vector2, color: true)));
+        Assert.Contains("default", FieldValues.Display(color, new byte[12]).Tooltip);
+    }
+
+    [Fact]
+    public void LinearColorsRoundTripThroughSrgb()
+    {
+        Assert.Equal("#ffbc00", LinearColor.Hex([1, 0.5, 0]));
+        var back = LinearColor.ParseHex("#ffbc00")!;
+        Assert.Equal(1, back[0], 6);
+        Assert.Equal(0.5, back[1], 2);
+        Assert.Null(LinearColor.ParseHex("ffbc0"));
+        var (h, s, v) = LinearColor.Hsv(1, 0.5, 0);
+        Assert.Equal([1, 0.5, 0], LinearColor.FromHsv(h, s, v).Select(c => Math.Round(c, 6)));
+        // A color brighter than white keeps its brightness apart.
+        var (split, scale) = LinearColor.Split([4, 2, 0]);
+        Assert.Equal(4, scale);
+        Assert.Equal([1, 0.5, 0], split);
     }
 
     [Fact]

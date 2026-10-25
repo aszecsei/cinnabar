@@ -170,6 +170,10 @@ set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f:
 		warn(&l, "%s.%s takes %s, so it is not set", info.name, f.name, expected)
 		return false
 	}
+	// A setting that the scene sets is overridden, and a reset one is not.
+	if field.has_override {
+		(^bool)(uintptr(data) + uintptr(field.override_offset))^ = !reset
+	}
 	if ecs.Component_Id(component) == ecs.TRANSFORM_ID {
 		settle(w, entity)
 	}
@@ -269,6 +273,8 @@ add_component_to :: proc(l: ^Loader, entity: ecs.Entity, c: format.Scene_Compone
 		}
 		if expected := write_field(l, raw_data(data[field.offset:]), field^, f.value); expected != "" {
 			warn(l, "%s.%s takes %s, so it is skipped", info.name, f.name, expected)
+		} else if field.has_override {
+			data[field.override_offset] = 1
 		}
 	}
 	ecs.add_raw(l.world, entity, id, data)
@@ -327,6 +333,11 @@ write_field :: proc(l: ^Loader, dst: rawptr, field: Field, v: format.Scene_Value
 			return "three numbers, such as [0, 1, 0]"
 		}
 		(^[3]f32)(dst)^ = {f32(v.floats[0]), f32(v.floats[1]), f32(v.floats[2])}
+	case .Vector2:
+		if v.kind != .Number || v.count != 2 {
+			return "two numbers, such as [0, 1]"
+		}
+		(^[2]f32)(dst)^ = {f32(v.floats[0]), f32(v.floats[1])}
 	case .Quaternion:
 		if v.kind != .Number || v.count != 4 {
 			return "four numbers, x, y, z and w"
@@ -368,7 +379,7 @@ zero_field :: proc(dst: rawptr, field: Field) {
 		size = 2
 	case .I32, .U32, .F32:
 		size = 4
-	case .I64, .U64, .F64, .Entity:
+	case .I64, .U64, .F64, .Entity, .Vector2:
 		size = 8
 	case .Enum:
 		zero_field(dst, Field{kind = field.enum_base})

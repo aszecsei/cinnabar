@@ -21,6 +21,8 @@ struct Push {
 	uint lut_hdr;
 	uint mode;
 	float paper_white;
+	// The scene holds a debug view's colors as they are (see docs/rendering.md#debug-views): no tone mapping.
+	uint raw;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -54,7 +56,9 @@ float4 ps_main(Varyings i) : SV_Target {
 	}
 	// Until the table is baked, a plain roll-off to white.
 	float3 color = encode_srgb(hdr / (1 + hdr));
-	if (push.has_lut != 0) {
+	if (push.raw != 0) {
+		color = encode_srgb(saturate(hdr));
+	} else if (push.has_lut != 0) {
 		color = lut_sample(cn_texture(push.lut), linear_clamp, hdr);
 		if (push.lut_hdr != 0) {
 			color = encode_srgb_extended(decode_pq(color) / push.paper_white);

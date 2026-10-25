@@ -15,6 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/volume"
 
 // What the hooks of the test frame saw, and the logged problems other than the shaders that the test cache lacks.
 @(private = "file")
@@ -101,6 +102,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	testing.expect(t, ecs.init(w, &platform))
 	defer ecs.destroy(w)
 	ecs.register_engine_components(&w.registry)
+	volume.register_components(&w.registry)
 	register_components(&w.registry)
 	dir, err := os.make_directory_temp("", "renderer_test_*", context.temp_allocator)
 	testing.expect(t, err == nil)
@@ -122,7 +124,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	ecs.add(w, lamp, Point_Light{intensity = 1, cast_shadows = true})
 	mist := ecs.spawn(w)
 	ecs.add(w, mist, ecs.TRANSFORM_IDENTITY)
-	ecs.add(w, mist, Fog{density = 0.05, height_falloff = 0.5})
+	// The fog is a setting of the volume around the camera.
+	ecs.add(w, mist, volume.Volume{shape = .Global})
+	ecs.add(w, mist, Fog{density = {true, 0.05}, height_falloff = {true, 0.5}})
 	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 0, 1}), {1, 0, 0, 1})
 	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 1, 0}), {0, 1, 0, 1}, mode = .Overlay)
 
@@ -237,6 +241,19 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, r.post.lut_grading.paper_white, mode != .Sdr ? DEFAULT_PAPER_WHITE : 0)
 		testing.expect_value(t, r.post.lut_grading.peak, mode != .Sdr ? DEFAULT_PEAK : 0)
 	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Every debug view draws, and a view that is not shaded has no bloom. So does every feature turned off.
+	r.debug_view.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test debug view"})
+	for view in Debug_View {
+		desc.debug_view = view
+		testing.expectf(t, draw_frame(r, w, desc), "the frame with the %v view did not execute", view)
+		testing.expectf(t, !record.bloom || view == .Lit, "the %v view has bloom", view)
+	}
+	desc.debug_view = .Lit
+	desc.disable = ~Features{}
+	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")
+	testing.expect(t, !record.bloom && !record.occlusion && !record.fog && !record.gi)
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 	// The jitter cycles inside the pixel.
 	for n in u32(1) ..= JITTER_SAMPLES {
