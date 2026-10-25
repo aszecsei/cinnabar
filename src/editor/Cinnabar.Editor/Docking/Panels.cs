@@ -32,7 +32,31 @@ public sealed class PanelTool : Tool
     public Control CreateView() => _createView();
 }
 
-/// <summary>The viewport, as the only document. It cannot close, float or move into a tool dock.</summary>
+/// <summary>
+/// A material or a material function in the material editor (see docs/editor.md#material-editor): a document beside the
+/// viewport, which closes, and asks first when it has unsaved changes. The layout file does not keep it.
+/// </summary>
+public sealed class MaterialEditorDocument : Dock.Model.Mvvm.Controls.Document
+{
+    readonly Func<Control> _createView;
+
+    public MaterialEditorDocument(Shell.MaterialEditor editor, Func<Control> createView)
+    {
+        _createView = createView;
+        Editor = editor;
+        Id = $"material.{editor.Guid}";
+        Title = editor.Document.Title;
+        CanFloat = false;
+        CanPin = false;
+        editor.Changed += () => Title = editor.Document.IsDirty ? $"{editor.Document.Title} •" : editor.Document.Title;
+    }
+
+    public Shell.MaterialEditor Editor { get; }
+
+    public Control CreateView() => _createView();
+}
+
+/// <summary>The viewport, as the first document. It cannot close, float or move into a tool dock.</summary>
 public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
 {
     public const string PanelId = "viewport";

@@ -55,7 +55,7 @@ flowchart TB
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - Ambient occlusion, light clustering, the fog volume and exposure run on the compute queue where they can (see [GPU](gpu.md#queues)). They depend only on the prepass, so they overlap with the shadow passes.
 - The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the shadows' acceleration structure, and later the history textures and the settings. It holds handles only, so a code reload keeps it (see [Hot reload](hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
-- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the ambient light until global illumination (`Ambient`, `DEFAULT_AMBIENT` when zero), and the hooks. The lights are components (see [Lights and clusters](#lights-and-clusters)).
+- A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, the entity slots not to draw (the editor's hidden ones), the exposure, the clear color, the ambient light until global illumination (`Ambient`, `DEFAULT_AMBIENT` when zero), the hooks, and the editor's material previews to draw (see [Material previews](#material-previews)). The lights are components (see [Lights and clusters](#lights-and-clusters)).
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
 
 | Hook | When | What it does |
@@ -242,13 +242,13 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 
 ### Material
 
-A material is a `.material` text file (see [Content pipeline](content-pipeline.md#materials)). From phase 5, the editor's node graph writes it, as it writes scenes. It has:
+A material is a `.material` text file (see [Content pipeline](content-pipeline.md#materials)). The editor's material editor writes its graph, as the editor writes scenes (see [Editor](editor.md#material-editor)). It has:
 
 - **Settings:** the shading model, the blend mode (`Opaque` and `Masked` now; `Transparent` and `Additive` with sorted transparent draws), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows.
 - **Parameters:** scalars, vectors, colors, textures and static switches, each with a name, a default and a group for the editor.
-- **The graph:** nodes and links. Nodes include math, texture samples, parameters, time, world position (relative to the camera), vertex attributes, material functions (other graph assets) and a custom HLSL node.
+- **The graph:** nodes and links (see [Content pipeline](content-pipeline.md#material-graphs)). Nodes include math, texture samples, parameters, time, world position (relative to the camera), vertex attributes, static switches, material functions (`.material_function` assets, graphs that a node calls) and a custom HLSL node.
 
-The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inputs inputs)`, and compiles it into each pass's template. Until the graph (phase 5), a material's `evaluate` is HLSL written after a `---` line of the file, which is how the built-in materials exist. `evaluate` reads its parameters from the generated `params`, and its static switches as defines.
+The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inputs inputs)`, and compiles it into each pass's template. A material's `evaluate` can also be HLSL written after a `---` line of the file, which is how the built-in materials exist. `evaluate` reads its parameters from the generated `params`, and its static switches as defines; a graph's switch nodes are decided when each variant generates its source, so they need no defines.
 
 **No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs. A later visibility buffer path can then fill the inputs from barycentrics and analytic derivatives without changing a material (see [Open questions](#open-questions)).
 
@@ -263,7 +263,7 @@ The cooker compiles each material for each pass and each vertex path:
 | Static switches | Each combination that the material or an instance uses |
 
 - One generated source holds every pass, each by its entry points (see [Content pipeline](content-pipeline.md#materials)). DXC keeps only what each pass's outputs need: the depth pass of an opaque material has no pixel shader and no material code. *Later,* such materials share one depth pipeline.
-- The cooker names each shader by the hash of its generated HLSL, so identical permutations compile once and share a pipeline.
+- The cooker names each generated source by its hash, which covers what it includes, so identical permutations compile once, and a source that an earlier cook compiled is not compiled again. *Later, the renderer shares one pipeline among the identical permutations of a material and of materials, which needs the blob to give each variant's hash, and an update in place to move a changed material to its new pipeline without a frame of nothing.*
 
 ### Material instance
 
@@ -287,14 +287,17 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 
 ### Material previews
 
-The editor's material editor shows the material on a mesh. The host renders it, as a second kind of view, into a second shared target. The preview therefore uses the same shaders, shading models and passes as the game.
+The editor's material editor shows the material on a mesh. The game renders it with the renderer, as a second kind of view, into a second shared target. The preview therefore uses the same shaders, shading models and passes as the game.
 
-- **Its own scene.** A preview view does not draw the world. It draws one preview mesh (a sphere, a cube, a plane or a mesh asset) with the material, a directional light and a fixed environment for indirect light. Its records are relative to its camera, as the view model's are. It has no fog, no GI and no temporal passes, so it keeps no history.
-- **Its own shared target.** Each preview has a set of shared textures and a fence, named and paced as the viewport's are (see [GPU](gpu.md#presentation) and [Editor](editor.md#viewport)): `<name>.preview<id>.g<generation>.texture0..2`. The editor sends the size, and the host clamps it to 1024 on each side.
-- **Only when needed.** The host renders a preview when its material, its mesh, its camera or its size changes, or every frame while the material reads time. With several previews open, it renders at most one in each frame, in turn.
-- **Editor link messages:** `Open_Preview` with the material or instance GUID, `Preview_Settings` with the mesh and the orbit camera, `Close_Preview`, and `Preview_Target` from the host with the shared target's name and generation. The editor's side belongs in [Editor](editor.md) when the material editor is designed.
-- **Unsaved changes.** The preview shows a graph that the user has not saved. The editor sends the graph's text to the cook daemon in a `Cook_Preview` message on the cook link. The daemon cooks it under the material's GUID into a separate preview area of the cache, `build/cache/dev/preview/<guid>.blob`, and the host loads the preview's material from there. The game's material changes only when the file is saved.
-- **Thumbnails.** The content browser's thumbnails for materials, meshes and textures can come from the same view: the host renders a preview at a fixed size and reads it back (see [Content pipeline](content-pipeline.md#implementation-phases), phase 4).
+- **Its own scene.** A preview does not draw the world. It draws one preview mesh with the material, lit by one directional light from over the camera's shoulder and the default ambient light, with the material's prepass and forward pipelines, then tone maps it with the output pass. The mesh is one of the engine's, a sphere, a cube or a plane, each 1 m across (`lib/engine/content/models/preview.gltf`, `render.preview_mesh`), or a mesh asset. Its records are relative to its camera, which orbits the mesh's middle. It has no shadows, no clusters, no fog, no GI and no temporal passes, so it keeps no history.
+- **In the frame's graph.** `Frame_Desc.previews` gives the previews that a frame draws (`render.Preview_Desc`): the target, the material, the mesh and the camera. `draw_frame` adds each one's passes to its graph: a copy of its records into the renderer's preview buffers, which the shaders read from their starts, its prepass, its forward pass and its output pass. A preview without its mesh or its material clears its target to the background.
+- **Complete.** `draw_frame` sets a preview's `complete` when its mesh was resident, its pipelines were compiled (`gpu_pipeline_ready`) and its textures were resident, so the game draws it again until it shows the material as it is.
+- **Its own shared target.** Each preview has a set of shared textures and a fence, named and paced as the viewport's are (see [GPU](gpu.md#presentation) and [Editor](editor.md#viewport)): `<name>.preview<id>.g<generation>.texture0..2`, with IDs below `gpu.MAX_PREVIEW_TARGETS` (4). `gpu_preview_target` gives the game a target's texture for a frame, at most `gpu.MAX_PREVIEW_SIZE` (1024) on each side, and `gpu_release_preview_target` releases it.
+- **Only when needed.** The game's editor package (`editor.previews`, which the game's frame puts in `Frame_Desc.previews`) draws a preview when its material, its mesh, its camera or its size changes, until it is complete, and every frame while its material reads the time (the blob's `Reads_Time`). It draws at most one in each frame, in turn, and none whose target the editor may still be reading.
+- **Editor link messages:** `Open_Preview` with the preview's ID, the material or instance GUID and whether to load the unsaved blob, `Preview_Settings` with the mesh, the orbit camera and the size, `Close_Preview`, and `Preview_Target` from the game with the shared target's name and generation. The editor acknowledges each frame that it copies with `Preview_Acknowledged`, which the host handles. The editor's side is in [Editor](editor.md#material-editor).
+- **Unsaved changes.** The preview shows a graph that the user has not saved. The editor sends the graph's text to the cook daemon in a `Cook_Preview` message on the cook link. The daemon cooks it under the material's GUID into a separate preview area of the cache, `build/cache/dev/preview/<guid>.blob`, and once a cook has succeeded, the editor opens the preview again with `unsaved`, so the game loads the preview's material from there (`asset.preview_blob`). The game checks the blob's time each frame while the preview is open, and a new one makes the renderer update the preview's own pipelines, which draw the old shaders until the new ones compile. The game's material changes only when the file is saved. A preview of an instance shows its cooked blob.
+- **Time:** materials read the frame's time as `Frame_Constants.time`: seconds since the host started, wrapped every hour so that a float keeps its precision.
+- **Thumbnails.** The content browser's thumbnails for materials, meshes and textures can come from the same view: the game renders a preview at a fixed size and reads it back (see [Content pipeline](content-pipeline.md#implementation-phases), phase 4).
 
 ## Post-processing
 
@@ -325,6 +328,7 @@ The design needs these changes in `lib/core/gpu` and the render graph:
 
 - *Done in phase 3:* depth bias and clamping, and comparison samplers (see [GPU](gpu.md#pipelines)).
 - *Done in phase 4:* stencil state in `Graphics_Pipeline_Desc`, the reference value in a command, the stencil's load and clear with the depth attachment, and a view of the stencil for shaders.
+- *Done in phase 5:* preview targets beside the frame target (`gpu_preview_target`), and whether a pipeline is compiled (`gpu_pipeline_ready`) (see [GPU](gpu.md#presentation)).
 - **Read-only depth:** a `Depth_Read` texture use in the graph and the `Depth_Stencil_Read` layout, so a pass can test against depth while another reads it as a texture.
 - **History textures** in the render graph (see [Later features](#later-features)).
 - **An HDR frame target** from `core`, for HDR output.
@@ -376,7 +380,7 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 | 2 | *Done.* The GPU scene with the render origin and stable slots, written in full every frame. Shading models and materials written in HLSL: `Unlit` and `Lit`, material and instance assets, the material table, pipelines by material and culling into bins. The sample draws with them. |
 | 3 | *Done.* Clustered forward: the prepass with normals and velocities, the forward pass with `Equal` depth, the light components, clusters, shadow maps in an atlas with cascades, and ray-traced shadow masks with the GPU scene's acceleration structures. The sample's scene has a sun, a point light and a spot light. |
 | 4 | *Done.* The view model, with the stencil additions: the `View_Model` tag, its projection from the `Camera`, its stencil bit in the prepass and the forward pass, and positions rebuilt with its projection for its pixels. The sample's camera holds a rod that reaches through the triangles. |
-| 5 | The material graph: the `.material` graph format, the cooker's code generation and permutations, the editor's node editor, and material previews with `Cook_Preview`. |
+| 5 | *Done.* The material graph: the `.material` graph format and material functions, the cooker's code generation with each permutation's switches decided and hash-named sources that compile once, the editor's node editor, and material previews in their own shared targets with `Cook_Preview`. The sample's checker material is a graph. |
 | 6 | Post: history textures, temporal AA, bloom, exposure, the tone mapping lookup table. |
 | 7 | Ambient occlusion and volumetric fog. |
 | 8 | Global illumination with radiance cascades. |

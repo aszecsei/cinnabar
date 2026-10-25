@@ -328,6 +328,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.ShadingModel => "shading model",
         AssetKind.Material => "material",
         AssetKind.MaterialInstance => "material instance",
+        AssetKind.MaterialFunction => "material function",
         _ => "script",
     };
 
@@ -573,7 +574,10 @@ public sealed class ContentBrowserView : DockPanel
             menu.Items.Clear();
             var linked = _shell.CanChangeContent && (row != null || _folder != null);
             foreach (var (label, template) in new (string, AssetTemplate?)[]
-                { ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene), ("New Folder", null) })
+                {
+                    ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
+                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Folder", null),
+                })
             {
                 menu.Items.Add(new MenuItem
                 {
@@ -714,7 +718,7 @@ public sealed class ContentBrowserView : DockPanel
         };
         if (EditorShell.CanOpen(asset))
         {
-            menu.Items.Add(new MenuItem { Header = asset.Kind == AssetKind.Scene ? "Open Scene" : "Open in Script Editor", Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
+            menu.Items.Add(new MenuItem { Header = _shell.OpenLabel(asset), Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
         }
         if (path != null)
         {

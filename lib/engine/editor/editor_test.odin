@@ -7,6 +7,9 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/gpu"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
@@ -645,4 +648,50 @@ game_commands_go_with_the_types_and_return_operations :: proc(t: ^testing.T) {
 	// A code reload forgets the commands, whose procedures were the old DLL's.
 	reload(&f.editor, &f.platform)
 	testing.expect_value(t, len(f.editor.commands), 0)
+}
+
+@(test)
+previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	assets: asset.Assets
+	f.platform.file_modified = proc(path: string) -> i64 {return 0}
+	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
+	f.editor.assets = &assets
+	f.platform.gpu_preview_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
+		return {texture = {index = 7, generation = 1}, prefix = "test.preview0.g0", size = size}, id == 0
+	}
+	f.platform.gpu_release_preview_target = proc(id: int) {}
+	gold := [16]u8{0xf6, 0xd3, 0xde, 0x31, 0x90, 0xe2, 0xdf, 0xb9, 0x7d, 0x68, 0x34, 0xed, 0x51, 0x01, 0xc4, 0xc0}
+	step(f, 1, link.Open_Preview{id = 0, material = gold}, link.Preview_Settings{id = 0, mesh = .Cube, pitch = 0.5, distance = 3, width = 128, height = 64})
+
+	descs := previews(&f.editor)
+	testing.expect_value(t, len(descs), 1)
+	if len(descs) == 1 {
+		testing.expect_value(t, descs[0].mesh, render.preview_mesh(.Cube))
+		testing.expect_value(t, descs[0].size, [2]u32{128, 64})
+		testing.expect_value(t, descs[0].distance, 3)
+		testing.expect(t, descs[0].material == format.Guid(gold))
+		testing.expect(t, descs[0].data == nil)
+	}
+	// Until a drawing is complete, the preview draws again; then it stops.
+	descs = previews(&f.editor)
+	testing.expect_value(t, len(descs), 1)
+	descs[0].complete^ = true
+	testing.expect_value(t, len(previews(&f.editor)), 0)
+	// The editor hears of the target at the next poll.
+	targets := 0
+	for m in step(f) {
+		if target, is_target := m.(link.Preview_Target); is_target {
+			targets += 1
+			testing.expect_value(t, target.prefix, "test.preview0.g0")
+			testing.expect_value(t, target.width, 128)
+		}
+	}
+	testing.expect_value(t, targets, 1)
+	// A new camera draws it again, and a closed preview draws no more.
+	step(f, 1, link.Preview_Settings{id = 0, mesh = .Cube, pitch = 0.2, distance = 3, width = 128, height = 64})
+	testing.expect_value(t, len(previews(&f.editor)), 1)
+	step(f, 1, link.Close_Preview{id = 0})
+	testing.expect_value(t, len(previews(&f.editor)), 0)
 }

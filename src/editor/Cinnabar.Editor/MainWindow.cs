@@ -69,6 +69,7 @@ public sealed class MainWindow : Window
         shell.RenameRequested += item => _ = AskRename(item);
         shell.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
+        shell.MaterialCloseRequested += editor => _ = AskCloseMaterial(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -118,12 +119,38 @@ public sealed class MainWindow : Window
             return;
         }
         e.Cancel = true;
-        if (await ConfirmDiscard("closing"))
+        if (await ConfirmDiscardMaterials() && await ConfirmDiscard("closing"))
         {
             _closing = true;
             _shell.SaveLayout();
             Close();
         }
+    }
+
+    /// <summary>Asks about a material editor's unsaved changes when its document closes.</summary>
+    async Task AskCloseMaterial(Shell.MaterialEditor editor)
+    {
+        var answer = await Dialogs.Ask(this, "Unsaved changes", $"{editor.Document.Title} has changes that are not saved. Save them before closing it?",
+            "Save", "Don't Save", "Cancel");
+        if (answer is "Save" or "Don't Save")
+        {
+            _shell.CloseMaterial(editor, discard: answer == "Don't Save");
+        }
+    }
+
+    // Asks about each material editor's unsaved changes before the editor closes, and returns whether to go on.
+    async Task<bool> ConfirmDiscardMaterials()
+    {
+        foreach (var editor in _shell.Materials.Where(m => m.Document.IsDirty).ToList())
+        {
+            var answer = await Dialogs.Ask(this, "Unsaved changes", $"{editor.Document.Title} has changes that are not saved. Save them before closing?",
+                "Save", "Don't Save", "Cancel");
+            if (answer == "Cancel" || answer == null || (answer == "Save" && !_shell.SaveMaterial(editor)))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>Asks about unsaved changes before they would be lost, and returns whether to go on.</summary>
@@ -178,6 +205,8 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Script => ("New Script", "script"),
             Link.Cook.AssetTemplate.Behaviour => ("New Behaviour", "behaviour, whose class is named for its file,"),
             Link.Cook.AssetTemplate.Scene => ("New Scene", "scene"),
+            Link.Cook.AssetTemplate.Material => ("New Material", "material"),
+            Link.Cook.AssetTemplate.MaterialFunction => ("New Material Function", "material function"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";

@@ -23,6 +23,8 @@ static class EditorCommands
     public const string NewScript = "content.newScript";
     public const string NewBehaviour = "content.newBehaviour";
     public const string NewSceneAsset = "content.newScene";
+    public const string NewMaterial = "content.newMaterial";
+    public const string NewMaterialFunction = "content.newMaterialFunction";
     public const string NewFolder = "content.newFolder";
     public const string RenameAsset = "content.rename";
     public const string DuplicateAsset = "content.duplicate";
@@ -69,12 +71,13 @@ static class EditorCommands
             Icon = "assets",
             Shortcut = "Ctrl+O",
         });
-        commands.Register(new Command(Save, "Save", () => shell.SaveScene())
+        // Save, Undo and Redo act on the material editor whose document is active, and on the scene otherwise.
+        commands.Register(new Command(Save, "Save", () => _ = shell.ActiveMaterial is { } material ? shell.SaveMaterial(material) : shell.SaveScene())
         {
-            Description = "Write the scene to its file.",
+            Description = "Write the scene, or the material that the material editor shows, to its file.",
             Icon = "save",
             Shortcut = "Ctrl+S",
-            CanExecuteWhen = () => shell.Scene != null,
+            CanExecuteWhen = () => shell.ActiveMaterial != null || shell.Scene != null,
         });
         commands.Register(new Command(SaveAs, "Save As", shell.RequestSaveAs)
         {
@@ -83,19 +86,39 @@ static class EditorCommands
             Shortcut = "Ctrl+Shift+S",
             CanExecuteWhen = () => shell.Scene != null,
         });
-        commands.Register(new Command(Undo, "Undo", () => shell.Scene?.Undo())
+        commands.Register(new Command(Undo, "Undo", () =>
+        {
+            if (shell.ActiveMaterial is { } material)
+            {
+                material.Document.Undo();
+            }
+            else
+            {
+                shell.Scene?.Undo();
+            }
+        })
         {
             Description = "Undo the last edit.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
-            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanUndo == true,
+            CanExecuteWhen = () => shell.ActiveMaterial is { } material ? material.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
         });
-        commands.Register(new Command(Redo, "Redo", () => shell.Scene?.Redo())
+        commands.Register(new Command(Redo, "Redo", () =>
+        {
+            if (shell.ActiveMaterial is { } material)
+            {
+                material.Document.Redo();
+            }
+            else
+            {
+                shell.Scene?.Redo();
+            }
+        })
         {
             Description = "Apply the last undone edit again.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
-            CanExecuteWhen = () => shell.IsEditing && shell.Scene?.CanRedo == true,
+            CanExecuteWhen = () => shell.ActiveMaterial is { } material ? material.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
         });
         commands.Register(new Command(CreateEntity, "New Entity", shell.CreateEntity)
         {
@@ -251,6 +274,8 @@ static class EditorCommands
         NewAssetCommand(NewScript, Link.Cook.AssetTemplate.Script, "New Script", "script", "Add a Luau module to the content browser's folder.");
         NewAssetCommand(NewBehaviour, Link.Cook.AssetTemplate.Behaviour, "New Behaviour", "script", "Add a script that defines a behaviour, named for its file, to the content browser's folder.");
         NewAssetCommand(NewSceneAsset, Link.Cook.AssetTemplate.Scene, "New Scene", "scene", "Add an empty scene to the content browser's folder.");
+        NewAssetCommand(NewMaterial, Link.Cook.AssetTemplate.Material, "New Material", "material", "Add a material graph, lit, to the content browser's folder.");
+        NewAssetCommand(NewMaterialFunction, Link.Cook.AssetTemplate.MaterialFunction, "New Material Function", "material-function", "Add a material function, a graph that materials call as a node, to the content browser's folder.");
         NewAssetCommand(NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
         {

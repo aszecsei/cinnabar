@@ -15,6 +15,8 @@ public sealed class AssetIndex
     readonly Dictionary<string, Asset> _assets = [];
     readonly HashSet<Folder> _folders = [];
     readonly Dictionary<string, Problem[]> _problems = [];
+    readonly List<NodeInfo> _nodes = [];
+    readonly List<ShadingModelInfo> _shadingModels = [];
 
     public IReadOnlyList<Root> Roots => _roots;
 
@@ -25,6 +27,12 @@ public sealed class AssetIndex
     public IReadOnlyDictionary<string, Asset> Assets => _assets;
 
     public IReadOnlyCollection<Folder> Folders => _folders;
+
+    /// <summary>The kinds of node of material graphs, which the daemon's cooker knows (see docs/content-pipeline.md#material-graphs).</summary>
+    public IReadOnlyList<NodeInfo> Nodes => _nodes;
+
+    /// <summary>The shading models that cook, by name.</summary>
+    public IReadOnlyList<ShadingModelInfo> ShadingModels => _shadingModels;
 
     /// <summary>The cook link is up, so the index is the daemon's latest.</summary>
     public bool Linked { get; private set; }
@@ -42,6 +50,12 @@ public sealed class AssetIndex
                 _roots.AddRange(welcome.Roots);
                 _importers.Clear();
                 _importers.AddRange(welcome.Importers);
+                _nodes.Clear();
+                _nodes.AddRange(welcome.Nodes);
+                break;
+            case ShadingModels models:
+                _shadingModels.Clear();
+                _shadingModels.AddRange(models.Models);
                 break;
             case AssetSnapshot snapshot:
                 _assets.Clear();

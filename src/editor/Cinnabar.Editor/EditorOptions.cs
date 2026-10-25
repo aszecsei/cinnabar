@@ -5,12 +5,16 @@ namespace Cinnabar.Editor;
 /// <summary>
 /// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]...</c>. The daemon cooks shaders only with <c>--dxc</c>.
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]...</c>. The daemon cooks shaders only with <c>--dxc</c>.
+/// Each <c>--material</c> opens in the material editor once the cook daemon's index has it.
 /// Paths are relative to the working directory, which is also the host's and the cook daemon's, so <c>just edit</c>
 /// runs the editor from the repository root. Without a scene, the host shows the scene that the game loads itself.
 /// </summary>
 public sealed record EditorOptions(string HostPath, string GamePath, string? ScenePath = null)
 {
+    /// <summary>Materials and material functions to open in the material editor, by their files' full paths.</summary>
+    public IReadOnlyList<string> MaterialPaths { get; init; } = [];
+
     /// <summary>Where autosaves go (see docs/editor.md#crash-recovery).</summary>
     public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
 
@@ -30,6 +34,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         var cook = new EditorOptions("", "").Cook;
         List<(string Name, string Dir)> roots = [];
         List<string> includes = [];
+        List<string> materials = [];
         for (var i = 0; i < args.Count; i++)
         {
             switch (args[i])
@@ -58,6 +63,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--include" when i + 1 < args.Count:
                     includes.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--material" when i + 1 < args.Count:
+                    materials.Add(Path.GetFullPath(args[++i]));
+                    break;
                 case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
                     var root = args[++i];
                     var equals = root.IndexOf('=');
@@ -75,6 +83,6 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        return new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook };
+        return new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials };
     }
 }

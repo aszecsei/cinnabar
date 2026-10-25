@@ -96,7 +96,7 @@ close_previews :: proc(e: ^Editor) {
 
 // previews gives the previews that this frame draws, for render.Frame_Desc.previews, in frame memory: at most one, the
 // next in turn that needs drawing and whose target the editor is not still reading.
-previews :: proc(e: ^Editor, r: ^render.Renderer) -> []render.Preview_Desc {
+previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 	if !active(e) || e.assets == nil {
 		return nil
 	}
@@ -115,8 +115,8 @@ previews :: proc(e: ^Editor, r: ^render.Renderer) -> []render.Preview_Desc {
 			continue
 		}
 		if !p.told || target.generation != p.told_generation {
-			n := copy(p.prefix[:], target.prefix)
-			p.announce = {id = u32(id), prefix = string(p.prefix[:n]), generation = target.generation, width = i32(target.size.x), height = i32(target.size.y)}
+			copied := copy(p.prefix[:], target.prefix)
+			p.announce = {id = u32(id), prefix = string(p.prefix[:copied]), generation = target.generation, width = i32(target.size.x), height = i32(target.size.y)}
 			p.told, p.told_generation = true, target.generation
 		}
 		e.next_preview = (id + 1) % MAX_PREVIEWS

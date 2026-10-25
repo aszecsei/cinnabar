@@ -55,4 +55,7 @@
     <StreamGeometry x:Key="Icon.material">F0 M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 1 1 12 2.5ZM12 4A8 8 0 0 0 12 20Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.material-instance">F0 M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 1 1 12 2.5ZM12 4A8 8 0 1 0 12 20A8 8 0 1 0 12 4ZM12 9A3 3 0 1 1 12 15A3 3 0 1 1 12 9Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.shading-model">F0 M10 6A7 7 0 1 1 10 20A7 7 0 1 1 10 6ZM10 7.5A5.5 5.5 0 1 0 10 18.5A5.5 5.5 0 1 0 10 7.5ZM18 2L22 2L22 6L20.5 6L20.5 3.5L18 3.5Z</StreamGeometry>
+    <!-- Not from Fluent: a material function, a node linked to two; a graph, two nodes linked. -->
+    <StreamGeometry x:Key="Icon.material-function">F0 M2 9H9V15H2ZM3.5 10.5V13.5H7.5V10.5ZM15 3H22V9H15ZM16.5 4.5V7.5H20.5V4.5ZM15 15H22V21H15ZM16.5 16.5V19.5H20.5V16.5ZM9 11.25H11.25V5.25H15V6.75H12.75V17.25H15V18.75H11.25V12.75H9Z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.graph">F0 M2 5H9V11H2ZM3.5 6.5V9.5H7.5V6.5ZM15 13H22V19H15ZM16.5 14.5V17.5H20.5V14.5ZM9 7.25H12.75V15.25H15V16.75H11.25V8.75H9Z</StreamGeometry>
 </ResourceDictionary>

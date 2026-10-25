@@ -99,6 +99,8 @@ public sealed partial class EditorShell
             AssetTemplate.Script => "new_script",
             AssetTemplate.Behaviour => "new_behaviour",
             AssetTemplate.Scene => "new_scene",
+            AssetTemplate.Material => "new_material",
+            AssetTemplate.MaterialFunction => "new_function",
             _ => "new_folder",
         };
         if (ContentFolder is not { } folder || Assets.FindRoot(folder.Root) is not { } root)
@@ -108,6 +110,8 @@ public sealed partial class EditorShell
         var extension = template switch
         {
             AssetTemplate.Scene => Assets.ExtensionOf(AssetKind.Scene),
+            AssetTemplate.Material => Assets.ExtensionOf(AssetKind.Material),
+            AssetTemplate.MaterialFunction => Assets.ExtensionOf(AssetKind.MaterialFunction),
             null => "",
             _ => Assets.ExtensionOf(AssetKind.Script),
         };

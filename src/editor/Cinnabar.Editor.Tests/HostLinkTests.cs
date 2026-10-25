@@ -345,6 +345,30 @@ public sealed class HostLinkTests : IAsyncDisposable
         var resized = await editor.Next<PreviewTarget>(t => t.Generation == 1);
         Assert.Equal((64, 64), (resized.Width, resized.Height));
         editor.Link.Send(new ClosePreview(0));
+
+        // An unsaved material comes from the cache's preview area. The checker's own blob stands in for one that the
+        // cook daemon cooked there.
+        const string Checker = "f7eadea8bd278c0ae71b61b681352a82";
+        var cache = Path.Combine(RepositoryRoot(), "build", "cache", "dev");
+        var unsavedBlob = Path.Combine(cache, "preview", Checker + ".blob");
+        Directory.CreateDirectory(Path.GetDirectoryName(unsavedBlob)!);
+        File.Copy(Path.Combine(cache, Checker + ".blob"), unsavedBlob, overwrite: true);
+        try
+        {
+            editor.Link.Send(new OpenPreview(1, Convert.FromHexString(Checker), true));
+            // The plane, seen from above.
+            editor.Link.Send(new PreviewSettings(1, PreviewMesh.Plane, new byte[16], 0, 1.2f, 1.2f, 64, 64));
+            var unsaved = await editor.Next<PreviewTarget>(t => t.Id == 1);
+            using var checker = await Open(device, unsaved.Prefix);
+            var drawn = await Settle(editor, checker, unsaved);
+            var middle = Pixel(device, checker.Texture(drawn), 32, 32);
+            Assert.True(middle.R > 100, $"the plane's middle is {middle}, not the checker's red or white");
+            editor.Link.Send(new ClosePreview(1));
+        }
+        finally
+        {
+            File.Delete(unsavedBlob);
+        }
     }
 
     // Settle acknowledges a preview's frames until it stops drawing, and gives its last frame.
