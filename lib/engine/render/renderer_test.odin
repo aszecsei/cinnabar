@@ -203,6 +203,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.post.histogram,
 		&r.post.adapt,
 		&r.post.tone_lut,
+		&r.ao.depth,
 		&r.ao.gtao,
 		&r.ao.denoise,
 		&r.gi.trace,
