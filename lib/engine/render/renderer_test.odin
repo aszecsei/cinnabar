@@ -24,6 +24,7 @@ Hook_Record :: struct {
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi:           bool,
 	temporal, display:                                  bool,
+	size, output_size, scene_size:                      [2]u32,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
 	post:                                               Texture,
@@ -175,6 +176,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
 				rec.temporal, rec.display = f.post.temporal, f.display != 0
+				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
 				read(f.graph, p, f.ids)
@@ -265,6 +267,23 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		}
 	}
 	desc.quality, desc.disable = nil, {}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// At half the frame's size, the scene and the debug layer are half its size and the UI is the frame's: temporal AA
+	// upscales the scene to the frame's size, and with the other techniques it stays small for the output pass.
+	for technique in Aa_Technique {
+		q := r.quality
+		q.aa, q.render_scale = technique, 0.5
+		desc.quality = &q
+		for _ in 0 ..< 2 {
+			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		}
+		testing.expect_value(t, record.size, desc.size / 2)
+		testing.expect_value(t, record.output_size, desc.size)
+		testing.expectf(t, record.scene_size == (technique == .Taa ? desc.size : desc.size / 2), "%v: scene size %v", technique, record.scene_size)
+		testing.expect_value(t, record.temporal, technique == .Taa)
+	}
+	desc.quality = nil
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
 	// HDR output: the frame target changes its format, the output pass draws with the pipeline of that format, and the

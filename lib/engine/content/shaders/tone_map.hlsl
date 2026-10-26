@@ -8,5 +8,5 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (any(id.xy >= push.size)) {
 		return;
 	}
-	cn_rw_texture(push.output)[id.xy] = float4(tone_map(id.xy + 0.5), 1);
+	cn_rw_texture(push.output)[id.xy] = float4(tone_map((id.xy + 0.5) / float2(push.size)), 1);
 }

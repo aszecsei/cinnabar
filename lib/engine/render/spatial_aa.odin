@@ -160,7 +160,7 @@ add_spatial_aa :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	platform := f.renderer.platform
-	pf.tone_mapped = create_texture(g, {size = f.size, format = DISPLAY_FORMAT, label = "tone mapped scene"})
+	pf.tone_mapped = create_texture(g, {size = f.scene_size, format = DISPLAY_FORMAT, label = "tone mapped scene"})
 	pass := add_compute_pass(g, "tone map", run_tone_map, f)
 	read(g, pass, f.scene)
 	read(g, pass, f.lut)
@@ -169,15 +169,15 @@ add_spatial_aa :: proc(f: ^Frame) {
 	}
 	write(g, pass, pf.tone_mapped)
 
-	result := create_texture(g, {size = f.size, format = DISPLAY_FORMAT, label = "anti-aliased scene"})
+	result := create_texture(g, {size = f.scene_size, format = DISPLAY_FORMAT, label = "anti-aliased scene"})
 	#partial switch pf.spatial {
 	case .Fxaa:
 		pass = add_compute_pass(g, "fxaa", run_fxaa, f)
 		read(g, pass, pf.tone_mapped)
 		write(g, pass, result)
 	case .Smaa:
-		pf.smaa_edges = create_texture(g, {size = f.size, format = SMAA_EDGES_FORMAT, label = "smaa edges"})
-		pf.smaa_weights = create_texture(g, {size = f.size, format = SMAA_WEIGHTS_FORMAT, label = "smaa weights"})
+		pf.smaa_edges = create_texture(g, {size = f.scene_size, format = SMAA_EDGES_FORMAT, label = "smaa edges"})
+		pf.smaa_weights = create_texture(g, {size = f.scene_size, format = SMAA_WEIGHTS_FORMAT, label = "smaa weights"})
 		pass = add_render_pass(g, "smaa edges", run_smaa, new_clone(Smaa_Pass{f, .Edges}, platform.frame_allocator))
 		read(g, pass, pf.tone_mapped)
 		color(g, pass, pf.smaa_edges, .Clear)
@@ -199,10 +199,10 @@ run_tone_map :: proc(ctx: ^Pass_Context) {
 	push := output_push(f, gpu_texture(g, f.scene), f.output.mode)
 	tone_map_inputs(f, g, &push)
 	push.output = gpu.write_index(gpu_texture(g, f.post.tone_mapped))
-	push.size = f.size
+	push.size = f.scene_size
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.spatial.tone_map.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(f.scene_size, POST_GROUP_SIZE))
 }
 
 @(private = "file")
@@ -213,12 +213,12 @@ run_fxaa :: proc(ctx: ^Pass_Context) {
 		input         = gpu.read_index(gpu_texture(g, f.post.tone_mapped)),
 		output        = gpu.write_index(gpu_texture(g, f.display)),
 		sampler_index = gpu.sampler_index(f.renderer.post.sampler),
-		size          = f.size,
-		texel         = {1 / f32(f.size.x), 1 / f32(f.size.y)},
+		size          = f.scene_size,
+		texel         = {1 / f32(f.scene_size.x), 1 / f32(f.scene_size.y)},
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.spatial.fxaa.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(f.scene_size, POST_GROUP_SIZE))
 }
 
 @(private = "file")
@@ -233,7 +233,7 @@ run_smaa :: proc(ctx: ^Pass_Context) {
 		search         = gpu.read_index(s.smaa_search),
 		linear_sampler = gpu.sampler_index(f.renderer.post.sampler),
 		point_sampler  = gpu.sampler_index(s.point_sampler),
-		metrics        = {1 / f32(f.size.x), 1 / f32(f.size.y), f32(f.size.x), f32(f.size.y)},
+		metrics        = {1 / f32(f.scene_size.x), 1 / f32(f.scene_size.y), f32(f.scene_size.x), f32(f.scene_size.y)},
 	}
 	pipeline: gpu.Pipeline
 	switch pass.step {

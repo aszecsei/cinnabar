@@ -294,6 +294,7 @@ Pipelines :: struct {
 // Frame is what the pass procedures need. It lives in frame memory.
 Frame :: struct {
 	state:          ^Game_State,
+	// The scene's size, at the quality's render scale, which before_world takes from the renderer's frame.
 	size:           [2]u32,
 	view:           render.View,
 	pass_constants: gpu.Upload,
@@ -442,6 +443,8 @@ register_post_effects :: proc(s: ^Game_State) {
 Lens_Pass :: struct {
 	frame:  ^Frame,
 	lens:   Lens,
+	// The scene's size there, which temporal AA may have upscaled.
+	size:   [2]u32,
 	input:  render.Texture,
 	output: render.Texture,
 }
@@ -456,8 +459,9 @@ add_lens :: proc(f: ^render.Frame, settings: rawptr) {
 	pass^ = {
 		frame  = frame,
 		lens   = (^Lens)(settings)^,
+		size   = f.scene_size,
 		input  = f.scene,
-		output = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "lens"}),
+		output = render.create_texture(g, {size = f.scene_size, format = render.SCENE_FORMAT, label = "lens"}),
 	}
 	p := render.add_compute_pass(g, "lens", run_lens, pass)
 	render.read(g, p, pass.input)
@@ -471,11 +475,11 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 	constants := Lens_Constants {
 		input      = gpu.read_index(render.gpu_texture(g, pass.input)),
 		output     = gpu.write_index(render.gpu_texture(g, pass.output)),
-		size       = pass.frame.size,
+		size       = pass.size,
 		aberration = pass.lens.chromatic_aberration.value,
 		vignette   = pass.lens.vignette.value,
 	}
-	groups := (pass.frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
+	groups := (pass.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
 	gpu.cmd_set_pipeline(cb, pass.frame.state.pipelines.lens.pipeline)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
@@ -697,6 +701,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 // amplification shaders, so only the vertex fallback has the compute passes.
 before_world :: proc(f: ^render.Frame) {
 	frame := (^Frame)(f.data)
+	frame.size = f.size
 	s := frame.state
 	g := f.graph
 	// The large triangles show the rings once they are streamed in.
@@ -782,7 +787,12 @@ draw_hud :: proc(ctx: ^render.Pass_Context) {
 // draw_editor_tools adds the editor's pick and its outline and gizmo, which draw into the debug layer.
 draw_editor_tools :: proc(f: ^render.Frame) {
 	s := (^Frame)(f.data).state
-	editor.add_viewport_passes(&s.editor, f.graph, &s.world, {view = f.view, size = f.size, target = f.debug, ids = f.ids, depth = f.depth})
+	editor.add_viewport_passes(
+		&s.editor,
+		f.graph,
+		&s.world,
+		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
+	)
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
@@ -1032,10 +1042,14 @@ update_output :: proc(s: ^Game_State) {
 	}
 }
 
+// The render scales that Ctrl+Shift+F9 cycles through, from the largest.
+@(rodata)
+RENDER_SCALES := [?]f32{1, 0.75, 2.0 / 3, 0.5}
+
 // update_quality changes the render quality, as a game's settings menu would, and saves it to the user's settings
 // file, from which update_output reads it back (see docs/rendering/quality.md#quality): F9 takes the next preset,
-// Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, and Alt+F9 the next
-// anti-aliasing technique.
+// Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Alt+F9 the next
+// anti-aliasing technique, and Ctrl+Shift+F9 the next render scale of RENDER_SCALES.
 update_quality :: proc(s: ^Game_State) {
 	input := s.platform.input()
 	if .F9 not_in input.pressed {
@@ -1043,9 +1057,20 @@ update_quality :: proc(s: ^Game_State) {
 	}
 	caps := s.renderer.caps
 	q := s.renderer.quality
-	if .Left_Shift in input.down || .Right_Shift in input.down {
+	shift := .Left_Shift in input.down || .Right_Shift in input.down
+	control := .Left_Control in input.down || .Right_Control in input.down
+	if shift && control {
+		next := 0
+		for scale, i in RENDER_SCALES {
+			if q.render_scale >= scale {
+				next = (i + 1) % len(RENDER_SCALES)
+				break
+			}
+		}
+		q.render_scale = RENDER_SCALES[next]
+	} else if shift {
 		q.shadows.ray_traced = !q.shadows.ray_traced
-	} else if .Left_Control in input.down || .Right_Control in input.down {
+	} else if control {
 		q.ao.technique = q.ao.technique >= max(render.Ao_Technique) ? .Off : render.Ao_Technique(int(q.ao.technique) + 1)
 	} else if .Left_Alt in input.down || .Right_Alt in input.down {
 		q.aa = q.aa >= max(render.Aa_Technique) ? .Off : render.Aa_Technique(int(q.aa) + 1)
@@ -1057,11 +1082,12 @@ update_quality :: proc(s: ^Game_State) {
 	render.set_quality(&s.renderer, q)
 	q = s.renderer.quality
 	log.infof(
-		"mygame: quality %v, traced shadows %v, ambient occlusion %v, anti-aliasing %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Alt+F9 the next anti-aliasing)",
+		"mygame: quality %v, traced shadows %v, ambient occlusion %v, anti-aliasing %v, render scale %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Alt+F9 the next anti-aliasing, Ctrl+Shift+F9 the next render scale)",
 		render.quality_preset(q, caps),
 		q.shadows.ray_traced,
 		q.ao.technique,
 		q.aa,
+		q.render_scale,
 	)
 	project.save_quality(s.platform, PROJECT_SETTINGS, q, caps)
 }

@@ -69,14 +69,18 @@ Gi_Quality :: struct {
 	level:     Quality_Level,
 }
 
-// Quality is plain data, so it lives in Game_State and a code reload keeps it. Its zero value is the cheapest frame,
-// with every feature that can be off off; preset_quality and default_quality give the others.
+// Quality is plain data, so it lives in Game_State and a code reload keeps it. Its zero value is the cheapest frame
+// at full resolution, with every feature that can be off off; preset_quality and default_quality give the others.
 Quality :: struct {
-	shadows: Shadow_Quality,
-	ao:      Ao_Quality,
-	gi:      Gi_Quality,
-	fog:     Quality_Level,
-	aa:      Aa_Technique,
+	shadows:      Shadow_Quality,
+	ao:           Ao_Quality,
+	gi:           Gi_Quality,
+	fog:          Quality_Level,
+	aa:           Aa_Technique,
+	// The share of the frame's width and height that the scene renders at, from MIN_RENDER_SCALE to 1, 0 giving 1.
+	// Temporal AA upscales the scene to the frame's size (see docs/rendering/anti-aliasing.md#upscaling); with the
+	// other techniques, the output pass stretches it.
+	render_scale: f32,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
@@ -86,6 +90,9 @@ Caps :: struct {
 	// The adapter's own memory in bytes, 0 when unknown.
 	video_memory: u64,
 }
+
+// The smallest render scale: below half, temporal AA has too few samples a pixel to upscale from.
+MIN_RENDER_SCALE :: 0.5
 
 // The video memory below which default_quality picks each preset. Unknown memory picks High.
 QUALITY_LOW_MEMORY :: 4 << 30
@@ -114,6 +121,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		gi = {technique = .Screen_Cascades, level = level},
 		fog = level,
 		aa = .Taa,
+		render_scale = 1,
 	}
 }
 
@@ -157,7 +165,17 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.gi.level = clamp_enum(q.gi.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
 	q.aa = clamp_enum(q.aa, .Off)
+	// Not a number, or 0, is full resolution.
+	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
 	return q
+}
+
+// render_size is the scene's size for a frame's size at a render scale, at least a pixel on each side.
+render_size :: proc(size: [2]u32, scale: f32) -> [2]u32 {
+	if scale >= 1 {
+		return size
+	}
+	return {max(u32(f32(size.x) * scale + 0.5), 1), max(u32(f32(size.y) * scale + 0.5), 1)}
 }
 
 // set_quality makes a quality the renderer's from the next frame on, as far as the device can do it.

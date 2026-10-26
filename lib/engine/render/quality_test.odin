@@ -40,7 +40,15 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	bad.shadows.level = Quality_Level(200)
 	bad.ao.technique = Ao_Technique(200)
 	bad.aa = Aa_Technique(200)
+	bad.render_scale = 0.1
 	clamped := clamp_quality(bad, {})
+	testing.expect_value(t, clamped.render_scale, MIN_RENDER_SCALE)
+	// 0 is full resolution, as is anything that is not a number.
+	bad.render_scale = 0
+	testing.expect_value(t, clamp_quality(bad, {}).render_scale, 1)
+	nan := f32(0)
+	bad.render_scale = nan / nan
+	testing.expect_value(t, clamp_quality(bad, {}).render_scale, 1)
 	testing.expect_value(t, clamped.shadows.level, Quality_Level.High)
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
@@ -71,4 +79,12 @@ a_quality_that_differs_from_every_preset_is_custom :: proc(t: ^testing.T) {
 	q := preset_quality(.High, caps)
 	q.ao.level = .Low
 	testing.expect_value(t, quality_preset(q, caps), Quality_Preset.Custom)
+}
+
+@(test)
+the_render_size_is_the_frames_at_the_render_scale :: proc(t: ^testing.T) {
+	testing.expect_value(t, render_size({1280, 720}, 1), [2]u32{1280, 720})
+	testing.expect_value(t, render_size({1280, 720}, 0.5), [2]u32{640, 360})
+	testing.expect_value(t, render_size({1280, 720}, 0.67), [2]u32{858, 482})
+	testing.expect_value(t, render_size({1, 1}, 0.5), [2]u32{1, 1})
 }

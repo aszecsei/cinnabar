@@ -138,3 +138,15 @@ icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 		testing.expect(t, icon.entity != sun)
 	}
 }
+
+@(test)
+a_pick_covers_the_scenes_pixels_under_it :: proc(t: ^testing.T) {
+	frame := Viewport_Frame{size = {640, 360}, output_size = {1280, 720}}
+	// A click at a pixel picks the scene's pixel under it.
+	testing.expect_value(t, scale_pick({id = 3, x = 101, y = 51, width = 1, height = 1}, frame), link.Pick_Request{id = 3, x = 50, y = 25, width = 1, height = 1})
+	// A box covers every scene pixel that it touches.
+	testing.expect_value(t, scale_pick({x = 101, y = 50, width = 4, height = 2}, frame), link.Pick_Request{x = 50, y = 25, width = 3, height = 1})
+	// At the frame's size, the pick is as it was.
+	same := Viewport_Frame{size = {1280, 720}, output_size = {1280, 720}}
+	testing.expect_value(t, scale_pick({x = 7, y = 9, width = 1, height = 1}, same), link.Pick_Request{x = 7, y = 9, width = 1, height = 1})
+}

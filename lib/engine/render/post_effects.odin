@@ -121,7 +121,7 @@ add_bloom_composite :: proc(f: ^Frame) {
 	g := f.graph
 	pf := f.post
 	pf.composite_in = f.scene
-	pf.composite_out = create_texture(g, {size = f.size, format = SCENE_FORMAT, label = "bloom composite"})
+	pf.composite_out = create_texture(g, {size = f.scene_size, format = SCENE_FORMAT, label = "bloom composite"})
 	pass := add_compute_pass(g, "bloom composite", run_bloom_composite, f)
 	read(g, pass, f.scene)
 	read(g, pass, f.bloom)
@@ -140,12 +140,12 @@ run_bloom_composite :: proc(ctx: ^Pass_Context) {
 		base          = gpu.read_index(gpu_texture(g, pf.composite_bloom)),
 		output        = gpu.write_index(gpu_texture(g, pf.composite_out)),
 		sampler_index = gpu.sampler_index(f.renderer.post.sampler),
-		size          = f.size,
+		size          = f.scene_size,
 		mode          = BLOOM_COMPOSITE,
 		scene_scale   = pf.composite_scales[0],
 		bloom_scale   = pf.composite_scales[1],
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.bloom.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(f.scene_size, POST_GROUP_SIZE))
 }

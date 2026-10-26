@@ -81,10 +81,16 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 
 	s: Settings
 	problems := make([dynamic]string, context.temp_allocator)
-	parse("quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\n", &s, &problems)
-	testing.expect_value(t, len(problems), 1)
+	parse(
+		"quality.preset = Low\nquality.ao = Off\nquality.shadows.ray_traced = true\nquality.fog = Loud\nquality.render_scale = 0.75\nquality.render_scale = half\n",
+		&s,
+		&problems,
+	)
+	testing.expect_value(t, len(problems), 2)
 	testing.expect_value(t, problems[0], `4: quality.fog takes Low, Medium, High, Ultra, not "Loud"`)
+	testing.expect_value(t, problems[1], `6: quality.render_scale takes a number from 0.5 to 1, not "half"`)
 	q := quality(s, caps)
+	testing.expect_value(t, q.render_scale, 0.75)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
 	testing.expect(t, q.shadows.ray_traced)
 	testing.expect_value(t, q.ao.technique, render.Ao_Technique.Off)

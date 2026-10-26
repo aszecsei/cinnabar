@@ -159,7 +159,14 @@ Frame :: struct {
 	graph:                    ^Graph,
 	data:                     rawptr,
 	view:                     View,
+	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
+	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
 	size:                     [2]u32,
+	// The frame's size, which the frame target and the UI have.
+	output_size:              [2]u32,
+	// The size of Frame.scene: size, until temporal AA upscales it to output_size. The post passes after temporal AA,
+	// and a game's post effects there, take it.
+	scene_size:               [2]u32,
 	debug_view:               Debug_View,
 	// The directional lights' cascades (see Shadows).
 	shadow_settings:          Shadow_Settings,
@@ -257,7 +264,8 @@ Output_Push :: struct {
 	raw:           u32,
 	// The scene is Frame.display, tone mapped already.
 	tone_mapped:   u32,
-	// The tone map pass's target and its size.
+	// The tone map pass's target. size is the pass's target's size, which the scene and the debug layer are stretched
+	// to when theirs is smaller.
 	output:        u32,
 	size:          [2]u32,
 }
@@ -342,27 +350,31 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
+	quality := desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality
+	size := render_size(desc.size, quality.render_scale)
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
 		renderer        = r,
 		graph           = &g,
 		data            = desc.hooks.data,
 		view            = desc.view,
-		size            = desc.size,
+		size            = size,
+		output_size     = desc.size,
+		scene_size      = size,
 		output          = output,
-		view_projection = view_projection(desc.view, f32(desc.size.x) / f32(max(desc.size.y, 1))),
+		view_projection = view_projection(desc.view, f32(size.x) / f32(max(size.y, 1))),
 		hooks           = desc.hooks,
 		scene_scale     = 1,
 		debug_view      = desc.debug_view,
 	}
 	target := import_texture(&g, r.platform.gpu_frame_target(), .Color)
-	f.scene = create_texture(&g, {size = desc.size, format = SCENE_FORMAT, label = "scene"})
-	f.ids = create_texture(&g, {size = desc.size, format = ID_FORMAT, label = "entity ids"})
-	f.depth = create_texture(&g, {size = desc.size, format = DEPTH_FORMAT, label = "scene depth"})
-	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
-	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
+	f.scene = create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
+	f.ids = create_texture(&g, {size = size, format = ID_FORMAT, label = "entity ids"})
+	f.depth = create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
+	f.normals = create_texture(&g, {size = size, format = NORMAL_FORMAT, label = "scene normals"})
+	f.velocity = create_texture(&g, {size = size, format = VELOCITY_FORMAT, label = "scene velocity"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
-	apply_quality(&settings, desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality)
+	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
 	begin_post(f, settings.post)
 	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit
@@ -444,7 +456,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 
 	if has_debug {
-		f.debug = create_texture(&g, {size = desc.size, format = DEBUG_FORMAT, label = "debug"})
+		f.debug = create_texture(&g, {size = size, format = DEBUG_FORMAT, label = "debug"})
 		upload_debug_lines(f, lines)
 		p = add_render_pass(&g, "debug", draw_debug_lines, f)
 		color(&g, p, f.debug, .Clear)
@@ -652,6 +664,7 @@ tone_map_inputs :: proc(f: ^Frame, g: ^Graph, push: ^Output_Push) {
 output_push :: proc(f: ^Frame, scene: gpu.Texture, mode: gpu.Output_Mode) -> Output_Push {
 	r := f.renderer
 	return {
+		size          = f.output_size,
 		scene         = gpu.read_index(scene),
 		lut           = gpu.read_index(r.post.lut),
 		has_lut       = u32(r.post.lut_baked),

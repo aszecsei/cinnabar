@@ -28,22 +28,21 @@ struct Push {
 	uint raw;
 	// The output pass's scene is tone mapped already, as tone_map gives it.
 	uint tone_mapped;
-	// The tone map pass's target and its size.
+	// The tone map pass's target. size is the pass's target's size: a scene or a debug layer that is smaller, at a
+	// render scale below 1, is stretched to it bilinearly.
 	uint output;
 	uint2 size;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// tone_map is the display color of the scene at a pixel's center: with bloom added, through the lookup table into
-// sRGB-encoded colors. In HDR, they are sRGB-encoded relative to paper white, so the scene's go above 1.
-float3 tone_map(float2 position) {
-	Texture2D<float4> scene = cn_texture(push.scene);
+// tone_map is the display color of the scene at a point in UV: with bloom added, through the lookup table into
+// sRGB-encoded colors. In HDR, they are sRGB-encoded relative to paper white, so the scene's go above 1. At a pixel's
+// center in a scene of the target's size, the bilinear sample is that pixel.
+float3 tone_map(float2 uv) {
 	SamplerState linear_clamp = cn_sampler(push.sampler_index);
-	float3 hdr = max(scene.Load(int3(position, 0)).rgb, 0) * push.scene_scale;
+	float3 hdr = max(cn_texture(push.scene).SampleLevel(linear_clamp, uv, 0).rgb, 0) * push.scene_scale;
 	if (push.has_bloom != 0) {
-		float2 size;
-		scene.GetDimensions(size.x, size.y);
-		hdr += cn_texture(push.bloom).SampleLevel(linear_clamp, position / size, 0).rgb * push.bloom_scale;
+		hdr += cn_texture(push.bloom).SampleLevel(linear_clamp, uv, 0).rgb * push.bloom_scale;
 	}
 	// Until the table is baked, a plain roll-off to white.
 	float3 color = encode_srgb(hdr / (1 + hdr));

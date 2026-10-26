@@ -6,6 +6,7 @@ package project
 import "core:fmt"
 import "core:log"
 import "core:reflect"
+import "core:strconv"
 import "core:strings"
 
 import "cinnabar:core"
@@ -39,6 +40,7 @@ Quality_Key :: enum u8 {
 	Gi_Level,
 	Fog,
 	Aa,
+	Render_Scale,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
@@ -54,6 +56,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Gi_Level           = "quality.gi.level",
 	.Fog                = "quality.fog",
 	.Aa                 = "quality.aa",
+	.Render_Scale       = "quality.render_scale",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -144,6 +147,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				ok = enum_value(problems, line, key, value, &q.fog)
 			case .Aa:
 				ok = enum_value(problems, line, key, value, &q.aa)
+			case .Render_Scale:
+				scale: f32
+				scale, ok = strconv.parse_f32(value)
+				if ok {
+					q.render_scale = scale
+				} else {
+					problem(problems, line, "%s takes a number from %v to 1, not %q", key, render.MIN_RENDER_SCALE, value)
+				}
 			}
 			if ok {
 				settings.quality_given += {k}
@@ -171,6 +182,7 @@ quality :: proc(settings: Settings, caps: render.Caps) -> render.Quality {
 	if .Gi_Level in given {q.gi.level = s.gi.level}
 	if .Fog in given {q.fog = s.fog}
 	if .Aa in given {q.aa = s.aa}
+	if .Render_Scale in given {q.render_scale = s.render_scale}
 	return render.clamp_quality(q, caps)
 }
 
@@ -190,6 +202,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Gi_Level           = name(q.gi.level),
 		.Fog                = name(q.fog),
 		.Aa                 = name(q.aa),
+		.Render_Scale       = fmt.tprintf("%v", q.render_scale),
 	}
 	return
 }

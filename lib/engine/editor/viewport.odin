@@ -65,8 +65,11 @@ Viewport :: struct {
 
 // Viewport_Frame is what the game drew that the tools draw on and pick from.
 Viewport_Frame :: struct {
-	view:   render.View,
-	size:   [2]u32,
+	view:        render.View,
+	// The scene's size, which the debug layer, the IDs and the depth have, and the frame's, which the editor's picks
+	// are in. The scene's is smaller at a render scale below 1 (see docs/rendering/anti-aliasing.md#upscaling).
+	size:        [2]u32,
+	output_size: [2]u32,
 	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering/layers-and-output.md#debug).
 	target: render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
@@ -151,7 +154,7 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	words := (slots + 31) / 32
 
 	if len(v.picks) > 0 && !v.picking {
-		request := v.picks[0]
+		request := scale_pick(v.picks[0], frame)
 		size := u32(PICK_HEADER) + words * 4
 		zeros, ok := platform.gpu_upload(int(size), 4)
 		if ok {
@@ -220,6 +223,22 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		render.read(g, p, frame.ids)
 		render.read(g, p, frame.depth)
 	}
+}
+
+// scale_pick is a pick in the frame's pixels in the scene's, which are larger at a render scale below 1: the scene's
+// pixels that the request's cover, at least one.
+@(private)
+scale_pick :: proc(request: link.Pick_Request, frame: Viewport_Frame) -> link.Pick_Request {
+	if frame.output_size == frame.size || frame.output_size.x == 0 || frame.output_size.y == 0 {
+		return request
+	}
+	scale := [2]f32{f32(frame.size.x) / f32(frame.output_size.x), f32(frame.size.y) / f32(frame.output_size.y)}
+	r := request
+	r.x = i32(f32(request.x) * scale.x)
+	r.y = i32(f32(request.y) * scale.y)
+	r.width = max(i32(math.ceil(f32(request.x + max(request.width, 1)) * scale.x)) - r.x, 1)
+	r.height = max(i32(math.ceil(f32(request.y + max(request.height, 1)) * scale.y)) - r.y, 1)
+	return r
 }
 
 // Matches Push in shaders/pick.hlsl.
