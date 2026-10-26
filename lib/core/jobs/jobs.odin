@@ -6,11 +6,14 @@
 package jobs
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 import "core:mem/virtual"
 import "core:os"
 import "core:sync"
 import "core:thread"
+
+import "cinnabar:core/profile"
 
 FIBER_COUNT :: 128
 // Reserved per fiber. Only the touched pages are committed.
@@ -48,9 +51,13 @@ Fiber :: struct {
 	job:        Job,
 	counter:    ^Counter,
 	background: bool,
+	// The zone that started the job, which names the job's zone.
+	parent:     profile.Name,
 	next:       ^Fiber,
 	// The job's scratch memory, in context.temp_allocator. It moves with the fiber between threads.
 	scratch:    virtual.Arena,
+	// The open zones move with the fiber too.
+	zones:      profile.Fiber_Zones,
 }
 
 @(private)
@@ -79,6 +86,7 @@ Pending :: struct {
 	job:        Job,
 	counter:    ^Counter,
 	background: bool,
+	parent:     profile.Name,
 }
 
 @(private)
@@ -124,7 +132,10 @@ init :: proc(worker_count := 0) -> bool {
 	main.current = &state.main_fiber
 	main.scheduler = _fiber_create(FIBER_STACK_SIZE, FIBER_STACK_COMMIT, main_scheduler, nil)
 	local_worker = main
-	for &f in state.fibers {
+	profile.init_fiber(&state.main_fiber.zones, FIBER_COUNT)
+	profile.set_fiber(&state.main_fiber.zones)
+	for &f, i in state.fibers {
+		profile.init_fiber(&f.zones, i)
 		f.handle = _fiber_create(FIBER_STACK_SIZE, FIBER_STACK_COMMIT, fiber_main, &f)
 		if f.handle == nil || main.scheduler == nil {
 			log.error("jobs: cannot create fibers")
@@ -160,6 +171,7 @@ shutdown :: proc() {
 	_fiber_delete(state.workers[0].scheduler)
 	_fiber_to_thread()
 	local_worker = nil
+	profile.set_fiber(nil)
 	delete(state.workers)
 	delete(state.fibers)
 	delete(state.free)
@@ -192,9 +204,11 @@ wait :: proc(counter: ^Counter) {
 	}
 	w := current_worker()
 	assert(w != nil, "jobs: wait outside the job system")
+	profile.fiber_suspend()
 	w.action = .Wait
 	w.wait_for = counter
 	_fiber_switch(w.scheduler)
+	profile.fiber_resume()
 }
 
 // lock takes the mutex. If another fiber holds it, the calling fiber suspends until the holder hands it over.
@@ -204,9 +218,11 @@ lock :: proc(m: ^Mutex) {
 	}
 	w := current_worker()
 	assert(w != nil, "jobs: lock outside the job system")
+	profile.fiber_suspend()
 	w.action = .Lock
 	w.lock_for = m
 	_fiber_switch(w.scheduler)
+	profile.fiber_resume()
 	// The unlocking fiber handed the mutex to this one, so it is held now.
 }
 
@@ -246,9 +262,10 @@ push :: proc(jobs: []Job, counter: ^Counter, background: bool) {
 		return
 	}
 	sync.atomic_add(&counter.value, len(jobs))
+	parent := profile.current_name()
 	sync.guard(&state.mutex)
 	for job in jobs {
-		append(&state.queue, Pending{job, counter, background})
+		append(&state.queue, Pending{job, counter, background, parent})
 	}
 	if len(jobs) == 1 {
 		sync.cond_signal(&state.cond)
@@ -271,7 +288,10 @@ fiber_main :: proc "system" (param: rawptr) {
 	for {
 		virtual.arena_free_all(&f.scratch)
 		context.temp_allocator = virtual.arena_allocator(&f.scratch)
+		profile.job_begin(f.parent)
 		f.job.procedure(f.job.data)
+		// Before the job counts as finished, so the frame boundary that the finish lets through sees the job's zones.
+		profile.job_end()
 		// The frame count goes first, so a fiber that the job's counter resumes never sees a finished job as running.
 		if !f.background {
 			finish(&state.frame_jobs)
@@ -321,6 +341,8 @@ make_ready :: proc(f: ^Fiber) {
 worker_main :: proc(data: rawptr) {
 	w := (^Worker)(data)
 	local_worker = w
+	name: [32]byte
+	profile.name_thread(fmt.bprintf(name[:], "Worker %d", (uintptr(w) - uintptr(&state.workers[0])) / size_of(Worker)))
 	w.scheduler = _thread_to_fiber(nil)
 	schedule(w, false)
 	_fiber_to_thread()
@@ -359,7 +381,7 @@ schedule :: proc(w: ^Worker, main: bool) {
 					state.queue_head = 0
 				}
 				next = pop(&state.free)
-				next.job, next.counter, next.background = pending.job, pending.counter, pending.background
+				next.job, next.counter, next.background, next.parent = pending.job, pending.counter, pending.background, pending.parent
 			case:
 				sync.cond_wait(&state.cond, &state.mutex)
 			}
@@ -371,7 +393,9 @@ schedule :: proc(w: ^Worker, main: bool) {
 		sync.unlock(&state.mutex)
 
 		w.current = next
+		profile.set_fiber(&next.zones)
 		_fiber_switch(next.handle)
+		profile.set_fiber(nil)
 		after_switch(w)
 	}
 }

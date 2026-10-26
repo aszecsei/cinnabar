@@ -136,7 +136,9 @@ run_waiter :: proc(r: ^Runtime, index: int, nargs: c.int = 0) -> luau.Status {
 	saved_current, saved_pending := r.current_waiter, r.pending_wait
 	r.current_waiter, r.pending_wait = index, {}
 	w.running = true
+	zone := begin_callback(r, waiter_class(r, w), .Coroutine)
 	status := resume_state(r, w.state, nargs)
+	end_callback(r, zone)
 	w.running = false
 	pending := r.pending_wait
 	r.current_waiter, r.pending_wait = saved_current, saved_pending
@@ -331,7 +333,10 @@ run_coroutines :: proc(r: ^Runtime) {
 			}
 		case .Until:
 			luau.getref(r.L, w.wait.predicate)
-			if !protected_call(r, r.L, 0, 1) {
+			zone := begin_callback(r, waiter_class(r, &w), .Coroutine)
+			called := protected_call(r, r.L, 0, 1)
+			end_callback(r, zone)
+			if !called {
 				free_waiter(r, i)
 				continue
 			}

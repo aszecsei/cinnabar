@@ -12,6 +12,7 @@ import "core:thread"
 import "core:time"
 
 import "cinnabar:core"
+import "cinnabar:core/profile"
 import "cinnabar:engine/editor/link"
 
 // While the editor is slow to read, log lines beyond this much unsent data are dropped and counted.
@@ -50,6 +51,8 @@ Link :: struct {
 	console:           log.Logger,
 	// The frames since the last Host_Stats.
 	stats:             Frame_Stats,
+	// The editor's capture requests that wait for their frames.
+	captures:          [dynamic]Pending_Capture,
 }
 
 // Frame_Stats adds up the frames of an interval.
@@ -88,6 +91,7 @@ link_start :: proc(l: ^Link, port: int, game: string) -> bool {
 	l.inbox = make([dynamic]Incoming, runtime.heap_allocator())
 	l.outbox = make([dynamic]byte, runtime.heap_allocator())
 	l.game_out = make([dynamic]byte, runtime.heap_allocator())
+	l.captures = make([dynamic]Pending_Capture, runtime.heap_allocator())
 	l.sent_generation = -1
 	l.game = game
 	l.console = context.logger
@@ -115,6 +119,7 @@ link_stop :: proc(l: ^Link) {
 	l.acceptor = nil
 	virtual.arena_destroy(&l.decode_arena)
 	delete(l.game_out)
+	delete(l.captures)
 }
 
 // link_logger logs to the editor while one is linked, and to the console otherwise.
@@ -201,6 +206,8 @@ send_stats :: proc(l: ^Link) {
 	frames := max(s.frames, 1)
 	gpu := core.gpu_stats()
 	permanent, frame_max := core.memory_stats()
+	// Right before the Host_Stats of the same interval, which the editor pairs it with.
+	link_send(l, profile_summary(context.temp_allocator))
 	link_send(
 		l,
 		link.Host_Stats {
@@ -231,6 +238,7 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 	if l.acceptor == nil {
 		return
 	}
+	profile.zone_text("Editor link", .Editor)
 	sync.lock(&l.mutex)
 	incoming := l.inbox
 	l.inbox = make([dynamic]Incoming, runtime.heap_allocator())
@@ -245,6 +253,8 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 		core.pace_shared_frames(false)
 		// Keys that the editor held stay down otherwise.
 		core.queue_input({{kind = .Release_All}})
+		clear(&l.captures)
+		profile.set_recording(true)
 		log.info("host: the editor disconnected")
 	}
 	arena := virtual.arena_allocator(&l.decode_arena)
@@ -293,6 +303,7 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 		log.warnf("host: editor link: dropped %d log lines while the editor was slow to read", dropped)
 	}
 	if l.linked {
+		send_captures(l)
 		send_stats(l)
 	}
 }
@@ -302,9 +313,9 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Editor_Input):
+	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording):
 		return true
-	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats):
+	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats), link.kind_of(link.Profile_Summary), link.kind_of(link.Profile_Capture):
 		// Only the host sends these, so handle_message reports them.
 		return true
 	}
@@ -350,7 +361,15 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 			}
 			core.queue_input(events)
 		}
-	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats:
+	case link.Profile_Capture_Request:
+		if l.linked {
+			request_capture(l, m)
+		}
+	case link.Profile_Recording:
+		if l.linked {
+			profile.set_recording(m.recording)
+		}
+	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats, link.Profile_Summary, link.Profile_Capture:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
 	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Viewport_Settings:
 		// is_host_message sends these to the game.

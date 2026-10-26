@@ -4,6 +4,7 @@ import "core:log"
 import "core:time"
 
 import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
 
 MAX_SYSTEMS :: 256
 MAX_SYSTEM_ACCESS :: 32
@@ -87,6 +88,8 @@ Schedule :: struct {
 @(private)
 System :: struct {
 	name:         string,
+	// Interned from name, so it stays valid across reloads.
+	profile_name: profile.Name,
 	procedure:    System_Proc,
 	stage:        Stage,
 	query:        Query,
@@ -114,6 +117,7 @@ register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 	}
 	sys := System {
 		name         = desc.name,
+		profile_name = profile.name(&w.platform.profile, desc.name, .System),
 		procedure    = desc.procedure,
 		stage        = desc.stage,
 		batch_chunks = desc.batch_chunks > 0 ? desc.batch_chunks : DEFAULT_BATCH_CHUNKS,
@@ -151,6 +155,7 @@ register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 // Each tick copies Transform to Previous_Transform, runs the Fixed systems, applies their commands and propagates
 // transforms. It returns the number of ticks.
 run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> (ticks: int) {
+	profile.scope_text(&w.platform.profile, "ECS Fixed", .Frame)
 	c := &w.clock
 	c.time += dt
 	for tick_start(c, c.tick + 1) <= c.time {
@@ -173,6 +178,7 @@ run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> (ticks: int) {
 // run_stage runs the Update or Late systems and applies their commands. After Late, it propagates transforms.
 run_stage :: proc(w: ^World, stage: Stage, dt: time.Duration, user: rawptr) {
 	assert(stage != .Fixed, "ecs: run the Fixed stage with run_fixed")
+	profile.scope_text(&w.platform.profile, "ECS Update" if stage == .Update else "ECS Late", .Frame)
 	run_systems(w, stage, f32(time.duration_seconds(dt)), user, false)
 	if stage == .Late {
 		propagate(w)
@@ -259,6 +265,7 @@ Driver :: struct {
 @(private = "file")
 Batch :: struct {
 	procedure: System_Proc,
+	name:      profile.Name,
 	ctx:       System_Context,
 	commands:  Commands,
 }
@@ -297,7 +304,8 @@ run_systems :: proc(w: ^World, stage: Stage, dt: f32, user: rawptr, first_tick: 
 		for &b, i in d.batches {
 			b = {
 				procedure = sys.procedure,
-				commands = commands(allocator),
+				name      = sys.profile_name,
+				commands  = commands(allocator),
 			}
 			b.ctx = {
 				world       = w,
@@ -350,6 +358,7 @@ run_driver :: proc(data: rawptr) {
 @(private = "file")
 run_batch :: proc(data: rawptr) {
 	b := (^Batch)(data)
+	profile.scope(&b.ctx.world.platform.profile, b.name)
 	b.procedure(&b.ctx)
 }
 

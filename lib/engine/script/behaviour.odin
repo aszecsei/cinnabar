@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:log"
 
 import "cinnabar:core/luau"
+import "cinnabar:core/profile"
 import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
 
@@ -57,6 +58,8 @@ Instance :: struct {
 	// Odd while the slot is live, so a stale handle never matches.
 	generation: u32,
 	flags:      Instance_Flags,
+	// The class's name for the profiler.
+	profile_class: profile.Name,
 }
 
 @(private)
@@ -276,10 +279,11 @@ attach :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, class_idx, values_idx
 
 	i := &r.instances[slot]
 	i^ = {
-		entity     = e,
-		category   = category,
-		generation = i.generation + 1,
-		flags      = {.Live},
+		entity        = e,
+		category      = category,
+		generation    = i.generation + 1,
+		flags         = {.Live},
+		profile_class = profile.name(&r.platform.profile, class_name(r, L, class), .Script),
 	}
 	push_instance_key(L)
 	luau.pushinteger64(L, i64(u64(i.generation) << 32 | u64(slot)))
@@ -540,7 +544,9 @@ call_method :: proc(r: ^Runtime, h: Instance_Handle, name: cstring, nargs: c.int
 	luau.insert(L, -2 - nargs)
 	luau.insert(L, -1 - nargs)
 	previous := set_category(r, L, i.category)
+	zone := begin_callback(r, i.profile_class, callback_kind(name))
 	protected_call(r, L, nargs + 1, 0)
+	end_callback(r, zone)
 	set_category(r, L, previous)
 }
 

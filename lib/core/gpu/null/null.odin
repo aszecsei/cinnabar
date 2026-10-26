@@ -8,10 +8,23 @@ import "core:sync"
 import "core:time"
 
 import "cinnabar:core/gpu"
+import "cinnabar:core/profile"
 
 // Stands in for vsync, so a host on this backend does not spin.
 FRAME_TIME :: time.Second / 60
 UPLOAD_RING_SIZE :: 4 * mem.Megabyte
+// The fake GPU time of a packet, which times the timed markers.
+PACKET_TIME :: 1000
+// A frame's GPU spans reach the profiler this many frames later, as on a real backend.
+FRAMES_IN_FLIGHT :: 2
+
+// Null_Frame is a frame's fake GPU spans, until begin_frame gives them to the profiler.
+@(private = "file")
+Null_Frame :: struct {
+	frame:      u64,
+	begin, end: u64,
+	spans:      [dynamic]profile.Gpu_Span,
+}
 
 @(private = "file")
 Pipeline_Entry :: struct {
@@ -51,6 +64,11 @@ state: struct {
 	transfers:     u64,
 	// The memory of each Readback buffer. Nothing copies into it, so it stays zero.
 	readbacks:     map[gpu.Buffer][]byte,
+	// A fake clock for each queue, in nanoseconds from the frame's start, and the frames in flight.
+	clock:         [gpu.Queue]u64,
+	frames:        [FRAMES_IN_FLIGHT]Null_Frame,
+	frame_index:   int,
+	timing_mutex:  sync.Mutex,
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
@@ -81,6 +99,9 @@ shutdown :: proc() {
 		delete(memory)
 	}
 	delete(state.readbacks)
+	for f in state.frames {
+		delete(f.spans)
+	}
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
 	gpu.pool_destroy(&state.samplers)
@@ -171,6 +192,16 @@ begin_frame :: proc(size: [2]i32) {
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
 	state.upload_peak = max(state.upload_peak, state.upload_offset)
 	state.upload_offset = 0
+
+	state.frame_index += 1
+	f := &state.frames[state.frame_index % FRAMES_IN_FLIGHT]
+	if f.frame != 0 {
+		profile.add_gpu(f.frame, f.spans[:], f.begin, f.end)
+	}
+	clear(&f.spans)
+	start := u64(state.frame_start._nsec)
+	f^ = {frame = profile.current_frame(), begin = start, end = start, spans = f.spans}
+	state.clock = {.Graphics = start, .Compute = start}
 }
 
 // submit returns false if any command buffer breaks a rule. It then drops all of them.
@@ -180,7 +211,46 @@ submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_
 		log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
 		return false
 	}
+	time_markers(buffers, queue)
 	return true
+}
+
+// time_markers gives each timed marker a span on the queue's fake clock, which advances PACKET_TIME per packet.
+@(private = "file")
+time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
+	Open :: struct {
+		start: u64,
+		name:  profile.Name,
+		timed: bool,
+	}
+	sync.guard(&state.timing_mutex)
+	f := &state.frames[state.frame_index % FRAMES_IN_FLIGHT]
+	clock := &state.clock[queue]
+	for cb in buffers {
+		open: [dynamic]Open
+		open.allocator = context.temp_allocator
+		timed := 0
+		it := gpu.packet_iterator(cb)
+		for p in gpu.next_packet(&it) {
+			clock^ += PACKET_TIME
+			#partial switch p.kind {
+			case .Begin_Marker:
+				o := Open{start = clock^, timed = gpu.marker_timed(p)}
+				if o.timed {
+					o.name = profile.intern(gpu.marker_label(p), .Render)
+				}
+				append(&open, o)
+				timed += 1 if o.timed else 0
+			case .End_Marker:
+				o := pop(&open)
+				if o.timed {
+					timed -= 1
+					append(&f.spans, profile.Gpu_Span{start = o.start, end = clock^, name = o.name, queue = u8(queue), depth = u8(timed)})
+				}
+			}
+		}
+	}
+	f.end = max(f.end, clock^)
 }
 
 // end_frame checks that the game left the frame target in the render target layout.

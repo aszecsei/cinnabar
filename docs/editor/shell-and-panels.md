@@ -1,6 +1,6 @@
 # Shell and panels
 
-Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the resource monitor and the content browser.
+Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the resource monitor, the profiler and the content browser.
 
 **In this document:** [Shell](#shell) · [Panels](#panels) · [Future work](README.md#future-work)
 
@@ -53,6 +53,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 | Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
 | Console | The host's and the cook daemon's log |
 | Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
+| Profiler | A captured frame's zones on each thread and GPU queue, and the costs of each pass, system and script |
 
 ### Outliner
 
@@ -85,7 +86,19 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 - **The host** sends `Host_Stats` four times a second while the editor is linked: the frames of the interval with their average and longest frame times, and how much of each the game's update and the frame's end took; the permanent arena's size and the most that a frame's arena used; and from the GPU backend's `stats`, the live buffers, textures, samplers, pipelines and acceleration structures, the most that a frame's upload ring used, and the adapter's local memory in use against the budget that the OS gives the process.
 - **The game** sends `Game_Stats` as often: the entities, the archetypes, the behaviour instances, the script VM's bytes, and each loaded module's part of them (see [Scripting](../scripting/embedding.md#embedding)).
-- **The panel** shows a minute of frame times as a graph, the longest frame of each interval faint behind the average, with a line at 16.7 ms; the host's memory and resources; the world; and the modules by memory, the largest first. It keeps a minute of samples, and forgets them when the link closes.
+- **The panel** shows a minute of frame times as a graph, with lines at 16.7 ms and 33.3 ms; the host's memory and resources; the world; and the modules by memory, the largest first. It keeps a minute of samples, and forgets them when the link closes.
+- **The graph's lines:** the longest frame of each interval, faint, and from the profiler's summary, which comes with each `Host_Stats`, the average CPU time in red, GPU time in teal and wait in amber ([Core](../core/profiling.md#frames-and-costs)). The pointer shows an interval's times. **A click** captures the interval's longest CPU frame in the profiler, or its longest GPU frame when the pointer is nearer the GPU line.
+
+### Profiler
+
+The profiler panel shows where a frame's time goes, from the host's profiler ([Core](../core/profiling.md#profiler)). It keeps its state in the shell's `ProfilerModel`, so a panel that docking rebuilds shows the same capture.
+
+- **A capture** is one frame. **Capture Frame** (Ctrl+Alt+P) takes the next frame, **Capture Worst Frame** the longest of the recent frames (120 from the ribbon, or 30, 60 or 120 from the panel), and a click on the Resource Monitor's graph a frame of that interval. The host answers once the frame's GPU times are in, a few frames later. It keeps the last 128 frames and the worst frames of the last minute's intervals, and a frame that it no longer has is unavailable, with the reason.
+- **The timeline** has a lane for each thread that ran in the frame, the main thread first, with its zones in rows by depth, and a lane for each GPU queue with its passes. Each thread's lane says how busy it was. Solid lines mark the frame's start and end, and dashed teal lines the GPU's first and last timestamps. Zones are colored by category and labeled where they fit. Zones too narrow to see merge into one dim block. A zone that its fiber suspended in is cut, with a bright edge where it stopped and where it went on, maybe on another lane, and hovering one outlines all its segments. Job zones are grey.
+- **Navigation:** the wheel zooms around the pointer, Shift and the wheel scroll the lanes, a drag or a middle drag pans, a click selects a zone, a double click zooms to it, F or Fit fits the frame, and Escape clears the selection. The pointer's tooltip and the strip under the timeline give a zone's name, callback, time, self time without its nested zones, start, lane and category, and how many times its name ran in the frame.
+- **The cost tables** are the last stats interval's costs per frame: **GPU passes** by queue, **Systems**, and **Scripts** by class and callback. Each has the calls, the average and the most in one frame, and the share of the frame's CPU time, or GPU time for passes. A header sorts by its column, and again turns the order around. Selecting a row highlights its name in the timeline.
+- **Record** turns the host's recording of zones on or off. Off, captures have no zones and the tables empty. The host records again when the editor disconnects.
+- The status line shows the capture's times and the zones that the host dropped, which a thread that records more than its ring holds in one frame loses.
 
 ### Content browser
 

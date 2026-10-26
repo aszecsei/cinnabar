@@ -77,5 +77,4 @@ A module that starts with `--!native`, or that has `native = true` in its `.meta
 
 - **Editor inspector for fields** (phase 8): the properties panel shows and edits behaviour fields today through `inspect` and `edit`; what is missing is editing of fields whose kinds have no editor yet, such as asset references once they exist ([Editor](../editor/shell-and-panels.md#properties)).
 - **Bundles** (phase 8): scripts load from bundles in release like every other asset; nothing script-specific is needed beyond the asset runtime's `Bundle` source ([Content pipeline](../content/blobs-and-loading.md#loading)). Script hot reload stays development-only.
-- **A script profiler.** The lifecycle promises that the profiler shows each class's `update` cost. The hooks exist (`interrupt` safepoints and memory categories); a per-class timer around each callback, sent in `Game_Stats`, is the missing piece ([Editor](../editor/shell-and-panels.md#resource-monitor)).
 - **Edit-mode scripts.** Behaviours that run in the editor's edit mode, like Unity's `ExecuteInEditMode`, for tools ([Editor](../editor/README.md#deferred)).

@@ -11,7 +11,7 @@ import "core:strings"
 import "core:time"
 
 import "cinnabar:core"
-import "cinnabar:core/gpu"
+import "cinnabar:core/profile"
 import "cinnabar:engine/editor/link"
 
 DEFAULT_GAME_PATH :: "build/mygame.dll"
@@ -100,7 +100,7 @@ main :: proc() {
 	for {
 		dt, keep_running := core.begin_frame()
 		work := time.tick_now()
-		if !keep_running || !game.api.update(state, dt) {
+		if !keep_running || !update_game(game, state, dt) {
 			break
 		}
 		core.end_frame()
@@ -108,6 +108,7 @@ main :: proc() {
 
 		// End of frame: the job system is drained, so this is the reload point.
 		if game_changed(game) {
+			profile.zone_text("Hot reload", .Editor)
 			switch next, reload := game_load(source_path, game.version + 1); reload {
 			case .Loaded:
 				kind := link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
@@ -125,6 +126,11 @@ main :: proc() {
 		link_poll(&editor, game.api, state)
 	}
 	game.api.shutdown(state)
+}
+
+update_game :: proc(game: Game_Module, state: rawptr, dt: time.Duration) -> bool {
+	profile.zone_text("Game update", .Frame)
+	return game.api.update(state, dt)
 }
 
 emit_script_types :: proc(game: Game_Module, platform: ^core.Platform_API, path: string) {
@@ -184,8 +190,8 @@ game_load :: proc(source_path: string, version: int) -> (game: Game_Module, resu
 		modified    = modified,
 		api         = (proc() -> core.Game_API)(get_api)(),
 	}
-	if game.api.gpu_format_hash() != gpu.format_hash() {
-		log.errorf("host: %s was built with a different GPU command format. Restart the host to load it.", loaded_path)
+	if game.api.abi_hash() != core.abi_hash() {
+		log.errorf("host: %s was built with a different GPU command format or Platform_API. Restart the host to load it.", loaded_path)
 		return game, .Refused
 	}
 	log.infof("host: loaded %s", loaded_path)

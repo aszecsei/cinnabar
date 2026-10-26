@@ -25,6 +25,7 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Files | `file_read`, `file_modified` | What the asset runtime reads the loose cache with. |
 | Window | `window_size`, `set_window_title` | The size is read once per frame. |
 | Jobs | `jobs_run`, `jobs_wait`, `jobs_lock`, `jobs_unlock`, `jobs_worker_count` | See [Job system](jobs-and-memory.md#job-system). Background jobs are deliberately absent. |
+| Profiler | `profile` | A `profile.Procs`, which the profile package's front-end takes. See [Profiling](profiling.md#zones). |
 | GPU | `gpu_features`, `gpu_frame_target`, `gpu_output`, `gpu_request_output`, `gpu_preview_target`, `gpu_release_preview_target`, `gpu_submit`, `gpu_upload`, `gpu_stream_*`, `gpu_transfer_done`, `gpu_read_buffer`, `gpu_create_*`, `gpu_update_*`, `gpu_pipeline_ready`, `gpu_accel_reference`, `gpu_destroy_*`, `gpu_destroy_scope` | One field per backend procedure. See [GPU](../gpu/interface.md#packages). |
 | Scripting | `script_open`, `script_close`, `script_push_binding`, `script_atom`, `script_direct_access` | The host trampolines. See [Scripting](../scripting/embedding.md#host-trampolines). |
 
@@ -34,7 +35,7 @@ In release, `main_release` fills the same struct with direct references, so a ga
 
 `core.begin_frame` and `core.end_frame` bracket each call of `Game_API.update`, and the host's loop is little more than those three calls plus the reload check:
 
-1. **`begin_frame`** pumps the window's messages, applies the editor's queued input after them, and fixes the window size for the frame (the editor's requested size in shared mode). It begins the GPU frame, which waits for the frame in flight before the previous one and resets its upload ring, command list pools and deferred destructions ([GPU](../gpu/command-buffers.md#barriers)). Then it computes `dt`, and swaps to the other frame arena and frees it, which is why frame memory is valid for exactly one frame.
+1. **`begin_frame`** closes the profiler's frame ([Profiling](profiling.md#frames-and-costs)), pumps the window's messages, applies the editor's queued input after them, and fixes the window size for the frame (the editor's requested size in shared mode). It begins the GPU frame, which waits for the frame in flight before the previous one and resets its upload ring, command list pools and deferred destructions ([GPU](../gpu/command-buffers.md#barriers)). Then it computes `dt`, and swaps to the other frame arena and frees it, which is why frame memory is valid for exactly one frame.
 2. **`update`** is the game's whole frame ([Architecture](../overview/architecture.md#frame)).
 3. **`end_frame`** waits for every frame-scoped job and logs an error if any was still running, then ends the GPU frame: the backend executes the submissions in order and presents, or signals the shared fence in shared mode ([GPU](../gpu/presentation.md#presentation)).
 4. **Between frames** the host checks for a new DLL build and reloads it ([Hot reload](../overview/hot-reload.md#reload-sequence)), then handles the editor's messages ([Editor](../editor/link.md#editor-link)). A soft restart runs here too: `core` closes the script VMs, destroys the `Game` scope's GPU resources, releases the game's memory reservations and frees the permanent arena between the old game's `shutdown` and the new game's `init`.

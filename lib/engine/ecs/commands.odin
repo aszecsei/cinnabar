@@ -3,6 +3,8 @@ package ecs
 import "base:runtime"
 import "core:mem"
 
+import "cinnabar:core/profile"
+
 // Commands records structural changes for apply. Each job records into its own buffer, in frame memory, so a buffer
 // never outlives the frame. Recording is safe while jobs read the world in parallel. To spawn, get a handle from
 // reserve and add components to it here: apply creates every reserved entity.
@@ -67,6 +69,7 @@ command_teleport :: proc(cb: ^Commands, e: Entity, pose: Transform) {
 // A command for an entity that is no longer alive does nothing. The descendants of despawned entities are despawned
 // at the end, so commands for them in the same apply still run first. Then Inactive is brought up to date.
 apply :: proc(w: ^World, buffers: []Commands) {
+	profile.scope_text(&w.platform.profile, "Apply commands", .Frame)
 	flush_reserved(w)
 	for cb in buffers {
 		offset := 0

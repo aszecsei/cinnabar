@@ -6,6 +6,7 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
 
 @(private = "file")
 Resources :: struct {
@@ -186,4 +187,40 @@ after_cycles_are_rejected :: proc(t: ^testing.T) {
 	testing.expect(t, !register_system(w, {name = "a", stage = .Update, procedure = first}))
 	run_stage(w, .Update, time.Millisecond, nil)
 	testing.expect(t, w.schedule.failed)
+}
+
+when profile.ENABLED {
+	@(test)
+	system_batches_are_zoned_by_system :: proc(t: ^testing.T) {
+		sync.guard(&scheduler_lock)
+		testing.expect(t, profile.init())
+		defer profile.shutdown()
+		testing.expect(t, jobs.init())
+		defer jobs.shutdown()
+		f := setup(t)
+		defer teardown(f)
+		w := &f.world
+		f.platform.profile = profile.procs()
+
+		r: Resources
+		register_system(w, {name = "first", stage = .Late, procedure = first})
+		profile.frame_boundary()
+		frame := profile.current_frame()
+		run_stage(w, .Late, time.Millisecond, &r)
+		profile.frame_boundary()
+
+		c, _ := profile.capture(frame, context.temp_allocator)
+		system := profile.intern("first", .System)
+		zoned := false
+		for z in c.zones {
+			zoned ||= z.name == system && .Job not_in z.flags
+		}
+		testing.expect(t, zoned)
+		s := profile.take_summary(context.temp_allocator)
+		counted := false
+		for cost in s.costs {
+			counted ||= cost.key == {kind = .System, name = system} && cost.calls == 1
+		}
+		testing.expect(t, counted)
+	}
 }

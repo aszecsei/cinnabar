@@ -8,6 +8,7 @@ import "core:log"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
 
 // Graph handles are valid in the graph that returned them. 0 is the nil handle.
 Texture :: distinct u32
@@ -397,6 +398,7 @@ Submission :: struct {
 // Call it from the game's frame code or from a job: it waits for the recording jobs.
 execute :: proc(g: ^Graph) -> bool {
 	submissions := record(g) or_return
+	profile.scope_text(&g.platform.profile, "Submit", .Render)
 	for s in submissions {
 		g.platform.gpu_submit(s.buffers[:], s.queue, s.wait_for) or_return
 	}
@@ -408,9 +410,15 @@ execute :: proc(g: ^Graph) -> bool {
 // buffer on a job, and groups consecutive passes on one queue into a submission. A last command buffer returns
 // imported textures to their resting layouts.
 record :: proc(g: ^Graph) -> (submissions: []Submission, ok: bool) {
+	p := &g.platform.profile
+	profile.begin(p, profile.name(p, "Compile graph", .Render))
 	cull(g)
-	create_transients(g) or_return
-	compute_barriers(g) or_return
+	ok = create_transients(g) && compute_barriers(g)
+	profile.end(p)
+	if !ok {
+		return
+	}
+	profile.scope_text(p, "Record passes", .Render)
 
 	live := make([dynamic]^Pass_Node, g.allocator)
 	pieces := make([dynamic]Piece, g.allocator)
@@ -539,7 +547,7 @@ compute_barriers :: proc(g: ^Graph) -> bool {
 
 // record_piece records one piece of a pass. Only the first piece of a render pass loads or clears the attachments,
 // and only the last one stores them. Commands between suspended and resumed pieces are not allowed, so a split
-// render pass has its debug marker inside each piece.
+// render pass has its debug marker inside each piece. The markers are timed, so the profiler has each pass's GPU time.
 // compute_layout is whether a compute-queue barrier may change a texture from or to a layout.
 @(private = "file")
 compute_layout :: proc(layout: gpu.Texture_Layout) -> bool {
@@ -564,6 +572,7 @@ record_piece :: proc(data: rawptr) {
 	piece := (^Piece)(data)
 	pass, i := piece.pass, piece.index
 	g := pass.graph
+	profile.scope(&g.platform.profile, profile.name(&g.platform.profile, pass.name, .Render), u16(i))
 	last := pass.piece_count - 1
 	split_render := pass.kind == .Render && pass.piece_count > 1
 	pass.cbs[i] = gpu.command_buffer(g.allocator)
@@ -572,7 +581,7 @@ record_piece :: proc(data: rawptr) {
 		gpu.cmd_barriers(cb, pass.barriers.buffers[:], pass.barriers.textures[:], pass.barriers.accels[:])
 	}
 	if !split_render {
-		gpu.cmd_begin_marker(cb, pass.name)
+		gpu.cmd_begin_marker(cb, pass.name, timed = true)
 	}
 	if pass.kind == .Render {
 		colors := pass.colors
@@ -600,7 +609,7 @@ record_piece :: proc(data: rawptr) {
 		}
 		gpu.cmd_begin_pass(cb, colors[:pass.color_count], depth, flags)
 		if split_render {
-			gpu.cmd_begin_marker(cb, pass.name)
+			gpu.cmd_begin_marker(cb, pass.name, timed = true)
 		}
 	}
 	ctx := Pass_Context{g, cb, pass.data, i, pass.piece_count}

@@ -3,6 +3,9 @@ package jobs
 import "base:intrinsics"
 import "core:sync"
 import "core:testing"
+import "core:time"
+
+import "cinnabar:core/profile"
 
 // The scheduler is a singleton, and the test runner runs tests on several threads.
 @(private = "file")
@@ -228,4 +231,72 @@ mutex_excludes_under_contention :: proc(t: ^testing.T) {
 	run(jobs[:], &counter)
 	wait(&counter)
 	testing.expect_value(t, l.value, COUNT * 1000)
+}
+
+@(private = "file")
+Zoned :: struct {
+	inner: profile.Name,
+}
+
+@(private = "file")
+sleep_briefly :: proc(data: rawptr) {
+	time.sleep(2 * time.Millisecond)
+}
+
+// zoned_wait waits inside a zone, so the zone is split where its fiber suspends.
+@(private = "file")
+zoned_wait :: proc(data: rawptr) {
+	z := (^Zoned)(data)
+	profile.zone(z.inner)
+	counter: Counter
+	run([]Job{{sleep_briefly, nil}}, &counter)
+	wait(&counter)
+}
+
+when profile.ENABLED {
+	@(test)
+	zones_follow_fibers_across_waits :: proc(t: ^testing.T) {
+		sync.guard(&scheduler_lock)
+		testing.expect(t, profile.init())
+		defer profile.shutdown()
+		testing.expect(t, init(2))
+		defer shutdown()
+
+		parent := profile.intern("frame code", .Frame)
+		z := Zoned{profile.intern("inner", .User)}
+		profile.frame_boundary()
+		frame := profile.current_frame()
+		profile.begin_zone(parent, 0)
+		counter: Counter
+		run([]Job{{zoned_wait, &z}}, &counter)
+		wait(&counter)
+		profile.end_zone()
+		profile.frame_boundary()
+
+		c, ok := profile.capture(frame, context.temp_allocator)
+		testing.expect(t, ok)
+		suspended, resumed, job, sub_job, waited: bool
+		inner_fiber: u8
+		for zone in c.zones {
+			switch {
+			case zone.name == z.inner && .Job in zone.flags:
+				// The job that the zone started is named after it.
+				sub_job = true
+			case zone.name == z.inner:
+				testing.expect_value(t, zone.depth, 1)
+				testing.expect(t, inner_fiber == 0 || inner_fiber == zone.fiber)
+				inner_fiber = zone.fiber
+				suspended ||= .Suspended in zone.flags
+				resumed ||= .Resumed in zone.flags
+			case zone.name == parent && .Job in zone.flags:
+				testing.expect_value(t, zone.depth, 0)
+				job = true
+			case zone.name == parent:
+				testing.expect_value(t, zone.lane, profile.main_lane())
+				waited ||= .Suspended in zone.flags
+			}
+		}
+		testing.expect(t, suspended && resumed && job && sub_job && waited)
+		testing.expect(t, inner_fiber != 0)
+	}
 }

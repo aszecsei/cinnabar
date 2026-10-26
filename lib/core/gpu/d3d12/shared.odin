@@ -10,6 +10,7 @@ import "core:time"
 import d3d "vendor:directx/d3d12"
 
 import "cinnabar:core/gpu"
+import "cinnabar:core/profile"
 
 // Shared mode renders the frame target into textures that another process opens, such as the editor's viewport,
 // instead of a swapchain (see docs/gpu/presentation.md#presentation). Each size of the target is a generation, whose textures and
@@ -192,7 +193,9 @@ begin_shared_frame :: proc(size: [2]i32) -> (texture: ^d3d.IResource, rtv: d3d.C
 		// A negative due time is relative, in 100 ns units.
 		due := win.LARGE_INTEGER(-i64((SHARED_FRAME_TIME - elapsed) / 100))
 		if win.SetWaitableTimerEx(shared.timer, &due, 0, nil, nil, nil, 0) {
+			begin_wait("Shared frame pacing")
 			win.WaitForSingleObject(shared.timer, win.INFINITE)
+			profile.end_zone()
 		}
 		// On schedule, so the timer's wake-up latency does not add up from frame to frame.
 		shared.frame_start = time.tick_add(shared.frame_start, SHARED_FRAME_TIME)

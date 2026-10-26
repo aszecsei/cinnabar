@@ -30,7 +30,17 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result`, `Viewport_Settings` |
 | Mode | `Set_Mode`, `Step_Frame`, and `Editor_Input`, which the host handles |
 | Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
+| Profile | `Profile_Summary`, `Profile_Capture_Request`, `Profile_Capture` and `Profile_Recording`, which the host handles (see [Profile](#profile)) |
 | Previews | `Open_Preview`, `Preview_Settings`, `Close_Preview`, `Preview_Target`, and `Preview_Acknowledged`, which the host handles (see [Rendering](../rendering/materials.md#material-previews)) |
+
+### Profile
+
+The host's profiler ([Core](../core/profiling.md#profiler)) talks to the editor's [profiler panel](shell-and-panels.md#profiler) without the game: every zone is the host's, so the host handles every profile message.
+
+- **`Profile_Summary`** goes out right before each `Host_Stats`, for the same interval: the CPU, wait and GPU times' averages and most, the frames with the longest CPU and GPU times, the zones that the threads dropped, whether the host records, and the costs per frame of each pass, system and script callback, with their names as text.
+- **`Profile_Capture_Request`** asks for a frame: the next one, the longest of the last `count`, or one by number. The editor gives it an `id`, and the host answers with a **`Profile_Capture`** with the same `id` once the frame has ended and its GPU times are in, or have not come for 8 frames. A frame that the host no longer has comes back with `available` false and a `reason`.
+- **A capture** has a table of the names that it uses, its lanes (each thread, then the graphics and the compute queue), and its zones. A zone's start is in nanoseconds from the frame's start, its name an index into the table, and its lane an index into the lanes. GPU spans are zones on the GPU lanes. 10,000 zones are about 150 KB.
+- **`Profile_Recording`** starts or stops the recording of zones. The host records again when the editor disconnects.
 
 ## World
 

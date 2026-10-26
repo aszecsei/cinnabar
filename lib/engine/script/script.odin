@@ -9,6 +9,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/luau"
+import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
@@ -70,6 +71,10 @@ Runtime :: struct {
 	native:           bool,
 	// The host calls the direct access handlers (see direct.odin).
 	direct_access:    bool,
+	// The profiler's depth inside the callback that runs, below which Profile.finish closes nothing (see profile.odin).
+	profile_base:      int,
+	warned_unbalanced: bool,
+	coroutine_name:    profile.Name,
 }
 
 // runtime_of is the Runtime of a VM, for bindings.
@@ -394,6 +399,7 @@ register_engine :: proc(r: ^Runtime) {
 	define(r, "Debug.error", proc(L: ^luau.State) -> c.int {return log_binding(L, .Error)})
 	register_frame(r)
 	register_math(r)
+	register_profile(r)
 	if r.world != nil {
 		register_world(r)
 	}

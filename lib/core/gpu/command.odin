@@ -103,9 +103,17 @@ Begin_Pass :: struct {
 
 End_Pass :: struct {}
 
+Marker_Flag :: enum u16 {
+	// The backend measures the marker's GPU time for the profiler (see docs/core/profiling.md#gpu-timestamps).
+	Timed,
+}
+
+Marker_Flags :: bit_set[Marker_Flag;u16]
+
 // The label's bytes follow the payload.
 Begin_Marker :: struct {
 	length: u16,
+	flags:  Marker_Flags,
 }
 
 End_Marker :: struct {}
@@ -373,10 +381,12 @@ cmd_end_pass :: proc(cb: ^Command_Buffer) {
 	push(cb, .End_Pass, End_Pass{})
 }
 
-// The label is copied into the command buffer. Labels longer than MAX_LABEL_LENGTH are truncated.
-cmd_begin_marker :: proc(cb: ^Command_Buffer, label: string) {
+// The label is copied into the command buffer. Labels longer than MAX_LABEL_LENGTH are truncated. A timed marker's
+// GPU time goes to the profiler under its label.
+cmd_begin_marker :: proc(cb: ^Command_Buffer, label: string, timed := false) {
 	truncated := label[:min(len(label), MAX_LABEL_LENGTH)]
-	push(cb, .Begin_Marker, Begin_Marker{length = u16(len(truncated))}, transmute([]byte)truncated)
+	flags := Marker_Flags{.Timed} if timed else {}
+	push(cb, .Begin_Marker, Begin_Marker{length = u16(len(truncated)), flags = flags}, transmute([]byte)truncated)
 }
 
 cmd_end_marker :: proc(cb: ^Command_Buffer) {
@@ -583,6 +593,10 @@ payload :: proc(packet: Packet, $T: typeid) -> ^T {
 marker_label :: proc(packet: Packet) -> string {
 	marker := payload(packet, Begin_Marker)
 	return string(packet.data[size_of(Begin_Marker):][:marker.length])
+}
+
+marker_timed :: proc(packet: Packet) -> bool {
+	return .Timed in payload(packet, Begin_Marker).flags
 }
 
 push_constants_data :: proc(packet: Packet) -> []byte {

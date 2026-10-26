@@ -12,6 +12,7 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 
 // A comma-separated list of gpu.Feature names that core hides from the game, to test fallback paths on hardware
@@ -67,6 +68,10 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 			return false
 		}
 	}
+	if !profile.init() {
+		log.error("core: failed to start the profiler")
+		return false
+	}
 	if !jobs.init() {
 		log.error("core: failed to start the job system")
 		return false
@@ -110,6 +115,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		jobs_lock                    = jobs.lock,
 		jobs_unlock                  = jobs.unlock,
 		jobs_worker_count            = jobs.worker_count,
+		profile                      = profile.procs(),
 		gpu_features                 = gpu_features,
 		gpu_adapter                  = backend.adapter,
 		gpu_frame_target             = backend.frame_target,
@@ -157,6 +163,7 @@ shutdown :: proc() {
 	backend.shutdown()
 	_window_close()
 	jobs.shutdown()
+	profile.shutdown()
 	release_reservations()
 	delete(platform.reservations)
 	delete(platform.input_queue)
@@ -173,6 +180,8 @@ platform_api :: proc() -> ^Platform_API {
 // begin_frame polls platform events, waits for the GPU backend to accept a new frame
 // and swaps the frame arena. It returns false when the window was closed.
 begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
+	profile.frame_boundary()
+	profile.zone_text("Begin frame", .Frame)
 	keep_running = _window_poll()
 	_window_apply_input(platform.input_queue[:])
 	clear(&platform.input_queue)
@@ -193,10 +202,17 @@ begin_frame :: proc() -> (dt: time.Duration, keep_running: bool) {
 
 // end_frame presents the frame. The GPU backend paces frames to vsync.
 end_frame :: proc() {
-	if !jobs.drain_frame() {
+	profile.zone_text("End frame", .Frame)
+	if !drain_jobs() {
 		log.error("core: jobs ran past the end of the frame. Wait for every counter before the frame ends.")
 	}
 	backend.end_frame()
+}
+
+@(private = "file")
+drain_jobs :: proc() -> bool {
+	profile.zone_text("Drain jobs", .Frame)
+	return jobs.drain_frame()
 }
 
 // alloc_game_state allocates zeroed root game state from the permanent arena.

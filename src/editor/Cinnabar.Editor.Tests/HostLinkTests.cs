@@ -308,6 +308,44 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheHostProfilesItsFramesAndCapturesOne()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+
+        // The first intervals can end before a frame's GPU times arrive.
+        var summary = await editor.Next<ProfileSummary>(s => s.Frames > 0 && s.GpuFrames > 0);
+        Assert.True(summary.Recording);
+        Assert.True(summary.CpuMsAverage > 0 && summary.GpuMsAverage > 0 && summary.CpuWorstFrame != 0);
+        Assert.Contains(summary.Costs, c => c.Kind == ProfileCostKind.Pass && c.MsAverage > 0);
+        // The host pairs each summary with the Host_Stats of the same interval.
+        await editor.Next<HostStats>();
+
+        editor.Link.Send(new ProfileCaptureRequest(1, ProfileCaptureMode.Next, 0, 0));
+        var capture = await editor.Next<ProfileCapture>(c => c.Id == 1);
+        Assert.True(capture.Available, capture.Reason);
+        Assert.Equal("Main", capture.Lanes[0].Name);
+        Assert.Contains(capture.Lanes, l => l.Name.StartsWith("Worker"));
+        string Name(ProfileZone z) => capture.Names[z.Name].Text;
+        Assert.Contains(capture.Zones, z => z.Lane == 0 && Name(z) == "Game update");
+        Assert.Contains(capture.Zones, z => Name(z) == "Wait for GPU" || Name(z) == "Shared frame pacing");
+        var graphics = Array.FindIndex(capture.Lanes, l => l.Kind == ProfileLaneKind.GpuGraphics);
+        Assert.Contains(capture.Zones, z => z.Lane == graphics && Name(z) == "prepass" && z.Duration > 0);
+        Assert.True(capture.GpuEnd > capture.GpuBegin && capture.FrameNs > 0);
+
+        // A frame that the host never had is unavailable, with a reason.
+        editor.Link.Send(new ProfileCaptureRequest(2, ProfileCaptureMode.Frame, 0, 0));
+        var missing = await editor.Next<ProfileCapture>(c => c.Id == 2);
+        Assert.False(missing.Available);
+        Assert.NotEmpty(missing.Reason);
+
+        // Off, the host records no zones, and the summaries say so.
+        editor.Link.Send(new ProfileRecording(false));
+        await editor.Next<ProfileSummary>(s => !s.Recording);
+    }
+
+    [Fact]
     public async Task TheGameDrawsMaterialPreviewsWhenTheyChange()
     {
         await using var editor = await Connect();

@@ -2,8 +2,23 @@ using Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Model;
 
-/// <summary>A point of the frame time history: the average and the longest frame of an interval, in milliseconds.</summary>
-public readonly record struct FrameSample(double AverageMs, double MaxMs, double WorkMs);
+/// <summary>
+/// A point of the frame time history: the average and the longest frame of an interval, in milliseconds. With the
+/// profiler's summary of the interval, also the CPU, GPU and wait times, and the frames with the longest CPU and GPU
+/// times, which a capture can ask for.
+/// </summary>
+public readonly record struct FrameSample(
+    double AverageMs,
+    double MaxMs,
+    double WorkMs,
+    bool Profiled = false,
+    double CpuMs = 0,
+    double CpuMaxMs = 0,
+    double GpuMs = 0,
+    double GpuMaxMs = 0,
+    double WaitMs = 0,
+    ulong CpuWorstFrame = 0,
+    ulong GpuWorstFrame = 0);
 
 /// <summary>
 /// What the resource monitor shows (see docs/editor/shell-and-panels.md#resource-monitor): the host's and the game's latest stats, and
@@ -15,6 +30,8 @@ public sealed class ResourceStats
     public const int HistoryLength = 240;
 
     readonly Queue<FrameSample> _history = new();
+    // The host sends the profiler's summary right before the Host_Stats of the same interval.
+    ProfileSummary? _summary;
 
     public HostStats? Host { get; private set; }
 
@@ -24,10 +41,28 @@ public sealed class ResourceStats
 
     public event Action? Changed;
 
+    public void Apply(ProfileSummary summary) => _summary = summary;
+
     public void Apply(HostStats stats)
     {
         Host = stats;
-        _history.Enqueue(new FrameSample(stats.FrameMsAverage, stats.FrameMsMax, stats.WorkMsAverage));
+        var sample = new FrameSample(stats.FrameMsAverage, stats.FrameMsMax, stats.WorkMsAverage);
+        if (_summary is { } p)
+        {
+            sample = sample with
+            {
+                Profiled = true,
+                CpuMs = p.CpuMsAverage,
+                CpuMaxMs = p.CpuMsMax,
+                GpuMs = p.GpuMsAverage,
+                GpuMaxMs = p.GpuMsMax,
+                WaitMs = p.WaitMsAverage,
+                CpuWorstFrame = p.CpuWorstFrame,
+                GpuWorstFrame = p.GpuWorstFrame,
+            };
+            _summary = null;
+        }
+        _history.Enqueue(sample);
         while (_history.Count > HistoryLength)
         {
             _history.Dequeue();
@@ -46,6 +81,7 @@ public sealed class ResourceStats
     {
         Host = null;
         Game = null;
+        _summary = null;
         _history.Clear();
         Changed?.Invoke();
     }

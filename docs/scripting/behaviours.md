@@ -60,7 +60,7 @@ return Door
 | `on_reload()` | none | After a script hot reload patched the class (see [Script hot reload](tooling-and-hot-reload.md#script-hot-reload)) |
 | `on_<event>(...)` | `OnTriggerEnter` and similar | When the event is delivered (see [Events](#events)) |
 
-- **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and the API favors events and coroutines.
+- **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and of its other callbacks and coroutines ([Profiling](../core/profiling.md#frames-and-costs)), and the API favors events and coroutines.
 - **No `fixed_update`.** Scripts do not run in fixed ticks. Logic that must run every tick is a native `Fixed` system. A script influences the simulation by writing components, and the next tick reads them.
 - **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`.
 - **Callbacks** run on the main thread in a protected call, under the watchdog. An error logs the message with a traceback, and the other callbacks still run. A callback cannot wait: it is not a coroutine.

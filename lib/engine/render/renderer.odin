@@ -5,6 +5,7 @@ import "core:mem"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:core/profile"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
@@ -346,6 +347,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 // (see docs/rendering/frame.md#frame). The world draws in a prepass, then in the forward pass with the lights' clusters and
 // the shadows, then post-processing runs on it. It returns false if the graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
+	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_update(&r.residency)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)

@@ -9,7 +9,9 @@ import "cinnabar:core/gpu"
 // translate records a command buffer into a command list. Release builds do not validate, so an
 // invalid handle stops at an assert.
 @(private)
-translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
+translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, frame: ^Frame, queue: gpu.Queue) {
+	timer := marker_timer(frame, queue)
+	defer timer_finish(&timer)
 	in_pass := false
 	// False while the bound pipeline is still compiling: its draws and dispatches are skipped.
 	pipeline_ready := false
@@ -28,7 +30,9 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			label: [gpu.MAX_LABEL_LENGTH + 1]byte
 			n := copy(label[:], gpu.marker_label(p))
 			list->BeginEvent(PIX_EVENT_ANSI_VERSION, &label[0], u32(n + 1))
+			timer_begin(&timer, list, gpu.marker_label(p), gpu.marker_timed(p))
 		case .End_Marker:
+			timer_end(&timer, list)
 			list->EndEvent()
 		case .Set_Pipeline:
 			entry := gpu.pool_get(&dev.pipeline_pool, gpu.payload(p, gpu.Set_Pipeline).pipeline)
