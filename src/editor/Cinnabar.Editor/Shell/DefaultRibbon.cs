@@ -45,6 +45,8 @@ static class DefaultRibbon
                         new SplitButton(EditorCommands.RunGame, [EditorCommands.RunGame, EditorCommands.StopGame]),
                         new ComboBox(EditorCommands.ProjectOutput),
                         new ComboBox(EditorCommands.UserOutput),
+                        new ComboBox(EditorCommands.ProjectQuality),
+                        new ComboBox(EditorCommands.UserQuality),
                     ]),
                     new RibbonGroup("Host",
                     [
@@ -73,6 +75,12 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
                         new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
                         new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
+                    ]),
+                    new RibbonGroup("Quality",
+                    [
+                        new ComboBox(EditorCommands.ViewportQuality),
+                        new ComboBox(EditorCommands.ViewportAntiAliasing),
+                        new ComboBox(EditorCommands.ViewportRenderScale),
                     ]),
                     new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),

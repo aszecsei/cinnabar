@@ -133,6 +133,35 @@ render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
 	return
 }
 
+// viewport_quality is the quality that the viewport draws at while an editor is linked: the renderer's, with the
+// viewport's preset, anti-aliasing and render scale in place of its own where the viewport chooses them. ok is false
+// when the viewport keeps the renderer's, or no editor is linked.
+viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality, ok: bool) {
+	if !active(e) {
+		return
+	}
+	s := e.viewport.settings
+	q = r.quality
+	if s.quality_preset != .Game {
+		q = render.preset_quality(render.Quality_Preset(int(s.quality_preset) - 1), r.caps)
+		// The preset sets the features; the anti-aliasing and the render scale stay the game's.
+		q.aa, q.render_scale = r.quality.aa, r.quality.render_scale
+		ok = true
+	}
+	if s.anti_aliasing != .Game {
+		q.aa = render.Aa_Technique(int(s.anti_aliasing) - 1)
+		ok = true
+	}
+	if s.render_scale > 0 {
+		q.render_scale = s.render_scale
+		ok = true
+	}
+	return render.clamp_quality(q, r.caps), ok
+}
+
+#assert(int(max(link.Viewport_Preset)) == int(render.Quality_Preset.Ultra) + 1)
+#assert(int(max(link.Viewport_Aa)) == int(max(render.Aa_Technique)) + 1)
+
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.
 entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {

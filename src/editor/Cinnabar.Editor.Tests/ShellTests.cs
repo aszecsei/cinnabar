@@ -48,6 +48,13 @@ public sealed class ShellTests : IDisposable
             Assert.Equal(0, shell.ViewportSettings.ExposureOffset);
 
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.Helpers)).Select("All");
+
+            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportQuality)).Select("Low");
+            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportAntiAliasing)).Select("FSR");
+            var scale = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportRenderScale);
+            Assert.Equal(EditorShell.GameQualityLabel, scale.Selected);
+            scale.Select("67%");
+            Assert.Equal("67%", scale.Selected);
         }
 
         // The next session starts with them.
@@ -55,7 +62,41 @@ public sealed class ShellTests : IDisposable
         Assert.True(again.ViewportSettings.NoBloom);
         Assert.Equal(Link.Protocol.DebugView.LightComplexity, again.ViewportSettings.DebugView);
         Assert.Equal(Link.Protocol.HelperMode.All, again.ViewportSettings.Helpers);
+        Assert.Equal(Link.Protocol.ViewportPreset.Low, again.ViewportSettings.QualityPreset);
+        Assert.Equal(Link.Protocol.ViewportAa.Fsr, again.ViewportSettings.AntiAliasing);
+        Assert.Equal(2f / 3, again.ViewportSettings.RenderScale, 1e-4f);
         Assert.Empty(Problems(again));
+    }
+
+    [Fact]
+    public void TheQualityPresetIsTheProjectsUnlessThisMachineReplacesIt()
+    {
+        var project = Path.Combine(_settingsDirectory, "game", "project.settings");
+        Directory.CreateDirectory(Path.GetDirectoryName(project)!);
+        File.WriteAllText(project, "output = Auto\n");
+        var user = Document.ProjectSettings.UserPath(project);
+        // A game's settings menu saved single features on this machine.
+        File.WriteAllText(user, "quality.preset = Custom\nquality.aa = Fsr\nquality.render_scale = 0.5\n");
+        using var shell = new EditorShell(new EditorOptions("host.exe", "game.dll") { ProjectPath = project }, new EditorSettings(_settingsDirectory));
+        var quality = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ProjectQuality);
+        var mine = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.UserQuality);
+        Assert.Equal(EditorShell.HardwareQualityLabel, quality.Selected);
+        Assert.Equal(EditorShell.CustomQualityLabel, mine.Selected);
+
+        quality.Select("Medium");
+        Assert.Equal("output = Auto\nquality.preset = Medium\n", File.ReadAllText(project));
+        // Custom keeps the features; a preset replaces them.
+        mine.Select(EditorShell.CustomQualityLabel);
+        Assert.Equal("Fsr", Document.ProjectSettings.Get(user, "quality.aa"));
+        mine.Select("Ultra");
+        Assert.Equal(["quality.preset"], Document.ProjectSettings.Keys(user));
+        Assert.Equal("Ultra", mine.Selected);
+        // Leaving it to the project again removes the user's file, and By Hardware the project's preset.
+        mine.Select(EditorShell.ProjectOutputLabel);
+        Assert.False(File.Exists(user));
+        quality.Select(EditorShell.HardwareQualityLabel);
+        Assert.Equal("output = Auto\n", File.ReadAllText(project));
+        Assert.Empty(Problems(shell));
     }
 
 [Fact]

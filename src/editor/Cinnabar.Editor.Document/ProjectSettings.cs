@@ -33,6 +33,25 @@ public static class ProjectSettings
         return value;
     }
 
+    /// <summary>The keys that a file gives, in the order of their last lines, or none when the file is not there.</summary>
+    public static IReadOnlyList<string> Keys(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+        var keys = new List<string>();
+        foreach (var line in File.ReadAllLines(path))
+        {
+            if (Parse(line) is { } entry)
+            {
+                keys.Remove(entry.Key);
+                keys.Add(entry.Key);
+            }
+        }
+        return keys;
+    }
+
     /// <summary>
     /// Sets a key in a file, replacing its line or adding one, or removes it with a null value. A user file left with
     /// nothing but comments goes, so the game has nothing to replace.

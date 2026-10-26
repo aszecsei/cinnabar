@@ -231,6 +231,8 @@ Pass_Constants :: struct {
 Game_State :: struct {
 	platform:           ^core.Platform_API,
 	frame_count:        u64,
+	// What the scripts' Render bindings reach: the renderer and the settings file (see quality_keys.luau).
+	script_quality:     project.Script_Quality,
 	// The project's settings, read again when their files change.
 	project:            project.Watch,
 	next_project_check: f64,
@@ -405,6 +407,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
+	s.script_quality = project.script_quality(&s.renderer, PROJECT_SETTINGS)
 	register_post_effects(s)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
@@ -507,6 +510,9 @@ find_camera :: proc(s: ^Game_State) {
 register_scripts :: proc(r: ^script.Runtime) {
 	script.expose(r, Spin)
 	script.expose(r, Triangle)
+	// The Render bindings read the Game_State's script_quality only when a script calls them, which the runtime of
+	// script_types, outside any Game_State, never does.
+	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -670,6 +676,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
 	// none without an editor.
 	overrides := editor.render_overrides(&s.editor)
+	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
 	desc := render.Frame_Desc {
 		view            = view,
@@ -679,6 +686,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
 		exposure_offset = overrides.exposure_offset,
+		quality         = viewport_quality ? &quality : nil,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),
 		hooks           = {
@@ -1029,7 +1037,6 @@ update_output :: proc(s: ^Game_State) {
 			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
 		}
 	}
-	update_quality(s)
 	if .F8 in s.platform.input().pressed {
 		current := s.output_override.? or_else s.project.settings.output
 		next := gpu.Output_Request((int(current) + 1) % len(gpu.Output_Request))
@@ -1040,62 +1047,6 @@ update_output :: proc(s: ^Game_State) {
 	if changed {
 		s.platform.gpu_request_output(s.output_override.? or_else s.project.settings.output)
 	}
-}
-
-// The render scales that Ctrl+Shift+F9 cycles through, from the largest.
-@(rodata)
-RENDER_SCALES := [?]f32{1, 0.75, 2.0 / 3, 0.5}
-
-// update_quality changes the render quality, as a game's settings menu would, and saves it to the user's settings
-// file, from which update_output reads it back (see docs/rendering/quality.md#quality): F9 takes the next preset,
-// Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Alt+F9 the next
-// anti-aliasing technique, and Ctrl+Shift+F9 the next render scale of RENDER_SCALES.
-update_quality :: proc(s: ^Game_State) {
-	input := s.platform.input()
-	if .F9 not_in input.pressed {
-		return
-	}
-	caps := s.renderer.caps
-	q := s.renderer.quality
-	shift := .Left_Shift in input.down || .Right_Shift in input.down
-	control := .Left_Control in input.down || .Right_Control in input.down
-	if shift && control {
-		next := 0
-		for scale, i in RENDER_SCALES {
-			if q.render_scale >= scale {
-				next = (i + 1) % len(RENDER_SCALES)
-				break
-			}
-		}
-		q.render_scale = RENDER_SCALES[next]
-	} else if shift {
-		q.shadows.ray_traced = !q.shadows.ray_traced
-	} else if control {
-		q.ao.technique = q.ao.technique >= max(render.Ao_Technique) ? .Off : render.Ao_Technique(int(q.ao.technique) + 1)
-	} else if .Left_Alt in input.down || .Right_Alt in input.down {
-		// The next technique that the device runs: FSR needs its library.
-		for {
-			q.aa = q.aa >= max(render.Aa_Technique) ? .Off : render.Aa_Technique(int(q.aa) + 1)
-			if render.clamp_quality(q, caps).aa == q.aa {
-				break
-			}
-		}
-	} else {
-		preset := render.quality_preset(q, caps)
-		next := preset >= .Ultra ? render.Quality_Preset.Low : render.Quality_Preset(int(preset) + 1)
-		q = render.preset_quality(next, caps)
-	}
-	render.set_quality(&s.renderer, q)
-	q = s.renderer.quality
-	log.infof(
-		"mygame: quality %v, traced shadows %v, ambient occlusion %v, anti-aliasing %v, render scale %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Alt+F9 the next anti-aliasing, Ctrl+Shift+F9 the next render scale)",
-		render.quality_preset(q, caps),
-		q.shadows.ray_traced,
-		q.ao.technique,
-		q.aa,
-		q.render_scale,
-	)
-	project.save_quality(s.platform, PROJECT_SETTINGS, q, caps)
 }
 
 // switch_scene loads the glass scene, or the main scene again, when F7 is pressed. A linked editor owns the scene, so

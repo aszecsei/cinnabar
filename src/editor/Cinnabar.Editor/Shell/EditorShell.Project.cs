@@ -8,7 +8,8 @@ namespace Cinnabar.Editor.Shell;
 /// <summary>
 /// The project's settings (see docs/overview/architecture.md#project-settings), which the game reads, and the game in its own
 /// window. The viewport is always SDR, so the output mode shows only in the game's window: Run Game opens it, and it
-/// takes a change of the settings at once.
+/// takes a change of the settings at once. The render quality's preset is there too (see
+/// docs/rendering/quality.md#saved-quality): the project's default, and this machine's in place of it.
 /// </summary>
 public sealed partial class EditorShell
 {
@@ -19,6 +20,18 @@ public sealed partial class EditorShell
     public const string ProjectOutputLabel = "Project's";
 
     const string OutputKey = "output";
+
+    /// <summary>The quality presets, by their names in the settings files, which the ribbon shows as they are.</summary>
+    public static readonly IReadOnlyList<string> QualityPresets = ["Low", "Medium", "High", "Ultra"];
+
+    /// <summary>The project's choice that leaves the quality to the device's default, by its video memory.</summary>
+    public const string HardwareQualityLabel = "By Hardware";
+
+    /// <summary>A file's quality that is no preset: the features that a game saved, one by one.</summary>
+    public const string CustomQualityLabel = "Custom";
+
+    const string QualityPrefix = "quality.";
+    const string QualityPresetKey = "quality.preset";
 
     ChildProcess? _gameWindow;
 
@@ -38,7 +51,58 @@ public sealed partial class EditorShell
         set => SetOutput(ProjectSettings.UserPath(ProjectPath), value, removeWhenEmpty: true);
     }
 
+    /// <summary>The project's quality preset, as the ribbon shows it.</summary>
+    public string ProjectQuality
+    {
+        get => QualityLabel(ProjectPath) ?? HardwareQualityLabel;
+        set => SetQuality(ProjectPath, value, HardwareQualityLabel, removeWhenEmpty: false);
+    }
+
+    /// <summary>This machine's quality preset, which replaces the project's, or <see cref="ProjectOutputLabel"/>.</summary>
+    public string UserQuality
+    {
+        get => QualityLabel(ProjectSettings.UserPath(ProjectPath)) ?? ProjectOutputLabel;
+        set => SetQuality(ProjectSettings.UserPath(ProjectPath), value, ProjectOutputLabel, removeWhenEmpty: true);
+    }
+
     public bool GameWindowRunning => _gameWindow != null;
+
+    // A file's quality: its preset, Custom for one that gives quality keys without one of the presets, or null for none.
+    static string? QualityLabel(string path)
+    {
+        var preset = ProjectSettings.Get(path, QualityPresetKey);
+        if (QualityPresets.FirstOrDefault(p => string.Equals(p, preset, StringComparison.OrdinalIgnoreCase)) is { } name)
+        {
+            return name;
+        }
+        return ProjectSettings.Keys(path).Any(k => k.StartsWith(QualityPrefix, StringComparison.Ordinal)) ? CustomQualityLabel : null;
+    }
+
+    // A preset gives every feature, so the file's other quality keys go, such as those that a game saved. Custom keeps
+    // the file's keys as they are.
+    void SetQuality(string path, string label, string noneLabel, bool removeWhenEmpty)
+    {
+        if (label == CustomQualityLabel)
+        {
+            return;
+        }
+        try
+        {
+            foreach (var key in ProjectSettings.Keys(path).Where(k => k.StartsWith(QualityPrefix, StringComparison.Ordinal)))
+            {
+                ProjectSettings.Set(path, key, null, removeWhenEmpty);
+            }
+            if (label != noneLabel)
+            {
+                ProjectSettings.Set(path, QualityPresetKey, label, removeWhenEmpty);
+            }
+        }
+        catch (IOException e)
+        {
+            Console.Add(LogLevel.Error, $"project: cannot write {path}: {e.Message}");
+        }
+        Commands.InvalidateAll();
+    }
 
     static string? Label(string? name) => OutputModes.FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)).Label;
 

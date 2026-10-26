@@ -1,9 +1,10 @@
 --!strict
 -- The game's main script. The scheduler resumes it once per frame, and it stays suspended across code reloads of the
 -- game DLL: its count keeps going, and Game.greeting shows the new code. Space reverses the large triangles' spin,
--- and Tab turns their Pulse off and on.
+-- and Tab turns their Pulse off and on. F9 and its modifiers change the render quality (see quality_keys.luau).
 local greeting = require("./greeting")
 local Pulse = require("./pulse")
+local quality_keys = require("./quality_keys")
 
 local count = 0
 while true do
@@ -28,5 +29,6 @@ while true do
 			end
 		end
 	end
+	quality_keys.update()
 	coroutine.yield()
 end

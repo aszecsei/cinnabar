@@ -114,3 +114,40 @@ declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()
 declare function wait_until(predicate: () -> boolean): ()
 declare function wait_event(entity: Entity, name: string): ...any
+
+-- The render quality of the Render bindings, which a game defines with project.define_quality_bindings (see
+-- docs/scripting/api.md#render): the settings files' quality keys, with the enums' values as strings.
+type RenderQuality = {
+	preset: string,
+	shadows: string,
+	ray_traced_shadows: boolean,
+	ao: string,
+	ao_level: string,
+	gi: string,
+	gi_level: string,
+	fog: string,
+	aa: string,
+	render_scale: number,
+}
+
+-- What Render.set_quality changes: the fields that it gives. A preset sets every feature first.
+type RenderQualityChange = {
+	preset: string?,
+	shadows: string?,
+	ray_traced_shadows: boolean?,
+	ao: string?,
+	ao_level: string?,
+	gi: string?,
+	gi_level: string?,
+	fog: string?,
+	aa: string?,
+	render_scale: number?,
+}
+
+-- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs.
+type RenderCaps = {
+	ray_query: boolean,
+	vendor: string,
+	video_memory: number,
+	aa: { string },
+}

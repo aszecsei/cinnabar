@@ -169,7 +169,13 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 // quality is the render quality that settings give on a device: the preset's, or the device's default without one,
 // with each key that a file gave in place of the preset's.
 quality :: proc(settings: Settings, caps: render.Caps) -> render.Quality {
-	q := render.default_quality(caps)
+	return with_keys(render.default_quality(caps), settings, caps)
+}
+
+// with_keys is a quality with the keys that settings give in place of its own: the preset's features, unless it is
+// Custom, and then each other key.
+with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> render.Quality {
+	q := q
 	if .Preset in settings.quality_given && settings.preset != .Custom {
 		q = render.preset_quality(settings.preset, caps)
 	}

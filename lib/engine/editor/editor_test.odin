@@ -720,3 +720,40 @@ the_viewports_settings_reach_the_frame_while_an_editor_is_linked :: proc(t: ^tes
 	step(f, 0)
 	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
 }
+
+@(test)
+the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	// A Renderer is too large for the stack.
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	renderer.caps = {upscalers = {.Fsr}}
+	renderer.quality = render.preset_quality(.High, renderer.caps)
+	renderer.quality.aa, renderer.quality.render_scale = .Smaa, 0.75
+
+	step(f)
+	_, ok := viewport_quality(&f.editor, renderer)
+	testing.expect(t, !ok, "the viewport keeps the game's quality")
+	// A preset sets the features, and the anti-aliasing and the render scale stay the game's.
+	step(f, 1, link.Viewport_Settings{quality_preset = .Low})
+	q: render.Quality
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok)
+	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
+	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
+	testing.expect_value(t, q.render_scale, 0.75)
+	step(f, 1, link.Viewport_Settings{anti_aliasing = .Fsr, render_scale = 0.5})
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok)
+	testing.expect_value(t, q.shadows.level, render.Quality_Level.High)
+	testing.expect_value(t, q.aa, render.Aa_Technique.Fsr)
+	testing.expect_value(t, q.render_scale, 0.5)
+	// The device limits it: without FSR, temporal AA.
+	renderer.caps = {}
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
+	step(f, 0)
+	_, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, !ok, "without an editor, the game's quality")
+}
