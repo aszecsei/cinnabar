@@ -84,7 +84,7 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 #if MATERIAL_TRANSPARENT
 	float occlusion = 1;
 #else
-	float occlusion = saturate(cn_texture(push.ambient_occlusion).Load(int3(i.position.xy, 0)).r);
+	float occlusion = saturate(load_screen(push.ambient_occlusion, i.position.xy).r);
 #endif
 	Indirect indirect;
 	if (frame.gi != 0) {

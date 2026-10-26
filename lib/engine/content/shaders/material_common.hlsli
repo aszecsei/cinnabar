@@ -91,6 +91,16 @@ static const uint DEBUG_SHADOW_CASCADES = 7;
 // From the frame's textures, but the transparent surfaces' moments pass counts their layers for it.
 static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 
+// load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
+// default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
+// is clamped to the texture, so the default's one texel is read everywhere.
+float4 load_screen(uint index, float2 pixel) {
+	Texture2D<float4> texture = cn_texture(index);
+	uint2 size;
+	texture.GetDimensions(size.x, size.y);
+	return texture.Load(int3(min(uint2(pixel), size - 1), 0));
+}
+
 // heat is a color for a value from 0 to 1: blue, cyan, green, yellow, red.
 float3 heat(float t) {
 	t = saturate(t);

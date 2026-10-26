@@ -123,7 +123,7 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float4 position)
 #if MATERIAL_TRANSPARENT
 		return 1;
 #else
-		return cn_texture(push.shadow_mask).Load(int3(position.xy, 0))[light.mask];
+		return load_screen(push.shadow_mask, position.xy)[light.mask];
 #endif
 	}
 	int view = shadow_view(light, p, frame.near / max(position.z, 1e-7));
