@@ -204,7 +204,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.post.adapt,
 		&r.post.tone_lut,
 		&r.ao.depth,
-		&r.ao.gtao,
+		&r.ao.searches[.Gtao],
+		&r.ao.searches[.Ssao],
+		&r.ao.searches[.Hbao],
 		&r.ao.denoise,
 		&r.gi.trace,
 		&r.gi.merge,
@@ -223,6 +225,17 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
 	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Each ambient occlusion technique that the quality chooses draws the occlusion, and Off draws none.
+	for technique in Ao_Technique {
+		q := r.quality
+		q.ao.technique = technique
+		desc.quality = &q
+		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		testing.expectf(t, record.occlusion == (technique != .Off), "%v: occlusion %v", technique, record.occlusion)
+	}
+	desc.quality = nil
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
 	// HDR output: the frame target changes its format, the output pass draws with the pipeline of that format, and the

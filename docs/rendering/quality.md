@@ -17,14 +17,14 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 |---|---|---|
 | `shadows.level` | `Low` … `Ultra` | The shadow maps' atlas, cascades and filter (`SHADOW_PARAMS`) |
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
-| `ao.technique` | `Off`, `Gtao` | The [ambient occlusion](ambient-occlusion.md#ambient-occlusion) |
-| `ao.level` | `Low` … `Ultra` | GTAO's slices and steps (`GTAO_PARAMS`) |
+| `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
+| `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades` | The [global illumination](global-illumination.md#global-illumination) |
 | `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa` | The anti-aliasing (see [Post-processing](post-processing.md#post-processing)) |
 
-- **Each enum lists only what exists.** SSAO, HBAO, FXAA, SMAA and the upscalers join their enums when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing.
+- **Each enum lists only what exists.** FXAA, SMAA and the upscalers join their enums when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
@@ -53,7 +53,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 - **Before levels,** the frame drew High's shadows and GI, Ultra's GTAO, and High's fog.
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
 - **The shadow filter** is `Frame_Constants.shadow_filter`, a `Shadow_Filter`. `shadow_map` in `material_lighting.hlsli` branches on it. Every pixel takes the same branch, so it costs no material permutation.
-- **GTAO's levels** are XeGTAO's presets. The slices and steps are in `gtao.hlsl`'s constants, and its loops are no longer unrolled.
+- **The ambient occlusion's levels** are each technique's own (see [Techniques](ambient-occlusion.md#techniques)); GTAO's are XeGTAO's presets. The samples and steps are in the search's constants, and its loops are no longer unrolled.
 - **GI's levels** trade probes for cascades: each cascade's interval is four times as long as the one before, from a length that scales with the spacing, so sparser probes need fewer cascades to reach as far. Sparser probes are noisier, so their histories average over more frames. The spacing and the steps are in `Gi_Constants`.
 - **Fog's slices** reach the injection in `Fog_Push.grid.z` and the forward pass in `Frame_Constants.fog_slices`.
 
@@ -82,7 +82,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.preset` | `Low`, `Medium`, `High`, `Ultra`, `Custom` |
 | `quality.shadows` | `Low` … `Ultra` |
 | `quality.shadows.ray_traced` | `true`, `false` |
-| `quality.ao` | `Off`, `Gtao` |
+| `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
 | `quality.gi` | `Off`, `Screen_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
@@ -91,13 +91,12 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
-- **The sample** applies the files' quality when they change. F9 takes the next preset, and Shift+F9 turns traced shadows on or off. Each saves the quality to `project.user.settings`, as a settings menu would.
+- **The sample** applies the files' quality when they change. F9 takes the next preset, Shift+F9 turns traced shadows on or off, and Ctrl+F9 takes the next ambient occlusion technique. Each saves the quality to `project.user.settings`, as a settings menu would.
 
 ## Future work
 
 The phases that follow this one, in order, each worth doing on its own:
 
-- **SSAO and HBAO** as `Ao_Technique`s beside GTAO, sharing its depth levels, its edges and its denoiser, each with its own table of levels. HBAO is the engine's own horizon-based search (Bavoil 2008), not NVIDIA's HBAO+ library, so it runs on every vendor and cooks like every other shader.
 - **FXAA and SMAA 1x** as `Aa_Technique`s. Both need the scene tone mapped apart from the output pass, which today tone maps and composites the UI in one; the upscalers need the same split.
 - **Rendering below the frame's resolution** with `render_scale`: a built-in temporal upscaler first, then FSR through the GPU interface, and DLSS and XeSS once their licenses are reviewed. The editor's picking then scales its coordinates.
 - **A script API** (`Render.quality`, `Render.set_quality`, `Render.caps`, `Render.save_quality`) for settings menus in Luau, and a quality drop-down in the editor's viewport that sets `Frame_Desc.quality`.

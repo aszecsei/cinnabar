@@ -27,10 +27,13 @@ Quality_Preset :: enum u8 {
 	Custom,
 }
 
+// The ambient occlusion's techniques (see docs/rendering/ambient-occlusion.md#techniques), in the order that they were added, so a
+// code reload keeps a quality's choice: GTAO after XeGTAO, the most faithful; SSAO, the cheapest; and HBAO between.
 Ao_Technique :: enum u8 {
 	Off,
-	// GTAO, after XeGTAO (see docs/rendering/ambient-occlusion.md#ambient-occlusion).
 	Gtao,
+	Ssao,
+	Hbao,
 }
 
 Gi_Technique :: enum u8 {
@@ -163,6 +166,7 @@ set_quality :: proc(r: ^Renderer, q: Quality) {
 apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.shadows.level = q.shadows.level
 	settings.shadows.ray_traced = q.shadows.ray_traced
+	settings.ambient_occlusion.technique = q.ao.technique
 	settings.ambient_occlusion.level = q.ao.level
 	settings.ambient_occlusion.off ||= q.ao.technique == .Off
 	settings.gi.level = q.gi.level

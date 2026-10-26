@@ -1033,8 +1033,8 @@ update_output :: proc(s: ^Game_State) {
 }
 
 // update_quality changes the render quality, as a game's settings menu would, and saves it to the user's settings
-// file, from which update_output reads it back (see docs/rendering/quality.md#quality): F9 takes the next preset, and
-// Shift+F9 turns traced shadows on or off.
+// file, from which update_output reads it back (see docs/rendering/quality.md#quality): F9 takes the next preset,
+// Shift+F9 turns traced shadows on or off, and Ctrl+F9 takes the next ambient occlusion technique.
 update_quality :: proc(s: ^Game_State) {
 	input := s.platform.input()
 	if .F9 not_in input.pressed {
@@ -1044,6 +1044,8 @@ update_quality :: proc(s: ^Game_State) {
 	q := s.renderer.quality
 	if .Left_Shift in input.down || .Right_Shift in input.down {
 		q.shadows.ray_traced = !q.shadows.ray_traced
+	} else if .Left_Control in input.down || .Right_Control in input.down {
+		q.ao.technique = q.ao.technique >= max(render.Ao_Technique) ? .Off : render.Ao_Technique(int(q.ao.technique) + 1)
 	} else {
 		preset := render.quality_preset(q, caps)
 		next := preset >= .Ultra ? render.Quality_Preset.Low : render.Quality_Preset(int(preset) + 1)
@@ -1051,7 +1053,12 @@ update_quality :: proc(s: ^Game_State) {
 	}
 	render.set_quality(&s.renderer, q)
 	q = s.renderer.quality
-	log.infof("mygame: quality %v, traced shadows %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off)", render.quality_preset(q, caps), q.shadows.ray_traced)
+	log.infof(
+		"mygame: quality %v, traced shadows %v, ambient occlusion %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion)",
+		render.quality_preset(q, caps),
+		q.shadows.ray_traced,
+		q.ao.technique,
+	)
 	project.save_quality(s.platform, PROJECT_SETTINGS, q, caps)
 }
 
