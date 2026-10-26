@@ -5,14 +5,16 @@
 //   ps_transparent: the surface's color times its opacity, and its opacity, both premultiplied by the light that gets
 //     through the surfaces in front of it when push.transmittance is set. Moment-based transparency adds them up and
 //     normalizes them; a sorted draw blends them over the scene as premultiplied alpha, and an additive one adds them.
-//   ps_transparent_ids: the entity ID where the surface is mostly opaque, for the editor.
+//   ps_transparent_ids: the entity ID wherever the surface shows, for the editor.
 #ifndef MATERIAL_TRANSPARENT_HLSLI
 #define MATERIAL_TRANSPARENT_HLSLI
 
 #include "moments.hlsli"
 
-// The opacity from which ps_transparent_ids writes a surface's ID and depth: below it, the editor picks what is behind.
-static const float TRANSPARENT_ID_CUTOFF = 0.5;
+// The opacity from which ps_transparent_ids writes a surface's ID and depth. A glass of low opacity is picked wherever
+// it shows; only where a surface does not show at all, such as a texture's cut-out texels, does the editor pick what is
+// behind.
+static const float TRANSPARENT_ID_CUTOFF = 1.0 / 255.0;
 
 struct Moment_Targets {
 	float b0 : SV_Target0;

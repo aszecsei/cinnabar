@@ -51,7 +51,7 @@ Material_Pass :: enum u32 {
 	Moments,
 	// A transparent or additive material's shading, premultiplied by its opacity.
 	Transparent,
-	// A transparent or additive material's entity IDs and depth where it is mostly opaque, for the editor.
+	// A transparent or additive material's entity IDs and depth wherever it shows, for the editor.
 	Transparent_Ids,
 }
 

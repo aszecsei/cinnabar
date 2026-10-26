@@ -274,7 +274,8 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 - The fog dims their color and adds its light in front of them, as for an opaque surface. An additive surface adds no fog light, since the fog's light is already in the scene behind it.
 
 **The editor.**
-- When `Frame_Desc.keep_ids` is set, a pass after post-processing draws every transparent item where its opacity is at least `TRANSPARENT_ID_CUTOFF` (0.5). It writes their IDs and their depth (`Transparent_Ids`).
+- When `Frame_Desc.keep_ids` is set, a pass after post-processing draws every transparent item where its opacity is at least `TRANSPARENT_ID_CUTOFF` (1/255), so wherever it shows. It writes their IDs and their depth (`Transparent_Ids`).
+- So a click on glass selects the glass, whatever its opacity, as in other editors; an object behind it is selected from the outliner. Only a surface's fully transparent parts, such as a texture's cut-out texels, let a click through.
 - So the editor picks glass, and its tools and tested debug lines see it. Temporal AA and the exposure have already run, so the scene looks as the game's does.
 - In a game without an editor, tested debug lines draw over transparent surfaces.
 

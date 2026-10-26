@@ -336,7 +336,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			cull = cull,
 			label = label,
 		},
-		// After post-processing, for the editor: the IDs and the depth of the surfaces where they are mostly opaque.
+		// After post-processing, for the editor: the IDs and the depth of the surfaces wherever they show.
 		.Transparent_Ids = {
 			colors = TRANSPARENT_ID_COLORS,
 			depth_format = DEPTH_FORMAT,

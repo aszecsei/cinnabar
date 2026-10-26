@@ -7,7 +7,7 @@ import "cinnabar:core/gpu"
 // default: a pass adds up each pixel's optical depth and its moments, a second shades each surface dimmed by the
 // transmittance in front of it that the moments give and adds them up, and a compute pass composites the sum over the
 // scene. A sorted material, and an additive one, draws back to front over the scene, an item at a time. The editor gets
-// the IDs and the depth of the surfaces where they are mostly opaque, after post-processing.
+// the IDs and the depth of the surfaces wherever they show, after post-processing.
 
 TRANSPARENCY_COMPOSITE_SHADER :: #load("../content/shaders/transparency_composite.hlsl.meta", string)
 
@@ -129,8 +129,8 @@ add_transparency_passes :: proc(f: ^Frame) {
 	}
 }
 
-// add_transparent_id_pass adds the editor's pass of the transparent surfaces' IDs and depth, where they are mostly
-// opaque, so its picking and its tools see them. It runs after post-processing, so the frame looks as the game's does.
+// add_transparent_id_pass adds the editor's pass of the transparent surfaces' IDs and depth, wherever they show, so its
+// picking and its tools see them. It runs after post-processing, so the frame looks as the game's does.
 @(private)
 add_transparent_id_pass :: proc(f: ^Frame, keep_ids: bool) {
 	if !keep_ids || !has_transparency(f) {
