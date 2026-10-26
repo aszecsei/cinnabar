@@ -37,6 +37,8 @@ public sealed partial class EditorShell
         {
             // A drag or a scrub that is under way ends as it is.
             CancelGizmo();
+            // A material that a drag only shows was never dropped.
+            CancelMaterial();
             if (Scene is { InTransaction: true })
             {
                 Scene.Commit();

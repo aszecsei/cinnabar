@@ -102,7 +102,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	case DEBUG_ENTITY_IDS: {
 		Texture2D<uint> ids = ResourceDescriptorHeap[push.source];
-		uint entity = ids.Load(pixel);
+		// Each entity in one color, whatever its submeshes. Matches ID_ENTITY_MASK in lib/engine/render/renderer.odin.
+		uint entity = ids.Load(pixel) & ((1u << 25) - 1);
 		color = entity == 0 ? 0 : hash_color(entity);
 		break;
 	}

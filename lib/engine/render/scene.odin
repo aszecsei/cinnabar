@@ -105,6 +105,7 @@ Material_Push :: struct {
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
+// mesh is the mesh's index, with the submesh's index in its mesh above ID_ENTITY_BITS, as the ID buffer has it.
 Draw_Record :: struct {
 	instance:    u32,
 	mesh:        u32,
@@ -150,7 +151,8 @@ Cull_Item :: struct {
 	material:    u32,
 	bin:         u32,
 	flags:       u32,
-	padding:     u32,
+	// The index of the submesh in its mesh, which the ID buffer gets (see ID_ENTITY_BITS).
+	submesh:     u32,
 	sphere:      [4]f32,
 }
 
@@ -724,6 +726,7 @@ add_items :: proc(
 				material = use.block,
 				bin = u32(use.pipeline),
 				flags = flags,
+				submesh = u32(min(s, ID_MAX_SUBMESH)),
 				sphere = {b.center.x, b.center.y, b.center.z, b.radius},
 			},
 		)

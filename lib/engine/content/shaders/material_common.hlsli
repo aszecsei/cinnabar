@@ -130,8 +130,13 @@ struct Material_Push {
 #endif
 CN_PUSH_CONSTANTS(MATERIAL_PUSH, push);
 
+// Matches ID_ENTITY_BITS and ID_ENTITY_MASK in lib/engine/render/renderer.odin: an ID buffer value has its entity
+// in its low bits and its submesh above them.
+static const uint ID_ENTITY_BITS = 25;
+static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
+
 // Matches Draw_Record in lib/engine/render/scene.odin: one indirect draw, by its draw ID. material is the byte offset
-// of the draw's parameter block in the material table.
+// of the draw's parameter block in the material table. mesh has the submesh's index above ID_ENTITY_BITS.
 struct Draw_Record {
 	uint instance;
 	uint mesh;

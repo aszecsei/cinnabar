@@ -503,11 +503,13 @@ Pick_Hit :: struct {
 }
 
 // Game to editor: the entities that a Pick_Request found, sorted by entity. For one pixel, depth is the view-space
-// distance of what is drawn there in meters, or 0 where nothing is.
+// distance of what is drawn there in meters, or 0 where nothing is, and submesh is the index of the mesh's submesh
+// drawn there, or -1 where no entity is drawn and for a larger rectangle.
 Pick_Result :: struct {
-	id:    u32,
-	hits:  []Pick_Hit,
-	depth: f32,
+	id:      u32,
+	hits:    []Pick_Hit,
+	depth:   f32,
+	submesh: i32,
 }
 
 // Editor to game: the entities that the editor hides, which the game does not draw, with their descendants. Hiding is

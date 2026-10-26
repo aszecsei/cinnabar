@@ -221,10 +221,12 @@ public sealed class HostLinkTests : IAsyncDisposable
         var center = await editor.Next<PickResult>(r => r.Id == 7);
         Assert.Equal(near.Id, Assert.Single(center.Hits).SceneId);
         Assert.InRange(center.Depth, 1.15f, 1.25f);
+        Assert.Equal(0, center.Submesh);
         editor.Link.Send(new PickRequest(9, 0, 0, 1, 1));
         var corner = await editor.Next<PickResult>(r => r.Id == 9);
         Assert.Empty(corner.Hits);
         Assert.Equal(0, corner.Depth);
+        Assert.Equal(-1, corner.Submesh);
 
         // A hidden entity is not drawn, so the pick sees through it to the far box.
         editor.Link.Send(new SetHidden([loaded.Entities.Single(e => e.SceneId == near.Id).Entity]));
@@ -415,7 +417,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
         editor.Link.Send(EditorShell.DefaultViewportSettings);
 
-        PickResult center = new(0, [], 0);
+        PickResult center = new(0, [], 0, -1);
         for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
         {
             editor.Link.Send(new PickRequest(100 + attempt, target.Width / 2, target.Height / 2, 1, 1));

@@ -15,8 +15,11 @@ struct Push {
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Matches PICK_HEADER in viewport.odin: the request, and the ID, depth and stencil at the rectangle's origin, and then
-// a bit for each entity slot that the rectangle shows. A pass before this one zeroed the results.
+// Matches ID_ENTITY_MASK in lib/engine/render/renderer.odin: an ID buffer value's entity, without its submesh.
+static const uint ID_ENTITY_MASK = (1u << 25) - 1;
+
+// Matches PICK_HEADER in viewport.odin: the request, and the ID buffer value, depth and stencil at the rectangle's
+// origin, and then a bit for each entity slot that the rectangle shows. A pass before this one zeroed the results.
 static const uint HEADER_SIZE = 16;
 
 [numthreads(8, 8, 1)]
@@ -28,12 +31,14 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (any(pixel < 0) || any(pixel >= int2(push.target_size))) {
 		return;
 	}
-	uint entity = cn_uint_texture(push.ids).Load(int3(pixel, 0));
+	uint value = cn_uint_texture(push.ids).Load(int3(pixel, 0));
+	uint entity = value & ID_ENTITY_MASK;
 	RWByteAddressBuffer results = cn_rw_buffer(push.results);
 	if (all(id.xy == 0)) {
 		float depth = cn_texture(push.depth).Load(int3(pixel, 0)).r;
 		uint stencil = cn_stencil_texture(push.stencil).Load(int3(pixel, 0)).g;
-		results.Store4(0, uint4(push.request, entity, asuint(depth), stencil));
+		// The whole value, with its submesh.
+		results.Store4(0, uint4(push.request, value, asuint(depth), stencil));
 	}
 	if (entity != 0 && entity <= push.slots) {
 		uint slot = entity - 1;

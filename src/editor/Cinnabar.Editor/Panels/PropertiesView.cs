@@ -56,7 +56,7 @@ public sealed class PropertiesView : ScrollViewer
                 ? DragDropEffects.Link : DragDropEffects.None);
         AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (ContentBrowserView.Dropped(e) is { } script)
+            if (ContentBrowserView.Dropped(e) is { } script && _shell.CanAddBehaviour(SelectedSceneIds(), script))
             {
                 _shell.AddBehaviour(SelectedSceneIds(), script);
             }

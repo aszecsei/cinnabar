@@ -102,15 +102,25 @@ public sealed partial class EditorShell
         Pick(x0, y0, Math.Max(x1 - x0, 1), Math.Max(y1 - y0, 1), mode);
     }
 
-    void Pick(int x, int y, int width, int height, SelectMode mode)
+    void Pick(int x, int y, int width, int height, SelectMode mode) =>
+        Pick(x, y, width, height, result => OnPicked(result, mode, width == 1 && height == 1));
+
+    /// <summary>
+    /// Finds what is drawn at a pixel of the frame without selecting it, and calls back with the answer a few frames
+    /// later. Returns false without a linked host, which never answers.
+    /// </summary>
+    public bool PickPixel(Vec2 pixel, Action<PickResult> then) => Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, then);
+
+    bool Pick(int x, int y, int width, int height, Action<PickResult> then)
     {
         if (!Host.Linked)
         {
-            return;
+            return false;
         }
         var id = ++_nextPick;
-        _picks[id] = result => OnPicked(result, mode, width == 1 && height == 1);
+        _picks[id] = then;
         Host.Send(new PickRequest(id, x, y, width, height));
+        return true;
     }
 
     void OnPicked(PickResult result, SelectMode mode, bool click)
