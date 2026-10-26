@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
@@ -17,7 +18,8 @@ namespace Cinnabar.Editor.Viewport;
 /// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
 /// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it. While
 /// the game plays, the viewport gives the game its keyboard and mouse instead, unless the free camera is on, and a
-/// frame in the mode's color goes around it.
+/// frame in the mode's color goes around it. A material dragged from the content browser shows on the submesh under
+/// the mouse, and drops onto it.
 /// </summary>
 public sealed class ViewportView : Grid
 {
@@ -57,6 +59,12 @@ public sealed class ViewportView : Grid
     ulong _lastPresented;
     ulong _lastShown;
     long _lastTick = Environment.TickCount64;
+    // A material drag: the pixel that it is over, the pixel of the pick that it last sent, whether that pick has not
+    // answered, and a count that a drag's end bumps, so an answer from before it does nothing.
+    (int X, int Y)? _dragPixel;
+    (int X, int Y)? _pickedPixel;
+    bool _dragPicking;
+    int _dragGeneration;
 
     public ViewportView(EditorShell shell)
     {
@@ -90,6 +98,11 @@ public sealed class ViewportView : Grid
         speed.IsHitTestVisible = false;
         Children.Add(speed);
         Children.Add(Palette());
+
+        DragDrop.SetAllowDrop(this, true);
+        AddHandler(DragDrop.DragOverEvent, (_, e) => OnDragOver(e));
+        AddHandler(DragDrop.DragLeaveEvent, (_, _) => EndMaterialDrag());
+        AddHandler(DragDrop.DropEvent, (_, e) => OnDrop(e));
 
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => UpdateStats());
         _flyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => FlyStep());
@@ -193,6 +206,83 @@ public sealed class ViewportView : Grid
 
     static SelectMode ModeOf(KeyModifiers modifiers) =>
         modifiers.HasFlag(KeyModifiers.Shift) ? SelectMode.Add : modifiers.HasFlag(KeyModifiers.Control) ? SelectMode.Toggle : SelectMode.Replace;
+
+    // The material that a drag carries, with the frame pixel under it, or null when the viewport does not take it.
+    (string Guid, Vec2 Pixel)? DraggedMaterial(DragEventArgs e) =>
+        _shell.IsEditing && ContentBrowserView.Dropped(e) is { } guid && _shell.IsMaterial(guid) && _control.FramePoint(e.GetPosition(this)) is { } pixel
+            ? (guid, pixel) : null;
+
+    void OnDragOver(DragEventArgs e)
+    {
+        if (DraggedMaterial(e) is not var (guid, pixel))
+        {
+            e.DragEffects = DragDropEffects.None;
+            EndMaterialDrag();
+            return;
+        }
+        e.DragEffects = DragDropEffects.Link;
+        e.Handled = true;
+        _dragPixel = ((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y));
+        PickUnderDrag(guid);
+    }
+
+    // Picks the pixel under the drag, one pick at a time, and shows the material where each answer finds.
+    void PickUnderDrag(string guid)
+    {
+        if (_dragPicking || _dragPixel is not { } pixel || pixel == _pickedPixel)
+        {
+            return;
+        }
+        var generation = _dragGeneration;
+        _pickedPixel = pixel;
+        _dragPicking = _shell.PickPixel(new Vec2(pixel.X, pixel.Y), result =>
+        {
+            if (generation != _dragGeneration)
+            {
+                return;
+            }
+            _dragPicking = false;
+            _shell.PreviewMaterial(_shell.MaterialTargetOf(result), guid);
+            PickUnderDrag(guid);
+        });
+    }
+
+    void OnDrop(DragEventArgs e)
+    {
+        var dragged = DraggedMaterial(e);
+        EndPicks();
+        if (dragged is not var (guid, pixel))
+        {
+            _shell.CancelMaterial();
+            return;
+        }
+        e.Handled = true;
+        var generation = _dragGeneration;
+        if (!_shell.PickPixel(pixel, result =>
+            {
+                if (generation == _dragGeneration)
+                {
+                    _shell.DropMaterial(result, guid);
+                }
+            }))
+        {
+            _shell.CancelMaterial();
+        }
+    }
+
+    // A drag that leaves the viewport, or stops carrying a material it takes, puts back what it showed.
+    void EndMaterialDrag()
+    {
+        EndPicks();
+        _shell.CancelMaterial();
+    }
+
+    void EndPicks()
+    {
+        _dragGeneration++;
+        _dragPixel = _pickedPixel = null;
+        _dragPicking = false;
+    }
 
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {

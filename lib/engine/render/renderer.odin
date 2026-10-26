@@ -14,8 +14,15 @@ import "cinnabar:engine/volume"
 // and reversed depth, which the prepass writes with the normals and the velocities (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
 // sRGB view, so it blends in linear light, and the output pass encodes it.
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
-// Each pixel holds entity_id of the entity drawn there, or 0. The editor picks from it.
+// Each pixel holds entity_id of the entity drawn there, or 0, with the submesh drawn there in its high bits (see
+// id_submesh). The editor picks from it.
 ID_FORMAT :: gpu.Format.R32_Uint
+// An ID buffer value's low ID_ENTITY_BITS are its entity_id, which ecs.MAX_ENTITIES fits, and the bits above them its
+// submesh, clamped to ID_MAX_SUBMESH. ID_ENTITY_MASK and ID_ENTITY_BITS match the shaders that read the buffer.
+ID_ENTITY_BITS :: 25
+ID_ENTITY_MASK :: 1 << ID_ENTITY_BITS - 1
+ID_MAX_SUBMESH :: 1 << (32 - ID_ENTITY_BITS) - 1
+#assert(ecs.MAX_ENTITIES <= ID_ENTITY_MASK)
 // The scene's depth has a stencil, whose bit VIEW_MODEL_STENCIL marks the view model's pixels.
 DEPTH_FORMAT :: gpu.Format.D32_Float_S8_Uint
 VIEW_MODEL_STENCIL :: 1
@@ -41,6 +48,17 @@ OUTPUT_SHADER :: #load("../content/shaders/output.hlsl.meta", string)
 // entity_id is an entity's value in the ID buffer: its slot + 1, so 0 is no entity.
 entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
 	return ecs.entity_index(entity) + 1
+}
+
+// id_entity is an ID buffer value's entity_id, without its submesh.
+id_entity :: proc "contextless" (id: u32) -> u32 {
+	return id & ID_ENTITY_MASK
+}
+
+// id_submesh is the submesh of an ID buffer value: the index of the mesh's submesh drawn there, clamped to
+// ID_MAX_SUBMESH, or 0 for what is not a submesh of a mesh.
+id_submesh :: proc "contextless" (id: u32) -> int {
+	return int(id >> ID_ENTITY_BITS)
 }
 
 // Renderer is the built-in renderer (see docs/rendering.md#frame). It lives in Game_State and holds handles only, so

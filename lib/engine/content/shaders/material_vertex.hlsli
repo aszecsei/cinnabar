@@ -49,7 +49,7 @@ float3 transform_direction(float4 rows[3], float3 d) {
 
 Material_Vertex load_vertex(uint vertex_id) {
 	Draw_Record d = cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
-	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + d.mesh * sizeof(Mesh_Record));
+	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + (d.mesh & ID_ENTITY_MASK) * sizeof(Mesh_Record));
 	uint corner = d.first_index + vertex_id;
 	uint index;
 	if (m.flags & MESH_INDEX32) {
@@ -89,7 +89,7 @@ Material_Vertex load_vertex(uint vertex_id) {
 	v.uv1 = uv1;
 	v.color = color;
 	v.material = d.material;
-	v.id = instance.id;
+	v.id = instance.id | (d.mesh & ~ID_ENTITY_MASK);
 	return v;
 }
 

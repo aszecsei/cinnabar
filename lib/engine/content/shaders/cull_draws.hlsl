@@ -49,9 +49,12 @@ struct Item {
 	uint material;
 	uint bin;
 	uint flags;
-	uint padding;
+	uint submesh;
 	float4 sphere;
 };
+
+// Matches ID_ENTITY_BITS in lib/engine/render/renderer.odin.
+static const uint ID_ENTITY_BITS = 25;
 
 // Matches Instance_Record in lib/engine/render/scene.odin.
 struct Instance_Record {
@@ -92,6 +95,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
 	cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.index_count, 1, 0));
 	cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
-	// Draw_Record: instance, mesh, first index, material.
-	cn_rw_buffer(cull.draws).Store4(index * 16, uint4(item.instance, item.mesh, item.first_index, item.material));
+	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first index, material.
+	cn_rw_buffer(cull.draws).Store4(index * 16, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first_index, item.material));
 }

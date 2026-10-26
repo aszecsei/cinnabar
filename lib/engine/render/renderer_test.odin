@@ -260,3 +260,13 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect(t, halton(n, 2) > 0 && halton(n, 2) < 1 && halton(n, 3) > 0 && halton(n, 3) < 1)
 	}
 }
+
+@(test)
+ids_keep_the_entity_and_the_submesh :: proc(t: ^testing.T) {
+	last := ecs.MAX_ENTITIES - 1
+	id := u32(last + 1) | ID_MAX_SUBMESH << ID_ENTITY_BITS
+	testing.expect_value(t, id_entity(id), u32(last + 1))
+	testing.expect_value(t, id_submesh(id), ID_MAX_SUBMESH)
+	testing.expect_value(t, id_entity(5 | 3 << ID_ENTITY_BITS), 5)
+	testing.expect_value(t, id_submesh(5), 0)
+}

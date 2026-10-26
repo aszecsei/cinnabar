@@ -566,12 +566,21 @@ sealed class EntityView : FieldView
         DockPanel.SetDock(_clear, Avalonia.Controls.Dock.Right);
         var box = new Border { Classes = { "value-box", "editable" }, Child = new DockPanel { Children = { _clear, _text } } };
         DragDrop.SetAllowDrop(box, true);
-        box.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = Dropped(e) != 0 ? DragDropEffects.Link : DragDropEffects.None);
+        // A drop that the field takes is handled, so the properties panel's own drop does not refuse it.
+        box.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            if (Dropped(e) != 0)
+            {
+                e.DragEffects = DragDropEffects.Link;
+                e.Handled = true;
+            }
+        });
         box.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
             if (Dropped(e) is var handle and not 0)
             {
                 editor.SetEntity(handle);
+                e.Handled = true;
             }
         });
         ToolTip.SetTip(box, "Drag an entity here from the outliner");
@@ -653,11 +662,11 @@ sealed class AssetView : FieldView
         _clear.Click += (_, _) => editor.SetAsset("");
         var pick = new Button { Content = "…", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
         ToolTip.SetTip(pick, assets.Kind == "" ? "Pick an asset" : $"Pick a {assets.Kind}");
-        var menu = new MenuFlyout();
-        // The menu fills when it opens, so it has the assets of the latest cook.
-        menu.Opening += (_, _) =>
+        // A new menu for each click, so it has the assets of the latest cook. A MenuFlyout that fills its items in Opening
+        // shows empty, as its presenter does not realize items added while it is detached.
+        pick.Click += (_, _) =>
         {
-            menu.Items.Clear();
+            var menu = new MenuFlyout();
             foreach (var asset in assets.Choices)
             {
                 var guid = asset.Guid;
@@ -669,18 +678,27 @@ sealed class AssetView : FieldView
             {
                 menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind} assets", IsEnabled = false });
             }
+            menu.ShowAt(pick);
         };
-        pick.Flyout = menu;
         DockPanel.SetDock(_clear, Avalonia.Controls.Dock.Right);
         DockPanel.SetDock(pick, Avalonia.Controls.Dock.Right);
         var box = new Border { Classes = { "value-box", "editable" }, Child = new DockPanel { Children = { _clear, pick, _text } } };
         DragDrop.SetAllowDrop(box, true);
-        box.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = Dropped(e) != null ? DragDropEffects.Link : DragDropEffects.None);
+        // A drop that the field takes is handled, so the properties panel's own drop does not refuse it.
+        box.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            if (Dropped(e) != null)
+            {
+                e.DragEffects = DragDropEffects.Link;
+                e.Handled = true;
+            }
+        });
         box.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
             if (Dropped(e) is { } guid)
             {
                 editor.SetAsset(guid);
+                e.Handled = true;
             }
         });
         ToolTip.SetTip(box, assets.Kind == "" ? "Drag an asset here from the content browser" : $"Drag a {assets.Kind} here from the content browser");

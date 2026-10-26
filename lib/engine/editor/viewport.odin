@@ -539,11 +539,13 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, nea
 		}
 	}
 	depth: f32
-	if request.width <= 1 && request.height <= 1 && words[1] != 0 {
+	submesh: i32 = -1
+	if request.width <= 1 && request.height <= 1 && render.id_entity(words[1]) != 0 {
 		// The view model's pixels have the view model's near plane (see docs/rendering.md#view-model).
 		depth = render.view_depth(transmute(f32)words[2], words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_near : near)
+		submesh = i32(render.id_submesh(words[1]))
 	}
-	return {id = request.id, hits = hits[:], depth = depth}
+	return {id = request.id, hits = hits[:], depth = depth, submesh = submesh}
 }
 
 // The gizmo's shape, as fractions of Gizmo_State.size. The editor's hit test uses the same numbers (see

@@ -59,8 +59,11 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	return o;
 }
 
+// Matches ID_ENTITY_MASK in lib/engine/render/renderer.odin: an ID buffer value's entity, without its submesh.
+static const uint ID_ENTITY_MASK = (1u << 25) - 1;
+
 bool selected(int2 pixel) {
-	uint entity = cn_uint_texture(push.ids).Load(int3(pixel, 0));
+	uint entity = cn_uint_texture(push.ids).Load(int3(pixel, 0)) & ID_ENTITY_MASK;
 	if (entity == 0 || entity > push.slots) {
 		return false;
 	}

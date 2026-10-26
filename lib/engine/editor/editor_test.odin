@@ -458,7 +458,8 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 	gone := ecs.spawn(w)
 	ecs.despawn(w, gone)
 
-	words := []u32{9, entity_id(c), transmute(u32)f32(0.5), 0, 0}
+	// The corner pixel shows c's third submesh.
+	words := []u32{9, entity_id(c) | 2 << render.ID_ENTITY_BITS, transmute(u32)f32(0.5), 0, 0}
 	for e in ([]ecs.Entity{c, a, gone}) {
 		index := ecs.entity_index(e)
 		words[4 + index / 32] |= 1 << (index % 32)
@@ -471,6 +472,7 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 	testing.expect_value(t, result.hits[1], link.Pick_Hit{entity = u64(c), scene_id = 0x77})
 	// A depth of 0.5 is twice the near plane.
 	testing.expect(t, abs(result.depth - 0.2) < 1e-6)
+	testing.expect_value(t, result.submesh, 2)
 
 	// On the view model's stencil bit, the depth is the view model's near plane's.
 	words[3] = render.VIEW_MODEL_STENCIL
@@ -479,6 +481,12 @@ picks_read_their_entities_from_the_results :: proc(t: ^testing.T) {
 
 	rect := pick_result(w, {id = 4, width = 8, height = 8}, words, 0.1, 0.01, context.temp_allocator)
 	testing.expect_value(t, rect.depth, 0)
+	testing.expect_value(t, rect.submesh, -1)
+
+	// Nothing at the corner has no submesh.
+	words[1] = 0
+	empty := pick_result(w, {id = 6, width = 1, height = 1}, words, 0.1, 0.01, context.temp_allocator)
+	testing.expect_value(t, empty.submesh, -1)
 }
 
 @(test)
