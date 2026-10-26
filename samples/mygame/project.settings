@@ -2,4 +2,4 @@
 # a change at once. project.user.settings beside this file replaces them on one machine, and is not committed.
 
 # The window's output mode: Auto (HDR10 on a display in HDR, SDR otherwise), Sdr, Hdr10 or Scrgb.
-output = Auto
+output = Sdr
