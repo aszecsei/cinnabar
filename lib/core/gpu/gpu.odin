@@ -24,6 +24,52 @@ Feature :: enum u8 {
 
 Features :: bit_set[Feature]
 
+Vendor :: enum u8 {
+	Unknown,
+	Amd,
+	Intel,
+	Nvidia,
+	Qualcomm,
+	Microsoft,
+}
+
+// vendor_from_id is the vendor of a PCI vendor ID.
+vendor_from_id :: proc(id: u32) -> Vendor {
+	switch id {
+	case 0x1002, 0x1022:
+		return .Amd
+	case 0x8086:
+		return .Intel
+	case 0x10de:
+		return .Nvidia
+	case 0x5143, 0x4d4f4351:
+		return .Qualcomm
+	case 0x1414:
+		return .Microsoft
+	}
+	return .Unknown
+}
+
+// Adapter is the device that the backend chose, for choosing the defaults of what the game draws (see
+// docs/gpu/interface.md#adapter).
+Adapter :: struct {
+	vendor:       Vendor,
+	device_id:    u32,
+	// The adapter's own memory in bytes, 0 when unknown or shared with the CPU.
+	video_memory: u64,
+	// UTF-8, with zeros after it (see adapter_name).
+	name:         [128]u8,
+}
+
+// adapter_name is an adapter's name, in its memory.
+adapter_name :: proc(a: ^Adapter) -> string {
+	n := 0
+	for n < len(a.name) && a.name[n] != 0 {
+		n += 1
+	}
+	return string(a.name[:n])
+}
+
 // Pool capacities. The bindless index ranges below depend on them.
 MAX_BUFFERS :: 16384
 MAX_TEXTURES :: 16384

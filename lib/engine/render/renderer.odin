@@ -95,6 +95,10 @@ Renderer :: struct {
 	debug_view:      Shader_Pipeline,
 	// Moment-based transparency's composite over the scene (see docs/rendering/transparency.md#transparency).
 	transparency_composite: Shader_Pipeline,
+	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
+	// set_quality).
+	caps:            Caps,
+	quality:         Quality,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
 }
@@ -110,6 +114,9 @@ Frame_Desc :: struct {
 	// The frame's settings (see docs/rendering/frame.md#settings). nil takes them from the volumes at the view, as
 	// resolve_settings does.
 	settings:          ^Frame_Settings,
+	// The frame's quality, as far as the device can do it (see docs/rendering/quality.md#quality). nil takes
+	// Renderer.quality.
+	quality:           ^Quality,
 	// The editor's debug view, the features that it turns off, and the stops that it adds to the exposure (see
 	// docs/rendering/post-processing.md#debug-views).
 	debug_view:        Debug_View,
@@ -253,6 +260,8 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	// The Renderer is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(r)
 	r.platform = platform
+	r.caps = device_caps(platform)
+	r.quality = default_quality(r.caps)
 	r.meshes = mesh_extractor(w)
 	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
@@ -275,7 +284,6 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	gi_init(&r.gi)
 	fog_init(&r.fog)
 	post_init(&r.post, platform)
-	r.residency.accels = r.shadows.ray_query
 }
 
 // mesh_extractor selects the entities with a Mesh_Renderer.
@@ -346,6 +354,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
 	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
+	apply_quality(&settings, desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
 	begin_post(f, settings.post)
 	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit

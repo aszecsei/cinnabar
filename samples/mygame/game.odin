@@ -1006,8 +1006,8 @@ shutdown :: proc(state: rawptr) {
 	log.info("mygame: shutdown")
 }
 
-// update_output asks for the output mode of the project's settings, and reads them again when their files change, so
-// the editor's change shows at once. F8 cycles the mode for this run.
+// update_output asks for the output mode and the render quality of the project's settings, and reads them again when
+// their files change, so the editor's change shows at once. F8 cycles the mode for this run.
 update_output :: proc(s: ^Game_State) {
 	now := s.platform.time_seconds()
 	changed := false
@@ -1016,8 +1016,10 @@ update_output :: proc(s: ^Game_State) {
 		if project.refresh(&s.project, s.platform, PROJECT_SETTINGS) {
 			changed = true
 			s.output_override = nil
+			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
 		}
 	}
+	update_quality(s)
 	if .F8 in s.platform.input().pressed {
 		current := s.output_override.? or_else s.project.settings.output
 		next := gpu.Output_Request((int(current) + 1) % len(gpu.Output_Request))
@@ -1028,6 +1030,29 @@ update_output :: proc(s: ^Game_State) {
 	if changed {
 		s.platform.gpu_request_output(s.output_override.? or_else s.project.settings.output)
 	}
+}
+
+// update_quality changes the render quality, as a game's settings menu would, and saves it to the user's settings
+// file, from which update_output reads it back (see docs/rendering/quality.md#quality): F9 takes the next preset, and
+// Shift+F9 turns traced shadows on or off.
+update_quality :: proc(s: ^Game_State) {
+	input := s.platform.input()
+	if .F9 not_in input.pressed {
+		return
+	}
+	caps := s.renderer.caps
+	q := s.renderer.quality
+	if .Left_Shift in input.down || .Right_Shift in input.down {
+		q.shadows.ray_traced = !q.shadows.ray_traced
+	} else {
+		preset := render.quality_preset(q, caps)
+		next := preset >= .Ultra ? render.Quality_Preset.Low : render.Quality_Preset(int(preset) + 1)
+		q = render.preset_quality(next, caps)
+	}
+	render.set_quality(&s.renderer, q)
+	q = s.renderer.quality
+	log.infof("mygame: quality %v, traced shadows %v (F9 takes the next preset, Shift+F9 turns traced shadows on or off)", render.quality_preset(q, caps), q.shadows.ray_traced)
+	project.save_quality(s.platform, PROJECT_SETTINGS, q, caps)
 }
 
 // switch_scene loads the glass scene, or the main scene again, when F7 is pressed. A linked editor owns the scene, so

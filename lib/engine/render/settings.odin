@@ -133,10 +133,14 @@ DEFAULT_SHADOWS :: Shadows {
 	split_lambda = {value = SHADOW_SPLIT_LAMBDA},
 }
 
-// Shadow_Settings are a frame's cascades, from the Shadows settings. A distance of 0 gives SHADOW_DISTANCE.
+// Shadow_Settings are a frame's cascades, from the Shadows settings, and its shadows' quality. A distance of 0 gives
+// SHADOW_DISTANCE.
 Shadow_Settings :: struct {
 	distance:     f32,
 	split_lambda: f32,
+	// The shadow maps' SHADOW_PARAMS, and whether the first lights trace their shadows where the device can.
+	level:        Quality_Level,
+	ray_traced:   bool,
 }
 
 // Fog_Settings are a frame's fog, from the Fog settings. A density of 0 is no fog.
@@ -146,10 +150,13 @@ Fog_Settings :: struct {
 	base_height:    f32,
 	height_falloff: f32,
 	anisotropy:     f32,
+	// The volume's FOG_LEVEL_SLICES.
+	level:          Quality_Level,
 }
 
 // Frame_Settings are a frame's settings, which resolve_settings takes from the volumes at the camera. A game can
-// resolve them, change them and give them to the frame in Frame_Desc.settings.
+// resolve them, change them and give them to the frame in Frame_Desc.settings. draw_frame then gives them the frame's
+// quality (see apply_quality).
 Frame_Settings :: struct {
 	post:              Post_Settings,
 	ambient_occlusion: Ao_Settings,

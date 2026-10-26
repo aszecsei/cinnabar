@@ -36,6 +36,7 @@ The order in which the renderer was built. Every phase is done; what remains is 
 | 12 | *Done.* Debug views: the forward template's views of the albedo, the lighting, the light complexity and the cascades, the views from the frame's textures, the raw output, and the features that the editor turns off. |
 | 13 | *Done.* The cascades' reach and split as `Shadows` settings on volumes. *The depth bias stays a constant: it is in the shadow pipelines' descriptions.* |
 | 14 | *Done.* Transparency: the `Transparent` and `Additive` blends, moment-based order-independent transparency with four power moments, sorted draws as bins of their own, the editor's transparent IDs and the overdraw view. The sample's glass scene, which F7 switches to. |
+| 15 | *Done.* Quality (see [Rendering](rendering/quality.md#quality)): `Quality` apart from the volumes' look, with each feature's level, `apply_quality` between the volumes and the editor's flags, and tables of levels in place of the shadows', GTAO's, GI's and fog's constants. Traced shadows as a choice, with the acceleration structures made the first frame that traces. Hardware caps and defaults by video memory, and the quality's keys in the project settings, which the game saves. In `lib/core`: `gpu_adapter` and `file_write` (see [GPU](gpu/interface.md#adapter)). The sample's F9 and Shift+F9. |
 
 ## Scripting
 Phases 1 to 7 are done. Phase 8 is in [Future work](scripting/README.md#future-work).

@@ -7,18 +7,41 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 
-// Shadows (see docs/rendering/lighting-and-shadows.md#shadows). With Ray_Query, a compute pass traces up to four lights' shadows into a
-// screen-space mask, from the prepass's depth, against an acceleration structure of the GPU scene. The other lights
-// that cast shadows get shadow maps in one atlas: four cascades for the first directional light, one view for a spot
-// light, and six for a point light. The maps draw each material's depth pass.
+// Shadows (see docs/rendering/lighting-and-shadows.md#shadows). With Ray_Query and traced shadows in the quality, a compute pass
+// traces up to four lights' shadows into a screen-space mask, from the prepass's depth, against an acceleration
+// structure of the GPU scene. The other lights that cast shadows get shadow maps in one atlas: the cascades for the
+// first directional light, one view for a spot light, and six for a point light. The maps draw each material's depth
+// pass.
 
-// The atlas is square. Cascades take cells of SHADOW_CELL pixels; spot lights and point lights' faces take slots of
-// SHADOW_SLOT, four to a cell.
-SHADOW_ATLAS_SIZE :: 4096
 SHADOW_FORMAT :: gpu.Format.D32_Float
-SHADOW_CELL :: 1024
-SHADOW_SLOT :: 512
+// The most cascades that a level has. Frame_Constants.cascade_splits holds this many.
 SHADOW_CASCADES :: 4
+
+// Shadow_Filter is how many bilinear comparisons a shadow map's lookup takes: 1 is the hardware's 2x2, 4 a 3x3
+// neighbourhood, 9 a 4x4. Matches shadow_map in material_lighting.hlsli.
+Shadow_Filter :: enum u32 {
+	Taps_1 = 1,
+	Taps_4 = 4,
+	Taps_9 = 9,
+}
+
+// Shadow_Params are the shadow maps at a level. The atlas is square. Cascades take cells of cell pixels; spot lights
+// and point lights' faces take slots of slot pixels, several to a cell.
+Shadow_Params :: struct {
+	atlas:    int,
+	cell:     int,
+	slot:     int,
+	cascades: int,
+	filter:   Shadow_Filter,
+}
+
+@(rodata)
+SHADOW_PARAMS := [Quality_Level]Shadow_Params {
+	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1},
+	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4},
+	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4},
+	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9},
+}
 // By default, the cascades cover the view to this depth, in meters, split between even and exponential by this much
 // (see Shadows).
 SHADOW_DISTANCE :: 100
@@ -33,11 +56,16 @@ MAX_MASK_LIGHTS :: 4
 SHADOW_MASK_FORMAT :: gpu.Format.RGBA8_Unorm
 MASK_GROUP_SIZE :: 8
 
-@(private = "file")
-CELLS_PER_SIDE :: SHADOW_ATLAS_SIZE / SHADOW_CELL
-@(private = "file")
-SLOTS_PER_CELL :: (SHADOW_CELL / SHADOW_SLOT) * (SHADOW_CELL / SHADOW_SLOT)
-MAX_SHADOW_VIEWS :: CELLS_PER_SIDE * CELLS_PER_SIDE * SLOTS_PER_CELL
+// slots_per_cell is how many slots a cell holds.
+slots_per_cell :: proc(p: Shadow_Params) -> int {
+	return (p.cell / p.slot) * (p.cell / p.slot)
+}
+
+// max_shadow_views is how many slots the atlas holds.
+max_shadow_views :: proc(p: Shadow_Params) -> int {
+	cells := p.atlas / p.cell
+	return cells * cells * slots_per_cell(p)
+}
 
 // SHADOW_MASK_SHADER is the engine's shadow mask shader (lib/engine/content/shaders/shadow_mask.hlsl).
 SHADOW_MASK_SHADER :: #load("../content/shaders/shadow_mask.hlsl.meta", string)
@@ -77,8 +105,8 @@ Mask_Constants :: struct {
 
 // Shadow_Passes is the shadows' state between frames, in the Renderer.
 Shadow_Passes :: struct {
-	// Whether the device traces rays in shaders, and the GPU scene's top-level acceleration structure then.
-	ray_query:     bool,
+	// The GPU scene's top-level acceleration structure, made the first frame that traces (see enable_tracing). It is
+	// kept when tracing turns off, so turning it on again does not make every mesh's again.
 	accel:         gpu.Accel_Struct,
 	mask_pipeline: Shader_Pipeline,
 	sampler:       gpu.Sampler,
@@ -93,6 +121,7 @@ Shadow_Frame :: struct {
 	planes:         [dynamic][6][4]f32,
 	viewports:      [dynamic][4]u32,
 	cascade_splits: [4]f32,
+	params:         Shadow_Params,
 	mask_lights:    [MAX_MASK_LIGHTS]u32,
 	mask_count:     int,
 	atlas:          Texture,
@@ -105,10 +134,6 @@ Shadow_Frame :: struct {
 }
 
 shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
-	s.ray_query = .Ray_Query in platform.gpu_features()
-	if s.ray_query {
-		s.accel = platform.gpu_create_accel({kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"})
-	}
 	s.mask_pipeline = shader_pipeline(SHADOW_MASK_SHADER)
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
 }
@@ -119,12 +144,14 @@ shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
 }
 
-// cascade_splits are the view depths at which each cascade ends: between even and exponential splits of the range
-// from the near plane to distance, lambda of the way to exponential.
-cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 = SHADOW_SPLIT_LAMBDA) -> (splits: [SHADOW_CASCADES]f32) {
+// cascade_splits are the view depths at which count cascades end: between even and exponential splits of the range
+// from the near plane to distance, lambda of the way to exponential. The splits past count repeat the last, so no
+// depth reaches a cascade past it.
+cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 = SHADOW_SPLIT_LAMBDA, count := SHADOW_CASCADES) -> (splits: [SHADOW_CASCADES]f32) {
 	far := max(distance, near * 2)
+	n := clamp(count, 1, SHADOW_CASCADES)
 	for &split, i in splits {
-		t := f32(i + 1) / SHADOW_CASCADES
+		t := f32(min(i + 1, n)) / f32(n)
 		exponential := near * math.pow(far / near, t)
 		even := near + (far - near) * t
 		split = lambda * exponential + (1 - lambda) * even
@@ -133,15 +160,32 @@ cascade_splits :: proc(near: f32, distance: f32 = SHADOW_DISTANCE, lambda: f32 =
 }
 
 // assign_shadows gives the lights that cast shadows their shadows, in order: the directional lights, then the
-// punctual lights by how much light they bring to the view. With Ray_Query, the first MAX_MASK_LIGHTS take channels of
-// the mask. The others take shadow maps while the atlas has room: the cascades only for one directional light.
+// punctual lights by how much light they bring to the view. With traced shadows, the first MAX_MASK_LIGHTS take
+// channels of the mask. The others take shadow maps while the atlas has room: the cascades only for one directional
+// light.
 @(private)
 assign_shadows :: proc(f: ^Frame) {
 	r := f.renderer
-	if r.shadows.ray_query {
+	if r.caps.ray_query {
+		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
 	}
-	assign_shadow_views(f, r.shadows.ray_query && r.shadows.mask_pipeline.pipeline != {})
+	trace := r.caps.ray_query && f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {}
+	if trace {
+		enable_tracing(r)
+	}
+	assign_shadow_views(f, trace)
+}
+
+// enable_tracing makes the GPU scene's acceleration structure, and has every mesh make its own, the first frame that
+// traces. Each mesh's is built in the frames after (see unbuilt_accels).
+@(private = "file")
+enable_tracing :: proc(r: ^Renderer) {
+	if r.shadows.accel != {} {
+		return
+	}
+	r.shadows.accel = r.platform.gpu_create_accel({kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"})
+	residency_enable_accels(&r.residency)
 }
 
 // assign_shadow_views gives the lights their shadows, with the mask's channels first if trace.
@@ -155,6 +199,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 	sf.matrices = make([dynamic]matrix[4, 4]f32, r.platform.frame_allocator)
 	sf.planes = make([dynamic][6][4]f32, r.platform.frame_allocator)
 	sf.viewports = make([dynamic][4]u32, r.platform.frame_allocator)
+	sf.params = SHADOW_PARAMS[f.shadow_settings.level]
+	max_views := max_shadow_views(sf.params)
 
 	// The directional lights first, in their order, then the punctual ones by their light in view.
 	order := make([dynamic]int, r.platform.frame_allocator)
@@ -199,11 +245,11 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 				continue
 			}
 			cascades_taken = true
-			first_slot = SHADOW_CASCADES * SLOTS_PER_CELL
+			first_slot = sf.params.cascades * slots_per_cell(sf.params)
 			record.shadow = i32(len(sf.views))
 			add_cascades(f, sf, record.direction)
 		case .Spot:
-			if first_slot + next_slot + 1 > MAX_SHADOW_VIEWS {
+			if first_slot + next_slot + 1 > max_views {
 				continue
 			}
 			record.shadow = i32(len(sf.views))
@@ -213,7 +259,7 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 			next_slot += 1
 		case .Point, .Quad, .Disk, .Line:
 			// An area light casts its shadows from its middle, as a point light does.
-			if first_slot + next_slot + 6 > MAX_SHADOW_VIEWS {
+			if first_slot + next_slot + 6 > max_views {
 				continue
 			}
 			record.shadow = i32(len(sf.views))
@@ -274,16 +320,18 @@ light_basis :: proc(forward: [3]f32) -> (right, up: [3]f32) {
 	return
 }
 
-// slot_viewport is a slot's rectangle of the atlas in pixels, and in UV.
-@(private = "file")
-slot_viewport :: proc(slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
-	per_side := SHADOW_CELL / size
-	cell := size == SHADOW_CELL ? slot : slot / SLOTS_PER_CELL
-	sub := size == SHADOW_CELL ? 0 : slot % SLOTS_PER_CELL
-	x := (cell % CELLS_PER_SIDE) * SHADOW_CELL + (sub % per_side) * size
-	y := (cell / CELLS_PER_SIDE) * SHADOW_CELL + (sub / per_side) * size
+// slot_viewport is a slot's rectangle of the atlas in pixels, and in UV: a whole cell when size is the cell's, and
+// otherwise one of its slots.
+slot_viewport :: proc(p: Shadow_Params, slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
+	per_side := p.cell / size
+	cells_per_side := p.atlas / p.cell
+	cell := size == p.cell ? slot : slot / slots_per_cell(p)
+	sub := size == p.cell ? 0 : slot % slots_per_cell(p)
+	x := (cell % cells_per_side) * p.cell + (sub % per_side) * size
+	y := (cell / cells_per_side) * p.cell + (sub / per_side) * size
 	pixels = {u32(x), u32(y), u32(size), u32(size)}
-	rect = {f32(x) / SHADOW_ATLAS_SIZE, f32(y) / SHADOW_ATLAS_SIZE, f32(size) / SHADOW_ATLAS_SIZE, f32(size) / SHADOW_ATLAS_SIZE}
+	atlas := f32(p.atlas)
+	rect = {f32(x) / atlas, f32(y) / atlas, f32(size) / atlas, f32(size) / atlas}
 	return
 }
 
@@ -294,14 +342,14 @@ slot_viewport :: proc(slot: int, size: int) -> (pixels: [4]u32, rect: [4]f32) {
 @(private = "file")
 add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 	s := f.shadow_settings
-	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda)
+	splits := cascade_splits(f.view.near, s.distance > 0 ? s.distance : SHADOW_DISTANCE, s.split_lambda, sf.params.cascades)
 	sf.cascade_splits = splits
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)
 	light_right, light_up := light_basis(direction)
 	camera_offset := ecs.position_sub(f.view.position, f.renderer.scene.origin)
 	start := f.view.near
-	for split, c in splits {
+	for split, c in splits[:sf.params.cascades] {
 		// The slice's corners, relative to the camera, and the sphere around them.
 		corners: [8][3]f32
 		for &corner, k in corners {
@@ -320,7 +368,7 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		}
 		// A radius in whole sixteenths of a meter keeps the texel size still too.
 		radius = math.ceil(radius * 16) / 16
-		texel := 2 * radius / SHADOW_CELL
+		texel := 2 * radius / f32(sf.params.cell)
 		absolute := center + camera_offset
 		snap := [2]f32{linalg.dot(absolute, light_right), linalg.dot(absolute, light_up)}
 		snapped := [2]f32{math.floor(snap.x / texel) * texel, math.floor(snap.y / texel) * texel}
@@ -336,7 +384,7 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 			-direction.x / depth_range, -direction.y / depth_range, -direction.z / depth_range, (radius + d) / depth_range,
 			0, 0, 0, 1,
 		}
-		pixels, rect := slot_viewport(c, SHADOW_CELL)
+		pixels, rect := slot_viewport(sf.params, c, sf.params.cell)
 		planes := frustum_planes_6(m)
 		// The near plane culls nothing: casters toward the light still cast, with their depth clamped.
 		planes[4] = {0, 0, 0, 1}
@@ -361,12 +409,13 @@ add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: 
 		0, 0, 0, SHADOW_NEAR,
 		direction.x, direction.y, direction.z, -linalg.dot(direction, position),
 	}
-	pixels, rect := slot_viewport(slot, SHADOW_SLOT)
+	slot_size := sf.params.slot
+	pixels, rect := slot_viewport(sf.params, slot, slot_size)
 	planes := frustum_planes_6(m)
 	// The far plane is at the light's range.
 	planes[5] = {-direction.x, -direction.y, -direction.z, linalg.dot(direction, position) + range}
 	append(&sf.matrices, m)
-	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 / (s * SHADOW_SLOT), perspective = 1})
+	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 / (s * f32(slot_size)), perspective = 1})
 	append(&sf.planes, planes)
 	append(&sf.viewports, pixels)
 }
@@ -403,7 +452,8 @@ add_shadow_passes :: proc(f: ^Frame) {
 	sf := f.shadows
 	g := f.graph
 	if len(sf.views) > 0 {
-		sf.atlas = create_texture(g, {size = SHADOW_ATLAS_SIZE, format = SHADOW_FORMAT, label = "shadow atlas"})
+		atlas := u32(sf.params.atlas)
+		sf.atlas = create_texture(g, {size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"})
 		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = len(sf.views))
 		depth(g, p, sf.atlas, .Clear)
 		declare_scene_draws(f, p)

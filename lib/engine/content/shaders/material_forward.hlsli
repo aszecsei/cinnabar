@@ -26,8 +26,9 @@ float4 fog_at(float3 p) {
 	float4 clip = mul(frame.cluster_view_projection, float4(p, 1));
 	float depth = max(clip.w, 1e-7);
 	float2 uv = (clip.xy / depth * float2(0.5, -0.5) + 0.5) * frame.fog_scale;
-	float slice = (log2(depth) * frame.slice_scale + frame.slice_bias) * (FOG_SLICES / CLUSTER_SLICES);
-	float3 coordinates = float3(uv, (slice - 0.5) / FOG_SLICES);
+	float slices = float(frame.fog_slices);
+	float slice = (log2(depth) * frame.slice_scale + frame.slice_bias) * (slices / CLUSTER_SLICES);
+	float3 coordinates = float3(uv, (slice - 0.5) / slices);
 	return cn_texture3d(push.fog).SampleLevel(cn_sampler(frame.fog_sampler), coordinates, 0);
 }
 

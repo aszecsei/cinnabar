@@ -33,9 +33,11 @@ Platform_API :: struct {
 	input:            proc() -> Input,
 	// File I/O for the asset runtime. Paths are relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
-	// or 0 if it does not exist.
+	// or 0 if it does not exist. file_write replaces a whole file, such as the user's settings, so a reader never sees
+	// half of it.
 	file_read:        proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool),
 	file_modified:    proc(path: string) -> i64,
+	file_write:       proc(path: string, data: []byte) -> bool,
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),
@@ -52,6 +54,8 @@ Platform_API :: struct {
 	jobs_worker_count: proc() -> int,
 
 	gpu_features:     proc() -> gpu.Features,
+	// The device that the backend chose (see docs/gpu/interface.md#adapter).
+	gpu_adapter:      proc() -> gpu.Adapter,
 	// The frame target is in the render target layout when the frame starts, and the game must leave it there.
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target: proc() -> gpu.Texture,

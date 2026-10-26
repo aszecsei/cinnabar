@@ -93,6 +93,13 @@ features :: proc() -> gpu.Features {
 	return FEATURES
 }
 
+// adapter is a fixed adapter with no video memory of its own.
+adapter :: proc() -> gpu.Adapter {
+	a := gpu.Adapter{}
+	copy(a.name[:], "null")
+	return a
+}
+
 // stats counts the live resources. The null backend has no video memory.
 stats :: proc() -> gpu.Stats {
 	s := gpu.Stats {

@@ -39,6 +39,36 @@ cascades_split_between_even_and_exponential :: proc(t: ^testing.T) {
 	// A volume's Shadows set the reach and the split: evenly, the cascades are a quarter each.
 	even := cascade_splits(0.1, 40, 1e-6)
 	testing.expect(t, abs(even[0] - (0.1 + 39.9 / 4)) < 1e-3 && abs(even[SHADOW_CASCADES - 1] - 40) < 1e-3)
+	// Fewer cascades split the same reach, and the splits past them repeat the last, so no depth reaches past them.
+	two := cascade_splits(0.1, 40, 1e-6, count = 2)
+	testing.expect(t, abs(two[0] - (0.1 + 39.9 / 2)) < 1e-3)
+	testing.expect_value(t, two[2], two[1])
+	testing.expect_value(t, two[3], two[1])
+}
+
+@(test)
+every_level_fits_its_shadow_views_in_its_atlas :: proc(t: ^testing.T) {
+	for p, level in SHADOW_PARAMS {
+		// The cascades take whole cells, then the slots start after them, as assign_shadow_views gives them.
+		viewports := make([dynamic][4]u32, context.temp_allocator)
+		for c in 0 ..< p.cascades {
+			pixels, _ := slot_viewport(p, c, p.cell)
+			append(&viewports, pixels)
+		}
+		for slot in p.cascades * slots_per_cell(p) ..< max_shadow_views(p) {
+			pixels, rect := slot_viewport(p, slot, p.slot)
+			testing.expectf(t, rect.x + rect.z <= 1 && rect.y + rect.w <= 1, "%v: slot %d is outside the atlas", level, slot)
+			append(&viewports, pixels)
+		}
+		for a, i in viewports {
+			testing.expectf(t, int(a.x + a.z) <= p.atlas && int(a.y + a.w) <= p.atlas, "%v: %v is outside the atlas", level, a)
+			for b in viewports[i + 1:] {
+				apart := a.x + a.z <= b.x || b.x + b.z <= a.x || a.y + a.w <= b.y || b.y + b.w <= a.y
+				testing.expectf(t, apart, "%v: %v and %v overlap", level, a, b)
+			}
+		}
+		testing.expect(t, p.cascades >= 1 && p.cascades <= SHADOW_CASCADES)
+	}
 }
 
 @(private = "file")
@@ -135,8 +165,8 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[3].range, DEFAULT_LIGHT_RANGE)
 	testing.expect_value(t, lf.records[4].type, Light_Type.Spot)
 
-	// As resolve_settings gives them without volumes.
-	frame.shadow_settings = {SHADOW_DISTANCE, SHADOW_SPLIT_LAMBDA}
+	// As resolve_settings gives them without volumes, at High, which has every cascade.
+	frame.shadow_settings = {distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA, level = .High}
 	assign_shadow_views(frame, trace = false)
 	sf := frame.shadows
 	testing.expect_value(t, lf.records[0].shadow, 0)

@@ -9,8 +9,6 @@
 // Match CLUSTER_TILE and CLUSTER_SLICES in lib/engine/render/lights.odin.
 static const uint CLUSTER_TILE = 64;
 static const uint CLUSTER_SLICES = 32;
-// Matches FOG_SLICES in lib/engine/render/fog.odin: the fog volume halves each of the clusters' depth slices.
-static const uint FOG_SLICES = CLUSTER_SLICES * 2;
 
 Light_Record load_light(uint index) {
 	return cn_buffer(frame.lights).Load<Light_Record>(frame.lights_offset + index * sizeof(Light_Record));
@@ -55,9 +53,10 @@ float4 shadow_clip(Shadow_View view, float3 p) {
 	return float4(dot(view.rows[0], v), dot(view.rows[1], v), dot(view.rows[2], v), dot(view.rows[3], v));
 }
 
-// shadow_map is how lit a point is in one shadow view: the fraction of a 3x3 texel neighbourhood that is nearer the
-// light than the point, from four bilinear comparisons. The point moves along its normal by a texel's size first, so a
-// surface does not shadow itself. Outside the view, it is lit.
+// shadow_map is how lit a point is in one shadow view: the fraction of a texel neighbourhood that is nearer the light
+// than the point, from frame.shadow_filter bilinear comparisons, a render.Shadow_Filter: 1 for 2x2 texels, 4 for 3x3,
+// 9 for 4x4. Every pixel takes the same branch. The point moves along its normal by a texel's size first, so a surface
+// does not shadow itself. Outside the view, it is lit.
 float shadow_map(uint view_index, float3 p, float3 normal) {
 	Shadow_View view = cn_buffer(frame.shadow_views).Load<Shadow_View>(frame.shadow_views_offset + view_index * sizeof(Shadow_View));
 	float4 clip = shadow_clip(view, p);
@@ -78,6 +77,16 @@ float shadow_map(uint view_index, float3 p, float3 normal) {
 	float2 center = view.rect.xy + uv * view.rect.zw;
 	SamplerComparisonState s = cn_comparison_sampler(frame.shadow_sampler);
 	float lit = 0;
+	if (frame.shadow_filter == 1) {
+		return atlas.SampleCmpLevelZero(s, clamp(center, low, high), ndc.z);
+	}
+	if (frame.shadow_filter == 9) {
+		[unroll] for (uint i = 0; i < 9; i++) {
+			float2 offset = float2(float(i % 3) - 1, float(i / 3) - 1) * texel_uv;
+			lit += atlas.SampleCmpLevelZero(s, clamp(center + offset, low, high), ndc.z);
+		}
+		return lit / 9;
+	}
 	[unroll] for (uint i = 0; i < 4; i++) {
 		float2 offset = float2((i & 1) != 0 ? 0.5 : -0.5, (i & 2) != 0 ? 0.5 : -0.5) * texel_uv;
 		lit += atlas.SampleCmpLevelZero(s, clamp(center + offset, low, high), ndc.z);

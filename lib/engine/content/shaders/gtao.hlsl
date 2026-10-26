@@ -9,7 +9,7 @@
 // view space. projection holds the camera's x and y scales and its near plane, and view_model the view model's, which
 // a pixel whose depth level 0 holds negated uses. levels and level4 are the depth levels. jitter is the camera's, which
 // the depth was drawn with. noise_index moves the noise from frame to frame, and is 0 without temporal AA, which would
-// average it.
+// average it. slices and steps are the level's search (see GTAO_PARAMS).
 struct Constants {
 	float4 right;
 	float4 up;
@@ -26,12 +26,14 @@ struct Constants {
 	float radius;
 	float power;
 	uint noise_index;
-	uint padding;
+	uint slices;
+	uint steps;
+	uint padding0;
+	uint padding1;
+	uint padding2;
 };
 CN_PASS_CONSTANTS(Constants, constants);
 
-static const uint SLICES = 9;
-static const uint STEPS = 3;
 static const uint LEVELS = 5;
 static const float PI = 3.14159265;
 static const float HALF_PI = 1.5707963;
@@ -171,8 +173,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 across = normalize(cross(float3(0, 1, 0), view));
 	float3 along = cross(view, across);
 	float2 projection_scale = view_model ? constants.view_model.xy : constants.projection.xy;
-	[unroll] for (uint slice = 0; slice < SLICES; slice++) {
-		float phi = (slice + slice_noise) / SLICES * PI;
+	uint slices = constants.slices;
+	uint steps = constants.steps;
+	[loop] for (uint slice = 0; slice < slices; slice++) {
+		float phi = (slice + slice_noise) / slices * PI;
 		float3 ortho = cos(phi) * across + sin(phi) * along;
 		// The slice's direction on the screen: how its direction moves the point's projection. The screen's y goes
 		// down, view space's up.
@@ -188,8 +192,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float low1 = cos(n - HALF_PI);
 		float horizon0 = low0;
 		float horizon1 = low1;
-		[unroll] for (uint step = 0; step < STEPS; step++) {
-			float s = (step + frac(step_noise + (slice + step * STEPS) * 0.618034)) / STEPS;
+		[loop] for (uint step = 0; step < steps; step++) {
+			float s = (step + frac(step_noise + (slice + step * steps) * 0.618034)) / steps;
 			s = s * s + min_step;
 			int2 offset = int2(round(omega * s));
 			uint level = uint(clamp(round(log2(length(float2(offset))) - LEVEL_OFFSET), 0, LEVELS - 1));
@@ -226,6 +230,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	// A pixel's estimate is noisy around the true value, above 1 too, so it is not clamped until the forward pass reads
 	// the denoised result; clamping each one first would darken every open surface.
-	visibility = max(pow(max(visibility / SLICES, 0), constants.power), 0.03);
+	visibility = max(pow(max(visibility / slices, 0), constants.power), 0.03);
 	cn_rw_texture(constants.output)[pixel] = visibility;
 }

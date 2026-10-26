@@ -112,6 +112,7 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 | Key | Values | Default | What it sets |
 |---|---|---|---|
 | `output` | `Auto`, `Sdr`, `Hdr10`, `Scrgb` | `Auto` | The window's output mode (see [Rendering](../rendering/layers-and-output.md#hdr-output)): `Auto` is HDR10 on a display in HDR, and SDR otherwise. `CINNABAR_OUTPUT` replaces it. The sample's F8 cycles it until the files change. |
+| `quality.*` | See [Rendering: Saved quality](../rendering/quality.md#saved-quality) | The device's `default_quality` | The render quality: a preset, and keys that replace its features. The game saves the player's choice to the user's file (`project.save_quality`), keeping the file's other lines. |
 
 ## Content pipeline
 

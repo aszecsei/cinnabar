@@ -81,6 +81,7 @@ dev: struct {
 	info_queue:        ^d3d.IInfoQueue1,
 	callback_cookie:   u32,
 	features:          gpu.Features,
+	adapter_info:      gpu.Adapter,
 	// The graphics queue and its fence. Frame ends, uploads and deferred releases use this fence.
 	queue:             ^d3d.ICommandQueue,
 	fence:             ^d3d.IFence,
@@ -240,6 +241,10 @@ shutdown :: proc() {
 
 features :: proc() -> gpu.Features {
 	return dev.features
+}
+
+adapter :: proc() -> gpu.Adapter {
+	return dev.adapter_info
 }
 
 // stats counts the live resources, and reads the adapter's memory use. Call it between frames.
@@ -568,6 +573,12 @@ create_device :: proc(luid: u64) -> bool {
 		dev.adapter = adapter
 		dev.device = device
 		dev.features = query_features(device)
+		dev.adapter_info = {
+			vendor       = gpu.vendor_from_id(desc.VendorId),
+			device_id    = desc.DeviceId,
+			video_memory = u64(desc.DedicatedVideoMemory),
+		}
+		copy(dev.adapter_info.name[:len(dev.adapter_info.name) - 1], name)
 		log.infof("d3d12: using %s, optional features %v", name, dev.features)
 		return true
 	}

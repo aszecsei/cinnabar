@@ -3,6 +3,7 @@ package core
 import "base:runtime"
 import "core:mem"
 import "core:os"
+import "core:strings"
 import "core:time"
 
 // file_read reads a whole file into memory from allocator, at the given alignment.
@@ -26,6 +27,20 @@ file_read :: proc(path: string, align: int, allocator: runtime.Allocator) -> (da
 		return
 	}
 	return buffer, true
+}
+
+// file_write replaces a file's contents with data, through a temporary file beside it, so a reader never sees half of
+// it. It returns false if it could not.
+file_write :: proc(path: string, data: []byte) -> bool {
+	temporary := strings.concatenate({path, ".tmp"}, context.temp_allocator)
+	if os.write_entire_file(temporary, data) != nil {
+		return false
+	}
+	if os.rename(temporary, path) != nil {
+		os.remove(temporary)
+		return false
+	}
+	return true
 }
 
 // file_modified is a file's modification time in nanoseconds since the Unix epoch, or 0 if it does not exist.

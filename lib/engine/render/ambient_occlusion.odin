@@ -33,6 +33,21 @@ AO_BLUR :: 1.2
 AO_DENOISE_PASSES_TEMPORAL :: 1
 AO_DENOISE_PASSES :: 2
 
+// Gtao_Params are GTAO's search at a level: how many slices turn around the view direction, and how many steps each
+// takes on each side. These are XeGTAO's presets; Ultra was the only one before levels.
+Gtao_Params :: struct {
+	slices: u32,
+	steps:  u32,
+}
+
+@(rodata)
+GTAO_PARAMS := [Quality_Level]Gtao_Params {
+	.Low    = {slices = 1, steps = 2},
+	.Medium = {slices = 2, steps = 2},
+	.High   = {slices = 3, steps = 3},
+	.Ultra  = {slices = 9, steps = 3},
+}
+
 // Ao_Settings are a frame's ambient occlusion, in Frame_Settings, from the Ambient_Occlusion settings. Zero gives the defaults.
 Ao_Settings :: struct {
 	off:    bool,
@@ -40,6 +55,8 @@ Ao_Settings :: struct {
 	radius: f32,
 	// 0 gives DEFAULT_AO_POWER.
 	power:  f32,
+	// The search's GTAO_PARAMS.
+	level:  Quality_Level,
 }
 
 // Ao_Passes is the ambient occlusion's state between frames, in the Renderer.
@@ -82,7 +99,9 @@ Ao_Constants :: struct {
 	radius:      f32,
 	power:       f32,
 	noise_index: u32,
-	padding:     u32,
+	slices:      u32,
+	steps:       u32,
+	padding:     [3]u32,
 }
 
 // Ao_Denoise_Push matches Push in gtao_denoise.hlsl.
@@ -186,6 +205,8 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 		power       = settings.power > 0 ? settings.power : DEFAULT_AO_POWER,
 		// Without temporal AA nothing averages the noise over time, so it stays where it is.
 		noise_index = temporal ? a.frame % 64 : 0,
+		slices      = GTAO_PARAMS[settings.level].slices,
+		steps       = GTAO_PARAMS[settings.level].steps,
 	}
 	f.ao = af
 

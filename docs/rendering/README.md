@@ -9,6 +9,7 @@ Read them in this order the first time.
 | Document | What it covers |
 |---|---|
 | [Frame](frame.md) | The passes, the `Renderer`, hooks, settings and views. |
+| [Quality](quality.md) | What the frame may cost: each feature's technique and level, the hardware's defaults and limits, and the saved choice. |
 | [GPU scene](gpu-scene.md) | Instance records, the render origin, slots, culling and the acceleration structure. |
 | [Layers and output](layers-and-output.md) | The world, view model, UI and debug layers, the output pass and HDR output. |
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
@@ -32,6 +33,7 @@ Read them in this order the first time.
 | `view.odin` | `View`: a camera's pose, projection and viewport; `view_projection`, `view_depth`, `camera_view` ([Views](frame.md#views)) |
 | `renderer.odin` | `Renderer`, `Frame_Desc`, `Frame`, the hooks, the frame's targets and `draw_frame` ([Frame](frame.md#frame)) |
 | `settings.odin` | The settings components on volumes and `resolve_settings` ([Settings](frame.md#settings)) |
+| `quality.odin` | `Quality`, its presets, `Caps`, `default_quality`, `clamp_quality` and `apply_quality` ([Quality](quality.md#quality)) |
 | `scene.odin` | `Gpu_Scene`: every instance's record at a stable slot, the render origin, culling into bins ([GPU scene](gpu-scene.md#gpu-scene)) |
 | `components.odin` | The render components' stable IDs: `Camera`, `Mesh_Renderer`, the lights, `View_Model` ([Components](assets.md#components)) |
 | `materials.odin` | `Material_Table`, pipelines by material, bins, the default material ([Runtime](materials.md#runtime)) |
