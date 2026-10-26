@@ -119,6 +119,9 @@ Shadow_Frame :: struct {
 	// Each view's projection, as the depth pass's Frame_Constants hold it, and its culling planes, relative to the camera, and its rectangle of the atlas in pixels.
 	matrices:       [dynamic]matrix[4, 4]f32,
 	planes:         [dynamic][6][4]f32,
+	// Where each view looks from, as Frame_Constants.cull_eye has it: the light's position relative to the camera in
+	// w = 1, or the direction that its light travels in w = 0.
+	eyes:           [dynamic][4]f32,
 	viewports:      [dynamic][4]u32,
 	cascade_splits: [4]f32,
 	params:         Shadow_Params,
@@ -198,6 +201,7 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 	sf.views = make([dynamic]Shadow_View, r.platform.frame_allocator)
 	sf.matrices = make([dynamic]matrix[4, 4]f32, r.platform.frame_allocator)
 	sf.planes = make([dynamic][6][4]f32, r.platform.frame_allocator)
+	sf.eyes = make([dynamic][4]f32, r.platform.frame_allocator)
 	sf.viewports = make([dynamic][4]u32, r.platform.frame_allocator)
 	sf.params = SHADOW_PARAMS[f.shadow_settings.level]
 	max_views := max_shadow_views(sf.params)
@@ -391,6 +395,7 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		append(&sf.matrices, m)
 		append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = texel})
 		append(&sf.planes, planes)
+		append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
 		append(&sf.viewports, pixels)
 		start = split
 	}
@@ -417,6 +422,7 @@ add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: 
 	append(&sf.matrices, m)
 	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 / (s * f32(slot_size)), perspective = 1})
 	append(&sf.planes, planes)
+	append(&sf.eyes, [4]f32{position.x, position.y, position.z, 1})
 	append(&sf.viewports, pixels)
 }
 

@@ -25,6 +25,12 @@ struct Frame_Constants {
 	float4 ground_color;
 	// The view depth at which each shadow cascade ends.
 	float4 cascade_splits;
+	// The view's frustum relative to the camera, which the mesh shader path culls meshlets with: a point is inside when
+	// dot(plane.xyz, p) + plane.w >= 0 for every one.
+	float4 planes[6];
+	// Where the view looks from, relative to the camera, which a meshlet's normal cone is tested from: a point when w is
+	// 1, or the direction that it looks along when w is 0.
+	float4 cull_eye;
 	// Bindless indices: the GPU scene's instances, this frame's draw records, the mesh records and the material table.
 	uint instances;
 	uint draws;
@@ -78,6 +84,11 @@ struct Frame_Constants {
 	// The fog volume's depth slices, and how many bilinear comparisons a shadow map lookup takes (see shadow_map).
 	uint fog_slices;
 	uint shadow_filter;
+	// The mesh shader path's level of detail (see lod_selected): the camera's pixels per unit of error at a distance of
+	// 1, over the error threshold in pixels, and the nearest distance that an error projects from. Every view has the
+	// camera's, so each draws the same levels as the camera does.
+	float lod_scale;
+	float lod_near;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -93,6 +104,9 @@ static const uint DEBUG_LIGHT_COMPLEXITY = 6;
 static const uint DEBUG_SHADOW_CASCADES = 7;
 // From the frame's textures, but the transparent surfaces' moments pass counts their layers for it.
 static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
+// The mesh shader path's meshlets, each in a color of its own, and their levels of detail as heat colors.
+static const uint DEBUG_MESHLETS = 18;
+static const uint DEBUG_LOD_DEPTH = 19;
 
 // load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
 // default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
@@ -108,6 +122,15 @@ float4 load_screen(uint index, float2 pixel) {
 float3 heat(float t) {
 	t = saturate(t);
 	return saturate(float3(1.5 - abs(4 * t - 3), 1.5 - abs(4 * t - 2), 1.5 - abs(4 * t - 1)));
+}
+
+// hash_color is a bright color for an ID, so neighbouring ones differ. Matches hash_color in debug_view.hlsl.
+float3 hash_color(uint id) {
+	uint h = id * 2654435761u;
+	h ^= h >> 15;
+	h *= 2246822519u;
+	h ^= h >> 13;
+	return float3(h & 0xff, (h >> 8) & 0xff, (h >> 16) & 0xff) / 255.0 * 0.75 + 0.25;
 }
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
@@ -139,12 +162,15 @@ static const uint ID_ENTITY_BITS = 25;
 static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 
 // Matches Draw_Record in lib/engine/render/scene.odin: one indirect draw, by its draw ID. material is the byte offset
-// of the draw's parameter block in the material table. mesh has the submesh's index above ID_ENTITY_BITS.
+// of the draw's parameter block in the material table. mesh has the submesh's index above ID_ENTITY_BITS. first and
+// count are the submesh's indices, or on the mesh shader path its meshlets.
 struct Draw_Record {
 	uint instance;
 	uint mesh;
-	uint first_index;
+	uint first;
 	uint material;
+	uint count;
+	uint3 padding;
 };
 
 // Matches Mesh_Record in lib/engine/render/scene.odin.
@@ -157,7 +183,9 @@ struct Mesh_Record {
 	uint indices;
 	uint attribute_stride;
 	uint flags;
-	uint3 padding;
+	uint meshlets;
+	uint meshlet_vertices;
+	uint meshlet_triangles;
 };
 
 // Matches Instance_Record in lib/engine/render/scene.odin: the pose relative to the render origin as the rows of a

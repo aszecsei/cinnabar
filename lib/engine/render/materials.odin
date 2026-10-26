@@ -45,6 +45,10 @@ Material_Pipeline :: struct {
 	material:     format.Guid,
 	switches:     u32,
 	pipelines:    [format.Material_Pass]gpu.Pipeline,
+	// With Mesh_Shaders, the mesh shader path's pipelines of the opaque passes, which the world's opaque draws draw
+	// with when mesh_path (see docs/rendering/gpu-scene.md#mesh-shader-path). The previews draw with pipelines.
+	meshes:       [format.Material_Pass]gpu.Pipeline,
+	mesh_path:    bool,
 	version:      u32,
 	two_sided:    bool,
 	cast_shadows: bool,
@@ -72,6 +76,9 @@ material_group :: proc(p: ^Material_Pipeline) -> Bin_Group {
 @(private)
 material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platform_API) {
 	for pipeline in p.pipelines {
+		platform.gpu_destroy_pipeline(pipeline)
+	}
+	for pipeline in p.meshes {
 		platform.gpu_destroy_pipeline(pipeline)
 	}
 	for pipeline in p.over {
@@ -365,6 +372,24 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		// A blob from before the pass existed has no code for it, and draws nothing in it.
 		update_pipeline(platform, &p.pipelines[pass], desc)
 	}
+	// The mesh shader path draws the opaque passes when the device has mesh shaders and the blob has every one's code.
+	// A vertex pipeline cannot become a mesh pipeline, so the two are apart.
+	mesh_descs: [format.Material_Pass]gpu.Graphics_Pipeline_Desc
+	p.mesh_path = r.caps.mesh_shaders && !format.material_transparent(blob.blend)
+	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
+		desc := &mesh_descs[pass]
+		desc^ = descs[pass]
+		desc.vertex = nil
+		desc.amplification = format.material_code(data, blob, switches, pass, .Amplification)
+		desc.mesh = format.material_code(data, blob, switches, pass, .Mesh)
+		p.mesh_path &&= desc.amplification != nil && desc.mesh != nil
+	}
+	for &desc, pass in mesh_descs {
+		if !p.mesh_path {
+			desc.mesh = nil
+		}
+		update_pipeline(platform, &p.meshes[pass], desc)
+	}
 	// Back faces first, which a one-sided material has none of.
 	faces := [2]gpu.Cull_Mode{.Front, .Back}
 	for &pipeline, i in p.over {
@@ -383,7 +408,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.
 @(private = "file")
 update_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) {
-	if desc.vertex == nil {
+	if desc.vertex == nil && desc.mesh == nil {
 		platform.gpu_destroy_pipeline(pipeline^)
 		pipeline^ = {}
 	} else if pipeline^ == {} || !platform.gpu_update_graphics_pipeline(pipeline^, desc) {

@@ -169,6 +169,8 @@ Frame :: struct {
 	// and a game's post effects there, take it.
 	scene_size:               [2]u32,
 	debug_view:               Debug_View,
+	// The quality's level of detail error, in pixels.
+	lod_error:                f32,
 	// The directional lights' cascades (see Shadows).
 	shadow_settings:          Shadow_Settings,
 	// How the frame target reaches the display (see docs/rendering/layers-and-output.md#hdr-output).
@@ -368,6 +370,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		hooks           = desc.hooks,
 		scene_scale     = 1,
 		debug_view      = desc.debug_view,
+		lod_error       = quality.lod_error,
 	}
 	target := import_texture(&g, r.platform.gpu_frame_target(), .Color)
 	f.scene = create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})

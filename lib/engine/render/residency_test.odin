@@ -65,10 +65,13 @@ write_mesh :: proc(t: ^testing.T, dir: string, guid: format.Guid, vertex_count: 
 		guid         = guid,
 		vertex_count = vertex_count,
 		index_count  = 3,
-		submeshes    = {{index_count = 3}},
+		submeshes    = {{index_count = 3, meshlet_count = 1}},
 		positions    = make([]byte, int(vertex_count) * 12, context.temp_allocator),
 		attributes   = make([]byte, int(vertex_count) * stride, context.temp_allocator),
 		indices      = mem.slice_to_bytes(indices),
+		meshlets     = {{vertex_count = 3, triangle_count = 1}},
+		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
+		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
 	}
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer))
@@ -104,7 +107,12 @@ resident_meshes_swap_only_when_their_new_data_is_in :: proc(t: ^testing.T) {
 	// The first request streams the mesh, which is not ready until its transfers are done.
 	_, ready := resident_mesh(r, guid)
 	testing.expect(t, !ready)
-	testing.expect_value(t, fake.live_buffers, 3)
+	testing.expect_value(t, fake.live_buffers, 6)
+	residency_update(r)
+	_, ready = resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	// Every stream must be in, the meshlets' too.
+	fake.done_through = fake.next_transfer - 1
 	residency_update(r)
 	_, ready = resident_mesh(r, guid)
 	testing.expect(t, !ready)
@@ -115,12 +123,13 @@ resident_meshes_swap_only_when_their_new_data_is_in :: proc(t: ^testing.T) {
 	testing.expect_value(t, mesh.vertex_count, 3)
 	testing.expect_value(t, mesh.submesh_count, 1)
 	testing.expect_value(t, mesh.index_format, gpu.Index_Format.U16)
+	testing.expect_value(t, mesh.submeshes[0].meshlet_count, 1)
 
 	// A new blob streams beside the old, which draws until the new one's transfers are done.
 	write_mesh(t, dir, guid, 4, time.time_add(start, time.Second))
 	testing.expect_value(t, len(asset.poll(&assets)), 1)
 	residency_update(r)
-	testing.expect_value(t, fake.live_buffers, 6)
+	testing.expect_value(t, fake.live_buffers, 12)
 	mesh, ready = resident_mesh(r, guid)
 	testing.expect(t, ready)
 	testing.expect_value(t, mesh.vertex_count, 3)
@@ -129,7 +138,7 @@ resident_meshes_swap_only_when_their_new_data_is_in :: proc(t: ^testing.T) {
 	mesh, ready = resident_mesh(r, guid)
 	testing.expect_value(t, mesh.vertex_count, 4)
 	// The old buffers are gone.
-	testing.expect_value(t, fake.live_buffers, 3)
+	testing.expect_value(t, fake.live_buffers, 6)
 
 	// No GUID is no mesh, and a GUID without a blob is never ready.
 	_, ready = resident_mesh(r, {})

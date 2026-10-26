@@ -70,7 +70,7 @@ Each document keeps the future work of its topic: [Identity and cooking](identit
 
 ## References
 
-- Arseny Kapoulkine, [meshoptimizer](https://github.com/zeux/meshoptimizer): vertex welding, cache and fetch ordering, meshlet building and MikkTSpace-compatible tangents in [Meshes](kinds/meshes.md#meshes).
+- Arseny Kapoulkine, [meshoptimizer](https://github.com/zeux/meshoptimizer): vertex welding, cache and fetch ordering, meshlet building, the cluster LOD builder `clusterlod.h`, and MikkTSpace-compatible tangents in [Meshes](kinds/meshes.md#meshes).
 - AMD, [Compressonator](https://github.com/GPUOpen-Tools/compressonator): the `CMP_Core` block encoders for BC1 to BC7 in [Textures](kinds/textures.md#textures).
 - Microsoft, [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler): the compiler that [Shaders](kinds/shaders.md#shaders) and [Materials](kinds/materials.md#materials) drive, and its `-Zi -Qembed_debug` flags.
 - Johannes Kuhlmann, [cgltf](https://github.com/jkuhlmann/cgltf), and Sean Barrett, [stb_image](https://github.com/nothings/stb): the readers behind Odin's `vendor:cgltf` and `vendor:stb/image`.
@@ -80,5 +80,6 @@ Each document keeps the future work of its topic: [Identity and cooking](identit
 - NVIDIA, [NVIDIA Texture Tools](https://github.com/castano/nvidia-texture-tools): the Kaiser-windowed mip filter and the alpha-coverage scaling that [Textures](kinds/textures.md#textures) uses and plans.
 - Microsoft, [Texture Block Compression in Direct3D 11](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11): the BC4 to BC7 and BC6H formats, including BC6H's half-float endpoint interpolation.
 - NVIDIA, [Introduction to Turing Mesh Shaders](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/): the 64-vertex, 124-triangle meshlet sizes that the cooker builds.
+- Brian Karis, Rune Stubbe and Graham Wihlidal, [Nanite: A Deep Dive](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf) (SIGGRAPH 2021): the hierarchy of simplified meshlet groups, and the rule that picks one cut of it, in [Meshlets](kinds/meshes.md#meshlets).
 - Luau, [the compiler and analyzer](https://github.com/luau-lang/luau) and [require-by-string](https://rfcs.luau.org/require-by-string-aliases.html): the `luau_compile` options, the type checker, and the `.luaurc` alias rules that [Scripts](kinds/scripts.md#scripts) resolves.
 - Microsoft, [ReadDirectoryChangesW](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-readdirectorychangesw) and [Handle Inheritance](https://learn.microsoft.com/en-us/windows/win32/procthread/inheritance): the watcher's API, and the cause of the one-DXC-at-a-time rule.

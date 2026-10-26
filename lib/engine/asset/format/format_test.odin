@@ -174,7 +174,7 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 		indices           = mem.slice_to_bytes(indices),
 		meshlets          = meshlets,
 		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
-		meshlet_triangles = {0, 1, 2},
+		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
 		name              = "Door",
 		source_path       = "game/door.glb",
 	}
@@ -195,6 +195,12 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 
 	// A submesh past the mesh's indices is not a mesh.
 	(^Mesh_Submesh)(&data[blob.submeshes.offset]).index_count = 6
+	_, ok = mesh_view(data)
+	testing.expect(t, !ok)
+	(^Mesh_Submesh)(&data[blob.submeshes.offset]).index_count = 3
+
+	// Meshlet triangles are whole u32s, which shaders load.
+	blob.meshlet_triangles.size = 3
 	_, ok = mesh_view(data)
 	testing.expect(t, !ok)
 }

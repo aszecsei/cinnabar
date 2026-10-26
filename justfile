@@ -33,6 +33,7 @@ luau_dir := build_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := build_dir + "/compressonator"
 meshoptimizer_dir := build_dir + "/meshoptimizer"
+clusterlod_dir := build_dir + "/clusterlod"
 # What tools/cook/compressonator builds from vendor/compressonator, which is checked out sparsely.
 compressonator_paths := "cmp_core license applications/_libs/cmp_math"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
@@ -202,10 +203,12 @@ compressonator: install-compressonator
     [ -f "{{compressonator_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/compressonator -B "{{compressonator_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
     cmake --build "{{compressonator_dir}}" --config Release -- -m -nologo -v:quiet
 
-# Build meshoptimizer for the cooker, with the static CRT that Odin links
+# Build meshoptimizer and its cluster LOD builder for the cooker, with the static CRT that Odin links
 meshoptimizer:
     [ -f "{{meshoptimizer_dir}}/CMakeCache.txt" ] || cmake -S vendor/meshoptimizer -B "{{meshoptimizer_dir}}" -G "{{cmake_generator}}" -A x64 -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DMESHOPT_INSTALL=OFF > /dev/null
     cmake --build "{{meshoptimizer_dir}}" --config Release -- -m -nologo -v:quiet
+    [ -f "{{clusterlod_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/clusterlod -B "{{clusterlod_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
+    cmake --build "{{clusterlod_dir}}" --config Release -- -m -nologo -v:quiet
 
 # Build the cooker
 cook: luau compressonator meshoptimizer

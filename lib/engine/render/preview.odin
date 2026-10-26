@@ -232,20 +232,10 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	arguments := make([]gpu.Draw_Indirect_Args, pf.draw_count, platform.frame_allocator)
 	for s in 0 ..< pf.draw_count {
 		submesh := mesh.submeshes[s]
-		draws[s] = {instance = 0, mesh = 0, first_index = submesh.first_index, material = block}
+		draws[s] = {instance = 0, mesh = 0, first = submesh.first_index, material = block, count = submesh.index_count}
 		arguments[s] = {draw_id = s, vertex_count = submesh.index_count, instance_count = 1}
 	}
-	flags: u32
-	if mesh.index_format == .U32 {
-		flags |= MESH_RECORD_INDEX32
-	}
-	if .UV1 in mesh.flags {
-		flags |= MESH_RECORD_UV1
-	}
-	if .Color in mesh.flags {
-		flags |= MESH_RECORD_COLOR
-	}
-	mesh_record := Mesh_Record{gpu.read_index(mesh.positions), gpu.read_index(mesh.attributes), gpu.read_index(mesh.indices), mesh.attribute_stride, flags, {}}
+	record := mesh_record(mesh)
 	// The light comes from over the camera's left shoulder, so it turns with the camera.
 	direction := linalg.normalize(linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0.55, -0.6, 0.6}))
 	light := Light_Record {
@@ -270,7 +260,7 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	pf.instance_at = place(&bytes, slice.bytes_from_ptr(&instance, size_of(instance)))
 	pf.draws_at = place(&bytes, slice.to_bytes(draws))
 	pf.args_at = place(&bytes, slice.to_bytes(arguments))
-	mesh_at := place(&bytes, slice.bytes_from_ptr(&mesh_record, size_of(mesh_record)))
+	mesh_at := place(&bytes, slice.bytes_from_ptr(&record, size_of(record)))
 	table_at := place(&bytes, table.bytes[:])
 	light_at := place(&bytes, slice.bytes_from_ptr(&light, size_of(light)))
 	upload, ok := upload_bytes(platform, bytes[:])

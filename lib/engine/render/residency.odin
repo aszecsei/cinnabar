@@ -18,27 +18,33 @@ RESIDENT_RETRY_FRAMES :: 60
 // Resident_Mesh is a mesh asset's GPU buffers, and what drawing it needs from its blob. Its pointer is valid for the
 // frame that it was given in.
 Resident_Mesh :: struct {
-	positions:        gpu.Buffer,
-	attributes:       gpu.Buffer,
-	indices:          gpu.Buffer,
-	index_format:     gpu.Index_Format,
-	index_count:      u32,
-	vertex_count:     u32,
-	attribute_stride: u32,
-	flags:            format.Mesh_Flags,
-	bounds:           format.Mesh_Bounds,
-	submesh_count:    u32,
-	submeshes:        [MAX_SUBMESHES]Resident_Submesh,
-	submesh_bounds:   [MAX_SUBMESHES]format.Mesh_Bounds,
+	positions:         gpu.Buffer,
+	attributes:        gpu.Buffer,
+	indices:           gpu.Buffer,
+	// The meshlets of every level of detail, which the mesh shader path draws (see docs/rendering/assets.md#gpu-residency).
+	meshlets:          gpu.Buffer,
+	meshlet_vertices:  gpu.Buffer,
+	meshlet_triangles: gpu.Buffer,
+	index_format:      gpu.Index_Format,
+	index_count:       u32,
+	vertex_count:      u32,
+	attribute_stride:  u32,
+	flags:             format.Mesh_Flags,
+	bounds:            format.Mesh_Bounds,
+	submesh_count:     u32,
+	submeshes:         [MAX_SUBMESHES]Resident_Submesh,
+	submesh_bounds:    [MAX_SUBMESHES]format.Mesh_Bounds,
 	// With Ray_Query, the bottom-level acceleration structure of every triangle, which the renderer builds the first
 	// frame after the mesh is ready (see docs/rendering/lighting-and-shadows.md#shadows).
-	accel:            gpu.Accel_Struct,
-	accel_built:      bool,
+	accel:             gpu.Accel_Struct,
+	accel_built:       bool,
 }
 
 Resident_Submesh :: struct {
-	first_index: u32,
-	index_count: u32,
+	first_index:   u32,
+	index_count:   u32,
+	first_meshlet: u32,
+	meshlet_count: u32,
 }
 
 // Resident_Texture is a texture asset's GPU texture.
@@ -77,7 +83,8 @@ Resident_Entry :: struct {
 	pending:       Resident_Resources,
 	pending_version: u32,
 	streaming:     bool,
-	transfers:     [3]gpu.Transfer,
+	// A mesh's six streams, or a texture's one.
+	transfers:     [6]gpu.Transfer,
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
 	failed_at:     u64,
@@ -234,12 +241,15 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	submeshes := format.mesh_submeshes(data, blob)
 	m.submesh_count = u32(min(len(submeshes), MAX_SUBMESHES))
 	for s, i in submeshes[:m.submesh_count] {
-		m.submeshes[i] = {s.first_index, s.index_count}
+		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count}
 		m.submesh_bounds[i] = s.bounds
 	}
 	m.positions = stream_buffer(r, e, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
 	m.attributes = stream_buffer(r, e, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
 	m.indices = stream_buffer(r, e, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
+	m.meshlets = stream_buffer(r, e, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
+	m.meshlet_vertices = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
+	m.meshlet_triangles = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
 	return true
 }
 
@@ -369,6 +379,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		r.platform.gpu_destroy_buffer(m.positions)
 		r.platform.gpu_destroy_buffer(m.attributes)
 		r.platform.gpu_destroy_buffer(m.indices)
+		r.platform.gpu_destroy_buffer(m.meshlets)
+		r.platform.gpu_destroy_buffer(m.meshlet_vertices)
+		r.platform.gpu_destroy_buffer(m.meshlet_triangles)
 		if m.accel != {} {
 			r.platform.gpu_destroy_accel(m.accel)
 		}

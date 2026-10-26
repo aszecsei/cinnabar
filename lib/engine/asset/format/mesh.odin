@@ -41,20 +41,37 @@ Mesh_Submesh :: struct {
 	bounds:        Mesh_Bounds,
 }
 
-// Meshlet is a cluster of at most MESHLET_MAX_VERTICES vertices and MESHLET_MAX_TRIANGLES triangles, with the bounds
-// that culling tests. Its vertices are a range of meshlet_vertices, which index the mesh's vertices, and its triangles
-// a range of meshlet_triangles, three u8 indices into its vertices each.
+// Meshlet is a cluster of at most MESHLET_MAX_VERTICES vertices and MESHLET_MAX_TRIANGLES triangles, at one level of
+// its submesh's LOD hierarchy, with the bounds that culling tests and the errors that pick the level (see
+// docs/content/kinds/meshes.md#meshlets). Its vertices are a range of meshlet_vertices, which index the mesh's vertices,
+// and its triangles a range of meshlet_triangles. Shaders read it as it is: matches Meshlet in material_mesh.hlsli.
 Meshlet :: struct {
 	vertex_offset:   u32,
 	triangle_offset: u32,
-	vertex_count:    u32,
-	triangle_count:  u32,
-	center:          [3]f32,
-	radius:          f32,
-	// The normal cone, in snorm8: decode with x / 127. A meshlet whose cone points away from the view can be culled.
+	vertex_count:    u8,
+	triangle_count:  u8,
+	// Its level: 0 for the submesh's own triangles, and one more for each simplification.
+	depth:           u16,
+	// The normal cone, in snorm8: decode with x / 127. A meshlet whose cone points away from the view can be culled. A
+	// cutoff of 127 is a cone too wide to cull.
 	cone_axis:       [3]i8,
 	cone_cutoff:     i8,
+	// The sphere that culling tests.
+	center:          [3]f32,
+	radius:          f32,
+	// The sphere of the simplification that made this meshlet, whose error is error: 0 for the submesh's own triangles.
+	error_center:    [3]f32,
+	error_radius:    f32,
+	// The sphere of its group's simplification, a level up, whose error is parent_error: F32_MAX at the top. A view draws
+	// the meshlet when error projects to at most its threshold and parent_error to more.
+	parent_center:   [3]f32,
+	parent_radius:   f32,
+	error:           f32,
+	parent_error:    f32,
+	padding:         [2]u32,
 }
+
+#assert(size_of(Meshlet) == 80)
 
 // The attribute stream's layout, in order. Normals and tangents are octahedral: a unit vector folded onto a square.
 // The tangent's second component keeps the bitangent's sign in its lowest bit: set means -1.
@@ -99,7 +116,7 @@ Mesh_Blob :: struct {
 	meshlets:          Slice,
 	// u32 per meshlet vertex.
 	meshlet_vertices:  Slice,
-	// Three u8 per meshlet triangle.
+	// u32 per meshlet triangle: its three indices into its meshlet's vertices in the low three bytes.
 	meshlet_triangles: Slice,
 	// The mesh's name in its model, and the model's path, prefixed with its root's name.
 	name:              Slice,
@@ -140,7 +157,8 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	     blob.attributes.size != blob.vertex_count * mesh_attribute_stride(blob.flags),
 	     blob.indices.size != blob.index_count * index_size,
 	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
-	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0:
+	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
+	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0:
 		return nil, false
 	}
 	meshlet_count := blob.meshlets.size / size_of(Meshlet)

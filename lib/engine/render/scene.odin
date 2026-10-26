@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:math"
 import "core:slice"
 
 import "cinnabar:core"
@@ -24,6 +25,9 @@ MAX_INSTANCES :: 16384
 // A Mesh_Renderer's material slots, one for each of its mesh's first submeshes.
 MAX_MATERIAL_SLOTS :: 8
 CULL_GROUP_SIZE :: 64
+// Each amplification group of the mesh shader path tests this many meshlets. Matches MESHLETS_PER_GROUP in
+// material_mesh.hlsli.
+MESHLETS_PER_GROUP :: 32
 
 // CULL_SHADER is the engine's culling shader (lib/engine/content/shaders/cull_draws.hlsl), by its .meta file.
 CULL_SHADER :: #load("../content/shaders/cull_draws.hlsl.meta", string)
@@ -45,6 +49,10 @@ Frame_Constants :: struct {
 	sky_color:                [4]f32,
 	ground_color:             [4]f32,
 	cascade_splits:           [4]f32,
+	// The view's frustum, which the mesh shader path culls meshlets with, and where it looks from: a point relative to
+	// the camera in w = 1, or the direction it looks along in w = 0.
+	planes:                   [6][4]f32,
+	cull_eye:                 [4]f32,
 	instances:                u32,
 	draws:                    u32,
 	meshes:                   u32,
@@ -88,6 +96,9 @@ Frame_Constants :: struct {
 	// The fog volume's depth slices (see FOG_LEVEL_SLICES), and the shadow maps' Shadow_Filter.
 	fog_slices:               u32,
 	shadow_filter:            u32,
+	// The mesh shader path's level of detail: the camera's, in every view (see lod_scale).
+	lod_scale:                f32,
+	lod_near:                 f32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -108,12 +119,15 @@ Material_Push :: struct {
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
-// mesh is the mesh's index, with the submesh's index in its mesh above ID_ENTITY_BITS, as the ID buffer has it.
+// mesh is the mesh's index, with the submesh's index in its mesh above ID_ENTITY_BITS, as the ID buffer has it. first
+// and count are the submesh's indices, or on the mesh shader path its meshlets.
 Draw_Record :: struct {
-	instance:    u32,
-	mesh:        u32,
-	first_index: u32,
-	material:    u32,
+	instance: u32,
+	mesh:     u32,
+	first:    u32,
+	material: u32,
+	count:    u32,
+	padding:  [3]u32,
 }
 
 MESH_RECORD_INDEX32 :: 1
@@ -122,12 +136,14 @@ MESH_RECORD_COLOR :: 4
 
 // Mesh_Record matches Mesh_Record in material_common.hlsli: a resident mesh's buffers, as bindless indices.
 Mesh_Record :: struct {
-	positions:        u32,
-	attributes:       u32,
-	indices:          u32,
-	attribute_stride: u32,
-	flags:            u32,
-	padding:          [3]u32,
+	positions:         u32,
+	attributes:        u32,
+	indices:           u32,
+	attribute_stride:  u32,
+	flags:             u32,
+	meshlets:          u32,
+	meshlet_vertices:  u32,
+	meshlet_triangles: u32,
 }
 
 // Instance_Record matches Instance_Record in material_common.hlsli and cull_draws.hlsl: the pose relative to the
@@ -144,19 +160,22 @@ Instance_Record :: struct {
 ITEM_CASTS_SHADOWS :: 1
 // An item of the view model, whose instance is relative to the camera.
 ITEM_VIEW_MODEL :: 2
+// An item that draws on the mesh shader path, whose first and count are its meshlets.
+ITEM_MESH_PATH :: 4
 
-// Cull_Item matches Item in cull_draws.hlsl.
+// Cull_Item matches Item in cull_draws.hlsl. first and count are the submesh's indices, or with ITEM_MESH_PATH its
+// meshlets.
 Cull_Item :: struct {
-	instance:    u32,
-	mesh:        u32,
-	first_index: u32,
-	index_count: u32,
-	material:    u32,
-	bin:         u32,
-	flags:       u32,
+	instance: u32,
+	mesh:     u32,
+	first:    u32,
+	count:    u32,
+	material: u32,
+	bin:      u32,
+	flags:    u32,
 	// The index of the submesh in its mesh, which the ID buffer gets (see ID_ENTITY_BITS).
-	submesh:     u32,
-	sphere:      [4]f32,
+	submesh:  u32,
+	sphere:   [4]f32,
 }
 
 // A view that draws only the items that cast shadows, and the view that draws only the view model's items, which every
@@ -189,11 +208,13 @@ Cull_Constants :: struct {
 	views:              u32,
 	views_offset:       u32,
 	bin_count:          u32,
-	padding:            [3]u32,
+	// The mesh shader path's indirect draws.
+	mesh_arguments:     u32,
+	padding:            [2]u32,
 }
 
-#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 440)
+#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 32)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 560)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -215,8 +236,10 @@ Gpu_Scene :: struct {
 	previous_view_model:      matrix[4, 4]f32,
 	has_previous:             bool,
 	instances:                gpu.Buffer,
-	// This frame's indirect draws and draw records, and each view's bins' counts, which grow with the frame's draws.
+	// This frame's indirect draws, the mesh shader path's in a buffer of their own, and draw records, and each view's
+	// bins' counts, which grow with the frame's draws.
 	arguments:                gpu.Buffer,
+	mesh_arguments:           gpu.Buffer,
 	draws:                    gpu.Buffer,
 	counts:                   gpu.Buffer,
 	capacity:                 int,
@@ -260,6 +283,7 @@ Scene_Frame :: struct {
 	accel_count:     int,
 	instances:       Buffer,
 	arguments:       Buffer,
+	mesh_arguments:  Buffer,
 	draws:           Buffer,
 	counts:          Buffer,
 }
@@ -274,7 +298,7 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	delete(s.slots)
 	delete(s.free)
-	for b in ([]gpu.Buffer{s.instances, s.arguments, s.draws, s.counts}) {
+	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
@@ -539,6 +563,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 		debug_view               = u32(f.debug_view),
 		shadow_filter            = u32(shadows.params.filter),
+		lod_scale                = lod_scale(f.view, f.size.y, f.lod_error),
+		lod_near                 = f.view.near,
 	}
 	constants.gi = u32(f.gi != nil)
 	if f.fog != nil {
@@ -562,12 +588,14 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 				c.view_projection, c.previous_view_projection = view_model, previous_view_model
 				c.camera_offset, c.previous_camera_offset = {}, {}
 				c.near = view_model_view(f.view).near
+				c.lod_scale, c.lod_near = lod_scale(view_model_view(f.view), f.size.y, f.lod_error), c.near
 				views[v].offset, views[v].flags = {}, VIEW_MODEL
 			}
 			planes := frustum_planes(c.view_projection)
 			copy(views[v].planes[:], planes[:])
 			// The far plane is at infinity.
 			views[v].planes[5] = {0, 0, 0, 1}
+			c.cull_eye = {0, 0, 0, 1}
 			// The camera's views draw with its jitter, which the velocities leave out.
 			c.view_projection = jitter_projection(c.view_projection, f.jitter)
 			c.jitter = f.jitter
@@ -575,7 +603,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
 			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]
 			views[v].flags = VIEW_CASTERS
+			c.cull_eye = shadows.eyes[v - FIRST_SHADOW_VIEW]
 		}
+		c.planes = views[v].planes
 		sf.view_constants[v], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 		if !ok {
 			sf.items = nil
@@ -596,6 +626,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	g := f.graph
 	sf.instances = import_buffer(g, s.instances)
 	sf.arguments = import_buffer(g, s.arguments)
+	sf.mesh_arguments = import_buffer(g, s.mesh_arguments)
 	sf.draws = import_buffer(g, s.draws)
 	sf.counts = import_buffer(g, s.counts)
 	cull := Cull_Constants {
@@ -611,6 +642,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		views              = gpu.read_index(view_upload.buffer),
 		views_offset       = view_upload.offset,
 		bin_count          = u32(len(sf.bin_pipelines)),
+		mesh_arguments     = gpu.write_index(s.mesh_arguments),
 	}
 	sf.cull_constants, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -625,6 +657,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	p = add_compute_pass(g, "cull draws", cull_draws, f)
 	read(g, p, sf.instances)
 	write(g, p, sf.arguments)
+	write(g, p, sf.mesh_arguments)
 	write(g, p, sf.draws)
 	write(g, p, sf.counts)
 }
@@ -638,6 +671,7 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	}
 	g := f.graph
 	indirect_buffer(g, p, sf.arguments)
+	indirect_buffer(g, p, sf.mesh_arguments)
 	indirect_buffer(g, p, sf.counts)
 	read(g, p, sf.draws)
 	read(g, p, sf.instances)
@@ -695,18 +729,8 @@ add_items :: proc(
 	}
 	mesh_index, known := mesh_indices[mesh]
 	if !known {
-		flags: u32
-		if mesh.index_format == .U32 {
-			flags |= MESH_RECORD_INDEX32
-		}
-		if .UV1 in mesh.flags {
-			flags |= MESH_RECORD_UV1
-		}
-		if .Color in mesh.flags {
-			flags |= MESH_RECORD_COLOR
-		}
 		mesh_index = u32(len(meshes))
-		append(meshes, Mesh_Record{gpu.read_index(mesh.positions), gpu.read_index(mesh.attributes), gpu.read_index(mesh.indices), mesh.attribute_stride, flags, {}})
+		append(meshes, mesh_record(mesh))
 		mesh_indices[mesh] = mesh_index
 	}
 	for submesh, s in mesh.submeshes[:mesh.submesh_count] {
@@ -720,14 +744,21 @@ add_items :: proc(
 		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows && !view_model {
 			flags |= ITEM_CASTS_SHADOWS
 		}
+		// The opaque draws of a material with mesh pipelines draw meshlets.
+		first, count := submesh.first_index, submesh.index_count
+		pipeline := &r.materials.pipelines[use.pipeline]
+		if pipeline.mesh_path && material_group(pipeline) == .Opaque {
+			flags |= ITEM_MESH_PATH
+			first, count = submesh.first_meshlet, submesh.meshlet_count
+		}
 		b := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
 		append(
 			items,
 			Cull_Item {
 				instance = slot,
 				mesh = mesh_index,
-				first_index = submesh.first_index,
-				index_count = submesh.index_count,
+				first = first,
+				count = count,
 				material = use.block,
 				bin = u32(use.pipeline),
 				flags = flags,
@@ -739,6 +770,39 @@ add_items :: proc(
 	return mesh
 }
 
+// mesh_record is a resident mesh's record.
+@(private)
+mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
+	flags: u32
+	if mesh.index_format == .U32 {
+		flags |= MESH_RECORD_INDEX32
+	}
+	if .UV1 in mesh.flags {
+		flags |= MESH_RECORD_UV1
+	}
+	if .Color in mesh.flags {
+		flags |= MESH_RECORD_COLOR
+	}
+	return {
+		positions = gpu.read_index(mesh.positions),
+		attributes = gpu.read_index(mesh.attributes),
+		indices = gpu.read_index(mesh.indices),
+		attribute_stride = mesh.attribute_stride,
+		flags = flags,
+		meshlets = gpu.read_index(mesh.meshlets),
+		meshlet_vertices = gpu.read_index(mesh.meshlet_vertices),
+		meshlet_triangles = gpu.read_index(mesh.meshlet_triangles),
+	}
+}
+
+// lod_scale is what the mesh shader path's level of detail scales an error by, over its distance, for a view of a
+// height in pixels: the error's height on the screen, over the largest that may show (see Quality.lod_error). The mesh
+// shader path draws the coarsest level of each part of a mesh that shows at most that.
+@(private)
+lod_scale :: proc(view: View, height: u32, error_pixels: f32) -> f32 {
+	return 0.5 * f32(height) / math.tan(view.vertical_fov * 0.5) / max(error_pixels, MIN_LOD_ERROR)
+}
+
 // ensure_draw_buffers grows the frame's draw buffers to hold its draws in every view, and its bins' counts.
 @(private = "file")
 ensure_draw_buffers :: proc(r: ^Renderer, draws, counts: int) {
@@ -746,9 +810,11 @@ ensure_draw_buffers :: proc(r: ^Renderer, draws, counts: int) {
 	platform := r.platform
 	if draws > s.capacity || s.arguments == {} {
 		platform.gpu_destroy_buffer(s.arguments)
+		platform.gpu_destroy_buffer(s.mesh_arguments)
 		platform.gpu_destroy_buffer(s.draws)
 		s.capacity = max(draws, s.capacity * 2, 256)
 		s.arguments = platform.gpu_create_buffer({size = u32(s.capacity * size_of(gpu.Draw_Indirect_Args)), usage = {.Storage, .Indirect}, label = "draw arguments"}, nil)
+		s.mesh_arguments = platform.gpu_create_buffer({size = u32(s.capacity * size_of(gpu.Draw_Mesh_Indirect_Args)), usage = {.Storage, .Indirect}, label = "mesh draw arguments"}, nil)
 		s.draws = platform.gpu_create_buffer({size = u32(s.capacity * size_of(Draw_Record)), usage = {.Storage}, label = "draw records"}, nil)
 	}
 	if counts > s.count_capacity || s.counts == {} {
@@ -803,7 +869,7 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		return
 	}
 	g := f.graph
-	arguments, counts := gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.counts)
+	arguments, mesh_arguments, counts := gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.mesh_arguments), gpu_buffer(g, sf.counts)
 	pushes := pass == .Forward || pass == .Transparent
 	push: Material_Push
 	if pushes {
@@ -820,6 +886,11 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		if pass == .Transparent && group == .Sorted {
 			pipelines = p.over
 		}
+		// The same test as add_items, so the bin's items are all on the path that it draws.
+		mesh_path := p.mesh_path && group == .Opaque
+		if mesh_path {
+			pipelines[1] = p.meshes[pass]
+		}
 		first := u32(view * len(sf.items)) + sf.bin_offsets[bin]
 		for pipeline in pipelines {
 			if pipeline == {} {
@@ -830,7 +901,12 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 			if pushes {
 				gpu.cmd_push_constants(cb, &push)
 			}
-			gpu.cmd_draw_indirect(cb, arguments, first * size_of(gpu.Draw_Indirect_Args), sf.bin_counts[bin], counts, u32(view * bin_count + bin) * 4)
+			count_offset := u32(view * bin_count + bin) * 4
+			if mesh_path {
+				gpu.cmd_draw_mesh_indirect(cb, mesh_arguments, first * size_of(gpu.Draw_Mesh_Indirect_Args), sf.bin_counts[bin], counts, count_offset)
+			} else {
+				gpu.cmd_draw_indirect(cb, arguments, first * size_of(gpu.Draw_Indirect_Args), sf.bin_counts[bin], counts, count_offset)
+			}
 		}
 	}
 }

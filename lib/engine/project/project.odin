@@ -41,6 +41,7 @@ Quality_Key :: enum u8 {
 	Fog,
 	Aa,
 	Render_Scale,
+	Lod_Error,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
@@ -57,6 +58,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Fog                = "quality.fog",
 	.Aa                 = "quality.aa",
 	.Render_Scale       = "quality.render_scale",
+	.Lod_Error          = "quality.lod_error",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -155,6 +157,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				} else {
 					problem(problems, line, "%s takes a number from %v to 1, not %q", key, render.MIN_RENDER_SCALE, value)
 				}
+			case .Lod_Error:
+				error: f32
+				error, ok = strconv.parse_f32(value)
+				if ok {
+					q.lod_error = error
+				} else {
+					problem(problems, line, "%s takes a number of pixels from %v to %v, not %q", key, render.MIN_LOD_ERROR, render.MAX_LOD_ERROR, value)
+				}
 			}
 			if ok {
 				settings.quality_given += {k}
@@ -189,6 +199,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Fog in given {q.fog = s.fog}
 	if .Aa in given {q.aa = s.aa}
 	if .Render_Scale in given {q.render_scale = s.render_scale}
+	if .Lod_Error in given {q.lod_error = s.lod_error}
 	return render.clamp_quality(q, caps)
 }
 
@@ -209,6 +220,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Fog                = name(q.fog),
 		.Aa                 = name(q.aa),
 		.Render_Scale       = fmt.tprintf("%v", q.render_scale),
+		.Lod_Error          = fmt.tprintf("%v", q.lod_error),
 	}
 	return
 }

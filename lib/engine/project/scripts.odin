@@ -42,6 +42,7 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Fog                = "fog",
 	.Aa                 = "aa",
 	.Render_Scale       = "render_scale",
+	.Lod_Error          = "lod_error",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
@@ -84,6 +85,8 @@ quality_binding :: proc(L: ^luau.State) -> c.int {
 			luau.pushboolean(L, b32(q.shadows.ray_traced))
 		case .Render_Scale:
 			luau.pushnumber(L, f64(q.render_scale))
+		case .Lod_Error:
+			luau.pushnumber(L, f64(q.lod_error))
 		case:
 			luau.pushodinstring(L, value)
 		}

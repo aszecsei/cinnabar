@@ -66,7 +66,7 @@ The cooker compiles each material for each pass and each vertex path:
 | Axis | Values |
 |---|---|
 | Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps) |
-| Vertex path | Vertex pulling; the mesh shader path and skinning later (see [GPU](../gpu/gpu-driven-and-mesh-shaders.md#mesh-shaders)) |
+| Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)); skinning later |
 | Static switches | Each combination that the material or an instance uses |
 
 - One generated source holds every pass, each by its entry points (see [Content pipeline](../content/kinds/materials.md#materials)). DXC keeps only what each pass's outputs need: the depth pass of an opaque material has no pixel shader and no material code. *Later,* such materials share one depth pipeline.
@@ -86,7 +86,7 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 ## Runtime
 
 - **One table.** Each frame uploads a table with a block for each material or instance that it draws (`Material_Table`, in `lib/engine/render/materials.odin`). A block holds the parameters in the layout that the material's blob gives, with each texture's bindless index written: the resident texture, or the default for its parameter (white, black or a flat normal) until it is resident. Each draw record holds its block's offset. *A persistent table that writes only what changed comes with larger scenes.*
-- **Pipelines by material.** The renderer creates the pipelines of each material and switch combination that a draw needs, one for each pass, from the material's blob, at most `MAX_MATERIAL_PIPELINES` combinations. Instances with the same switches share them. A two-sided material culls no faces. The forward pipeline tests depth `Equal` and does not write it.
+- **Pipelines by material.** The renderer creates the pipelines of each material and switch combination that a draw needs, one for each pass, from the material's blob, at most `MAX_MATERIAL_PIPELINES` combinations. With mesh shaders, an opaque material has mesh pipelines for its opaque passes too (see [GPU scene](gpu-scene.md#mesh-shader-path)). Instances with the same switches share them. A two-sided material culls no faces. The forward pipeline tests depth `Equal` and does not write it.
 - **The default material.** A submesh without a material, or whose material cannot draw (not cooked, or without the variant that its instance needs), draws with the engine's default material, `lib/engine/content/materials/default.material`.
 - **Bins.** Culling writes each visible draw into the bin of its pipeline. Each bin is one indirect draw with a count buffer (see [GPU](../gpu/gpu-driven-and-mesh-shaders.md#gpu-driven-rendering)).
 - **Hot reload.** A new material blob updates its pipelines with `update_graphics_pipeline`, so the old shaders draw until the new ones compile. A new instance blob rewrites its parameter block. Both come through `asset.poll` (see [Content pipeline](../content/blobs-and-loading.md#loading)).

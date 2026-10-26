@@ -49,4 +49,4 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(len(render.Debug_View) == len(link.Debug_View))
 #assert(int(render.Debug_View.Shadow_Cascades) == int(link.Debug_View.Shadow_Cascades))
 #assert(int(render.Debug_View.Luminance) == int(link.Debug_View.Luminance))
-#assert(int(render.Debug_View.Transparent_Overdraw) == int(link.Debug_View.Transparent_Overdraw))
+#assert(int(render.Debug_View.Lod_Depth) == int(link.Debug_View.Lod_Depth))

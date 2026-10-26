@@ -1,9 +1,10 @@
 // Models are .gltf and .glb files, read with cgltf. A model is a file of meshes: each glTF mesh is a Mesh sub-asset,
 // in its own space, or with combine = true the whole default scene is one. The cooker converts them to the engine's
-// axes, welds and orders their vertices, and builds their meshlets with meshoptimizer (see meshoptimizer.odin). See
-// docs/content/kinds/meshes.md#meshes.
+// axes, welds and orders their vertices, and builds their meshlets and the meshlets' LOD hierarchy with meshoptimizer
+// (see meshoptimizer.odin). See docs/content/kinds/meshes.md#meshes.
 package cook
 
+import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:hash"
@@ -21,10 +22,13 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 1"
+MODEL_COOK_VERSION :: "models 2"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
-// How much meshoptimizer weighs a meshlet's normal cone against its size: some, so culling by cone works.
+// How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
+// works.
 MESHLET_CONE_WEIGHT :: 0.25
+// How much simplification weighs each component of the normal against the positions, as meshoptimizer's demo does.
+LOD_NORMAL_WEIGHT :: 0.5
 
 MODEL_SETTINGS := []Setting_Info {
 	{
@@ -44,6 +48,12 @@ MODEL_SETTINGS := []Setting_Info {
 		values = {"file", "generate"},
 		default = "file",
 		description = "Take the tangents from the file, or make MikkTSpace tangents. A primitive without tangents always gets made ones.",
+	},
+	{
+		key = "cluster_lod",
+		values = {"true", "false"},
+		default = "true",
+		description = "Simplify the meshlets into a hierarchy of levels of detail, which the mesh shader path draws by distance. Without it, the meshlets are the mesh's own triangles only.",
 	},
 }
 
@@ -317,6 +327,7 @@ model_key :: proc(options: Cook_Options, a: Asset_Source, data: ^cgltf.data, pro
 build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
 	scale := f32(strconv.parse_f64(model_setting(a, "scale")) or_else 1)
 	generate := model_setting(a, "tangents") == "generate"
+	lod := model_setting(a, "cluster_lod") == "true"
 	flags: format.Mesh_Flags
 
 	// The primitives are grouped by material, and each group is a submesh, in the order of their first use.
@@ -377,11 +388,11 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
-	meshlet_triangles := make([dynamic]u8, context.temp_allocator)
+	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(materials), context.temp_allocator)
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
-		build_meshlets(indices[r.x:r.y], vertices, &meshlets, &meshlet_vertices, &meshlet_triangles)
+		build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_vertices, &meshlet_triangles)
 		name := ""
 		if materials[s] != nil && materials[s].name != nil {
 			name = string(materials[s].name)
@@ -444,7 +455,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 		indices           = index_bytes,
 		meshlets          = meshlets[:],
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
-		meshlet_triangles = meshlet_triangles[:],
+		meshlet_triangles = mem.slice_to_bytes(meshlet_triangles[:]),
 		name              = m.name,
 		source_path       = a.name,
 	}
@@ -537,48 +548,137 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^
 	return true
 }
 
-// build_meshlets splits a submesh's triangles into meshlets, appended with their offsets into the mesh's arrays.
+// build_meshlets splits a submesh's triangles into meshlets, appended with their offsets into the mesh's arrays. With
+// lod, they are clusterlod's hierarchy, level by level: the submesh's own triangles, then each simplification of groups
+// of the level below (see docs/content/kinds/meshes.md#meshlets). Without it, they are the submesh's own triangles,
+// clustered with a weight on their cones.
 @(private = "file")
-build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u8) {
+build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
 	if len(indices) == 0 {
 		return
 	}
 	stride := c.size_t(size_of(Vertex))
-	bound := int(meshopt_buildMeshletsBound(c.size_t(len(indices)), format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES))
-	built := make([]Meshopt_Meshlet, bound, context.temp_allocator)
-	local_vertices := make([]c.uint, len(indices), context.temp_allocator)
-	local_triangles := make([]u8, len(indices), context.temp_allocator)
-	count := int(
-		meshopt_buildMeshlets(
-			&built[0], &local_vertices[0], &local_triangles[0],
-			&indices[0], c.size_t(len(indices)),
-			&vertices[0].position[0], c.size_t(len(vertices)), stride,
-			format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES, MESHLET_CONE_WEIGHT,
-		),
-	)
-	for m in built[:count] {
-		meshopt_optimizeMeshlet(&local_vertices[m.vertex_offset], &local_triangles[m.triangle_offset], c.size_t(m.triangle_count), c.size_t(m.vertex_count))
-		b := meshopt_computeMeshletBounds(
-			&local_vertices[m.vertex_offset], &local_triangles[m.triangle_offset], c.size_t(m.triangle_count),
-			&vertices[0].position[0], c.size_t(len(vertices)), stride,
+	if !lod {
+		bound := int(meshopt_buildMeshletsBound(c.size_t(len(indices)), format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES))
+		built := make([]Meshopt_Meshlet, bound, context.temp_allocator)
+		local_vertices := make([]c.uint, len(indices), context.temp_allocator)
+		local_triangles := make([]u8, len(indices), context.temp_allocator)
+		count := int(
+			meshopt_buildMeshlets(
+				&built[0], &local_vertices[0], &local_triangles[0],
+				&indices[0], c.size_t(len(indices)),
+				&vertices[0].position[0], c.size_t(len(vertices)), stride,
+				format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES, MESHLET_CONE_WEIGHT,
+			),
 		)
-		append(
-			meshlets,
-			format.Meshlet {
-				vertex_offset = u32(len(meshlet_vertices)),
-				triangle_offset = u32(len(meshlet_triangles)),
-				vertex_count = u32(m.vertex_count),
-				triangle_count = u32(m.triangle_count),
-				center = b.center,
-				radius = b.radius,
-				cone_axis = b.cone_axis_s8,
-				cone_cutoff = b.cone_cutoff_s8,
-			},
-		)
-		for v in local_vertices[m.vertex_offset:][:m.vertex_count] {
-			append(meshlet_vertices, u32(v))
+		for m in built[:count] {
+			meshopt_optimizeMeshlet(&local_vertices[m.vertex_offset], &local_triangles[m.triangle_offset], c.size_t(m.triangle_count), c.size_t(m.vertex_count))
+			top := Clod_Bounds{error = math.F32_MAX}
+			append_meshlet(local_vertices[m.vertex_offset:][:m.vertex_count], local_triangles[m.triangle_offset:][:m.triangle_count * 3], vertices, 0, {}, top, meshlets, meshlet_vertices, meshlet_triangles)
 		}
-		append(meshlet_triangles, ..local_triangles[m.triangle_offset:][:m.triangle_count * 3])
+		return
+	}
+
+	config := clod_default_config(format.MESHLET_MAX_TRIANGLES)
+	config.max_vertices = format.MESHLET_MAX_VERTICES
+	weights := [3]f32{LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT}
+	// The attributes are the floats of Vertex from its normal on. The normal weighs in, and the UV sets' seams are
+	// protected, which permissive simplification needs.
+	first := offset_of(Vertex, normal)
+	protect: c.uint
+	for field in ([]uintptr{offset_of(Vertex, uv0), offset_of(Vertex, uv1)}) {
+		protect |= 3 << ((field - first) / size_of(f32))
+	}
+	mesh := Clod_Mesh {
+		indices                  = &indices[0],
+		index_count              = c.size_t(len(indices)),
+		vertex_count             = c.size_t(len(vertices)),
+		vertex_positions         = &vertices[0].position[0],
+		vertex_positions_stride  = stride,
+		vertex_attributes        = &vertices[0].normal[0],
+		vertex_attributes_stride = stride,
+		attribute_weights        = &weights[0],
+		attribute_count          = len(weights),
+		attribute_protect_mask   = protect,
+	}
+	output := Lod_Output {
+		ctx      = context,
+		groups   = make([dynamic]Clod_Group, context.temp_allocator),
+		clusters = make([dynamic]Lod_Cluster, context.temp_allocator),
+	}
+	clod_build(config, mesh, &output, lod_output)
+	// clodBuild gives the groups level by level, so the meshlets are in order of depth.
+	for cluster in output.clusters {
+		local_vertices := make([]c.uint, len(cluster.indices), context.temp_allocator)
+		local_triangles := make([]u8, len(cluster.indices), context.temp_allocator)
+		vertex_count := int(clod_local_indices(&local_vertices[0], &local_triangles[0], &cluster.indices[0], c.size_t(len(cluster.indices))))
+		made := cluster.refined >= 0 ? output.groups[cluster.refined].simplified : Clod_Bounds{}
+		group := output.groups[cluster.group]
+		append_meshlet(local_vertices[:vertex_count], local_triangles, vertices, int(group.depth), made, group.simplified, meshlets, meshlet_vertices, meshlet_triangles)
+	}
+}
+
+// Lod_Output is what clodBuild gave: each group, and each cluster with its group and the group it was simplified from.
+@(private = "file")
+Lod_Output :: struct {
+	ctx:      runtime.Context,
+	groups:   [dynamic]Clod_Group,
+	clusters: [dynamic]Lod_Cluster,
+}
+
+@(private = "file")
+Lod_Cluster :: struct {
+	group:   int,
+	refined: int,
+	indices: []c.uint,
+}
+
+@(private = "file")
+lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]Clod_Cluster, cluster_count: c.size_t) -> c.int {
+	output := (^Lod_Output)(output_context)
+	context = output.ctx
+	id := len(output.groups)
+	append(&output.groups, group)
+	// The clusters' indices last only until this returns.
+	for cluster in clusters[:cluster_count] {
+		indices := slice.clone(cluster.indices[:cluster.index_count], context.temp_allocator)
+		append(&output.clusters, Lod_Cluster{group = id, refined = int(cluster.refined), indices = indices})
+	}
+	return c.int(id)
+}
+
+// append_meshlet appends a meshlet of local vertices and triangles, with its culling bounds, the simplification that
+// made it and its group's, a level up.
+@(private = "file")
+append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices: []Vertex, depth: int, made, parent: Clod_Bounds, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
+	triangle_count := len(local_triangles) / 3
+	b := meshopt_computeMeshletBounds(&local_vertices[0], &local_triangles[0], c.size_t(triangle_count), &vertices[0].position[0], c.size_t(len(vertices)), size_of(Vertex))
+	append(
+		meshlets,
+		format.Meshlet {
+			vertex_offset = u32(len(meshlet_vertices)),
+			triangle_offset = u32(len(meshlet_triangles)),
+			vertex_count = u8(len(local_vertices)),
+			triangle_count = u8(triangle_count),
+			depth = u16(depth),
+			cone_axis = b.cone_axis_s8,
+			cone_cutoff = b.cone_cutoff_s8,
+			center = b.center,
+			radius = b.radius,
+			error_center = made.center,
+			error_radius = made.radius,
+			parent_center = parent.center,
+			parent_radius = parent.radius,
+			error = made.error,
+			parent_error = parent.error,
+		},
+	)
+	for v in local_vertices {
+		append(meshlet_vertices, u32(v))
+	}
+	for i in 0 ..< triangle_count {
+		t := local_triangles[i * 3:]
+		append(meshlet_triangles, u32(t[0]) | u32(t[1]) << 8 | u32(t[2]) << 16)
 	}
 }
 
