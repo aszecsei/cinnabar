@@ -44,12 +44,13 @@ Gi_Technique :: enum u8 {
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
-// frame and do not blur in motion.
+// frame and do not blur in motion, then AMD's FSR, an upscaler in temporal AA's place where the device runs it.
 Aa_Technique :: enum u8 {
 	Off,
 	Taa,
 	Fxaa,
 	Smaa,
+	Fsr,
 }
 
 Shadow_Quality :: struct {
@@ -89,6 +90,8 @@ Caps :: struct {
 	vendor:       gpu.Vendor,
 	// The adapter's own memory in bytes, 0 when unknown.
 	video_memory: u64,
+	// The vendors' upscalers that the device runs, from Platform_API.gpu_upscalers.
+	upscalers:    gpu.Upscaler_Kinds,
 }
 
 // The smallest render scale: below half, temporal AA has too few samples a pixel to upscale from.
@@ -107,6 +110,9 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 	if platform.gpu_adapter != nil {
 		adapter := platform.gpu_adapter()
 		caps.vendor, caps.video_memory = adapter.vendor, adapter.video_memory
+	}
+	if platform.gpu_upscalers != nil {
+		caps.upscalers = platform.gpu_upscalers()
 	}
 	return
 }
@@ -151,7 +157,7 @@ default_quality :: proc(caps: Caps) -> Quality {
 }
 
 // clamp_quality turns off what the device cannot do, and puts each enum back in its range, since a settings file or a
-// script may give any number.
+// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too.
 clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q := q
 	clamp_enum :: proc(value: $T, fallback: T) -> T {
@@ -165,6 +171,9 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.gi.level = clamp_enum(q.gi.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
 	q.aa = clamp_enum(q.aa, .Off)
+	if kind, upscales := upscaler_kind(q.aa); upscales && kind not_in caps.upscalers {
+		q.aa = .Taa
+	}
 	// Not a number, or 0, is full resolution.
 	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
 	return q

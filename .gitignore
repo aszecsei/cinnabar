@@ -2,6 +2,7 @@
 build
 vendor/agility
 vendor/dxc
+vendor/fidelityfx/*/
 *.dxil
 *.dxil.key
 .vscode

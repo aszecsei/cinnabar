@@ -19,7 +19,7 @@ Read them in this order the first time.
 | [Global illumination](global-illumination.md) | Screen-space radiance cascades. |
 | [Volumetric fog](fog.md) | The froxel volume. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
-| [Anti-aliasing](anti-aliasing.md) | The quality's techniques: temporal AA, FXAA and SMAA 1x, and the tone map pass before the last two. |
+| [Anti-aliasing](anti-aliasing.md) | The quality's techniques: temporal AA, FSR, FXAA and SMAA 1x, upscaling, and the tone map pass before FXAA and SMAA. |
 | [Assets and components](assets.md) | GPU residency, asset fields and the renderer's components. |
 
 ## Overview
@@ -48,6 +48,7 @@ Read them in this order the first time.
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |
+| `upscalers.odin` | FSR's upscaler and its motion pass ([Anti-aliasing](anti-aliasing.md#fsr)) |
 | `post_effects.odin` | A game's own post passes at fixed points ([Post effects](post-processing.md#post-effects)) |
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
@@ -85,7 +86,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 | UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than the UI does. The debug layer has the scene's size, for the depth that it tests against. |
 | HDR output | HDR10 by default on a display in HDR, scRGB on request; the tone mapper's SDR result, opened up above a knee to the display's peak | The tone mappers keep their look, and SDR's white, which the UI has, is as bright as Windows shows SDR content. See [HDR output](layers-and-output.md#hdr-output). |
 | Instance positions | Relative to a render origin that snaps to a 1024 m grid, in a persistent GPU scene | See [GPU scene](gpu-scene.md#gpu-scene). |
-| Anti-aliasing | Temporal by default, FXAA or SMAA 1x as the quality chooses; no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. FXAA and SMAA are for a game that does not want temporal AA's blur in motion. See [Anti-aliasing](anti-aliasing.md#anti-aliasing). |
+| Anti-aliasing | Temporal by default, FXAA or SMAA 1x, or AMD's FSR where the device runs it, as the quality chooses; no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. FXAA and SMAA are for a game that does not want temporal AA's blur in motion. FSR runs through the GPU interface, which loads its library at run time, so temporal AA stays the fallback on every device. See [Anti-aliasing](anti-aliasing.md#anti-aliasing). |
 
 ## Open questions
 
@@ -112,6 +113,7 @@ Each entry names the section that follows it.
 - Jorge Jimenez, [*Next Generation Post Processing in Call of Duty: Advanced Warfare*](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/), SIGGRAPH 2014: the 13-tap downsample with luminance weighting, the tent upsample and the Halton jitter in [Post-processing](post-processing.md#post-processing).
 - Timothy Lottes, [*FXAA*](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf), NVIDIA 2011, and FXAA 3.11: the edge search and subpixel blend of [Anti-aliasing](anti-aliasing.md#fxaa)'s FXAA.
 - Jorge Jimenez, Jose I. Echevarria, Tiago Sousa, Diego Gutierrez, [*SMAA: Enhanced Subpixel Morphological Antialiasing*](https://www.iryoku.com/smaa/), Eurographics 2012, and its [reference implementation](https://github.com/iryoku/smaa): [Anti-aliasing](anti-aliasing.md#smaa)'s SMAA 1x, which includes it as it is.
+- AMD, [*FidelityFX Super Resolution 3.1 upscaler*](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/Kits/FidelityFX/docs/techniques/super-resolution-upscaler.md), in the AMD FSR SDK: the inputs, motion, jitter and exposure of [Anti-aliasing](anti-aliasing.md#fsr)'s FSR.
 - Troy Sobotka, [AgX](https://github.com/sobotka/AgX); Khronos, [PBR Neutral tone mapper](https://github.com/KhronosGroup/ToneMapping); Academy, [ACES](https://github.com/ampas/aces-dev): the tone mappers in the lookup table of [Post-processing](post-processing.md#post-processing).
 - Bart Wronski, [*Volumetric Fog: Unified compute shader based solution to atmospheric scattering*](https://bartwronski.com/publications/), SIGGRAPH 2014, and Sébastien Hillaire, [*Physically Based and Unified Volumetric Rendering in Frostbite*](https://www.ea.com/frostbite/news/physically-based-unified-volumetric-rendering-in-frostbite), SIGGRAPH 2015: the froxel volume, injection, temporal blend and integration of [Volumetric fog](fog.md#volumetric-fog). The phase function is Henyey and Greenstein, 1941.
 - Louis Bavoil, Miguel Sainz, Rouslan Dimitrov, [*Image-Space Horizon-Based Ambient Occlusion*](https://developer.download.nvidia.com/presentations/2008/SIGGRAPH/HBAO_SIG08b.pdf), SIGGRAPH 2008 talk: the horizon tracking of [Ambient occlusion](ambient-occlusion.md#techniques)'s HBAO.

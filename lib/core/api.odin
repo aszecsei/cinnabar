@@ -108,12 +108,17 @@ Platform_API :: struct {
 	// Acceleration structures need Ray_Query or Ray_Tracing_Pipeline. The reference goes in Accel_Instance records.
 	gpu_create_accel:             proc(desc: gpu.Accel_Struct_Desc) -> gpu.Accel_Struct,
 	gpu_accel_reference:          proc(accel: gpu.Accel_Struct) -> u64,
+	// The vendors' upscalers that the device runs, whose libraries the backend found (see docs/gpu/upscalers.md#upscalers).
+	// Creation compiles the upscaler's pipelines before it returns, which can take a moment.
+	gpu_upscalers:                proc() -> gpu.Upscaler_Kinds,
+	gpu_create_upscaler:          proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler,
 	// Destruction invalidates the handle at once and releases the resource when the GPU no longer uses it.
 	gpu_destroy_buffer:           proc(buffer: gpu.Buffer),
 	gpu_destroy_texture:          proc(texture: gpu.Texture),
 	gpu_destroy_sampler:          proc(sampler: gpu.Sampler),
 	gpu_destroy_pipeline:         proc(pipeline: gpu.Pipeline),
 	gpu_destroy_accel:            proc(accel: gpu.Accel_Struct),
+	gpu_destroy_upscaler:         proc(upscaler: gpu.Upscaler),
 	// Destroys every resource in the scope and returns how many there were. See gpu.Scope.
 	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
 

@@ -115,6 +115,7 @@ dev: struct {
 	using pipelines:   Pipelines,
 	using uploads:     Uploads,
 	using streaming:   Streaming,
+	using upscalers:   Upscalers,
 }
 
 // A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
@@ -173,6 +174,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	init_pipelines() or_return
 	init_uploads() or_return
 	init_streaming() or_return
+	init_upscalers()
 	for &frame in dev.frames {
 		init_upload_ring(&frame.upload) or_return
 	}
@@ -198,6 +200,7 @@ shutdown :: proc() {
 	shutdown_streaming()
 	shutdown_pipelines()
 	shutdown_resources()
+	shutdown_upscalers()
 	for &frame in dev.frames {
 		for lists in frame.lists {
 			for &l in lists {

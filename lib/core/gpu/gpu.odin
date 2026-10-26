@@ -14,6 +14,8 @@ Sampler :: distinct Handle
 Pipeline :: distinct Handle
 // An acceleration structure for ray tracing (see docs/gpu/ray-tracing.md#ray-tracing).
 Accel_Struct :: distinct Handle
+// A vendor's temporal upscaler (see docs/gpu/upscalers.md#upscalers).
+Upscaler :: distinct Handle
 
 // Capabilities above the hardware floor. The backend reports them at device creation.
 Feature :: enum u8 {
@@ -76,6 +78,7 @@ MAX_TEXTURES :: 16384
 MAX_SAMPLERS :: 1024
 MAX_PIPELINES :: 4096
 MAX_ACCEL_STRUCTS :: 4096
+MAX_UPSCALERS :: 16
 // The geometries of one bottom-level acceleration structure.
 MAX_ACCEL_GEOMETRIES :: 16
 
@@ -749,6 +752,38 @@ accel_instance :: proc(
 		hit_group_offset_flags = (hit_group_offset & 0xffffff) | u32(transmute(u8)flags) << 24,
 		accel = accel_reference,
 	}
+}
+
+// Upscaler_Kind is a vendor's temporal upscaler, which a backend runs through the vendor's library when it finds it
+// (see docs/gpu/upscalers.md#upscalers).
+Upscaler_Kind :: enum u8 {
+	// AMD FidelityFX Super Resolution, through the FidelityFX API: FSR 4 on the GPUs that have it, and FSR 3.1 on the
+	// others.
+	Fsr,
+}
+
+Upscaler_Kinds :: bit_set[Upscaler_Kind;u8]
+
+Upscaler_Flag :: enum u8 {
+	// The color is linear HDR. Without it, it is linear and at most 1.
+	Hdr,
+	// Depth is reversed: 1 at the near plane, and 0 at the far one.
+	Depth_Reversed,
+	// The projection has no far plane.
+	Depth_Infinite,
+}
+
+Upscaler_Flags :: bit_set[Upscaler_Flag;u8]
+
+// Upscaler_Desc is an upscaler into one output size, from renders at most max_render_size. The upscaler keeps its own
+// history and finds the exposure from the color.
+Upscaler_Desc :: struct {
+	kind:            Upscaler_Kind,
+	flags:           Upscaler_Flags,
+	max_render_size: [2]u32,
+	output_size:     [2]u32,
+	scope:           Scope,
+	label:           string,
 }
 
 // Stats is what a backend holds, for the editor's resource monitor (see docs/editor/shell-and-panels.md#resource-monitor). The live

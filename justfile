@@ -17,6 +17,10 @@ agility_dir := "vendor/agility/" + agility_version
 dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
+# The AMD FSR SDK, whose FidelityFX API runs FSR (see docs/gpu/upscalers.md#fsr). Its version must match
+# FFX_SDK_VERSION in lib/core/gpu/d3d12/ffx.odin.
+fidelityfx_version := "2.3.0"
+fidelityfx_dir := "vendor/fidelityfx/" + fidelityfx_version
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
 # Luau's experimental direct field access for engine userdata (see docs/scripting/embedding.md#direct-field-access). Off unless
 # CINNABAR_DIRECT_ACCESS=true.
@@ -60,7 +64,7 @@ default:
 # =================================
 
 # Install dependencies
-install: install-agility install-dxc install-compressonator
+install: install-agility install-dxc install-fidelityfx install-compressonator
     git submodule update --init --recursive
 
 # Fetch Compressonator's block compression core at the commit that the repository pins. The repository is over 700 MB,
@@ -112,6 +116,19 @@ install-dxc:
     [ -f "{{dxc}}" ] || { echo "error: dxc.exe is missing from the archive" >&2; exit 1; }
     echo "✓ DXC {{dxc_version}}"
 
+# Download the FidelityFX API's loader and FSR's library, both MIT-licensed (see vendor/fidelityfx/README.md)
+[script]
+install-fidelityfx:
+    set -euo pipefail
+    [ -f "{{fidelityfx_dir}}/amd_fidelityfx_upscaler_dx12.dll" ] && exit 0
+    mkdir -p "{{fidelityfx_dir}}"
+    base="https://raw.githubusercontent.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/v{{fidelityfx_version}}/Kits/FidelityFX/signedbin"
+    for dll in amd_fidelityfx_loader_dx12.dll amd_fidelityfx_upscaler_dx12.dll; do
+        curl -sSfL -o "{{fidelityfx_dir}}/$dll.part" "$base/$dll"
+        mv "{{fidelityfx_dir}}/$dll.part" "{{fidelityfx_dir}}/$dll"
+    done
+    echo "✓ FidelityFX {{fidelityfx_version}}"
+
 # Setup project for first time
 setup: install
     echo "✓ Project ready"
@@ -162,7 +179,7 @@ alias b := build
 build: host game-dll script-types scripts scenes shaders textures models materials
 
 # Build the development host
-host: agility-runtime luau
+host: agility-runtime fidelityfx-runtime luau
     mkdir -p "{{build_dir}}"
     odin build src/host {{collections}} {{dev_defines}} -out:"{{build_dir}}/host.exe" -debug
 
@@ -246,6 +263,14 @@ agility-runtime: install-agility
     mkdir -p "{{build_dir}}/D3D12"
     cp "{{agility_dir}}/D3D12Core.dll" "{{agility_dir}}/d3d12SDKLayers.dll" "{{build_dir}}/D3D12/"
 
+# Copy FSR's libraries next to the executables, where the D3D12 backend loads them, with their license. A running host
+# keeps them loaded, so only changed ones are copied.
+[private]
+fidelityfx-runtime: install-fidelityfx
+    mkdir -p "{{build_dir}}"
+    for dll in amd_fidelityfx_loader_dx12.dll amd_fidelityfx_upscaler_dx12.dll; do cmp -s "{{fidelityfx_dir}}/$dll" "{{build_dir}}/$dll" || cp "{{fidelityfx_dir}}/$dll" "{{build_dir}}/"; done
+    cp vendor/fidelityfx/LICENSE.txt "{{build_dir}}/amd_fidelityfx_LICENSE.txt"
+
 # Build and run the game in the development host
 dev: build
     "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll"
@@ -289,7 +314,7 @@ edit: build editor
         --project "samples/{{game}}/project.settings"
 
 # Build the statically linked release executable
-release: agility-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
+release: agility-runtime fidelityfx-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
     mkdir -p "{{build_dir}}"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -define:DEBUG_DRAW=false -out:"{{build_dir}}/{{game}}.exe" -o:speed
 

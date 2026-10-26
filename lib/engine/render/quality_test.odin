@@ -52,6 +52,11 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, clamped.shadows.level, Quality_Level.High)
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
+
+	// An upscaler that the device does not run gives temporal AA, which upscales too.
+	q.aa = .Fsr
+	testing.expect_value(t, clamp_quality(q, {}).aa, Aa_Technique.Taa)
+	testing.expect_value(t, clamp_quality(q, {upscalers = {.Fsr}}).aa, Aa_Technique.Fsr)
 }
 
 @(test)

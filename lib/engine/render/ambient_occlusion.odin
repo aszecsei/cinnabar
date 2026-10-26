@@ -204,7 +204,7 @@ sync_ao_pipelines :: proc(r: ^Renderer, force: bool) {
 
 // add_ao_passes adds the ambient occlusion's passes after the prepass, on the compute queue, and sets
 // Frame.ambient_occlusion to the denoiser's result, which the forward pass reads. Without its pipelines or with off,
-// it adds nothing. It reads f.post.temporal, so it runs after begin_post.
+// it adds nothing. It reads f.post, so it runs after begin_post.
 @(private)
 add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	r := f.renderer
@@ -227,7 +227,8 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	af.raw = create_texture(g, {size = f.size, format = AO_FORMAT, label = "ambient occlusion raw"})
 	af.edges = create_texture(g, {size = f.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"})
 	a.frame += 1
-	temporal := f.post.temporal
+	// An upscaler averages the noise over time as temporal AA does.
+	temporal := f.post.temporal || f.post.upscaler != {}
 
 	right, up, forward := view_axes(f.view)
 	aspect := f32(f.size.x) / f32(max(f.size.y, 1))

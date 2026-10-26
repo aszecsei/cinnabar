@@ -14,6 +14,8 @@ SAMPLED :: Texture{index = 3, generation = 1}
 @(private = "file")
 MULTI :: Texture{index = 4, generation = 1}
 @(private = "file")
+STORAGE :: Texture{index = 5, generation = 1}
+@(private = "file")
 INDICES :: Buffer{index = 0, generation = 1}
 @(private = "file")
 PLAIN :: Buffer{index = 1, generation = 1}
@@ -39,6 +41,8 @@ UPDATABLE_BLAS :: Accel_Struct{index = 1, generation = 1}
 TLAS :: Accel_Struct{index = 2, generation = 1}
 @(private = "file")
 STALE_BLAS :: Accel_Struct{index = 3, generation = 1}
+@(private = "file")
+UPSCALER :: Upscaler{index = 0, generation = 1}
 
 @(private = "file")
 RESOURCES :: Resources {
@@ -54,6 +58,8 @@ RESOURCES :: Resources {
 			return {size = {64, 64}, format = .RGBA8_Unorm, usage = {.Sampled}}, true
 		case MULTI:
 			return {size = {64, 64}, format = FRAME_TARGET_FORMAT, usage = {.Sampled, .Render_Target}}, true
+		case STORAGE:
+			return {size = {64, 64}, format = .RGBA16_Float, usage = {.Sampled, .Storage}}, true
 		}
 		return {}, false
 	},
@@ -95,6 +101,12 @@ RESOURCES :: Resources {
 			return {kind = .Top, max_instances = 2, inputs_valid = true}, true
 		case STALE_BLAS:
 			return {kind = .Bottom}, true
+		}
+		return {}, false
+	},
+	upscaler = proc(upscaler: Upscaler) -> (Upscaler_Desc, bool) {
+		if upscaler == UPSCALER {
+			return {max_render_size = {32, 32}, output_size = {64, 64}}, true
 		}
 		return {}, false
 	},
@@ -818,6 +830,80 @@ validate_ray_dispatches :: proc(t: ^testing.T) {
 	bad = desc
 	bad.max_recursion = 32
 	testing.expect_value(t, validate_ray_tracing_pipeline_desc(bad), Desc_Error.Bad_Stages)
+}
+
+@(test)
+validate_upscales :: proc(t: ^testing.T) {
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	allocator := virtual.arena_allocator(&arena)
+
+	UPSCALE :: Upscale {
+		upscaler    = UPSCALER,
+		color       = SAMPLED,
+		depth       = SAMPLED,
+		motion      = SAMPLED,
+		output      = STORAGE,
+		render_size = {32, 32},
+	}
+	Case :: struct {
+		upscale: Upscale,
+		in_pass: bool,
+		queue:   Queue,
+		err:     Validation_Error,
+	}
+	cases := []Case {
+		{UPSCALE, false, .Graphics, .None},
+		{UPSCALE, true, .Graphics, .Dispatch_Inside_Pass},
+		{UPSCALE, false, .Compute, .Wrong_Queue},
+		{{upscaler = {index = 9, generation = 1}, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Invalid_Upscaler},
+		// Larger than the upscaler's renders, or empty.
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {48, 32}}, false, .Graphics, .Bad_Upscale},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = STORAGE}, false, .Graphics, .Bad_Upscale},
+		// An input that is not sampled, and an output that is not storage or not the output's size.
+		{{upscaler = UPSCALER, color = TARGET, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = SAMPLED, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SMALL_TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+	}
+	for c, i in cases {
+		cb := command_buffer(allocator)
+		if c.in_pass {
+			cmd_begin_pass(&cb, {{texture = TARGET}})
+		}
+		cmd_upscale(&cb, c.upscale)
+		if c.in_pass {
+			cmd_end_pass(&cb)
+		}
+		err, _ := validate(cb, RESOURCES, nil, c.queue)
+		testing.expectf(t, err == c.err, "case %d: got %v, want %v", i, err, c.err)
+	}
+
+	// The upscale leaves the upscaler's pipelines bound, so a dispatch after it binds its own.
+	cb := command_buffer(allocator)
+	cmd_set_pipeline(&cb, COMPUTE_PIPELINE)
+	cmd_upscale(&cb, UPSCALE)
+	cmd_dispatch(&cb, {1, 1, 1})
+	err, _ := validate(cb, RESOURCES)
+	testing.expect_value(t, err, Validation_Error.No_Pipeline)
+
+	// With layouts, the inputs are sampled and the output is written.
+	layouts: Layout_Tracker
+	layout_tracker_init(&layouts)
+	defer layout_tracker_destroy(&layouts)
+	track_layout(&layouts, SAMPLED, .Shader_Resource)
+	track_layout(&layouts, STORAGE, .Shader_Resource)
+	cb = command_buffer(allocator)
+	cmd_upscale(&cb, UPSCALE)
+	err, _ = validate(cb, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.Layout_Mismatch)
+	track_layout(&layouts, STORAGE, .Unordered_Access)
+	err, _ = validate(cb, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.None)
+
+	testing.expect_value(t, validate_upscaler_desc({max_render_size = {32, 32}, output_size = {64, 64}}), Desc_Error.None)
+	testing.expect_value(t, validate_upscaler_desc({max_render_size = {64, 65}, output_size = {64, 64}}), Desc_Error.Bad_Size)
+	testing.expect_value(t, validate_upscaler_desc({output_size = {64, 64}}), Desc_Error.Bad_Size)
 }
 
 @(test)

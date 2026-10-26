@@ -106,6 +106,7 @@ Post :: struct {
 	adapt:          Shader_Pipeline,
 	tone_lut:       Shader_Pipeline,
 	spatial:        Spatial_Aa,
+	upscalers:      Upscalers,
 	// Bilinear and clamped: the history, bloom's chain and the lookup table read with it.
 	sampler:        gpu.Sampler,
 	// Two floats: the exposure that pre-exposes this frame's scene, then last frame's. The exposure pass writes the
@@ -144,6 +145,12 @@ Grading :: struct {
 Post_Frame :: struct {
 	settings:         Post_Settings,
 	temporal:         bool,
+	// The upscaler that upscales in temporal AA's place, or nil, and whether its history starts again, with the
+	// motion that it reads and its result.
+	upscaler:         gpu.Upscaler,
+	upscale_reset:    bool,
+	motion:           Texture,
+	upscaled:         Texture,
 	// FXAA or SMAA, which run, or Off, and their textures: the tone-mapped scene that they read, and SMAA's edges and
 	// weights.
 	spatial:          Aa_Technique,
@@ -298,6 +305,7 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.histogram_bins = platform.gpu_create_buffer({size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"}, transmute([]byte)zeros[:])
 	p.lut = platform.gpu_create_texture({size = {LUT_SIZE * LUT_SIZE, LUT_SIZE}, format = LUT_FORMAT, usage = {.Sampled, .Storage}, label = "tone mapping lut"}, nil)
 	spatial_aa_init(&p.spatial, platform)
+	upscalers_init(&p.upscalers)
 }
 
 post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
@@ -311,6 +319,7 @@ post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
 	platform.gpu_destroy_texture(p.lut)
 	p.lut, p.lut_baked = {}, false
 	spatial_aa_destroy(&p.spatial, platform)
+	upscalers_destroy(&p.upscalers, platform)
 }
 
 @(private)
@@ -323,6 +332,7 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&p.adapt, r.platform, assets, {label = "exposure"}, force)
 	sync_compute_pipeline(&p.tone_lut, r.platform, assets, {label = "tone mapping lut"}, force)
 	sync_spatial_aa_pipelines(r, force)
+	sync_upscaler_pipelines(r, force)
 }
 
 // pipeline_ready is whether a pipeline is compiled, so a pass that it records does its work. A post pass whose
@@ -372,13 +382,19 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	f.post = pf
 	pf.settings = settings
 	aa := settings.no_aa ? Aa_Technique.Off : settings.aa
-	pf.temporal = aa == .Taa && pipeline_ready(platform, &p.temporal_aa)
+	// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
+	pf.upscaler = frame_upscaler(f, aa)
+	_, upscales := upscaler_kind(aa)
+	pf.temporal = (aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
 	if spatial_aa_ready(platform, &p.spatial, aa) {
 		pf.spatial = aa
 	}
+	u := &p.upscalers
+	pf.upscale_reset = !u.active || u.render_size != f.size
+	u.active, u.render_size = pf.upscaler != {}, f.size
 	pf.exposure = pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
-	if pf.temporal {
+	if pf.temporal || pf.upscaler != {} {
 		p.jitter_index += 1
 		ratio := f32(f.output_size.x * f.output_size.y) / f32(max(f.size.x * f.size.y, 1))
 		n := p.jitter_index % u32(f32(JITTER_SAMPLES) * max(ratio, 1) + 0.5) + 1
@@ -419,6 +435,8 @@ add_post_passes :: proc(f: ^Frame) {
 			write(g, pass, pf.history.current)
 			f.scene, f.scene_size = pf.history.current, f.output_size
 		}
+	} else if pf.upscaler != {} {
+		add_upscale(f)
 	}
 	add_post_effects(f, .After_Temporal_Aa)
 
@@ -638,5 +656,5 @@ run_tone_lut :: proc(ctx: ^Pass_Context) {
 // reads_depth is whether a post pass reads the scene's depth after the world pass.
 @(private)
 reads_depth :: proc(f: ^Frame) -> bool {
-	return f.post.temporal || f.post.exposure_auto
+	return f.post.temporal || f.post.upscaler != {} || f.post.exposure_auto
 }

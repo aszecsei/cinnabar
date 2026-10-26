@@ -40,6 +40,7 @@ state: struct {
 	samplers:      gpu.Pool(gpu.Sampler, gpu.Sampler_Desc),
 	pipelines:     gpu.Pool(gpu.Pipeline, Pipeline_Entry),
 	accels:        gpu.Pool(gpu.Accel_Struct, Accel_Entry),
+	upscalers:     gpu.Pool(gpu.Upscaler, gpu.Upscaler_Desc),
 	upload_buffer: gpu.Buffer,
 	upload_memory: []byte,
 	upload_offset: int,
@@ -63,6 +64,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	gpu.pool_init(&state.samplers, gpu.MAX_SAMPLERS)
 	gpu.pool_init(&state.pipelines, gpu.MAX_PIPELINES)
 	gpu.pool_init(&state.accels, gpu.MAX_ACCEL_STRUCTS)
+	gpu.pool_init(&state.upscalers, gpu.MAX_UPSCALERS)
 	gpu.layout_tracker_init(&state.layouts)
 	state.frame_target = gpu.pool_add(&state.textures, frame_target_desc(size))
 	gpu.track_layout(&state.layouts, state.frame_target, .Render_Target)
@@ -84,6 +86,7 @@ shutdown :: proc() {
 	gpu.pool_destroy(&state.samplers)
 	gpu.pool_destroy(&state.pipelines)
 	gpu.pool_destroy(&state.accels)
+	gpu.pool_destroy(&state.upscalers)
 }
 
 // The null backend validates every optional feature's commands, so it reports all of them.
@@ -91,6 +94,13 @@ FEATURES :: gpu.Features{.Mesh_Shaders, .Ray_Query, .Ray_Tracing_Pipeline}
 
 features :: proc() -> gpu.Features {
 	return FEATURES
+}
+
+// The null backend validates every upscaler's commands, so it reports all of them.
+UPSCALERS :: gpu.Upscaler_Kinds{.Fsr}
+
+upscalers :: proc() -> gpu.Upscaler_Kinds {
+	return UPSCALERS
 }
 
 // adapter is a fixed adapter with no video memory of its own.
@@ -339,6 +349,22 @@ accel_reference :: proc(accel: gpu.Accel_Struct) -> u64 {
 	return u64(accel.index) << 32 | u64(accel.generation)
 }
 
+create_upscaler :: proc(desc: gpu.Upscaler_Desc) -> gpu.Upscaler {
+	if err := gpu.validate_upscaler_desc(desc); err != .None {
+		log.errorf("gpu: upscaler %q: %v", desc.label, err)
+		return {}
+	}
+	stored := desc
+	stored.label = ""
+	return gpu.pool_add(&state.upscalers, stored)
+}
+
+destroy_upscaler :: proc(upscaler: gpu.Upscaler) {
+	if _, ok := gpu.pool_remove(&state.upscalers, upscaler); ok {
+		gpu.pool_free(&state.upscalers, upscaler.index)
+	}
+}
+
 destroy_pipeline :: proc(pipeline: gpu.Pipeline) {
 	if _, ok := gpu.pool_remove(&state.pipelines, pipeline); ok {
 		gpu.pool_free(&state.pipelines, pipeline.index)
@@ -368,6 +394,12 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 	for i in 0 ..< state.accels.count {
 		if accel, ok := gpu.pool_handle(&state.accels, i); ok && state.accels.items[i].scope == scope {
 			destroy_accel(accel)
+			count += 1
+		}
+	}
+	for i in 0 ..< state.upscalers.count {
+		if upscaler, ok := gpu.pool_handle(&state.upscalers, i); ok && state.upscalers.items[i].scope == scope {
+			destroy_upscaler(upscaler)
 			count += 1
 		}
 	}
@@ -459,5 +491,8 @@ RESOURCES :: gpu.Resources {
 			entry.info.inputs_valid &&= vertices_ok && (buffers[1] == {} || indices_ok)
 		}
 		return entry.info, ok
+	},
+	upscaler = proc(upscaler: gpu.Upscaler) -> (gpu.Upscaler_Desc, bool) {
+		return gpu.pool_lookup(&state.upscalers, upscaler)
 	},
 }

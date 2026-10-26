@@ -1073,7 +1073,13 @@ update_quality :: proc(s: ^Game_State) {
 	} else if control {
 		q.ao.technique = q.ao.technique >= max(render.Ao_Technique) ? .Off : render.Ao_Technique(int(q.ao.technique) + 1)
 	} else if .Left_Alt in input.down || .Right_Alt in input.down {
-		q.aa = q.aa >= max(render.Aa_Technique) ? .Off : render.Aa_Technique(int(q.aa) + 1)
+		// The next technique that the device runs: FSR needs its library.
+		for {
+			q.aa = q.aa >= max(render.Aa_Technique) ? .Off : render.Aa_Technique(int(q.aa) + 1)
+			if render.clamp_quality(q, caps).aa == q.aa {
+				break
+			}
+		}
 	} else {
 		preset := render.quality_preset(q, caps)
 		next := preset >= .Ultra ? render.Quality_Preset.Low : render.Quality_Preset(int(preset) + 1)

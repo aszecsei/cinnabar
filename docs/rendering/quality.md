@@ -22,10 +22,10 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `gi.technique` | `Off`, `Screen_Cascades` | The [global illumination](global-illumination.md#global-illumination) |
 | `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
-| `aa` | `Off`, `Taa`, `Fxaa`, `Smaa` | The [anti-aliasing](anti-aliasing.md#anti-aliasing) |
-| `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA [upscales](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
+| `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
+| `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 
-- **Each enum lists only what exists.** The upscalers join their enum when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing.
+- **Each enum lists only what exists.** DLSS and XeSS join `Aa_Technique` when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
@@ -60,10 +60,10 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 
 ## Hardware caps
 
-`Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, the adapter's `vendor`, and its `video_memory`. `device_caps(platform)` reads them from `Platform_API.gpu_features` and `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) when the renderer starts.
+`Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
 
 - **Defaults:** `default_quality(caps)` picks a preset by the video memory: Low below 4 GiB, Medium below 6 GiB, High below 10 GiB, Ultra above, and High when the memory is unknown, as on an adapter that shares the CPU's.
-- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
+- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
 - `CINNABAR_DISABLE_FEATURES=Ray_Query` hides the feature, as it does everywhere, to try the fallback on hardware that has it.
 
 ## Changing quality while the game runs
@@ -72,6 +72,7 @@ A change takes effect on the next frame, and nothing waits for the GPU.
 
 - **Sizes:** the atlas, the GI cascades, the fog volume and, with the render scale, the scene's targets are the graph's transient textures, and the [texture cache](../gpu/render-graph.md#render-graph) makes a new one when a description changes. The histories (GI, fog) start again, as they do on a resize.
 - **Pipelines** do not change with a level: the levels are constants that the passes read. A technique's pipelines are synced whether or not the frame uses it, so switching to it does not wait for it to compile. For example, the shadow mask's pipeline and the traced fog injection are synced on every device with `Ray_Query`.
+- **FSR** makes its upscaler the first frame that uses it, and again when the frame's size changes, which compiles FSR's pipelines on the main thread for a moment (see [Anti-aliasing](anti-aliasing.md#fsr)). Until then, and while its motion pass compiles, temporal AA stands in.
 - **Traced shadows:** the GPU scene's acceleration structure is made the first frame that traces, and every mesh gets its own then (`residency_enable_accels`), which the next frames build. When tracing turns off, the structures stay, so turning it on again builds nothing new. Until the traced fog injection is ready, the fog lights the traced lights without shadows.
 
 ## Saved quality
@@ -88,17 +89,17 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.gi` | `Off`, `Screen_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
 | `quality.fog` | `Low` … `Ultra` |
-| `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa` |
+| `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
 | `quality.render_scale` | A number from 0.5 to 1 |
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
-- **The sample** applies the files' quality when they change. F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Alt+F9 the next anti-aliasing technique, and Ctrl+Shift+F9 the next render scale: 1, 0.75, 0.67 and 0.5. Each saves the quality to `project.user.settings`, as a settings menu would.
+- **The sample** applies the files' quality when they change. F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Alt+F9 the next anti-aliasing technique that the device runs, and Ctrl+Shift+F9 the next render scale: 1, 0.75, 0.67 and 0.5. Each saves the quality to `project.user.settings`, as a settings menu would.
 
 ## Future work
 
 The phases that follow this one, in order, each worth doing on its own:
 
-- **FSR** through the GPU interface as an `Aa_Technique` that upscales in temporal AA's place, then DLSS and XeSS once their licenses are reviewed (see [Anti-aliasing](anti-aliasing.md#future-work)).
 - **A script API** (`Render.quality`, `Render.set_quality`, `Render.caps`, `Render.save_quality`) for settings menus in Luau, and a quality drop-down in the editor's viewport that sets `Frame_Desc.quality`.
+- **DLSS and XeSS** as `Aa_Technique`s beside FSR, through the GPU interface's upscalers, once their licenses are reviewed (see [Anti-aliasing](anti-aliasing.md#future-work)).
 - **Levels for the transparency and the bloom**, when their cost shows in a profile.

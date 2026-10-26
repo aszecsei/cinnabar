@@ -43,6 +43,7 @@ Packet_Kind :: enum u16 {
 	Build_Accel,
 	Dispatch_Rays,
 	Copy_Buffer,
+	Upscale,
 }
 
 // size includes the header and the padding after the payload.
@@ -220,6 +221,36 @@ Dispatch_Rays :: struct {
 	size: [3]u32,
 }
 
+// Upscale runs an upscaler into output from this frame's color, depth and motion, at render_size in their top left,
+// outside a render pass on the graphics queue (see docs/gpu/upscalers.md#upscaling). It is compute work: color,
+// depth and motion are Sampled textures in the Shader_Resource layout, and output a Storage texture of the upscaler's
+// output size in the Unordered_Access layout. It leaves no pipeline, push constants or pass constants bound.
+Upscale :: struct {
+	upscaler:     Upscaler,
+	color:        Texture,
+	depth:        Texture,
+	motion:       Texture,
+	output:       Texture,
+	render_size:  [2]u32,
+	// The camera's jitter in the render's pixels, y down: the projection moved the image by 2 * jitter / render_size
+	// in x, and by -2 * jitter / render_size in y, in normalized device coordinates.
+	jitter:       [2]f32,
+	// Motion's texels times motion_scale are the way, in the render's pixels, from where a pixel's surface is to where
+	// it was in the previous frame.
+	motion_scale: [2]f32,
+	// Seconds since the previous frame.
+	delta_time:   f32,
+	// The camera's near and far planes' distances and its vertical field of view in radians. far is unused with
+	// Depth_Infinite.
+	near:         f32,
+	far:          f32,
+	fov_y:        f32,
+	// The upscaler's own sharpening, from 0, none, to 1.
+	sharpness:    f32,
+	// The history is not this frame's: a cut, or the first frame.
+	reset:        b32,
+}
+
 Buffer_Barrier :: struct {
 	buffer:        Buffer,
 	sync_before:   Syncs,
@@ -288,6 +319,7 @@ Packet_Format :: struct {
 	build_accel:        Build_Accel,
 	dispatch_rays:      Dispatch_Rays,
 	copy_buffer:        Copy_Buffer,
+	upscale:            Upscale,
 	accel_barrier:      Accel_Barrier,
 	accel_instance:     Accel_Instance,
 }
@@ -468,6 +500,11 @@ cmd_build_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, update := fals
 // instances. The offset is a multiple of 16. The instances may be in the upload ring.
 cmd_build_top_accel :: proc(cb: ^Command_Buffer, accel: Accel_Struct, instances: Buffer, offset, count: u32, update := false) {
 	push(cb, .Build_Accel, Build_Accel{accel, instances, offset, count, b32(update)})
+}
+
+// cmd_upscale runs an upscaler. See Upscale.
+cmd_upscale :: proc(cb: ^Command_Buffer, upscale: Upscale) {
+	push(cb, .Upscale, upscale)
 }
 
 @(private)
