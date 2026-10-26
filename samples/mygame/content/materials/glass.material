@@ -1,0 +1,19 @@
+material 1
+# Tinted glass, with moment-based order-independent transparency: surfaces that pass through each other blend at
+# every pixel in their order (see docs/rendering.md#transparency).
+shading = lit
+blend = transparent
+two_sided = true
+param tint color = [0.9, 0.95, 1, 1]
+param opacity float = 0.3
+param roughness float = 0.05
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = params.tint.rgb;
+	s.roughness = params.roughness;
+	// Glass reflects more, and lets less through, toward grazing angles: Schlick's Fresnel on its opacity.
+	float facing = saturate(abs(dot(inputs.normal, inputs.view)));
+	s.opacity = lerp(params.opacity, 1, pow(1 - facing, 5));
+	return s;
+}

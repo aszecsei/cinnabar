@@ -104,10 +104,8 @@ previews_destroy :: proc(p: ^Previews, r: ^Renderer) {
 	for b in ([]gpu.Buffer{p.instances, p.draws, p.arguments}) {
 		platform.gpu_destroy_buffer(b)
 	}
-	for u in p.unsaved {
-		for pipeline in u.pipelines {
-			platform.gpu_destroy_pipeline(pipeline)
-		}
+	for &u in p.unsaved {
+		material_pipeline_destroy(&u, platform)
 	}
 	p^ = {}
 }
@@ -122,11 +120,12 @@ preview_use :: proc(r: ^Renderer, table: ^Material_Table, desc: ^Preview_Desc) -
 	}
 	blob := format.material_view(desc.data) or_return
 	b := material_block(desc.data, desc.material) or_return
-	if format.material_code(desc.data, blob, b.switches, .Forward, .Vertex) == nil {
+	main := format.material_main_pass(blob)
+	if format.material_code(desc.data, blob, b.switches, main, .Vertex) == nil {
 		return
 	}
 	p := &r.previews.unsaved[desc.id]
-	if p.material != desc.material || p.version != desc.version || p.pipelines[.Forward] == {} {
+	if p.material != desc.material || p.version != desc.version || p.pipelines[main] == {} && p.over[1] == {} {
 		make_pipelines(r, p, desc.data, blob, b.switches)
 		p.material, p.version = desc.material, desc.version
 	}
@@ -161,8 +160,9 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		pf.pipeline = pipeline
 		pf.draw_count = mesh.submesh_count
 		ready := platform.gpu_pipeline_ready != nil
-		for pass in ([]format.Material_Pass{.Prepass, .Forward}) {
-			ready &&= pipeline.pipelines[pass] != {} && platform.gpu_pipeline_ready(pipeline.pipelines[pass])
+		pipelines, count := preview_pipelines(pipeline)
+		for p in pipelines[:count] {
+			ready &&= p != {} && platform.gpu_pipeline_ready(p)
 		}
 		if desc.complete != nil {
 			// The output pass tone maps with the lookup table only once it is baked.
@@ -190,9 +190,15 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		color(g, p, velocity, .Clear, store = .Discard)
 		depth(g, p, pf.depth, .Clear)
 		declare_preview_draws(g, p, pf)
-		p = add_render_pass(g, "preview", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Forward)}, pf)
-		color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
-		color(g, p, ids, .Clear, store = .Discard)
+		if pf.pipeline != nil && material_group(pf.pipeline) != .Opaque {
+			// A transparent material's preview blends over the background, as a sorted draw does: it has no moments.
+			p = add_render_pass(g, "preview", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Transparent)}, pf)
+			color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
+		} else {
+			p = add_render_pass(g, "preview", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Forward)}, pf)
+			color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
+			color(g, p, ids, .Clear, store = .Discard)
+		}
 		depth(g, p, pf.depth, .Load, store = .Discard)
 		declare_preview_draws(g, p, pf)
 	} else {
@@ -324,23 +330,44 @@ update_preview :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.args_at, gpu_buffer(g, pf.arguments), 0, pf.draw_count * size_of(gpu.Draw_Indirect_Args))
 }
 
+// preview_pipelines are the pipelines that a preview draws with: an opaque material's prepass and forward pass, or a
+// transparent one's passes over the scene, its back faces first.
+@(private = "file")
+preview_pipelines :: proc(p: ^Material_Pipeline) -> (pipelines: [2]gpu.Pipeline, count: int) {
+	if material_group(p) == .Opaque {
+		return {p.pipelines[.Prepass], p.pipelines[.Forward]}, 2
+	}
+	if p.two_sided {
+		return p.over, 2
+	}
+	return {p.over[1], {}}, 1
+}
+
 @(private = "file")
 draw_preview :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 	pf := (^Preview_Frame)(ctx.data)
-	pipeline := pf.pipeline.pipelines[pass]
-	if pipeline == {} || pf.draw_count == 0 {
+	if pf.draw_count == 0 {
 		return
+	}
+	pipelines := [2]gpu.Pipeline{{}, pf.pipeline.pipelines[pass]}
+	if pass == .Transparent {
+		pipelines = pf.pipeline.over
 	}
 	cb := ctx.cb
 	gpu.cmd_set_stencil_reference(cb, 0)
-	gpu.cmd_set_pipeline(cb, pipeline)
-	gpu.cmd_set_pass_constants(cb, pf.constants)
-	if pass == .Forward {
-		white := gpu.read_index(pf.renderer.materials.defaults[.White])
-		push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
-		gpu.cmd_push_constants(cb, &push)
+	for pipeline in pipelines {
+		if pipeline == {} {
+			continue
+		}
+		gpu.cmd_set_pipeline(cb, pipeline)
+		gpu.cmd_set_pass_constants(cb, pf.constants)
+		if pass == .Forward || pass == .Transparent {
+			white := gpu.read_index(pf.renderer.materials.defaults[.White])
+			push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
+			gpu.cmd_push_constants(cb, &push)
+		}
+		gpu.cmd_draw_indirect(cb, gpu_buffer(ctx.graph, pf.arguments), 0, pf.draw_count)
 	}
-	gpu.cmd_draw_indirect(cb, gpu_buffer(ctx.graph, pf.arguments), 0, pf.draw_count)
 }
 
 @(private = "file")

@@ -45,6 +45,8 @@ PROJECT_CHECK_INTERVAL :: 0.5
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
+// The transparency scene, which F7 switches to and back (see docs/rendering.md#transparency).
+GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -234,6 +236,8 @@ Game_State :: struct {
 	next_project_check: f64,
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
+	// F7 switches between the main scene and the glass scene.
+	glass_scene:        bool,
 	elapsed:            time.Duration,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
@@ -534,6 +538,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
 	// despawns (see docs/editor.md#modes).
 	update_output(s)
+	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
 	script.set_quiet(&s.scripts, !run)
 	if run {
@@ -1022,6 +1027,19 @@ update_output :: proc(s: ^Game_State) {
 	}
 	if changed {
 		s.platform.gpu_request_output(s.output_override.? or_else s.project.settings.output)
+	}
+}
+
+// switch_scene loads the glass scene, or the main scene again, when F7 is pressed. A linked editor owns the scene, so
+// the key does nothing then.
+switch_scene :: proc(s: ^Game_State) {
+	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
+		return
+	}
+	s.glass_scene = !s.glass_scene
+	if guid, ok := format.meta_guid(s.glass_scene ? GLASS_SCENE_META : MAIN_SCENE_META); ok {
+		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
+		log.infof("mygame: the %s scene (F7 switches it)", s.glass_scene ? "glass" : "main")
 	}
 }
 

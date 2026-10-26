@@ -19,6 +19,11 @@ Material_Blend :: enum u32 {
 	Opaque,
 	// Opaque, but the shading model's opacity below the cutoff discards the pixel.
 	Masked,
+	// Blended over what is behind by its opacity, with moment-based order-independent transparency, or sorted back to
+	// front with the Sorted flag (see docs/rendering.md#transparency).
+	Transparent,
+	// Its light times its opacity adds to what is behind, sorted with the sorted transparent draws.
+	Additive,
 }
 
 Material_Flag :: enum u32 {
@@ -29,6 +34,8 @@ Material_Flag :: enum u32 {
 	// The material reads the frame's time, so its look changes from frame to frame without a change of its own. The
 	// editor's previews draw it every frame.
 	Reads_Time,
+	// A Transparent material that draws sorted back to front instead of with moment-based transparency.
+	Sorted,
 }
 
 Material_Flags :: bit_set[Material_Flag;u32]
@@ -39,6 +46,23 @@ Material_Pass :: enum u32 {
 	Prepass,
 	// Depth only, for the shadow maps. An opaque material's has no pixel stage.
 	Depth,
+	// A Transparent material's optical depth and its moments, which the transparent pass reconstructs the
+	// transmittance in front of each surface from.
+	Moments,
+	// A transparent or additive material's shading, premultiplied by its opacity.
+	Transparent,
+	// A transparent or additive material's entity IDs and depth where it is mostly opaque, for the editor.
+	Transparent_Ids,
+}
+
+// material_transparent is whether a blend draws after the opaque surfaces, without a prepass, shadows or a forward pass.
+material_transparent :: proc "contextless" (blend: Material_Blend) -> bool {
+	return blend == .Transparent || blend == .Additive
+}
+
+// material_main_pass is the pass that every variant of a material has: the forward pass, or the transparent pass.
+material_main_pass :: proc "contextless" (blob: ^Material_Blob) -> Material_Pass {
+	return material_transparent(blob.blend) ? .Transparent : .Forward
 }
 
 Material_Param_Type :: enum u32 {

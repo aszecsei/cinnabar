@@ -97,6 +97,11 @@ Material_Push :: struct {
 	fog:               u32,
 	gi_diffuse:        u32,
 	gi_specular:       u32,
+	// Moment-based transparency's moments, which its transparent pass reads with transmittance set (see
+	// docs/rendering.md#transparency).
+	moments_zeroth:    u32,
+	moments:           u32,
+	transmittance:     u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -214,6 +219,15 @@ Gpu_Scene :: struct {
 	cull_pipeline:            Shader_Pipeline,
 }
 
+// Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
+// the forward pass draw, those of moment-based transparency, and the sorted transparent and additive draws, a bin for
+// each item, back to front (see docs/rendering.md#transparency).
+Bin_Group :: enum u8 {
+	Opaque,
+	Moments,
+	Sorted,
+}
+
 // Scene_Frame is what one frame's GPU scene passes need, in frame memory.
 @(private)
 Scene_Frame :: struct {
@@ -222,6 +236,8 @@ Scene_Frame :: struct {
 	bin_pipelines:   []int,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
+	// Each group's first bin and the bin after its last.
+	groups:          [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
 	view_count:      int,
 	instance_upload: gpu.Upload,
@@ -335,27 +351,26 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		}
 	}
 
-	// Each pipeline's items are a bin, in one range of each view's draws.
-	slice.sort_by(items[:], proc(a, b: Cull_Item) -> bool {return a.bin < b.bin})
-	pipelines := make([dynamic]int, r.platform.frame_allocator)
-	pipeline_bins := make(map[int]u32, r.platform.frame_allocator)
-	for &item in items {
-		pipeline := int(item.bin)
-		bin, seen := pipeline_bins[pipeline]
-		if !seen {
-			bin = u32(len(pipelines))
-			pipeline_bins[pipeline] = bin
-			append(&pipelines, pipeline)
+	// Each pipeline's opaque or moment-based items are a bin, in one range of each view's draws. Each sorted item is a
+	// bin of its own, back to front from the camera by its bounds' middle, so the bins draw in that order.
+	camera := ecs.position_sub(f.view.position, s.origin)
+	sorting := make([]Sort_Item, len(items), r.platform.frame_allocator)
+	for item, i in items {
+		sorting[i] = {item = item, group = material_group(&r.materials.pipelines[item.bin])}
+		if sorting[i].group == .Sorted {
+			// The view model's instances are relative to the camera already.
+			eye := item.flags & ITEM_VIEW_MODEL != 0 ? [3]f32{} : camera
+			sorting[i].distance = squared_distance(records[item.instance].rows, item.sphere.xyz, eye)
 		}
-		item.bin = bin
 	}
-	sf.items, sf.bin_pipelines = items[:], pipelines[:]
-	sf.bin_offsets = make([]u32, max(len(pipelines), 1), r.platform.frame_allocator)
-	sf.bin_counts = make([]u32, max(len(pipelines), 1), r.platform.frame_allocator)
+	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
+	sf.items = items[:]
+	sf.bin_offsets = make([]u32, max(len(sf.bin_pipelines), 1), r.platform.frame_allocator)
+	sf.bin_counts = make([]u32, max(len(sf.bin_pipelines), 1), r.platform.frame_allocator)
 	for item in items {
 		sf.bin_counts[item.bin] += 1
 	}
-	for b in 1 ..< len(pipelines) {
+	for b in 1 ..< len(sf.bin_pipelines) {
 		sf.bin_offsets[b] = sf.bin_offsets[b - 1] + sf.bin_counts[b - 1]
 	}
 
@@ -375,6 +390,59 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	}
 	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload = item_upload, mesh_upload, table_upload, bin_upload
 	sf.accel_instances, sf.accel_count = accel_upload, len(accel_instances)
+}
+
+// Sort_Item is a draw item as build_scene sorts it into bins. Its item's bin is its material pipeline.
+@(private)
+Sort_Item :: struct {
+	item:     Cull_Item,
+	group:    Bin_Group,
+	// A sorted item's squared distance from the camera.
+	distance: f32,
+}
+
+// sort_bins writes the items in their bins' order, each with its bin, and gives each bin's material pipeline and each
+// group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, then a bin for
+// each sorted item, the farthest first.
+@(private)
+sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
+	slice.sort_by(sorting, proc(a, b: Sort_Item) -> bool {
+		if a.group != b.group {
+			return a.group < b.group
+		}
+		if a.group == .Sorted {
+			return a.distance > b.distance
+		}
+		return a.item.bin < b.item.bin
+	})
+	bins := make([dynamic]int, allocator)
+	group_bins: [Bin_Group]int
+	for entry, i in sorting {
+		pipeline := int(entry.item.bin)
+		previous := sorting[max(i - 1, 0)]
+		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) {
+			append(&bins, pipeline)
+			group_bins[entry.group] += 1
+		}
+		items[i] = entry.item
+		items[i].bin = u32(len(bins) - 1)
+	}
+	first := 0
+	for count, group in group_bins {
+		groups[group] = {first, first + count}
+		first += count
+	}
+	return bins[:], groups
+}
+
+// squared_distance is the squared distance to a point in an instance's space, moved by its rows, from another point.
+@(private = "file")
+squared_distance :: proc(rows: [3][4]f32, p: [3]f32, from: [3]f32) -> f32 {
+	d: [3]f32
+	for row, k in rows {
+		d[k] = row.x * p.x + row.y * p.y + row.z * p.z + row.w - from[k]
+	}
+	return d.x * d.x + d.y * d.y + d.z * d.z
 }
 
 // upload_bytes copies data into the upload ring.
@@ -715,55 +783,81 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(sf.view_count), 1})
 }
 
-// draw_scene_view draws each bin of a view with one indirect draw, with its material's pipeline for a pass (see
-// VIEW_CAMERA). A bin whose pipeline is not compiled yet draws nothing. The forward pass pushes the frame's shadow
-// textures. The prepass and the forward pass draw with the view model's stencil bit as the reference: set for the view
-// model, clear for the world (see docs/rendering.md#view-model).
+// draw_scene_view draws each bin of a view's group with one indirect draw, with its material's pipeline for a pass (see
+// VIEW_CAMERA). A bin whose pipeline is not compiled yet draws nothing. The forward and transparent passes push the
+// frame's textures. The sorted transparent draws blend over the scene, a two-sided one's back faces first. Every pass
+// but the shadow maps' draws with the view model's stencil bit as the reference: set for the view model, clear for the
+// world (see docs/rendering.md#view-model).
 @(private)
-draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass) {
+draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque) {
 	sf := f.scene_frame
 	if sf == nil || len(sf.items) == 0 || view >= sf.view_count {
 		return
 	}
 	g := f.graph
 	arguments, counts := gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.counts)
+	pushes := pass == .Forward || pass == .Transparent
 	push: Material_Push
-	if pass == .Forward {
-		white := gpu.read_index(f.renderer.materials.defaults[.White])
-		push = {shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
-		if f.gi_diffuse != 0 {
-			push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
-			push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))
-		}
-		if f.ambient_occlusion != 0 {
-			push.ambient_occlusion = gpu.read_index(gpu_texture(g, f.ambient_occlusion))
-		}
-		if f.fog_volume != 0 {
-			push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
-		}
-		if f.shadows.atlas != 0 {
-			push.shadow_atlas = gpu.read_index(gpu_texture(g, f.shadows.atlas))
-		}
-		if f.shadows.mask != 0 {
-			push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
-		}
+	if pushes {
+		push = material_push(f, pass, group)
 	}
 	if pass != .Depth {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)
-	for pipeline_index, bin in sf.bin_pipelines {
-		p := &f.renderer.materials.pipelines[pipeline_index]
-		pipeline := p.pipelines[pass]
-		if pipeline == {} {
-			continue
-		}
-		gpu.cmd_set_pipeline(cb, pipeline)
-		gpu.cmd_set_pass_constants(cb, sf.view_constants[view])
-		if pass == .Forward {
-			gpu.cmd_push_constants(cb, &push)
+	bins := sf.groups[group]
+	for bin in bins[0] ..< bins[1] {
+		p := &f.renderer.materials.pipelines[sf.bin_pipelines[bin]]
+		pipelines := [2]gpu.Pipeline{{}, p.pipelines[pass]}
+		if pass == .Transparent && group == .Sorted {
+			pipelines = p.over
 		}
 		first := u32(view * len(sf.items)) + sf.bin_offsets[bin]
-		gpu.cmd_draw_indirect(cb, arguments, first * size_of(gpu.Draw_Indirect_Args), sf.bin_counts[bin], counts, u32(view * bin_count + bin) * 4)
+		for pipeline in pipelines {
+			if pipeline == {} {
+				continue
+			}
+			gpu.cmd_set_pipeline(cb, pipeline)
+			gpu.cmd_set_pass_constants(cb, sf.view_constants[view])
+			if pushes {
+				gpu.cmd_push_constants(cb, &push)
+			}
+			gpu.cmd_draw_indirect(cb, arguments, first * size_of(gpu.Draw_Indirect_Args), sf.bin_counts[bin], counts, u32(view * bin_count + bin) * 4)
+		}
 	}
+}
+
+// material_push is the frame's textures for the forward pass or a transparent pass. A transparent surface has no
+// prepass, so its template reads neither the ambient occlusion nor the shadow mask, which belong to the opaque surface
+// behind it. Moment-based transparency's transparent pass reads the moments.
+@(private)
+material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -> Material_Push {
+	g := f.graph
+	white := gpu.read_index(f.renderer.materials.defaults[.White])
+	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
+	if f.gi_diffuse != 0 {
+		push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
+		push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))
+	}
+	if f.fog_volume != 0 {
+		push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
+	}
+	if f.shadows.atlas != 0 {
+		push.shadow_atlas = gpu.read_index(gpu_texture(g, f.shadows.atlas))
+	}
+	if pass == .Transparent {
+		if group == .Moments && f.moments_zeroth != 0 {
+			push.moments_zeroth = gpu.read_index(gpu_texture(g, f.moments_zeroth))
+			push.moments = gpu.read_index(gpu_texture(g, f.moments))
+			push.transmittance = 1
+		}
+		return push
+	}
+	if f.ambient_occlusion != 0 {
+		push.ambient_occlusion = gpu.read_index(gpu_texture(g, f.ambient_occlusion))
+	}
+	if f.shadows.mask != 0 {
+		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
+	}
+	return push
 }

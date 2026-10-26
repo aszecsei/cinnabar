@@ -1,0 +1,4 @@
+material_instance 1
+# Red glass, sorted.
+parent = $dd3df1d437284265965d48d9d5f7094a
+tint = [1, 0.25, 0.2, 1]

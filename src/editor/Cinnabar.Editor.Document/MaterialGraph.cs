@@ -166,7 +166,9 @@ public sealed record MaterialSwitch(string Name, bool Default);
 public sealed class MaterialGraph
 {
     public static readonly string[] ParamTypes = ["float", "float2", "float3", "float4", "color", "texture"];
-    public static readonly string[] Blends = ["opaque", "masked"];
+    public static readonly string[] Blends = ["opaque", "masked", "transparent", "additive"];
+    /// <summary>A transparent material's: moment-based order-independent transparency, or sorted back to front.</summary>
+    public static readonly string[] Transparencies = ["moments", "sorted"];
 
     public MaterialFileKind Kind { get; init; }
 
@@ -176,6 +178,7 @@ public sealed class MaterialGraph
     public string Shading { get; set; } = "lit";
     public string Blend { get; set; } = "opaque";
     public double Cutoff { get; set; } = 0.5;
+    public string Transparency { get; set; } = "moments";
     public bool TwoSided { get; set; }
     public bool CastShadows { get; set; } = true;
     public List<MaterialParam> Params { get; } = [];
@@ -184,6 +187,9 @@ public sealed class MaterialGraph
 
     /// <summary>The HLSL after the <c>---</c> line, with that line, or null for a graph.</summary>
     public string? Hlsl { get; set; }
+
+    /// <summary>Whether the material draws after the opaque surfaces, blended over them.</summary>
+    public bool IsTransparent => Blend is "transparent" or "additive";
 
     public GraphNode? Find(int id) => Nodes.Find(n => n.Id == id);
 
@@ -211,6 +217,7 @@ public sealed class MaterialGraph
             Shading = Shading,
             Blend = Blend,
             Cutoff = Cutoff,
+            Transparency = Transparency,
             TwoSided = TwoSided,
             CastShadows = CastShadows,
             Hlsl = Hlsl,
@@ -373,6 +380,9 @@ public static class MaterialFile
             case "cutoff" when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var cutoff):
                 graph.Cutoff = cutoff;
                 return true;
+            case "transparency" when MaterialGraph.Transparencies.Contains(value):
+                graph.Transparency = value;
+                return true;
             case "two_sided" when value is "true" or "false":
                 graph.TwoSided = value == "true";
                 return true;
@@ -400,13 +410,21 @@ public static class MaterialFile
             if (graph.Blend != "opaque")
             {
                 lines.Add($"blend = {graph.Blend}");
+            }
+            if (graph.Blend == "masked")
+            {
                 lines.Add($"cutoff = {GraphNumbers.Format(graph.Cutoff)}");
+            }
+            if (graph.Blend == "transparent" && graph.Transparency != "moments")
+            {
+                lines.Add($"transparency = {graph.Transparency}");
             }
             if (graph.TwoSided)
             {
                 lines.Add("two_sided = true");
             }
-            if (!graph.CastShadows)
+            // Transparent surfaces cast no shadows, so the cooker takes no setting for them.
+            if (!graph.CastShadows && !graph.IsTransparent)
             {
                 lines.Add("cast_shadows = false");
             }

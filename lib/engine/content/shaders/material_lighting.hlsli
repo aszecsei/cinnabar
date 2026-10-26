@@ -116,10 +116,15 @@ int shadow_view(Light_Record light, float3 p, float depth) {
 	return view;
 }
 
-// light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1.
+// light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1. The mask is
+// the opaque surfaces', from the prepass's depth, so a transparent surface is lit by the lights that have a channel.
 float light_shadow(Light_Record light, float3 p, float3 normal, float4 position) {
 	if (light.mask >= 0) {
+#if MATERIAL_TRANSPARENT
+		return 1;
+#else
 		return cn_texture(push.shadow_mask).Load(int3(position.xy, 0))[light.mask];
+#endif
 	}
 	int view = shadow_view(light, p, frame.near / max(position.z, 1e-7));
 	return view < 0 ? 1 : shadow_map(uint(view), p, normal);

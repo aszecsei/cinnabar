@@ -75,6 +75,8 @@ Renderer :: struct {
 	debug_overlay:   Shader_Pipeline,
 	// The debug views from the frame's textures (see Debug_View).
 	debug_view:      Shader_Pipeline,
+	// Moment-based transparency's composite over the scene (see docs/rendering.md#transparency).
+	transparency_composite: Shader_Pipeline,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
 }
@@ -158,6 +160,9 @@ Frame :: struct {
 	// The global illumination's diffuse and specular light, zero without it.
 	gi_diffuse:               Texture,
 	gi_specular:              Texture,
+	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering.md#transparency).
+	moments_zeroth:           Texture,
+	moments:                  Texture,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:                       Texture,
 	debug:                    Texture,
@@ -240,6 +245,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.debug_behind = shader_pipeline(DEBUG_SHADER)
 	r.debug_overlay = shader_pipeline(DEBUG_SHADER)
 	r.debug_view = shader_pipeline(DEBUG_VIEW_SHADER)
+	r.transparency_composite = shader_pipeline(TRANSPARENCY_COMPOSITE_SHADER)
 	residency_init(&r.residency, platform, assets)
 	debug.init(&r.debug, platform.heap_allocator)
 	materials_init(&r.materials, platform)
@@ -289,7 +295,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	for &p in r.output_pipelines {
 		destroy_shader_pipeline(&p, r.platform)
 	}
-	for p in ([]^Shader_Pipeline{&r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay, &r.debug_view}) {
+	for p in ([]^Shader_Pipeline{&r.debug_tested, &r.debug_hidden, &r.debug_behind, &r.debug_overlay, &r.debug_view, &r.transparency_composite}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 }
@@ -371,37 +377,20 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, {settings.background.r, settings.background.g, settings.background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
-	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, temporal AA,
-	// the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || reads_depth(f) || desc.debug_view == .Depth
+	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, the
+	// transparent surfaces, temporal AA, the exposure and the depth's debug view.
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
-	read(&g, p, f.exposure)
-	if f.lights.clustered {
-		read(&g, p, f.lights.clusters)
-		read(&g, p, f.lights.indices)
-	}
-	if f.shadows.atlas != 0 {
-		read(&g, p, f.shadows.atlas)
-	}
-	if f.shadows.mask != 0 {
-		read(&g, p, f.shadows.mask)
-	}
-	if f.ambient_occlusion != 0 {
-		read(&g, p, f.ambient_occlusion)
-	}
-	if f.fog_volume != 0 {
-		read(&g, p, f.fog_volume)
-	}
-	if f.gi_diffuse != 0 {
-		read(&g, p, f.gi_diffuse)
-		read(&g, p, f.gi_specular)
-	}
+	declare_lighting(f, p, opaque = true)
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
+	// The background's fog first, so it does not dim the transparent surfaces in front of it, and the global
+	// illumination's lit scene, which keeps only the opaque surfaces.
 	add_fog_background(f)
 	add_gi_lit(f)
+	add_transparency_passes(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
 	}
@@ -410,6 +399,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	add_debug_view_pass(f)
 	add_post_passes(f)
+	add_transparent_id_pass(f, desc.keep_ids)
 
 	if desc.hooks.ui != nil {
 		f.ui = create_texture(&g, {size = desc.size, format = UI_FORMAT, label = "ui"})
@@ -477,6 +467,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
+	sync_compute_pipeline(&r.transparency_composite, r.platform, assets, {label = "transparency composite"}, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
 		colors       = {{format = DEBUG_FORMAT, blend = .Alpha}},
 		depth_format = DEPTH_FORMAT,

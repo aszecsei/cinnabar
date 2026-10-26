@@ -181,3 +181,63 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
 }
+
+@(private = "file")
+GLASS_BODY :: "---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.opacity = 0.4;\n\treturn s;\n}\n"
+
+@(test)
+transparent_materials_cook_their_transparent_passes_only :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/glass.material", "material 1\nshading = lit\nblend = transparent\ncast_shadows = true\n" + GLASS_BODY},
+			{"content/sorted.material", "material 1\nshading = lit\nblend = transparent\ntransparency = sorted\n" + GLASS_BODY},
+			{"content/glow.material", "material 1\nshading = lit\nblend = additive\n" + GLASS_BODY},
+		},
+	)
+	defer remove_tree(tree)
+	pass := cook(material_options(t, tree), {.Material})
+	testing.expect(t, pass.ok)
+	for name in ([]string{"glass.material", "sorted.material", "glow.material"}) {
+		data := tree_blob(t, tree, tree_guid(t, tree, name))
+		blob, ok := format.material_view(data)
+		if !ok {
+			continue
+		}
+		// No prepass, forward or depth pass: a transparent surface is not in the depth, and casts no shadows.
+		testing.expect_value(t, format.material_main_pass(blob), format.Material_Pass.Transparent)
+		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Vertex) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Prepass, .Vertex) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Transparent, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Transparent_Ids, .Pixel) != nil)
+		testing.expect(t, .Cast_Shadows not_in blob.flags)
+		// An additive material has no moments: it adds light, and takes none away.
+		testing.expect_value(t, format.material_code(data, blob, 0, .Moments, .Pixel) != nil, blob.blend == .Transparent)
+		testing.expect_value(t, .Sorted in blob.flags, name == "sorted.material")
+	}
+}
+
+@(test)
+transparency_settings_belong_to_their_blends :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/cut.material", "material 1\nshading = lit\nblend = transparent\ncutoff = 0.5\n" + GLASS_BODY},
+			{"content/opaque.material", "material 1\nshading = lit\ntransparency = sorted\n" + GLASS_BODY},
+			{"content/odd.material", "material 1\nshading = lit\nblend = transparent\ntransparency = layered\n" + GLASS_BODY},
+		},
+	)
+	defer remove_tree(tree)
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, !cook(material_options(t, tree), {.Material}).ok)
+	expect_error(t, &errors, "cut.material:4: cutoff is for masked materials; a transparent one blends by its opacity")
+	expect_error(t, &errors, "opaque.material:3: transparency is for transparent materials")
+	expect_error(t, &errors, "odd.material:4: transparency is moments or sorted")
+}

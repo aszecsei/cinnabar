@@ -111,6 +111,26 @@ public sealed class MaterialTests : IDisposable
     }
 
     [Fact]
+    public void TransparentMaterialsWriteTheirTransparencyAndNoCutoff()
+    {
+        const string glass = "material 1\nshading = lit\nblend = transparent\ntransparency = sorted\ntwo_sided = true\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n";
+        var (graph, problems) = MaterialFile.Parse(glass, MaterialFileKind.Material);
+        Assert.Empty(problems);
+        Assert.Equal("sorted", graph!.Transparency);
+        Assert.True(graph.IsTransparent);
+        Assert.Equal(glass, MaterialFile.Write(graph));
+
+        // Moments are the default, and only a masked material has a cutoff.
+        graph.Transparency = "moments";
+        Assert.DoesNotContain("transparency", MaterialFile.Write(graph));
+        graph.Blend = "additive";
+        Assert.DoesNotContain("transparency", MaterialFile.Write(graph));
+        Assert.DoesNotContain("cutoff", MaterialFile.Write(graph));
+        graph.Blend = "masked";
+        Assert.Contains("cutoff = 0.5", MaterialFile.Write(graph));
+    }
+
+    [Fact]
     public void LinesThatDoNotParseAreProblemsWithTheirLines()
     {
         var (graph, problems) = MaterialFile.Parse("material 1\nshading = lit\nnode x output\nwobble = 3\n", MaterialFileKind.Material);

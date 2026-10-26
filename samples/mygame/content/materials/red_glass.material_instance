@@ -1,0 +1,4 @@
+material_instance 1
+# Red glass, moment-based.
+parent = $c7e55e16afd547c1a8e3ae9fc29835e0
+tint = [1, 0.25, 0.2, 1]

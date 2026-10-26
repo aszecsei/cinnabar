@@ -1,0 +1,15 @@
+material 1
+# A glowing panel that adds its light to what is behind it, as a hologram does.
+shading = unlit
+blend = additive
+two_sided = true
+param color color = [0.3, 0.8, 1, 1]
+param intensity float = 2
+param opacity float = 0.6
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.color = params.color.rgb * params.intensity;
+	s.opacity = params.opacity;
+	return s;
+}

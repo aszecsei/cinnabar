@@ -114,12 +114,13 @@ public sealed class MaterialEditorView : DockPanel
         ToolTip.SetTip(_status, _editor.CookError);
     }
 
-    // The material's settings: its shading model, its blend and cutoff, two-sided and casting shadows.
+    // The material's settings: its shading model, its blend with its cutoff or its transparency, two-sided and casting
+    // shadows, which a transparent material does not.
     void ShowSettings()
     {
         var graph = _editor.Document.Graph;
         var models = _editor.Catalog.ShadingModels.Select(s => s.Name).ToList();
-        var shown = $"{graph.Kind}|{graph.Shading}|{graph.Blend}|{graph.Cutoff}|{graph.TwoSided}|{graph.CastShadows}|{string.Join(",", models)}";
+        var shown = $"{graph.Kind}|{graph.Shading}|{graph.Blend}|{graph.Cutoff}|{graph.Transparency}|{graph.TwoSided}|{graph.CastShadows}|{string.Join(",", models)}";
         if (shown == _shownSettings)
         {
             return;
@@ -147,8 +148,15 @@ public sealed class MaterialEditorView : DockPanel
                 }
             }), 60));
         }
+        if (graph.Blend == "transparent")
+        {
+            _settings.Children.Add(Labeled("Transparency", Choice(MaterialGraph.Transparencies, graph.Transparency, t => _editor.SetSettings("Set Transparency", g => g.Transparency = t)), 100));
+        }
         _settings.Children.Add(Check("Two-sided", graph.TwoSided, on => _editor.SetSettings("Set Two-Sided", g => g.TwoSided = on)));
-        _settings.Children.Add(Check("Casts shadows", graph.CastShadows, on => _editor.SetSettings("Set Casts Shadows", g => g.CastShadows = on)));
+        if (!graph.IsTransparent)
+        {
+            _settings.Children.Add(Check("Casts shadows", graph.CastShadows, on => _editor.SetSettings("Set Casts Shadows", g => g.CastShadows = on)));
+        }
     }
 
     static Control Labeled(string label, Control control, double width)

@@ -1,0 +1,168 @@
+# The transparency sample, which F7 in mygame switches to: tinted glass boxes that pass through each other and through
+# an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
+# around a gold one, and an additive hologram behind them (see docs/rendering.md#transparency). The editor writes this
+# file; see docs/editor.md#scenes.
+scene 1
+
+entity 0c5c7fd0a6a3a450
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 67108864, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity 0f21ddb66cad4a26
+name = "Sorted Red Glass"
+component 1 Transform
+	position = [2516582400039426458, 10905190, 14260634]
+	rotation = [0, 0.300706, 0, 0.953717]
+	scale = [0.7, 1.3, 0.7]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $95441e2508f144a7bfd6c36f798c02c9
+
+entity 1600a35a099950d8
+name = "Blue Glass Sphere"
+component 1 Transform
+	position = [2516582399971478733, 12582912, 26843546]
+	rotation = [0, 0, 0, 1]
+	scale = [1.5, 1.5, 1.5]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $f91c9e53503c43ef92ba10bacd28c3d6
+
+entity 1818e811892f902b
+name = "Floor"
+component 1 Transform
+	position = [2516582400015099494, -838861, 16777216]
+	rotation = [0, 0, 0, 1]
+	scale = [10, 0.1, 10]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $f7eadea8bd278c0ae71b61b681352a82
+	cast_shadows = true
+
+entity 36f675cc81e74ef5
+name = "Green Glass"
+component 1 Transform
+	position = [2516582400005033165, 8388608, 12582912]
+	rotation = [0, -0.130526, 0, 0.991445]
+	scale = [1.1, 0.5, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $594b76dcb88c432b836539b7f540f578
+
+entity 3d9c172411e20b8f
+name = "Gold Sphere"
+component 1 Transform
+	position = [2516582399971478733, 12582912, 26843546]
+	rotation = [0, 0, 0, 1]
+	scale = [0.35, 0.35, 0.35]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
+	cast_shadows = true
+
+entity 6513270e269e0d37
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.3, 0.42, 0.6]
+	sky = [0.35, 0.45, 0.6]
+	ground = [0.12, 0.1, 0.08]
+component 38 Fog
+	density = 0.01
+	height_falloff = 0.3
+
+entity 6b0d549b6f03675a
+name = "Red Glass Sphere"
+component 1 Transform
+	position = [2516582399971478733, 12582912, 26843546]
+	rotation = [0, 0, 0, 1]
+	scale = [0.9, 0.9, 0.9]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $13431ffa75644abe8786c1fd50e45d8c
+
+entity 8d116ece1738f7d9
+name = "Sorted Pillar"
+component 1 Transform
+	position = [2516582400043620762, 8388608, 16777216]
+	rotation = [0, 0.173648, 0, 0.984808]
+	scale = [0.5, 1, 0.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 90c192cfd3ac94af
+name = "Sorted Green Glass"
+component 1 Transform
+	position = [2516582400048653926, 8388608, 12582912]
+	rotation = [0, -0.130526, 0, 0.991445]
+	scale = [1.1, 0.5, 1]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $300460392efe4be0ad60465db867161f
+
+entity 9531985d5d9dc9f8
+name = "Pillar"
+component 1 Transform
+	position = [2516582400000000000, 8388608, 16777216]
+	rotation = [0, 0.173648, 0, 0.984808]
+	scale = [0.5, 1, 0.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity d23f0824128b2f33
+name = "Lamp"
+component 1 Transform
+	position = [2516582400015099494, 38587597, -20132659]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	color = [1, 0.8, 0.6]
+	intensity = 4
+	range = 8
+	cast_shadows = true
+
+entity e8e25d940ed90475
+name = "Red Glass"
+component 1 Transform
+	position = [2516582399995805696, 10905190, 14260634]
+	rotation = [0, 0.300706, 0, 0.953717]
+	scale = [0.7, 1.3, 0.7]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $13431ffa75644abe8786c1fd50e45d8c
+
+entity f28c105d1fb17c23
+name = "Hologram"
+component 1 Transform
+	position = [2516582400015099494, 31876710, 46976205]
+	rotation = [0, 0, 0, 1]
+	scale = [4, 1, 0.02]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $649373d0b9bc4cf9a9957a31788ea403
+
+entity f2a74de452e6b438
+name = "Camera"
+component 1 Transform
+	position = [2516582400015099494, 26004685, -60397978]
+	rotation = [0.104528, 0, 0, 0.994522]
+	scale = [1, 1, 1]
+component 32 Camera
+	vertical_fov = 0.9
+	near = 0.05

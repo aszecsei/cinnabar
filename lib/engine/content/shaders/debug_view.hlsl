@@ -26,11 +26,14 @@ static const uint DEBUG_GI_SPECULAR = 13;
 static const uint DEBUG_SHADOW_MASK = 14;
 static const uint DEBUG_ENTITY_IDS = 15;
 static const uint DEBUG_LUMINANCE = 16;
+static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
 // The depth view's far end, in meters, on a log scale from the near plane.
 static const float DEPTH_FAR = 1000;
+// The transparent overdraw view's count of layers at its hottest color.
+static const float OVERDRAW_HIGH = 8;
 // The luminance view's range of EV100, which its heat colors span.
 static const float EV_LOW = -4;
 static const float EV_HIGH = 16;
@@ -108,6 +111,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float3 scene = max(cn_texture(push.source).Load(pixel).rgb, 0) / max(exposure, 1e-12);
 		float luminance = dot(scene, float3(0.2126, 0.7152, 0.0722));
 		color = luminance > 0 ? heat((log2(luminance * 8) - EV_LOW) / (EV_HIGH - EV_LOW)) : 0;
+		break;
+	}
+	case DEBUG_TRANSPARENT_OVERDRAW: {
+		// The moments pass counts the transparent layers in place of their optical depth for this view.
+		float layers = cn_texture(push.source).Load(pixel).r;
+		color = layers > 0 ? heat((layers - 1) / (OVERDRAW_HIGH - 1)) : 0;
 		break;
 	}
 	}
