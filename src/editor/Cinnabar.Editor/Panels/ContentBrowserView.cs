@@ -20,7 +20,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The content browser (see docs/editor.md#content-browser): the content roots' folders on the left, as a virtualized
+/// The content browser (see docs/editor/shell-and-panels.md#content-browser): the content roots' folders on the left, as a virtualized
 /// list of the visible rows, the selected folder's assets in the middle, or every asset that a search matches, and the
 /// selected asset's details on the right. Everything comes from the cook daemon's index. A double click opens a scene in
 /// the editor and a script in the script editor, and a script that defines a behaviour drags onto an entity. The menus,

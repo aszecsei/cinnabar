@@ -12,7 +12,7 @@ DEFAULT_BATCH_CHUNKS :: 4
 MAX_TICKS_PER_FRAME :: 4
 DEFAULT_TICK_RATE :: 60
 
-// Stage is when a system runs. See docs/world.md#systems.
+// Stage is when a system runs. See docs/world/ecs.md#systems.
 Stage :: enum u8 {
 	// Once per fixed tick, zero or more times per frame.
 	Fixed,

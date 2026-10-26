@@ -1,4 +1,4 @@
-// What the global illumination's shaders share (see docs/rendering.md#global-illumination): their constants, the
+// What the global illumination's shaders share (see docs/rendering/global-illumination.md#global-illumination): their constants, the
 // cascades' layout and the probes' positions. The cascades are screen-space radiance cascades. Cascade k has a probe
 // every GI_SPACING << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
 // so every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long

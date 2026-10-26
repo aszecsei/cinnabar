@@ -8,7 +8,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/render"
 import "cinnabar:engine/volume"
 
-// The viewport's helpers (see docs/editor.md#viewport): the shapes of lights, volumes and cameras, as debug lines, for
+// The viewport's helpers (see docs/editor/viewport.md#viewport): the shapes of lights, volumes and cameras, as debug lines, for
 // the selection or for every entity, as Viewport_Settings.helpers says.
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.

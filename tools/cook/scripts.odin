@@ -1,6 +1,6 @@
 // `cook scripts --cache <dir> --config dev|release [--definitions <file>] --root <name>=<dir>...` cooks every .luau
 // file in the content roots into <cache>/<config>/<guid>.blob, and type checks it against the definition file. See
-// docs/content-pipeline.md#scripts.
+// docs/content/kinds/scripts.md#scripts.
 package cook
 
 import "base:runtime"
@@ -235,7 +235,7 @@ find_requires :: proc(s: ^Script_Source, problems: ^Problems) -> bool {
 }
 
 // resolve_requires resolves each require of a script to a script in the roots, as Luau's require does (see
-// docs/scripting.md#modules-and-require).
+// docs/scripting/tooling-and-hot-reload.md#modules-and-require).
 resolve_requires :: proc(scripts: []Script_Source, by_path: map[string]int, s: ^Script_Source, problems: ^Problems) -> bool {
 	ok := true
 	for r in s.requires {
@@ -445,7 +445,7 @@ compile_script :: proc(config: Script_Config, s: Script_Source, key: u64, output
 		requires[i] = r.entry
 	}
 	flags: format.Script_Flags
-	// The runtime compiles the module to machine code (see docs/scripting.md#native-code-generation).
+	// The runtime compiles the module to machine code (see docs/scripting/tooling-and-hot-reload.md#native-code-generation).
 	if native, _ := format.meta_value(s.meta, "native"); native == "true" || s.native_comment {
 		flags += {.Native}
 	}

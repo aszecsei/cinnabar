@@ -8,7 +8,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/script"
 
-// Game commands (see docs/editor.md#commands): commands that the game describes, which the editor shows in its ribbon
+// Game commands (see docs/editor/shell-and-panels.md#commands): commands that the game describes, which the editor shows in its ribbon
 // and its command palette and runs in the game. A command that changes the scene does not change the world itself: it
 // adds operations to its context, and the editor applies them to its document as one undo entry, which sends them
 // back, so the edit can be undone like any other.

@@ -1,4 +1,4 @@
-// The composite of moment-based transparency (see docs/rendering.md#transparency): the scene behind the transparent
+// The composite of moment-based transparency (see docs/rendering/transparency.md#transparency): the scene behind the transparent
 // surfaces is dimmed by all of them, e^-b0, and their light, which the transparent pass added up premultiplied by its
 // opacity, is normalized by the opacity that it added up and fills the rest. The colors are pre-exposed already.
 #include "cinnabar.hlsli"

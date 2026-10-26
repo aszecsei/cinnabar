@@ -1,5 +1,5 @@
 // Package gpu is the backend-agnostic GPU interface: handles, descriptions and command buffers.
-// It is pure Odin and is compiled into both the host and the game DLL. See docs/gpu.md.
+// It is pure Odin and is compiled into both the host and the game DLL. See docs/gpu/README.md.
 package gpu
 
 // A handle with generation 0 is the nil handle.
@@ -12,7 +12,7 @@ Buffer :: distinct Handle
 Texture :: distinct Handle
 Sampler :: distinct Handle
 Pipeline :: distinct Handle
-// An acceleration structure for ray tracing (see docs/gpu.md#ray-tracing).
+// An acceleration structure for ray tracing (see docs/gpu/ray-tracing.md#ray-tracing).
 Accel_Struct :: distinct Handle
 
 // Capabilities above the hardware floor. The backend reports them at device creation.
@@ -33,7 +33,7 @@ MAX_ACCEL_STRUCTS :: 4096
 // The geometries of one bottom-level acceleration structure.
 MAX_ACCEL_GEOMETRIES :: 16
 
-// The bindless index of a view is a fixed function of the handle's pool index (see docs/gpu.md#binding-model).
+// The bindless index of a view is a fixed function of the handle's pool index (see docs/gpu/interface.md#binding-model).
 // The resource descriptor heap holds these ranges in order: buffer reads, buffer writes, texture reads, texture writes,
 // acceleration structures.
 BUFFER_READ_BASE :: 0
@@ -109,7 +109,7 @@ Format :: enum u8 {
 	RGBA32_Float,
 	D32_Float,
 	D32_Float_S8_Uint,
-	// Block-compressed formats store 4x4 blocks of texels (see docs/content-pipeline.md#textures). They are only
+	// Block-compressed formats store 4x4 blocks of texels (see docs/content/kinds/textures.md#textures). They are only
 	// sampled, and mip 0 of a texture in one has sides that are multiples of 4.
 	BC1_Unorm,
 	BC1_Unorm_Srgb,
@@ -123,7 +123,7 @@ Format :: enum u8 {
 // The frame target is written through an sRGB view in the Sdr output mode, as the preview targets always are.
 FRAME_TARGET_FORMAT :: Format.RGBA8_Unorm_Srgb
 
-// Output_Mode is how the frame target's colors reach the display (see docs/gpu.md#presentation).
+// Output_Mode is how the frame target's colors reach the display (see docs/gpu/presentation.md#presentation).
 Output_Mode :: enum u8 {
 	// sRGB, in FRAME_TARGET_FORMAT.
 	Sdr,
@@ -188,7 +188,7 @@ output_mode :: proc(request: Output_Request, display: Display) -> Output_Mode {
 }
 
 // The editor's previews render into shared targets of their own beside the frame target, at most this many, each at
-// most this large on a side (see docs/rendering.md#material-previews).
+// most this large on a side (see docs/rendering/materials.md#material-previews).
 MAX_PREVIEW_TARGETS :: 4
 MAX_PREVIEW_SIZE :: 1024
 
@@ -273,7 +273,7 @@ Buffer_Usage :: enum u8 {
 	Storage,
 	Indirect,
 	// The CPU reads the buffer with gpu_read_buffer, and the GPU only copies into it with cmd_copy_buffer. It has no
-	// views and no other usage, and no initial data (see docs/gpu.md#readback).
+	// views and no other usage, and no initial data (see docs/gpu/queues-streaming-readback.md#readback).
 	Readback,
 }
 
@@ -332,7 +332,7 @@ initial_layout :: proc(usage: Texture_Usages, has_data: bool) -> Texture_Layout 
 	return .Shader_Resource
 }
 
-// Barriers follow the Enhanced Barriers model (see docs/gpu.md#barriers). An empty Syncs means no
+// Barriers follow the Enhanced Barriers model (see docs/gpu/command-buffers.md#barriers). An empty Syncs means no
 // synchronization, and an empty Accesses means no access.
 Sync :: enum u8 {
 	All,
@@ -378,7 +378,7 @@ COMPUTE_QUEUE_ACCESSES :: Accesses{.Shader_Resource, .Unordered_Access, .Indirec
 ACCEL_ACCESSES :: Accesses{.Accel_Read, .Accel_Write}
 
 // Queue is where a submission runs. Compute runs alongside graphics (async compute). Cross-queue dependencies
-// are declared at submission (see docs/gpu.md#queues).
+// are declared at submission (see docs/gpu/queues-streaming-readback.md#queues).
 Queue :: enum u8 {
 	Graphics,
 	Compute,
@@ -705,7 +705,7 @@ accel_instance :: proc(
 	}
 }
 
-// Stats is what a backend holds, for the editor's resource monitor (see docs/editor.md#resource-monitor). The live
+// Stats is what a backend holds, for the editor's resource monitor (see docs/editor/shell-and-panels.md#resource-monitor). The live
 // counts include the backend's own permanent resources.
 Stats :: struct {
 	buffers:             u32,
@@ -720,7 +720,7 @@ Stats :: struct {
 	video_memory_budget: u64,
 }
 
-// Transfer identifies a streaming copy (see docs/gpu.md#streaming). gpu_transfer_done reports when the resource can
+// Transfer identifies a streaming copy (see docs/gpu/queues-streaming-readback.md#streaming). gpu_transfer_done reports when the resource can
 // be used. The zero Transfer is always done.
 Transfer :: distinct u64
 
@@ -746,7 +746,7 @@ PASS_CONSTANTS_ALIGN :: 256
 
 // Indirect argument records. A draw record starts with a draw ID, which shaders read as CN_DRAW_ID. Portable code
 // stores the record's index there, counting from the record at the command's offset: the Vulkan backend delivers
-// that index, not the stored value. See docs/gpu.md#gpu-driven-rendering.
+// that index, not the stored value. See docs/gpu/gpu-driven-and-mesh-shaders.md#gpu-driven-rendering.
 Draw_Indirect_Args :: struct {
 	draw_id:        u32,
 	vertex_count:   u32,

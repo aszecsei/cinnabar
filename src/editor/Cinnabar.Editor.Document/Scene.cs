@@ -1,7 +1,7 @@
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// A scene document, as its file describes it (see docs/editor.md#scenes). The editor owns it: the host's world is a
+/// A scene document, as its file describes it (see docs/editor/document-and-scenes.md#scenes). The editor owns it: the host's world is a
 /// mirror of it. It knows nothing of the game's types, so data that the game's DLL no longer has is kept and saved.
 /// </summary>
 public sealed class Scene

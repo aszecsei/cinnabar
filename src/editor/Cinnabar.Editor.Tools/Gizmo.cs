@@ -20,7 +20,7 @@ public enum Space
 }
 
 /// <summary>
-/// The gizmo's shape and its hit test (see docs/editor.md#viewport). The game draws the gizmo from a Gizmo_State, with
+/// The gizmo's shape and its hit test (see docs/editor/viewport.md#viewport). The game draws the gizmo from a Gizmo_State, with
 /// the same proportions as here (see lib/engine/editor/viewport.odin): an axis's length is <see cref="Size"/>, and the
 /// other parts are fractions of it.
 /// </summary>
@@ -184,7 +184,7 @@ public readonly record struct Snapping(double Meters, double Degrees, double Fac
 }
 
 /// <summary>
-/// A drag of a gizmo part, from the press to the release (see docs/editor.md#viewport). Each mouse position gives the
+/// A drag of a gizmo part, from the press to the release (see docs/editor/viewport.md#viewport). Each mouse position gives the
 /// change from where the drag started. The camera is the one at the press, so flying during a drag does not move the
 /// selection.
 /// </summary>

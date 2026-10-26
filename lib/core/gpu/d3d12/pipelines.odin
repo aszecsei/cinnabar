@@ -13,7 +13,7 @@ import "vendor:directx/dxgi"
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 
-// The fixed root signature (see docs/gpu.md#binding-model). Shaders declare these with the macros in
+// The fixed root signature (see docs/gpu/interface.md#binding-model). Shaders declare these with the macros in
 // lib/core/gpu/shaders/cinnabar.hlsli.
 ROOT_PUSH_CONSTANTS :: 0
 ROOT_PASS_CONSTANTS :: 1
@@ -244,7 +244,7 @@ bind_root_signature :: proc(list: ^d3d.IGraphicsCommandList7, queue := gpu.Queue
 }
 
 // A pipeline compiles on a background job. Its handle is valid at once, and draws and dispatches with it are
-// skipped until it is ready. See docs/gpu.md#pipelines.
+// skipped until it is ready. See docs/gpu/resources-and-pipelines.md#pipelines.
 create_graphics_pipeline :: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline {
 	task, entry, ok := graphics_task(desc)
 	return ok ? start_compile(task, entry) : {}

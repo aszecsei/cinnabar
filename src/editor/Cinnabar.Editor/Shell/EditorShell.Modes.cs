@@ -8,7 +8,7 @@ using StepFrame = Cinnabar.Editor.Link.Protocol.StepFrame;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// Play, pause, step and stop (see docs/editor.md#modes). In Edit, the game's world stands still and mirrors the
+/// Play, pause, step and stop (see docs/editor/document-and-scenes.md#modes). In Edit, the game's world stands still and mirrors the
 /// document. Play runs the world that the game has; nothing of it reaches the document, which no edit changes until
 /// Stop, which sends the document again. A new link starts in Edit, as the game does.
 /// </summary>

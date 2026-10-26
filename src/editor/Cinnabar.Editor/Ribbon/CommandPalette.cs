@@ -10,7 +10,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Ribbon;
 
 /// <summary>
-/// The command palette (see docs/editor.md#commands): an overlay that searches every command by name. Enter runs the
+/// The command palette (see docs/editor/shell-and-panels.md#commands): an overlay that searches every command by name. Enter runs the
 /// selected command, and Escape or a click outside closes it.
 /// </summary>
 public sealed class CommandPalette : Grid

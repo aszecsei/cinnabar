@@ -6,7 +6,7 @@ import "core:fmt"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ecs"
 
-// register_world defines Entity's methods and the World library. See docs/scripting.md#the-entity-and-component-view.
+// register_world defines Entity's methods and the World library. See docs/scripting/api.md#the-entity-and-component-view.
 @(private)
 register_world :: proc(r: ^Runtime) {
 	light_method(r, .Entity, "get", entity_get)

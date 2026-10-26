@@ -21,7 +21,7 @@ public sealed record ContentItem(string? Guid, ContentFolder? Folder)
 }
 
 /// <summary>
-/// The asset operations (see docs/editor.md#content-browser): each asks the cook daemon, which is the only program
+/// The asset operations (see docs/editor/shell-and-panels.md#content-browser): each asks the cook daemon, which is the only program
 /// that writes .meta files, and awaits its answer. They change the project, not the scene, so they are not on the undo
 /// stack. The commands act on the content browser's folder and selection.
 /// </summary>
@@ -35,7 +35,7 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Whether the selection holds a sub-asset. A sub-asset changes only with its file, so the file operations do not
-    /// take it (see docs/content-pipeline.md#asset-operations).
+    /// take it (see docs/content/daemon-and-operations.md#asset-operations).
     /// </summary>
     public bool SelectionHasSubassets => SelectedAssets.Any(g => Assets.Find(g) is { } a && AssetIndex.IsSubasset(a));
 

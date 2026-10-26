@@ -1,5 +1,5 @@
 // `cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir>...` cooks
-// every .hlsl file in the content roots into <cache>/<config>/<guid>.blob. See docs/content-pipeline.md#shaders.
+// every .hlsl file in the content roots into <cache>/<config>/<guid>.blob. See docs/content/kinds/shaders.md#shaders.
 //
 // Each file's vs_main, ps_main, cs_main, as_main and ms_main entry points compile into one blob, with the fixed root
 // signature attached, so DXC rejects a shader that does not fit it. A file with [shader("...")] attributes is a ray
@@ -246,7 +246,7 @@ dxc_version :: proc(dxc: string) -> (version: string, ok: bool) {
 
 // compile runs DXC for one entry and gives its bytecode. Stage entry points get the fixed root signature, so DXC
 // checks that the shader fits it. A library gets its global root signature from the pipeline (see
-// docs/gpu.md#ray-tracing). Development builds embed debug information, so PIX shows the source.
+// docs/gpu/ray-tracing.md#ray-tracing). Development builds embed debug information, so PIX shows the source.
 compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir: string, problems: ^Problems) -> (code: []byte, ok: bool) {
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.%v.dxil.tmp", out_dir, format.guid_format(s.meta.guid, &buffer), target.stage)

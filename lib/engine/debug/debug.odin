@@ -1,5 +1,5 @@
 // Package debug draws shapes for one frame or for a while: lines, boxes, spheres, arrows and axes, in the world, in
-// exact colors over the tone-mapped frame (see docs/rendering.md#debug). Any job can draw. Release builds compile the
+// exact colors over the tone-mapped frame (see docs/rendering/layers-and-output.md#debug). Any job can draw. Release builds compile the
 // calls out (DEBUG_DRAW).
 package debug
 

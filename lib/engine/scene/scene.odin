@@ -1,5 +1,5 @@
 // Package scene loads scenes into the world: a cooked scene blob, or a snapshot from the editor (see
-// docs/editor.md#scenes). Both arrive as an asset_format.Scene, and load replaces the world with it. The editor's
+// docs/editor/document-and-scenes.md#scenes). Both arrive as an asset_format.Scene, and load replaces the world with it. The editor's
 // operations use the same procedures for one entity, component or field at a time.
 package scene
 
@@ -16,7 +16,7 @@ import "cinnabar:engine/script"
 SCENE_ENTITY_ID :: ecs.Component_Id(8)
 
 // A volume setting's override flag is a field of its own in a scene, <field>.override, which only false needs: a
-// scene that sets the setting overrides it, unless it also sets the flag to false (see docs/world.md#volumes).
+// scene that sets the setting overrides it, unless it also sets the flag to false (see docs/world/volumes.md#volumes).
 OVERRIDE_SUFFIX :: ".override"
 
 // Scene_Entity marks an entity that a scene made, with its scene ID. Entities that the game spawns have none.

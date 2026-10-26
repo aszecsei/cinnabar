@@ -8,7 +8,7 @@ import "core:math/linalg"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ecs"
 
-// The world is ±2^38 m on each axis (see docs/world.md#positions).
+// The world is ±2^38 m on each axis (see docs/world/positions-and-transforms.md#positions).
 WORLD_LIMIT_METERS :: f64(1 << 38)
 // Quaternions compare equal when they are this close, like Unity's ==.
 QUATERNION_EQUAL_DOT :: 1 - 1e-6

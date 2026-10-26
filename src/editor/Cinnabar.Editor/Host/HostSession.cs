@@ -19,7 +19,7 @@ public enum HostState
 }
 
 /// <summary>
-/// The host's lifetime and its editor link (see docs/editor.md#processes): start, stop, restart, crashes, and the
+/// The host's lifetime and its editor link (see docs/editor/processes-and-projects.md#processes): start, stop, restart, crashes, and the
 /// connection to the running host. Events are raised on the UI thread.
 /// </summary>
 public sealed class HostSession : IDisposable

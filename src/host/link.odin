@@ -19,7 +19,7 @@ MAX_OUTBOX :: 16 * mem.Megabyte
 // Host_Stats go out this often.
 STATS_INTERVAL :: 250 * time.Millisecond
 
-// The host's side of the editor link (see docs/editor.md#editor-link). It listens on loopback for one editor at a
+// The host's side of the editor link (see docs/editor/link.md#editor-link). It listens on loopback for one editor at a
 // time. A reader thread queues the editor's messages, and the main thread handles them between frames. Everything
 // that the host sends, the log included, goes into the outbox, and a writer thread sends it.
 Link :: struct {

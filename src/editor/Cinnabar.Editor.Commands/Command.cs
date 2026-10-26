@@ -2,7 +2,7 @@ namespace Cinnabar.Editor.Commands;
 
 /// <summary>
 /// Something the user can do: from the ribbon, a menu, a shortcut or the command palette (see
-/// docs/editor.md#commands). A command whose <see cref="IsCheckedWhen"/> is set is a toggle.
+/// docs/editor/shell-and-panels.md#commands). A command whose <see cref="IsCheckedWhen"/> is set is a toggle.
 /// </summary>
 public class Command
 {

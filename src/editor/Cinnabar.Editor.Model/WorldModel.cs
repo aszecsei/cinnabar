@@ -37,7 +37,7 @@ public sealed class EntityNode
 }
 
 /// <summary>
-/// The editor's mirror of the game's world (see docs/editor.md#world): the component types, every entity with its
+/// The editor's mirror of the game's world (see docs/editor/link.md#world): the component types, every entity with its
 /// hierarchy, and the values of the watched entities. It changes only through <see cref="Apply"/>, with the game's
 /// messages, and <see cref="Clear"/>. Use it on one thread.
 /// </summary>

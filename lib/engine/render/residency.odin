@@ -31,7 +31,7 @@ Resident_Mesh :: struct {
 	submeshes:        [MAX_SUBMESHES]Resident_Submesh,
 	submesh_bounds:   [MAX_SUBMESHES]format.Mesh_Bounds,
 	// With Ray_Query, the bottom-level acceleration structure of every triangle, which the renderer builds the first
-	// frame after the mesh is ready (see docs/rendering.md#shadows).
+	// frame after the mesh is ready (see docs/rendering/lighting-and-shadows.md#shadows).
 	accel:            gpu.Accel_Struct,
 	accel_built:      bool,
 }
@@ -51,7 +51,7 @@ Resident_Texture :: struct {
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
-// docs/rendering.md#gpu-residency). It lives in Game_State and holds handles only, so a code reload keeps it.
+// docs/rendering/assets.md#gpu-residency). It lives in Game_State and holds handles only, so a code reload keeps it.
 Residency :: struct {
 	platform: ^core.Platform_API,
 	assets:   ^asset.Assets,

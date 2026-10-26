@@ -4,7 +4,7 @@
         <Setter Property="Background" Value="#1B1B1D" />
     </Style>
 
-    <!-- Ribbon (docs/editor.md#ribbon). Its button brushes are in Ribbon/RibbonResources.axaml. -->
+    <!-- Ribbon (docs/editor/shell-and-panels.md#ribbon). Its button brushes are in Ribbon/RibbonResources.axaml. -->
     <Style Selector="DockPanel.ribbon">
         <Setter Property="Background" Value="#232326" />
     </Style>

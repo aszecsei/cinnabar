@@ -79,7 +79,7 @@ tracked_layout :: proc(tracker: ^Layout_Tracker, texture: Texture) -> (layout: T
 	return tracker.layouts[texture]
 }
 
-// validate checks the rules that every backend enforces (see docs/gpu.md#pass-rules).
+// validate checks the rules that every backend enforces (see docs/gpu/command-buffers.md#pass-rules).
 // With a tracker, it also checks barrier layouts and attachment layouts, and applies the barriers to the tracker.
 // After a rejected command buffer, the tracker holds the layouts that the valid packets left.
 // packet is the index of the offending packet, or the packet count for errors found at the end.

@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Document;
 public sealed record GraphPin(string Name, PinType Type, IReadOnlyList<float> Default, string DefaultLabel = "");
 
 /// <summary>
-/// What the editor knows to show a graph's nodes (see docs/editor.md#material-editor): the kinds of node and the
+/// What the editor knows to show a graph's nodes (see docs/editor/material-editor.md#material-editor): the kinds of node and the
 /// shading models, which the cook daemon sends, and the material functions, which the editor reads from their files.
 /// A node's inputs and outputs come from its kind, or for some kinds from the material's parameters, the shading model
 /// or the function that it calls.

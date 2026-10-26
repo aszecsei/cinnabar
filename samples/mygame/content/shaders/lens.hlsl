@@ -15,7 +15,7 @@ struct Push {
 CN_PUSH_CONSTANTS(Push, push);
 
 // The sample's lens: chromatic aberration and a vignette, in linear HDR with bloom added, as a post effect before tone
-// mapping (see docs/rendering.md#post-effects).
+// mapping (see docs/rendering/post-processing.md#post-effects).
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (any(id.xy >= push.size)) {

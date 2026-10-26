@@ -8,7 +8,7 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 
 // Shader_Pipeline is a pipeline that compiles from a shader asset. A sync procedure creates it, and updates it when
-// asset.poll swaps the shader's blob, so a shader change needs no code reload (see docs/rendering.md#gpu-residency).
+// asset.poll swaps the shader's blob, so a shader change needs no code reload (see docs/rendering/assets.md#gpu-residency).
 // It holds handles only, so it can live in Game_State.
 Shader_Pipeline :: struct {
 	pipeline: gpu.Pipeline,

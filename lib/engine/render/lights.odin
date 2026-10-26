@@ -8,7 +8,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 
-// The lights and their clusters (see docs/rendering.md#lights-and-clusters). Each frame writes the lights relative to
+// The lights and their clusters (see docs/rendering/lighting-and-shadows.md#lights-and-clusters). Each frame writes the lights relative to
 // the camera, the directional ones first. A compute pass then gives each cluster, a tile of the screen and a depth
 // slice, the punctual lights that reach it, and the forward pass loops over the lights of its pixel's cluster.
 
@@ -27,7 +27,7 @@ MAX_DIRECTIONAL_LIGHTS :: 4
 // CLUSTER_SHADER is the engine's light clustering shader (lib/engine/content/shaders/cluster_lights.hlsl).
 CLUSTER_SHADER :: #load("../content/shaders/cluster_lights.hlsl.meta", string)
 
-// The area lights' lookup tables (see docs/rendering.md#area-lights), which tools/ltc_fit fits: two LTC_SIZE x LTC_SIZE
+// The area lights' lookup tables (see docs/rendering/lighting-and-shadows.md#area-lights), which tools/ltc_fit fits: two LTC_SIZE x LTC_SIZE
 // RGBA32_Float textures, one after the other. Matches LTC_SIZE in ltc.hlsli.
 LTC_SIZE :: 64
 @(private = "file", rodata)

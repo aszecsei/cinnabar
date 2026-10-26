@@ -1,5 +1,5 @@
 // Package cook_link is the cook link's protocol: the messages between the editor and the cook daemon, which go over
-// the transport in lib/engine/wire (see docs/content-pipeline.md#cook-link). tools/cook uses it, and the editor's C#
+// the transport in lib/engine/wire (see docs/content/daemon-and-operations.md#cook-link). tools/cook uses it, and the editor's C#
 // is generated from its schema. It imports nothing from core or engine.
 package cook_link
 
@@ -48,7 +48,7 @@ Welcome :: struct {
 	roots:     []Root,
 	importers: []Importer,
 	// The kinds of node that material graphs have, which the editor's node editor shows (see
-	// docs/content-pipeline.md#material-graphs).
+	// docs/content/kinds/materials.md#material-graphs).
 	nodes:     []Node_Info,
 }
 
@@ -204,7 +204,7 @@ Cook_Finished :: struct {
 }
 
 // The asset operations go from the editor to the daemon, which is the only program that writes .meta files (see
-// docs/content-pipeline.md#asset-operations). Each is a request with an ID in its header. The daemon checks
+// docs/content/daemon-and-operations.md#asset-operations). Each is a request with an ID in its header. The daemon checks
 // everything first, so an operation fails without changing anything, or does all of it. It then cooks, sends what
 // changed, and answers with an Operation_Result with the request's ID, so the editor's index already has the change.
 // Names are file and folder names without a path, and an asset's name is without its extension.
@@ -289,7 +289,7 @@ Operation_Result :: struct {
 	guids: []string,
 }
 
-// Material graphs (see docs/content-pipeline.md#material-graphs). The daemon gives the editor the kinds of node and
+// Material graphs (see docs/content/kinds/materials.md#material-graphs). The daemon gives the editor the kinds of node and
 // the shading models, whose surface inputs are the inputs of a graph's output node, and cooks the graphs that the
 // editor has not saved, for its previews.
 

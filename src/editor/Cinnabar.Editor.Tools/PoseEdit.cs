@@ -3,7 +3,7 @@ using Cinnabar.Editor.Document;
 namespace Cinnabar.Editor.Tools;
 
 /// <summary>
-/// Moves, turns or scales entities of a scene by a gizmo's change, about a pivot (see docs/editor.md#viewport). It
+/// Moves, turns or scales entities of a scene by a gizmo's change, about a pivot (see docs/editor/viewport.md#viewport). It
 /// keeps the world poses from the start of the drag, so each step is the change from the start, not from the step
 /// before. An entity whose ancestor is also moved follows that ancestor and gets no operations of its own.
 /// </summary>

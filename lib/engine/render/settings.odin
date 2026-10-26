@@ -3,7 +3,7 @@ package render
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
 
-// The render settings (see docs/rendering.md#settings) are settings components on volumes (see docs/world.md#volumes):
+// The render settings (see docs/rendering/frame.md#settings) are settings components on volumes (see docs/world/volumes.md#volumes):
 // the frame takes each from the volumes at the camera. Each field is a volume.Value. A setting that no volume
 // overrides has its default, from the DEFAULT_ structs below, which register_settings_components registers, so a
 // component added in the editor starts from them too.
@@ -17,7 +17,7 @@ GLOBAL_ILLUMINATION_ID :: ecs.Component_Id(48)
 ENVIRONMENT_ID :: ecs.Component_Id(49)
 SHADOWS_ID :: ecs.Component_Id(50)
 
-// Anti_Aliasing is the temporal AA (see docs/rendering.md#post-processing).
+// Anti_Aliasing is the temporal AA (see docs/rendering/post-processing.md#post-processing).
 Anti_Aliasing :: struct {
 	off: volume.Value(bool),
 }
@@ -57,7 +57,7 @@ Bloom :: struct {
 	intensity: volume.Value(f32) `editor:"range=0,0.5"`,
 }
 
-// Ambient_Occlusion is the ambient occlusion (see docs/rendering.md#ambient-occlusion).
+// Ambient_Occlusion is the ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion).
 Ambient_Occlusion :: struct {
 	off:    volume.Value(bool),
 	// In meters.
@@ -65,7 +65,7 @@ Ambient_Occlusion :: struct {
 	power:  volume.Value(f32) `editor:"range=0,5"`,
 }
 
-// Global_Illumination is the global illumination (see docs/rendering.md#global-illumination). Without it, the indirect
+// Global_Illumination is the global illumination (see docs/rendering/global-illumination.md#global-illumination). Without it, the indirect
 // light is the Environment's ambient light.
 Global_Illumination :: struct {
 	off: volume.Value(bool),
@@ -88,7 +88,7 @@ Shadows :: struct {
 	split_lambda: volume.Value(f32) `editor:"range=0,1"`,
 }
 
-// Fog fills the world with volumetric fog (see docs/rendering.md#volumetric-fog). Its density is the share of light
+// Fog fills the world with volumetric fog (see docs/rendering/fog.md#volumetric-fog). Its density is the share of light
 // that a meter of fog takes away, at and below its base height, and falls off above it. A density of 0 is no fog.
 Fog :: struct {
 	density:        volume.Value(f32) `editor:"range=0,1"`,

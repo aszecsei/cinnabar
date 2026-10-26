@@ -1,4 +1,4 @@
-// The vertex side of every material pass (see docs/rendering.md#materials): the draw's vertex, pulled through its
+// The vertex side of every material pass (see docs/rendering/materials.md#materials): the draw's vertex, pulled through its
 // draw record, so one indirect draw draws a whole bin, and the inputs that a material's evaluate reads. The prepass
 // and the forward pass place vertices with the same code, so their depths are equal.
 #ifndef MATERIAL_VERTEX_HLSLI

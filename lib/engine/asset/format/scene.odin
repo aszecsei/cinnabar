@@ -7,7 +7,7 @@ import "cinnabar:core/layout"
 
 SCENE_EXTENSION :: ".scene"
 
-// Scene is a scene as its file describes it (see docs/editor.md#scenes). The cooker parses it from text, the asset
+// Scene is a scene as its file describes it (see docs/editor/document-and-scenes.md#scenes). The cooker parses it from text, the asset
 // runtime reads it from a blob, and the editor sends it over the link. The scene loader in lib/engine applies it.
 Scene :: struct {
 	entities: []Scene_Entity,

@@ -18,11 +18,11 @@ dxc_version := "1.9.2609"
 dxc_release := "dxc_2026_09_29"
 dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
-# Luau's experimental direct field access for engine userdata (see docs/scripting.md#direct-field-access). Off unless
+# Luau's experimental direct field access for engine userdata (see docs/scripting/embedding.md#direct-field-access). Off unless
 # CINNABAR_DIRECT_ACCESS=true.
 direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
 luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
-# The development host and game DLL share luau.dll (see docs/scripting.md#embedding). Everything else links Luau statically.
+# The development host and game DLL share luau.dll (see docs/scripting/embedding.md#embedding). Everything else links Luau statically.
 dev_defines := "-define:LUAU_SHARED=true " + luau_features
 # lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
 luau_dir := build_dir + "/luau"
@@ -204,7 +204,7 @@ scenes config="dev": cook
     "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} {{roots}}
 
 # Run the cook daemon, which cooks the game's and the engine's content into build/cache/dev whenever they change, until it is
-# stopped. A running game swaps the new blobs (see docs/content-pipeline.md#cook-daemon).
+# stopped. A running game swaps the new blobs (see docs/content/daemon-and-operations.md#cook-daemon).
 watch: cook install-dxc
     "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
@@ -256,7 +256,7 @@ viewer:
     odin build tools/viewer {{collections}} -out:"{{build_dir}}/viewer.exe" -debug
 
 # Fit the area lights' lookup tables to the Lit shading model's specular, into lib/engine/render/ltc_ggx.bin (see
-# docs/rendering.md#area-lights). Run it after changing Lit's specular, and commit the table.
+# docs/rendering/lighting-and-shadows.md#area-lights). Run it after changing Lit's specular, and commit the table.
 ltc-fit:
     mkdir -p "{{build_dir}}"
     odin run tools/ltc_fit -o:speed -out:"{{build_dir}}/ltc_fit.exe" -- lib/engine/render/ltc_ggx.bin
@@ -273,12 +273,12 @@ dev-shared name="cinnabar": build viewer
     "./{{build_dir}}/viewer.exe" "{{name}}"
 
 # Write the editor link's and the cook link's schemas, which the editor's source generator reads (see
-# docs/editor.md#editor-link)
+# docs/editor/link.md#editor-link)
 link-schema: host cook
     "./{{build_dir}}/host.exe" --emit-link-schema "{{build_dir}}/link/link-schema.json"
     "./{{build_dir}}/cook.exe" --emit-link-schema "{{build_dir}}/link/cook-schema.json"
 
-# Build the editor (see docs/editor.md#projects)
+# Build the editor (see docs/editor/processes-and-projects.md#projects)
 editor: link-schema
     dotnet build src/editor -nologo -v:quiet
 
@@ -310,6 +310,10 @@ vet:
 lint:
     for p in {{packages}}; do odin check "$p" {{collections}} -no-entry-point -vet -vet-tabs -vet-style -strict-style -warnings-as-errors || exit 1; done
 
+# Check that every docs/<path>.md#<section> link in the source, the justfile and the docs resolves to a heading
+docs-check:
+    python -I tools/check_docs.py .
+
 fmt:
     odinfmt lib src samples -w
 
@@ -320,7 +324,7 @@ fmt:
 # The cooker's tests compile shaders, so they need DXC.
 test: luau compressonator meshoptimizer link-schema install-dxc
     for p in lib/core lib/core/layout lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
-    # The optional direct field access path must behave the same (see docs/scripting.md#direct-field-access).
+    # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     dotnet test src/editor
 

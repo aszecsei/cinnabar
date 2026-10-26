@@ -1,4 +1,4 @@
-// Ambient occlusion (see docs/rendering.md#ambient-occlusion): ground-truth ambient occlusion (GTAO, after Jimenez et
+// Ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion): ground-truth ambient occlusion (GTAO, after Jimenez et
 // al.) from gtao_depth.hlsl's depth levels and the prepass's normals. Each pixel searches a few slices around the view
 // direction for the highest horizon on each side, and integrates the cosine-weighted visible arc between them. It also
 // writes how much each of its four neighbors is on its surface, for gtao_denoise.hlsl. After XeGTAO's XeGTAO_MainPass

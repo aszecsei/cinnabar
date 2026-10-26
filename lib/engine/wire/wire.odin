@@ -1,5 +1,5 @@
 // Package wire is the transport of the editor link and the cook link: the framing, the wire format, and the schema
-// that the editor's C# is generated from (see docs/editor.md#editor-link). Each link gives a union of messages, and a
+// that the editor's C# is generated from (see docs/editor/link.md#editor-link). Each link gives a union of messages, and a
 // message's kind is its index in the union, from 1. It imports nothing from core or engine.
 package wire
 

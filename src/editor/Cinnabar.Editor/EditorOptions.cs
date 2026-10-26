@@ -15,13 +15,13 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// <summary>Materials and material functions to open in the material editor, by their files' full paths.</summary>
     public IReadOnlyList<string> MaterialPaths { get; init; } = [];
 
-    /// <summary>The project's settings file, which the game reads (see docs/architecture.md#project-settings).</summary>
+    /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
     public string ProjectPath { get; init; } = Path.GetFullPath(Path.Combine("samples", "mygame", "project.settings"));
 
-    /// <summary>Where autosaves go (see docs/editor.md#crash-recovery).</summary>
+    /// <summary>Where autosaves go (see docs/editor/processes-and-projects.md#crash-recovery).</summary>
     public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
 
-    /// <summary>How the editor runs the cook daemon (see docs/editor.md#processes). The defaults are the repository's.</summary>
+    /// <summary>How the editor runs the cook daemon (see docs/editor/processes-and-projects.md#processes). The defaults are the repository's.</summary>
     public CookOptions Cook { get; init; } = new(
         Path.GetFullPath(Path.Combine("build", "cook.exe")),
         Path.GetFullPath(Path.Combine("build", "cache")),

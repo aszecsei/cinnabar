@@ -1,5 +1,5 @@
 // The C API that tools/cook calls to block-compress a texture's mip with Compressonator's CMP_Core, whose own API is
-// C++ and compresses one 4x4 block at a time. See docs/content-pipeline.md#textures.
+// C++ and compresses one 4x4 block at a time. See docs/content/kinds/textures.md#textures.
 
 #include <algorithm>
 #include <cstdint>

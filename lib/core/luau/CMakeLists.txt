@@ -1,4 +1,4 @@
-# Builds vendor/luau for cinnabar. See docs/scripting.md#embedding.
+# Builds vendor/luau for cinnabar. See docs/scripting/embedding.md#embedding.
 #
 # The justfile configures this project twice:
 # - CINNABAR_LUAU_SHARED=ON builds luau.dll, which the development host and the game DLL share.
@@ -24,7 +24,7 @@ endforeach()
 
 add_subdirectory(../../../vendor/luau luau EXCLUDE_FROM_ALL)
 
-# The C API with longjmp errors, as the Odin bindings expect (see docs/scripting.md#embedding).
+# The C API with longjmp errors, as the Odin bindings expect (see docs/scripting/embedding.md#embedding).
 if(CINNABAR_LUAU_SHARED)
     set(export "__declspec(dllexport)")
 else()

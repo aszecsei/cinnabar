@@ -11,7 +11,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 
-// The viewport tools' game side (see docs/editor.md#viewport). The editor sends its camera, its selection and its
+// The viewport tools' game side (see docs/editor/viewport.md#viewport). The editor sends its camera, its selection and its
 // gizmo, and the game draws the frame from that camera with add_viewport_passes after its own passes: an outline
 // around the selection and the gizmo over the frame. The game's scene pass also writes an entity ID buffer, and a
 // pick reads it and the depth, and copies the result to the CPU.
@@ -28,7 +28,7 @@ PICK_HEADER :: 16
 @(private)
 PICK_RESULTS_SIZE :: PICK_HEADER + ecs.MAX_ENTITIES / 8
 
-// The tools' shaders are engine content (see docs/content-pipeline.md#shaders).
+// The tools' shaders are engine content (see docs/content/kinds/shaders.md#shaders).
 @(private)
 PICK_SHADER :: #load("../content/shaders/pick.hlsl.meta", string)
 @(private)
@@ -67,7 +67,7 @@ Viewport :: struct {
 Viewport_Frame :: struct {
 	view:   render.View,
 	size:   [2]u32,
-	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering.md#debug).
+	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering/layers-and-output.md#debug).
 	target: render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
 	ids:    render.Texture,
@@ -541,7 +541,7 @@ pick_result :: proc(w: ^ecs.World, request: link.Pick_Request, words: []u32, nea
 	depth: f32
 	submesh: i32 = -1
 	if request.width <= 1 && request.height <= 1 && render.id_entity(words[1]) != 0 {
-		// The view model's pixels have the view model's near plane (see docs/rendering.md#view-model).
+		// The view model's pixels have the view model's near plane (see docs/rendering/layers-and-output.md#view-model).
 		depth = render.view_depth(transmute(f32)words[2], words[3] & render.VIEW_MODEL_STENCIL != 0 ? view_model_near : near)
 		submesh = i32(render.id_submesh(words[1]))
 	}

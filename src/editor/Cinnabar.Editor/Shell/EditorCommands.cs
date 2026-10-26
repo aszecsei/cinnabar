@@ -364,7 +364,7 @@ static class EditorCommands
     }
 
     // The game in its own window, and the project's output mode, which shows only there (see
-    // docs/architecture.md#project-settings).
+    // docs/overview/architecture.md#project-settings).
     static void RegisterGameWindow(EditorShell shell)
     {
         var commands = shell.Commands;
@@ -393,7 +393,7 @@ static class EditorCommands
         });
     }
 
-    // The viewport's rendering (see docs/editor.md#viewport): what it shows in place of the lit scene, the features
+    // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features
     // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
     static void RegisterRendering(EditorShell shell)
     {

@@ -1,4 +1,4 @@
-// The global illumination's gather (see docs/rendering.md#global-illumination): each pixel takes its indirect light
+// The global illumination's gather (see docs/rendering/global-illumination.md#global-illumination): each pixel takes its indirect light
 // from the merged cascades. Its diffuse light is the cosine-weighted mean of the first cascade's directions around its
 // normal, and its specular light the second cascade's along its reflection, blended between directions, each at the four probes around it, weighted
 // by how near they are, whether they are on the same surface (see probe_weight) and how alike their normals are. Then both blend into their histories, found by the velocity,

@@ -13,9 +13,9 @@ import "cinnabar:engine/ecs"
 // cannot hang the frame.
 MAX_EVENT_ROUNDS :: 16
 
-// run_phase is the script phase (phase 5 and 6 in docs/architecture.md#frame), in Unity's order: despawns and
+// run_phase is the script phase (phase 5 and 6 in docs/overview/architecture.md#frame), in Unity's order: despawns and
 // activity changes, awake and start, events, update, coroutines, and the scripts' structural changes. See
-// docs/scripting.md#frame.
+// docs/scripting/behaviours.md#frame.
 run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	begin_phase(r, dt, input)
 	drain_log(r)
@@ -44,7 +44,7 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 }
 
 // set_quiet stops or starts the callbacks that the world's changes run, as the editor's edit mode does (see
-// docs/editor.md#modes). While quiet, a despawned behaviour, or one that an edit removes, ends without on_disable or
+// docs/editor/document-and-scenes.md#modes). While quiet, a despawned behaviour, or one that an edit removes, ends without on_disable or
 // on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one gets awake and on_enable
 // in the next script phase that runs, and one that was awake gets no on_enable. The script phase itself still runs
 // everything: the game does not run it while quiet.

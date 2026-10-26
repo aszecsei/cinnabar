@@ -1,5 +1,5 @@
 # Builds Compressonator's block compression core, CMP_Core, from vendor/compressonator for tools/cook, with
-# cn_compress.cpp, the C API that the cooker calls (see docs/content-pipeline.md#textures). `just compressonator`
+# cn_compress.cpp, the C API that the cooker calls (see docs/content/kinds/textures.md#textures). `just compressonator`
 # configures it, and puts cn_compressonator.lib in <build dir>/out, where tools/cook/compressonator.odin looks for it.
 #
 # vendor/compressonator is a sparse checkout that holds only what this project builds (see install-compressonator in

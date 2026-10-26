@@ -1,5 +1,5 @@
 // Package asset is the asset runtime: it loads cooked blobs by GUID and keeps them behind generational handles. In
-// development it reloads the blobs that a cook writes again. See docs/content-pipeline.md#loading.
+// development it reloads the blobs that a cook writes again. See docs/content/blobs-and-loading.md#loading.
 package asset
 
 import "core:fmt"
@@ -180,7 +180,7 @@ poll :: proc(a: ^Assets) -> []Handle {
 }
 
 // preview_blob reads a material's blob from the preview area of the cache, <dir>/preview/<guid>.blob, where the cook
-// daemon cooks the editor's unsaved materials (see docs/rendering.md#material-previews), if it is newer than modified.
+// daemon cooks the editor's unsaved materials (see docs/rendering/materials.md#material-previews), if it is newer than modified.
 // The data is in the asset allocator, and the caller frees it.
 preview_blob :: proc(a: ^Assets, guid: format.Guid, modified: i64) -> (data: []byte, newer: i64, changed: bool) {
 	buffer: [32]u8

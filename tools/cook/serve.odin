@@ -15,7 +15,7 @@ import cook_link "cinnabar:engine/asset/cook_link"
 // While the editor is slow to read, log lines beyond this much unsent data are dropped and counted.
 MAX_OUTBOX :: 16 * mem.Megabyte
 
-// Server is the daemon's side of the cook link (see docs/content-pipeline.md#cook-link), as the host serves the editor
+// Server is the daemon's side of the cook link (see docs/content/daemon-and-operations.md#cook-link), as the host serves the editor
 // link. It listens on loopback for one editor at a time. A reader thread queues the editor's messages and wakes the
 // main thread, which handles them between passes. Everything that the daemon sends, the log included, goes into the
 // outbox, and a writer thread sends it.

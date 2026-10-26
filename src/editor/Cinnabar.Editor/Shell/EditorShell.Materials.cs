@@ -7,7 +7,7 @@ using PreviewTarget = Cinnabar.Editor.Link.Protocol.PreviewTarget;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The material editor's documents (see docs/editor.md#material-editor): opening a material or a material function from
+/// The material editor's documents (see docs/editor/material-editor.md#material-editor): opening a material or a material function from
 /// the content browser, each as a document beside the viewport, saving it, and its preview's link to the game.
 /// </summary>
 public sealed partial class EditorShell

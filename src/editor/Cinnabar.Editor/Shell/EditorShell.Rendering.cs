@@ -7,7 +7,7 @@ using LogLevel = Cinnabar.Editor.Panels.LogLevel;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// How the viewport draws (see docs/editor.md#viewport): the debug view, the features that it turns off, the exposure
+/// How the viewport draws (see docs/editor/viewport.md#viewport): the debug view, the features that it turns off, the exposure
 /// offset, and the icons and shapes of lights, volumes and cameras. The game draws them while the editor is linked. The
 /// settings are the user's, in <c>viewport.json</c>, so they stay across sessions.
 /// </summary>

@@ -117,7 +117,7 @@ Asset_Source :: struct {
 	dependencies: [dynamic]format.Guid,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
-	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content-pipeline.md#identity).
+	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content/identity-and-cooking.md#identity).
 	subassets:    [dynamic]Subasset,
 	// For a material, the combinations of static switches that it and its instances use.
 	permutations: int,
@@ -383,7 +383,7 @@ meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_S
 		}
 	}
 	if strings.builder_len(b) == 0 {
-		fmt.sbprintln(&b, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).")
+		fmt.sbprintln(&b, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).")
 	}
 	buffer: [32]u8
 	fmt.sbprintfln(&b, "guid = %s", format.guid_format(guid, &buffer))

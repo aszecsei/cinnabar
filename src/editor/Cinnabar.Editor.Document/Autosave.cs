@@ -4,7 +4,7 @@ using System.Text;
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// Autosaves of dirty scenes (see docs/editor.md#crash-recovery), in one directory, by default
+/// Autosaves of dirty scenes (see docs/editor/processes-and-projects.md#crash-recovery), in one directory, by default
 /// <c>build/editor/autosave/</c>. A scene's autosave is named for its file and a hash of its full path, so two scenes
 /// with one name do not share one. Saving the scene, or discarding its changes, deletes the autosave.
 /// </summary>

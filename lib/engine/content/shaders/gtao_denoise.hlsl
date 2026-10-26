@@ -1,4 +1,4 @@
-// Ambient occlusion's denoiser (see docs/rendering.md#ambient-occlusion): it averages gtao.hlsl's noisy result over
+// Ambient occlusion's denoiser (see docs/rendering/ambient-occlusion.md#ambient-occlusion): it averages gtao.hlsl's noisy result over
 // each pixel's 3x3 neighbors, weighted by how much each is on the pixel's surface, from gtao.hlsl's edges. One pass
 // runs with temporal AA, which averages the rest over time, and two without it. There is no history. After XeGTAO's
 // XeGTAO_Denoise (Copyright (C) 2016-2021, Intel Corporation; SPDX-License-Identifier: MIT).

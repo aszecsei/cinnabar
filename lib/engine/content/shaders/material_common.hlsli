@@ -1,4 +1,4 @@
-// What every material's shaders share (see docs/rendering.md#materials): the frame's constants, the GPU scene's
+// What every material's shaders share (see docs/rendering/materials.md#materials): the frame's constants, the GPU scene's
 // records, the inputs that a material's evaluate reads, and what a shading model is given.
 #ifndef MATERIAL_COMMON_HLSLI
 #define MATERIAL_COMMON_HLSLI
@@ -59,7 +59,7 @@ struct Frame_Constants {
 	// coordinates, which view_projection holds. The velocities leave it out.
 	float2 jitter;
 	// The exposure that pre-exposes the scene's colors: the float at 0 of this buffer (see
-	// docs/rendering.md#post-processing).
+	// docs/rendering/post-processing.md#post-processing).
 	uint exposure;
 	// Whether the fog volume in Material_Push exists, the bilinear sampler that it is read with, and the share of the
 	// volume's width and height that the screen covers (see fog_at).
@@ -72,7 +72,7 @@ struct Frame_Constants {
 	uint ltc_matrix;
 	uint ltc_amplitude;
 	uint ltc_sampler;
-	// The editor's debug view, a render.Debug_View (see docs/rendering.md#debug-views). The forward pass draws the
+	// The editor's debug view, a render.Debug_View (see docs/rendering/post-processing.md#debug-views). The forward pass draws the
 	// views below; the others come from the frame's textures.
 	uint debug_view;
 };
@@ -109,8 +109,8 @@ float3 heat(float t) {
 
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
 // passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient
-// occlusion in r, the integrated fog volume (see docs/rendering.md#volumetric-fog), and the global illumination's diffuse
-// and specular light (see docs/rendering.md#global-illumination). The transparent pass of moment-based transparency
+// occlusion in r, the integrated fog volume (see docs/rendering/fog.md#volumetric-fog), and the global illumination's diffuse
+// and specular light (see docs/rendering/global-illumination.md#global-illumination). The transparent pass of moment-based transparency
 // also has the moments, and transmittance set, so each surface is dimmed by those in front of it (see
 // material_transparent.hlsli). A compute pass that includes the light loop defines MATERIAL_PUSH as its own push
 // constants, which start with shadow_atlas and shadow_mask.
@@ -235,7 +235,7 @@ struct Light {
 	float3 color;
 };
 
-// An area light that reaches the point (see docs/rendering.md#area-lights): its shape relative to the point, and its
+// An area light that reaches the point (see docs/rendering/lighting-and-shadows.md#area-lights): its shape relative to the point, and its
 // radiance after its range's window and its shadow, which a shading model multiplies by ltc_integral of its lobes.
 // shape is LIGHT_QUAD, LIGHT_DISK or LIGHT_LINE. axis_x and axis_y are a quad's or a disk's half sizes, and axis_x a
 // line's half length, with radius its radius, 0 for an ideal line, whose radiance is per meter of its width.
@@ -261,7 +261,7 @@ static const float PI = 3.14159265;
 
 // world_position is a point's position relative to the render origin, which snaps to a grid of 1024 m, from its
 // position relative to the camera. It stays where it is while the camera moves, and a pattern whose period divides
-// 1024 m goes on without a seam when the origin moves (see docs/rendering.md#gpu-scene).
+// 1024 m goes on without a seam when the origin moves (see docs/rendering/gpu-scene.md#gpu-scene).
 float3 world_position(Material_Inputs inputs) {
 	return inputs.position + frame.origin_offset.xyz;
 }

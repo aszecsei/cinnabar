@@ -13,7 +13,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The outliner (see docs/editor.md#outliner): the entity hierarchy as a virtualized list of the visible rows,
+/// The outliner (see docs/editor/shell-and-panels.md#outliner): the entity hierarchy as a virtualized list of the visible rows,
 /// indented by depth. A tree control with one item per entity would not scale to a large world. Dragging a row onto
 /// another reparents it, and onto the empty space below the rows makes it a root. A row also drags onto an entity
 /// field in the properties panel, and a script from the content browser drags onto a row to add its behaviour. Ctrl and Shift select more than one row. Each row of a scene entity has a toggle that

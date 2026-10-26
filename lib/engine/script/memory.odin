@@ -5,7 +5,7 @@ import "core:c"
 
 import "cinnabar:core/luau"
 
-// Memory by module (see docs/scripting.md#embedding). Each module has a Luau memory category, its index + 1, and
+// Memory by module (see docs/scripting/embedding.md#embedding). Each module has a Luau memory category, its index + 1, and
 // category 0 is the engine. What a module's top level allocates, and what a behaviour's callbacks and coroutines
 // allocate, counts toward the module: a coroutine's thread keeps the category of the code that started it. There are
 // 255 categories for MAX_MODULES modules, so the last module shares the one before it.

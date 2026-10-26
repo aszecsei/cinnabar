@@ -1,5 +1,5 @@
 // The commands that cook the content roots share their options and one pass: a scan of the roots, and then each kind
-// of asset in turn. See docs/content-pipeline.md#cooking.
+// of asset in turn. See docs/content/identity-and-cooking.md#cooking.
 package cook
 
 import "core:fmt"
@@ -123,7 +123,7 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 }
 
 // cook scans the roots and cooks the assets of the kinds whose keys changed. When it writes a blob, it then writes the
-// cache's generation, so a running game swaps the pass's blobs together (see docs/content-pipeline.md#loading). It
+// cache's generation, so a running game swaps the pass's blobs together (see docs/content/blobs-and-loading.md#loading). It
 // logs each problem as it finds it, unless log_problems is false. It cooks the assets in force whatever their keys.
 cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, force: map[format.Guid]bool = nil) -> (pass: Pass) {
 	pass.problems.log = log_problems

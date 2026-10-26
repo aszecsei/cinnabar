@@ -3,7 +3,7 @@ using Wire = Cinnabar.Editor.Link.Protocol;
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// An edit of a scene (see docs/editor.md#document-model). <see cref="Apply"/> changes the document and returns the
+/// An edit of a scene (see docs/editor/document-and-scenes.md#document-model). <see cref="Apply"/> changes the document and returns the
 /// operation that undoes it. The same operation goes to the host as <see cref="ToWire"/>. An operation that does not
 /// fit the document, such as one for an entity that is not there, throws <see cref="InvalidOperationException"/> and
 /// changes nothing.

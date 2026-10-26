@@ -1,5 +1,5 @@
 // The daemon's asset operations: the changes to the content roots that the editor asks for (see
-// docs/content-pipeline.md#asset-operations). Each checks everything first, so it fails without changing anything, or
+// docs/content/daemon-and-operations.md#asset-operations). Each checks everything first, so it fails without changing anything, or
 // does all of it. The daemon then makes a pass, so the index has the change before the editor hears the result.
 package cook
 

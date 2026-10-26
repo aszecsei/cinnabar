@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "cinnabar:engine/ecs"
 
 // View is where a frame is drawn from: a camera's pose and its projection. The camera looks down its +z, with +y up
-// and +x right. The game's camera gives one, and in the editor the editor's camera does (see docs/editor.md#viewport).
+// and +x right. The game's camera gives one, and in the editor the editor's camera does (see docs/editor/viewport.md#viewport).
 View :: struct {
 	position:     ecs.World_Position,
 	// Camera to world.
@@ -15,7 +15,7 @@ View :: struct {
 	vertical_fov: f32,
 	// The near plane's distance in meters. The far plane is at infinity.
 	near:           f32,
-	// The view model's projection (see docs/rendering.md#view-model): its vertical field of view and its near plane.
+	// The view model's projection (see docs/rendering/layers-and-output.md#view-model): its vertical field of view and its near plane.
 	// 0 in either means the view's own.
 	view_model_fov:  f32,
 	view_model_near: f32,

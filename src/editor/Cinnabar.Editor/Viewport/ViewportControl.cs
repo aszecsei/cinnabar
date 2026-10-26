@@ -7,7 +7,7 @@ using Avalonia.Threading;
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
-/// Shows the frames of its <see cref="Session"/> (see docs/editor.md#viewport). On each composition update, it copies
+/// Shows the frames of its <see cref="Session"/> (see docs/editor/viewport.md#viewport). On each composition update, it copies
 /// the newest finished frame into a <see cref="ViewportImage"/> and gives that to its surface.
 /// </summary>
 public sealed class ViewportControl : Control
@@ -183,7 +183,7 @@ public sealed class ViewportControl : Control
             _images.Add(image);
         }
         // The fence says the frame is finished, so the copy reads a complete frame. The host draws into this texture
-        // again only after the editor acknowledges the copy (see docs/editor.md#viewport).
+        // again only after the editor acknowledges the copy (see docs/editor/viewport.md#viewport).
         image.Present(device.Context, frames.Texture(latest), latest, _surface!);
         Session.Presented(latest);
     }

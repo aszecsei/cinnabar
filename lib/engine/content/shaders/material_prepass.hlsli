@@ -1,4 +1,4 @@
-// The prepass of every material (see docs/rendering.md#prepass): depth, the surface's normal and the velocity. The
+// The prepass of every material (see docs/rendering/lighting-and-shadows.md#prepass): depth, the surface's normal and the velocity. The
 // pixel shader evaluates only what the normal and the opacity mask need; DXC drops the rest of evaluate.
 #ifndef MATERIAL_PREPASS_HLSLI
 #define MATERIAL_PREPASS_HLSLI

@@ -1,4 +1,4 @@
-// The fog volume's integration (see docs/rendering.md#volumetric-fog): a thread for each tile walks its froxels from
+// The fog volume's integration (see docs/rendering/fog.md#volumetric-fog): a thread for each tile walks its froxels from
 // the camera outward, and writes for each the light that the fog scatters toward the camera up to the far end of its
 // slice, and the share of light from there that reaches the camera. Each slice integrates its light as the fog dims
 // it, so the result does not depend on the slices' thickness.

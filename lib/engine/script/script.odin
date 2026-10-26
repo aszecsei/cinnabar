@@ -1,5 +1,5 @@
 // Package script is the game side of scripting: the VM's bindings and globals, and running scripts on their own
-// threads. The VM and its heap belong to the host (see cinnabar:core/script, package script_host). See docs/scripting.md.
+// threads. The VM and its heap belong to the host (see cinnabar:core/script, package script_host). See docs/scripting/README.md.
 package script
 
 import "core:c"
@@ -14,7 +14,7 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
-// The watchdog's limit for one resume (see docs/scripting.md#watchdog).
+// The watchdog's limit for one resume (see docs/scripting/embedding.md#watchdog).
 DEFAULT_BUDGET :: 100 * time.Millisecond
 // The incremental collector's work per frame.
 GC_STEP_KB :: 64

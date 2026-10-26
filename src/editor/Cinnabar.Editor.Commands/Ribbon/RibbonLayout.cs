@@ -1,7 +1,7 @@
 namespace Cinnabar.Editor.Commands.Ribbon;
 
 /// <summary>
-/// The ribbon as data: tabs, groups in each tab and items in each group (see docs/editor.md#ribbon). Every item names
+/// The ribbon as data: tabs, groups in each tab and items in each group (see docs/editor/shell-and-panels.md#ribbon). Every item names
 /// commands by ID, so the ribbon has no logic of its own.
 /// </summary>
 public sealed record RibbonLayout(IReadOnlyList<RibbonCategory> Categories, IReadOnlyList<RibbonTab> Tabs)

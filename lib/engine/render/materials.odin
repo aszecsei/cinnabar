@@ -18,7 +18,7 @@ MATERIAL_RETRY_FRAMES :: 60
 // without a material, or with one that cannot draw, draws with.
 DEFAULT_MATERIAL :: #load("../content/materials/default.material.meta", string)
 
-// Materials is the material runtime (see docs/rendering.md#runtime): the materials and instances that the frames
+// Materials is the material runtime (see docs/rendering/materials.md#runtime): the materials and instances that the frames
 // draw, their pipelines, and the textures that a texture parameter without its texture samples. It lives in the
 // Renderer, and holds handles only.
 Materials :: struct {
@@ -53,7 +53,7 @@ Material_Pipeline :: struct {
 	sorted:       bool,
 	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
-	// material, which have no moments (see docs/rendering.md#transparency).
+	// material, which have no moments (see docs/rendering/transparency.md#transparency).
 	over:         [2]gpu.Pipeline,
 }
 
@@ -293,7 +293,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			label = label,
 		},
 		// The view model draws with the bit as its reference, which passes everywhere and sets it. The world draws with
-		// 0, which passes only where the bit is clear (see docs/rendering.md#view-model).
+		// 0, which passes only where the bit is clear (see docs/rendering/layers-and-output.md#view-model).
 		.Prepass = {
 			colors = PREPASS_COLORS,
 			depth_format = DEPTH_FORMAT,

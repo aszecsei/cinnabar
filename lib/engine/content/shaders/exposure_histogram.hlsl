@@ -1,4 +1,4 @@
-// The auto exposure's luminance histogram (see docs/rendering.md#post-processing): each pixel's luminance, without this
+// The auto exposure's luminance histogram (see docs/rendering/post-processing.md#post-processing): each pixel's luminance, without this
 // frame's pre-exposure, counts into one of 256 bins of log2 luminance. Pixels where nothing drew hold the clear color,
 // which is not pre-exposed, so they do not count: the exposure would chase its own scale. Each thread group counts in
 // shared memory, then adds its counts to the histogram, which exposure_adapt.hlsl reads and clears.

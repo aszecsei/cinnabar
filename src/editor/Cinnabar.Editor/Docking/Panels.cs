@@ -5,7 +5,7 @@ using Dock.Model.Mvvm.Controls;
 namespace Cinnabar.Editor.Docking;
 
 /// <summary>
-/// A tool panel (see docs/editor.md#panels). Each panel exists once. Closing it removes it from the layout, and
+/// A tool panel (see docs/editor/shell-and-panels.md#panels). Each panel exists once. Closing it removes it from the layout, and
 /// showing it again puts the same panel back, so its state survives.
 /// </summary>
 public sealed class PanelTool : Tool
@@ -33,7 +33,7 @@ public sealed class PanelTool : Tool
 }
 
 /// <summary>
-/// A material or a material function in the material editor (see docs/editor.md#material-editor): a document beside the
+/// A material or a material function in the material editor (see docs/editor/material-editor.md#material-editor): a document beside the
 /// viewport, which closes, and asks first when it has unsaved changes. The layout file does not keep it.
 /// </summary>
 public sealed class MaterialEditorDocument : Dock.Model.Mvvm.Controls.Document

@@ -4,7 +4,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 
-// Volumetric fog (see docs/rendering.md#volumetric-fog): a froxel volume with the clusters' depth slices, halved. A
+// Volumetric fog (see docs/rendering/fog.md#volumetric-fog): a froxel volume with the clusters' depth slices, halved. A
 // compute pass injects each froxel's density and the light that reaches it, and blends it with last frame's in a
 // history texture. Another integrates the volume along each view ray, and the forward pass dims each pixel by it and
 // adds its light. A last pass fogs the background, where the forward pass drew nothing.

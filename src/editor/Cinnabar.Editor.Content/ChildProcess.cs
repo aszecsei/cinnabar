@@ -6,7 +6,7 @@ using Microsoft.Win32.SafeHandles;
 namespace Cinnabar.Editor.Content;
 
 /// <summary>
-/// A child process of the editor, such as <c>host.exe</c> or the cook daemon (see docs/editor.md#processes). It runs in
+/// A child process of the editor, such as <c>host.exe</c> or the cook daemon (see docs/editor/processes-and-projects.md#processes). It runs in
 /// a Job Object that kills it when the job's handle closes, so it exits with the editor even when the editor crashes.
 /// </summary>
 public sealed partial class ChildProcess : IDisposable

@@ -1,4 +1,4 @@
-// The area lights' linearly transformed cosines (see docs/rendering.md#area-lights). A shading model's shade_area
+// The area lights' linearly transformed cosines (see docs/rendering/lighting-and-shadows.md#area-lights). A shading model's shade_area
 // integrates a lobe over a light's shape with ltc_integral: the lobe is a clamped cosine transformed by a matrix, so its
 // integral over a shape is the cosine's over the shape transformed by the matrix's inverse. ltc_ggx gives the Lit
 // specular's inverse from the tables that tools/ltc_fit fits; the identity gives Lambert's diffuse.

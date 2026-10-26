@@ -1,4 +1,4 @@
-// The passes of a transparent or additive material (see docs/rendering.md#transparency). They draw after the opaque
+// The passes of a transparent or additive material (see docs/rendering/transparency.md#transparency). They draw after the opaque
 // surfaces, test their depth and do not write it. The cooker includes this after material_forward.hlsli for a material
 // with MATERIAL_TRANSPARENT, and MATERIAL_ADDITIVE for an additive one. Each pass draws with vs_forward.
 //   ps_moments: a Transparent material's optical depth and moments, which moment-based transparency adds up.
@@ -30,7 +30,7 @@ Moment_Targets ps_moments(Varyings i, bool front : SV_IsFrontFace) {
 	Material_Inputs inputs = material_inputs(i, front);
 	Surface s = evaluate(inputs);
 	Moment_Targets o;
-	// The overdraw view counts the layers instead (see docs/rendering.md#debug-views).
+	// The overdraw view counts the layers instead (see docs/rendering/post-processing.md#debug-views).
 	if (frame.debug_view == DEBUG_TRANSPARENT_OVERDRAW) {
 		o.b0 = 1;
 		o.moments = 0;

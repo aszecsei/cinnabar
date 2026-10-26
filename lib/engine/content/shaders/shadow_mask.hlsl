@@ -1,4 +1,4 @@
-// Traces the shadow mask (see docs/rendering.md#shadows): for each pixel of the prepass, one ray toward each of up to
+// Traces the shadow mask (see docs/rendering/lighting-and-shadows.md#shadows): for each pixel of the prepass, one ray toward each of up to
 // four lights, against the GPU scene's acceleration structure. Each channel holds one light's result: 1 lit, 0 in
 // shadow. Pixels with no surface are lit.
 #include "cinnabar.hlsli"

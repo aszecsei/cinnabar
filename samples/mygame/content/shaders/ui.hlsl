@@ -25,7 +25,7 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 }
 
 // A HUD panel with rounded corners and an accent stripe on its left, into the UI layer, which is premultiplied and
-// sRGB-encoded, so it blends as the designer's tools do (see docs/rendering.md#ui).
+// sRGB-encoded, so it blends as the designer's tools do (see docs/rendering/layers-and-output.md#ui).
 float4 ps_main(Varyings i) : SV_Target {
 	float2 p = i.position.xy - push.origin;
 	float2 half_size = push.size * 0.5;

@@ -11,7 +11,7 @@ public enum MaterialFileKind
 }
 
 /// <summary>
-/// A value in a node's block (see docs/content-pipeline.md#material-graphs), as the file writes it: numbers, a quoted
+/// A value in a node's block (see docs/content/kinds/materials.md#material-graphs), as the file writes it: numbers, a quoted
 /// string, a bare word, an asset's GUID after <c>$</c>, or a link to another node's output, <c>@node.output</c>.
 /// </summary>
 public abstract record GraphValue
@@ -159,7 +159,7 @@ public sealed record MaterialParam(string Name, string Type, string Value, strin
 public sealed record MaterialSwitch(string Name, bool Default);
 
 /// <summary>
-/// A <c>.material</c> or a <c>.material_function</c> file (see docs/content-pipeline.md#material-graphs): a material's
+/// A <c>.material</c> or a <c>.material_function</c> file (see docs/content/kinds/materials.md#material-graphs): a material's
 /// settings, parameters and static switches, and the graph's nodes. A material whose evaluate is HLSL after a
 /// <c>---</c> line has <see cref="Hlsl"/>, and no nodes.
 /// </summary>

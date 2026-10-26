@@ -5,7 +5,7 @@ import "core:mem"
 import "cinnabar:core/layout"
 
 // A glTF file is a Model asset, which has no blob of its own. Each of its meshes is a Mesh sub-asset with its own blob
-// (see docs/content-pipeline.md#meshes). MESH_KIND names them in .meta files.
+// (see docs/content/kinds/meshes.md#meshes). MESH_KIND names them in .meta files.
 MESH_KIND :: "mesh"
 
 // Meshlets hold at most this many vertices and triangles, which mesh shaders can draw in one group.
@@ -79,7 +79,7 @@ mesh_attribute_stride :: proc "contextless" (flags: Mesh_Flags) -> u32 {
 	return stride
 }
 
-// Mesh_Blob is the start of a mesh blob (see docs/content-pipeline.md#blob-format). Each stream starts at BLOB_ALIGN,
+// Mesh_Blob is the start of a mesh blob (see docs/content/blobs-and-loading.md#blob-format). Each stream starts at BLOB_ALIGN,
 // so it can stream straight into a GPU buffer.
 Mesh_Blob :: struct {
 	header:            Blob_Header,

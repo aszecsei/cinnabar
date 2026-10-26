@@ -6,7 +6,7 @@ import "core:log"
 import "core:strings"
 
 // Problem is an error or a warning of a cook, in a file: an asset's source or .meta file, or another file such as the
-// definition file. The daemon gives each asset the problems in its files (see docs/content-pipeline.md#cook-daemon).
+// definition file. The daemon gives each asset the problems in its files (see docs/content/daemon-and-operations.md#cook-daemon).
 Problem :: struct {
 	// Absolute, with forward slashes. Empty for a problem that is in no file.
 	file:   string,

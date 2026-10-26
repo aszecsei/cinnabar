@@ -4,7 +4,7 @@ using SetHidden = Cinnabar.Editor.Link.Protocol.SetHidden;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// Visibility and lock (see docs/editor.md#outliner): the entities that the user hid, which the game does not draw,
+/// Visibility and lock (see docs/editor/shell-and-panels.md#outliner): the entities that the user hid, which the game does not draw,
 /// and the ones that the user locked, which the viewport does not pick. Both apply to an entity's descendants too.
 /// They are the editor's own state, by scene ID: they change neither the scene nor the game's Disabled, and the editor
 /// keeps them for each user and each scene in <c>scene-views.json</c>.

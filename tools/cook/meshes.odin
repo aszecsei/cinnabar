@@ -1,7 +1,7 @@
 // Models are .gltf and .glb files, read with cgltf. A model is a file of meshes: each glTF mesh is a Mesh sub-asset,
 // in its own space, or with combine = true the whole default scene is one. The cooker converts them to the engine's
 // axes, welds and orders their vertices, and builds their meshlets with meshoptimizer (see meshoptimizer.odin). See
-// docs/content-pipeline.md#meshes.
+// docs/content/kinds/meshes.md#meshes.
 package cook
 
 import "core:c"

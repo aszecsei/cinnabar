@@ -8,7 +8,7 @@ import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 
-// Material previews (see docs/rendering.md#material-previews): the editor's material editor shows a material on a mesh,
+// Material previews (see docs/rendering/materials.md#material-previews): the editor's material editor shows a material on a mesh,
 // which the game draws into a shared target of its own with the renderer. A preview draws when what it shows changes,
 // or every frame while its material reads the time, and a frame draws at most one preview, in turn.
 

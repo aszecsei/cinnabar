@@ -8,11 +8,11 @@ import "cinnabar:core/gpu"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
-// The GPU scene (see docs/rendering.md#gpu-scene): every Mesh_Renderer's instance at a stable slot of a persistent
+// The GPU scene (see docs/rendering/gpu-scene.md#gpu-scene): every Mesh_Renderer's instance at a stable slot of a persistent
 // buffer, its pose relative to a render origin that snaps to a 1024 m grid. Each frame writes every slot, then culls
 // each submesh of each instance on the GPU, for the camera, the view model and each shadow view, into the bin of its
 // material's pipelines. The view model's instances are relative to the camera, not the origin (see
-// docs/rendering.md#view-model). The prepass, the shadow maps and the forward pass each draw a bin with one indirect draw.
+// docs/rendering/layers-and-output.md#view-model). The prepass, the shadow maps and the forward pass each draw a bin with one indirect draw.
 
 // The render origin snaps to cells of 1024 m: 2^34 units of 2^-24 m.
 ORIGIN_CELL_BITS :: 34
@@ -98,7 +98,7 @@ Material_Push :: struct {
 	gi_diffuse:        u32,
 	gi_specular:       u32,
 	// Moment-based transparency's moments, which its transparent pass reads with transmittance set (see
-	// docs/rendering.md#transparency).
+	// docs/rendering/transparency.md#transparency).
 	moments_zeroth:    u32,
 	moments:           u32,
 	transmittance:     u32,
@@ -223,7 +223,7 @@ Gpu_Scene :: struct {
 
 // Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
 // the forward pass draw, those of moment-based transparency, and the sorted transparent and additive draws, a bin for
-// each item, back to front (see docs/rendering.md#transparency).
+// each item, back to front (see docs/rendering/transparency.md#transparency).
 Bin_Group :: enum u8 {
 	Opaque,
 	Moments,
@@ -790,7 +790,7 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 // VIEW_CAMERA). A bin whose pipeline is not compiled yet draws nothing. The forward and transparent passes push the
 // frame's textures. The sorted transparent draws blend over the scene, a two-sided one's back faces first. Every pass
 // but the shadow maps' draws with the view model's stencil bit as the reference: set for the view model, clear for the
-// world (see docs/rendering.md#view-model).
+// world (see docs/rendering/layers-and-output.md#view-model).
 @(private)
 draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque) {
 	sf := f.scene_frame

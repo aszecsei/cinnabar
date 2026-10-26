@@ -1,6 +1,6 @@
-// The output pass (see docs/rendering.md#output): it adds bloom to the scene, tone maps it through the lookup table
+// The output pass (see docs/rendering/layers-and-output.md#output): it adds bloom to the scene, tone maps it through the lookup table
 // into sRGB-encoded colors, blends the UI and then the debug layer over it as sRGB-encoded values, and writes the frame
-// target, encoded for its output mode (see docs/rendering.md#hdr-output). In HDR, the colors are relative to paper
+// target, encoded for its output mode (see docs/rendering/layers-and-output.md#hdr-output). In HDR, the colors are relative to paper
 // white, so the UI's white is paper white, and the scene's go above 1.
 #include "tone_lut.hlsli"
 
@@ -21,7 +21,7 @@ struct Push {
 	uint lut_hdr;
 	uint mode;
 	float paper_white;
-	// The scene holds a debug view's colors as they are (see docs/rendering.md#debug-views): no tone mapping.
+	// The scene holds a debug view's colors as they are (see docs/rendering/post-processing.md#debug-views): no tone mapping.
 	uint raw;
 };
 CN_PUSH_CONSTANTS(Push, push);

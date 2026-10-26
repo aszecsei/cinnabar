@@ -23,7 +23,7 @@ Shader_Target :: enum u32 {
 	DXIL,
 }
 
-// Shader_Blob is the start of a shader blob (see docs/content-pipeline.md#blob-format).
+// Shader_Blob is the start of a shader blob (see docs/content/blobs-and-loading.md#blob-format).
 Shader_Blob :: struct {
 	header:      Blob_Header,
 	// Shader_Entry records, sorted by stage and then target.

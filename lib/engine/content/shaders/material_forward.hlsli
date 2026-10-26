@@ -1,4 +1,4 @@
-// The forward pass of every material (see docs/rendering.md#materials). It draws after the prepass with an Equal depth
+// The forward pass of every material (see docs/rendering/materials.md#materials). It draws after the prepass with an Equal depth
 // test, so each pixel shades once. The cooker includes it after the shading model, the Params struct and the
 // material's evaluate, with these defined:
 //   MATERIAL_TWO_SIDED, MATERIAL_MASKED and MATERIAL_CUTOFF: the material's settings.
@@ -43,7 +43,7 @@ static const float3 CASCADE_COLORS[5] = {float3(1, 0.3, 0.3), float3(0.3, 1, 0.3
 // light that it scatters toward the camera times scatter: an additive surface adds none, since the fog's light is
 // already in front of what it adds to.
 float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatter) {
-	// The debug views (see docs/rendering.md#debug-views). A dynamic branch on the frame's constant, so they need no
+	// The debug views (see docs/rendering/post-processing.md#debug-views). A dynamic branch on the frame's constant, so they need no
 	// permutations.
 	uint debug_view = frame.debug_view;
 	if (debug_view == DEBUG_ALBEDO) {

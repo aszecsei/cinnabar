@@ -1,4 +1,4 @@
-// The shader side of the fixed root signature. See docs/gpu.md#binding-model.
+// The shader side of the fixed root signature. See docs/gpu/interface.md#binding-model.
 #ifndef CINNABAR_HLSLI
 #define CINNABAR_HLSLI
 

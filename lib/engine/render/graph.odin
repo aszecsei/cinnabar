@@ -1,5 +1,5 @@
 // Package render is the render frontend. Its render graph culls unused passes, creates transient textures and
-// records every barrier. See docs/gpu.md#render-graph.
+// records every barrier. See docs/gpu/render-graph.md#render-graph.
 package render
 
 import "base:runtime"
@@ -232,7 +232,7 @@ History :: struct {
 }
 
 // history_texture adds a pair of textures that the graph's cache keeps between frames and swaps every frame, as
-// temporal passes need (see docs/gpu.md#render-graph). A pass writes current in shaders, and the pass after it may
+// temporal passes need (see docs/gpu/render-graph.md#render-graph). A pass writes current in shaders, and the pass after it may
 // read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
 // Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history, or when
 // desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
@@ -253,13 +253,13 @@ create_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> Texture {
 }
 
 // pieces splits a large pass across jobs. The pieces of a render pass are one render pass on the GPU: the first
-// piece loads or clears the attachments, and the last one stores them (see docs/gpu.md#split-passes).
+// piece loads or clears the attachments, and the last one stores them (see docs/gpu/command-buffers.md#split-passes).
 add_render_pass :: proc(g: ^Graph, name: string, execute: Pass_Proc, data: rawptr = nil, pieces := 1) -> Pass {
 	return add_pass(g, name, .Render, execute, data, pieces, .Graphics)
 }
 
 // A compute pass on the Compute queue runs alongside graphics work (async compute). The graph orders it against
-// the graphics passes that share its resources (see docs/gpu.md#queues).
+// the graphics passes that share its resources (see docs/gpu/queues-streaming-readback.md#queues).
 add_compute_pass :: proc(
 	g: ^Graph,
 	name: string,

@@ -1,7 +1,7 @@
 --!strict
 -- The engine prelude: Behaviour.define and Field. The runtime runs it once at init, and tools/cook runs it to read the
 -- fields of each behaviour, so both see the same classes. native holds the engine's procedures. The cooker's raise an
--- error, because a module's top level must not call into the engine. See docs/scripting.md#behaviours.
+-- error, because a module's top level must not call into the engine. See docs/scripting/behaviours.md#behaviours.
 local native = ...
 
 local Field = {}

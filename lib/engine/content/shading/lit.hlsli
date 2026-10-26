@@ -1,5 +1,5 @@
 // The Lit shading model (lit.shading): metallic and roughness, GGX specular with Smith visibility and Schlick's
-// Fresnel, and Lambert diffuse. See docs/rendering.md#shading-models.
+// Fresnel, and Lambert diffuse. See docs/rendering/materials.md#shading-models.
 
 float3 lit_f0(Surface s) {
 	return lerp(0.04, s.base_color, s.metallic);

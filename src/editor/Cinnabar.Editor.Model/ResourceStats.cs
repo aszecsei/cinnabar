@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Model;
 public readonly record struct FrameSample(double AverageMs, double MaxMs, double WorkMs);
 
 /// <summary>
-/// What the resource monitor shows (see docs/editor.md#resource-monitor): the host's and the game's latest stats, and
+/// What the resource monitor shows (see docs/editor/shell-and-panels.md#resource-monitor): the host's and the game's latest stats, and
 /// the frame times of the last minute. It changes only from link messages.
 /// </summary>
 public sealed class ResourceStats

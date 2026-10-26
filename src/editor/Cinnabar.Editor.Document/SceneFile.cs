@@ -10,7 +10,7 @@ public sealed record SceneProblem(int Line, string Message, bool IsError)
 }
 
 /// <summary>
-/// Reads and writes scene files (see docs/editor.md#scenes). The cooker reads the same format with
+/// Reads and writes scene files (see docs/editor/document-and-scenes.md#scenes). The cooker reads the same format with
 /// <c>asset_format.scene_parse</c>, and the two must agree. Writing sorts entities by scene ID and components by ID,
 /// so an edit changes only the lines of the entity that it touches.
 /// </summary>
