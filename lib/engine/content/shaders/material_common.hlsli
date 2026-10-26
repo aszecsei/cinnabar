@@ -88,6 +88,18 @@ static const uint DEBUG_FOG = 4;
 static const uint DEBUG_ALBEDO = 5;
 static const uint DEBUG_LIGHT_COMPLEXITY = 6;
 static const uint DEBUG_SHADOW_CASCADES = 7;
+// From the frame's textures, but the transparent surfaces' moments pass counts their layers for it.
+static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
+
+// load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
+// default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
+// is clamped to the texture, so the default's one texel is read everywhere.
+float4 load_screen(uint index, float2 pixel) {
+	Texture2D<float4> texture = cn_texture(index);
+	uint2 size;
+	texture.GetDimensions(size.x, size.y);
+	return texture.Load(int3(min(uint2(pixel), size - 1), 0));
+}
 
 // heat is a color for a value from 0 to 1: blue, cyan, green, yellow, red.
 float3 heat(float t) {
@@ -98,8 +110,10 @@ float3 heat(float t) {
 // Matches Material_Push in lib/engine/render/scene.odin: the frame's textures, which exist only once the frame's
 // passes record, so the forward pass pushes them. The shadow maps' atlas, the ray-traced shadow mask, the ambient
 // occlusion in r, the integrated fog volume (see docs/rendering.md#volumetric-fog), and the global illumination's diffuse
-// and specular light (see docs/rendering.md#global-illumination). A compute pass that includes the
-// light loop defines MATERIAL_PUSH as its own push constants, which start with shadow_atlas and shadow_mask.
+// and specular light (see docs/rendering.md#global-illumination). The transparent pass of moment-based transparency
+// also has the moments, and transmittance set, so each surface is dimmed by those in front of it (see
+// material_transparent.hlsli). A compute pass that includes the light loop defines MATERIAL_PUSH as its own push
+// constants, which start with shadow_atlas and shadow_mask.
 #ifndef MATERIAL_PUSH
 struct Material_Push {
 	uint shadow_atlas;
@@ -108,6 +122,9 @@ struct Material_Push {
 	uint fog;
 	uint gi_diffuse;
 	uint gi_specular;
+	uint moments_zeroth;
+	uint moments;
+	uint transmittance;
 };
 #define MATERIAL_PUSH Material_Push
 #endif

@@ -37,6 +37,8 @@ Debug_View :: enum u8 {
 	Entity_Ids,
 	// EV100 as heat colors, from -4 to 16.
 	Luminance,
+	// The number of transparent surfaces at each pixel, as heat colors from 1 to 8, which the moments pass counts.
+	Transparent_Overdraw,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -134,6 +136,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.ids
 	case .Luminance:
 		source = f.scene
+	case .Transparent_Overdraw:
+		source = f.moments_zeroth
 	}
 	g := f.graph
 	dv := new(Debug_View_Frame, r.platform.frame_allocator)

@@ -48,6 +48,35 @@ Material_Pipeline :: struct {
 	version:      u32,
 	two_sided:    bool,
 	cast_shadows: bool,
+	blend:        format.Material_Blend,
+	// A Transparent material that draws sorted back to front, not with moment-based transparency.
+	sorted:       bool,
+	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
+	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
+	// material, which have no moments (see docs/rendering.md#transparency).
+	over:         [2]gpu.Pipeline,
+}
+
+// material_group is the bins that a material's draws are in: the opaque ones, which the prepass and the forward pass
+// draw, those of moment-based transparency, or the sorted transparent and additive draws.
+material_group :: proc(p: ^Material_Pipeline) -> Bin_Group {
+	switch {
+	case !format.material_transparent(p.blend):
+		return .Opaque
+	case p.blend == .Transparent && !p.sorted:
+		return .Moments
+	}
+	return .Sorted
+}
+
+@(private)
+material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platform_API) {
+	for pipeline in p.pipelines {
+		platform.gpu_destroy_pipeline(pipeline)
+	}
+	for pipeline in p.over {
+		platform.gpu_destroy_pipeline(pipeline)
+	}
 }
 
 // The prepass's targets: the surface's normal in the world, folded into the octahedron, and the velocity in UV.
@@ -84,10 +113,8 @@ materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 }
 
 materials_destroy :: proc(m: ^Materials, platform: ^core.Platform_API) {
-	for p in m.pipelines[:m.pipeline_count] {
-		for pipeline in p.pipelines {
-			platform.gpu_destroy_pipeline(pipeline)
-		}
+	for &p in m.pipelines[:m.pipeline_count] {
+		material_pipeline_destroy(&p, platform)
 	}
 	for t in m.defaults {
 		platform.gpu_destroy_texture(t)
@@ -231,7 +258,7 @@ material_pipeline :: proc(r: ^Renderer, guid: format.Guid, switches: u32) -> (in
 	if index >= 0 && m.pipelines[index].version == ref_version {
 		return index, true
 	}
-	if format.material_code(data, blob, switches, .Forward, .Vertex) == nil {
+	if format.material_code(data, blob, switches, format.material_main_pass(blob), .Vertex) == nil {
 		return -1, false
 	}
 	if index < 0 {
@@ -286,24 +313,83 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			cull = cull,
 			label = label,
 		},
+		// The transparent passes test the opaque surfaces' depth and write none, where the stencil bit is the
+		// reference's, as the forward pass does. Their depth bias keeps a face in an opaque surface's plane in front of it.
+		.Moments = {
+			colors = MOMENT_COLORS,
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_bias = TRANSPARENT_DEPTH_BIAS,
+			slope_bias = TRANSPARENT_SLOPE_BIAS,
+			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL},
+			cull = cull,
+			label = label,
+		},
+		// Moment-based transparency's: each surface adds its light and its opacity, so the order does not matter.
+		.Transparent = {
+			colors = ACCUMULATED_COLORS,
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_bias = TRANSPARENT_DEPTH_BIAS,
+			slope_bias = TRANSPARENT_SLOPE_BIAS,
+			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL},
+			cull = cull,
+			label = label,
+		},
+		// After post-processing, for the editor: the IDs and the depth of the surfaces wherever they show.
+		.Transparent_Ids = {
+			colors = TRANSPARENT_ID_COLORS,
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_bias = TRANSPARENT_DEPTH_BIAS,
+			slope_bias = TRANSPARENT_SLOPE_BIAS,
+			depth_write = true,
+			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL},
+			cull = cull,
+			label = label,
+		},
 	}
 	for &desc, pass in descs {
 		desc.vertex = format.material_code(data, blob, switches, pass, .Vertex)
 		desc.pixel = format.material_code(data, blob, switches, pass, .Pixel)
 	}
+	sorted := .Sorted in blob.flags
+	over := descs[.Transparent]
+	over.colors = blob.blend == .Additive ? ADDITIVE_COLORS : OVER_COLORS
+	// Only moment-based transparency adds up its transparent pass; the sorted draws blend theirs over the scene.
+	if blob.blend != .Transparent || sorted {
+		descs[.Transparent].vertex = nil
+	}
 	platform := r.platform
 	for desc, pass in descs {
 		// A blob from before the pass existed has no code for it, and draws nothing in it.
-		if desc.vertex == nil {
-			platform.gpu_destroy_pipeline(p.pipelines[pass])
-			p.pipelines[pass] = {}
-		} else if p.pipelines[pass] == {} || !platform.gpu_update_graphics_pipeline(p.pipelines[pass], desc) {
-			platform.gpu_destroy_pipeline(p.pipelines[pass])
-			p.pipelines[pass] = platform.gpu_create_graphics_pipeline(desc)
+		update_pipeline(platform, &p.pipelines[pass], desc)
+	}
+	// Back faces first, which a one-sided material has none of.
+	faces := [2]gpu.Cull_Mode{.Front, .Back}
+	for &pipeline, i in p.over {
+		desc := over
+		desc.cull = faces[i]
+		if i == 0 && !two_sided {
+			desc.vertex = nil
 		}
+		update_pipeline(platform, &pipeline, desc)
 	}
 	p.two_sided = two_sided
 	p.cast_shadows = .Cast_Shadows in blob.flags
+	p.blend, p.sorted = blob.blend, sorted
+}
+
+// update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.
+@(private = "file")
+update_pipeline :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) {
+	if desc.vertex == nil {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = {}
+	} else if pipeline^ == {} || !platform.gpu_update_graphics_pipeline(pipeline^, desc) {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = platform.gpu_create_graphics_pipeline(desc)
+	}
 }
 
 @(private = "file")

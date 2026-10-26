@@ -536,6 +536,7 @@ Debug_View :: enum u8 {
 	Shadow_Mask,
 	Entity_Ids,
 	Luminance,
+	Transparent_Overdraw,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
