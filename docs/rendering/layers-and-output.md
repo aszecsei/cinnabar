@@ -52,7 +52,7 @@ A first-person view model needs its own field of view, and it must never go into
 
 The output pass is one full-screen pass that writes the frame target (`lib/engine/content/shaders/output.hlsl`):
 
-1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](post-processing.md#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. *Later, a separate pass tone maps the scene, and this pass reads it, upscaled to the frame's size if the scene's resolution is lower.*
+1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](post-processing.md#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. With FXAA or SMAA, the tone map pass has done this step already, and this pass reads its anti-aliased result, `Frame.display` (see [Anti-aliasing](anti-aliasing.md#anti-aliasing)). Both take it from `output.hlsli`. *Later, this pass reads it upscaled to the frame's size if the scene's resolution is lower.*
 2. Without the table, encode the color to sRGB. In HDR output, the table's colors are in nits: divide them by paper white and encode them with the sRGB curve, which goes on above 1.
 3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
 4. Write the result, encoded for the output mode (`Frame.output`). In SDR, the frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again. In HDR, the pass decodes it, scales it by paper white and encodes it for the display (see [HDR output](#hdr-output)).

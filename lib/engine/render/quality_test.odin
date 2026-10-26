@@ -7,22 +7,25 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	q := preset_quality(.Ultra, {ray_query = true})
 	settings: Frame_Settings
 	apply_quality(&settings, q)
-	testing.expect(t, !settings.ambient_occlusion.off && !settings.gi.off && !settings.post.no_temporal_aa)
+	testing.expect(t, !settings.ambient_occlusion.off && !settings.gi.off && !settings.post.no_aa)
 	testing.expect_value(t, settings.shadows.level, Quality_Level.Ultra)
 	testing.expect(t, settings.shadows.ray_traced)
 	testing.expect_value(t, settings.fog.level, Quality_Level.Ultra)
+	q.aa = .Smaa
+	apply_quality(&settings, q)
+	testing.expect_value(t, settings.post.aa, Aa_Technique.Smaa)
 
 	// A volume that turned a feature off keeps it off at every quality.
 	settings = {}
-	settings.ambient_occlusion.off, settings.gi.off, settings.post.no_temporal_aa = true, true, true
+	settings.ambient_occlusion.off, settings.gi.off, settings.post.no_aa = true, true, true
 	apply_quality(&settings, q)
-	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_temporal_aa)
+	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 
 	// The quality turns them off too.
 	q.ao.technique, q.gi.technique, q.aa = .Off, .Off, .Off
 	settings = {}
 	apply_quality(&settings, q)
-	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_temporal_aa)
+	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 }
 
 @(test)

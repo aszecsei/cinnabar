@@ -199,6 +199,9 @@ Frame :: struct {
 	scene_scale:              f32,
 	// The tone mapping lookup table (see LUT_SIZE).
 	lut:                      Texture,
+	// The scene tone mapped and anti-aliased by FXAA or SMAA, which the output pass only encodes: zero when the output
+	// pass tone maps the scene itself.
+	display:                  Texture,
 	post:                     ^Post_Frame,
 	ao:                       ^Ao_Frame,
 	// nil without global illumination.
@@ -252,6 +255,11 @@ Output_Push :: struct {
 	paper_white:   f32,
 	// The scene holds a debug view's colors as they are, which the pass only encodes.
 	raw:           u32,
+	// The scene is Frame.display, tone mapped already.
+	tone_mapped:   u32,
+	// The tone map pass's target and its size.
+	output:        u32,
+	size:          [2]u32,
 }
 
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
@@ -447,10 +455,14 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 
 	p = add_render_pass(&g, "output", draw_output, f)
-	read(&g, p, f.scene)
-	read(&g, p, f.lut)
-	if f.bloom != 0 {
-		read(&g, p, f.bloom)
+	if f.display != 0 {
+		read(&g, p, f.display)
+	} else {
+		read(&g, p, f.scene)
+		read(&g, p, f.lut)
+		if f.bloom != 0 {
+			read(&g, p, f.bloom)
+		}
 	}
 	if f.ui != 0 {
 		read(&g, p, f.ui)
@@ -604,9 +616,10 @@ draw_output :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	push := output_push(f, gpu_texture(g, f.scene), f.output.mode)
-	if f.bloom != 0 {
-		push.bloom, push.has_bloom = gpu.read_index(gpu_texture(g, f.bloom)), 1
-		push.scene_scale, push.bloom_scale = f.scene_scale, f.bloom_scale
+	if f.display != 0 {
+		push.scene, push.tone_mapped = gpu.read_index(gpu_texture(g, f.display)), 1
+	} else {
+		tone_map_inputs(f, g, &push)
 	}
 	if f.ui != 0 {
 		push.ui, push.has_ui = gpu.read_index(gpu_texture(g, f.ui)), 1
@@ -614,13 +627,23 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	if f.debug != 0 {
 		push.debug, push.has_debug = gpu.read_index(gpu_texture(g, f.debug)), 1
 	}
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_push_constants(ctx.cb, &push)
+	gpu.cmd_draw(ctx.cb, 3)
+}
+
+// tone_map_inputs gives the output pass's constants, or the tone map pass's, what the frame's tone mapping reads
+// besides the scene: bloom, and the lookup table unless the tone mapping is off or the scene is raw.
+@(private)
+tone_map_inputs :: proc(f: ^Frame, g: ^Graph, push: ^Output_Push) {
+	if f.bloom != 0 {
+		push.bloom, push.has_bloom = gpu.read_index(gpu_texture(g, f.bloom)), 1
+		push.scene_scale, push.bloom_scale = f.scene_scale, f.bloom_scale
+	}
 	if f.post.no_tone_mapping {
 		push.has_lut = 0
 	}
 	push.raw = u32(f.post.raw)
-	gpu.cmd_set_pipeline(ctx.cb, pipeline)
-	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_draw(ctx.cb, 3)
 }
 
 // output_push is the output pass's constants for a scene, which it tone maps through the lookup table once that is

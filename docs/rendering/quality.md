@@ -22,9 +22,9 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `gi.technique` | `Off`, `Screen_Cascades` | The [global illumination](global-illumination.md#global-illumination) |
 | `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
-| `aa` | `Off`, `Taa` | The anti-aliasing (see [Post-processing](post-processing.md#post-processing)) |
+| `aa` | `Off`, `Taa`, `Fxaa`, `Smaa` | The [anti-aliasing](anti-aliasing.md#anti-aliasing) |
 
-- **Each enum lists only what exists.** FXAA, SMAA and the upscalers join their enums when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing.
+- **Each enum lists only what exists.** The upscalers join their enum when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
@@ -87,17 +87,16 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.gi` | `Off`, `Screen_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
 | `quality.fog` | `Low` … `Ultra` |
-| `quality.aa` | `Off`, `Taa` |
+| `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa` |
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
-- **The sample** applies the files' quality when they change. F9 takes the next preset, Shift+F9 turns traced shadows on or off, and Ctrl+F9 takes the next ambient occlusion technique. Each saves the quality to `project.user.settings`, as a settings menu would.
+- **The sample** applies the files' quality when they change. F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, and Alt+F9 the next anti-aliasing technique. Each saves the quality to `project.user.settings`, as a settings menu would.
 
 ## Future work
 
 The phases that follow this one, in order, each worth doing on its own:
 
-- **FXAA and SMAA 1x** as `Aa_Technique`s. Both need the scene tone mapped apart from the output pass, which today tone maps and composites the UI in one; the upscalers need the same split.
-- **Rendering below the frame's resolution** with `render_scale`: a built-in temporal upscaler first, then FSR through the GPU interface, and DLSS and XeSS once their licenses are reviewed. The editor's picking then scales its coordinates.
+- **Rendering below the frame's resolution** with `render_scale`: a built-in temporal upscaler first, then FSR through the GPU interface, and DLSS and XeSS once their licenses are reviewed. The output pass then reads the upscaled scene, as it reads FXAA's and SMAA's (see [Anti-aliasing](anti-aliasing.md#anti-aliasing)), and the editor's picking scales its coordinates.
 - **A script API** (`Render.quality`, `Render.set_quality`, `Render.caps`, `Render.save_quality`) for settings menus in Luau, and a quality drop-down in the editor's viewport that sets `Frame_Desc.quality`.
 - **Levels for the transparency and the bloom**, when their cost shows in a profile.

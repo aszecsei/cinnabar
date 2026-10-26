@@ -17,7 +17,8 @@ GLOBAL_ILLUMINATION_ID :: ecs.Component_Id(48)
 ENVIRONMENT_ID :: ecs.Component_Id(49)
 SHADOWS_ID :: ecs.Component_Id(50)
 
-// Anti_Aliasing is the temporal AA (see docs/rendering/post-processing.md#post-processing).
+// Anti_Aliasing is the anti-aliasing, of the technique that the quality chooses (see
+// docs/rendering/anti-aliasing.md#anti-aliasing): off turns it off.
 Anti_Aliasing :: struct {
 	off: volume.Value(bool),
 }
@@ -197,7 +198,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 	shadows, _ := volume.blend(w, &inf, Shadows)
 	return {
 		post = {
-			no_temporal_aa = aa.off.value,
+			no_aa = aa.off.value,
 			no_bloom = bloom.off.value,
 			bloom_intensity = bloom.intensity.value,
 			exposure_mode = exposure.mode.value,

@@ -19,6 +19,7 @@ Read them in this order the first time.
 | [Global illumination](global-illumination.md) | Screen-space radiance cascades. |
 | [Volumetric fog](fog.md) | The froxel volume. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
+| [Anti-aliasing](anti-aliasing.md) | The quality's techniques: temporal AA, FXAA and SMAA 1x, and the tone map pass before the last two. |
 | [Assets and components](assets.md) | GPU residency, asset fields and the renderer's components. |
 
 ## Overview
@@ -46,11 +47,12 @@ Read them in this order the first time.
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
+| `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |
 | `post_effects.odin` | A game's own post passes at fixed points ([Post effects](post-processing.md#post-effects)) |
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 
@@ -83,7 +85,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 | UI and debug | Separate targets, combined after tone mapping | Tone mapping and exposure do not change them, and the scene can render at a lower resolution than they do. |
 | HDR output | HDR10 by default on a display in HDR, scRGB on request; the tone mapper's SDR result, opened up above a knee to the display's peak | The tone mappers keep their look, and SDR's white, which the UI has, is as bright as Windows shows SDR content. See [HDR output](layers-and-output.md#hdr-output). |
 | Instance positions | Relative to a render origin that snaps to a 1024 m grid, in a persistent GPU scene | See [GPU scene](gpu-scene.md#gpu-scene). |
-| Anti-aliasing | Temporal, no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. |
+| Anti-aliasing | Temporal by default, FXAA or SMAA 1x as the quality chooses; no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. FXAA and SMAA are for a game that does not want temporal AA's blur in motion. See [Anti-aliasing](anti-aliasing.md#anti-aliasing). |
 
 ## Open questions
 
@@ -108,6 +110,8 @@ Each entry names the section that follows it.
 - Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013: the `Lit` shading model's GGX, Smith visibility, Schlick Fresnel and the environment BRDF fit in [Shading models](materials.md#shading-models).
 - Brian Karis, [*High Quality Temporal Supersampling*](https://de45xmedrsdbp.cloudfront.net/Resources/files/TemporalAA_small-59732822.pdf), SIGGRAPH 2014, and Lasse Jon Fuglsang Pedersen, [*Temporal Reprojection Anti-Aliasing in INSIDE*](https://www.gdcvault.com/play/1022970/Temporal-Reprojection-Anti-Aliasing-in), GDC 2016: the velocity dilation, YCoCg clipping and reversible tone map of [Post-processing](post-processing.md#post-processing)'s temporal AA.
 - Jorge Jimenez, [*Next Generation Post Processing in Call of Duty: Advanced Warfare*](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/), SIGGRAPH 2014: the 13-tap downsample with luminance weighting, the tent upsample and the Halton jitter in [Post-processing](post-processing.md#post-processing).
+- Timothy Lottes, [*FXAA*](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf), NVIDIA 2011, and FXAA 3.11: the edge search and subpixel blend of [Anti-aliasing](anti-aliasing.md#fxaa)'s FXAA.
+- Jorge Jimenez, Jose I. Echevarria, Tiago Sousa, Diego Gutierrez, [*SMAA: Enhanced Subpixel Morphological Antialiasing*](https://www.iryoku.com/smaa/), Eurographics 2012, and its [reference implementation](https://github.com/iryoku/smaa): [Anti-aliasing](anti-aliasing.md#smaa)'s SMAA 1x, which includes it as it is.
 - Troy Sobotka, [AgX](https://github.com/sobotka/AgX); Khronos, [PBR Neutral tone mapper](https://github.com/KhronosGroup/ToneMapping); Academy, [ACES](https://github.com/ampas/aces-dev): the tone mappers in the lookup table of [Post-processing](post-processing.md#post-processing).
 - Bart Wronski, [*Volumetric Fog: Unified compute shader based solution to atmospheric scattering*](https://bartwronski.com/publications/), SIGGRAPH 2014, and Sébastien Hillaire, [*Physically Based and Unified Volumetric Rendering in Frostbite*](https://www.ea.com/frostbite/news/physically-based-unified-volumetric-rendering-in-frostbite), SIGGRAPH 2015: the froxel volume, injection, temporal blend and integration of [Volumetric fog](fog.md#volumetric-fog). The phase function is Henyey and Greenstein, 1941.
 - Louis Bavoil, Miguel Sainz, Rouslan Dimitrov, [*Image-Space Horizon-Based Ambient Occlusion*](https://developer.download.nvidia.com/presentations/2008/SIGGRAPH/HBAO_SIG08b.pdf), SIGGRAPH 2008 talk: the horizon tracking of [Ambient occlusion](ambient-occlusion.md#techniques)'s HBAO.

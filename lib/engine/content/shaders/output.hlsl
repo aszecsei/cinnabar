@@ -1,30 +1,9 @@
 // The output pass (see docs/rendering/layers-and-output.md#output): it adds bloom to the scene, tone maps it through the lookup table
 // into sRGB-encoded colors, blends the UI and then the debug layer over it as sRGB-encoded values, and writes the frame
 // target, encoded for its output mode (see docs/rendering/layers-and-output.md#hdr-output). In HDR, the colors are relative to paper
-// white, so the UI's white is paper white, and the scene's go above 1.
-#include "tone_lut.hlsli"
-
-// Matches Output_Push in lib/engine/render/renderer.odin.
-struct Push {
-	uint scene;
-	uint ui;
-	uint debug;
-	uint has_ui;
-	uint has_debug;
-	uint bloom;
-	uint has_bloom;
-	uint lut;
-	uint has_lut;
-	uint sampler_index;
-	float scene_scale;
-	float bloom_scale;
-	uint lut_hdr;
-	uint mode;
-	float paper_white;
-	// The scene holds a debug view's colors as they are (see docs/rendering/post-processing.md#debug-views): no tone mapping.
-	uint raw;
-};
-CN_PUSH_CONSTANTS(Push, push);
+// white, so the UI's white is paper white, and the scene's go above 1. After FXAA or SMAA, the scene is tone mapped
+// already, and the pass blends and encodes it.
+#include "output.hlsli"
 
 struct Varyings {
 	float4 position : SV_Position;
@@ -46,24 +25,7 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 
 float4 ps_main(Varyings i) : SV_Target {
 	int3 pixel = int3(i.position.xy, 0);
-	Texture2D<float4> scene = cn_texture(push.scene);
-	SamplerState linear_clamp = cn_sampler(push.sampler_index);
-	float3 hdr = max(scene.Load(pixel).rgb, 0) * push.scene_scale;
-	if (push.has_bloom != 0) {
-		float2 size;
-		scene.GetDimensions(size.x, size.y);
-		hdr += cn_texture(push.bloom).SampleLevel(linear_clamp, i.position.xy / size, 0).rgb * push.bloom_scale;
-	}
-	// Until the table is baked, a plain roll-off to white.
-	float3 color = encode_srgb(hdr / (1 + hdr));
-	if (push.raw != 0) {
-		color = encode_srgb(saturate(hdr));
-	} else if (push.has_lut != 0) {
-		color = lut_sample(cn_texture(push.lut), linear_clamp, hdr);
-		if (push.lut_hdr != 0) {
-			color = encode_srgb_extended(decode_pq(color) / push.paper_white);
-		}
-	}
+	float3 color = push.tone_mapped != 0 ? cn_texture(push.scene).Load(pixel).rgb : tone_map(i.position.xy);
 	// The UI is premultiplied and sRGB-encoded already, as designers' tools blend.
 	if (push.has_ui != 0) {
 		float4 ui = cn_texture(push.ui).Load(pixel);

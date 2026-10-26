@@ -42,10 +42,14 @@ Gi_Technique :: enum u8 {
 	Screen_Cascades,
 }
 
+// The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
+// added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
+// frame and do not blur in motion.
 Aa_Technique :: enum u8 {
 	Off,
-	// Temporal AA (see docs/rendering/post-processing.md#post-processing).
 	Taa,
+	Fxaa,
+	Smaa,
 }
 
 Shadow_Quality :: struct {
@@ -172,5 +176,6 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.gi.level = q.gi.level
 	settings.gi.off ||= q.gi.technique == .Off
 	settings.fog.level = q.fog
-	settings.post.no_temporal_aa ||= q.aa == .Off
+	settings.post.aa = q.aa
+	settings.post.no_aa ||= q.aa == .Off
 }

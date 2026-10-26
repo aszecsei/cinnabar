@@ -58,7 +58,7 @@ The settings that make the scene's look are settings components on [volumes](../
 
 | Component | Stable ID | Settings |
 |---|---|---|
-| `Anti_Aliasing` | 43 | `off`: no temporal AA |
+| `Anti_Aliasing` | 43 | `off`: no anti-aliasing, of any technique |
 | `Exposure` | 44 | `mode` (Auto or Manual), the manual `exposure`, the `compensation` in stops, and the auto exposure's `range` and `adaptation_speed` |
 | `Tone_Mapping` | 45 | The `tone_mapper`, the grading's `contrast`, `saturation` and `tint`, and HDR output's `paper_white` and `peak` |
 | `Bloom` | 46 | `off`, `intensity` |

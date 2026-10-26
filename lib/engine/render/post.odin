@@ -8,7 +8,8 @@ import "cinnabar:core/gpu"
 
 // Post-processing (see docs/rendering/post-processing.md#post-processing): temporal AA into a history texture, the exposure from a
 // luminance histogram, which pre-exposes the next frame, and bloom, all in linear HDR at the scene's resolution. The
-// output pass then tone maps through a lookup table, which a compute pass bakes when the settings change.
+// output pass then tone maps through a lookup table, which a compute pass bakes when the settings change, or with FXAA
+// or SMAA in temporal AA's place, the tone map pass does before them (see spatial_aa.odin).
 
 // The engine's post-processing shaders, by their .meta files.
 TEMPORAL_AA_SHADER :: #load("../content/shaders/temporal_aa.hlsl.meta", string)
@@ -68,7 +69,9 @@ Exposure_Mode :: enum u8 {
 
 // Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Where 0 would mean nothing, it gives the default.
 Post_Settings :: struct {
-	no_temporal_aa:        bool,
+	// The anti-aliasing's technique, from the quality, and no_aa when a volume or the editor turns it off.
+	aa:                    Aa_Technique,
+	no_aa:                 bool,
 	no_bloom:              bool,
 	// Bloom's share of the final color.
 	bloom_intensity:       f32,
@@ -101,6 +104,7 @@ Post :: struct {
 	histogram:      Shader_Pipeline,
 	adapt:          Shader_Pipeline,
 	tone_lut:       Shader_Pipeline,
+	spatial:        Spatial_Aa,
 	// Bilinear and clamped: the history, bloom's chain and the lookup table read with it.
 	sampler:        gpu.Sampler,
 	// Two floats: the exposure that pre-exposes this frame's scene, then last frame's. The exposure pass writes the
@@ -139,6 +143,12 @@ Grading :: struct {
 Post_Frame :: struct {
 	settings:         Post_Settings,
 	temporal:         bool,
+	// FXAA or SMAA, which run, or Off, and their textures: the tone-mapped scene that they read, and SMAA's edges and
+	// weights.
+	spatial:          Aa_Technique,
+	tone_mapped:      Texture,
+	smaa_edges:       Texture,
+	smaa_weights:     Texture,
 	// The exposure pass runs, and with exposure_auto, the histogram before it.
 	exposure:         bool,
 	exposure_auto:    bool,
@@ -281,6 +291,7 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	zeros: [HISTOGRAM_BINS]u32
 	p.histogram_bins = platform.gpu_create_buffer({size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"}, transmute([]byte)zeros[:])
 	p.lut = platform.gpu_create_texture({size = {LUT_SIZE * LUT_SIZE, LUT_SIZE}, format = LUT_FORMAT, usage = {.Sampled, .Storage}, label = "tone mapping lut"}, nil)
+	spatial_aa_init(&p.spatial, platform)
 }
 
 post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
@@ -293,6 +304,7 @@ post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
 	}
 	platform.gpu_destroy_texture(p.lut)
 	p.lut, p.lut_baked = {}, false
+	spatial_aa_destroy(&p.spatial, platform)
 }
 
 @(private)
@@ -304,6 +316,7 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&p.histogram, r.platform, assets, {label = "exposure histogram"}, force)
 	sync_compute_pipeline(&p.adapt, r.platform, assets, {label = "exposure"}, force)
 	sync_compute_pipeline(&p.tone_lut, r.platform, assets, {label = "tone mapping lut"}, force)
+	sync_spatial_aa_pipelines(r, force)
 }
 
 // pipeline_ready is whether a pipeline is compiled, so a pass that it records does its work. A post pass whose
@@ -352,7 +365,11 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	pf := new(Post_Frame, platform.frame_allocator)
 	f.post = pf
 	pf.settings = settings
-	pf.temporal = !settings.no_temporal_aa && pipeline_ready(platform, &p.temporal_aa)
+	aa := settings.no_aa ? Aa_Technique.Off : settings.aa
+	pf.temporal = aa == .Taa && pipeline_ready(platform, &p.temporal_aa)
+	if spatial_aa_ready(platform, &p.spatial, aa) {
+		pf.spatial = aa
+	}
 	pf.exposure = pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
 	if pf.temporal {
@@ -369,8 +386,8 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 }
 
 // add_post_passes adds the post passes after the world and the before_post hook: temporal AA, whose history becomes
-// Frame.scene, the exposure for the next frame, bloom into Frame.bloom, and the lookup table's bake when the settings
-// or its shader changed.
+// Frame.scene, the exposure for the next frame, bloom into Frame.bloom, the lookup table's bake when the settings or
+// its shader changed, and FXAA or SMAA into Frame.display.
 @(private)
 add_post_passes :: proc(f: ^Frame) {
 	r := f.renderer
@@ -471,6 +488,7 @@ add_post_passes :: proc(f: ^Frame) {
 		write(g, pass, f.lut)
 		p.lut_baked, p.lut_grading, p.lut_version = true, pf.grading, p.tone_lut.version
 	}
+	add_spatial_aa(f)
 }
 
 // groups is the thread groups of a dispatch over a size.

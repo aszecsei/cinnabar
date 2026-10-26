@@ -23,6 +23,7 @@ Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi:           bool,
+	temporal, display:                                  bool,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
 	post:                                               Texture,
@@ -173,6 +174,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
+				rec.temporal, rec.display = f.post.temporal, f.display != 0
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
 				read(f.graph, p, f.ids)
@@ -236,6 +238,33 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expectf(t, record.occlusion == (technique != .Off), "%v: occlusion %v", technique, record.occlusion)
 	}
 	desc.quality = nil
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Each anti-aliasing technique: temporal AA in the scene, FXAA and SMAA into Frame.display, which the output pass
+	// reads tone mapped, and Off neither. A volume or the editor that turns the anti-aliasing off turns every technique
+	// off.
+	r.post.spatial.tone_map.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	r.post.spatial.fxaa.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	smaa := [?]struct {
+		pipeline: ^Shader_Pipeline,
+		format:   gpu.Format,
+	}{{&r.post.spatial.smaa_edges, SMAA_EDGES_FORMAT}, {&r.post.spatial.smaa_weights, SMAA_WEIGHTS_FORMAT}, {&r.post.spatial.smaa_blend, DISPLAY_FORMAT}}
+	for s in smaa {
+		s.pipeline.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = s.format}}, label = "test smaa"})
+	}
+	for technique in Aa_Technique {
+		q := r.quality
+		q.aa = technique
+		desc.quality = &q
+		for disable in ([]Features{{}, {.Temporal_Aa}}) {
+			desc.disable = disable
+			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+			on := disable == {}
+			testing.expectf(t, record.temporal == (on && technique == .Taa), "%v: temporal %v", technique, record.temporal)
+			testing.expectf(t, record.display == (on && (technique == .Fxaa || technique == .Smaa)), "%v: display %v", technique, record.display)
+		}
+	}
+	desc.quality, desc.disable = nil, {}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
 	// HDR output: the frame target changes its format, the output pass draws with the pipeline of that format, and the

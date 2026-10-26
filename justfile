@@ -41,8 +41,8 @@ content_root := "samples/" + game + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
 # What the cooker compiles shaders and materials with: DXC, the directory of the fixed header, cinnabar.hlsli, and the
-# engine's material templates.
-shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/engine/content/shaders"
+# engine's material templates and SMAA's reference shader (vendor/smaa).
+shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/engine/content/shaders --include vendor/smaa"
 cache_dir := build_dir + "/cache"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := build_dir + "/script-types/cinnabar.d.luau"
