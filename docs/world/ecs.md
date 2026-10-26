@@ -53,6 +53,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - A system divides its chunks into batches (4 chunks by default) and starts one job per batch. A system without terms runs as one job.
 - Each system gets a driver job. The driver waits for the systems before it, then starts the batches. All drivers start in run order, so a driver can wait for the counter of an earlier driver at once.
 - Systems are registrations, like queries. Their procedures and names point into the DLL image, so `reload` clears them.
+- Each batch is a profiler zone named after its system, so the editor's profiler shows each system's time ([Profiling](../core/profiling.md#zones)). `register_system` interns the name.
 - The game drives the stages from its frame code:
 
   ```odin

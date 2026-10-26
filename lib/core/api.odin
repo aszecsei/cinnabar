@@ -5,7 +5,9 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/layout"
 import "cinnabar:core/luau"
+import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 
 // Platform_API is everything core provides to the game side (host -> game).
@@ -52,6 +54,10 @@ Platform_API :: struct {
 	jobs_unlock:       proc(mutex: ^jobs.Mutex),
 	// The number of threads that run jobs, including the main thread.
 	jobs_worker_count: proc() -> int,
+
+	// The profiler's zones (see docs/core/profiling.md#zones). Zone through the profile package's front-end, which
+	// compiles to nothing with -define:PROFILE=false: profile.scope(&platform.profile, name).
+	profile: profile.Procs,
 
 	gpu_features:     proc() -> gpu.Features,
 	// The device that the backend chose (see docs/gpu/interface.md#adapter).
@@ -147,8 +153,9 @@ Game_API :: struct {
 	on_reload:   proc(state: rawptr, platform: ^Platform_API),
 	state_size:  proc() -> int,
 	layout_hash: proc() -> u64,
-	// The host refuses a DLL whose GPU command format differs from its own (see docs/gpu/command-buffers.md#command-buffers).
-	gpu_format_hash: proc() -> u64,
+	// The host refuses a DLL whose abi_hash differs from its own: a different GPU command format (see
+	// docs/gpu/command-buffers.md#command-buffers) or Platform_API.
+	abi_hash:    proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
 	script_types:    proc(platform: ^Platform_API) -> string,
@@ -164,6 +171,12 @@ Editor_Message :: struct {
 	kind:    u16,
 	request: u32,
 	payload: []byte,
+}
+
+// abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format and Platform_API's
+// layout.
+abi_hash :: proc() -> u64 {
+	return gpu.format_hash() ~ layout.hash(Platform_API)
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

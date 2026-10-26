@@ -83,6 +83,11 @@ static class DefaultRibbon
                         new ComboBox(EditorCommands.ViewportRenderScale),
                     ]),
                     new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),
+                    new RibbonGroup("Profiler",
+                    [
+                        new LargeButton(EditorCommands.CaptureFrame),
+                        new SmallStack([EditorCommands.CaptureWorstFrame, EditorCommands.RecordZones]),
+                    ]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
             ]);

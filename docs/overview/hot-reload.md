@@ -51,7 +51,7 @@ A code reload is what `just game-dll` gives in the common case. A soft restart h
 1. `core` detects a new DLL build.
 2. At the end of the frame, the host waits until the job system is drained. Background jobs run only host code, so they can continue.
 3. The host loads `mygame_N.dll` and resolves `Game_API`.
-4. The host compares the new GPU command format hash with its own (see [GPU](../gpu/command-buffers.md#command-buffers)). If they differ, the host keeps the old DLL and asks for a restart.
+4. The host compares the new DLL's `abi_hash` with its own: a hash of the GPU command format (see [GPU](../gpu/command-buffers.md#command-buffers)) and of `Platform_API`'s layout. If they differ, the host keeps the old DLL and asks for a restart.
 5. The host compares the new `layout_hash` with the old one. The DLL computes this hash at runtime by walking the type info of `Game_State` (field names, offsets and types).
    - **Same hash:** the host calls `on_reload`. State is kept.
    - **Different hash:** the host calls `shutdown` and then `init` with fresh state. This is a soft restart. The window, the GPU device and the loaded assets stay up. Between the two calls, `core` destroys the GPU resources that the old game left in the `Game` scope (see [GPU](../gpu/resources-and-pipelines.md#resources)).
@@ -67,7 +67,7 @@ When adding a feature that keeps state, ask these in order. The answers are the 
 2. **Does it hold a procedure, a `typeid` or a string literal?** Then it is a registration. Keep it in a table that `on_reload` clears and the game's registration procedure fills again. Examples: `ecs` systems and queries, `script` bindings, `editor` commands, `render` post effects and extractors.
 3. **Does it hold a pointer into a blob, a component or the VM heap?** Blobs are swapped by the asset runtime and component storage moves; hold an asset handle, an `Entity`, or a `lua_ref` instead, and look the data up when you use it.
 4. **Does it hold a GPU resource?** Hold the handle, and give the resource the right scope: `Game` for anything the game creates for itself, `Asset` for resident asset data, `Permanent` only in `core`.
-5. **Is it in a shared package?** Then its layout is compiled into both sides. Changing a `gpu` packet is caught by the format hash; changing `Game_State` by the layout hash. Changing a `link` message changes the protocol version. Nothing else is checked, so keep shared packages small.
+5. **Is it in a shared package?** Then its layout is compiled into both sides. Changing a `gpu` packet or `Platform_API` is caught by the ABI hash; changing `Game_State` by the layout hash. Changing a `link` message changes the protocol version. Nothing else is checked, so keep shared packages small.
 6. **Does a job or a callback run it?** A job must finish within the frame, and a Luau callback must be a host trampoline (see [Scripting](../scripting/embedding.md#host-trampolines)).
 
 ## Future work

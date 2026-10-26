@@ -119,7 +119,7 @@ packets_round_trip :: proc(t: ^testing.T) {
 	defer virtual.arena_destroy(&arena)
 
 	cb := command_buffer(virtual.arena_allocator(&arena))
-	cmd_begin_marker(&cb, "frame")
+	cmd_begin_marker(&cb, "frame", timed = true)
 	cmd_begin_pass(&cb, {{texture = TARGET, load = .Clear, clear = {0.25, 0.5, 0.75, 1}}})
 	cmd_end_pass(&cb)
 	cmd_end_marker(&cb)
@@ -131,6 +131,7 @@ packets_round_trip :: proc(t: ^testing.T) {
 		#partial switch p.kind {
 		case .Begin_Marker:
 			testing.expect_value(t, marker_label(p), "frame")
+			testing.expect(t, marker_timed(p))
 		case .Begin_Pass:
 			pass := payload(p, Begin_Pass)
 			testing.expect_value(t, pass.color_count, 1)
@@ -263,6 +264,16 @@ validate_rules :: proc(t: ^testing.T) {
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {})}, .Bad_Attachment_Count, 0},
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = {}}})}, .Invalid_Texture, 0},
 		{proc(cb: ^Command_Buffer) {cmd_end_marker(cb)}, .End_Marker_Without_Begin, 0},
+		{
+			proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}); cmd_begin_marker(cb, "a", timed = true); cmd_end_marker(cb); cmd_end_pass(cb)},
+			.None,
+			4,
+		},
+		{
+			proc(cb: ^Command_Buffer) {push(cb, .Begin_Marker, Begin_Marker{flags = transmute(Marker_Flags)u16(2)}); cmd_end_marker(cb)},
+			.Unknown_Marker_Flags,
+			0,
+		},
 		{proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a")}, .Unclosed_Marker, 1},
 		{
 			proc(cb: ^Command_Buffer) {cmd_begin_marker(cb, "a"); cmd_begin_pass(cb, {{texture = TARGET}}); cmd_end_marker(cb)},

@@ -7,6 +7,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/luau"
+import "cinnabar:core/profile"
 import "cinnabar:engine/ecs"
 
 // Events delivered in one phase can send more events. Delivery stops after this many rounds, so a loop of events
@@ -17,27 +18,37 @@ MAX_EVENT_ROUNDS :: 16
 // activity changes, awake and start, events, update, coroutines, and the scripts' structural changes. See
 // docs/scripting/behaviours.md#frame.
 run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
+	p := &r.platform.profile
+	profile.scope_text(p, "Script phase", .Frame)
 	begin_phase(r, dt, input)
 	drain_log(r)
+	profile.begin(p, profile.name(p, "Awake", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
 		if .Live in i.flags && .Needs_Awake in i.flags {
 			wake(r, {u32(index), i.generation})
 		}
 	}
+	profile.end(p)
+	profile.begin(p, profile.name(p, "Start", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
 		if effective(&i) && .Started not_in i.flags {
 			i.flags += {.Started}
 			call_method(r, {u32(index), i.generation}, "start")
 		}
 	}
+	profile.end(p)
 	deliver_events(r)
+	profile.begin(p, profile.name(p, "Update", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
 		if effective(&i) && i.flags >= {.Started, .Updates} {
 			luau.pushnumber(r.L, time.duration_seconds(dt))
 			call_method(r, {u32(index), i.generation}, "update", 1)
 		}
 	}
+	profile.end(p)
+	profile.begin(p, profile.name(p, "Coroutines", .Frame))
 	run_coroutines(r)
+	profile.end(p)
 	// Events that update and the coroutines sent are delivered in the same phase.
 	deliver_events(r)
 	end_phase(r)
@@ -148,6 +159,7 @@ queue_event :: proc(r: ^Runtime, L: ^luau.State, first, count: c.int) {
 @(private)
 deliver_events :: proc(r: ^Runtime) {
 	L := r.L
+	profile.scope_text(&r.platform.profile, "Events", .Frame)
 	for round := 0; ; round += 1 {
 		luau.getref(L, r.events)
 		if luau.objlen(L, -1) == 0 {

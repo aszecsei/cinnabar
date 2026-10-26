@@ -60,6 +60,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
 | `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
+| `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
 - `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
@@ -92,6 +93,20 @@ local i = table.find(techniques, q.aa) or 0
 Render.set_quality({ aa = techniques[i % #techniques + 1] })
 Render.save_quality()
 ```
+
+## Profile
+
+Zones of a script's own code in the editor's profiler ([Profiling](../core/profiling.md#zones)). Each callback is already a zone, named after its class, so these split a callback's time further.
+
+| Binding | What it does |
+|---|---|
+| `Profile.begin(name)` | Opens a zone |
+| `Profile.finish()` | Closes the innermost zone that the script opened. With none open, it does nothing |
+| `Profile.zone(name, fn, ...)` | Calls `fn(...)` in a zone and returns its results |
+
+- **Zones end with their callback.** A zone that is still open when the callback returns or a coroutine yields is closed there, marked unbalanced in the profiler, and the first one logs a warning. A zone cannot span a `wait`.
+- **Names are interned**, so a name built from changing values, such as an entity's ID, fills the profiler's name table. Use fixed names.
+- Without the profiler (`-define:PROFILE=false`), the bindings do nothing, and `zone` only calls `fn`.
 
 ## Unity mapping
 

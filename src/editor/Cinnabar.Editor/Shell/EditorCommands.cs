@@ -33,6 +33,9 @@ static class EditorCommands
     public const string Reimport = "content.reimport";
     public const string ResetLayout = "view.resetLayout";
     public const string Stats = "view.stats";
+    public const string CaptureFrame = "profile.captureFrame";
+    public const string CaptureWorstFrame = "profile.captureWorst";
+    public const string RecordZones = "profile.record";
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SelectAll = "edit.selectAll";
@@ -365,6 +368,7 @@ static class EditorCommands
             Icon = "scale",
         });
         RegisterRendering(shell);
+        RegisterProfiler(shell);
         RegisterGameWindow(shell);
     }
 
@@ -407,6 +411,32 @@ static class EditorCommands
         {
             Description = "The render quality on this machine, which replaces the project's. A game's settings menu saves it here, as Custom when it changed single features.",
             Icon = "viewport",
+        });
+    }
+
+    // The profiler (see docs/editor/shell-and-panels.md#profiler): captures of a frame, and whether the host records zones.
+    static void RegisterProfiler(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(CaptureFrame, "Capture Frame", shell.CaptureNextFrame)
+        {
+            Description = "Capture the next frame in the profiler: where each thread and the GPU spent its time.",
+            Icon = "monitor",
+            Shortcut = "Ctrl+Alt+P",
+            CanExecuteWhen = () => shell.Host.Linked,
+        });
+        commands.Register(new Command(CaptureWorstFrame, "Capture Worst Frame", () => shell.CaptureWorstFrame())
+        {
+            Description = $"Capture the longest of the last {EditorShell.WorstOfFrames} frames in the profiler, to find a stutter.",
+            Icon = "monitor",
+            CanExecuteWhen = () => shell.Host.Linked,
+        });
+        commands.Register(new Command(RecordZones, "Record Zones", shell.ToggleProfilerRecording)
+        {
+            Description = "Record the profiler's zones. Off, the host does no profiling work, and captures have no zones.",
+            Icon = "stats",
+            IsCheckedWhen = () => shell.Profiler.Recording,
+            CanExecuteWhen = () => shell.Host.Linked,
         });
     }
 

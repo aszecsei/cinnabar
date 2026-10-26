@@ -96,6 +96,14 @@ declare Debug: {
 	error: (...any) -> (),
 }
 
+-- Zones in the editor's profiler (see docs/scripting/api.md#profile). A zone that is still open when its callback
+-- returns or yields is closed there.
+declare Profile: {
+	begin: (name: string) -> (),
+	finish: () -> (),
+	zone: <A..., R...>(name: string, fn: (A...) -> R..., A...) -> R...,
+}
+
 declare Field: {
 	number: (default: number?) -> FieldSpec,
 	boolean: (default: boolean?) -> FieldSpec,

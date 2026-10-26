@@ -78,6 +78,10 @@ Message :: union {
 	Preview_Target,
 	Preview_Acknowledged,
 	Viewport_Settings,
+	Profile_Summary,
+	Profile_Capture_Request,
+	Profile_Capture,
+	Profile_Recording,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -679,6 +683,156 @@ Host_Stats :: struct {
 	// The adapter's local memory that the process uses, and the budget that the OS gives it, or 0 when unknown.
 	video_memory_used:   u64,
 	video_memory_budget: u64,
+}
+
+// The profiler (see docs/editor/link.md#profile). The host handles every profile message: the zones are its own.
+
+// Profile_Category is profile.Category.
+Profile_Category :: enum u8 {
+	Frame,
+	Wait,
+	Job,
+	System,
+	Script,
+	Render,
+	Gpu,
+	Asset,
+	Editor,
+	User,
+}
+
+Profile_Cost_Kind :: enum u8 {
+	// An ECS system's CPU time, summed over the threads.
+	System,
+	// A behaviour class's CPU time in one callback, without the script callbacks nested in it. detail is the callback.
+	Script,
+	// A render pass's GPU time on one queue.
+	Pass,
+}
+
+// Profile_Callback is profile.Callback, a Script cost's detail.
+Profile_Callback :: enum u16 {
+	None,
+	Awake,
+	Start,
+	Update,
+	On_Enable,
+	On_Disable,
+	On_Destroy,
+	On_Reload,
+	Event,
+	Coroutine,
+}
+
+// Profile_Cost is a cost per frame over a stats interval: per profiled frame for systems and scripts, per frame with
+// GPU times for passes.
+Profile_Cost :: struct {
+	kind:       Profile_Cost_Kind,
+	name:       string,
+	callback:   Profile_Callback,
+	// A Pass's queue: 0 graphics, 1 compute.
+	queue:      u8,
+	calls:      f32,
+	ms_average: f32,
+	// The most in one frame.
+	ms_max:     f32,
+}
+
+// Host to editor, right before each Host_Stats: the profiler's view of the same interval.
+Profile_Summary :: struct {
+	first_frame:     u64,
+	last_frame:      u64,
+	frames:          u32,
+	gpu_frames:      u32,
+	// The frames' time without the main thread's waits for the GPU and the display, which wait is.
+	cpu_ms_average:  f32,
+	cpu_ms_max:      f32,
+	cpu_worst_frame: u64,
+	wait_ms_average: f32,
+	wait_ms_max:     f32,
+	// From each frame's first GPU timestamp to its last.
+	gpu_ms_average:  f32,
+	gpu_ms_max:      f32,
+	gpu_worst_frame: u64,
+	// Zones that the threads' rings had no room for.
+	dropped:         u32,
+	recording:       bool,
+	costs:           []Profile_Cost,
+}
+
+Profile_Capture_Mode :: enum u8 {
+	// The next frame that ends.
+	Next,
+	// The longest of the last count frames.
+	Worst_Recent,
+	// The frame numbered frame, from the recent frames or the pinned worst frames.
+	Frame,
+}
+
+// Editor to host: capture a frame. The host answers with a Profile_Capture with the same id once the frame's GPU
+// times are in.
+Profile_Capture_Request :: struct {
+	id:    u32,
+	mode:  Profile_Capture_Mode,
+	frame: u64,
+	count: u32,
+}
+
+Profile_Name :: struct {
+	text:     string,
+	category: Profile_Category,
+}
+
+Profile_Lane_Kind :: enum u8 {
+	Thread,
+	Gpu_Graphics,
+	Gpu_Compute,
+}
+
+Profile_Lane :: struct {
+	name: string,
+	kind: Profile_Lane_Kind,
+}
+
+// Profile_Zone is a zone's segment on a thread, or a GPU span on a GPU lane.
+Profile_Zone :: struct {
+	// Nanoseconds from the frame's start. A neighbouring frame's zone can start before it.
+	start:    i64,
+	duration: u32,
+	// An index into the capture's names.
+	name:     u16,
+	// The callback of a Script zone, the piece of a split render pass, and 0 otherwise.
+	detail:   u16,
+	lane:     u8,
+	depth:    u8,
+	// profile.Zone_Flags: 1 suspended, 2 resumed, 4 job, 8 unbalanced.
+	flags:    u8,
+	// The fiber's index + 1, which links a zone's segments, or 0.
+	fiber:    u8,
+}
+
+// Host to editor: a captured frame. available is false, with a reason, when the host no longer has the frame.
+Profile_Capture :: struct {
+	id:        u32,
+	frame:     u64,
+	available: bool,
+	reason:    string,
+	frame_ns:  u64,
+	cpu_ns:    u64,
+	wait_ns:   u64,
+	gpu_ns:    u64,
+	// The frame's first and last GPU timestamps, from the frame's start. Both are 0 without GPU times.
+	gpu_begin: i64,
+	gpu_end:   i64,
+	dropped:   u32,
+	names:     []Profile_Name,
+	lanes:     []Profile_Lane,
+	zones:     []Profile_Zone,
+}
+
+// Editor to host: start or stop recording zones.
+Profile_Recording :: struct {
+	recording: bool,
 }
 
 Script_Module_Memory :: struct {

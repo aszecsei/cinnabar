@@ -132,7 +132,7 @@ public sealed class EditorLayout
             VisibleDockables = Factory.CreateList<IDockable>(
                 NewDocumentDock(0.72),
                 new ProportionalDockSplitter(),
-                Tools(BottomDock, Alignment.Bottom, 0.28, "console", "contentBrowser", "resourceMonitor")),
+                Tools(BottomDock, Alignment.Bottom, 0.28, "console", "contentBrowser", "resourceMonitor", "profiler")),
         };
         var main = new ProportionalDock
         {

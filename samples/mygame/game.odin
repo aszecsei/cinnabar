@@ -1213,7 +1213,7 @@ cinnabar_game_api :: proc() -> core.Game_API {
 		on_reload = on_reload,
 		state_size = state_size,
 		layout_hash = layout_hash,
-		gpu_format_hash = gpu.format_hash,
+		abi_hash = core.abi_hash,
 		script_types = script_types,
 		editor_poll = editor_poll,
 	}

@@ -164,7 +164,8 @@ public sealed partial class EditorShell : IDisposable
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));
-        yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats));
+        yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats, CaptureFrame));
+        yield return new PanelTool("profiler", "Profiler", "stats", EditorLayout.BottomDock, () => new ProfilerView(this));
     }
 
     void OnHostStateChanged()
@@ -185,6 +186,10 @@ public sealed partial class EditorShell : IDisposable
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
+            }
+            if (Profiler.Summary != null || Profiler.Status != CaptureStatus.None)
+            {
+                Profiler.Clear();
             }
             if (World.HasWorld)
             {

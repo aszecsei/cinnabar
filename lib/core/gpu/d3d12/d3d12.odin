@@ -12,6 +12,7 @@ import "vendor:directx/dxgi"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/profile"
 
 FRAMES_IN_FLIGHT :: 2
 BACK_BUFFER_COUNT :: 3
@@ -59,6 +60,7 @@ Frame :: struct {
 	op_lists:    [dynamic]^d3d.ICommandList,
 	// end_frame batches each queue's lists here until it must execute them.
 	pending:     [gpu.Queue][dynamic]^d3d.ICommandList,
+	timestamps:  Timestamps,
 }
 
 // Op is one submission: op_lists[first:][:count] on a queue, after the earlier submissions of the wait_for queues.
@@ -88,6 +90,9 @@ dev: struct {
 	fence_event:       win.HANDLE,
 	fence_value:       u64,
 	compute_queue:     ^d3d.ICommandQueue,
+	// The queues' timestamp ticks per second, and the QPC's, for the profiler's GPU spans.
+	timestamp_frequency: [gpu.Queue]u64,
+	qpc_frequency:       win.LARGE_INTEGER,
 	compute_fence:     ^d3d.IFence,
 	compute_value:     u64,
 	frames:            [FRAMES_IN_FLIGHT]Frame,
@@ -175,6 +180,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	init_uploads() or_return
 	init_streaming() or_return
 	init_upscalers()
+	init_timestamps() or_return
 	for &frame in dev.frames {
 		init_upload_ring(&frame.upload) or_return
 	}
@@ -199,6 +205,7 @@ shutdown :: proc() {
 	shutdown_uploads()
 	shutdown_streaming()
 	shutdown_pipelines()
+	shutdown_timestamps()
 	shutdown_resources()
 	shutdown_upscalers()
 	for &frame in dev.frames {
@@ -290,7 +297,10 @@ request_output :: proc(request: gpu.Output_Request) {
 // then records the frame target's transition into the render target layout.
 begin_frame :: proc(size: [2]i32) {
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
+	begin_wait("Wait for GPU")
 	wait_fence(frame.fence_value)
+	profile.end_zone()
+	begin_timestamps(frame)
 	reset_upload_ring(&frame.upload)
 	reset_scratch_pool(&frame.scratch)
 	collect_releases()
@@ -298,7 +308,9 @@ begin_frame :: proc(size: [2]i32) {
 	// In shared mode the window is hidden, and the frame target has the size that the reader asks for.
 	dev.recording = dev.shared_mode || (size.x > 0 && size.y > 0)
 	if !dev.recording {
+		begin_wait("Minimized")
 		time.sleep(MINIMIZED_FRAME_TIME)
+		profile.end_zone()
 		return
 	}
 	if !dev.shared_mode && size != dev.size {
@@ -312,7 +324,9 @@ begin_frame :: proc(size: [2]i32) {
 	if dev.shared_mode {
 		target.resource, target.rtv = begin_shared_frame(size)
 	} else {
+		begin_wait("Wait for swapchain")
 		win.WaitForSingleObjectEx(dev.latency_waitable, 1000, true)
+		profile.end_zone()
 		dev.back_buffer_index = dev.swapchain->GetCurrentBackBufferIndex()
 		target.resource = dev.back_buffers[dev.back_buffer_index]
 		target.rtv = rtv_handle(gpu.MAX_TEXTURES + dev.back_buffer_index)
@@ -321,6 +335,7 @@ begin_frame :: proc(size: [2]i32) {
 	clear(&frame.ops)
 	clear(&frame.op_lists)
 	list := acquire_list(frame, .Graphics)
+	write_timestamp(frame, list, FRAME_BEGIN_TIMESTAMP)
 	texture_barrier(list, target.resource, {.NO_ACCESS}, {.RENDER_TARGET}, {}, {.RENDER_TARGET}, .UNDEFINED, .RENDER_TARGET)
 	finish_streams(list)
 	check(list->Close(), "ICommandList.Close")
@@ -336,6 +351,7 @@ begin_frame :: proc(size: [2]i32) {
 // and drop all of them if any breaks a rule. Call it from the game's frame code or from a job: it waits for the
 // translation jobs.
 submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
+	profile.zone_text("GPU submit", .Render)
 	when ODIN_DEBUG {
 		if err, buffer, packet := gpu.validate_submission(buffers, VALIDATION_RESOURCES, &dev.layouts, queue); err != .None {
 			log.errorf("gpu: command buffer %d, packet %d: %v", buffer, packet, err)
@@ -384,8 +400,9 @@ Translate_Task :: struct {
 @(private = "file")
 translate_job :: proc(data: rawptr) {
 	task := (^Translate_Task)(data)
+	profile.zone(profile.intern("Translate", .Render), u16(task.queue))
 	task.list = acquire_list(task.frame, task.queue)
-	translate(task.list, task.cb)
+	translate(task.list, task.cb, task.frame, task.queue)
 	check(task.list->Close(), "ICommandList.Close")
 }
 
@@ -426,6 +443,7 @@ LIST_TYPE := [gpu.Queue]d3d.COMMAND_LIST_TYPE {
 
 // end_frame executes the frame's uploads and submissions, then presents with vsync.
 end_frame :: proc() {
+	profile.zone_text("Execute", .Render)
 	flush_uploads()
 	flush_streams()
 	if !dev.recording {
@@ -446,6 +464,7 @@ end_frame :: proc() {
 	if dev.shared_mode {
 		end_shared_previews(list)
 	}
+	resolve_timestamps(frame, list)
 	check(list->Close(), "ICommandList.Close")
 
 	// The compute queue starts after the previous frame's end and this frame's uploads, and the graphics queue
@@ -466,6 +485,8 @@ end_frame :: proc() {
 	append(&frame.pending[.Graphics], (^d3d.ICommandList)(list))
 	flush(&e, .Graphics)
 
+	begin_wait("Present")
+	defer profile.end_zone()
 	if dev.shared_mode {
 		end_shared_frame()
 	} else {
@@ -481,6 +502,12 @@ end_frame :: proc() {
 	stamp_releases(dev.fence_value)
 	stamp_readbacks(dev.fence_value)
 	dev.frame_index += 1
+}
+
+// begin_wait opens a zone of time that the main thread waits for the GPU or the display, which is not CPU work.
+@(private)
+begin_wait :: proc(text: string) {
+	profile.begin_zone(profile.intern(text, .Wait), 0)
 }
 
 // Executor runs a frame's submissions. A queue's lists wait in the frame's pending batch until another queue needs

@@ -52,6 +52,27 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			components = {{id = 1, data = {1, 2, 3}}},
 			behaviours = {{class = "Door", enabled = true, fields = {{name = "angle", kind = .Number, number = 90}, {name = "at", kind = .Vector, vector = {1, 2, 3}}}}},
 		},
+		Profile_Summary{
+			first_frame = 10,
+			last_frame = 24,
+			frames = 15,
+			cpu_ms_average = 4.5,
+			gpu_worst_frame = 21,
+			recording = true,
+			costs = {{kind = .Script, name = "Door", callback = .Update, calls = 3, ms_average = 0.25, ms_max = 1}, {kind = .Pass, name = "prepass", queue = 1}},
+		},
+		Profile_Capture_Request{id = 4, mode = .Worst_Recent, count = 60},
+		Profile_Capture{
+			id = 4,
+			frame = 21,
+			available = true,
+			frame_ns = 16_000_000,
+			gpu_begin = -200,
+			names = {{"Game update", .Frame}, {"prepass", .Render}},
+			lanes = {{"Main", .Thread}, {"GPU graphics", .Gpu_Graphics}},
+			zones = {{start = -5, duration = 100, name = 1, detail = 2, lane = 1, depth = 3, flags = 5, fiber = 9}},
+		},
+		Profile_Recording{recording = true},
 	}
 	for message in messages {
 		decoded := round_trip(t, message)

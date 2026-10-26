@@ -39,6 +39,7 @@ Validation_Error :: enum u8 {
 	Bad_Copy,
 	Invalid_Upscaler,
 	Bad_Upscale,
+	Unknown_Marker_Flags,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -163,6 +164,9 @@ validate :: proc(
 			graphics_bound, mesh_bound, compute_bound, ray_tracing_bound = false, false, false, false
 			index_buffer_set = false
 		case .Begin_Marker:
+			if payload(p, Begin_Marker).flags - {.Timed} != {} {
+				return .Unknown_Marker_Flags, packet
+			}
 			marker_depth += 1
 		case .End_Marker:
 			if marker_depth == 0 {

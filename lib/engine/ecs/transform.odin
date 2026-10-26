@@ -3,6 +3,8 @@ package ecs
 import "core:log"
 import "core:math/linalg"
 
+import "cinnabar:core/profile"
+
 // Engine components have small explicit IDs. A hash of a name is practically never this small.
 TRANSFORM_ID :: Component_Id(1)
 LOCAL_TRANSFORM_ID :: Component_Id(2)
@@ -144,6 +146,7 @@ propagate :: proc(w: ^World) {
 	if registry_find(&w.registry, PARENT_ID) == nil {
 		return
 	}
+	profile.scope_text(&w.platform.profile, "Propagate transforms", .Frame)
 	if w.hierarchy_dirty {
 		rebuild_hierarchy(w)
 	}

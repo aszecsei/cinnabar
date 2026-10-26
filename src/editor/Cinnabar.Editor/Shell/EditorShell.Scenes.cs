@@ -411,6 +411,13 @@ public sealed partial class EditorShell
             case Link.Protocol.HostStats host:
                 Stats.Apply(host);
                 return;
+            case Link.Protocol.ProfileSummary summary:
+                Stats.Apply(summary);
+                Profiler.Apply(summary);
+                return;
+            case Link.Protocol.ProfileCapture capture:
+                Profiler.Apply(capture);
+                return;
             case Link.Protocol.PreviewTarget target:
                 OnPreviewTarget(target);
                 return;

@@ -6,6 +6,7 @@ import "core:sync"
 import "core:testing"
 
 import "cinnabar:core/gpu"
+import "cinnabar:core/profile"
 
 // The backend is a singleton, and the test runner runs tests on several threads.
 @(private = "file")
@@ -257,4 +258,56 @@ readback_buffers_are_readable :: proc(t: ^testing.T) {
 	destroy_buffer(readback)
 	_, ok = read_buffer(readback)
 	testing.expect(t, !ok)
+}
+
+when profile.ENABLED {
+	@(test)
+	timed_markers_reach_the_profiler_late :: proc(t: ^testing.T) {
+		arena: virtual.Arena
+		testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+		defer virtual.arena_destroy(&arena)
+
+		sync.guard(&backend_lock)
+		testing.expect(t, profile.init())
+		defer profile.shutdown()
+		testing.expect(t, init(nil, {64, 64}))
+		defer shutdown()
+
+		profile.frame_boundary()
+		begin_frame({64, 64})
+		frame := profile.current_frame()
+		cb := gpu.command_buffer(virtual.arena_allocator(&arena))
+		gpu.cmd_begin_marker(&cb, "pass", timed = true)
+		gpu.cmd_begin_marker(&cb, "untimed")
+		gpu.cmd_begin_marker(&cb, "inner", timed = true)
+		gpu.cmd_end_marker(&cb)
+		gpu.cmd_end_marker(&cb)
+		gpu.cmd_end_marker(&cb)
+		testing.expect(t, submit({cb}, .Compute))
+		end_frame()
+
+		for _ in 0 ..< FRAMES_IN_FLIGHT - 1 {
+			profile.frame_boundary()
+			begin_frame({64, 64})
+			end_frame()
+			_, ready := profile.frame_state(frame)
+			testing.expect(t, !ready)
+		}
+		profile.frame_boundary()
+		begin_frame({64, 64})
+		_, ready := profile.frame_state(frame)
+		testing.expect(t, ready)
+
+		c, _ := profile.capture(frame, context.temp_allocator)
+		testing.expect_value(t, len(c.gpu), 2)
+		if len(c.gpu) == 2 {
+			inner, pass := c.gpu[0], c.gpu[1]
+			testing.expect_value(t, inner.name, profile.intern("inner", .Render))
+			testing.expect_value(t, inner.depth, 1)
+			testing.expect_value(t, pass.depth, 0)
+			testing.expect_value(t, pass.queue, u8(gpu.Queue.Compute))
+			testing.expect(t, pass.start < inner.start && inner.end < pass.end)
+		}
+		testing.expect(t, c.frame.gpu_end > c.frame.gpu_begin)
+	}
 }

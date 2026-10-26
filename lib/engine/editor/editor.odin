@@ -9,6 +9,7 @@ import "core:log"
 import "core:strings"
 
 import "cinnabar:core"
+import "cinnabar:core/profile"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
@@ -120,6 +121,7 @@ destroy :: proc(e: ^Editor) {
 // poll handles the editor's messages and appends the game's messages to out. Call it between frames, outside the
 // script phase. user is the game's own data, which its commands get.
 poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte, user: rawptr = nil) {
+	profile.scope_text(&e.platform.profile, "Editor poll", .Editor)
 	snapshot := false
 	if connection != e.connection {
 		e.connection = connection

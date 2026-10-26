@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:log"
 
 import "cinnabar:core"
+import "cinnabar:core/profile"
 import format "cinnabar:engine/asset/format"
 
 MAX_ASSETS :: 4096
@@ -151,6 +152,7 @@ guid :: proc(a: ^Assets, h: Handle) -> format.Guid {
 // end of the frame, when nothing holds a blob. It checks the blobs only when the cache's generation file changes,
 // which a cook writes after all of its blobs, so every blob of one cook is swapped in the same frame.
 poll :: proc(a: ^Assets) -> []Handle {
+	profile.scope_text(&a.platform.profile, "Assets poll", .Asset)
 	generation := a.platform.file_modified(generation_path(a))
 	if generation == a.cache_generation {
 		return nil
