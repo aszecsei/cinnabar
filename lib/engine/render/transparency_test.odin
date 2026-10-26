@@ -118,6 +118,7 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
 		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "instances"}, nil),
 		platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil),
+		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "mesh arguments"}, nil),
 	}
 	defer for b in buffers {
 		platform.gpu_destroy_buffer(b)
@@ -146,6 +147,7 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		sf.arguments, sf.counts = import_buffer(&g, buffers[0]), import_buffer(&g, buffers[1])
 		sf.draws, sf.instances = import_buffer(&g, buffers[2]), import_buffer(&g, buffers[3])
 		f.exposure = import_buffer(&g, buffers[4])
+		sf.mesh_arguments = import_buffer(&g, buffers[5])
 		f.scene = create_texture(&g, {size = f.size, format = SCENE_FORMAT, label = "scene"})
 		f.ids = create_texture(&g, {size = f.size, format = ID_FORMAT, label = "ids"})
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})

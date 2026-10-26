@@ -133,7 +133,7 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		testing.expect_value(t, len(format.material_variants(data, blob)), 10)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 22)
 		// The off branch reads the time, so the material does too.
 		testing.expect(t, .Reads_Time in blob.flags)
 	}
@@ -281,7 +281,7 @@ previews_cook_unsaved_text_into_the_preview_area :: proc(t: ^testing.T) {
 	testing.expect(t, err == nil)
 	if blob, view_ok := format.material_view(data); view_ok {
 		// The default switches only.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 5)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 11)
 	}
 	// The material's own blob is not cooked by a preview.
 	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/00112233445566778899aabbccddeeff.blob", tree.dir)))

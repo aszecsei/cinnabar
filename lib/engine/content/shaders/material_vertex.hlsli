@@ -1,6 +1,7 @@
 // The vertex side of every material pass (see docs/rendering/materials.md#materials): the draw's vertex, pulled through its
 // draw record, so one indirect draw draws a whole bin, and the inputs that a material's evaluate reads. The prepass
-// and the forward pass place vertices with the same code, so their depths are equal.
+// and the forward pass place vertices with the same code, so their depths are equal, and so does the mesh shader path
+// (see material_mesh.hlsli).
 #ifndef MATERIAL_VERTEX_HLSLI
 #define MATERIAL_VERTEX_HLSLI
 
@@ -20,6 +21,8 @@ struct Material_Vertex {
 	float4 color;
 	uint material;
 	uint id;
+	// On the mesh shader path, its meshlet's index, with its level above MESHLET_DEPTH_SHIFT, for the debug views.
+	uint cluster;
 };
 
 // What every pass but an opaque depth pass interpolates.
@@ -34,6 +37,7 @@ struct Varyings {
 	float4 color : COLOR0;
 	nointerpolation uint material : MATERIAL;
 	nointerpolation uint id : ENTITY;
+	nointerpolation uint cluster : CLUSTER;
 };
 
 float3 transform_point(float4 rows[3], float3 p) {
@@ -47,17 +51,30 @@ float3 transform_direction(float4 rows[3], float3 d) {
 	return float3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
 }
 
-Material_Vertex load_vertex(uint vertex_id) {
-	Draw_Record d = cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
-	Mesh_Record m = cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + (d.mesh & ID_ENTITY_MASK) * sizeof(Mesh_Record));
-	uint corner = d.first_index + vertex_id;
-	uint index;
+Draw_Record load_draw() {
+	return cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
+}
+
+Mesh_Record load_mesh(Draw_Record d) {
+	return cn_buffer(frame.meshes).Load<Mesh_Record>(frame.meshes_offset + (d.mesh & ID_ENTITY_MASK) * sizeof(Mesh_Record));
+}
+
+Instance_Record load_instance(Draw_Record d) {
+	return cn_buffer(frame.instances).Load<Instance_Record>(d.instance * sizeof(Instance_Record));
+}
+
+// draw_index is the mesh's vertex at a corner of the draw's indices.
+uint draw_index(Draw_Record d, Mesh_Record m, uint vertex_id) {
+	uint corner = d.first + vertex_id;
 	if (m.flags & MESH_INDEX32) {
-		index = cn_buffer(m.indices).Load(corner * 4);
-	} else {
-		uint word = cn_buffer(m.indices).Load((corner * 2) & ~3u);
-		index = (corner & 1) != 0 ? word >> 16 : word & 0xffff;
+		return cn_buffer(m.indices).Load(corner * 4);
 	}
+	uint word = cn_buffer(m.indices).Load((corner * 2) & ~3u);
+	return (corner & 1) != 0 ? word >> 16 : word & 0xffff;
+}
+
+// place_vertex is a mesh's vertex, placed by its instance's pose: what both vertex paths draw.
+Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record instance, uint index) {
 	float3 local = cn_buffer(m.positions).Load<float3>(index * 12);
 	ByteAddressBuffer attributes = cn_buffer(m.attributes);
 	uint base = index * m.attribute_stride;
@@ -78,7 +95,6 @@ Material_Vertex load_vertex(uint vertex_id) {
 		color = unpack_unorm8(attributes.Load(offset));
 	}
 
-	Instance_Record instance = cn_buffer(frame.instances).Load<Instance_Record>(d.instance * sizeof(Instance_Record));
 	Material_Vertex v;
 	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
 	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
@@ -90,7 +106,15 @@ Material_Vertex load_vertex(uint vertex_id) {
 	v.color = color;
 	v.material = d.material;
 	v.id = instance.id | (d.mesh & ~ID_ENTITY_MASK);
+	v.cluster = 0;
 	return v;
+}
+
+// load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID.
+Material_Vertex load_vertex(uint vertex_id) {
+	Draw_Record d = load_draw();
+	Mesh_Record m = load_mesh(d);
+	return place_vertex(d, m, load_instance(d), draw_index(d, m, vertex_id));
 }
 
 // clip_position is where every pass places a vertex. It is precise, so each pass computes the same depth.
@@ -111,6 +135,7 @@ Varyings vertex_varyings(Material_Vertex v) {
 	o.color = v.color;
 	o.material = v.material;
 	o.id = v.id;
+	o.cluster = v.cluster;
 	return o;
 }
 

@@ -4,6 +4,7 @@
 #define MATERIAL_PREPASS_HLSLI
 
 #include "material_vertex.hlsli"
+#include "material_mesh.hlsli"
 
 struct Prepass_Varyings {
 	Varyings v;
@@ -18,13 +19,35 @@ struct Prepass_Targets {
 	float2 velocity : SV_Target1;
 };
 
-Prepass_Varyings vs_prepass(uint vertex_id : SV_VertexID) {
-	Material_Vertex v = load_vertex(vertex_id);
+Prepass_Varyings prepass_varyings(Material_Vertex v) {
 	Prepass_Varyings o;
 	o.v = vertex_varyings(v);
 	o.current = o.v.position;
 	o.previous = mul(frame.previous_view_projection, float4(v.previous, 1));
 	return o;
+}
+
+Prepass_Varyings vs_prepass(uint vertex_id : SV_VertexID) {
+	return prepass_varyings(load_vertex(vertex_id));
+}
+
+[outputtopology("triangle")]
+[numthreads(MESHLET_THREADS, 1, 1)]
+void ms_prepass(
+	uint thread : SV_GroupIndex,
+	uint group : SV_GroupID,
+	in payload Cluster_Payload clusters,
+	out vertices Prepass_Varyings vertices[MESHLET_MAX_VERTICES],
+	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
+) {
+	Cluster c = load_cluster(clusters.meshlets[group]);
+	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
+	if (thread < c.vertex_count) {
+		vertices[thread] = prepass_varyings(cluster_vertex(c, thread));
+	}
+	if (thread < c.triangle_count) {
+		triangles[thread] = cluster_triangle(c, thread);
+	}
 }
 
 Prepass_Targets ps_prepass(Prepass_Varyings i, bool front : SV_IsFrontFace) {

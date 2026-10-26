@@ -26,9 +26,9 @@ local caps = Render.caps()
 assert(table.find(caps.aa, "Fsr") and not caps.ray_query and caps.vendor == "Amd")
 
 -- The fields that a change gives, and the others as they were.
-Render.set_quality({ aa = "Fsr", render_scale = 0.5, ao = "Hbao" })
+Render.set_quality({ aa = "Fsr", render_scale = 0.5, ao = "Hbao", lod_error = 2 })
 q = Render.quality()
-assert(q.aa == "Fsr" and q.render_scale == 0.5 and q.ao == "Hbao" and q.shadows == "High" and q.preset == "Custom")
+assert(q.aa == "Fsr" and q.render_scale == 0.5 and q.ao == "Hbao" and q.lod_error == 2 and q.shadows == "High" and q.preset == "Custom")
 
 -- A field that does not exist, or a value that does not fit, raises an error and changes nothing.
 local ok, err = pcall(Render.set_quality, { aa = "Msaa" })

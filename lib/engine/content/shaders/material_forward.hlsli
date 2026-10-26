@@ -10,6 +10,7 @@
 #define MATERIAL_FORWARD_HLSLI
 
 #include "material_vertex.hlsli"
+#include "material_mesh.hlsli"
 #include "material_lighting.hlsli"
 
 // The scene's HDR colors, pre-exposed, and the entity IDs that the editor picks from.
@@ -34,6 +35,25 @@ float4 fog_at(float3 p) {
 
 Varyings vs_forward(uint vertex_id : SV_VertexID) {
 	return vertex_varyings(load_vertex(vertex_id));
+}
+
+[outputtopology("triangle")]
+[numthreads(MESHLET_THREADS, 1, 1)]
+void ms_forward(
+	uint thread : SV_GroupIndex,
+	uint group : SV_GroupID,
+	in payload Cluster_Payload clusters,
+	out vertices Varyings vertices[MESHLET_MAX_VERTICES],
+	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
+) {
+	Cluster c = load_cluster(clusters.meshlets[group]);
+	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
+	if (thread < c.vertex_count) {
+		vertices[thread] = vertex_varyings(cluster_vertex(c, thread));
+	}
+	if (thread < c.triangle_count) {
+		triangles[thread] = cluster_triangle(c, thread);
+	}
 }
 
 // The colors of the directional lights' cascades, and beyond the last.
@@ -61,6 +81,13 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	}
 	if (debug_view == DEBUG_SHADOW_CASCADES) {
 		return CASCADE_COLORS[cascade_at(frame.near / max(i.position.z, 1e-7))] * lambert;
+	}
+	// Vertex pulling draws no meshlets, so its surfaces are all one color, at level 0.
+	if (debug_view == DEBUG_MESHLETS) {
+		return hash_color(i.cluster & ((1u << MESHLET_DEPTH_SHIFT) - 1)) * lambert;
+	}
+	if (debug_view == DEBUG_LOD_DEPTH) {
+		return heat((i.cluster >> MESHLET_DEPTH_SHIFT) / 8.0) * lambert;
 	}
 #if SHADING_HAS_BASE_COLOR
 	if (debug_view == DEBUG_LIGHTING_ONLY) {

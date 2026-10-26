@@ -2,9 +2,11 @@ package cook
 
 import "core:encoding/base64"
 import "core:fmt"
+import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
@@ -189,4 +191,160 @@ octahedral_vectors_round_trip :: proc(t: ^testing.T) {
 	// The bitangent's sign is the second component's lowest bit.
 	testing.expect_value(t, encode_tangent({1, 0, 0, -1}).y & 1, 1)
 	testing.expect_value(t, encode_tangent({1, 0, 0, 1}).y & 1, 0)
+}
+
+// grid_gltf is a mesh of one gently bumpy square of size by size quads, which simplifies into several levels.
+@(private = "file")
+grid_gltf :: proc(size: int) -> string {
+	positions := make([dynamic][3]f32, context.temp_allocator)
+	for y in 0 ..= size {
+		for x in 0 ..= size {
+			fx, fy := f32(x) / f32(size), f32(y) / f32(size)
+			append(&positions, [3]f32{fx, fy, 0.05 * math.sin(fx * 7) * math.cos(fy * 5)})
+		}
+	}
+	indices := make([dynamic]u32, context.temp_allocator)
+	row := u32(size + 1)
+	for y in 0 ..< u32(size) {
+		for x in 0 ..< u32(size) {
+			i := y * row + x
+			append(&indices, i, i + 1, i + row + 1, i, i + row + 1, i + row)
+		}
+	}
+	buffer := make([dynamic]byte, context.temp_allocator)
+	append(&buffer, ..mem.slice_to_bytes(positions[:]))
+	append(&buffer, ..mem.slice_to_bytes(indices[:]))
+	encoded := base64.encode(buffer[:], allocator = context.temp_allocator)
+	position_bytes := len(positions) * 12
+	return fmt.tprintf(
+		`{{
+  "asset": {{"version": "2.0"}},
+  "buffers": [{{"byteLength": %d, "uri": "data:application/octet-stream;base64,%s"}}],
+  "bufferViews": [
+    {{"buffer": 0, "byteOffset": 0, "byteLength": %d}},
+    {{"buffer": 0, "byteOffset": %d, "byteLength": %d}}
+  ],
+  "accessors": [
+    {{"bufferView": 0, "componentType": 5126, "count": %d, "type": "VEC3", "min": [0, 0, -0.05], "max": [1, 1, 0.05]}},
+    {{"bufferView": 1, "componentType": 5125, "count": %d, "type": "SCALAR"}}
+  ],
+  "meshes": [{{"name": "Grid", "primitives": [{{"attributes": {{"POSITION": 0}}, "indices": 1}}]}}],
+  "nodes": [{{"mesh": 0}}],
+  "scenes": [{{"nodes": [0]}}],
+  "scene": 0
+}}`,
+		len(buffer),
+		encoded,
+		position_bytes,
+		position_bytes,
+		len(indices) * 4,
+		len(positions),
+		len(indices),
+	)
+}
+
+// Grid_Mesh is a cooked grid's meshlets, as the tests below read them.
+@(private = "file")
+Grid_Mesh :: struct {
+	data:      []byte,
+	blob:      ^format.Mesh_Blob,
+	meshlets:  []format.Meshlet,
+	vertices:  []u32,
+	triangles: []u32,
+	positions: [][3]f32,
+}
+
+@(private = "file")
+cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", meta}})
+	defer remove_tree(tree)
+	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
+	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
+	testing.expect(t, found)
+	grid.data, grid.blob = mesh_blob(t, tree, guid) or_return
+	grid.meshlets = format.mesh_meshlets(grid.data, grid.blob)
+	grid.vertices = slice.reinterpret([]u32, format.blob_bytes(grid.data, grid.blob.meshlet_vertices))
+	grid.triangles = slice.reinterpret([]u32, format.blob_bytes(grid.data, grid.blob.meshlet_triangles))
+	grid.positions = slice.reinterpret([][3]f32, format.blob_bytes(grid.data, grid.blob.positions))
+	return grid, true
+}
+
+// meshlet_area is the area of a meshlet's triangles.
+@(private = "file")
+meshlet_area :: proc(grid: Grid_Mesh, m: format.Meshlet) -> f32 {
+	area: f32
+	for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
+		corner :: proc(grid: Grid_Mesh, m: format.Meshlet, packed: u32, shift: u32) -> [3]f32 {
+			return grid.positions[grid.vertices[m.vertex_offset + (packed >> shift) & 0xff]]
+		}
+		a, b, c := corner(grid, m, packed, 0), corner(grid, m, packed, 8), corner(grid, m, packed, 16)
+		area += linalg.length(linalg.cross(b - a, c - a)) / 2
+	}
+	return area
+}
+
+@(test)
+cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testing.T) {
+	grid, ok := cook_grid(t, "guid = 00112233445566778899aabbccddeeff\n")
+	if !ok {
+		return
+	}
+	submeshes := format.mesh_submeshes(grid.data, grid.blob)
+	testing.expect_value(t, len(submeshes), 1)
+	testing.expect_value(t, int(submeshes[0].meshlet_count), len(grid.meshlets))
+
+	deepest := 0
+	for m, i in grid.meshlets {
+		testing.expectf(t, m.vertex_count <= format.MESHLET_MAX_VERTICES && m.triangle_count <= format.MESHLET_MAX_TRIANGLES, "meshlet %d has %d vertices and %d triangles", i, m.vertex_count, m.triangle_count)
+		for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
+			testing.expect(t, packed >> 24 == 0 && packed & 0xff < u32(m.vertex_count) && (packed >> 8) & 0xff < u32(m.vertex_count) && (packed >> 16) & 0xff < u32(m.vertex_count))
+		}
+		for v in grid.vertices[m.vertex_offset:][:m.vertex_count] {
+			testing.expect(t, v < grid.blob.vertex_count)
+		}
+		// The submesh's own triangles have no error, and errors grow a level up, so each view draws one level of each
+		// part of the mesh.
+		testing.expect(t, m.depth != 0 || m.error == 0)
+		testing.expectf(t, m.error <= m.parent_error, "meshlet %d's error %v is over its parent's %v", i, m.error, m.parent_error)
+		if i > 0 {
+			testing.expect(t, m.depth >= grid.meshlets[i - 1].depth)
+		}
+		deepest = max(deepest, int(m.depth))
+	}
+	testing.expectf(t, deepest >= 2, "the grid simplified to only %d levels", deepest + 1)
+	testing.expect_value(t, grid.meshlets[len(grid.meshlets) - 1].parent_error, math.F32_MAX)
+
+	// The cut at any threshold is a whole mesh: its area is the grid's, without holes or overlaps.
+	full: f32
+	for m in grid.meshlets {
+		if m.depth == 0 {
+			full += meshlet_area(grid, m)
+		}
+	}
+	for threshold in ([]f32{0, 1e-4, 1e-3, 1e-2, 0.1, math.F32_MAX / 2}) {
+		area: f32
+		triangles := 0
+		for m in grid.meshlets {
+			if m.error <= threshold && m.parent_error > threshold {
+				area += meshlet_area(grid, m)
+				triangles += int(m.triangle_count)
+			}
+		}
+		testing.expectf(t, abs(area - full) < full * 0.02, "the cut at %v has an area of %v, not %v", threshold, area, full)
+		testing.expect(t, triangles > 0)
+	}
+}
+
+@(test)
+without_cluster_lod_meshlets_are_the_mesh_itself :: proc(t: ^testing.T) {
+	grid, ok := cook_grid(t, "guid = 00112233445566778899aabbccddeeff\ncluster_lod = false\n")
+	if !ok {
+		return
+	}
+	triangles := 0
+	for m in grid.meshlets {
+		testing.expect(t, m.depth == 0 && m.error == 0 && m.parent_error == math.F32_MAX)
+		triangles += int(m.triangle_count)
+	}
+	testing.expect_value(t, triangles, int(grid.blob.index_count / 3))
 }

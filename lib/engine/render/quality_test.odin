@@ -49,6 +49,12 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	nan := f32(0)
 	bad.render_scale = nan / nan
 	testing.expect_value(t, clamp_quality(bad, {}).render_scale, 1)
+	// The level of detail's error is a number of pixels within its range, and 1 without one.
+	bad.lod_error = 100
+	testing.expect_value(t, clamp_quality(bad, {}).lod_error, MAX_LOD_ERROR)
+	bad.lod_error = nan / nan
+	testing.expect_value(t, clamp_quality(bad, {}).lod_error, 1)
+	testing.expect_value(t, preset_quality(.Ultra, {}).lod_error, LOD_ERRORS[.Ultra])
 	testing.expect_value(t, clamped.shadows.level, Quality_Level.High)
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)

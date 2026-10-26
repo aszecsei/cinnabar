@@ -39,6 +39,9 @@ Debug_View :: enum u8 {
 	Luminance,
 	// The number of transparent surfaces at each pixel, as heat colors from 1 to 8, which the moments pass counts.
 	Transparent_Overdraw,
+	// The mesh shader path's meshlets, each in a color of its own, and their levels of detail as heat colors to 8.
+	Meshlets,
+	Lod_Depth,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -69,7 +72,11 @@ debug_view_shaded :: proc(view: Debug_View) -> bool {
 
 // debug_view_from_textures is whether a view comes from the frame's textures, not the forward pass.
 debug_view_from_textures :: proc(view: Debug_View) -> bool {
-	return view > .Shadow_Cascades
+	#partial switch view {
+	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth:
+		return false
+	}
+	return true
 }
 
 // apply_debug turns off what a debug view and the disabled features leave out of the frame's settings, and adds the

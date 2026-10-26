@@ -82,11 +82,17 @@ Quality :: struct {
 	// Temporal AA upscales the scene to the frame's size (see docs/rendering/anti-aliasing.md#upscaling); with the
 	// other techniques, the output pass stretches it.
 	render_scale: f32,
+	// The mesh shader path's level of detail: the largest error, in pixels, that a simplified part of a mesh may show,
+	// from MIN_LOD_ERROR to MAX_LOD_ERROR, 0 giving 1 (see docs/rendering/gpu-scene.md#mesh-shader-path).
+	lod_error:    f32,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
 Caps :: struct {
 	ray_query:    bool,
+	// Amplification and mesh shaders, which the opaque passes draw meshlets with (see
+	// docs/rendering/gpu-scene.md#mesh-shader-path).
+	mesh_shaders: bool,
 	vendor:       gpu.Vendor,
 	// The adapter's own memory in bytes, 0 when unknown.
 	video_memory: u64,
@@ -97,6 +103,17 @@ Caps :: struct {
 // The smallest render scale: below half, temporal AA has too few samples a pixel to upscale from.
 MIN_RENDER_SCALE :: 0.5
 
+// The level of detail's error at each level, in pixels: below a quarter of a pixel, a finer level shows no change.
+@(rodata)
+LOD_ERRORS := [Quality_Level]f32 {
+	.Low    = 2,
+	.Medium = 1.5,
+	.High   = 1,
+	.Ultra  = 0.5,
+}
+MIN_LOD_ERROR :: 0.25
+MAX_LOD_ERROR :: 8
+
 // The video memory below which default_quality picks each preset. Unknown memory picks High.
 QUALITY_LOW_MEMORY :: 4 << 30
 QUALITY_MEDIUM_MEMORY :: 6 << 30
@@ -105,7 +122,8 @@ QUALITY_HIGH_MEMORY :: 10 << 30
 // device_caps are the caps of the platform's device. A platform without a GPU, as in the tests, has none.
 device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 	if platform.gpu_features != nil {
-		caps.ray_query = .Ray_Query in platform.gpu_features()
+		features := platform.gpu_features()
+		caps.ray_query, caps.mesh_shaders = .Ray_Query in features, .Mesh_Shaders in features
 	}
 	if platform.gpu_adapter != nil {
 		adapter := platform.gpu_adapter()
@@ -128,6 +146,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,
+		lod_error = LOD_ERRORS[level],
 	}
 }
 
@@ -176,6 +195,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	}
 	// Not a number, or 0, is full resolution.
 	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
+	q.lod_error = q.lod_error > 0 ? clamp(q.lod_error, MIN_LOD_ERROR, MAX_LOD_ERROR) : 1
 	return q
 }
 

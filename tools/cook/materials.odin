@@ -19,7 +19,8 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 4"
+MATERIAL_COOK_VERSION :: "materials 5"
+
 
 Shading_Input :: struct {
 	name:    string,
@@ -936,9 +937,10 @@ Material_Entry :: struct {
 }
 
 // material_entries are the entry points that each variant compiles, the main pass's first. A masked material's
-// depth pass discards in a pixel shader; an opaque one's has none. A transparent or additive material has no prepass,
-// forward or depth pass, but the transparent passes; a Transparent one has moments too, which a sorted one draws only
-// in the overdraw debug view.
+// depth pass discards in a pixel shader; an opaque one's has none. The opaque passes have the mesh shader path's
+// entries too, an amplification and a mesh shader each (see docs/rendering/materials.md#permutations). A transparent or
+// additive material has no prepass, forward or depth pass, but the transparent passes; a Transparent one has moments
+// too, which a sorted one draws only in the overdraw debug view.
 @(private = "file")
 material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	entries := make([dynamic]Material_Entry, context.temp_allocator)
@@ -970,6 +972,15 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	if decl.blend == .Masked {
 		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
 	}
+	append(
+		&entries,
+		Material_Entry{.Forward, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
+		Material_Entry{.Forward, {.Mesh, "ms_" + SHADER_MODEL, "ms_forward"}},
+		Material_Entry{.Prepass, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
+		Material_Entry{.Prepass, {.Mesh, "ms_" + SHADER_MODEL, "ms_prepass"}},
+		Material_Entry{.Depth, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
+		Material_Entry{.Depth, {.Mesh, "ms_" + SHADER_MODEL, "ms_depth"}},
+	)
 	return entries[:]
 }
 

@@ -24,6 +24,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
+| `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
 - **Each enum lists only what exists.** DLSS and XeSS join `Aa_Technique` when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
@@ -60,7 +61,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 
 ## Hardware caps
 
-`Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
+`Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, `mesh_shaders`, which the [mesh shader path](gpu-scene.md#mesh-shader-path) needs, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
 
 - **Defaults:** `default_quality(caps)` picks a preset by the video memory: Low below 4 GiB, Medium below 6 GiB, High below 10 GiB, Ultra above, and High when the memory is unknown, as on an adapter that shares the CPU's.
 - **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
@@ -91,6 +92,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
 | `quality.render_scale` | A number from 0.5 to 1 |
+| `quality.lod_error` | A number of pixels from 0.25 to 8 |
 
 - **Reading:** `project.quality(settings, caps)` starts from the preset, or from `default_quality` without one, and each other key replaces the preset's value for its feature. A fresh machine with no keys gets the defaults for its hardware.
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.

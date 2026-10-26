@@ -1,7 +1,8 @@
 // Culls the frame's draw items against each view's frustum: the camera's, the view model's, then each shadow view's
 // (see docs/rendering/gpu-scene.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is
-// its own index, and the draw record at that index, which the material's vertex shader reads. A dispatch row is a
-// view.
+// its own index, and the draw record at that index, which the material's vertex shader reads. An item on the mesh
+// shader path writes a mesh draw instead, of an amplification group for each MESHLETS_PER_GROUP of its meshlets, which
+// cull them (see material_mesh.hlsli). A dispatch row is a view.
 #include "cinnabar.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
@@ -19,7 +20,8 @@ struct Cull_Constants {
 	uint views;
 	uint views_offset;
 	uint bin_count;
-	uint3 padding;
+	uint mesh_arguments;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -38,14 +40,15 @@ struct Cull_View {
 };
 
 // Matches Cull_Item in lib/engine/render/scene.odin: one submesh of one instance, its bin, and its bounding sphere in
-// the mesh's space.
+// the mesh's space. first and count are its indices, or on the mesh shader path its meshlets.
 static const uint ITEM_CASTS_SHADOWS = 1;
 static const uint ITEM_VIEW_MODEL = 2;
+static const uint ITEM_MESH_PATH = 4;
 struct Item {
 	uint instance;
 	uint mesh;
-	uint first_index;
-	uint index_count;
+	uint first;
+	uint count;
 	uint material;
 	uint bin;
 	uint flags;
@@ -55,6 +58,8 @@ struct Item {
 
 // Matches ID_ENTITY_BITS in lib/engine/render/renderer.odin.
 static const uint ID_ENTITY_BITS = 25;
+// Matches MESHLETS_PER_GROUP in lib/engine/render/scene.odin.
+static const uint MESHLETS_PER_GROUP = 32;
 
 // Matches Instance_Record in lib/engine/render/scene.odin.
 struct Instance_Record {
@@ -81,8 +86,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Instance_Record instance = cn_buffer(cull.instances).Load<Instance_Record>(item.instance * sizeof(Instance_Record));
 	float4 center = float4(item.sphere.xyz, 1);
 	float3 p = float3(dot(instance.rows[0], center), dot(instance.rows[1], center), dot(instance.rows[2], center)) - view.offset.xyz;
-	// The largest scale of the rows scales the radius.
-	float scale = sqrt(max(dot(instance.rows[0].xyz, instance.rows[0].xyz), max(dot(instance.rows[1].xyz, instance.rows[1].xyz), dot(instance.rows[2].xyz, instance.rows[2].xyz))));
+	// The largest scale of an axis, a column's length, scales the radius.
+	float3 scales = instance.rows[0].xyz * instance.rows[0].xyz + instance.rows[1].xyz * instance.rows[1].xyz + instance.rows[2].xyz * instance.rows[2].xyz;
+	float scale = sqrt(max(scales.x, max(scales.y, scales.z)));
 	float radius = item.sphere.w * scale;
 	for (uint i = 0; i < 6; i++) {
 		if (dot(view.planes[i].xyz, p) + view.planes[i].w < -radius) {
@@ -92,9 +98,15 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	uint slot;
 	cn_rw_buffer(cull.counts).InterlockedAdd((id.y * cull.bin_count + item.bin) * 4, 1, slot);
 	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
-	// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
-	cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.index_count, 1, 0));
-	cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
-	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first index, material.
-	cn_rw_buffer(cull.draws).Store4(index * 16, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first_index, item.material));
+	if ((item.flags & ITEM_MESH_PATH) != 0) {
+		// Draw_Mesh_Indirect_Args: draw ID, then the amplification groups.
+		cn_rw_buffer(cull.mesh_arguments).Store4(index * 16, uint4(index, (item.count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP, 1, 1));
+	} else {
+		// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
+		cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.count, 1, 0));
+		cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
+	}
+	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count.
+	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first, item.material));
+	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, 0, 0, 0));
 }
