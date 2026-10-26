@@ -22,7 +22,7 @@ public enum SelectMode
 }
 
 /// <summary>
-/// The viewport's tools (see docs/editor.md#viewport): the editor's camera, picking, and the gizmo with its drags and
+/// The viewport's tools (see docs/editor/viewport.md#viewport): the editor's camera, picking, and the gizmo with its drags and
 /// snapping. The camera, the selection and the gizmo go to the game, which draws them. The viewport's controls turn
 /// input into calls here, in pixels of the host's frame, so tests can drive the tools without a window.
 /// </summary>

@@ -1,5 +1,5 @@
 // Culls the frame's draw items against each view's frustum: the camera's, the view model's, then each shadow view's
-// (see docs/rendering.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is
+// (see docs/rendering/gpu-scene.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is
 // its own index, and the draw record at that index, which the material's vertex shader reads. A dispatch row is a
 // view.
 #include "cinnabar.hlsli"

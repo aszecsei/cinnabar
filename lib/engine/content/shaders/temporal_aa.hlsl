@@ -1,4 +1,4 @@
-// Temporal anti-aliasing (see docs/rendering.md#post-processing). The camera's jitter moves the scene's samples within
+// Temporal anti-aliasing (see docs/rendering/post-processing.md#post-processing). The camera's jitter moves the scene's samples within
 // each pixel from frame to frame, and this pass blends each pixel with its history: last frame's result where the
 // surface was then, found by the velocity, and clipped to the colors around the pixel so that what the history saw and
 // the pixel does not see fades out. Colors are blended after a reversible tone map, so one bright sample does not

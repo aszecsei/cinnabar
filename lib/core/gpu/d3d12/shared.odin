@@ -12,12 +12,12 @@ import d3d "vendor:directx/d3d12"
 import "cinnabar:core/gpu"
 
 // Shared mode renders the frame target into textures that another process opens, such as the editor's viewport,
-// instead of a swapchain (see docs/gpu.md#presentation). Each size of the target is a generation, whose textures and
+// instead of a swapchain (see docs/gpu/presentation.md#presentation). Each size of the target is a generation, whose textures and
 // fence are named shared objects: <name>.g<generation>.texture0 to .texture2 and <name>.g<generation>.fence. Frame k
 // of a generation renders into texture k % SHARED_TEXTURE_COUNT and then signals k on the fence, so a reader that
 // sees fence value v reads texture v % SHARED_TEXTURE_COUNT. A frame ends with its texture in the common layout,
 // which other processes and devices can use. The editor's previews have shared targets of their own beside the frame
-// target, named <name>.preview<id>.g<generation> (see docs/rendering.md#material-previews).
+// target, named <name>.preview<id>.g<generation> (see docs/rendering/materials.md#material-previews).
 SHARED_TEXTURE_COUNT :: 3
 // Nothing presents in shared mode, so this paces the frame.
 SHARED_FRAME_TIME :: time.Second / 60
@@ -89,7 +89,7 @@ create_shared_objects :: proc(t: ^Shared_Target, size: [2]i32, scratch: bool) ->
 		Type = .DEFAULT,
 	}
 	// Typed, unlike the swapchain's typeless back buffers: D3D11 cannot open a shared typeless texture without
-	// simultaneous access, and the editor opens these with D3D11 (see docs/editor.md#viewport).
+	// simultaneous access, and the editor opens these with D3D11 (see docs/editor/viewport.md#viewport).
 	desc := d3d.RESOURCE_DESC1 {
 		Dimension        = .TEXTURE2D,
 		Width            = u64(width),

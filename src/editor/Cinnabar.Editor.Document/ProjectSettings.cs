@@ -1,7 +1,7 @@
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// A project's settings file (see docs/architecture.md#project-settings): <c>key = value</c> lines, with blank lines
+/// A project's settings file (see docs/overview/architecture.md#project-settings): <c>key = value</c> lines, with blank lines
 /// and <c>#</c> comments, which the game reads. The user file beside it, <c>project.user.settings</c> for
 /// <c>project.settings</c>, replaces its values on one machine. An edit changes a key's line in place, so the file keeps
 /// its comments and order.

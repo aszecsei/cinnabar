@@ -11,7 +11,7 @@ import format "cinnabar:engine/asset/format"
 
 MAX_MODULES :: 256
 
-// Module is a script asset that the runtime has run. See docs/scripting.md#modules-and-require.
+// Module is a script asset that the runtime has run. See docs/scripting/tooling-and-hot-reload.md#modules-and-require.
 @(private)
 Module :: struct {
 	guid:   format.Guid,
@@ -98,7 +98,7 @@ module_index :: proc(r: ^Runtime, m: ^Module) -> int {
 }
 
 // reload_changed reloads the modules whose blobs the asset runtime swapped: pass it asset.poll's result, at the end of
-// the frame, when no script runs. See docs/scripting.md#script-hot-reload.
+// the frame, when no script runs. See docs/scripting/tooling-and-hot-reload.md#script-hot-reload.
 reload_changed :: proc(r: ^Runtime, changed: []asset.Handle) {
 	// Modules first, so a main script that restarts already requires their new versions.
 	for main in ([2]bool{false, true}) {

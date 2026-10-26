@@ -11,7 +11,7 @@ using Cinnabar.Editor.Shell;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The properties panel (see docs/editor.md#properties): the selected entity's components and behaviours, with an
+/// The properties panel (see docs/editor/shell-and-panels.md#properties): the selected entity's components and behaviours, with an
 /// editor for each field that the scene can set. The editor watches the selected entity, and when only values change,
 /// each field's view shows the new value, so the panel keeps its expanders, its scroll position and the box being
 /// typed in at twenty updates a second. Values come from the host; edits go to the document, which sends them on.

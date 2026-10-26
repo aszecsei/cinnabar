@@ -1,4 +1,4 @@
-// Package ecs is the native ECS: entities, components, systems and fixed-point positions. See docs/world.md.
+// Package ecs is the native ECS: entities, components, systems and fixed-point positions. See docs/world/README.md.
 package ecs
 
 import "core:math"
@@ -12,7 +12,7 @@ POSITION_LIMIT :: i64(1) << 62 - 1
 POSITION_SCALE :: f32(1 << POSITION_FRACTION_BITS)
 
 // World_Position is a fixed-point position. It is a struct so that Odin allows no arithmetic on it: subtract two
-// positions with position_sub, and add a delta with position_offset. See docs/world.md#positions.
+// positions with position_sub, and add a delta with position_offset. See docs/world/positions-and-transforms.md#positions.
 World_Position :: struct {
 	raw: [3]i64,
 }

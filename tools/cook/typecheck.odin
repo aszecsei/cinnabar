@@ -9,7 +9,7 @@ import "core:os"
 import "core:path/slashpath"
 
 // Type_Checker checks scripts against the definition file that host.exe --emit-script-types writes (see
-// docs/scripting.md#types-and-tooling).
+// docs/scripting/tooling-and-hot-reload.md#types-and-tooling).
 Type_Checker :: struct {
 	handle: ^Luau_Checker,
 }

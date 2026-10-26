@@ -3,7 +3,7 @@ package render
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-// Ambient occlusion (see docs/rendering.md#ambient-occlusion): GTAO, after Intel's XeGTAO, from the prepass's depth and
+// Ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion): GTAO, after Intel's XeGTAO, from the prepass's depth and
 // normals on the compute queue. A pass turns the depth into view depth and four smaller levels, the main pass finds
 // the occlusion and the edges between surfaces, and the denoiser blurs it within each surface. It keeps no history:
 // with temporal AA, its noise changes from frame to frame and temporal AA averages it. The forward pass scales the

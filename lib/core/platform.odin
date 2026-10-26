@@ -55,7 +55,7 @@ Platform :: struct {
 platform: Platform
 
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
-// hidden (see docs/gpu.md#presentation). A non-zero adapter is the LUID of the GPU to use.
+// hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use.
 init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
@@ -272,7 +272,7 @@ queue_input :: proc(events: []Input_Event) {
 // The largest shared target side. A reader that asks for more gets this.
 MAX_SHARED_SIZE :: 8192
 
-// resize_shared_target sets the size of the shared target from the next frame (see docs/editor.md#viewport). The
+// resize_shared_target sets the size of the shared target from the next frame (see docs/editor/viewport.md#viewport). The
 // game sees it as the window size.
 resize_shared_target :: proc(size: [2]i32) {
 	platform.shared_size = {clamp(size.x, 1, MAX_SHARED_SIZE), clamp(size.y, 1, MAX_SHARED_SIZE)}
@@ -292,14 +292,14 @@ memory_stats :: proc() -> (permanent, frame_max: u64) {
 	return
 }
 
-// pace_shared_frames turns the reader's back-pressure on or off (see docs/editor.md#viewport).
+// pace_shared_frames turns the reader's back-pressure on or off (see docs/editor/viewport.md#viewport).
 pace_shared_frames :: backend.pace_shared_frames
 
 // acknowledge_shared_frame records that the reader has finished with a frame of a generation.
 acknowledge_shared_frame :: backend.acknowledge_shared_frame
 
 // acknowledge_preview_frame records that the reader has finished with a frame of a generation of a preview target
-// (see docs/rendering.md#material-previews).
+// (see docs/rendering/materials.md#material-previews).
 acknowledge_preview_frame :: backend.acknowledge_preview_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.

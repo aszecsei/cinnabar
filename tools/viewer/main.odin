@@ -1,5 +1,5 @@
 // tools/viewer shows the frames of a host in shared mode: run `host --shared <name>`, then `viewer <name>`. It stands in
-// for the editor's viewport (docs/editor.md#viewport) and does what the editor will: open the shared textures and fence
+// for the editor's viewport (docs/editor/viewport.md#viewport) and does what the editor will: open the shared textures and fence
 // by name, and copy the newest frame into its own swapchain.
 package viewer
 

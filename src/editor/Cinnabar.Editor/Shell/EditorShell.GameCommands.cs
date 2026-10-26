@@ -9,7 +9,7 @@ using RunGameCommand = Cinnabar.Editor.Link.Protocol.RunGameCommand;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The game's commands (see docs/editor.md#commands): the game describes them with its types, the editor registers
+/// The game's commands (see docs/editor/shell-and-panels.md#commands): the game describes them with its types, the editor registers
 /// them as <c>game.</c> commands on the tabs and in the groups that they name, and running one runs it in the game. A
 /// command that edits the scene sends back operations, which the editor applies as one undo entry. The list comes again
 /// after a code reload, and replaces the one before.

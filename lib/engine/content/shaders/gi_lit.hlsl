@@ -1,4 +1,4 @@
-// The global illumination's lit scene (see docs/rendering.md#global-illumination): after the world pass, each texel
+// The global illumination's lit scene (see docs/rendering/global-illumination.md#global-illumination): after the world pass, each texel
 // keeps the mean of a 2x2 block of the scene, without its pre-exposure, so the next frame's rays read the light that
 // each surface reflects. It holds this frame's indirect light too, so the light bounces on from frame to frame.
 #include "gi_common.hlsli"

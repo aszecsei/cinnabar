@@ -6,7 +6,7 @@ import "core:c"
 import "cinnabar:core/luau"
 import "cinnabar:engine/ecs"
 
-// register_direct sets the direct access handlers of the engine's userdata (see docs/scripting.md#direct-field-access).
+// register_direct sets the direct access handlers of the engine's userdata (see docs/scripting/embedding.md#direct-field-access).
 // They do what the metamethods do, without the closure call. A component field is found from the instruction's
 // cached slot when it can be, and every other key takes the metamethods' path.
 @(private)

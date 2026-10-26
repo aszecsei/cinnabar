@@ -1,4 +1,4 @@
-// Material graphs (see docs/content-pipeline.md#material-graphs): the nodes of a .material or a .material_function
+// Material graphs (see docs/content/kinds/materials.md#material-graphs): the nodes of a .material or a .material_function
 // file, the kinds of node, and the HLSL that the cooker generates from them. A material's graph becomes its evaluate,
 // and each material function that it calls a function of its own. Each variant generates its source with its static
 // switches decided, so a switch node keeps only the branch that its switch picks.

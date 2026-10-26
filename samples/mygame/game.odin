@@ -26,7 +26,7 @@ import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 import "cinnabar:engine/volume"
 
-// The shaders are assets, which the cooker compiles (see docs/content-pipeline.md#shaders). The game finds them by the
+// The shaders are assets, which the cooker compiles (see docs/content/kinds/shaders.md#shaders). The game finds them by the
 // GUIDs in their .meta files.
 TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
 OBJECTS_SHADER :: #load("content/shaders/objects.hlsl.meta", string)
@@ -38,14 +38,14 @@ SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
 UI_SHADER :: #load("content/shaders/ui.hlsl.meta", string)
 // The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
 CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
-// The project's settings, which the editor edits, and the user's file beside them (see docs/architecture.md#project-settings).
+// The project's settings, which the editor edits, and the user's file beside them (see docs/overview/architecture.md#project-settings).
 PROJECT_SETTINGS :: #config(CINNABAR_PROJECT, "samples/mygame/project.settings")
 // How often the game looks for a change to the settings' files, in seconds.
 PROJECT_CHECK_INTERVAL :: 0.5
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
-// The transparency scene, which F7 switches to and back (see docs/rendering.md#transparency).
+// The transparency scene, which F7 switches to and back (see docs/rendering/transparency.md#transparency).
 GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
@@ -116,7 +116,7 @@ Triangle_Instance :: struct {
 	_:          [2]f32,
 }
 
-// The game's components have explicit IDs, because the scene refers to them by ID (see docs/world.md#component-registry).
+// The game's components have explicit IDs, because the scene refers to them by ID (see docs/world/ecs.md#component-registry).
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
 LENS_ID :: ecs.Component_Id(1003)
@@ -131,7 +131,7 @@ Triangle :: struct {
 	brightness: f32,
 }
 
-// Lens is the sample's post effect, on volumes (see docs/rendering.md#post-effects): chromatic aberration and a
+// Lens is the sample's post effect, on volumes (see docs/rendering/post-processing.md#post-effects): chromatic aberration and a
 // vignette, from DEFAULT_LENS unless a volume overrides them.
 Lens :: struct {
 	// How far red and blue move apart toward the frame's edges, in pixels for each unit of the frame's size from its
@@ -265,7 +265,7 @@ Game_State :: struct {
 	world:              ecs.World,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:             ecs.Entity,
-	// The built-in renderer, which draws the frame (see docs/rendering.md#frame).
+	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
 	renderer:           render.Renderer,
 	// A registration, created again in on_reload.
 	triangles:          render.Extractor,
@@ -273,7 +273,7 @@ Game_State :: struct {
 	scripts:            script.Runtime,
 	// content/scripts/hello.luau, which the scheduler runs.
 	hello:              script.Main_Script,
-	// What the editor knows of the world (see docs/editor.md#world).
+	// What the editor knows of the world (see docs/editor/link.md#world).
 	editor:             editor.Editor,
 }
 
@@ -412,7 +412,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if hello, ok := format.meta_guid(HELLO_META); ok {
 		s.hello, _ = script.spawn_script(&s.scripts, hello)
 	}
-	// An editor replaces this scene with its own document when it links (see docs/editor.md#document-model).
+	// An editor replaces this scene with its own document when it links (see docs/editor/document-and-scenes.md#document-model).
 	if main_scene, ok := format.meta_guid(MAIN_SCENE_META); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, main_scene)
 	}
@@ -536,7 +536,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 
 	// In the editor's edit mode, and while it pauses, the world stands still and only its transforms propagate, so
 	// edits show. No script code runs then, not even on_disable and on_destroy for the behaviours that a new scene
-	// despawns (see docs/editor.md#modes).
+	// despawns (see docs/editor/document-and-scenes.md#modes).
 	update_output(s)
 	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
@@ -663,7 +663,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	}
 	extract_triangles(frame)
 	editing := editor.active(&s.editor)
-	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor.md#viewport), or
+	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
 	// none without an editor.
 	overrides := editor.render_overrides(&s.editor)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
@@ -675,7 +675,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
 		exposure_offset = overrides.exposure_offset,
-		// The material editor's previews (see docs/rendering.md#material-previews).
+		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),
 		hooks           = {
 			data         = frame,
@@ -1201,7 +1201,7 @@ cinnabar_game_api :: proc() -> core.Game_API {
 }
 
 // register_editor_commands describes the game's commands, which the editor shows on its Game tab (see
-// docs/editor.md#commands). init and on_reload call it.
+// docs/editor/shell-and-panels.md#commands). init and on_reload call it.
 register_editor_commands :: proc(s: ^Game_State) {
 	editor.register_command(&s.editor, {
 		id = "mygame.add_triangle",

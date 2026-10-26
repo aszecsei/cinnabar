@@ -1,6 +1,6 @@
 // Package script is the host side of the script VM. It owns the VM heaps and every function pointer that Luau stores:
 // the allocator, the binding dispatcher, the atom interner, the watchdog and the panic handler. The game reaches them
-// through Platform_API, and fills a Bindings table that the dispatcher reads. See docs/scripting.md#host-trampolines.
+// through Platform_API, and fills a Bindings table that the dispatcher reads. See docs/scripting/embedding.md#host-trampolines.
 package script_host
 
 import "base:runtime"
@@ -23,7 +23,7 @@ BINDING_SLOTS :: 2 * MAX_BINDINGS
 WATCHDOG_INTERVAL :: 1024
 
 // LUAU_DIRECT_ACCESS turns on Luau's experimental direct field access for the engine's userdata (see
-// docs/scripting.md#direct-field-access). Off, nothing depends on that API.
+// docs/scripting/embedding.md#direct-field-access). Off, nothing depends on that API.
 LUAU_DIRECT_ACCESS :: #config(LUAU_DIRECT_ACCESS, false)
 
 // The game's direct access handlers for one userdata tag. They run with the arguments of __index, __newindex or

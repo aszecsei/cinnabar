@@ -6,7 +6,7 @@ import "core:hash"
 import "core:strings"
 
 // schema describes every message of a link's union as JSON, for the editor's C# source generator (see
-// docs/editor.md#editor-link). Its version is the protocol version.
+// docs/editor/link.md#editor-link). Its version is the protocol version.
 schema :: proc(messages: typeid, allocator := context.allocator) -> string {
 	body := schema_body(messages, context.temp_allocator)
 	return fmt.aprintf("{{\n  \"version\": \"%016x\",\n%s}}\n", protocol_version(messages), body, allocator = allocator)

@@ -11,7 +11,7 @@ using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
 namespace Cinnabar.Editor.Materials;
 
 /// <summary>
-/// The material's preview (see docs/rendering.md#material-previews): the game's frames of the material on a mesh, which
+/// The material's preview (see docs/rendering/materials.md#material-previews): the game's frames of the material on a mesh, which
 /// the editor copies as it does the viewport's. Dragging turns the camera about the mesh, the wheel moves it nearer or
 /// farther, and the buttons pick the mesh.
 /// </summary>

@@ -40,7 +40,7 @@ public readonly record struct GraphHit(GraphHitKind Kind, int Node = 0, string P
 public readonly record struct LinkLayout(int From, string Output, int To, string Input, Vec2 Start, Vec2 End, PinType Type);
 
 /// <summary>
-/// Where a graph's nodes and links are on the canvas (see docs/editor.md#material-editor), and what is at a point, so
+/// Where a graph's nodes and links are on the canvas (see docs/editor/material-editor.md#material-editor), and what is at a point, so
 /// the node editor's hit tests run without a window.
 /// </summary>
 public sealed class GraphGeometry

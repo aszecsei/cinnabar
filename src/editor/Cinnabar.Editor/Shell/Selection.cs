@@ -3,7 +3,7 @@ namespace Cinnabar.Editor.Shell;
 /// <summary>
 /// The selected entities, by handle, in the order they were selected. The last is the primary one, which the gizmo
 /// sits on and the properties panel names. The shell keeps their scene IDs, so a resync, which gives every entity a
-/// new handle, keeps the selection (see docs/editor.md#document-model).
+/// new handle, keeps the selection (see docs/editor/document-and-scenes.md#document-model).
 /// </summary>
 public sealed class Selection
 {

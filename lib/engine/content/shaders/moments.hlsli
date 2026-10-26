@@ -1,5 +1,5 @@
 // Moment-based order-independent transparency with four power moments (Muenstermann, Krumpen, Klein and Peters,
-// "Moment-Based Order-Independent Transparency", 2018; see docs/rendering.md#transparency). The moments pass adds up,
+// "Moment-Based Order-Independent Transparency", 2018; see docs/rendering/transparency.md#transparency). The moments pass adds up,
 // at each pixel, the optical depth of every transparent surface, b0 = sum of -ln(1 - alpha), and the moments of their
 // depths weighted by it, b0 * (z, z^2, z^3, z^4). The transparent pass then reconstructs, from those, how much light
 // gets through the surfaces in front of each one.

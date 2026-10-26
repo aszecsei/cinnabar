@@ -1,5 +1,5 @@
 // `cook scenes --cache <dir> --config dev|release --root <name>=<dir>...` cooks every .scene file in the content
-// roots into <cache>/<config>/<guid>.blob. See docs/editor.md#scenes.
+// roots into <cache>/<config>/<guid>.blob. See docs/editor/document-and-scenes.md#scenes.
 package cook
 
 import "core:fmt"

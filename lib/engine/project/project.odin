@@ -1,4 +1,4 @@
-// A project's settings (see docs/architecture.md#project-settings): a text file of `key = value` lines, beside the
+// A project's settings (see docs/overview/architecture.md#project-settings): a text file of `key = value` lines, beside the
 // game, that the editor edits, and a user file beside it whose values replace the project's on one machine. The game
 // reads both when it starts, and again when either changes, so a running game takes an edit at once.
 package project
@@ -17,7 +17,7 @@ USER_SUFFIX :: ".user"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
-	// The window's output mode (see docs/rendering.md#hdr-output). Auto is HDR10 on a display in HDR, and SDR
+	// The window's output mode (see docs/rendering/layers-and-output.md#hdr-output). Auto is HDR10 on a display in HDR, and SDR
 	// otherwise. CINNABAR_OUTPUT replaces it.
 	output: gpu.Output_Request,
 }
@@ -75,7 +75,7 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 // write is a settings file that holds settings, for the editor's tests and tools.
 write :: proc(settings: Settings, allocator := context.allocator) -> string {
 	name, _ := reflect.enum_name_from_value(settings.output)
-	return strings.concatenate({"# Project settings (see docs/architecture.md#project-settings).\noutput = ", name, "\n"}, allocator)
+	return strings.concatenate({"# Project settings (see docs/overview/architecture.md#project-settings).\noutput = ", name, "\n"}, allocator)
 }
 
 // refresh reads the project file and its user file the first time, and again when either changed. It returns true

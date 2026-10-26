@@ -100,7 +100,7 @@ dev: struct {
 	back_buffers:      [BACK_BUFFER_COUNT]^d3d.IResource,
 	back_buffer_index: u32,
 	frame_target:      gpu.Texture,
-	// The output that the game asked for, and the frame's (see docs/gpu.md#presentation). Shared mode is always Sdr.
+	// The output that the game asked for, and the frame's (see docs/gpu/presentation.md#presentation). Shared mode is always Sdr.
 	request:           gpu.Output_Request,
 	output:            gpu.Output,
 	// The modes whose color space the swapchain cannot present, which are not tried again.
@@ -442,7 +442,7 @@ end_frame :: proc() {
 
 	// The compute queue starts after the previous frame's end and this frame's uploads, and the graphics queue
 	// ends the frame after the compute queue's work. So a frame's work on either queue starts after the previous
-	// frame's work on both queues (docs/gpu.md#barriers).
+	// frame's work on both queues (docs/gpu/command-buffers.md#barriers).
 	e := Executor {
 		frame = frame,
 	}
@@ -579,7 +579,7 @@ create_device :: proc(luid: u64) -> bool {
 	return false
 }
 
-// missing_floor_feature checks the hardware floor in docs/gpu.md#hardware-floor.
+// missing_floor_feature checks the hardware floor in docs/gpu/interface.md#hardware-floor.
 @(private = "file")
 missing_floor_feature :: proc(device: ^d3d.IDevice10) -> string {
 	shader_model := d3d.FEATURE_DATA_SHADER_MODEL {

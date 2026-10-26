@@ -9,7 +9,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
 
-// A game's post effects (see docs/rendering.md#post-effects): passes that the post-processing runs at a point among
+// A game's post effects (see docs/rendering/post-processing.md#post-effects): passes that the post-processing runs at a point among
 // its own, each driven by a settings component on volumes, as the renderer's own settings are.
 
 MAX_POST_EFFECTS :: 16

@@ -59,7 +59,7 @@ Field :: struct {
 	range_max:       f64,
 	// From the struct tag editor:"color", for a Vector3 that holds a linear color.
 	color:           bool,
-	// A setting that a volume can override (see docs/world.md#volumes): a struct of exactly override: bool and
+	// A setting that a volume can override (see docs/world/volumes.md#volumes): a struct of exactly override: bool and
 	// value: T. The field is the value, and override_offset is where its override flag is, which a scene sets as
 	// <name>.override (see OVERRIDE_SUFFIX). A scene that sets the field sets the flag, unless it sets that to false.
 	has_override:    bool,
@@ -73,7 +73,7 @@ Field :: struct {
 // fields with its name and a dot in front. The struct tag editor holds words with spaces between them: "-" hides a
 // field, "read" makes it and what is in it read-only, "range=min,max" gives a number's range, and "color" marks a
 // [3]f32 as a linear color, such as editor:"color range=0,1". A format.Guid field is an asset reference,
-// and asset:"<kind>" names the kind of asset that it takes (see docs/rendering.md#asset-fields). A fixed array of
+// and asset:"<kind>" names the kind of asset that it takes (see docs/rendering/assets.md#asset-fields). A fixed array of
 // asset references is a field for each element, named for the array and the index, such as materials.0. Other field
 // types are hidden.
 component_fields :: proc(type: typeid, allocator: runtime.Allocator) -> []Field {

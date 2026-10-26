@@ -1,4 +1,4 @@
-// Assigns the punctual lights to clusters (see docs/rendering.md#lights-and-clusters): a thread for each cluster, a
+// Assigns the punctual lights to clusters (see docs/rendering/lighting-and-shadows.md#lights-and-clusters): a thread for each cluster, a
 // tile of the screen and a depth slice, finds the lights whose spheres reach its box in view space, and writes their
 // indices into one list, at an offset that it takes with an atomic add.
 #include "cinnabar.hlsli"

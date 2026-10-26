@@ -10,7 +10,7 @@ static class Program
     public static AppBuilder BuildAvaloniaApp() =>
         AppBuilder.Configure<App>()
             .UsePlatformDetect()
-            // The viewport hands its frames to ANGLE's D3D11 device (see docs/editor.md#viewport).
+            // The viewport hands its frames to ANGLE's D3D11 device (see docs/editor/viewport.md#viewport).
             .With(new Win32PlatformOptions { RenderingMode = [Win32RenderingMode.AngleEgl] })
             .WithInterFont()
             .LogToTrace();

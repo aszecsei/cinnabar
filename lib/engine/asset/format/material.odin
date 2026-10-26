@@ -4,7 +4,7 @@ import "core:mem"
 
 import "cinnabar:core/layout"
 
-// Materials and their instances (see docs/rendering.md#materials). A material compiles one variant for each static
+// Materials and their instances (see docs/rendering/materials.md#materials). A material compiles one variant for each static
 // switch combination that it or an instance uses, for each pass. A parameter block is the bytes that the material's
 // Params struct loads from the material table, with each texture as its bindless index, which the runtime writes.
 
@@ -20,7 +20,7 @@ Material_Blend :: enum u32 {
 	// Opaque, but the shading model's opacity below the cutoff discards the pixel.
 	Masked,
 	// Blended over what is behind by its opacity, with moment-based order-independent transparency, or sorted back to
-	// front with the Sorted flag (see docs/rendering.md#transparency).
+	// front with the Sorted flag (see docs/rendering/transparency.md#transparency).
 	Transparent,
 	// Its light times its opacity adds to what is behind, sorted with the sorted transparent draws.
 	Additive,
@@ -105,7 +105,7 @@ Material_Variant :: struct {
 	code:     Slice,
 }
 
-// Material_Blob is the start of a material blob (see docs/content-pipeline.md#blob-format).
+// Material_Blob is the start of a material blob (see docs/content/blobs-and-loading.md#blob-format).
 Material_Blob :: struct {
 	header:           Blob_Header,
 	flags:            Material_Flags,

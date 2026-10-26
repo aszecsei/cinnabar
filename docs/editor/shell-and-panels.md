@@ -1,0 +1,113 @@
+# Shell and panels
+
+Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the resource monitor and the content browser.
+
+**In this document:** [Shell](#shell) · [Panels](#panels) · [Future work](README.md#future-work)
+
+## Shell
+
+- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties and undo history on the right, and the console, content browser and resource monitor at the bottom.
+- **One instance of each panel.** Closing a panel takes it out of the layout, and showing it again puts the same panel back in its default dock, so its state survives. Docking can rebuild a panel's view at any time, so a view holds no state: the console's lines are in a `ConsoleLog`, and the viewport's device and frames are in a `ViewportSession`.
+- **The layout file:** the editor saves the layout to `layout.json` when it closes. The file is the editor's own: the tree of splits, tool docks and the document dock, with proportions and panel IDs. Dock's serializer would store Dock's types, and need metadata for each. A panel that floats docks again in its default dock at the next start, and panels cannot be pinned. A layout that has no viewport, or that does not parse, is replaced by the default with a warning in the console.
+- **Documents:** the viewport is the first document, and cannot close, float or move into a tool dock. The material editor's documents go beside it (see [Material editor](material-editor.md#material-editor)); the layout file does not keep them.
+- **Status bar:** the host's state (waiting for the viewport, running, stopped, exited with its code), the cook daemon's state (starting, watching, stopped, exited with its code), the scene's file, the entity count, the selection, and the mode.
+- **Theme:** dark, with one accent color, cinnabar (`#E34234`), also in Dock's brushes. Play mode tints the shell. Icons are Fluent UI System Icons (MIT), as path data in `Icons/Icons.axaml`, so the editor depends on no icon package.
+- **Errors:** an exception that no code handles on the UI thread goes to the console, and the editor keeps running. A bug in one panel must not close the editor and lose unsaved work.
+
+### Ribbon
+
+The editor has its own ribbon control. The Avalonia ribbon libraries are small and not maintained much, and a ribbon that reads the command registry is not much work.
+
+- **The ribbon is data.** A layout gives tabs, groups in each tab, and items in each group. Every item names a command ID. The ribbon has no logic of its own.
+- **Item kinds:** large button, a stack of up to three small buttons, split button, dropdown, and combo box. A toggle command shows as a toggle in any of them, with a check in menus. A combo box needs a choice command, which has a list of options. A gallery comes later.
+- **Validation:** `RibbonLayout.Validate` finds unknown commands, unknown categories, repeated tabs and items of the wrong shape. The shell reports them in the console, and a test checks the default ribbon.
+- **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs, with its name over the first tab of each run. The editor's tabs have no categories yet, so no band shows.
+- **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true. A condition is a named context, such as `host.running`, that the editor sets.
+- **Game commands** that the DLL describes can name a tab and a group. They appear in the ribbon, and they come and go with a code reload.
+- Double-clicking a tab, or Ctrl+F1, collapses the ribbon to its tabs, and clicking a tab opens it again. When the window is too narrow, the ribbon scrolls.
+- *Later:* groups that shrink as the window narrows, key tips, and a quick access toolbar.
+
+### Commands
+
+- A command has an ID such as `edit.undo`, a label, an icon, a default shortcut, a can-execute check and an execute procedure.
+- **Editor commands** are C#. **Game commands** are described by the DLL and run in the game through `Game_API.editor_poll`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
+
+### Game commands
+
+- **The game registers them** with `editor.register_command`: an ID, a label, a description, the ribbon tab and group by label, an icon of the editor's set, whether it edits the scene, and a procedure. The strings and the procedure are the DLL's, so the commands are registrations: `editor.reload` forgets them, and the game registers them again in `on_reload`, as it does its systems.
+- **The editor gets the list** as `Game_Commands`, with the component types, when it links and after a code reload. It registers each as `game.<id>`, removes the ones that the list no longer has, and adds each to its group at the end of the tab with that label, or of a new tab after the others. A group of one or two commands has large buttons, and a larger one stacks of small buttons. The commands are in the command palette too. A command that edits runs only in Edit, and every command needs a linked host.
+- **Running one** sends `Run_Game_Command`. The game calls the procedure in `poll`, between frames, with a `Command_Context`: the world, the scripts, the game's own data that it passes to `poll`, the editor's selection and camera. The procedure does not change the scene itself: it adds operations by scene ID to the context, which `editor.new_scene_id`, `scene_numbers`, `scene_position` and `scene_field` help build, and it can set a message. The game sends them back in `Game_Command_Result`. The editor turns the wire operations back into the document's, applies them as one undo entry under the command's label, which sends them to the game as for any edit, writes the message to the console, and selects the entities that the command created.
+- **The sample's commands** are on the Game tab: Add Triangle makes a spinning triangle 2 m in front of the editor's camera, Reverse Spin negates the selected triangles' speed, and World Report writes the counts to the console without an edit.
+- **Toggles and choices:** a command with a checked state is a toggle. A choice command picks one of a list of options. A command raises `Changed` when it runs, and owners of shared state, such as the host session, invalidate every command, so views update without polling.
+- **Key bindings:** `keybindings.json` in the editor settings is an object from command ID to key gesture, such as `{ "view.stats": "F3" }`. An empty gesture removes a shortcut. When two commands get the same gesture, the first by ID keeps it, and the console says so.
+- **The command palette** (Ctrl+Shift+P) searches every command by label and ID. Every word of the query must match. A label that starts with the query ranks first, then a label with a word that starts with it.
+
+## Panels
+
+| Panel | Contents |
+|---|---|
+| Outliner | The entity hierarchy, with a filter, visibility and lock toggles, drag to reparent, and multi-select |
+| Properties | The components and behaviours of the selection |
+| Viewport | The frames, the overlays, the gizmo and the camera |
+| Content Browser | The content roots' folders and assets, from the cook daemon's index, with each asset's cook status |
+| Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
+| Console | The host's and the cook daemon's log |
+| Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
+
+### Outliner
+
+- The outliner is a virtualized list of the visible rows of the tree, indented by depth. A tree control with one item per entity does not scale to tens of thousands of entities.
+- The hierarchy comes from `Parent`, in handle order. An entity whose parent the editor does not know is a root. Rows start expanded, and the outliner remembers the ones that the user collapsed.
+- A row shows the entity's name, or the entity as the engine prints it (`Entity(3:1)`) when it has none, and its components, without the ones that the tree shows itself (`Parent`, `Previous_Transform`, `Inactive`, `Disabled`, `Name`, `Scene_Entity`). An inactive entity is dimmed.
+- **Filter:** a filter shows the rows whose name, entity or components match, with their ancestors.
+- **Dragging** a row onto another row reparents its entity, and onto the space below the rows makes it a root, without moving it in the world. A row cannot go under itself or its descendants. A row also drags onto an entity field in the properties panel.
+- Double-clicking a row, or Focus in its menu, frames its entity in the viewport, as F does.
+- A row's menu duplicates, deletes and moves to the root, and makes a new entity. A row whose entity the game could not apply all of has a warning mark, with the problems in its tooltip.
+- **Visibility and lock are editor state.** Each row of a scene entity has an eye that hides it in the viewport and a lock that stops the viewport from picking it, and each applies to the entity's descendants too. A hidden row is dimmed, and a toggle that is on is bright. Hide (H in the viewport), Show All and Lock act on the selection, from the ribbon or a row's menu. Neither changes the game's `Disabled` state, and neither is saved in the scene: the editor keeps them by scene ID for each user and each scene file, in `scene-views.json` in the editor's settings.
+- **Hidden entities are not drawn.** The editor sends their handles in `Set_Hidden` when they change, when their handles change, and after each snapshot. `editor.visibility` gives the game the hidden entities with their descendants for the frame, and the game leaves out those that `editor.is_visible` rejects, so they are neither drawn nor picked, and they cast no shadow in the sample. A locked entity is drawn and picked, and the editor drops it from the pick's result. The outliner still selects both.
+
+### Properties
+
+- The panel is built from the type descriptors: one group per component or behaviour, one row per field, and an editor for each field kind. A component with no fields the editor can show, such as a tag, is a chip with its name. The components that the header shows (`Parent`, `Name`, `Inactive`, `Scene_Entity`) and `Behaviours` are not groups.
+- **Editing:** a field edits when the document has its component or behaviour. A number, a string or an axis is a box that sets the field on Enter or when it loses focus, and puts the value back on Escape. Dragging a number's name, or an axis's colored marker, changes it in one undo entry, ten times as fast with Shift and a tenth with Ctrl. A number with a range also has a slider, whose drag is one undo entry. The range is only the slider's: a typed value can go beyond it. A color has a swatch and its red, green and blue boxes. Clicking the swatch opens a picker of hue, saturation and value in sRGB, and a hex box, which edit the color in one undo entry while it is open. A color brighter than white keeps its brightness: the picker edits the color scaled to at most 1. All zero, which is the default color, shows hatched. A `bool` is a check box, an enum a choice of its names, and an entity reference takes a drop from the outliner and has a button that clears it. A rotation edits as Euler angles, so an edit of one angle keeps the others as they show. A position edits in meters, with m, km, Mm or Gm, and the other axes keep their raw values exactly. A box that has focus keeps what the user types while the host's values arrive.
+- **What does not edit:** fields with `editor:"read"`, a child's `Transform`, which propagation writes from its `Local_Transform`, `Previous_Transform`, which the world writes, and entities that the game spawned.
+- **The header** edits the name and, with the Active badge, the active state. Each group has a button that removes its component or behaviour, and Add Component offers the registered types that the entity lacks. A `Transform` or a `Local_Transform` starts as the identity. Add Behaviour offers the scripts that define a behaviour, from the content browser's index, and a script that defines one also drags from the content browser onto the panel.
+- A component that the document has and the game does not is a group with its values as the file writes them. The scene keeps it, and the group can remove it.
+- The panel builds its controls when the entity, its components or its behaviours change. When only values change, it updates their text, so it keeps its expanders and scroll position while values change twenty times a second. A collapsed group stays collapsed across selections.
+- An entity reference, such as `Parent` or an entity field, is a link that selects that entity.
+- **Reset:** a field that the scene sets shows a reset button, which removes it from the scene. With prefabs, the default is the prefab's value.
+- **Volume settings:** a volume's setting has a check box before its name, ticked when the volume overrides it (see [World](../world/volumes.md#volumes)). A new volume's settings show their defaults, unticked and dim. Ticking a setting overrides it with the value that shows, and changing the value ticks it. Clearing the check box keeps the value, as `<field>.override = false` in the scene, so ticking it again brings it back, which compares the volume's value with what is below it. The reset button sets the setting back to its default, unticked.
+- **Multi-select:** the panel shows the components that every selected entity has, without the behaviours. A field whose values differ shows "—", and setting it, dragging it or resetting it makes one operation for each entity, in one undo entry; an axis edit keeps each entity's own other axes. Removing a component removes it from each, Add Component adds to each that lacks it, and the Active badge sets all. The fields edit only when the document has every selected entity.
+- **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
+- An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference (see [Rendering](../rendering/assets.md#asset-fields)) shows the asset's name, or its name in its file for a sub-asset such as a mesh; a click on the name shows the asset in the content browser. With the `…` button it picks from the assets of the field's kind, it accepts a drag from the content browser of an asset of that kind only, and `×` clears it. An asset that is not in the content shows as missing, with its GUID in the tooltip.
+
+### Resource monitor
+
+- **The host** sends `Host_Stats` four times a second while the editor is linked: the frames of the interval with their average and longest frame times, and how much of each the game's update and the frame's end took; the permanent arena's size and the most that a frame's arena used; and from the GPU backend's `stats`, the live buffers, textures, samplers, pipelines and acceleration structures, the most that a frame's upload ring used, and the adapter's local memory in use against the budget that the OS gives the process.
+- **The game** sends `Game_Stats` as often: the entities, the archetypes, the behaviour instances, the script VM's bytes, and each loaded module's part of them (see [Scripting](../scripting/embedding.md#embedding)).
+- **The panel** shows a minute of frame times as a graph, the longest frame of each interval faint behind the average, with a line at 16.7 ms; the host's memory and resources; the world; and the modules by memory, the largest first. It keeps a minute of samples, and forgets them when the link closes.
+
+### Content browser
+
+- **The index is the daemon's.** `AssetIndex` in `Cinnabar.Editor.Content` mirrors the daemon's `Asset_Snapshot` and `Asset_Delta` events, as `WorldModel` mirrors the game's world. The editor never scans the content roots itself.
+- **Layout:** the roots and their folders on the left, as a virtualized list of the visible rows like the outliner's, the selected folder's assets in the middle, with the folder's path over them, and the details of the asset that was selected first on the right. Several assets can be selected. The panel docks at the bottom, where it is wide and short, so the details are a column. Roots start expanded. Each asset shows an icon for its kind, its name, its behaviour's class, and a mark when it failed or has errors or warnings. Over the assets, the daemon's state or its last cook: what it cooked, in how long, and how many assets failed. Problems that belong to no asset, such as a broken definition file, show over the panel. *Thumbnails come later, as a cook output.*
+- **Sub-assets:** a file with sub-assets, such as a glTF model, has an arrow that expands it in place to show them, each with its own icon, name and status (see [Content pipeline](../content/identity-and-cooking.md#identity)). A sub-asset selects, drags onto an asset field and shows its details like any asset. The operations act on its file, so Rename, Duplicate and Delete are offered on the file only.
+- **Search** shows the assets of every folder whose name or behaviour class has every word of the query. A `kind:` word, such as `kind:script`, filters by kind.
+- **Details:** the selected asset's path, GUID, status, behaviour, import settings, the assets that it depends on and those that use it, as links that select them, and its problems. Clicking a problem opens its file in the script editor at its line. Each import setting that the asset's importer takes has an editor: a check box for a setting of true or false, and a list of its values otherwise, with the setting's description as its tooltip. A change goes to the daemon.
+- **Problems** are in the daemon's log, which the console shows, with their file and line. An asset with problems shows them in its tooltip too.
+- **Opening:** double-clicking a scene opens it, and asks first to save unsaved changes. Double-clicking a material graph or a material function opens it in the material editor, and a script, a shader, a shading model, a material written in HLSL or a material instance in the script editor. An asset's menu also shows it in Explorer, and copies its GUID or its path.
+- **The script editor** is `"scriptEditor"` in `settings.json` in the editor's settings: an array of the program and its arguments, in which `{file}` and `{line}` stand for the script's path and a line, such as `["code", "-g", "{file}:{line}"]`, the default. The editor runs it through `cmd /c`, as VS Code's `code` is a batch file.
+- **Dragging:** a script that defines a behaviour drags onto an entity in the outliner, or onto the properties panel, which adds the behaviour to each selected entity that lacks it, in one undo entry. Assets drag onto a folder in the content browser, which moves them there. A drag of a selected asset takes the whole selection. An asset drags onto an asset reference field of its kind, and a material onto the viewport (see [Viewport](viewport.md#viewport)).
+- **Operations:** the editor never writes a `.meta` file. Each operation sends its message to the daemon, which does it, and awaits the answer (see [Content pipeline](../content/daemon-and-operations.md#asset-operations)). The commands are New Script, New Behaviour, New Scene, New Material, New Material Function and New Folder, which ask for a name and make it in the content browser's folder, and Rename Asset (F2), Duplicate Asset (Ctrl+D), Delete Asset (Delete) and Re-import, which act on the selected assets. They are in the command palette and the content browser's menus. Their keys work while the content browser has focus, because the same keys act on entities elsewhere. A folder's menu also renames and deletes it. Delete shows the assets that use what it takes, which will fail to cook, and confirms. When the daemon refuses an operation, the editor shows its reason, and the console has it. Without the cook link, the operations are disabled.
+- **No undo:** asset operations change the project, not the scene, so they are not on the undo stack. The Recycle Bin has what a delete takes.
+- **Missing scripts:** a delete does not change the scenes that use what it takes. A behaviour whose script is no longer in the content shows in the properties panel as a missing script, with its GUID and the values that the scene keeps, and a button that removes it. Restoring the script from the Recycle Bin brings the behaviour back. A behaviour that the scene names and the game did not attach shows the same way.
+- **The open scene follows its file:** when a move or a rename takes the open scene's file, the document takes the new path, and so does its autosave.
+- **Saving scenes:** the editor writes a scene's text, the one content file that it writes. A new scene in a root gets its `.meta` file at the daemon's next pass.
+- **Without the daemon:** while the cook link is down, the content browser keeps its last index, dimmed.
+- **Panel ID:** the panel is `contentBrowser`. A saved layout from before phase 10 names it `assetBrowser`, and the editor reads that as the new ID.
+
+## Future work
+
+- **Ribbon:** groups that shrink as the window narrows, key tips, a quick access toolbar, and galleries. Each follows the Microsoft Fluent ribbon guidelines that the ribbon's current item kinds take from. Do these as the ribbon fills.
+- **Thumbnails** for materials, meshes and textures in the content browser, rendered by the game's preview path at a fixed size and stored by the daemon as a cook output (see [Rendering](../rendering/materials.md#material-previews) and [Content pipeline](../content/README.md#future-work)).
+- **Tests against a real host with the null backend.** The link tests run the real host when it is built. A null-backend host would let the document model, the modes and the pick path run under `dotnet test` without a GPU, on any machine. Do this when the editor's tests move to CI.

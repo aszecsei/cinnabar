@@ -1,4 +1,4 @@
-// The radiance cascades' rays (see docs/rendering.md#global-illumination): a thread for each texel of every cascade,
+// The radiance cascades' rays (see docs/rendering/global-illumination.md#global-illumination): a thread for each texel of every cascade,
 // a probe and a direction. It marches its cascade's interval through the depth buffer from the probe's surface. Where
 // the ray passes behind a surface, it takes that surface's light in last frame's lit scene, and nothing from beyond;
 // otherwise everything from beyond gets through, which the merge adds.

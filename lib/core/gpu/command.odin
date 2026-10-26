@@ -80,7 +80,7 @@ Depth_Attachment :: struct {
 }
 
 // A split pass is one pass recorded as pieces in consecutive command buffers of one submission. Each piece but
-// the last suspends the pass, and each piece but the first resumes it. See docs/gpu.md#split-passes.
+// the last suspends the pass, and each piece but the first resumes it. See docs/gpu/command-buffers.md#split-passes.
 Pass_Flag :: enum u8 {
 	// The pass continues in the next command buffer. The piece must end its command buffer and store its attachments.
 	Suspending,

@@ -5,7 +5,7 @@ import "core:math/linalg"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-// Global illumination (see docs/rendering.md#global-illumination): screen-space radiance cascades. After the prepass,
+// Global illumination (see docs/rendering/global-illumination.md#global-illumination): screen-space radiance cascades. After the prepass,
 // on the compute queue, the cascades' probes trace their intervals through the depth buffer into last frame's lit
 // scene, merge from the last cascade to the first with the ambient sky beyond, and each pixel gathers its diffuse and
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After

@@ -1,4 +1,4 @@
-// Package editor is the game's side of the editor link (see docs/editor.md#world): the component types, the entity
+// Package editor is the game's side of the editor link (see docs/editor/link.md#world): the component types, the entity
 // list and its deltas, and the values of the entities that the editor watches. The game keeps an Editor in its
 // Game_State and calls poll from Game_API.editor_poll.
 package editor

@@ -5,7 +5,7 @@ using System.Threading.Channels;
 namespace Cinnabar.Editor.Link;
 
 /// <summary>
-/// The editor's end of a link (see docs/editor.md#editor-link): a TCP connection to the host or the cook daemon, with a
+/// The editor's end of a link (see docs/editor/link.md#editor-link): a TCP connection to the host or the cook daemon, with a
 /// task that reads and a task that writes. Events are raised on the reading task's thread.
 /// </summary>
 public sealed class LinkClient : IAsyncDisposable

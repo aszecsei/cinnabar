@@ -1,6 +1,6 @@
 // Package luau binds the Luau C API: the VM (lua.h, lualib.h), the compiler (luacode.h) and the code generator
 // (luacodegen.h). Names drop their C prefix: lua_pushnumber is pushnumber, luaL_sandbox is L_sandbox and luau_load
-// is load. C macros are procedures here. See docs/scripting.md#embedding.
+// is load. C macros are procedures here. See docs/scripting/embedding.md#embedding.
 //
 // lib/core/luau/CMakeLists.txt builds the libraries that this package links. Luau raises errors with longjmp, so an
 // error skips the defer statements of the Odin frames that it jumps over.
@@ -120,7 +120,7 @@ Debug :: struct {
 }
 
 // Callbacks are shared by every thread of a VM. Every pointer stored here must stay valid for the VM's lifetime, so
-// game-side code never stores one (see docs/scripting.md#host-trampolines).
+// game-side code never stores one (see docs/scripting/embedding.md#host-trampolines).
 Callbacks :: struct {
 	userdata:            rawptr,
 	interrupt:           proc "c" (L: ^State, gc: c.int),

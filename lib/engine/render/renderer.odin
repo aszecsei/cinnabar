@@ -10,7 +10,7 @@ import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
 
-// The frame's targets (see docs/rendering.md#layers). The world draws into linear HDR colors, the editor's entity IDs
+// The frame's targets (see docs/rendering/layers-and-output.md#layers). The world draws into linear HDR colors, the editor's entity IDs
 // and reversed depth, which the prepass writes with the normals and the velocities (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
 // sRGB view, so it blends in linear light, and the output pass encodes it.
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
@@ -31,7 +31,7 @@ DEBUG_FORMAT :: gpu.Format.RGBA8_Unorm_Srgb
 // The world pass's color targets, which a game's pipelines that draw in it use.
 WORLD_COLORS :: []gpu.Color_Target{{format = SCENE_FORMAT}, {format = ID_FORMAT}}
 // The stencil test of a game's pipelines that draw in the world pass, so they never cover the view model, as the
-// renderer's draws never do (see docs/rendering.md#view-model).
+// renderer's draws never do (see docs/rendering/layers-and-output.md#view-model).
 WORLD_STENCIL :: gpu.Stencil_State {
 	compare   = .Equal,
 	read_mask = VIEW_MODEL_STENCIL,
@@ -61,7 +61,7 @@ id_submesh :: proc "contextless" (id: u32) -> int {
 	return int(id >> ID_ENTITY_BITS)
 }
 
-// Renderer is the built-in renderer (see docs/rendering.md#frame). It lives in Game_State and holds handles only, so
+// Renderer is the built-in renderer (see docs/rendering/frame.md#frame). It lives in Game_State and holds handles only, so
 // a code reload keeps it.
 Renderer :: struct {
 	platform:        ^core.Platform_API,
@@ -93,7 +93,7 @@ Renderer :: struct {
 	debug_overlay:   Shader_Pipeline,
 	// The debug views from the frame's textures (see Debug_View).
 	debug_view:      Shader_Pipeline,
-	// Moment-based transparency's composite over the scene (see docs/rendering.md#transparency).
+	// Moment-based transparency's composite over the scene (see docs/rendering/transparency.md#transparency).
 	transparency_composite: Shader_Pipeline,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
@@ -107,17 +107,17 @@ Frame_Desc :: struct {
 	keep_ids:          bool,
 	// The entity slots not to draw, a bit each, as the editor hides them. nil hides nothing.
 	hidden:            []u32,
-	// The frame's settings (see docs/rendering.md#settings). nil takes them from the volumes at the view, as
+	// The frame's settings (see docs/rendering/frame.md#settings). nil takes them from the volumes at the view, as
 	// resolve_settings does.
 	settings:          ^Frame_Settings,
 	// The editor's debug view, the features that it turns off, and the stops that it adds to the exposure (see
-	// docs/rendering.md#debug-views).
+	// docs/rendering/post-processing.md#debug-views).
 	debug_view:        Debug_View,
 	disable:           Features,
 	exposure_offset:   f32,
 	hooks:             Frame_Hooks,
 	// The editor's material previews that the frame also draws, each into its own target (see
-	// docs/rendering.md#material-previews). draw_frame sets each one's complete.
+	// docs/rendering/materials.md#material-previews). draw_frame sets each one's complete.
 	previews:          []Preview_Desc,
 }
 
@@ -156,7 +156,7 @@ Frame :: struct {
 	debug_view:               Debug_View,
 	// The directional lights' cascades (see Shadows).
 	shadow_settings:          Shadow_Settings,
-	// How the frame target reaches the display (see docs/rendering.md#hdr-output).
+	// How the frame target reaches the display (see docs/rendering/layers-and-output.md#hdr-output).
 	output:                   gpu.Output,
 	view_projection:          matrix[4, 4]f32,
 	// The camera's subpixel jitter for temporal AA, in normalized device coordinates, which the renderer's draws add
@@ -178,7 +178,7 @@ Frame :: struct {
 	// The global illumination's diffuse and specular light, zero without it.
 	gi_diffuse:               Texture,
 	gi_specular:              Texture,
-	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering.md#transparency).
+	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering/transparency.md#transparency).
 	moments_zeroth:           Texture,
 	moments:                  Texture,
 	// Zero without a UI hook, and without debug lines or a debug hook.
@@ -319,7 +319,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 }
 
 // draw_frame draws a frame into the frame target: the world, the UI and the debug layer, combined by the output pass
-// (see docs/rendering.md#frame). The world draws in a prepass, then in the forward pass with the lights' clusters and
+// (see docs/rendering/frame.md#frame). The world draws in a prepass, then in the forward pass with the lights' clusters and
 // the shadows, then post-processing runs on it. It returns false if the graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	residency_update(&r.residency)

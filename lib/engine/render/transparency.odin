@@ -2,7 +2,7 @@ package render
 
 import "cinnabar:core/gpu"
 
-// Transparency (see docs/rendering.md#transparency): the transparent and additive surfaces draw after the opaque ones,
+// Transparency (see docs/rendering/transparency.md#transparency): the transparent and additive surfaces draw after the opaque ones,
 // test their depth and write none. A Transparent material draws with moment-based order-independent transparency by
 // default: a pass adds up each pixel's optical depth and its moments, a second shades each surface dimmed by the
 // transmittance in front of it that the moments give and adds them up, and a compute pass composites the sum over the

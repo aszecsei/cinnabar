@@ -11,7 +11,7 @@ import "cinnabar:engine/ecs"
 
 MAX_WAITERS :: 4096
 
-// Wait_Kind is what a coroutine waits for. See docs/scripting.md#coroutines.
+// Wait_Kind is what a coroutine waits for. See docs/scripting/behaviours.md#coroutines.
 @(private)
 Wait_Kind :: enum u8 {
 	None,

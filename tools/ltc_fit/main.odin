@@ -1,4 +1,4 @@
-// tools/ltc_fit fits the lookup tables that the area lights shade with (see docs/rendering.md#area-lights): for each
+// tools/ltc_fit fits the lookup tables that the area lights shade with (see docs/rendering/lighting-and-shadows.md#area-lights): for each
 // roughness and view angle, the linearly transformed cosine that best matches the Lit shading model's GGX specular, with
 // its magnitude and Fresnel term, and the horizon-clipped sphere's form factor. Run `just ltc-fit` after a change to
 // Lit's specular, and commit the table it writes.

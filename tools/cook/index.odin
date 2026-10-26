@@ -9,7 +9,7 @@ import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // Index is what the daemon knows of the content after a pass: every asset with its status and problems, and every
-// folder (see docs/content-pipeline.md#cook-daemon). Its entries are the cook link's, so they go to the editor as
+// folder (see docs/content/daemon-and-operations.md#cook-daemon). Its entries are the cook link's, so they go to the editor as
 // they are. Each pass builds a new index, which the daemon compares with the last one.
 Index :: struct {
 	arena:    virtual.Arena,

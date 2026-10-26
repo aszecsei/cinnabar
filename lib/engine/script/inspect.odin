@@ -39,7 +39,7 @@ Behaviour_Snapshot :: struct {
 }
 
 // inspect reads an entity's behaviours and the values of their declared fields, for the editor (see
-// docs/editor.md#properties). It calls no script code. Strings and slices are in allocator. Call it outside the
+// docs/editor/shell-and-panels.md#properties). It calls no script code. Strings and slices are in allocator. Call it outside the
 // script phase.
 inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []Behaviour_Snapshot {
 	handles := entity_instances(r, e)

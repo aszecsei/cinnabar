@@ -1,4 +1,4 @@
-// The tone mapping lookup table (see docs/rendering.md#post-processing): LUT_SIZE^3 entries over a range of stops
+// The tone mapping lookup table (see docs/rendering/post-processing.md#post-processing): LUT_SIZE^3 entries over a range of stops
 // around middle grey, its blue slices side by side in one 2D texture. Each entry holds the display color of a
 // pre-exposed scene color: sRGB-encoded for SDR output, and for HDR output its nits with Rec. 709 primaries, encoded
 // with the PQ curve. tone_lut.hlsl bakes it, and the output pass reads it.

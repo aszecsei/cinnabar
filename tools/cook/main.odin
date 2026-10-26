@@ -1,4 +1,4 @@
-// tools/cook compiles source assets. See docs/content-pipeline.md#cooking.
+// tools/cook compiles source assets. See docs/content/identity-and-cooking.md#cooking.
 //
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), and `cook daemon` cooks every kind whenever the content changes (see daemon.odin).
@@ -62,7 +62,7 @@ main :: proc() {
 			ok = run_daemon(options)
 		}
 	case "--emit-link-schema":
-		// The editor's source generator reads the cook link's schema (see docs/content-pipeline.md#cook-link).
+		// The editor's source generator reads the cook link's schema (see docs/content/daemon-and-operations.md#cook-link).
 		if parsed = len(os.args) == 3; parsed {
 			ok = write_schema(os.args[2])
 		}

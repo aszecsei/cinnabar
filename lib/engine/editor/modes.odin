@@ -5,7 +5,7 @@ import "core:time"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 
-// Modes (see docs/editor.md#modes). While an editor is linked, it decides whether the game's world runs: in Edit
+// Modes (see docs/editor/document-and-scenes.md#modes). While an editor is linked, it decides whether the game's world runs: in Edit
 // nothing runs, so the editor's document is the world; in Play the full frame runs; and while Paused, only a frame
 // for each step runs. Without an editor, the world always runs.
 

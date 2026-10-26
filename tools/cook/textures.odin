@@ -1,6 +1,6 @@
 // Textures are .png, .jpg, .tga and .hdr files. The cooker decodes them, sizes them, makes their mips in floating
 // point, and block-compresses each mip by its usage with Compressonator (see compressonator.odin). See
-// docs/content-pipeline.md#textures.
+// docs/content/kinds/textures.md#textures.
 package cook
 
 import "core:c"

@@ -16,7 +16,7 @@ Scene_Problem :: struct {
 	error:   bool,
 }
 
-// scene_parse reads a scene file (see docs/editor.md#scenes). The scene and the messages are in allocator, and the
+// scene_parse reads a scene file (see docs/editor/document-and-scenes.md#scenes). The scene and the messages are in allocator, and the
 // strings without escapes point into text. ok is false when any problem is an error. An entity key that the parser
 // does not know is a warning, so a file from a newer editor still cooks.
 scene_parse :: proc(text: string, allocator := context.allocator) -> (scene: Scene, problems: []Scene_Problem, ok: bool) {

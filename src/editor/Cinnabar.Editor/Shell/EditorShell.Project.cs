@@ -6,7 +6,7 @@ using LogLevel = Cinnabar.Editor.Panels.LogLevel;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The project's settings (see docs/architecture.md#project-settings), which the game reads, and the game in its own
+/// The project's settings (see docs/overview/architecture.md#project-settings), which the game reads, and the game in its own
 /// window. The viewport is always SDR, so the output mode shows only in the game's window: Run Game opens it, and it
 /// takes a change of the settings at once.
 /// </summary>

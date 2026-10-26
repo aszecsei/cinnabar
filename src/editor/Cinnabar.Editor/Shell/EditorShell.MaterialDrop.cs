@@ -9,7 +9,7 @@ namespace Cinnabar.Editor.Shell;
 public sealed record MaterialTarget(ulong SceneId, int Slot);
 
 /// <summary>
-/// Dropping a material from the content browser onto an entity in the viewport (see docs/editor.md#viewport): the
+/// Dropping a material from the content browser onto an entity in the viewport (see docs/editor/viewport.md#viewport): the
 /// material shows on the submesh under the mouse while the drag is over it, as an open undo entry, and the drop
 /// commits it.
 /// </summary>

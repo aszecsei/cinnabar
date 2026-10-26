@@ -4,7 +4,7 @@ using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Viewport;
 
-/// <summary>The viewport's keyboard and mouse as the game's input events (see docs/editor.md#modes).</summary>
+/// <summary>The viewport's keyboard and mouse as the game's input events (see docs/editor/document-and-scenes.md#modes).</summary>
 static class GameInput
 {
     public static InputEvent Down(InputKey key) => new(InputEventKind.KeyDown, key, [0, 0], 0);

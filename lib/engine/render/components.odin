@@ -5,7 +5,7 @@ import "core:math"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
-// The render components' stable IDs (see docs/world.md). Engine components take IDs below 1000.
+// The render components' stable IDs (see docs/world/README.md). Engine components take IDs below 1000.
 CAMERA_ID :: ecs.Component_Id(32)
 MESH_RENDERER_ID :: ecs.Component_Id(33)
 DIRECTIONAL_LIGHT_ID :: ecs.Component_Id(34)
@@ -22,7 +22,7 @@ DEFAULT_VERTICAL_FOV :: math.PI / 3
 DEFAULT_NEAR :: 0.05
 
 // Camera makes its entity a camera: the frame can be drawn from its presented Transform. Game_State holds the active
-// camera's entity (see docs/rendering.md#components). 0 in a field means its default.
+// camera's entity (see docs/rendering/assets.md#components). 0 in a field means its default.
 Camera :: struct {
 	// In radians.
 	vertical_fov: f32 `editor:"range=0.1,3"`,
@@ -34,7 +34,7 @@ Camera :: struct {
 }
 
 // View_Model marks an entity of the first-person view model: it draws with the camera's view model projection, over
-// the world, which never covers it, and it casts no shadows (see docs/rendering.md#view-model). Its pose is in the
+// the world, which never covers it, and it casts no shadows (see docs/rendering/layers-and-output.md#view-model). Its pose is in the
 // world, usually as a child of the camera.
 View_Model :: struct {}
 
@@ -53,7 +53,7 @@ DEFAULT_SPOT_OUTER :: math.PI / 4
 DEFAULT_AREA_SIZE :: 1
 
 // Directional_Light lights the world from far away, along its entity's +z, as the sun does. Its light is color times
-// intensity, in the same units as the sky's. A color of 0 means white. See docs/rendering.md#lights-and-clusters.
+// intensity, in the same units as the sky's. A color of 0 means white. See docs/rendering/lighting-and-shadows.md#lights-and-clusters.
 Directional_Light :: struct {
 	color:        [3]f32 `editor:"color"`,
 	intensity:    f32 `editor:"range=0,100"`,
@@ -80,7 +80,7 @@ Spot_Light :: struct {
 	cast_shadows: bool,
 }
 
-// The area lights (see docs/rendering.md#area-lights) have a size in meters, and their intensity is as a point light's
+// The area lights (see docs/rendering/lighting-and-shadows.md#area-lights) have a size in meters, and their intensity is as a point light's
 // would be along their +z: a bigger light spreads the same light over more of its surface. Each reaches 0 at its range
 // beyond its size (0 means DEFAULT_LIGHT_RANGE), and casts shadows from its center, as a point light does.
 

@@ -30,7 +30,7 @@ public sealed record CookOptions(
     IReadOnlyList<string>? Includes = null);
 
 /// <summary>
-/// The cook daemon's lifetime and its cook link (see docs/editor.md#processes): start, stop, restart, crashes, and the
+/// The cook daemon's lifetime and its cook link (see docs/editor/processes-and-projects.md#processes): start, stop, restart, crashes, and the
 /// connection, which fills an <see cref="AssetIndex"/>. Events are raised, and the index changes, on the
 /// synchronization context that the session was made on, which is the UI thread in the editor.
 /// </summary>
@@ -129,7 +129,7 @@ public sealed class CookSession : IDisposable
     }
 
     /// <summary>
-    /// Asks the daemon for an asset operation (see docs/content-pipeline.md#asset-operations), and completes with its
+    /// Asks the daemon for an asset operation (see docs/content/daemon-and-operations.md#asset-operations), and completes with its
     /// answer, which comes after the index's changes. Without the cook link, it fails at once.
     /// </summary>
     public Task<OperationResult> Request(ILinkMessage operation)
@@ -147,7 +147,7 @@ public sealed class CookSession : IDisposable
 
     /// <summary>
     /// Asks the daemon to cook a material's unsaved text into the cache's preview area (see
-    /// docs/rendering.md#material-previews), and completes with its answer. Without the cook link, it fails at once.
+    /// docs/rendering/materials.md#material-previews), and completes with its answer. Without the cook link, it fails at once.
     /// </summary>
     public Task<PreviewResult> CookPreview(string guid, string text)
     {

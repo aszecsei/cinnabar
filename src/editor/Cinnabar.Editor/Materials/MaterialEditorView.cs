@@ -11,7 +11,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Materials;
 
 /// <summary>
-/// The material editor (see docs/editor.md#material-editor): the material's settings over its node canvas, its
+/// The material editor (see docs/editor/material-editor.md#material-editor): the material's settings over its node canvas, its
 /// preview and parameters on the left, and the selected node's details on the right. A material function has its
 /// canvas and details only. Docking can rebuild the view at any time, so its state is in its <see cref="MaterialEditor"/>.
 /// </summary>

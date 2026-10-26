@@ -1,7 +1,7 @@
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// An open material or material function and its edits (see docs/editor.md#material-editor). Every edit changes the
+/// An open material or material function and its edits (see docs/editor/material-editor.md#material-editor). Every edit changes the
 /// graph and keeps its text before and after as an undo entry: graphs are small, and their text is what the cook daemon
 /// cooks for the preview. A drag groups its steps with <see cref="Begin"/> and <see cref="Commit"/> into one entry.
 /// </summary>

@@ -1,5 +1,5 @@
 // Package asset_format defines what tools/cook writes and the asset runtime reads: GUIDs, .meta files and blob
-// layouts. It imports nothing from core, so the cooker can use it. See docs/content-pipeline.md.
+// layouts. It imports nothing from core, so the cooker can use it. See docs/content/README.md.
 package asset_format
 
 import "core:mem"
@@ -52,11 +52,11 @@ hex_digit :: proc "contextless" (c: u8) -> (u8, bool) {
 META_EXTENSION :: ".meta"
 
 // After a cook writes blobs into a configuration's cache directory, it writes a counter to this file in it. The
-// runtime checks the blobs it has loaded only when the file changes (see docs/content-pipeline.md#loading).
+// runtime checks the blobs it has loaded only when the file changes (see docs/content/blobs-and-loading.md#loading).
 GENERATION_FILE :: ".generation"
 
 // Meta is a parsed .meta file: lines of `key = value`, with `#` comments. Every .meta has a guid. A key with a dot,
-// `<kind>.<name>`, gives the GUID of a sub-asset that the file makes (see docs/content-pipeline.md#identity). The other
+// `<kind>.<name>`, gives the GUID of a sub-asset that the file makes (see docs/content/identity-and-cooking.md#identity). The other
 // keys are the asset's import settings.
 Meta :: struct {
 	guid:      Guid,
@@ -198,7 +198,7 @@ Script_Flag :: enum u32 {
 
 Script_Flags :: bit_set[Script_Flag; u32]
 
-// Script_Blob is the start of a script blob (see docs/content-pipeline.md#blob-format).
+// Script_Blob is the start of a script blob (see docs/content/blobs-and-loading.md#blob-format).
 Script_Blob :: struct {
 	header:      Blob_Header,
 	flags:       Script_Flags,

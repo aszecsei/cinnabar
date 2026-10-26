@@ -7,7 +7,7 @@ import "core:slice"
 import "cinnabar:core/gpu"
 import format "cinnabar:engine/asset/format"
 
-// Material previews (see docs/rendering.md#material-previews): a frame can draw a material on one mesh into a target of
+// Material previews (see docs/rendering/materials.md#material-previews): a frame can draw a material on one mesh into a target of
 // its own, as the editor's material editor shows it. A preview draws no world: its mesh, lit by one directional light
 // and the ambient light, with the material's prepass and forward pipelines, then the output pass's tone mapping
 // through the frame's lookup table. Its records are relative to its camera, which orbits the mesh's middle. It has no

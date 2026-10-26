@@ -1,4 +1,4 @@
--- The types of the engine's script API (see docs/scripting.md). script.definitions adds the rest, which depends on
+-- The types of the engine's script API (see docs/scripting/README.md). script.definitions adds the rest, which depends on
 -- the game: Entity, Key, each exposed component and the game's bindings.
 
 declare extern type WorldPosition with

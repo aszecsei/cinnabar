@@ -14,7 +14,7 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// The viewport panel: the frames, the tool palette, the camera's speed and the stats over them, and the input that
-/// drives the editor's tools (see docs/editor.md#viewport). The right button flies with WASD, Q and E; Alt with the
+/// drives the editor's tools (see docs/editor/viewport.md#viewport). The right button flies with WASD, Q and E; Alt with the
 /// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
 /// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it. While
 /// the game plays, the viewport gives the game its keyboard and mouse instead, unless the free camera is on, and a

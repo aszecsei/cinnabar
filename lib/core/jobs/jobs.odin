@@ -1,5 +1,5 @@
 // Package jobs is the fiber job system: one worker thread per core, a pool of fibers and atomic counters.
-// See docs/core.md#job-system.
+// See docs/core/jobs-and-memory.md#job-system.
 //
 // The types are shared. The scheduler runs in the host: the game calls it through Platform_API, because the
 // game DLL has its own, uninitialized copy of this package.

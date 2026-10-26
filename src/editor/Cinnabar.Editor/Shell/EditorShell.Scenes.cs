@@ -251,7 +251,7 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Adds a global volume where the selected entity is, as New Entity does, for the settings components that volumes
-    /// carry (see docs/world.md#volumes).
+    /// carry (see docs/world/volumes.md#volumes).
     /// </summary>
     public void CreateVolume()
     {

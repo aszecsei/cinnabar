@@ -1,4 +1,4 @@
-// The fog volume's injection (see docs/rendering.md#volumetric-fog): a thread for each froxel, a screen tile of
+// The fog volume's injection (see docs/rendering/fog.md#volumetric-fog): a thread for each froxel, a screen tile of
 // FOG_TILE pixels in one of FOG_SLICES depth slices, which halve the clusters' slices. Each froxel takes the fog's
 // density at a point in it, which moves within its slice from frame to frame, and the light that reaches that point:
 // every directional light, the punctual lights of its cluster with their shadow maps, and the ambient light. Then it

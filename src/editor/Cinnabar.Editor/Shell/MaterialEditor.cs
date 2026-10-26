@@ -14,7 +14,7 @@ namespace Cinnabar.Editor.Shell;
 public sealed record GraphProblem(int? Node, string Text, bool Error);
 
 /// <summary>
-/// An open material or material function in the material editor (see docs/editor.md#material-editor): its document, the
+/// An open material or material function in the material editor (see docs/editor/material-editor.md#material-editor): its document, the
 /// selected nodes, the problems of its last preview cook, and for a material, its preview. Every change of the graph
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.

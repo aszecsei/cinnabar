@@ -4,7 +4,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/render"
 
-// The icons' pass (see docs/editor.md#viewport): before the pick, so a click on an icon picks its entity.
+// The icons' pass (see docs/editor/viewport.md#viewport): before the pick, so a click on an icon picks its entity.
 
 @(private)
 ICONS_SHADER :: #load("../content/shaders/icons.hlsl.meta", string)

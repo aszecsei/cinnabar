@@ -1,4 +1,4 @@
-// Bloom's chain (see docs/rendering.md#post-processing): each level halves the one before with a 13-tap filter, then
+// Bloom's chain (see docs/rendering/post-processing.md#post-processing): each level halves the one before with a 13-tap filter, then
 // from the smallest level up, each level adds the level below it, blurred with a 3x3 tent. The output pass adds the
 // largest level to the scene, or the composite adds it, before a game's effects that read the scene with its bloom.
 #include "cinnabar.hlsli"

@@ -1,6 +1,6 @@
 // `cook daemon --cache <dir> [--definitions <file>] [--link <port>] --root <name>=<dir>...` cooks the dev
 // configuration, and then cooks again each time the roots or the definition file change, until it is stopped. With
-// --link, it serves the editor the index of the content over the cook link. See docs/content-pipeline.md#cook-daemon.
+// --link, it serves the editor the index of the content over the cook link. See docs/content/daemon-and-operations.md#cook-daemon.
 package cook
 
 import "core:fmt"

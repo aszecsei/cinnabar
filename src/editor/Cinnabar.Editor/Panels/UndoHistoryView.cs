@@ -8,7 +8,7 @@ using Cinnabar.Editor.Shell;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The undo history (see docs/editor.md#panels): the open scene's undo entries, oldest first, after a row for the
+/// The undo history (see docs/editor/shell-and-panels.md#panels): the open scene's undo entries, oldest first, after a row for the
 /// scene as it opened. Clicking a row undoes or redoes to it. Entries past the current one are dimmed, and the one
 /// that the file has is marked.
 /// </summary>

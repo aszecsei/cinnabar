@@ -1,4 +1,4 @@
-// Debug lines (see docs/rendering.md#debug): each line is a quad a few pixels wide, in exact colors, into the debug
+// Debug lines (see docs/rendering/layers-and-output.md#debug): each line is a quad a few pixels wide, in exact colors, into the debug
 // layer. The renderer draws tested lines twice, faintly where the scene hides them and fully where it does not, and
 // overlay lines over everything.
 #include "cinnabar.hlsli"

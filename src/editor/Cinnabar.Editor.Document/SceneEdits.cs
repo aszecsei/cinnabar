@@ -9,9 +9,9 @@ public static class SceneEdits
     public const ulong TransformId = 1;
     public const ulong LocalTransformId = 2;
     public const ulong PreviousTransformId = 4;
-    /// <summary>The engine's Volume (see docs/world.md#volumes).</summary>
+    /// <summary>The engine's Volume (see docs/world/volumes.md#volumes).</summary>
     public const ulong VolumeId = 42;
-    /// <summary>The renderer's Mesh_Renderer (see docs/rendering.md#components).</summary>
+    /// <summary>The renderer's Mesh_Renderer (see docs/rendering/assets.md#components).</summary>
     public const ulong MeshRendererId = 33;
 
     /// <summary>Sets a field in a list, or removes it with a null value, and returns the old value or null.</summary>

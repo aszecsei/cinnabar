@@ -56,12 +56,12 @@ Platform_API :: struct {
 	// Its contents are undefined at the start of each frame.
 	gpu_frame_target: proc() -> gpu.Texture,
 	// The frame's output: how the frame target's colors reach the display, the frame target's format, which follows
-	// from it, and the display (see docs/gpu.md#presentation). gpu_request_output asks for an output mode from the
+	// from it, and the display (see docs/gpu/presentation.md#presentation). gpu_request_output asks for an output mode from the
 	// next frame on; Auto, the default, is HDR10 while the display is in HDR mode. Shared mode is always Sdr.
 	gpu_output:         proc() -> gpu.Output,
 	gpu_request_output: proc(request: gpu.Output_Request),
 	// The editor's previews render into shared targets of their own beside the frame target (see
-	// docs/rendering.md#material-previews). gpu_preview_target gives target id's texture for this frame at a size, at
+	// docs/rendering/materials.md#material-previews). gpu_preview_target gives target id's texture for this frame at a size, at
 	// most gpu.MAX_PREVIEW_SIZE on a side, in the render target layout, which the game must leave it in; the frame's end
 	// gives it to the reader. It gives false outside shared mode, and while the reader may still read the texture that
 	// the frame would draw into. id is below gpu.MAX_PREVIEW_TARGETS. gpu_release_preview_target releases a target's
@@ -70,7 +70,7 @@ Platform_API :: struct {
 	gpu_release_preview_target: proc(id: int),
 	// gpu_submit runs the command buffers on a queue, in order after the queue's earlier submissions in the frame.
 	// They start after the earlier submissions of the wait_for queues finish. It returns false if the backend
-	// rejected the command buffers. See docs/gpu.md#queues.
+	// rejected the command buffers. See docs/gpu/queues-streaming-readback.md#queues.
 	gpu_submit:       proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool,
 	// gpu_upload allocates memory in the frame's upload ring. It returns false when the ring is full.
 	gpu_upload:       proc(size, align: int) -> (gpu.Upload, bool),
@@ -82,7 +82,7 @@ Platform_API :: struct {
 	gpu_transfer_done:  proc(transfer: gpu.Transfer) -> bool,
 	// gpu_read_buffer returns a Readback buffer's memory, or false while the GPU has not finished a frame that copies
 	// into it. The memory is the backend's: read it during the frame, and keep no pointer into it. See
-	// docs/gpu.md#readback.
+	// docs/gpu/queues-streaming-readback.md#readback.
 	gpu_read_buffer:    proc(buffer: gpu.Buffer) -> ([]byte, bool),
 
 	// Creation returns the nil handle on failure. data may be nil. The backend copies the description and the data.
@@ -114,7 +114,7 @@ Platform_API :: struct {
 	gpu_destroy_scope:            proc(scope: gpu.Scope) -> int,
 
 	// The script VM lives in host memory, and every function pointer that it stores is host code (see
-	// docs/scripting.md#host-trampolines). bindings must stay at the same address until script_close, and on_reload
+	// docs/scripting/embedding.md#host-trampolines). bindings must stay at the same address until script_close, and on_reload
 	// must register every binding again. The VM opens with the built-in libraries. A soft restart closes the VMs
 	// that the game left open.
 	script_open:         proc(bindings: ^script_host.Bindings) -> ^luau.State,
@@ -123,7 +123,7 @@ Platform_API :: struct {
 	script_push_binding: proc(L: ^luau.State, name: string),
 	// Interns a method or field name and returns its atom, or -1 if the interner is full. Atoms never change meaning.
 	script_atom:         proc(name: string) -> i16,
-	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting.md#direct-field-access). It returns
+	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting/embedding.md#direct-field-access). It returns
 	// false when the host was built without LUAU_DIRECT_ACCESS.
 	script_direct_access: proc(L: ^luau.State, tag: i32) -> bool,
 }
@@ -138,12 +138,12 @@ Game_API :: struct {
 	on_reload:   proc(state: rawptr, platform: ^Platform_API),
 	state_size:  proc() -> int,
 	layout_hash: proc() -> u64,
-	// The host refuses a DLL whose GPU command format differs from its own (see docs/gpu.md#command-buffers).
+	// The host refuses a DLL whose GPU command format differs from its own (see docs/gpu/command-buffers.md#command-buffers).
 	gpu_format_hash: proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
-	// must not need init: it makes its own script runtime. See docs/scripting.md#types-and-tooling.
+	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
 	script_types:    proc(platform: ^Platform_API) -> string,
-	// The game's side of the editor link (see docs/editor.md#editor-link). The host calls it between frames with
+	// The game's side of the editor link (see docs/editor/link.md#editor-link). The host calls it between frames with
 	// the editor's messages for the game, and the game appends its own messages, framed, to out. connection changes
 	// for each editor, and is 0 while none is linked. A game without editor support leaves it nil.
 	editor_poll:     proc(state: rawptr, connection: u64, incoming: []Editor_Message, out: ^[dynamic]byte),

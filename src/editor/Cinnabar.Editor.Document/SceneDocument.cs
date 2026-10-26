@@ -4,7 +4,7 @@ namespace Cinnabar.Editor.Document;
 public sealed record Transaction(string Label, IReadOnlyList<Operation> Operations, IReadOnlyList<Operation> Inverses);
 
 /// <summary>
-/// An open scene and its edits (see docs/editor.md#document-model): every change is an operation, applied to the
+/// An open scene and its edits (see docs/editor/document-and-scenes.md#document-model): every change is an operation, applied to the
 /// scene, kept on the undo stack and passed to <see cref="Applied"/>, which sends it to the host. The editor never
 /// waits for the host. An interaction such as a drag groups its operations with <see cref="Begin"/>,
 /// <see cref="Preview"/> and <see cref="Commit"/> into one entry.

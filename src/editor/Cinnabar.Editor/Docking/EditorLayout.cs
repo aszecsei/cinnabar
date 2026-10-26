@@ -6,7 +6,7 @@ using Dock.Model.Mvvm.Controls;
 namespace Cinnabar.Editor.Docking;
 
 /// <summary>
-/// The dock layout of the panels (see docs/editor.md#shell): the default layout, showing and closing panels by ID,
+/// The dock layout of the panels (see docs/editor/shell-and-panels.md#shell): the default layout, showing and closing panels by ID,
 /// and saving and restoring the layout as a <see cref="LayoutFile"/>.
 /// </summary>
 public sealed class EditorLayout

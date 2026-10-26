@@ -3,7 +3,7 @@ using Wire = Cinnabar.Editor.Link.Protocol;
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
-/// The scene as a <c>Load_Scene</c> message, which replaces the host's world (see docs/editor.md#document-model). The
+/// The scene as a <c>Load_Scene</c> message, which replaces the host's world (see docs/editor/document-and-scenes.md#document-model). The
 /// editor sends it when the link connects, after a soft restart, and when it opens a scene. Operations use the same
 /// conversions for their parts, and the game's commands the ones back from the wire.
 /// </summary>

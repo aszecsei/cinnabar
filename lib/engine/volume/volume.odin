@@ -1,4 +1,4 @@
-// Volumes give settings that change with where a point is (see docs/world.md#volumes): the post-processing and the
+// Volumes give settings that change with where a point is (see docs/world/volumes.md#volumes): the post-processing and the
 // fog at the camera, and later the wind at a tree. A Volume component gives its entity a shape, and the settings
 // components on the same entity give the values. Each setting is a Value, which a volume overrides or leaves to the
 // volumes below it, so a small volume can change one setting and keep the rest.

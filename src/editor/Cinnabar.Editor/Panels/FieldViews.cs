@@ -629,7 +629,7 @@ sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string>
 }
 
 /// <summary>
-/// An asset reference (see docs/rendering.md#asset-fields): the asset's name, which shows it in the content browser, and
+/// An asset reference (see docs/rendering/assets.md#asset-fields): the asset's name, which shows it in the content browser, and
 /// with an editor, a button that picks from the assets of the field's kind, a drop of one from the content browser,
 /// and a button that clears it. An asset that is not in the content shows as missing, with its GUID.
 /// </summary>

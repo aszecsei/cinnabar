@@ -1,4 +1,4 @@
-// Ambient occlusion's depth (see docs/rendering.md#ambient-occlusion): the prepass's depth as view depth, and four
+// Ambient occlusion's depth (see docs/rendering/ambient-occlusion.md#ambient-occlusion): the prepass's depth as view depth, and four
 // levels below it, each half the size of the one above. gtao.hlsl reads a step far from its pixel from a smaller
 // level, where one texel stands for the area around it. After XeGTAO's XeGTAO_PrefilterDepths16x16 (Copyright (C)
 // 2016-2021, Intel Corporation; SPDX-License-Identifier: MIT).

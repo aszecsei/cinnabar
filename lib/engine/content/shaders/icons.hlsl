@@ -1,6 +1,6 @@
 #include "cinnabar.hlsli"
 
-// The editor's icons for lights, volumes and cameras (see docs/editor.md#viewport): a disc that faces the camera, a
+// The editor's icons for lights, volumes and cameras (see docs/editor/viewport.md#viewport): a disc that faces the camera, a
 // fixed size on screen, with a glyph for its kind in its light's color. It draws into the debug layer, and its entity's
 // ID and depth into the ID buffer and the scene's depth, so the pick and the outline find it as they find a mesh.
 

@@ -7,7 +7,7 @@ using Cinnabar.Editor.Model;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The resource monitor (see docs/editor.md#resource-monitor): the frame times of the last minute as a graph, the
+/// The resource monitor (see docs/editor/shell-and-panels.md#resource-monitor): the frame times of the last minute as a graph, the
 /// host's memory and GPU resources, and the world's entities and the scripts' memory by module. The host and the game
 /// send their stats four times a second while the link is up.
 /// </summary>

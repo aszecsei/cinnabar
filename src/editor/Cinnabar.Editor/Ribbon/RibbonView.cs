@@ -15,7 +15,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.Ribbon;
 
 /// <summary>
-/// Shows a <see cref="RibbonLayout"/> (see docs/editor.md#ribbon): the category bands, the tab strip, and the groups
+/// Shows a <see cref="RibbonLayout"/> (see docs/editor/shell-and-panels.md#ribbon): the category bands, the tab strip, and the groups
 /// of the selected tab. It rebuilds when the editor's context changes, because contextual tabs come and go.
 /// </summary>
 public sealed class RibbonView : DockPanel

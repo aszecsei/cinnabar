@@ -1,4 +1,4 @@
-// The exposure (see docs/rendering.md#post-processing): from the luminance histogram, the mean log2 luminance between
+// The exposure (see docs/rendering/post-processing.md#post-processing): from the luminance histogram, the mean log2 luminance between
 // its 10th and 90th percentiles, clamped to the settings' range, gives the exposure that maps it to middle grey. The
 // exposure moves toward it, and pre-exposes the next frame. With a manual exposure, it takes that at once.
 #include "cinnabar.hlsli"

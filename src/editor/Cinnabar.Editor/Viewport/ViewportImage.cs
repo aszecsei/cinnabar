@@ -8,7 +8,7 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// A texture that the compositor shows. ANGLE imports only D3D11 textures with a keyed mutex, and a D3D12 resource
-/// cannot have one, so each host frame is copied into one of these (see docs/editor.md#viewport). Key 0 is the
+/// cannot have one, so each host frame is copied into one of these (see docs/editor/viewport.md#viewport). Key 0 is the
 /// editor's turn and key 1 is the compositor's.
 /// </summary>
 sealed class ViewportImage : IAsyncDisposable

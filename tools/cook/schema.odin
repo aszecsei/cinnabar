@@ -36,7 +36,7 @@ return {
 }
 `
 
-// Schema_VM runs the top level of behaviour scripts to read their fields (see docs/content-pipeline.md#scripts).
+// Schema_VM runs the top level of behaviour scripts to read their fields (see docs/content/kinds/scripts.md#scripts).
 Schema_VM :: struct {
 	L:        ^luau.State,
 	ctx:      runtime.Context,

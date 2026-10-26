@@ -12,7 +12,7 @@ public enum ViewportScale
 
 /// <summary>
 /// What the viewport shows, apart from any one control: the editor's D3D11 device and the host's shared frames (see
-/// docs/editor.md#viewport). Docking can move or rebuild the <see cref="ViewportControl"/>, and the session stays.
+/// docs/editor/viewport.md#viewport). Docking can move or rebuild the <see cref="ViewportControl"/>, and the session stays.
 /// </summary>
 public sealed class ViewportSession : IDisposable
 {

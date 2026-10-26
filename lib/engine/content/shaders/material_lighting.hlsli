@@ -1,4 +1,4 @@
-// The forward pass's light loop (see docs/rendering.md#lights-and-clusters): every directional light, then the
+// The forward pass's light loop (see docs/rendering/lighting-and-shadows.md#lights-and-clusters): every directional light, then the
 // punctual and area lights of the pixel's cluster, each with its shadow from the shadow mask or the shadow maps. The
 // shading model shades each light; this file only finds the lights and how much of each reaches the point.
 #ifndef MATERIAL_LIGHTING_HLSLI

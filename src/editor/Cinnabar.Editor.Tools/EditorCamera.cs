@@ -4,7 +4,7 @@ using Wire = Cinnabar.Editor.Link.Protocol;
 namespace Cinnabar.Editor.Tools;
 
 /// <summary>
-/// The editor's camera in edit mode (see docs/editor.md#viewport): a position, a heading and a pitch, and a pivot ahead
+/// The editor's camera in edit mode (see docs/editor/viewport.md#viewport): a position, a heading and a pitch, and a pivot ahead
 /// of it, which orbiting turns around and dollying approaches. The camera looks down its +z, with +y up and +x right,
 /// as the engine's views do. The editor sends it to the game whenever it changes, so a host restart keeps the view.
 /// </summary>

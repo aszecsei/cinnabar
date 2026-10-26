@@ -1,4 +1,4 @@
-// The radiance cascades' merge (see docs/rendering.md#global-illumination): one pass for each cascade, from the last
+// The radiance cascades' merge (see docs/rendering/global-illumination.md#global-illumination): one pass for each cascade, from the last
 // to the first. Each texel adds what gets through its interval from beyond: the next cascade's light in its direction,
 // the four finer directions that it splits into, at the four probes of the next cascade around it, weighted by how
 // near they are and whether they are on the same surface (see probe_weight). The last cascade takes the ambient sky from beyond.

@@ -7,7 +7,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/ecs"
 
-// Shadows (see docs/rendering.md#shadows). With Ray_Query, a compute pass traces up to four lights' shadows into a
+// Shadows (see docs/rendering/lighting-and-shadows.md#shadows). With Ray_Query, a compute pass traces up to four lights' shadows into a
 // screen-space mask, from the prepass's depth, against an acceleration structure of the GPU scene. The other lights
 // that cast shadows get shadow maps in one atlas: four cascades for the first directional light, one view for a spot
 // light, and six for a point light. The maps draw each material's depth pass.

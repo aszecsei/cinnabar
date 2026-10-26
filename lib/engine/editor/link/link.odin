@@ -1,5 +1,5 @@
 // Package link is the editor link's protocol: its messages, which go over the transport in lib/engine/wire (see
-// docs/editor.md#editor-link). The host and the game both use it, so it imports nothing from core or engine.
+// docs/editor/link.md#editor-link). The host and the game both use it, so it imports nothing from core or engine.
 package link
 
 import "core:mem"
@@ -139,7 +139,7 @@ Viewport_Size :: struct {
 	height: i32,
 }
 
-// Host to editor: the shared target that frames render into (see docs/gpu.md#presentation). The objects are named
+// Host to editor: the shared target that frames render into (see docs/gpu/presentation.md#presentation). The objects are named
 // <prefix>.texture0..2 and <prefix>.fence. Each resize makes a new generation, whose frames count from 1 again.
 Frame_Target :: struct {
 	prefix:     string,
@@ -155,7 +155,7 @@ Frame_Acknowledged :: struct {
 	frame:      u64,
 }
 
-// The world (see docs/editor.md#world). The game side sends these, and handles Watch_Entity and Unwatch_Entity.
+// The world (see docs/editor/link.md#world). The game side sends these, and handles Watch_Entity and Unwatch_Entity.
 // When it sees a new editor, which includes after a soft restart, it sends Component_Types and an Entity_Snapshot,
 // and then an Entity_Delta at most ten times a second. After a snapshot, the editor sends its watches again.
 
@@ -304,7 +304,7 @@ Behaviour_Field :: struct {
 	entity:  u64,
 }
 
-// Edit (see docs/editor.md#document-model).
+// Edit (see docs/editor/document-and-scenes.md#document-model).
 
 // Editor to game: the editor's scene document. The game replaces its world with it, and then sends an
 // Entity_Snapshot and the Edit_Problems of the load. The editor sends it when the link connects and after a soft
@@ -429,7 +429,7 @@ Edit_Problems :: struct {
 	problems: []Edit_Problem,
 }
 
-// Viewport tools (see docs/editor.md#viewport). The editor owns its camera, its selection and its gizmo, and the game
+// Viewport tools (see docs/editor/viewport.md#viewport). The editor owns its camera, its selection and its gizmo, and the game
 // draws them: the frame from the camera, an outline around the selected entities, and the gizmo. The game also
 // renders an entity ID buffer, which answers picks.
 
@@ -519,7 +519,7 @@ Set_Hidden :: struct {
 	entities: []u64,
 }
 
-// What the viewport shows in place of the lit scene (see docs/rendering.md#debug-views). Matches render.Debug_View.
+// What the viewport shows in place of the lit scene (see docs/rendering/post-processing.md#debug-views). Matches render.Debug_View.
 Debug_View :: enum u8 {
 	Lit,
 	Lighting_Only,
@@ -548,7 +548,7 @@ Helper_Mode :: enum u8 {
 	All,
 }
 
-// Editor to game: how the viewport draws while an editor is linked (see docs/editor.md#viewport). The editor sends it
+// Editor to game: how the viewport draws while an editor is linked (see docs/editor/viewport.md#viewport). The editor sends it
 // when it changes, and when the link connects. The features are the ones that the viewport turns off.
 Viewport_Settings :: struct {
 	debug_view:           Debug_View,
@@ -567,7 +567,7 @@ Viewport_Settings :: struct {
 	helpers:              Helper_Mode,
 }
 
-// Modes (see docs/editor.md#modes).
+// Modes (see docs/editor/document-and-scenes.md#modes).
 
 Editor_Mode :: enum u8 {
 	// The world does not run: no Fixed or Update systems and no scripts. Transforms still propagate, so edits show.
@@ -625,7 +625,7 @@ Editor_Input :: struct {
 	events: []Input_Event,
 }
 
-// Stats (see docs/editor.md#resource-monitor). The host and the game each send theirs four times a second while an
+// Stats (see docs/editor/shell-and-panels.md#resource-monitor). The host and the game each send theirs four times a second while an
 // editor is linked.
 
 // Host to editor: the frames and the memory of the last interval.
@@ -672,7 +672,7 @@ Game_Stats :: struct {
 	modules:      []Script_Module_Memory,
 }
 
-// Game commands (see docs/editor.md#commands).
+// Game commands (see docs/editor/shell-and-panels.md#commands).
 
 Game_Command_Info :: struct {
 	// Unique in the game, such as "mygame.add_triangle". The editor's command ID is "game." and this.
@@ -706,7 +706,7 @@ Game_Command_Result :: struct {
 	message:    string,
 }
 
-// Material previews (see docs/rendering.md#material-previews). The game renders each open preview into a shared
+// Material previews (see docs/rendering/materials.md#material-previews). The game renders each open preview into a shared
 // target of its own, beside the viewport's, when what it shows changes. The editor copies its frames as it copies the
 // viewport's, and acknowledges them to the host.
 

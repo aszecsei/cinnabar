@@ -2,7 +2,7 @@ package render
 
 import "cinnabar:core/gpu"
 
-// Debug views (see docs/rendering.md#debug-views): the editor's views of what makes the frame, in place of the lit
+// Debug views (see docs/rendering/post-processing.md#debug-views): the editor's views of what makes the frame, in place of the lit
 // scene, and features that it turns off in its viewport.
 
 DEBUG_VIEW_SHADER :: #load("../content/shaders/debug_view.hlsl.meta", string)

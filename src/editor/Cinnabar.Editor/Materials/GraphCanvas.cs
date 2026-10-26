@@ -11,7 +11,7 @@ using Cinnabar.Editor.Tools;
 namespace Cinnabar.Editor.Materials;
 
 /// <summary>
-/// The material editor's node canvas (see docs/editor.md#material-editor): the graph's nodes and links, drawn in the
+/// The material editor's node canvas (see docs/editor/material-editor.md#material-editor): the graph's nodes and links, drawn in the
 /// canvas's own units under a pan and a zoom. The left button selects nodes, drags them, drags a box, and drags a link
 /// from a pin to a pin; a link dragged off an input comes away. The right or middle button pans, and a right click
 /// without a drag, Space or Tab adds a node. The wheel zooms about the mouse. Delete deletes the selected nodes,

@@ -18,7 +18,7 @@ Texture_Format :: enum u32 {
 }
 
 // Texture_Usage is how a texture is used, which its import setting `usage` names. It selects the format and the mip
-// filter (see docs/content-pipeline.md#textures).
+// filter (see docs/content/kinds/textures.md#textures).
 Texture_Usage :: enum u32 {
 	Color,
 	Normal,
@@ -27,7 +27,7 @@ Texture_Usage :: enum u32 {
 	Data,
 }
 
-// Texture_Blob is the start of a texture blob (see docs/content-pipeline.md#blob-format).
+// Texture_Blob is the start of a texture blob (see docs/content/blobs-and-loading.md#blob-format).
 Texture_Blob :: struct {
 	header:      Blob_Header,
 	format:      Texture_Format,

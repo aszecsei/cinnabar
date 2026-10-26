@@ -1,4 +1,4 @@
-// The fog over the background (see docs/rendering.md#volumetric-fog): where nothing drew, the scene holds the clear
+// The fog over the background (see docs/rendering/fog.md#volumetric-fog): where nothing drew, the scene holds the clear
 // color, which the forward pass's fog did not reach, so this pass dims it by the whole volume and adds the volume's
 // light, pre-exposed.
 #include "cinnabar.hlsli"

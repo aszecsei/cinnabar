@@ -10,7 +10,7 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// The editor's D3D11 device, on the adapter that composites the editor's window. The viewport copies the host's
-/// frames with it (see docs/editor.md#viewport).
+/// frames with it (see docs/editor/viewport.md#viewport).
 /// </summary>
 sealed class ViewportDevice : IDisposable
 {
@@ -61,7 +61,7 @@ sealed class ViewportDevice : IDisposable
 /// <summary>
 /// One generation of the host's frames: the named textures <c>&lt;prefix&gt;.texture0..2</c> and the fence
 /// <c>&lt;prefix&gt;.fence</c>, where the prefix comes from the host's <c>Frame_Target</c> message (see
-/// docs/gpu.md#presentation). Fence value v means that texture v % 3 holds frame v, finished.
+/// docs/gpu/presentation.md#presentation). Fence value v means that texture v % 3 holds frame v, finished.
 /// </summary>
 sealed class SharedFrames : IDisposable
 {

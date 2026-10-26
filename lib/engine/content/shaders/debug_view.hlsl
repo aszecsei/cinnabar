@@ -1,4 +1,4 @@
-// The debug views that come from the frame's textures (see docs/rendering.md#debug-views): it writes the view into a
+// The debug views that come from the frame's textures (see docs/rendering/post-processing.md#debug-views): it writes the view into a
 // new scene color, before post-processing. The shaded views are pre-exposed, as the scene is, and the others are
 // colors as they are, which the output pass only encodes.
 #include "cinnabar.hlsli"

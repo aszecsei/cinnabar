@@ -4,7 +4,7 @@ using Cinnabar.Editor.Link.Cook;
 namespace Cinnabar.Editor.Content;
 
 /// <summary>
-/// The editor's mirror of the cook daemon's index (see docs/editor.md#content-browser): the roots, their folders and
+/// The editor's mirror of the cook daemon's index (see docs/editor/shell-and-panels.md#content-browser): the roots, their folders and
 /// assets, and each asset's problems. It changes only through the daemon's messages, and keeps what it has while the
 /// cook link is down. Use it on one thread.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class AssetIndex
 
     public IReadOnlyCollection<Folder> Folders => _folders;
 
-    /// <summary>The kinds of node of material graphs, which the daemon's cooker knows (see docs/content-pipeline.md#material-graphs).</summary>
+    /// <summary>The kinds of node of material graphs, which the daemon's cooker knows (see docs/content/kinds/materials.md#material-graphs).</summary>
     public IReadOnlyList<NodeInfo> Nodes => _nodes;
 
     /// <summary>The shading models that cook, by name.</summary>
@@ -151,7 +151,7 @@ public sealed class AssetIndex
     public IEnumerable<Asset> AssetsIn(string root, string folder) =>
         _assets.Values.Where(a => a.Root == root && a.Parent == "" && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content-pipeline.md#identity).</summary>
+    /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content/identity-and-cooking.md#identity).</summary>
     public IEnumerable<Asset> SubassetsOf(string guid) =>
         _assets.Values.Where(a => a.Parent == guid).OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase);
 

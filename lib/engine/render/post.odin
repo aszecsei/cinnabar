@@ -6,7 +6,7 @@ import "core:math/linalg"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-// Post-processing (see docs/rendering.md#post-processing): temporal AA into a history texture, the exposure from a
+// Post-processing (see docs/rendering/post-processing.md#post-processing): temporal AA into a history texture, the exposure from a
 // luminance histogram, which pre-exposes the next frame, and bloom, all in linear HDR at the scene's resolution. The
 // output pass then tone maps through a lookup table, which a compute pass bakes when the settings change.
 
@@ -46,7 +46,7 @@ LUT_SIZE :: 32
 LUT_FORMAT :: gpu.Format.RGBA16_Float
 // In HDR output, SDR's white, which the UI has, is the display's SDR white, as Windows shows SDR content, or
 // DEFAULT_PAPER_WHITE nits when that is unknown. The brightest colors reach the display's peak, or DEFAULT_PEAK nits
-// (see docs/rendering.md#hdr-output).
+// (see docs/rendering/layers-and-output.md#hdr-output).
 DEFAULT_PAPER_WHITE :: 200
 DEFAULT_PEAK :: 1000
 

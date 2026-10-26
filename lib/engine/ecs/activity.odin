@@ -11,7 +11,7 @@ INACTIVE_ID :: Component_Id(6)
 Disabled :: struct {}
 
 // Inactive marks an entity that has Disabled or an inactive ancestor. The world maintains it. A query skips Inactive
-// entities unless one of its terms names Inactive. See docs/world.md#queries.
+// entities unless one of its terms names Inactive. See docs/world/ecs.md#queries.
 Inactive :: struct {}
 
 MAX_LOG :: 1 << 16

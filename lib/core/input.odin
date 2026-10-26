@@ -71,7 +71,7 @@ Input_Event_Kind :: enum u8 {
 }
 
 // Input_Event is a change of the keyboard or mouse that does not come from the window: in shared mode, the editor's
-// viewport sends them while the game plays (see docs/editor.md#modes). queue_input applies them at the start of the
+// viewport sends them while the game plays (see docs/editor/document-and-scenes.md#modes). queue_input applies them at the start of the
 // next frame, after the window's own messages.
 Input_Event :: struct {
 	kind:     Input_Event_Kind,

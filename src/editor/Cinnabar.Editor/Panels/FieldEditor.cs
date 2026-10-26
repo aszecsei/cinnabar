@@ -31,7 +31,7 @@ enum EditKind
 
 /// <summary>
 /// Edits one field of the selected entities: each edit becomes an operation for each entity that sets the field in the
-/// document and on the host, in one undo entry (see docs/editor.md#properties). The value to change comes from the
+/// document and on the host, in one undo entry (see docs/editor/shell-and-panels.md#properties). The value to change comes from the
 /// host's values, which the panel passes in as it gets them, so an axis edit keeps each entity's other axes exactly.
 /// </summary>
 sealed class FieldEditor : IFieldEditor
@@ -113,7 +113,7 @@ sealed class FieldEditor : IFieldEditor
         };
     }
 
-    /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world.md#volumes).</summary>
+    /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world/volumes.md#volumes).</summary>
     public const string OverrideSuffix = ".override";
 
     /// <summary>An editor for a behaviour's field, or null for a kind that the editor cannot set.</summary>
@@ -145,7 +145,7 @@ sealed class FieldEditor : IFieldEditor
 
     /// <summary>
     /// Sets the field of every entity to the value that it has, so the scene sets it: for a volume's setting, the
-    /// volume then overrides it with the value that it kept, or its default (see docs/world.md#volumes).
+    /// volume then overrides it with the value that it kept, or its default (see docs/world/volumes.md#volumes).
     /// </summary>
     public void Override() => _shell.Edit($"Override {_label["Set ".Length..]}", Operations(current => current));
 
