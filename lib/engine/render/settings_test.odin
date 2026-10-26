@@ -43,7 +43,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	testing.expect_value(t, s.ambient, DEFAULT_AMBIENT)
 	testing.expect_value(t, s.fog.density, 0)
 	testing.expect_value(t, s.post.paper_white, 0)
-	testing.expect_value(t, s.shadows, Shadow_Settings{SHADOW_DISTANCE, SHADOW_SPLIT_LAMBDA})
+	testing.expect_value(t, s.shadows, Shadow_Settings{distance = SHADOW_DISTANCE, split_lambda = SHADOW_SPLIT_LAMBDA})
 
 	base := ecs.spawn(w)
 	ecs.add(w, base, ecs.TRANSFORM_IDENTITY)
@@ -61,7 +61,7 @@ the_frame_takes_its_settings_from_the_volumes_at_the_camera :: proc(t: ^testing.
 	s = resolve_settings(r, w, {})
 	testing.expect_value(t, s.background, [3]f32{0.02, 0.02, 0.035})
 	testing.expect_value(t, s.fog.density, 0.1)
-	testing.expect_value(t, s.shadows, Shadow_Settings{30, SHADOW_SPLIT_LAMBDA})
+	testing.expect_value(t, s.shadows, Shadow_Settings{distance = 30, split_lambda = SHADOW_SPLIT_LAMBDA})
 	testing.expect(t, !s.post.no_bloom)
 
 	s = resolve_settings(r, w, ecs.position_offset({}, {10, 0, 0}))

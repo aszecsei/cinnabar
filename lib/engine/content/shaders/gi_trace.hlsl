@@ -4,8 +4,6 @@
 // otherwise everything from beyond gets through, which the merge adds.
 #include "gi_common.hlsli"
 
-static const uint STEPS = 8;
-
 [numthreads(8, 8, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	uint k = id.z;
@@ -30,11 +28,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	origin += normal * pixel_meters(z) * 2;
 	float start = interval_start(k, z);
 	float end = interval_start(k + 1, z);
-	float step = (end - start) / STEPS;
+	uint steps = constants.steps;
+	float step = (end - start) / steps;
 
 	Texture2D<float4> depth = cn_texture(constants.depth);
 	float4 result = float4(0, 0, 0, 1);
-	for (uint s = 0; s < STEPS; s++) {
+	for (uint s = 0; s < steps; s++) {
 		float3 p = origin + direction * (start + (s + noise.x) * step);
 		float3 view = float3(dot(p, constants.right.xyz), dot(p, constants.up.xyz), dot(p, constants.forward.xyz));
 		if (view.z <= constants.projection.z) {

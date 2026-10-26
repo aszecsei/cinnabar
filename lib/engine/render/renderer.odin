@@ -95,6 +95,10 @@ Renderer :: struct {
 	debug_view:      Shader_Pipeline,
 	// Moment-based transparency's composite over the scene (see docs/rendering/transparency.md#transparency).
 	transparency_composite: Shader_Pipeline,
+	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
+	// set_quality).
+	caps:            Caps,
+	quality:         Quality,
 	// A code reload may bring new descriptions, so the next frame updates every pipeline.
 	reloaded:        bool,
 }
@@ -110,6 +114,9 @@ Frame_Desc :: struct {
 	// The frame's settings (see docs/rendering/frame.md#settings). nil takes them from the volumes at the view, as
 	// resolve_settings does.
 	settings:          ^Frame_Settings,
+	// The frame's quality, as far as the device can do it (see docs/rendering/quality.md#quality). nil takes
+	// Renderer.quality.
+	quality:           ^Quality,
 	// The editor's debug view, the features that it turns off, and the stops that it adds to the exposure (see
 	// docs/rendering/post-processing.md#debug-views).
 	debug_view:        Debug_View,
@@ -152,7 +159,14 @@ Frame :: struct {
 	graph:                    ^Graph,
 	data:                     rawptr,
 	view:                     View,
+	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
+	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
 	size:                     [2]u32,
+	// The frame's size, which the frame target and the UI have.
+	output_size:              [2]u32,
+	// The size of Frame.scene: size, until temporal AA upscales it to output_size. The post passes after temporal AA,
+	// and a game's post effects there, take it.
+	scene_size:               [2]u32,
 	debug_view:               Debug_View,
 	// The directional lights' cascades (see Shadows).
 	shadow_settings:          Shadow_Settings,
@@ -192,6 +206,9 @@ Frame :: struct {
 	scene_scale:              f32,
 	// The tone mapping lookup table (see LUT_SIZE).
 	lut:                      Texture,
+	// The scene tone mapped and anti-aliased by FXAA or SMAA, which the output pass only encodes: zero when the output
+	// pass tone maps the scene itself.
+	display:                  Texture,
 	post:                     ^Post_Frame,
 	ao:                       ^Ao_Frame,
 	// nil without global illumination.
@@ -245,6 +262,12 @@ Output_Push :: struct {
 	paper_white:   f32,
 	// The scene holds a debug view's colors as they are, which the pass only encodes.
 	raw:           u32,
+	// The scene is Frame.display, tone mapped already.
+	tone_mapped:   u32,
+	// The tone map pass's target. size is the pass's target's size, which the scene and the debug layer are stretched
+	// to when theirs is smaller.
+	output:        u32,
+	size:          [2]u32,
 }
 
 #assert(size_of(Debug_Push) <= 128 && size_of(Output_Push) <= 128)
@@ -253,6 +276,8 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	// The Renderer is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(r)
 	r.platform = platform
+	r.caps = device_caps(platform)
+	r.quality = default_quality(r.caps)
 	r.meshes = mesh_extractor(w)
 	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
@@ -275,7 +300,6 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	gi_init(&r.gi)
 	fog_init(&r.fog)
 	post_init(&r.post, platform)
-	r.residency.accels = r.shadows.ray_query
 }
 
 // mesh_extractor selects the entities with a Mesh_Renderer.
@@ -326,26 +350,31 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
+	quality := desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality
+	size := render_size(desc.size, quality.render_scale)
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
 		renderer        = r,
 		graph           = &g,
 		data            = desc.hooks.data,
 		view            = desc.view,
-		size            = desc.size,
+		size            = size,
+		output_size     = desc.size,
+		scene_size      = size,
 		output          = output,
-		view_projection = view_projection(desc.view, f32(desc.size.x) / f32(max(desc.size.y, 1))),
+		view_projection = view_projection(desc.view, f32(size.x) / f32(max(size.y, 1))),
 		hooks           = desc.hooks,
 		scene_scale     = 1,
 		debug_view      = desc.debug_view,
 	}
 	target := import_texture(&g, r.platform.gpu_frame_target(), .Color)
-	f.scene = create_texture(&g, {size = desc.size, format = SCENE_FORMAT, label = "scene"})
-	f.ids = create_texture(&g, {size = desc.size, format = ID_FORMAT, label = "entity ids"})
-	f.depth = create_texture(&g, {size = desc.size, format = DEPTH_FORMAT, label = "scene depth"})
-	f.normals = create_texture(&g, {size = desc.size, format = NORMAL_FORMAT, label = "scene normals"})
-	f.velocity = create_texture(&g, {size = desc.size, format = VELOCITY_FORMAT, label = "scene velocity"})
+	f.scene = create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
+	f.ids = create_texture(&g, {size = size, format = ID_FORMAT, label = "entity ids"})
+	f.depth = create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
+	f.normals = create_texture(&g, {size = size, format = NORMAL_FORMAT, label = "scene normals"})
+	f.velocity = create_texture(&g, {size = size, format = VELOCITY_FORMAT, label = "scene velocity"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
+	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
 	begin_post(f, settings.post)
 	f.post.effects = .Post_Effects not_in desc.disable && desc.debug_view == .Lit
@@ -427,7 +456,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 
 	if has_debug {
-		f.debug = create_texture(&g, {size = desc.size, format = DEBUG_FORMAT, label = "debug"})
+		f.debug = create_texture(&g, {size = size, format = DEBUG_FORMAT, label = "debug"})
 		upload_debug_lines(f, lines)
 		p = add_render_pass(&g, "debug", draw_debug_lines, f)
 		color(&g, p, f.debug, .Clear)
@@ -438,10 +467,14 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 
 	p = add_render_pass(&g, "output", draw_output, f)
-	read(&g, p, f.scene)
-	read(&g, p, f.lut)
-	if f.bloom != 0 {
-		read(&g, p, f.bloom)
+	if f.display != 0 {
+		read(&g, p, f.display)
+	} else {
+		read(&g, p, f.scene)
+		read(&g, p, f.lut)
+		if f.bloom != 0 {
+			read(&g, p, f.bloom)
+		}
 	}
 	if f.ui != 0 {
 		read(&g, p, f.ui)
@@ -595,9 +628,10 @@ draw_output :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	push := output_push(f, gpu_texture(g, f.scene), f.output.mode)
-	if f.bloom != 0 {
-		push.bloom, push.has_bloom = gpu.read_index(gpu_texture(g, f.bloom)), 1
-		push.scene_scale, push.bloom_scale = f.scene_scale, f.bloom_scale
+	if f.display != 0 {
+		push.scene, push.tone_mapped = gpu.read_index(gpu_texture(g, f.display)), 1
+	} else {
+		tone_map_inputs(f, g, &push)
 	}
 	if f.ui != 0 {
 		push.ui, push.has_ui = gpu.read_index(gpu_texture(g, f.ui)), 1
@@ -605,13 +639,23 @@ draw_output :: proc(ctx: ^Pass_Context) {
 	if f.debug != 0 {
 		push.debug, push.has_debug = gpu.read_index(gpu_texture(g, f.debug)), 1
 	}
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_push_constants(ctx.cb, &push)
+	gpu.cmd_draw(ctx.cb, 3)
+}
+
+// tone_map_inputs gives the output pass's constants, or the tone map pass's, what the frame's tone mapping reads
+// besides the scene: bloom, and the lookup table unless the tone mapping is off or the scene is raw.
+@(private)
+tone_map_inputs :: proc(f: ^Frame, g: ^Graph, push: ^Output_Push) {
+	if f.bloom != 0 {
+		push.bloom, push.has_bloom = gpu.read_index(gpu_texture(g, f.bloom)), 1
+		push.scene_scale, push.bloom_scale = f.scene_scale, f.bloom_scale
+	}
 	if f.post.no_tone_mapping {
 		push.has_lut = 0
 	}
 	push.raw = u32(f.post.raw)
-	gpu.cmd_set_pipeline(ctx.cb, pipeline)
-	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_draw(ctx.cb, 3)
 }
 
 // output_push is the output pass's constants for a scene, which it tone maps through the lookup table once that is
@@ -620,6 +664,7 @@ draw_output :: proc(ctx: ^Pass_Context) {
 output_push :: proc(f: ^Frame, scene: gpu.Texture, mode: gpu.Output_Mode) -> Output_Push {
 	r := f.renderer
 	return {
+		size          = f.output_size,
 		scene         = gpu.read_index(scene),
 		lut           = gpu.read_index(r.post.lut),
 		has_lut       = u32(r.post.lut_baked),

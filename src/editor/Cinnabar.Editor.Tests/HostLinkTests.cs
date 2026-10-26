@@ -399,6 +399,20 @@ public sealed class HostLinkTests : IAsyncDisposable
             editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = view, NoBloom = true, NoShadows = true, ExposureOffset = 1 });
             await Latest(editor, frames, target);
         }
+        // The viewport's quality in place of the game's: each preset, and each anti-aliasing at half the size, FSR
+        // included, which is temporal AA where the device cannot run it.
+        foreach (var preset in Enum.GetValues<ViewportPreset>())
+        {
+            editor.Link.Send(EditorShell.DefaultViewportSettings with { QualityPreset = preset });
+            await Latest(editor, frames, target);
+        }
+        foreach (var aa in Enum.GetValues<ViewportAa>())
+        {
+            editor.Link.Send(EditorShell.DefaultViewportSettings with { AntiAliasing = aa, RenderScale = 0.5f });
+            await Latest(editor, frames, target);
+        }
+        var scaled = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
+        Assert.True(scaled.R > scaled.G + 60 && scaled.R > scaled.B + 60, $"at half the size, the background is {scaled}");
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
@@ -425,6 +439,16 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
         Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
         Assert.InRange(center.Depth, 1.9f, 2.1f);
+
+        // At half the render size, a pick in the viewport's pixels still finds it.
+        editor.Link.Send(EditorShell.DefaultViewportSettings with { RenderScale = 0.5f });
+        center = new(0, [], 0, -1);
+        for (var attempt = 0u; attempt < 60 && center.Hits.Length == 0; attempt++)
+        {
+            editor.Link.Send(new PickRequest(200 + attempt, target.Width / 2, target.Height / 2, 1, 1));
+            center = await editor.Next<PickResult>(r => r.Id == 200 + attempt);
+        }
+        Assert.Equal(lamp.Id, Assert.Single(center.Hits).SceneId);
 
         // Without the icons, the light is not drawn, so nothing is there.
         editor.Link.Send(EditorShell.DefaultViewportSettings with { ShowIcons = false });

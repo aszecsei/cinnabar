@@ -379,6 +379,7 @@ draw_preview_output :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	push := output_push(pf.frame, gpu_texture(g, pf.scene), .Sdr)
+	push.size = pf.desc.size
 	gpu.cmd_set_pipeline(ctx.cb, output)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)

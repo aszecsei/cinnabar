@@ -2,7 +2,9 @@
 // each pixel from frame to frame, and this pass blends each pixel with its history: last frame's result where the
 // surface was then, found by the velocity, and clipped to the colors around the pixel so that what the history saw and
 // the pixel does not see fades out. Colors are blended after a reversible tone map, so one bright sample does not
-// dominate.
+// dominate. When the scene is smaller than the output (see docs/rendering/anti-aliasing.md#upscaling), the history is
+// at the output's size, and each output pixel takes this frame's color from the scene's samples around it, weighted by
+// how near their jittered positions are, and blends in as much of it as its nearest sample is near.
 #include "cinnabar.hlsli"
 
 // Matches Temporal_Constants in lib/engine/render/post.odin. reproject maps a pixel's clip position in this frame,
@@ -22,7 +24,9 @@ struct Temporal_Constants {
 	uint sampler_index;
 	uint valid;
 	float blend;
-	uint padding;
+	uint upscale;
+	uint2 render_size;
+	float2 inverse_render_size;
 };
 CN_PASS_CONSTANTS(Temporal_Constants, constants);
 
@@ -30,6 +34,11 @@ CN_PASS_CONSTANTS(Temporal_Constants, constants);
 static const float VELOCITY_NONE = 1000;
 // How many standard deviations of the neighborhood's colors the history may stray from their mean.
 static const float CLIP_SIGMAS = 1.25;
+// When upscaling, a sample's weight at a distance d in output pixels is exp(-SAMPLE_FALLOFF d^2), Karis's fit of a
+// Blackman-Harris window. This frame's share is at least MIN_BLEND_SHARE of the blend, so the history does not linger
+// where no sample lands near.
+static const float SAMPLE_FALLOFF = 2.29;
+static const float MIN_BLEND_SHARE = 0.2;
 
 float3 to_ycocg(float3 c) {
 	return float3(dot(c, float3(0.25, 0.5, 0.25)), dot(c, float3(0.5, 0, -0.5)), dot(c, float3(-0.25, 0.5, -0.25)));
@@ -92,23 +101,39 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Texture2D<float4> scene = cn_texture(constants.scene);
 	Texture2D<float4> depth = cn_texture(constants.depth);
 	int2 pixel = int2(id.xy);
-	int2 last = int2(constants.size) - 1;
+	float2 uv = (float2(pixel) + 0.5) * constants.inverse_size;
+	int2 last = int2(constants.render_size) - 1;
+	// The scene's pixel whose sample is nearest: a sample was taken the jitter's pixels from its pixel's center, which
+	// at the output's size is the pixel itself.
+	float2 jitter_pixels = constants.jitter * float2(0.5, -0.5) * float2(constants.render_size);
+	float2 position = uv * float2(constants.render_size);
+	int2 center = constants.upscale != 0 ? int2(floor(position + jitter_pixels)) : pixel;
+	float2 output_pixels = float2(constants.size) * constants.inverse_render_size;
 
 	// The neighborhood's mean and spread, and its nearest pixel, whose motion the pixel takes so edges move with the
-	// surface in front. Depth is reversed, so the nearest is the largest.
+	// surface in front. Depth is reversed, so the nearest is the largest. Upscaling, this frame's color is the samples'
+	// weighted by how near they are, and nearest_weight how near the nearest is.
 	float3 current = 0;
+	float current_weight = 0;
+	float nearest_weight = 1;
 	float3 sum = 0;
 	float3 squares = 0;
 	float nearest_depth = -1;
-	int2 nearest = pixel;
+	int2 nearest = center;
 	for (int y = -1; y <= 1; y++) {
 		for (int x = -1; x <= 1; x++) {
-			int2 p = clamp(pixel + int2(x, y), 0, last);
+			int2 p = clamp(center + int2(x, y), 0, last);
 			float3 c = to_ycocg(compress(max(scene.Load(int3(p, 0)).rgb, 0)));
 			sum += c;
 			squares += c * c;
-			if (x == 0 && y == 0) {
+			if (constants.upscale != 0) {
+				float2 offset = (float2(center + int2(x, y)) + 0.5 - jitter_pixels - position) * output_pixels;
+				float w = exp(-SAMPLE_FALLOFF * dot(offset, offset));
+				current += c * w;
+				current_weight += w;
+			} else if (x == 0 && y == 0) {
 				current = c;
+				current_weight = 1;
 			}
 			float d = depth.Load(int3(p, 0)).r;
 			if (d > nearest_depth) {
@@ -117,17 +142,21 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			}
 		}
 	}
+	current /= max(current_weight, 1e-6);
+	if (constants.upscale != 0) {
+		float2 offset = (float2(center) + 0.5 - jitter_pixels - position) * output_pixels;
+		nearest_weight = max(exp(-SAMPLE_FALLOFF * dot(offset, offset)), MIN_BLEND_SHARE);
+	}
 
 	float2 velocity = cn_texture(constants.velocity).Load(int3(nearest, 0)).rg;
 	bool moved = true;
 	if (velocity.x >= VELOCITY_NONE) {
 		// The prepass drew nothing there, so the point moves only with the camera.
-		float2 ndc = (float2(nearest) + 0.5) * constants.inverse_size * float2(2, -2) + float2(-1, 1) - constants.jitter;
+		float2 ndc = (float2(nearest) + 0.5) * constants.inverse_render_size * float2(2, -2) + float2(-1, 1) - constants.jitter;
 		float4 previous = mul(constants.reproject, float4(ndc, nearest_depth, 1));
 		moved = previous.w > 0;
 		velocity = (ndc - previous.xy / previous.w) * float2(0.5, -0.5);
 	}
-	float2 uv = (float2(pixel) + 0.5) * constants.inverse_size;
 	float2 previous_uv = uv - velocity;
 
 	float3 result = current;
@@ -138,7 +167,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float3 mean = sum / 9;
 		float3 sigma = sqrt(max(squares / 9 - mean * mean, 0));
 		history = clip_to_box(history, mean - CLIP_SIGMAS * sigma, mean + CLIP_SIGMAS * sigma);
-		result = lerp(history, current, constants.blend);
+		result = lerp(history, current, constants.blend * nearest_weight);
 	}
 	cn_rw_texture(constants.output)[pixel] = float4(max(expand(from_ycocg(result)), 0), 1);
 }

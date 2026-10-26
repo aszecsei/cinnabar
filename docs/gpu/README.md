@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Queues, streaming and readback](queues-streaming-readback.md) | The graphics and compute queues, the copy queue, and readback. |
 | [GPU-driven rendering and mesh shaders](gpu-driven-and-mesh-shaders.md) | Indirect draws with draw IDs, and the mesh shader path. |
 | [Ray tracing](ray-tracing.md) | Acceleration structures, ray queries and ray tracing pipelines. |
+| [Upscalers](upscalers.md) | Vendors' temporal upscalers, the upscale command, and FSR through the FidelityFX API. |
 | [Presentation](presentation.md) | The frame target, output modes and shared mode. |
 | [Shaders](shaders.md) | Cooked shaders and pipelines that follow them. |
 
@@ -24,7 +25,7 @@ The interface is three layers. The engine sees only the first.
 
 | Layer | Package | Files | What it holds |
 |---|---|---|---|
-| Interface | `lib/core/gpu` | `gpu.odin` | Handles (`Buffer`, `Texture`, `Pipeline`, `Sampler`, `Accel_Struct`), descriptions, enums, `Features`, `Output`, the bindless index functions, format and size helpers. |
+| Interface | `lib/core/gpu` | `gpu.odin` | Handles (`Buffer`, `Texture`, `Pipeline`, `Sampler`, `Accel_Struct`, `Upscaler`), descriptions, enums, `Features`, `Output`, the bindless index functions, format and size helpers. |
 | | | `command.odin` | The packet format, `Command_Buffer` and every `cmd_*` recording procedure, `Submission`, and the format hash. |
 | | | `pool.odin` | `Pool`: the fixed-capacity generational handle table that every backend stores its resources in. |
 | | | `validate.odin` | The command buffer validation and `Layout_Tracker`, which every backend runs in debug builds and the null backend always. |
@@ -37,6 +38,7 @@ The interface is three layers. The engine sees only the first.
 | | | `uploads.odin` | The upload ring and the initial-data copies. |
 | | | `streaming.odin` | The copy queue and transfers. |
 | | | `accels.odin` | Acceleration structures and the scratch pool. |
+| | | `upscalers.odin`, `ffx.odin` | Upscalers: FSR through the FidelityFX API, which it loads at run time. |
 | | | `shared.odin` | Shared textures and fences for the editor's viewport and previews. |
 | | | `display.odin` | The display's HDR state, luminances and SDR white. |
 | Render graph | `lib/engine/render` | `graph.odin` | `Graph`: passes, uses, transient and history textures, barrier computation, culling, and parallel recording. Game side. |
@@ -68,4 +70,5 @@ The interface is three layers. The engine sees only the first.
 - Yuriy O'Donnell, [*FrameGraph: Extensible Rendering Architecture in Frostbite*](https://www.gdcvault.com/play/1024612/FrameGraph-Extensible-Rendering-Architecture-in), GDC 2017: the declare-uses, cull, compute-barriers design of the [Render graph](render-graph.md#render-graph).
 - Ulrich Haar and Sebastian Aaltonen, [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/aaltonenhaar_siggraph2015_combined_final_footer_220dpi.pdf), SIGGRAPH 2015: indirect draws, GPU culling and vertex pulling ([GPU-driven rendering](gpu-driven-and-mesh-shaders.md#gpu-driven-rendering), [Vertex pulling](interface.md#vertex-pulling)).
 - Christoph Kubisch, [*Introduction to Turing Mesh Shaders*](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/), NVIDIA: the amplification and mesh stage model of [Mesh shaders](gpu-driven-and-mesh-shaders.md#mesh-shaders).
+- AMD, [*AMD FSR SDK*](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) and its [*FidelityFX API*](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/Kits/FidelityFX/docs/getting-started/ffx-api.md) and [*FSR upscaler*](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/blob/main/Kits/FidelityFX/docs/techniques/super-resolution-upscaler.md) guides: the inputs, jitter and depth conventions of [Upscalers](upscalers.md#upscalers).
 - SMPTE ST 2084 (PQ) and Rec. 2020: the HDR10 encoding of [Presentation](presentation.md#presentation); see also Microsoft, [*Using DirectX with high dynamic range displays*](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range).

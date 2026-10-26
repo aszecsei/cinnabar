@@ -21,7 +21,7 @@ These rules come from Metal's encoder model. All backends enforce them.
 - Draws occur only inside a render pass.
 - Bindings reset at every pass boundary: the pipeline, pass constants and index buffer. Bind them again in each pass, and bind compute pipelines again after a pass. A render pass begins with the viewport and scissor set to the attachment size.
 - A graphics pipeline's attachment formats must match the pass. A compute pipeline is bound only outside a pass.
-- Copies, dispatches and acceleration structure builds occur only outside a render pass.
+- Copies, dispatches, acceleration structure builds and upscales occur only outside a render pass. An upscale leaves nothing bound, as a pass boundary does (see [Upscalers](upscalers.md#upscaling)).
 - A render pass declares its attachments with load and store operations. It maps to `BeginRenderPass` (D3D12), dynamic rendering (Vulkan) and a render command encoder (Metal).
 
 ### Split passes

@@ -1,6 +1,6 @@
 // What the global illumination's shaders share (see docs/rendering/global-illumination.md#global-illumination): their constants, the
 // cascades' layout and the probes' positions. The cascades are screen-space radiance cascades. Cascade k has a probe
-// every GI_SPACING << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
+// every spacing << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
 // so every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long
 // as the cascade before's, and its texels hold the light that they found and the share of light from beyond that gets
 // through. The cascades are one texture, each in its own rows.
@@ -44,17 +44,18 @@ struct Gi_Constants {
 	uint exposure;
 	float interval_scale;
 	float max_frames;
-	uint2 padding;
+	// The level's probe spacing, and each ray's steps (see GI_PARAMS).
+	uint spacing;
+	uint steps;
 };
 CN_PASS_CONSTANTS(Gi_Constants, constants);
 
-// Match GI_SPACING and GI_DIRECTIONS in lib/engine/render/gi.odin, and VIEW_MODEL_STENCIL in renderer.odin.
-static const uint GI_SPACING = 8;
+// Match GI_DIRECTIONS in lib/engine/render/gi.odin, and VIEW_MODEL_STENCIL in renderer.odin.
 static const uint GI_DIRECTIONS = 4;
 static const uint VIEW_MODEL_STENCIL = 1;
 
 uint cascade_spacing(uint k) {
-	return GI_SPACING << k;
+	return constants.spacing << k;
 }
 
 uint cascade_directions(uint k) {
@@ -145,7 +146,7 @@ float pixel_meters(float z) {
 // The distance at which cascade k's interval starts: they grow four times longer each, from a length that scales
 // with the probe's depth, so a cascade covers about as many pixels at every depth.
 float interval_start(uint k, float z) {
-	float base = constants.interval_scale * GI_SPACING * pixel_meters(z);
+	float base = constants.interval_scale * constants.spacing * pixel_meters(z);
 	return base * ((float)(1u << (2 * k)) - 1) / 3;
 }
 

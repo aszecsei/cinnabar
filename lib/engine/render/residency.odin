@@ -58,7 +58,8 @@ Residency :: struct {
 	entries:  [MAX_RESIDENT]Resident_Entry,
 	count:    int,
 	frame:    u64,
-	// Whether meshes get acceleration structures, which the renderer sets when the device has Ray_Query.
+	// Whether meshes get acceleration structures, which the renderer sets the first frame that traces (see
+	// residency_enable_accels).
 	accels:   bool,
 }
 
@@ -240,6 +241,20 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.attributes = stream_buffer(r, e, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
 	m.indices = stream_buffer(r, e, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
 	return true
+}
+
+// residency_enable_accels gives meshes acceleration structures from now on, and gives one to every mesh that is
+// resident already.
+residency_enable_accels :: proc(r: ^Residency) {
+	if r.accels {
+		return
+	}
+	r.accels = true
+	for &e in r.entries[:r.count] {
+		if e.kind == .Mesh && e.ready && e.current.mesh.accel == {} {
+			create_mesh_accel(r, &e.current.mesh)
+		}
+	}
 }
 
 // create_mesh_accel creates a ready mesh's bottom-level acceleration structure, which unbuilt_accels then gives to the

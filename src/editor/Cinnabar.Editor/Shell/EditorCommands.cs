@@ -67,10 +67,15 @@ static class EditorCommands
     public const string ExposureUp = "view.exposureUp";
     public const string ExposureDown = "view.exposureDown";
     public const string ExposureReset = "view.exposureReset";
+    public const string ViewportQuality = "view.quality";
+    public const string ViewportAntiAliasing = "view.antiAliasing";
+    public const string ViewportRenderScale = "view.renderScale";
     public const string RunGame = "game.run";
     public const string StopGame = "game.stop";
     public const string ProjectOutput = "project.output";
     public const string UserOutput = "project.userOutput";
+    public const string ProjectQuality = "project.quality";
+    public const string UserQuality = "project.userQuality";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -391,6 +396,18 @@ static class EditorCommands
             Description = "The output mode on this machine, which replaces the project's, for a display that HDR does not suit. It is in the project's user settings file, which is not committed.",
             Icon = "viewport",
         });
+        commands.Register(new ChoiceCommand(ProjectQuality, "Quality",
+            [EditorShell.HardwareQualityLabel, .. EditorShell.QualityPresets, EditorShell.CustomQualityLabel], () => shell.ProjectQuality, option => shell.ProjectQuality = option)
+        {
+            Description = "The project's render quality for the game: a preset, or By Hardware, which picks one by the video memory. Custom is a file's features one by one, which the preset replaces. A running game takes it at once.",
+            Icon = "viewport",
+        });
+        commands.Register(new ChoiceCommand(UserQuality, "Quality On This PC",
+            [EditorShell.ProjectOutputLabel, .. EditorShell.QualityPresets, EditorShell.CustomQualityLabel], () => shell.UserQuality, option => shell.UserQuality = option)
+        {
+            Description = "The render quality on this machine, which replaces the project's. A game's settings menu saves it here, as Custom when it changed single features.",
+            Icon = "viewport",
+        });
     }
 
     // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features
@@ -431,6 +448,26 @@ static class EditorCommands
         {
             Description = "Draw the shapes of lights, volumes and cameras: their ranges, cones and bounds, for the selection or for all of them.",
             Icon = "frame",
+        });
+        commands.Register(new ChoiceCommand(ViewportQuality, "Quality", EditorShell.ViewportPresetNames,
+            () => EditorShell.ViewportPresetNames[(int)shell.ViewportSettings.QualityPreset],
+            option => shell.ViewportSettings = shell.ViewportSettings with { QualityPreset = (Link.Protocol.ViewportPreset)Math.Max(0, EditorShell.ViewportPresetNames.ToList().IndexOf(option)) })
+        {
+            Description = "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too.",
+            Icon = "viewport",
+        });
+        commands.Register(new ChoiceCommand(ViewportAntiAliasing, "Anti-Aliasing", EditorShell.ViewportAaNames,
+            () => EditorShell.ViewportAaNames[(int)shell.ViewportSettings.AntiAliasing],
+            option => shell.ViewportSettings = shell.ViewportSettings with { AntiAliasing = (Link.Protocol.ViewportAa)Math.Max(0, EditorShell.ViewportAaNames.ToList().IndexOf(option)) })
+        {
+            Description = "Smooth the viewport's edges with a technique in place of the game's. FSR needs a GPU and the library that run it; elsewhere the viewport uses TAA.",
+            Icon = "viewport",
+        });
+        commands.Register(new ChoiceCommand(ViewportRenderScale, "Render Scale", [.. EditorShell.ViewportRenderScales.Select(s => s.Label)],
+            () => shell.ViewportRenderScale, shell.SetViewportRenderScale)
+        {
+            Description = "Draw the viewport's scene at a share of its size in place of the game's, which TAA or FSR upscale.",
+            Icon = "viewport",
         });
         commands.Register(new Command(ExposureUp, "Brighter", () => shell.ChangeExposure(1))
         {

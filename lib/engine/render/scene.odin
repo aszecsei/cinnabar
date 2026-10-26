@@ -85,6 +85,9 @@ Frame_Constants :: struct {
 	ltc_sampler:              u32,
 	// The editor's debug view, which the forward pass draws for the views that it has.
 	debug_view:               u32,
+	// The fog volume's depth slices (see FOG_LEVEL_SLICES), and the shadow maps' Shadow_Filter.
+	fog_slices:               u32,
+	shadow_filter:            u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -190,7 +193,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 16 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 432)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 440)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -535,10 +538,12 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 		debug_view               = u32(f.debug_view),
+		shadow_filter            = u32(shadows.params.filter),
 	}
 	constants.gi = u32(f.gi != nil)
 	if f.fog != nil {
 		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
+		constants.fog_slices = f.fog.grid.z
 	}
 	if lf.clustered {
 		constants.clusters = gpu.read_index(r.lights.clusters)

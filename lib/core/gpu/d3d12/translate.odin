@@ -143,6 +143,11 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer) {
 			rays := program.rays
 			rays.Width, rays.Height, rays.Depth = d.size.x, d.size.y, d.size.z
 			list->DispatchRays(&rays)
+		case .Upscale:
+			upscale(list, gpu.payload(p, gpu.Upscale))
+			// The upscaler bound its own heaps, root signature and pipeline. Upscales are on the graphics queue.
+			bind_root_signature(list)
+			pipeline_ready, program = false, nil
 		case .Dispatch_Indirect:
 			if !pipeline_ready {
 				continue

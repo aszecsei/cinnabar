@@ -1,5 +1,5 @@
 // The fog volume's injection (see docs/rendering/fog.md#volumetric-fog): a thread for each froxel, a screen tile of
-// FOG_TILE pixels in one of FOG_SLICES depth slices, which halve the clusters' slices. Each froxel takes the fog's
+// FOG_TILE pixels in one of grid.z depth slices, which divide the clusters' slices. Each froxel takes the fog's
 // density at a point in it, which moves within its slice from frame to frame, and the light that reaches that point:
 // every directional light, the punctual lights of its cluster with their shadow maps, and the ambient light. Then it
 // blends with last frame's value where the point was then. fog_inject.hlsl and fog_inject_traced.hlsl include this;
@@ -42,7 +42,7 @@ static const float FOG_RAY_DISTANCE = 10000;
 // fog_depth is the view depth at a slice coordinate of the fog volume, from slice = log2(depth) * scale + bias in the
 // clusters' slices.
 float fog_depth(float slice) {
-	return exp2((slice * CLUSTER_SLICES / FOG_SLICES - frame.slice_bias) / frame.slice_scale);
+	return exp2((slice * CLUSTER_SLICES / float(push.grid.z) - frame.slice_bias) / frame.slice_scale);
 }
 
 // henyey_greenstein is the share of light that scatters by an angle, per steradian.
@@ -122,8 +122,9 @@ void fog_inject(uint3 id) {
 		float4 clip = mul(frame.previous_view_projection, float4(previous, 1));
 		if (clip.w > 0) {
 			float2 uv = (clip.xy / clip.w * float2(0.5, -0.5) + 0.5) * frame.fog_scale;
-			float slice = (log2(clip.w) * frame.slice_scale + frame.slice_bias) * (FOG_SLICES / CLUSTER_SLICES);
-			float3 coordinates = float3(uv, slice / FOG_SLICES);
+			float slices = float(push.grid.z);
+			float slice = (log2(clip.w) * frame.slice_scale + frame.slice_bias) * (slices / CLUSTER_SLICES);
+			float3 coordinates = float3(uv, slice / slices);
 			if (all(coordinates == saturate(coordinates))) {
 				float4 history = cn_texture3d(push.history).SampleLevel(cn_sampler(frame.fog_sampler), coordinates, 0);
 				result = lerp(history, current, push.blend);

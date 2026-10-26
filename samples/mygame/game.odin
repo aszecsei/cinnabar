@@ -231,6 +231,8 @@ Pass_Constants :: struct {
 Game_State :: struct {
 	platform:           ^core.Platform_API,
 	frame_count:        u64,
+	// What the scripts' Render bindings reach: the renderer and the settings file (see quality_keys.luau).
+	script_quality:     project.Script_Quality,
 	// The project's settings, read again when their files change.
 	project:            project.Watch,
 	next_project_check: f64,
@@ -294,6 +296,7 @@ Pipelines :: struct {
 // Frame is what the pass procedures need. It lives in frame memory.
 Frame :: struct {
 	state:          ^Game_State,
+	// The scene's size, at the quality's render scale, which before_world takes from the renderer's frame.
 	size:           [2]u32,
 	view:           render.View,
 	pass_constants: gpu.Upload,
@@ -404,6 +407,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
+	s.script_quality = project.script_quality(&s.renderer, PROJECT_SETTINGS)
 	register_post_effects(s)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
@@ -442,6 +446,8 @@ register_post_effects :: proc(s: ^Game_State) {
 Lens_Pass :: struct {
 	frame:  ^Frame,
 	lens:   Lens,
+	// The scene's size there, which temporal AA may have upscaled.
+	size:   [2]u32,
 	input:  render.Texture,
 	output: render.Texture,
 }
@@ -456,8 +462,9 @@ add_lens :: proc(f: ^render.Frame, settings: rawptr) {
 	pass^ = {
 		frame  = frame,
 		lens   = (^Lens)(settings)^,
+		size   = f.scene_size,
 		input  = f.scene,
-		output = render.create_texture(g, {size = frame.size, format = render.SCENE_FORMAT, label = "lens"}),
+		output = render.create_texture(g, {size = f.scene_size, format = render.SCENE_FORMAT, label = "lens"}),
 	}
 	p := render.add_compute_pass(g, "lens", run_lens, pass)
 	render.read(g, p, pass.input)
@@ -471,11 +478,11 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 	constants := Lens_Constants {
 		input      = gpu.read_index(render.gpu_texture(g, pass.input)),
 		output     = gpu.write_index(render.gpu_texture(g, pass.output)),
-		size       = pass.frame.size,
+		size       = pass.size,
 		aberration = pass.lens.chromatic_aberration.value,
 		vignette   = pass.lens.vignette.value,
 	}
-	groups := (pass.frame.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
+	groups := (pass.size + POST_GROUP_SIZE - 1) / POST_GROUP_SIZE
 	gpu.cmd_set_pipeline(cb, pass.frame.state.pipelines.lens.pipeline)
 	gpu.cmd_push_constants(cb, &constants)
 	gpu.cmd_dispatch(cb, {groups.x, groups.y, 1})
@@ -503,6 +510,9 @@ find_camera :: proc(s: ^Game_State) {
 register_scripts :: proc(r: ^script.Runtime) {
 	script.expose(r, Spin)
 	script.expose(r, Triangle)
+	// The Render bindings read the Game_State's script_quality only when a script calls them, which the runtime of
+	// script_types, outside any Game_State, never does.
+	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -666,6 +676,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
 	// none without an editor.
 	overrides := editor.render_overrides(&s.editor)
+	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
 	desc := render.Frame_Desc {
 		view            = view,
@@ -675,6 +686,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
 		exposure_offset = overrides.exposure_offset,
+		quality         = viewport_quality ? &quality : nil,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),
 		hooks           = {
@@ -697,6 +709,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 // amplification shaders, so only the vertex fallback has the compute passes.
 before_world :: proc(f: ^render.Frame) {
 	frame := (^Frame)(f.data)
+	frame.size = f.size
 	s := frame.state
 	g := f.graph
 	// The large triangles show the rings once they are streamed in.
@@ -782,7 +795,12 @@ draw_hud :: proc(ctx: ^render.Pass_Context) {
 // draw_editor_tools adds the editor's pick and its outline and gizmo, which draw into the debug layer.
 draw_editor_tools :: proc(f: ^render.Frame) {
 	s := (^Frame)(f.data).state
-	editor.add_viewport_passes(&s.editor, f.graph, &s.world, {view = f.view, size = f.size, target = f.debug, ids = f.ids, depth = f.depth})
+	editor.add_viewport_passes(
+		&s.editor,
+		f.graph,
+		&s.world,
+		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
+	)
 }
 
 // extract_triangles writes the large triangles' instances for the scene pass and the acceleration structure:
@@ -1006,8 +1024,8 @@ shutdown :: proc(state: rawptr) {
 	log.info("mygame: shutdown")
 }
 
-// update_output asks for the output mode of the project's settings, and reads them again when their files change, so
-// the editor's change shows at once. F8 cycles the mode for this run.
+// update_output asks for the output mode and the render quality of the project's settings, and reads them again when
+// their files change, so the editor's change shows at once. F8 cycles the mode for this run.
 update_output :: proc(s: ^Game_State) {
 	now := s.platform.time_seconds()
 	changed := false
@@ -1016,6 +1034,7 @@ update_output :: proc(s: ^Game_State) {
 		if project.refresh(&s.project, s.platform, PROJECT_SETTINGS) {
 			changed = true
 			s.output_override = nil
+			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
 		}
 	}
 	if .F8 in s.platform.input().pressed {

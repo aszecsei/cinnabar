@@ -14,6 +14,8 @@ Sampler :: distinct Handle
 Pipeline :: distinct Handle
 // An acceleration structure for ray tracing (see docs/gpu/ray-tracing.md#ray-tracing).
 Accel_Struct :: distinct Handle
+// A vendor's temporal upscaler (see docs/gpu/upscalers.md#upscalers).
+Upscaler :: distinct Handle
 
 // Capabilities above the hardware floor. The backend reports them at device creation.
 Feature :: enum u8 {
@@ -24,12 +26,59 @@ Feature :: enum u8 {
 
 Features :: bit_set[Feature]
 
+Vendor :: enum u8 {
+	Unknown,
+	Amd,
+	Intel,
+	Nvidia,
+	Qualcomm,
+	Microsoft,
+}
+
+// vendor_from_id is the vendor of a PCI vendor ID.
+vendor_from_id :: proc(id: u32) -> Vendor {
+	switch id {
+	case 0x1002, 0x1022:
+		return .Amd
+	case 0x8086:
+		return .Intel
+	case 0x10de:
+		return .Nvidia
+	case 0x5143, 0x4d4f4351:
+		return .Qualcomm
+	case 0x1414:
+		return .Microsoft
+	}
+	return .Unknown
+}
+
+// Adapter is the device that the backend chose, for choosing the defaults of what the game draws (see
+// docs/gpu/interface.md#adapter).
+Adapter :: struct {
+	vendor:       Vendor,
+	device_id:    u32,
+	// The adapter's own memory in bytes, 0 when unknown or shared with the CPU.
+	video_memory: u64,
+	// UTF-8, with zeros after it (see adapter_name).
+	name:         [128]u8,
+}
+
+// adapter_name is an adapter's name, in its memory.
+adapter_name :: proc(a: ^Adapter) -> string {
+	n := 0
+	for n < len(a.name) && a.name[n] != 0 {
+		n += 1
+	}
+	return string(a.name[:n])
+}
+
 // Pool capacities. The bindless index ranges below depend on them.
 MAX_BUFFERS :: 16384
 MAX_TEXTURES :: 16384
 MAX_SAMPLERS :: 1024
 MAX_PIPELINES :: 4096
 MAX_ACCEL_STRUCTS :: 4096
+MAX_UPSCALERS :: 16
 // The geometries of one bottom-level acceleration structure.
 MAX_ACCEL_GEOMETRIES :: 16
 
@@ -703,6 +752,38 @@ accel_instance :: proc(
 		hit_group_offset_flags = (hit_group_offset & 0xffffff) | u32(transmute(u8)flags) << 24,
 		accel = accel_reference,
 	}
+}
+
+// Upscaler_Kind is a vendor's temporal upscaler, which a backend runs through the vendor's library when it finds it
+// (see docs/gpu/upscalers.md#upscalers).
+Upscaler_Kind :: enum u8 {
+	// AMD FidelityFX Super Resolution, through the FidelityFX API: FSR 4 on the GPUs that have it, and FSR 3.1 on the
+	// others.
+	Fsr,
+}
+
+Upscaler_Kinds :: bit_set[Upscaler_Kind;u8]
+
+Upscaler_Flag :: enum u8 {
+	// The color is linear HDR. Without it, it is linear and at most 1.
+	Hdr,
+	// Depth is reversed: 1 at the near plane, and 0 at the far one.
+	Depth_Reversed,
+	// The projection has no far plane.
+	Depth_Infinite,
+}
+
+Upscaler_Flags :: bit_set[Upscaler_Flag;u8]
+
+// Upscaler_Desc is an upscaler into one output size, from renders at most max_render_size. The upscaler keeps its own
+// history and finds the exposure from the color.
+Upscaler_Desc :: struct {
+	kind:            Upscaler_Kind,
+	flags:           Upscaler_Flags,
+	max_render_size: [2]u32,
+	output_size:     [2]u32,
+	scope:           Scope,
+	label:           string,
 }
 
 // Stats is what a backend holds, for the editor's resource monitor (see docs/editor/shell-and-panels.md#resource-monitor). The live

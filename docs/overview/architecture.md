@@ -107,11 +107,12 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 
 - **The user's file** beside it, `project.user.settings`, replaces the project's values on one machine, for a display or a GPU that the project's choice does not suit. Version control ignores `*.user.settings`.
 - **Reading:** `lib/engine/project` reads both files, the project's first. The game reads them when it starts, and looks for a change twice a second (`project.refresh`), so an edit in the editor shows in a running game at once. An unknown key or a value that does not fit is a warning, and the setting keeps its default. The sample finds the file at `CINNABAR_PROJECT` (by default `samples/mygame/project.settings`), relative to the working directory, as it finds its content cache.
-- **The editor** edits both: the Home tab's Game Window group sets the project's output and this machine's, and Run Game opens the game in its own window, which shows what the viewport cannot.
+- **The editor** edits both: the Home tab's Game Window group sets the project's output and quality preset, and this machine's, and Run Game opens the game in its own window, which shows what the viewport cannot (see [Editor](../editor/viewport.md#quality)).
 
 | Key | Values | Default | What it sets |
 |---|---|---|---|
 | `output` | `Auto`, `Sdr`, `Hdr10`, `Scrgb` | `Auto` | The window's output mode (see [Rendering](../rendering/layers-and-output.md#hdr-output)): `Auto` is HDR10 on a display in HDR, and SDR otherwise. `CINNABAR_OUTPUT` replaces it. The sample's F8 cycles it until the files change. |
+| `quality.*` | See [Rendering: Saved quality](../rendering/quality.md#saved-quality) | The device's `default_quality` | The render quality: a preset, and keys that replace its features. The game saves the player's choice to the user's file (`project.save_quality`, or `Render.save_quality` from a script), keeping the file's other lines. |
 
 ## Content pipeline
 

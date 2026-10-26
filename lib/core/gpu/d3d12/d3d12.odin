@@ -81,6 +81,7 @@ dev: struct {
 	info_queue:        ^d3d.IInfoQueue1,
 	callback_cookie:   u32,
 	features:          gpu.Features,
+	adapter_info:      gpu.Adapter,
 	// The graphics queue and its fence. Frame ends, uploads and deferred releases use this fence.
 	queue:             ^d3d.ICommandQueue,
 	fence:             ^d3d.IFence,
@@ -114,6 +115,7 @@ dev: struct {
 	using pipelines:   Pipelines,
 	using uploads:     Uploads,
 	using streaming:   Streaming,
+	using upscalers:   Upscalers,
 }
 
 // A non-empty shared_name selects shared mode: the frame target is a set of named shared textures, and nothing presents.
@@ -172,6 +174,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	init_pipelines() or_return
 	init_uploads() or_return
 	init_streaming() or_return
+	init_upscalers()
 	for &frame in dev.frames {
 		init_upload_ring(&frame.upload) or_return
 	}
@@ -197,6 +200,7 @@ shutdown :: proc() {
 	shutdown_streaming()
 	shutdown_pipelines()
 	shutdown_resources()
+	shutdown_upscalers()
 	for &frame in dev.frames {
 		for lists in frame.lists {
 			for &l in lists {
@@ -240,6 +244,10 @@ shutdown :: proc() {
 
 features :: proc() -> gpu.Features {
 	return dev.features
+}
+
+adapter :: proc() -> gpu.Adapter {
+	return dev.adapter_info
 }
 
 // stats counts the live resources, and reads the adapter's memory use. Call it between frames.
@@ -568,6 +576,12 @@ create_device :: proc(luid: u64) -> bool {
 		dev.adapter = adapter
 		dev.device = device
 		dev.features = query_features(device)
+		dev.adapter_info = {
+			vendor       = gpu.vendor_from_id(desc.VendorId),
+			device_id    = desc.DeviceId,
+			video_memory = u64(desc.DedicatedVideoMemory),
+		}
+		copy(dev.adapter_info.name[:len(dev.adapter_info.name) - 1], name)
 		log.infof("d3d12: using %s, optional features %v", name, dev.features)
 		return true
 	}

@@ -3,16 +3,22 @@ package render
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-// Ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion): GTAO, after Intel's XeGTAO, from the prepass's depth and
-// normals on the compute queue. A pass turns the depth into view depth and four smaller levels, the main pass finds
-// the occlusion and the edges between surfaces, and the denoiser blurs it within each surface. It keeps no history:
-// with temporal AA, its noise changes from frame to frame and temporal AA averages it. The forward pass scales the
-// indirect light by it.
+// Ambient occlusion (see docs/rendering/ambient-occlusion.md#ambient-occlusion): GTAO after Intel's XeGTAO, HBAO or SSAO, as the
+// quality chooses, from the prepass's depth and normals on the compute queue. A pass turns the depth into view depth
+// and four smaller levels, the technique's search finds the occlusion and the edges between surfaces, and the denoiser
+// blurs it within each surface. It keeps no history: with temporal AA, its noise changes from frame to frame and
+// temporal AA averages it. The forward pass scales the indirect light by it.
 
-// The engine's ambient occlusion shaders, by their .meta files.
+// The engine's ambient occlusion shaders, by their .meta files: the depth levels and the denoiser that every technique
+// shares, and each technique's search.
 AO_DEPTH_SHADER :: #load("../content/shaders/gtao_depth.hlsl.meta", string)
-AO_SHADER :: #load("../content/shaders/gtao.hlsl.meta", string)
 AO_DENOISE_SHADER :: #load("../content/shaders/gtao_denoise.hlsl.meta", string)
+AO_SEARCH_SHADERS :: [Ao_Technique]string {
+	.Off  = "",
+	.Gtao = #load("../content/shaders/gtao.hlsl.meta", string),
+	.Ssao = #load("../content/shaders/ssao.hlsl.meta", string),
+	.Hbao = #load("../content/shaders/hbao.hlsl.meta", string),
+}
 
 // The view depth's levels, each half the size of the one before. Matches LEVELS in gtao.hlsl.
 AO_DEPTH_LEVELS :: 5
@@ -33,6 +39,39 @@ AO_BLUR :: 1.2
 AO_DENOISE_PASSES_TEMPORAL :: 1
 AO_DENOISE_PASSES :: 2
 
+// Ao_Params are a technique's search at a level. samples are GTAO's slices around the view direction, HBAO's directions
+// on the screen, or SSAO's points in the hemisphere; steps are each slice's steps on each side, or each direction's,
+// which SSAO does not take.
+Ao_Params :: struct {
+	samples: u32,
+	steps:   u32,
+}
+
+// The levels of each technique, from its cost: GTAO's are XeGTAO's presets, and its Ultra was the only search before
+// levels. HBAO takes about as many depth reads as GTAO a level up, and SSAO as many as GTAO's slices times its steps.
+@(rodata)
+AO_PARAMS := [Ao_Technique][Quality_Level]Ao_Params {
+	.Off = {},
+	.Gtao = {
+		.Low    = {samples = 1, steps = 2},
+		.Medium = {samples = 2, steps = 2},
+		.High   = {samples = 3, steps = 3},
+		.Ultra  = {samples = 9, steps = 3},
+	},
+	.Ssao = {
+		.Low    = {samples = 6},
+		.Medium = {samples = 8},
+		.High   = {samples = 12},
+		.Ultra  = {samples = 16},
+	},
+	.Hbao = {
+		.Low    = {samples = 4, steps = 3},
+		.Medium = {samples = 4, steps = 4},
+		.High   = {samples = 6, steps = 4},
+		.Ultra  = {samples = 8, steps = 6},
+	},
+}
+
 // Ao_Settings are a frame's ambient occlusion, in Frame_Settings, from the Ambient_Occlusion settings. Zero gives the defaults.
 Ao_Settings :: struct {
 	off:    bool,
@@ -40,13 +79,17 @@ Ao_Settings :: struct {
 	radius: f32,
 	// 0 gives DEFAULT_AO_POWER.
 	power:  f32,
+	// The search, and its AO_PARAMS. A frame whose quality turns the ambient occlusion off has off set instead.
+	technique: Ao_Technique,
+	level:     Quality_Level,
 }
 
 // Ao_Passes is the ambient occlusion's state between frames, in the Renderer.
 Ao_Passes :: struct {
-	depth:   Shader_Pipeline,
-	gtao:    Shader_Pipeline,
-	denoise: Shader_Pipeline,
+	depth:    Shader_Pipeline,
+	// Each technique's search. Every one is synced, so switching technique does not wait for a compile.
+	searches: [Ao_Technique]Shader_Pipeline,
+	denoise:  Shader_Pipeline,
 	// Counts the frames, for the noise.
 	frame:   u32,
 }
@@ -64,7 +107,7 @@ Ao_Depth_Constants :: struct {
 	view_model_near: f32,
 }
 
-// Ao_Constants matches Constants in gtao.hlsl.
+// Ao_Constants matches Constants in ao_common.hlsli.
 @(private = "file")
 Ao_Constants :: struct {
 	right:       [4]f32,
@@ -82,7 +125,9 @@ Ao_Constants :: struct {
 	radius:      f32,
 	power:       f32,
 	noise_index: u32,
-	padding:     u32,
+	samples:     u32,
+	steps:       u32,
+	padding:     [3]u32,
 }
 
 // Ao_Denoise_Push matches Push in gtao_denoise.hlsl.
@@ -100,6 +145,7 @@ Ao_Denoise_Push :: struct {
 Ao_Frame :: struct {
 	depth_constants: Ao_Depth_Constants,
 	constants:       Ao_Constants,
+	search:          gpu.Pipeline,
 	levels:          [AO_DEPTH_LEVELS]Texture,
 	raw:             Texture,
 	edges:           Texture,
@@ -119,34 +165,55 @@ Ao_Denoise_Pass :: struct {
 
 ao_init :: proc(a: ^Ao_Passes) {
 	a.depth = shader_pipeline(AO_DEPTH_SHADER)
-	a.gtao = shader_pipeline(AO_SHADER)
+	shaders := AO_SEARCH_SHADERS
+	for &search, technique in a.searches {
+		if technique != .Off {
+			search = shader_pipeline(shaders[technique])
+		}
+	}
 	a.denoise = shader_pipeline(AO_DENOISE_SHADER)
 }
 
 ao_destroy :: proc(a: ^Ao_Passes, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&a.depth, platform)
-	destroy_shader_pipeline(&a.gtao, platform)
+	for &search in a.searches {
+		destroy_shader_pipeline(&search, platform)
+	}
 	destroy_shader_pipeline(&a.denoise, platform)
+}
+
+// The searches' pipelines' labels, which name their passes too.
+@(private = "file")
+AO_SEARCH_LABELS := [Ao_Technique]string {
+	.Off  = "",
+	.Gtao = "gtao",
+	.Ssao = "ssao",
+	.Hbao = "hbao",
 }
 
 @(private)
 sync_ao_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&r.ao.depth, r.platform, r.residency.assets, {label = "gtao depth"}, force)
-	sync_compute_pipeline(&r.ao.gtao, r.platform, r.residency.assets, {label = "gtao"}, force)
+	for &search, technique in r.ao.searches {
+		if technique != .Off {
+			sync_compute_pipeline(&search, r.platform, r.residency.assets, {label = AO_SEARCH_LABELS[technique]}, force)
+		}
+	}
 	sync_compute_pipeline(&r.ao.denoise, r.platform, r.residency.assets, {label = "gtao denoise"}, force)
 }
 
 // add_ao_passes adds the ambient occlusion's passes after the prepass, on the compute queue, and sets
 // Frame.ambient_occlusion to the denoiser's result, which the forward pass reads. Without its pipelines or with off,
-// it adds nothing. It reads f.post.temporal, so it runs after begin_post.
+// it adds nothing. It reads f.post, so it runs after begin_post.
 @(private)
 add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	r := f.renderer
 	a := &r.ao
 	platform := r.platform
 	if settings.off ||
+	   settings.technique == .Off ||
 	   !pipeline_ready(platform, &a.depth) ||
-	   !pipeline_ready(platform, &a.gtao) ||
+	   !pipeline_ready(platform, &a.searches[settings.technique]) ||
 	   !pipeline_ready(platform, &a.denoise) {
 		return
 	}
@@ -160,7 +227,8 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	af.raw = create_texture(g, {size = f.size, format = AO_FORMAT, label = "ambient occlusion raw"})
 	af.edges = create_texture(g, {size = f.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"})
 	a.frame += 1
-	temporal := f.post.temporal
+	// An upscaler averages the noise over time as temporal AA does.
+	temporal := f.post.temporal || f.post.upscaler != {}
 
 	right, up, forward := view_axes(f.view)
 	aspect := f32(f.size.x) / f32(max(f.size.y, 1))
@@ -186,7 +254,10 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 		power       = settings.power > 0 ? settings.power : DEFAULT_AO_POWER,
 		// Without temporal AA nothing averages the noise over time, so it stays where it is.
 		noise_index = temporal ? a.frame % 64 : 0,
+		samples     = AO_PARAMS[settings.technique][settings.level].samples,
+		steps       = AO_PARAMS[settings.technique][settings.level].steps,
 	}
+	af.search = a.searches[settings.technique].pipeline
 	f.ao = af
 
 	p := add_compute_pass(g, "gtao depth", run_ao_depth, f, queue = .Compute)
@@ -194,7 +265,7 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	for level in af.levels {
 		write(g, p, level)
 	}
-	p = add_compute_pass(g, "gtao", run_gtao, f, queue = .Compute)
+	p = add_compute_pass(g, AO_SEARCH_LABELS[settings.technique], run_ao_search, f, queue = .Compute)
 	for level in af.levels {
 		read(g, p, level)
 	}
@@ -249,7 +320,7 @@ run_ao_depth :: proc(ctx: ^Pass_Context) {
 }
 
 @(private = "file")
-run_gtao :: proc(ctx: ^Pass_Context) {
+run_ao_search :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	g := ctx.graph
 	constants := f.ao.constants
@@ -269,7 +340,7 @@ run_gtao :: proc(ctx: ^Pass_Context) {
 		return
 	}
 	(^Ao_Constants)(raw_data(upload.data))^ = constants
-	gpu.cmd_set_pipeline(ctx.cb, f.renderer.ao.gtao.pipeline)
+	gpu.cmd_set_pipeline(ctx.cb, f.ao.search)
 	gpu.cmd_set_pass_constants(ctx.cb, upload)
 	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
 }

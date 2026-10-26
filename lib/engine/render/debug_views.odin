@@ -78,7 +78,7 @@ debug_view_from_textures :: proc(view: Debug_View) -> bool {
 @(private)
 apply_debug :: proc(s: ^Frame_Settings, view: Debug_View, disable: Features, exposure_offset: f32) {
 	shaded := debug_view_shaded(view)
-	s.post.no_temporal_aa ||= .Temporal_Aa in disable || !shaded
+	s.post.no_aa ||= .Temporal_Aa in disable || !shaded
 	s.post.no_bloom ||= .Bloom in disable || view != .Lit
 	s.post.exposure_compensation += exposure_offset
 	if .Fog in disable || (!shaded && view != .Fog) {

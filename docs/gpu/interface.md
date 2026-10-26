@@ -2,7 +2,7 @@
 
 The hardware floor that every design rule follows from, the packages and how a backend is selected, and the bindless binding model with its fixed root signature. Read this before any other GPU document.
 
-**In this document:** [Hardware floor](#hardware-floor) · [Packages](#packages) · [Binding model](#binding-model)
+**In this document:** [Hardware floor](#hardware-floor) · [Adapter](#adapter) · [Packages](#packages) · [Binding model](#binding-model)
 
 ## Hardware floor
 
@@ -24,9 +24,24 @@ Some features are above the floor. The backend reports them at device creation i
 - Inline ray tracing (ray queries).
 - Ray tracing pipelines.
 
-The engine checks `Features` before it uses a capability. Every capability must have a fallback path in the engine, or the engine must report that the device is not supported.
+The engine checks `Features` before it uses a capability. Every capability must have a fallback path in the engine, or the engine must report that the device is not supported. The vendors' upscalers are optional the same way, but depend on the vendor's library as well as the device, so `gpu_upscalers` reports them apart (see [Upscalers](upscalers.md#upscalers)).
 
 To test a fallback path on hardware that has the capability, set `CINNABAR_DISABLE_FEATURES` to a comma-separated list of `Feature` names, for example `CINNABAR_DISABLE_FEATURES=Mesh_Shaders`. `core` then hides those features from `gpu_features`. The null backend reports `Mesh_Shaders`, so it validates mesh pipelines and mesh draws.
+
+## Adapter
+
+`Platform_API.gpu_adapter` gives the device that the backend chose, as a `gpu.Adapter`, so the engine can pick defaults that suit it, such as the renderer's [quality](../rendering/quality.md#hardware-caps). It never decides what the engine can do: `Features` does that.
+
+| Field | What it is |
+|---|---|
+| `vendor` | A `gpu.Vendor`, from the PCI vendor ID (`vendor_from_id`), or `Unknown` |
+| `device_id` | The PCI device ID |
+| `video_memory` | The adapter's own memory in bytes, or 0 when it is unknown or shared with the CPU |
+| `name` | The adapter's name, UTF-8 with zeros after it; `adapter_name` gives it as a string |
+
+- **D3D12** fills it from `DXGI_ADAPTER_DESC1` when it creates the device. The memory is `DedicatedVideoMemory`. How much of it the process may use now is `gpu.Stats.video_memory_budget`, which only the host reads.
+- **The null backend** gives an adapter named `null` with no memory of its own.
+- A port fills it from its API's equivalent, such as `VkPhysicalDeviceProperties` and the device-local heaps, or `MTLDevice.recommendedMaxWorkingSetSize`.
 
 ## Packages
 
@@ -39,7 +54,7 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 
 The engine imports `lib/core/gpu` for types and recording only. It never imports a backend package.
 
-**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines and acceleration structures, `update_*_pipeline`, `accel_reference`, `destroy_scope`, `stream_buffer`, `stream_texture`, `transfer_done`, `read_buffer`, and `stats`, the live resources and the memory for the editor's resource monitor, which only the host calls. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
+**Backend selection:** `lib/core` imports the backend as `gpu_backend:.`. The build points the `gpu_backend` collection at one backend package, for example `-collection:gpu_backend=lib/core/gpu/d3d12`. In the justfile, set `gpu_backend` to choose the backend. Every backend package provides the same procedures: `init`, `shutdown`, `features`, `frame_target`, `begin_frame`, `submit`, `end_frame`, `upload`, `create_*` and `destroy_*` for buffers, textures, samplers, pipelines, acceleration structures and upscalers, `update_*_pipeline`, `accel_reference`, `upscalers`, `destroy_scope`, `stream_buffer`, `stream_texture`, `transfer_done`, `read_buffer`, and `stats`, the live resources and the memory for the editor's resource monitor, which only the host calls. `core` exposes them to the game as `gpu_*` fields of `Platform_API`.
 
 The null backend applies the same rules as the real backends: pass rules, barrier rules and handle validity. It also tracks texture layouts, so it rejects a barrier from the wrong layout. Use it to find code that only D3D12 accepts.
 

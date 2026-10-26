@@ -8,7 +8,8 @@ import "cinnabar:core/gpu"
 
 // Post-processing (see docs/rendering/post-processing.md#post-processing): temporal AA into a history texture, the exposure from a
 // luminance histogram, which pre-exposes the next frame, and bloom, all in linear HDR at the scene's resolution. The
-// output pass then tone maps through a lookup table, which a compute pass bakes when the settings change.
+// output pass then tone maps through a lookup table, which a compute pass bakes when the settings change, or with FXAA
+// or SMAA in temporal AA's place, the tone map pass does before them (see spatial_aa.odin).
 
 // The engine's post-processing shaders, by their .meta files.
 TEMPORAL_AA_SHADER :: #load("../content/shaders/temporal_aa.hlsl.meta", string)
@@ -20,7 +21,8 @@ TONE_LUT_SHADER :: #load("../content/shaders/tone_lut.hlsl.meta", string)
 // The thread groups of the passes over pixels, and of the histogram.
 POST_GROUP_SIZE :: 8
 HISTOGRAM_GROUP_SIZE :: 16
-// The camera's jitter cycles through this many points of the Halton (2, 3) sequence.
+// The camera's jitter cycles through this many points of the Halton (2, 3) sequence, times the output's pixels for
+// each of the scene's when temporal AA upscales, so every output pixel gets samples near its center.
 JITTER_SAMPLES :: 8
 // This frame's share of temporal AA's result. The history holds the rest.
 TEMPORAL_BLEND :: 0.1
@@ -68,7 +70,9 @@ Exposure_Mode :: enum u8 {
 
 // Post_Settings are a frame's post-processing, in Frame_Settings, from the Anti_Aliasing, Exposure, Tone_Mapping and Bloom settings. Where 0 would mean nothing, it gives the default.
 Post_Settings :: struct {
-	no_temporal_aa:        bool,
+	// The anti-aliasing's technique, from the quality, and no_aa when a volume or the editor turns it off.
+	aa:                    Aa_Technique,
+	no_aa:                 bool,
 	no_bloom:              bool,
 	// Bloom's share of the final color.
 	bloom_intensity:       f32,
@@ -101,6 +105,8 @@ Post :: struct {
 	histogram:      Shader_Pipeline,
 	adapt:          Shader_Pipeline,
 	tone_lut:       Shader_Pipeline,
+	spatial:        Spatial_Aa,
+	upscalers:      Upscalers,
 	// Bilinear and clamped: the history, bloom's chain and the lookup table read with it.
 	sampler:        gpu.Sampler,
 	// Two floats: the exposure that pre-exposes this frame's scene, then last frame's. The exposure pass writes the
@@ -139,6 +145,18 @@ Grading :: struct {
 Post_Frame :: struct {
 	settings:         Post_Settings,
 	temporal:         bool,
+	// The upscaler that upscales in temporal AA's place, or nil, and whether its history starts again, with the
+	// motion that it reads and its result.
+	upscaler:         gpu.Upscaler,
+	upscale_reset:    bool,
+	motion:           Texture,
+	upscaled:         Texture,
+	// FXAA or SMAA, which run, or Off, and their textures: the tone-mapped scene that they read, and SMAA's edges and
+	// weights.
+	spatial:          Aa_Technique,
+	tone_mapped:      Texture,
+	smaa_edges:       Texture,
+	smaa_weights:     Texture,
 	// The exposure pass runs, and with exposure_auto, the histogram before it.
 	exposure:         bool,
 	exposure_auto:    bool,
@@ -181,20 +199,23 @@ Bloom_Step :: struct {
 // Temporal_Constants matches Temporal_Constants in temporal_aa.hlsl.
 @(private = "file")
 Temporal_Constants :: struct {
-	reproject:     matrix[4, 4]f32,
-	jitter:        [2]f32,
-	inverse_size:  [2]f32,
-	size:          [2]u32,
-	scene:         u32,
-	velocity:      u32,
-	depth:         u32,
-	history:       u32,
-	output:        u32,
-	exposure:      u32,
-	sampler_index: u32,
-	valid:         u32,
-	blend:         f32,
-	padding:       u32,
+	reproject:           matrix[4, 4]f32,
+	jitter:              [2]f32,
+	inverse_size:        [2]f32,
+	size:                [2]u32,
+	scene:               u32,
+	velocity:            u32,
+	depth:               u32,
+	history:             u32,
+	output:              u32,
+	exposure:            u32,
+	sampler_index:       u32,
+	valid:               u32,
+	blend:               f32,
+	// The scene is smaller than the output, which is the history's size.
+	upscale:             u32,
+	render_size:         [2]u32,
+	inverse_render_size: [2]f32,
 }
 
 // The modes of bloom.hlsl: the first downsample, which weighs down bright pixels so they do not flicker, the others,
@@ -233,6 +254,8 @@ Histogram_Push :: struct {
 	size:          [2]u32,
 	min_log:       f32,
 	inverse_range: f32,
+	// The depth's pixels for each of the scene's, less than 1 after temporal AA upscales the scene.
+	depth_scale:   [2]f32,
 }
 
 // Exposure_Push matches Push in exposure_adapt.hlsl.
@@ -266,7 +289,7 @@ Lut_Push :: struct {
 	padding:     [2]u32,
 }
 
-#assert(size_of(Temporal_Constants) == 128 && size_of(Bloom_Push) <= 128 && size_of(Exposure_Push) <= 128)
+#assert(size_of(Temporal_Constants) == 144 && size_of(Bloom_Push) <= 128 && size_of(Exposure_Push) <= 128)
 
 post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.temporal_aa = shader_pipeline(TEMPORAL_AA_SHADER)
@@ -281,6 +304,8 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	zeros: [HISTOGRAM_BINS]u32
 	p.histogram_bins = platform.gpu_create_buffer({size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"}, transmute([]byte)zeros[:])
 	p.lut = platform.gpu_create_texture({size = {LUT_SIZE * LUT_SIZE, LUT_SIZE}, format = LUT_FORMAT, usage = {.Sampled, .Storage}, label = "tone mapping lut"}, nil)
+	spatial_aa_init(&p.spatial, platform)
+	upscalers_init(&p.upscalers)
 }
 
 post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
@@ -293,6 +318,8 @@ post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
 	}
 	platform.gpu_destroy_texture(p.lut)
 	p.lut, p.lut_baked = {}, false
+	spatial_aa_destroy(&p.spatial, platform)
+	upscalers_destroy(&p.upscalers, platform)
 }
 
 @(private)
@@ -304,6 +331,8 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&p.histogram, r.platform, assets, {label = "exposure histogram"}, force)
 	sync_compute_pipeline(&p.adapt, r.platform, assets, {label = "exposure"}, force)
 	sync_compute_pipeline(&p.tone_lut, r.platform, assets, {label = "tone mapping lut"}, force)
+	sync_spatial_aa_pipelines(r, force)
+	sync_upscaler_pipelines(r, force)
 }
 
 // pipeline_ready is whether a pipeline is compiled, so a pass that it records does its work. A post pass whose
@@ -352,12 +381,23 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	pf := new(Post_Frame, platform.frame_allocator)
 	f.post = pf
 	pf.settings = settings
-	pf.temporal = !settings.no_temporal_aa && pipeline_ready(platform, &p.temporal_aa)
+	aa := settings.no_aa ? Aa_Technique.Off : settings.aa
+	// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
+	pf.upscaler = frame_upscaler(f, aa)
+	_, upscales := upscaler_kind(aa)
+	pf.temporal = (aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
+	if spatial_aa_ready(platform, &p.spatial, aa) {
+		pf.spatial = aa
+	}
+	u := &p.upscalers
+	pf.upscale_reset = !u.active || u.render_size != f.size
+	u.active, u.render_size = pf.upscaler != {}, f.size
 	pf.exposure = pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
-	if pf.temporal {
+	if pf.temporal || pf.upscaler != {} {
 		p.jitter_index += 1
-		n := p.jitter_index % JITTER_SAMPLES + 1
+		ratio := f32(f.output_size.x * f.output_size.y) / f32(max(f.size.x * f.size.y, 1))
+		n := p.jitter_index % u32(f32(JITTER_SAMPLES) * max(ratio, 1) + 0.5) + 1
 		pixel := [2]f32{halton(n, 2) - 0.5, halton(n, 3) - 0.5}
 		f.jitter = {2 * pixel.x / f32(f.size.x), -2 * pixel.y / f32(f.size.y)}
 	}
@@ -369,8 +409,8 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 }
 
 // add_post_passes adds the post passes after the world and the before_post hook: temporal AA, whose history becomes
-// Frame.scene, the exposure for the next frame, bloom into Frame.bloom, and the lookup table's bake when the settings
-// or its shader changed.
+// Frame.scene, at the frame's size if the scene is smaller, the exposure for the next frame, bloom into Frame.bloom, the lookup table's bake when the settings or
+// its shader changed, and FXAA or SMAA into Frame.display.
 @(private)
 add_post_passes :: proc(f: ^Frame) {
 	r := f.renderer
@@ -382,7 +422,7 @@ add_post_passes :: proc(f: ^Frame) {
 
 	add_post_effects(f, .Before_Temporal_Aa)
 	if pf.temporal {
-		pf.history = history_texture(g, {size = f.size, format = SCENE_FORMAT, label = "temporal aa history"})
+		pf.history = history_texture(g, {size = f.output_size, format = SCENE_FORMAT, label = "temporal aa history"})
 		if pf.history.current != 0 {
 			pf.temporal_in = f.scene
 			pf.reproject = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion) * linalg.inverse(f.view_projection)
@@ -393,8 +433,10 @@ add_post_passes :: proc(f: ^Frame) {
 			read(g, pass, f.exposure)
 			read(g, pass, pf.history.previous)
 			write(g, pass, pf.history.current)
-			f.scene = pf.history.current
+			f.scene, f.scene_size = pf.history.current, f.output_size
 		}
+	} else if pf.upscaler != {} {
+		add_upscale(f)
 	}
 	add_post_effects(f, .After_Temporal_Aa)
 
@@ -417,7 +459,7 @@ add_post_passes :: proc(f: ^Frame) {
 	}
 
 	if !s.no_bloom && pipeline_ready(platform, &p.bloom) {
-		size := f.size
+		size := f.scene_size
 		for level in 0 ..< BLOOM_LEVELS {
 			size = {max(size.x / 2, 1), max(size.y / 2, 1)}
 			if level > 0 && min(size.x, size.y) < BLOOM_MIN_SIZE {
@@ -471,6 +513,7 @@ add_post_passes :: proc(f: ^Frame) {
 		write(g, pass, f.lut)
 		p.lut_baked, p.lut_grading, p.lut_version = true, pf.grading, p.tone_lut.version
 	}
+	add_spatial_aa(f)
 }
 
 // groups is the thread groups of a dispatch over a size.
@@ -486,19 +529,22 @@ run_temporal_aa :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	platform := f.renderer.platform
 	constants := Temporal_Constants {
-		reproject     = pf.reproject,
-		jitter        = f.jitter,
-		inverse_size  = {1 / f32(f.size.x), 1 / f32(f.size.y)},
-		size          = f.size,
-		scene         = gpu.read_index(gpu_texture(g, pf.temporal_in)),
-		velocity      = gpu.read_index(gpu_texture(g, f.velocity)),
-		depth         = gpu.read_index(gpu_texture(g, f.depth)),
-		history       = gpu.read_index(gpu_texture(g, pf.history.previous)),
-		output        = gpu.write_index(gpu_texture(g, pf.history.current)),
-		exposure      = gpu.read_index(gpu_buffer(g, f.exposure)),
-		sampler_index = gpu.sampler_index(f.renderer.post.sampler),
-		valid         = u32(pf.history.valid),
-		blend         = TEMPORAL_BLEND,
+		reproject           = pf.reproject,
+		jitter              = f.jitter,
+		inverse_size        = {1 / f32(f.output_size.x), 1 / f32(f.output_size.y)},
+		size                = f.output_size,
+		scene               = gpu.read_index(gpu_texture(g, pf.temporal_in)),
+		velocity            = gpu.read_index(gpu_texture(g, f.velocity)),
+		depth               = gpu.read_index(gpu_texture(g, f.depth)),
+		history             = gpu.read_index(gpu_texture(g, pf.history.previous)),
+		output              = gpu.write_index(gpu_texture(g, pf.history.current)),
+		exposure            = gpu.read_index(gpu_buffer(g, f.exposure)),
+		sampler_index       = gpu.sampler_index(f.renderer.post.sampler),
+		valid               = u32(pf.history.valid),
+		blend               = TEMPORAL_BLEND,
+		upscale             = u32(f.size != f.output_size),
+		render_size         = f.size,
+		inverse_render_size = {1 / f32(f.size.x), 1 / f32(f.size.y)},
 	}
 	upload, ok := platform.gpu_upload(size_of(Temporal_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -507,7 +553,7 @@ run_temporal_aa :: proc(ctx: ^Pass_Context) {
 	(^Temporal_Constants)(raw_data(upload.data))^ = constants
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.temporal_aa.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, upload)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(f.output_size, POST_GROUP_SIZE))
 }
 
 @(private = "file")
@@ -519,13 +565,14 @@ run_histogram :: proc(ctx: ^Pass_Context) {
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),
 		exposure      = gpu.read_index(gpu_buffer(g, f.exposure)),
 		histogram     = gpu.write_index(gpu_buffer(g, f.post.histogram)),
-		size          = f.size,
+		size          = f.scene_size,
 		min_log       = HISTOGRAM_MIN_LOG,
 		inverse_range = 1.0 / (HISTOGRAM_MAX_LOG - HISTOGRAM_MIN_LOG),
+		depth_scale   = {f32(f.size.x) / f32(f.scene_size.x), f32(f.size.y) / f32(f.scene_size.y)},
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.histogram.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, HISTOGRAM_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(f.scene_size, HISTOGRAM_GROUP_SIZE))
 }
 
 @(private = "file")
@@ -576,7 +623,7 @@ run_bloom :: proc(ctx: ^Pass_Context) {
 		push.mode = BLOOM_UP
 	} else {
 		source = level == 0 ? pf.bloom_in : pf.bloom_down[level - 1]
-		source_size = level == 0 ? f.size : pf.bloom_sizes[level - 1]
+		source_size = level == 0 ? f.scene_size : pf.bloom_sizes[level - 1]
 		push.output = gpu.write_index(gpu_texture(g, pf.bloom_down[level]))
 		push.mode = level == 0 ? BLOOM_FIRST : BLOOM_DOWN
 	}
@@ -609,5 +656,5 @@ run_tone_lut :: proc(ctx: ^Pass_Context) {
 // reads_depth is whether a post pass reads the scene's depth after the world pass.
 @(private)
 reads_depth :: proc(f: ^Frame) -> bool {
-	return f.post.temporal || f.post.exposure_auto
+	return f.post.temporal || f.post.upscaler != {} || f.post.exposure_auto
 }

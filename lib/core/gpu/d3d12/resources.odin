@@ -41,6 +41,7 @@ Release_Pool :: enum u8 {
 	Sampler,
 	Pipeline,
 	Accel,
+	Upscaler,
 }
 
 // A destroyed object waits here until the GPU passes fence_value. Then the object is released
@@ -50,6 +51,8 @@ Release :: struct {
 	object:      ^d3d.IUnknown,
 	// Backend memory, from dev.allocator, that the GPU work may still use.
 	memory:      rawptr,
+	// An upscaler's FidelityFX context, which the GPU work may still use.
+	ffx_context: Ffx_Context,
 	pool:        Release_Pool,
 	index:       u32,
 	// 0 until end_frame stamps it with the fence value of the frame that destroyed it.
@@ -111,6 +114,9 @@ shutdown_resources :: proc() {
 	for r in dev.releases {
 		if r.object != nil {
 			r.object->Release()
+		}
+		if r.ffx_context != nil {
+			destroy_ffx_context(r.ffx_context)
 		}
 		free(r.memory, dev.allocator)
 	}
@@ -469,6 +475,12 @@ destroy_scope :: proc(scope: gpu.Scope) -> (count: int) {
 			count += 1
 		}
 	}
+	for i in 0 ..< dev.upscaler_pool.count {
+		if upscaler, ok := gpu.pool_handle(&dev.upscaler_pool, i); ok && dev.upscaler_pool.items[i].desc.scope == scope {
+			destroy_upscaler(upscaler)
+			count += 1
+		}
+	}
 	for i in 0 ..< dev.pipeline_pool.count {
 		if pipeline, ok := gpu.pool_handle(&dev.pipeline_pool, i); ok && dev.pipeline_pool.items[i].scope == scope {
 			destroy_pipeline(pipeline)
@@ -490,6 +502,14 @@ defer_release :: proc(object: ^d3d.IUnknown, pool: Release_Pool, index: u32) {
 defer_free :: proc(memory: rawptr) {
 	sync.guard(&dev.releases_mutex)
 	append(&dev.releases, Release{memory = memory, copy_value = sync.atomic_load(&dev.copy_horizon)})
+}
+
+// defer_release_upscaler destroys an upscaler's context and frees its pool slot after the GPU finishes the current
+// frame.
+@(private)
+defer_release_upscaler :: proc(ctx: Ffx_Context, index: u32) {
+	sync.guard(&dev.releases_mutex)
+	append(&dev.releases, Release{ffx_context = ctx, pool = .Upscaler, index = index, copy_value = sync.atomic_load(&dev.copy_horizon)})
 }
 
 // stamp_releases assigns the fence value that the frame's work signals to the releases queued during the frame.
@@ -519,6 +539,9 @@ collect_releases :: proc() {
 		if r.object != nil {
 			r.object->Release()
 		}
+		if r.ffx_context != nil {
+			destroy_ffx_context(r.ffx_context)
+		}
 		free(r.memory, dev.allocator)
 		switch r.pool {
 		case .None:
@@ -532,6 +555,8 @@ collect_releases :: proc() {
 			gpu.pool_free(&dev.pipeline_pool, r.index)
 		case .Accel:
 			gpu.pool_free(&dev.accels, r.index)
+		case .Upscaler:
+			gpu.pool_free(&dev.upscaler_pool, r.index)
 		}
 		unordered_remove(&dev.releases, i)
 	}
@@ -601,6 +626,10 @@ VALIDATION_RESOURCES :: gpu.Resources {
 		entry, ok := gpu.pool_lookup(&dev.accels, accel)
 		entry.info.inputs_valid = ok && accel_inputs_valid(&entry)
 		return entry.info, ok
+	},
+	upscaler = proc(upscaler: gpu.Upscaler) -> (gpu.Upscaler_Desc, bool) {
+		entry, ok := gpu.pool_lookup(&dev.upscaler_pool, upscaler)
+		return entry.desc, ok
 	},
 }
 

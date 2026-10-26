@@ -59,12 +59,39 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
 | `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
+| `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
 - `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
 - An arithmetic result outside the world (±2^38 m) raises an error.
 
 A game adds its own globals with `script.define(r, "Game.frame", procedure, "() -> number")` in its registration procedure: the qualified name gives the binding its stable ID and its place in the definition file ([Types and tooling](tooling-and-hot-reload.md#types-and-tooling)).
+
+## Render
+
+The render quality's bindings, for a settings menu in Luau (`lib/engine/project/scripts.odin`). A game defines them in its registration procedure with `project.define_quality_bindings(r, &state.script_quality)`, where `script_quality` is a `project.Script_Quality` in its `Game_State` that `project.script_quality(&renderer, settings_path)` made, so its address stays across reloads. The bindings find it in the VM's registry.
+
+| Binding | What it does |
+|---|---|
+| `Render.quality()` | The renderer's quality as a `RenderQuality` table |
+| `Render.set_quality(t)` | Makes the fields that `t` gives the quality's from the next frame on, as far as the device can do them. A `preset` sets every feature first |
+| `Render.caps()` | What the device can do: `ray_query`, `vendor`, `video_memory` in bytes, and `aa`, the anti-aliasing techniques that it runs |
+| `Render.presets()` | `{ "Low", "Medium", "High", "Ultra" }` |
+| `Render.save_quality()` | Writes the quality to the user settings file, as the player's choice on this machine; false if it could not |
+
+- **A quality table** has the settings files' quality keys (see [Rendering: Saved quality](../rendering/quality.md#saved-quality)): `preset`, `shadows`, `ray_traced_shadows`, `ao`, `ao_level`, `gi`, `gi_level`, `fog`, `aa` and `render_scale`. Enums are their names as strings (`"Ultra"`, `"Fsr"`), `ray_traced_shadows` a boolean, `render_scale` a number. `preset` is `"Custom"` when the features match no preset.
+- **`set_quality` checks** each field as the settings files' parser does, and raises an error, which changes nothing, for a field that does not exist or a value that does not fit, such as `aa = "Msaa"`. A technique that the device cannot run is limited as `clamp_quality` limits it: FSR becomes temporal AA.
+- **Types:** `RenderQuality`, `RenderQualityChange`, every field optional, and `RenderCaps` are in `engine.d.luau`.
+- **The sample's** `quality_keys.luau` is a settings menu on keys: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, and F6 the next anti-aliasing technique in `Render.caps().aa`. Each saves.
+
+```lua
+-- The next anti-aliasing technique that the device runs, saved as the player's choice.
+local q = Render.quality()
+local techniques = Render.caps().aa
+local i = table.find(techniques, q.aa) or 0
+Render.set_quality({ aa = techniques[i % #techniques + 1] })
+Render.save_quality()
+```
 
 ## Unity mapping
 

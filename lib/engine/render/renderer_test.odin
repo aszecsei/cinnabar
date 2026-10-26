@@ -23,6 +23,8 @@ Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi:           bool,
+	temporal, upscaled, display:                        bool,
+	size, output_size, scene_size:                      [2]u32,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
 	post:                                               Texture,
@@ -70,6 +72,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		gpu_create_accel             = null.create_accel,
 		gpu_destroy_accel            = null.destroy_accel,
 		gpu_accel_reference          = null.accel_reference,
+		gpu_upscalers                = null.upscalers,
+		gpu_create_upscaler          = null.create_upscaler,
+		gpu_destroy_upscaler         = null.destroy_upscaler,
 		gpu_frame_target             = null.frame_target,
 		gpu_output                   = null.output,
 		gpu_request_output           = null.request_output,
@@ -173,6 +178,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
+				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
+				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
 				read(f.graph, p, f.ids)
@@ -204,7 +211,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.post.adapt,
 		&r.post.tone_lut,
 		&r.ao.depth,
-		&r.ao.gtao,
+		&r.ao.searches[.Gtao],
+		&r.ao.searches[.Ssao],
+		&r.ao.searches[.Hbao],
 		&r.ao.denoise,
 		&r.gi.trace,
 		&r.gi.merge,
@@ -213,6 +222,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.fog.inject,
 		&r.fog.integrate,
 		&r.fog.background,
+		&r.post.upscalers.motion,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
@@ -223,6 +233,64 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
 	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Each ambient occlusion technique that the quality chooses draws the occlusion, and Off draws none.
+	for technique in Ao_Technique {
+		q := r.quality
+		q.ao.technique = technique
+		desc.quality = &q
+		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		testing.expectf(t, record.occlusion == (technique != .Off), "%v: occlusion %v", technique, record.occlusion)
+	}
+	desc.quality = nil
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Each anti-aliasing technique: temporal AA in the scene, FXAA and SMAA into Frame.display, which the output pass
+	// reads tone mapped, FSR's upscale in temporal AA's place, and Off none. A volume or the editor that turns the
+	// anti-aliasing off turns every technique off.
+	r.post.spatial.tone_map.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	r.post.spatial.fxaa.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	smaa := [?]struct {
+		pipeline: ^Shader_Pipeline,
+		format:   gpu.Format,
+	}{{&r.post.spatial.smaa_edges, SMAA_EDGES_FORMAT}, {&r.post.spatial.smaa_weights, SMAA_WEIGHTS_FORMAT}, {&r.post.spatial.smaa_blend, DISPLAY_FORMAT}}
+	for s in smaa {
+		s.pipeline.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = s.format}}, label = "test smaa"})
+	}
+	for technique in Aa_Technique {
+		q := r.quality
+		q.aa = technique
+		desc.quality = &q
+		for disable in ([]Features{{}, {.Temporal_Aa}}) {
+			desc.disable = disable
+			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+			on := disable == {}
+			testing.expectf(t, record.temporal == (on && technique == .Taa), "%v: temporal %v", technique, record.temporal)
+			testing.expectf(t, record.upscaled == (on && technique == .Fsr), "%v: upscaled %v", technique, record.upscaled)
+			testing.expectf(t, record.display == (on && (technique == .Fxaa || technique == .Smaa)), "%v: display %v", technique, record.display)
+		}
+	}
+	desc.quality, desc.disable = nil, {}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// At half the frame's size, the scene and the debug layer are half its size and the UI is the frame's: temporal AA
+	// and FSR upscale the scene to the frame's size, and with the other techniques it stays small for the output pass.
+	for technique in Aa_Technique {
+		q := r.quality
+		q.aa, q.render_scale = technique, 0.5
+		desc.quality = &q
+		for _ in 0 ..< 2 {
+			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+		}
+		testing.expect_value(t, record.size, desc.size / 2)
+		testing.expect_value(t, record.output_size, desc.size)
+		upscales := technique == .Taa || technique == .Fsr
+		testing.expectf(t, record.scene_size == (upscales ? desc.size : desc.size / 2), "%v: scene size %v", technique, record.scene_size)
+		testing.expect_value(t, record.temporal, technique == .Taa)
+		testing.expect_value(t, record.upscaled, technique == .Fsr)
+	}
+	desc.quality = nil
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
 	// HDR output: the frame target changes its format, the output pass draws with the pipeline of that format, and the

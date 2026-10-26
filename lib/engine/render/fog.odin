@@ -16,10 +16,17 @@ FOG_INJECT_TRACED_SHADER :: #load("../content/shaders/fog_inject_traced.hlsl.met
 FOG_INTEGRATE_SHADER :: #load("../content/shaders/fog_integrate.hlsl.meta", string)
 FOG_BACKGROUND_SHADER :: #load("../content/shaders/fog_background.hlsl.meta", string)
 
-// A froxel is a screen tile of FOG_TILE pixels in one of FOG_SLICES depth slices, two for each of the clusters' slices.
-// Matches fog_inject.hlsli and material_lighting.hlsli.
+// A froxel is a screen tile of FOG_TILE pixels in one of the level's depth slices, which divide the clusters' slices.
+// FOG_TILE matches fog_inject.hlsli and fog_integrate.hlsl; the slices reach the shaders in Fog_Push.grid and
+// Frame_Constants.fog_slices.
 FOG_TILE :: 16
-FOG_SLICES :: CLUSTER_SLICES * 2
+@(rodata)
+FOG_LEVEL_SLICES := [Quality_Level]u32 {
+	.Low    = CLUSTER_SLICES,
+	.Medium = CLUSTER_SLICES * 3 / 2,
+	.High   = CLUSTER_SLICES * 2,
+	.Ultra  = CLUSTER_SLICES * 3,
+}
 FOG_FORMAT :: gpu.Format.RGBA16_Float
 FOG_GROUP_SIZE :: 4
 // This frame's share of the injected volume. The history holds the rest.
@@ -119,31 +126,33 @@ fog_destroy :: proc(v: ^Volumetric_Fog, platform: ^core.Platform_API) {
 sync_fog_pipelines :: proc(r: ^Renderer, force: bool) {
 	v := &r.fog
 	assets := r.residency.assets
-	// A device without Ray_Query cannot create the traced pipeline, and has no shadow mask to trace for.
-	if r.shadows.ray_query {
+	// A device without Ray_Query cannot create the traced pipeline, and has no shadow mask to trace for. With it, both
+	// are kept, since the quality turns tracing on and off.
+	if r.caps.ray_query {
 		sync_compute_pipeline(&v.inject_traced, r.platform, assets, {label = "fog inject (traced)"}, force)
-	} else {
-		sync_compute_pipeline(&v.inject, r.platform, assets, {label = "fog inject"}, force)
 	}
+	sync_compute_pipeline(&v.inject, r.platform, assets, {label = "fog inject"}, force)
 	sync_compute_pipeline(&v.integrate, r.platform, assets, {label = "fog integrate"}, force)
 	sync_compute_pipeline(&v.background, r.platform, assets, {label = "fog background"}, force)
 }
 
 // begin_fog readies the frame's fog volume, from the Fog settings at the camera, before the scene's constants are
-// written, which say whether there is fog. Without fog or its pipelines, Frame.fog stays nil.
+// written, which say whether there is fog. It runs after assign_shadows: the injection traces the lights that have a
+// channel of the mask. Without fog or its pipelines, Frame.fog stays nil.
 @(private)
 begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	r := f.renderer
 	v := &r.fog
 	platform := r.platform
-	traced := r.shadows.ray_query
+	// Until the traced pipeline is ready, the lights in the mask light the fog unshadowed.
+	traced := f.shadows.mask_count > 0 && pipeline_ready(platform, &v.inject_traced)
 	if !pipeline_ready(platform, traced ? &v.inject_traced : &v.inject) || !pipeline_ready(platform, &v.integrate) {
 		return
 	}
 	if fog.density <= 0 {
 		return
 	}
-	grid := [3]u32{(f.size.x + FOG_TILE - 1) / FOG_TILE, (f.size.y + FOG_TILE - 1) / FOG_TILE, FOG_SLICES}
+	grid := [3]u32{(f.size.x + FOG_TILE - 1) / FOG_TILE, (f.size.y + FOG_TILE - 1) / FOG_TILE, FOG_LEVEL_SLICES[fog.level]}
 	history := history_texture(f.graph, {size = grid.xy, depth = grid.z, format = FOG_FORMAT, label = "fog history"})
 	if history.current == 0 {
 		return
@@ -261,7 +270,7 @@ run_fog_integrate :: proc(ctx: ^Pass_Context) {
 		scale       = {ff.push.right.w, ff.push.up.w},
 		slices      = {scale, bias},
 		screen_size = {f32(f.size.x), f32(f.size.y)},
-		slice_count = FOG_SLICES,
+		slice_count = ff.grid.z,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.fog.integrate.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

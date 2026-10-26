@@ -17,20 +17,38 @@ GI_MERGE_SHADER :: #load("../content/shaders/gi_merge.hlsl.meta", string)
 GI_GATHER_SHADER :: #load("../content/shaders/gi_gather.hlsl.meta", string)
 GI_LIT_SHADER :: #load("../content/shaders/gi_lit.hlsl.meta", string)
 
-// Cascade k has a probe every GI_SPACING << k pixels with (GI_DIRECTIONS << k)^2 directions. Matches gi_common.hlsli.
-GI_CASCADES :: 5
-GI_SPACING :: 8
+// Cascade k has a probe every spacing << k pixels, the level's spacing, with (GI_DIRECTIONS << k)^2 directions.
+// GI_DIRECTIONS matches gi_common.hlsli.
 GI_DIRECTIONS :: 4
 GI_FORMAT :: gpu.Format.RGBA16_Float
 // The first cascade's interval is this many probe spacings long, at the probe's depth.
 GI_INTERVAL_SCALE :: 2
-// The histories average at most this many frames, so the light follows a change within a few.
-GI_HISTORY_FRAMES :: 12
+
+// Gi_Params are the cascades at a level. Each cascade's interval is four times as long as the one before, from a
+// length that scales with the spacing, so fewer probes need fewer cascades to reach as far. steps are each ray's
+// steps through the depth buffer. The histories average at most history_frames frames, so the light follows a change
+// within a few; fewer probes average over more.
+Gi_Params :: struct {
+	cascades:       u32,
+	spacing:        u32,
+	steps:          u32,
+	history_frames: f32,
+}
+
+@(rodata)
+GI_PARAMS := [Quality_Level]Gi_Params {
+	.Low    = {cascades = 4, spacing = 16, steps = 4, history_frames = 16},
+	.Medium = {cascades = 5, spacing = 8, steps = 6, history_frames = 12},
+	.High   = {cascades = 5, spacing = 8, steps = 8, history_frames = 12},
+	.Ultra  = {cascades = 6, spacing = 4, steps = 12, history_frames = 10},
+}
 
 // Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
 Gi_Settings :: struct {
 	// Without it, the indirect light is Frame_Settings.ambient.
-	off: bool,
+	off:   bool,
+	// The cascades' GI_PARAMS.
+	level: Quality_Level,
 }
 
 // Gi_Passes is the global illumination's state between frames, in the Renderer.
@@ -76,13 +94,15 @@ Gi_Constants :: struct {
 	exposure:         u32,
 	interval_scale:   f32,
 	max_frames:       f32,
-	padding:          [2]u32,
+	spacing:          u32,
+	steps:            u32,
 }
 
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
 @(private)
 Gi_Frame :: struct {
 	constants: Gi_Constants,
+	params:    Gi_Params,
 	region:    [2]u32,
 	lit_size:  [2]u32,
 	cascades:  Texture,
@@ -124,9 +144,9 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 }
 
 // gi_region is the size of one cascade's rows: the most texels that a cascade's probes and directions take.
-gi_region :: proc(size: [2]u32) -> (region: [2]u32) {
-	for k in u32(0) ..< GI_CASCADES {
-		spacing, directions := u32(GI_SPACING) << k, u32(GI_DIRECTIONS) << k
+gi_region :: proc(size: [2]u32, params: Gi_Params) -> (region: [2]u32) {
+	for k in u32(0) ..< params.cascades {
+		spacing, directions := params.spacing << k, u32(GI_DIRECTIONS) << k
 		probes := (size + spacing - 1) / spacing
 		region = {max(region.x, probes.x * directions), max(region.y, probes.y * directions)}
 	}
@@ -150,7 +170,8 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	g := f.graph
 	gf := new(Gi_Frame, platform.frame_allocator)
 	gf.lit_size = (f.size + 1) / 2
-	gf.region = gi_region(f.size)
+	gf.params = GI_PARAMS[settings.level]
+	gf.region = gi_region(f.size, gf.params)
 	gf.lit = history_texture(g, {size = gf.lit_size, format = GI_FORMAT, label = "gi lit scene"})
 	gf.diffuse = history_texture(g, {size = f.size, format = GI_FORMAT, label = "gi diffuse"})
 	gf.specular = history_texture(g, {size = f.size, format = GI_FORMAT, label = "gi specular"})
@@ -170,12 +191,14 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		lit_valid      = u32(gf.lit.valid),
 		valid          = u32(gf.diffuse.valid && gf.specular.valid),
 		frame          = gi.frame,
-		cascade_count  = GI_CASCADES,
+		cascade_count  = gf.params.cascades,
 		size           = f.size,
 		lit_size       = gf.lit_size,
 		region         = gf.region,
 		interval_scale = GI_INTERVAL_SCALE,
-		max_frames     = GI_HISTORY_FRAMES,
+		max_frames     = gf.params.history_frames,
+		spacing        = gf.params.spacing,
+		steps          = gf.params.steps,
 	}
 	f.gi = gf
 }
@@ -192,13 +215,13 @@ add_gi_passes :: proc(f: ^Frame) {
 	platform := f.renderer.platform
 	// Last frame's projection is known once the scene's constants are written.
 	gf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
-	gf.cascades = create_texture(g, {size = {gf.region.x, gf.region.y * GI_CASCADES}, format = GI_FORMAT, label = "gi cascades"})
+	gf.cascades = create_texture(g, {size = {gf.region.x, gf.region.y * gf.params.cascades}, format = GI_FORMAT, label = "gi cascades"})
 	p := add_compute_pass(g, "gi trace", run_gi_trace, f, queue = .Compute)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
 	read(g, p, gf.lit.previous)
 	write(g, p, gf.cascades)
-	for k := GI_CASCADES - 1; k >= 0; k -= 1 {
+	for k := int(gf.params.cascades) - 1; k >= 0; k -= 1 {
 		p = add_compute_pass(g, "gi merge", run_gi_merge, new_clone(Gi_Merge{f, u32(k)}, platform.frame_allocator), queue = .Compute)
 		read(g, p, f.depth)
 		write(g, p, gf.cascades)
@@ -266,7 +289,7 @@ run_gi_trace :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.gi.trace.pipeline)
 	if upload_gi_constants(ctx, f, c) {
 		groups := groups(gf.region, POST_GROUP_SIZE)
-		gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, GI_CASCADES})
+		gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, gf.params.cascades})
 	}
 }
 
@@ -278,7 +301,7 @@ run_gi_merge :: proc(ctx: ^Pass_Context) {
 	c := gi_constants(ctx, f)
 	c.cascades = gpu.write_index(gpu_texture(ctx.graph, gf.cascades))
 	c.cascade = m.cascade
-	spacing, directions := u32(GI_SPACING) << m.cascade, u32(GI_DIRECTIONS) << m.cascade
+	spacing, directions := gf.params.spacing << m.cascade, u32(GI_DIRECTIONS) << m.cascade
 	texels := (f.size + spacing - 1) / spacing * directions
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.gi.merge.pipeline)
 	if upload_gi_constants(ctx, f, c) {

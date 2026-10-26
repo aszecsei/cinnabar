@@ -75,6 +75,9 @@ struct Frame_Constants {
 	// The editor's debug view, a render.Debug_View (see docs/rendering/post-processing.md#debug-views). The forward pass draws the
 	// views below; the others come from the frame's textures.
 	uint debug_view;
+	// The fog volume's depth slices, and how many bilinear comparisons a shadow map lookup takes (see shadow_map).
+	uint fog_slices;
+	uint shadow_filter;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

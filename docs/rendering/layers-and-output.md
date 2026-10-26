@@ -13,6 +13,8 @@ The world, the view model, the UI and debug drawing each have their own target a
 | UI | `RGBA8_Unorm`, premultiplied | sRGB-encoded, blended as encoded | None | In the output pass, over the tone-mapped scene |
 | Debug | `RGBA8_Unorm_Srgb`, premultiplied | Linear, which the target's sRGB view encodes; the output pass blends it as encoded | Tested lines test scene depth; overlay lines ignore it | In the output pass, over the UI |
 
+- The world, the view model and the debug layer have the scene's size, `Frame.size`, and the UI the frame's, `Frame.output_size`. They differ at a render scale below 1 (see [Anti-aliasing](anti-aliasing.md#upscaling)).
+
 - The renderer makes the UI target only with a `ui` hook, and the debug layer only with debug lines or a `debug` hook. Without them, the output pass reads neither.
 
 ### View model
@@ -35,7 +37,7 @@ A first-person view model needs its own field of view, and it must never go into
 
 - The UI draws into its own target in sRGB-encoded values, and blends them as encoded values, as design tools do. A color that a designer picks is the color on the screen.
 - The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space, and in HDR output, scale the UI to paper white (see [HDR output](#hdr-output)).
-- The UI target has the frame target's size. The scene can render at a lower resolution, and the UI stays sharp.
+- The UI target has the frame target's size. The scene can render at a lower resolution (see [Anti-aliasing](anti-aliasing.md#upscaling)), and the UI stays sharp.
 - The UI renderer itself is not part of this design. It only has to write into the UI target, through the `ui` hook. The sample draws a HUD panel there, with colors picked as sRGB values, and the `Premultiplied` blend.
 
 ### Debug
@@ -45,6 +47,7 @@ A first-person view model needs its own field of view, and it must never go into
 - Each line is a quad two pixels wide that the vertex shader makes, and a line that passes behind the camera is clipped where it does. Tested lines draw twice: with depth `Less` at `DEBUG_HIDDEN_ALPHA`, then with `Greater_Equal` at full alpha.
 - **Tested** shapes read scene depth. The hidden part draws with a lower alpha, so a shape inside a wall still shows where it is. **Overlay** shapes draw over everything.
 - The colors are exactly the colors given: no exposure, no tone mapping, no fog.
+- The debug layer has the scene's size, as its depth does, which the output pass stretches to the frame's.
 - The editor's selection outline and gizmo draw into the debug layer: the game adds `editor.add_viewport_passes` in its `debug` hook, with `Frame.debug` as the target (see [Editor](../editor/viewport.md#viewport)).
 - Release builds compile the debug calls out: the justfile's release build sets `DEBUG_DRAW` false.
 
@@ -52,9 +55,9 @@ A first-person view model needs its own field of view, and it must never go into
 
 The output pass is one full-screen pass that writes the frame target (`lib/engine/content/shaders/output.hlsl`):
 
-1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](post-processing.md#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. *Later, a separate pass tone maps the scene, and this pass reads it, upscaled to the frame's size if the scene's resolution is lower.*
+1. Read the scene, which is pre-exposed, add bloom, and tone map it through the [lookup table](post-processing.md#post-processing), which gives sRGB-encoded colors. Until the table is baked, a plain roll-off to white, `x / (1 + x)`, stands in. With FXAA or SMAA, the tone map pass has done this step already, and this pass reads its anti-aliased result, `Frame.display` (see [Anti-aliasing](anti-aliasing.md#anti-aliasing)). Both take it from `output.hlsli`. The pass reads the scene, or `Frame.display`, bilinearly at its pixel's center in UV: the pixel itself at the frame's size, and a smaller scene, which temporal AA did not upscale, stretched (see [Anti-aliasing](anti-aliasing.md#upscaling)).
 2. Without the table, encode the color to sRGB. In HDR output, the table's colors are in nits: divide them by paper white and encode them with the sRGB curve, which goes on above 1.
-3. Blend the UI over it, then the debug layer, both as sRGB-encoded values.
+3. Blend the UI over it, then the debug layer, both as sRGB-encoded values. The debug layer is read bilinearly, stretched when it is smaller.
 4. Write the result, encoded for the output mode (`Frame.output`). In SDR, the frame target has an sRGB view (`FRAME_TARGET_FORMAT`), so the pass decodes the result to linear first and the view encodes it again. In HDR, the pass decodes it, scales it by paper white and encodes it for the display (see [HDR output](#hdr-output)).
 
 The pass has a pipeline for each output mode's frame target format (`Renderer.output_pipelines`), made when a frame first needs it.

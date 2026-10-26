@@ -37,6 +37,8 @@ Validation_Error :: enum u8 {
 	Bad_Accel_Build,
 	Copy_Inside_Pass,
 	Bad_Copy,
+	Invalid_Upscaler,
+	Bad_Upscale,
 }
 
 // Resources lets validation look up handles. Each procedure returns false for an invalid handle.
@@ -45,6 +47,7 @@ Resources :: struct {
 	buffer:   proc(buffer: Buffer) -> (Buffer_Desc, bool),
 	pipeline: proc(pipeline: Pipeline) -> (Pipeline_Info, bool),
 	accel:    proc(accel: Accel_Struct) -> (Accel_Info, bool),
+	upscaler: proc(upscaler: Upscaler) -> (Upscaler_Desc, bool),
 }
 
 // Layout_Tracker follows texture layouts across submissions for validation. The backends do not track layouts
@@ -322,6 +325,18 @@ validate :: proc(
 			if err = validate_indirect(resources, d.arguments, d.offset, size_of(Dispatch_Indirect_Args)); err != .None {
 				return err, packet
 			}
+		case .Upscale:
+			if in_pass {
+				return .Dispatch_Inside_Pass, packet
+			}
+			if queue != .Graphics {
+				return .Wrong_Queue, packet
+			}
+			if err = validate_upscale(resources, layouts, payload(p, Upscale)); err != .None {
+				return err, packet
+			}
+			// The upscaler binds its own pipelines.
+			compute_bound, ray_tracing_bound = false, false
 		case .Barriers:
 			if in_pass {
 				return .Barrier_Inside_Pass, packet
@@ -410,6 +425,53 @@ validate_submission :: proc(
 		return .Bad_Suspend, len(buffers) - 1, 0
 	}
 	return .None, len(buffers), 0
+}
+
+// validate_upscale checks an upscale's textures against its upscaler: the inputs are sampled, cover the render size
+// and are in the Shader_Resource layout, and the output is a storage texture of the output size in the
+// Unordered_Access layout.
+@(private = "file")
+validate_upscale :: proc(resources: Resources, layouts: ^Layout_Tracker, u: ^Upscale) -> Validation_Error {
+	desc, ok := resources.upscaler(u.upscaler)
+	if !ok {
+		return .Invalid_Upscaler
+	}
+	if u.render_size.x == 0 || u.render_size.y == 0 || u.render_size.x > desc.max_render_size.x || u.render_size.y > desc.max_render_size.y {
+		return .Bad_Upscale
+	}
+	for input in ([]Texture{u.color, u.depth, u.motion}) {
+		texture, valid := resources.texture(input)
+		if !valid {
+			return .Invalid_Texture
+		}
+		if .Sampled not_in texture.usage || texture.depth != 0 || texture.size.x < u.render_size.x || texture.size.y < u.render_size.y {
+			return .Bad_Upscale
+		}
+		if !in_layout(layouts, input, .Shader_Resource) {
+			return .Layout_Mismatch
+		}
+	}
+	output, valid := resources.texture(u.output)
+	if !valid {
+		return .Invalid_Texture
+	}
+	if .Storage not_in output.usage || output.depth != 0 || output.size != desc.output_size {
+		return .Bad_Upscale
+	}
+	if !in_layout(layouts, u.output, .Unordered_Access) {
+		return .Layout_Mismatch
+	}
+	return .None
+}
+
+// in_layout is whether a texture is in a layout, or untracked. The caller holds the tracker's lock.
+@(private = "file")
+in_layout :: proc(layouts: ^Layout_Tracker, texture: Texture, layout: Texture_Layout) -> bool {
+	if layouts == nil {
+		return true
+	}
+	current, tracked := layouts.layouts[texture]
+	return !tracked || current == layout
 }
 
 // A resumed piece loads what the suspended piece stored, so it neither clears nor discards. A suspended piece stores.
@@ -785,6 +847,15 @@ validate_stream_texture :: proc(desc: Texture_Desc, streamed_before: bool, data:
 }
 
 // validate_accel_desc checks the shape of a description. The backend checks that the geometry buffers are valid.
+// An upscaler upscales: its renders are at most its output's size on each side.
+validate_upscaler_desc :: proc(desc: Upscaler_Desc) -> Desc_Error {
+	render, output := desc.max_render_size, desc.output_size
+	if render.x == 0 || render.y == 0 || render.x > output.x || render.y > output.y {
+		return .Bad_Size
+	}
+	return .None
+}
+
 validate_accel_desc :: proc(desc: Accel_Struct_Desc) -> Desc_Error {
 	switch desc.kind {
 	case .Top:

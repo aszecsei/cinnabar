@@ -420,7 +420,6 @@ guid_text :: proc(r: ^Runtime, guid: format.Guid) -> string {
 
 // raise raises a Luau error with the caller's location. It does not return, and skips the defers of the frames that
 // it leaves.
-@(private)
 raise :: proc(L: ^luau.State, message: string) -> ! {
 	luau.L_errorL(L, "%s", fmt.caprintf("%s", message, allocator = frame(runtime_of(L))))
 }
