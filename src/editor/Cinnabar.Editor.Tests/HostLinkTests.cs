@@ -13,7 +13,7 @@ using Vortice.DXGI;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// The editor link against a real host: build/host.exe running build/mygame.dll in shared mode. The test is skipped
+/// The editor link against a real host: build/dev/host.exe running build/dev/mygame.dll in shared mode. The test is skipped
 /// when they are not built, and when the host cannot start its GPU device, such as on a machine without one.
 /// </summary>
 public sealed class HostLinkTests : IAsyncDisposable
@@ -29,8 +29,8 @@ public sealed class HostLinkTests : IAsyncDisposable
     public HostLinkTests()
     {
         var root = RepositoryRoot();
-        var hostPath = Path.Combine(root, "build", "host.exe");
-        var gamePath = Path.Combine(root, "build", "mygame.dll");
+        var hostPath = Path.Combine(root, "build", "dev", "host.exe");
+        var gamePath = Path.Combine(root, "build", "dev", "mygame.dll");
         if (!File.Exists(hostPath) || !File.Exists(gamePath))
         {
             return;
@@ -381,7 +381,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         // An unsaved material comes from the cache's preview area. The checker's own blob stands in for one that the
         // cook daemon cooked there.
         const string Checker = "f7eadea8bd278c0ae71b61b681352a82";
-        var cache = Path.Combine(RepositoryRoot(), "build", "cache", "dev");
+        var cache = Path.Combine(RepositoryRoot(), "build", "dev", "content");
         var unsavedBlob = Path.Combine(cache, "preview", Checker + ".blob");
         Directory.CreateDirectory(Path.GetDirectoryName(unsavedBlob)!);
         File.Copy(Path.Combine(cache, Checker + ".blob"), unsavedBlob, overwrite: true);
@@ -559,7 +559,7 @@ public sealed class HostLinkTests : IAsyncDisposable
     {
         if (_host == null)
         {
-            Assert.Skip("build/host.exe or build/mygame.dll is not built");
+            Assert.Skip("build/dev/host.exe or build/dev/mygame.dll is not built");
         }
         var deadline = DateTime.UtcNow + Timeout;
         while (true)

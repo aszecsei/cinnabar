@@ -7,8 +7,11 @@ namespace Cinnabar.Editor;
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
 /// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon cooks shaders only with <c>--dxc</c>.
 /// Each <c>--material</c> opens in the material editor once the cook daemon's index has it.
-/// Paths are relative to the working directory, which is also the host's and the cook daemon's, so <c>just edit</c>
-/// runs the editor from the repository root. Without a scene, the host shows the scene that the game loads itself.
+/// Paths on the command line are relative to the working directory. The defaults are the repository's build layout
+/// (see docs/overview/building-and-running.md#build-layout), relative to the repository root, which the editor finds above its own
+/// executable, so an editor started from an IDE finds them too. The host and the cook daemon run in their executables'
+/// directories, and the host is told the content and the project in full, so the editor's working directory never
+/// matters to them. Without a scene, the host shows the scene that the game loads itself.
 /// </summary>
 public sealed record EditorOptions(string HostPath, string GamePath, string? ScenePath = null)
 {
@@ -16,23 +19,50 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     public IReadOnlyList<string> MaterialPaths { get; init; } = [];
 
     /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
-    public string ProjectPath { get; init; } = Path.GetFullPath(Path.Combine("samples", "mygame", "project.settings"));
+    public string ProjectPath { get; init; } = InRepository("samples", "mygame", "project.settings");
 
     /// <summary>Where autosaves go (see docs/editor/processes-and-projects.md#crash-recovery).</summary>
-    public string AutosaveDirectory { get; init; } = Path.GetFullPath(Path.Combine("build", "editor", "autosave"));
+    public string AutosaveDirectory { get; init; } = InRepository("build", "obj", "editor", "autosave");
 
     /// <summary>How the editor runs the cook daemon (see docs/editor/processes-and-projects.md#processes). The defaults are the repository's.</summary>
     public CookOptions Cook { get; init; } = new(
-        Path.GetFullPath(Path.Combine("build", "cook.exe")),
-        Path.GetFullPath(Path.Combine("build", "cache")),
-        Path.GetFullPath(Path.Combine("build", "script-types", "cinnabar.d.luau")),
-        [("game", Path.GetFullPath(Path.Combine("samples", "mygame", "content"))), ("engine", Path.GetFullPath(Path.Combine("lib", "engine", "content")))],
-        Environment.CurrentDirectory);
+        InRepository("build", "tools", "cook.exe"),
+        InRepository("build", "dev", "content"),
+        InRepository("build", "obj", "script-types", "cinnabar.d.luau"),
+        [("game", InRepository("samples", "mygame", "content")), ("engine", InRepository("lib", "engine", "content"))],
+        RepositoryRoot());
+
+    /// <summary>
+    /// The host's arguments: the game, where its content and its project settings are, and then the given ones (see
+    /// docs/editor/processes-and-projects.md#processes).
+    /// </summary>
+    public string[] HostArguments(params string[] rest) =>
+        [GamePath, "--content", Cook.CachePath, "--project", ProjectPath, .. rest];
+
+    /// <summary>The host runs in its executable's directory.</summary>
+    public string HostDirectory => Path.GetDirectoryName(HostPath) is { Length: > 0 } dir ? dir : RepositoryRoot();
+
+    /// <summary>
+    /// The repository root: the directory with the justfile above the editor's executable, else the working directory.
+    /// </summary>
+    public static string RepositoryRoot()
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
+            {
+                return dir.FullName;
+            }
+        }
+        return Environment.CurrentDirectory;
+    }
+
+    static string InRepository(params string[] parts) => Path.GetFullPath(Path.Combine([RepositoryRoot(), .. parts]));
 
     public static EditorOptions Parse(IReadOnlyList<string> args)
     {
-        var host = Path.Combine("build", "host.exe");
-        var game = Path.Combine("build", "mygame.dll");
+        var host = InRepository("build", "dev", "host.exe");
+        var game = InRepository("build", "dev", "mygame.dll");
         string? scene = null;
         var cook = new EditorOptions("", "").Cook;
         List<(string Name, string Dir)> roots = [];

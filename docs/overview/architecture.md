@@ -106,7 +106,7 @@ Details: [Editor](../editor/README.md).
 A project's settings are a text file beside the game, such as `samples/mygame/project.settings`: `key = value` lines, with blank lines and `#` comments, as `.meta` files have. They are settings of the game as a whole, not of a scene.
 
 - **The user's file** beside it, `project.user.settings`, replaces the project's values on one machine, for a display or a GPU that the project's choice does not suit. Version control ignores `*.user.settings`.
-- **Reading:** `lib/engine/project` reads both files, the project's first. The game reads them when it starts, and looks for a change twice a second (`project.refresh`), so an edit in the editor shows in a running game at once. An unknown key or a value that does not fit is a warning, and the setting keeps its default. The sample finds the file at `CINNABAR_PROJECT` (by default `samples/mygame/project.settings`), relative to the working directory, as it finds its content cache.
+- **Reading:** `lib/engine/project` reads both files, the project's first. The game reads them when it starts, and looks for a change twice a second (`project.refresh`), so an edit in the editor shows in a running game at once. An unknown key or a value that does not fit is a warning, and the setting keeps its default. The game finds the file at `Platform_API.project_path`: beside the executable, or where the host's `--project` points, as it finds its content at `content_dir` (see [Building and running](building-and-running.md#build-layout)).
 - **The editor** edits both: the Home tab's Game Window group sets the project's output and quality preset, and this machine's, and Run Game opens the game in its own window, which shows what the viewport cannot (see [Editor](../editor/viewport.md#quality)).
 
 | Key | Values | Default | What it sets |
@@ -119,7 +119,7 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 ```mermaid
 flowchart TB
     SOURCE[("source/<br/>png, gltf, hlsl, scripts, scenes, materials<br/>+ .meta sidecars")]
-    CACHE[("build/cache/<br/>one blob per asset<br/>and configuration")]
+    CACHE[("build/&lt;target&gt;/content/<br/>one blob per asset,<br/>a cache per configuration")]
     BUNDLES[("bundles/*.cbb")]
     DEVRT["Development runtime"]
     RELRT["Release runtime"]

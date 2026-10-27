@@ -5,8 +5,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Build output goes to build/dotnet with the rest of the build, not next to the sources. -->
+    <!-- Build output goes to build/obj/dotnet with the rest of the build's intermediates, not next to the sources. -->
     <UseArtifactsOutput>true</UseArtifactsOutput>
-    <ArtifactsPath>$(MSBuildThisFileDirectory)..\..\build\dotnet</ArtifactsPath>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)..\..\build\obj\dotnet</ArtifactsPath>
   </PropertyGroup>
 </Project>

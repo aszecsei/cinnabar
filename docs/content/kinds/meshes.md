@@ -1,6 +1,6 @@
 # Meshes
 
-Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a `Model` asset, which has no blob of its own: its meshes are `Mesh` sub-assets (see [Identity](../identity-and-cooking.md#identity)), each with its GUID on a `mesh.<name>` line of the model's `.meta` file. `just models` runs `cook models --cache build/cache --config dev|release` with the roots.
+Meshes come from `.gltf` and `.glb` files, read with `vendor:cgltf`. A glTF file is a `Model` asset, which has no blob of its own: its meshes are `Mesh` sub-assets (see [Identity](../identity-and-cooking.md#identity)), each with its GUID on a `mesh.<name>` line of the model's `.meta` file. `just models` runs `cook models --cache build/<target>/content --config dev|release` with the roots.
 
 - **One mesh asset per glTF mesh**, named for the glTF mesh, in its own space with its own pivot. Node transforms are not baked in, so a mesh that many nodes use is one asset. Each glTF primitive becomes a submesh. Primitives that share a glTF material share a submesh, and each submesh has a material slot named for its glTF material.
 - **Unnamed meshes** are named for the first node that uses them, then `mesh_<index>`.

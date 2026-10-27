@@ -43,7 +43,7 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 	// A second cook finds the scene up to date.
 	key := (^format.Blob_Header)(raw_data(blob)).key
 	testing.expect(t, cook(options, {.Scene}).ok)
-	testing.expect_value(t, cooked_key(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(guid)), .Scene, format.scene_layout()), key)
+	testing.expect_value(t, cooked_key(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(guid)), .Scene, format.scene_layout()), key)
 }
 
 @(test)

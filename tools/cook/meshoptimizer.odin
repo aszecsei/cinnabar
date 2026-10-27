@@ -4,9 +4,9 @@ import "core:c"
 
 // vendor/meshoptimizer, which `just meshoptimizer` builds. Its API is C, so the cooker binds it directly. Only the
 // cooker links it.
-foreign import meshoptimizer "../../build/meshoptimizer/Release/meshoptimizer.lib"
+foreign import meshoptimizer "../../build/obj/meshoptimizer/Release/meshoptimizer.lib"
 // Its cluster LOD builder, demo/clusterlod.h, which `just meshoptimizer` builds from tools/cook/clusterlod.
-foreign import clusterlod "../../build/clusterlod/out/cn_clusterlod.lib"
+foreign import clusterlod "../../build/obj/clusterlod/out/cn_clusterlod.lib"
 
 // The justfile passes the vendor/meshoptimizer tag, so a meshoptimizer update cooks every mesh again.
 MESHOPTIMIZER_VERSION :: #config(MESHOPTIMIZER_VERSION, "unknown")

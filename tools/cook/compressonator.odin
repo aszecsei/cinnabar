@@ -4,7 +4,7 @@ import "core:c"
 
 // tools/cook/compressonator/cn_compress.cpp with Compressonator's CMP_Core, which `just compressonator` builds. Only
 // the cooker links it.
-foreign import compressonator "../../build/compressonator/out/cn_compressonator.lib"
+foreign import compressonator "../../build/obj/compressonator/out/cn_compressonator.lib"
 
 // The justfile passes the vendor/compressonator tag, so a Compressonator update cooks every texture again.
 COMPRESSONATOR_VERSION :: #config(COMPRESSONATOR_VERSION, "unknown")

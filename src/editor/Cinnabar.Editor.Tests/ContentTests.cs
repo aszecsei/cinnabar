@@ -178,6 +178,21 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void TheHostIsToldItsContentAndItsProjectAndRunsBesideItself()
+    {
+        var options = EditorOptions.Parse(["--host", "build/dev/host.exe", "--game", "build/dev/mygame.dll", "--cache", "build/dev/content", "--project", "samples/mygame/project.settings"]);
+
+        Assert.Equal(
+            [Path.GetFullPath("build/dev/mygame.dll"), "--content", Path.GetFullPath("build/dev/content"), "--project", Path.GetFullPath("samples/mygame/project.settings"), "--shared", "x"],
+            options.HostArguments("--shared", "x"));
+        Assert.Equal(Path.GetFullPath("build/dev"), options.HostDirectory);
+        // The defaults are the repository's build layout, wherever the editor runs from.
+        var defaults = EditorOptions.Parse([]);
+        Assert.Equal(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "host.exe"), defaults.HostPath);
+        Assert.Equal(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content"), defaults.Cook.CachePath);
+    }
+
+    [Fact]
     public void TheScriptEditorComesFromTheSettings()
     {
         var settings = new EditorSettings(Path.Combine(_directory, "settings"));

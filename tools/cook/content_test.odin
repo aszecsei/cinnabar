@@ -8,7 +8,7 @@ import format "cinnabar:engine/asset/format"
 
 @(private)
 has_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> bool {
-	return os.exists(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(tree_guid(t, tree, path))))
+	return os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(tree_guid(t, tree, path))))
 }
 
 @(test)

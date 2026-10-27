@@ -121,15 +121,15 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Opens the game in its own window, as <c>just dev</c> does, with the scene and content that it loads itself. A game
-    /// window that is open closes first. It closes with the editor.
+    /// Opens the game in its own window, as <c>just dev</c> does, with the scene that it loads itself, the editor's content
+    /// and its project settings. A game window that is open closes first. It closes with the editor.
     /// </summary>
     public void RunGame()
     {
         StopGame();
         try
         {
-            var process = ChildProcess.Start(_options.HostPath, [_options.GamePath], Environment.CurrentDirectory);
+            var process = ChildProcess.Start(_options.HostPath, _options.HostArguments(), _options.HostDirectory);
             _gameWindow = process;
             process.Output += line => Dispatcher.UIThread.Post(() => Console.Add(LogLevel.Info, $"game window: {line}"));
             process.Exited += code => Dispatcher.UIThread.Post(() =>

@@ -15,7 +15,7 @@ Modules and `require`, the type definitions that the cooker checks against and `
 
 ## Types and tooling
 
-- **Definitions come from the bindings.** Type info for game-side types exists only in the DLL (see [Editor](../editor/link.md#editor-link)). `just script-types` runs `host.exe --emit-script-types <file>`, which calls `Game_API.script_types`. That procedure makes a world and a script runtime of its own, runs the game's registrations, and returns `script.definitions`, so it needs no game state and makes no GPU resources. The file goes to `build/script-types/cinnabar.d.luau`.
+- **Definitions come from the bindings.** Type info for game-side types exists only in the DLL (see [Editor](../editor/link.md#editor-link)). `just script-types` runs `host.exe --emit-script-types <file>`, which calls `Game_API.script_types`. That procedure makes a world and a script runtime of its own, runs the game's registrations, and returns `script.definitions`, so it needs no game state and makes no GPU resources. The file goes to `build/obj/script-types/cinnabar.d.luau`.
 - **What the file holds:**
   - The engine's API from `lib/engine/script/engine.d.luau`, which is written by hand.
   - `Entity`, whose `get` and `add` are overloaded for each exposed component.
@@ -29,7 +29,7 @@ Modules and `require`, the type definitions that the cooker checks against and `
   {
   	"luau-lsp.platform.type": "standard",
   	"luau-lsp.types.definitionFiles": {
-  		"@cinnabar": "build/script-types/cinnabar.d.luau"
+  		"@cinnabar": "build/obj/script-types/cinnabar.d.luau"
   	},
   	"luau-lsp.fflags.override": {
   		"LuauSolverV2": "false"

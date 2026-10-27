@@ -5,6 +5,7 @@ import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
+import "core:path/filepath"
 import "core:reflect"
 import "core:strings"
 import "core:sync"
@@ -56,12 +57,19 @@ Platform :: struct {
 platform: Platform
 
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
-// hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use.
-init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0) -> bool {
+// hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use. content_dir and
+// project_path are where the game's files are; empty, they are beside the executable (see game_paths).
+init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0, content_dir := "", project_path := "") -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
 		return false
 	}
+	exe_dir, exe_err := os.get_executable_directory(context.temp_allocator)
+	if exe_err != nil {
+		log.errorf("core: cannot find the executable's directory: %v", exe_err)
+		return false
+	}
+	content, project := game_paths(exe_dir, content_dir, project_path, virtual.arena_allocator(&platform.permanent))
 	for &arena in platform.frame {
 		if err := virtual.arena_init_static(&arena, FRAME_RESERVE); err != nil {
 			log.errorf("core: frame arena: %v", err)
@@ -100,6 +108,8 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		frame_allocator              = virtual.arena_allocator(&platform.frame[0]),
 		asset_allocator              = runtime.heap_allocator(),
 		heap_allocator               = runtime.heap_allocator(),
+		content_dir                  = content,
+		project_path                 = project,
 		memory_reserve               = memory_reserve,
 		memory_commit                = memory_commit,
 		memory_release               = memory_release,
@@ -157,6 +167,28 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		script_direct_access         = script_host.direct_access,
 	}
 	return true
+}
+
+// game_paths resolves where the game's files are: content_dir and project_path as given, or content and
+// project.settings in the executable's directory when empty. Both come back absolute, so a change of the working
+// directory later cannot move them, and in allocator.
+game_paths :: proc(exe_dir, content_dir, project_path: string, allocator: runtime.Allocator) -> (content, project: string) {
+	content, project = content_dir, project_path
+	if content == "" {
+		content, _ = filepath.join({exe_dir, "content"}, context.temp_allocator)
+	}
+	if project == "" {
+		project, _ = filepath.join({exe_dir, "project.settings"}, context.temp_allocator)
+	}
+	return absolute(content, allocator), absolute(project, allocator)
+}
+
+@(private)
+absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
+	if full, err := os.get_absolute_path(path, allocator); err == nil {
+		return full
+	}
+	return strings.clone(path, allocator)
 }
 
 shutdown :: proc() {

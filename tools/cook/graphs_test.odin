@@ -42,7 +42,7 @@ expect_no_errors :: proc(t: ^testing.T, pass: Pass) {
 @(private = "file")
 generated :: proc(tree: Tree) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	dir := fmt.tprintf("%s/cache/dev/generated", tree.dir)
+	dir := fmt.tprintf("%s/cache/generated", tree.dir)
 	infos, _ := os.read_all_directory_by_path(dir, context.temp_allocator)
 	for info in infos {
 		if strings.has_suffix(info.name, ".hlsl") {
@@ -55,7 +55,7 @@ generated :: proc(tree: Tree) -> string {
 
 @(private = "file")
 count_generated :: proc(tree: Tree, suffix: string) -> (count: int) {
-	infos, _ := os.read_all_directory_by_path(fmt.tprintf("%s/cache/dev/generated", tree.dir), context.temp_allocator)
+	infos, _ := os.read_all_directory_by_path(fmt.tprintf("%s/cache/generated", tree.dir), context.temp_allocator)
 	for info in infos {
 		count += int(strings.has_suffix(info.name, suffix))
 	}
@@ -277,14 +277,14 @@ previews_cook_unsaved_text_into_the_preview_area :: proc(t: ^testing.T) {
 	problems, ok := cook_preview(options, guid, unsaved)
 	testing.expect(t, ok)
 	testing.expect_value(t, len(problems.list), 0)
-	data, err := os.read_entire_file(fmt.tprintf("%s/cache/dev/preview/00112233445566778899aabbccddeeff.blob", tree.dir), context.temp_allocator)
+	data, err := os.read_entire_file(fmt.tprintf("%s/cache/preview/00112233445566778899aabbccddeeff.blob", tree.dir), context.temp_allocator)
 	testing.expect(t, err == nil)
 	if blob, view_ok := format.material_view(data); view_ok {
 		// The default switches only.
 		testing.expect_value(t, len(format.material_variants(data, blob)), 11)
 	}
 	// The material's own blob is not cooked by a preview.
-	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/00112233445566778899aabbccddeeff.blob", tree.dir)))
+	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/00112233445566778899aabbccddeeff.blob", tree.dir)))
 	broken, _ := strings.replace(tinted, "name = \"tint\"", "name = \"tnit\"", 1, context.temp_allocator)
 	problems, ok = cook_preview(options, guid, broken)
 	testing.expect(t, !ok)

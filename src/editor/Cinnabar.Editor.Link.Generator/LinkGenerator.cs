@@ -22,7 +22,7 @@ public sealed class LinkGenerator : IIncrementalGenerator
 
     static readonly DiagnosticDescriptor Missing = new(
         "CNL001", "A link's schema is missing",
-        "The {0}'s schema is missing. Run 'just link-schema', which writes build/link/{1}.",
+        "The {0}'s schema is missing. Run 'just link-schema', which writes build/obj/link/{1}.",
         "Cinnabar", DiagnosticSeverity.Error, isEnabledByDefault: true);
 
     static readonly DiagnosticDescriptor Invalid = new(
