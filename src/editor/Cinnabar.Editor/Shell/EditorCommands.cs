@@ -49,6 +49,7 @@ static class EditorCommands
     public const string MeshTubeRadius = "mesh.tubeRadius";
     public const string MeshCut = "mesh.cut";
     public const string MeshDraw = "mesh.draw";
+    public const string MeshApplyPoints = "mesh.applyPoints";
     public const string MeshExtrude = "mesh.extrude";
     public const string MeshPushPull = "mesh.pushPull";
     public const string MeshOffset = "mesh.offset";
@@ -295,6 +296,12 @@ static class EditorCommands
             });
         ModeTool(MeshCut, MeshTool.Cut, "Cut", "scale-tool", "Click points on the edited mesh, on vertices, edges or faces, and press Enter to split every face the line crosses. Backspace drops a point.");
         ModeTool(MeshDraw, MeshTool.Draw, "Draw", "graph", "Click the corners of a polygon on a face, or on the grid, and press Enter or click the first corner to close it: a face cut into the face, or a new plane.");
+        commands.Register(new Command(MeshApplyPoints, "Apply Points", shell.ApplyToolPoints)
+        {
+            Description = "Cut or draw with the points clicked so far, as Enter in the viewport does.",
+            Icon = "play",
+            CanExecuteWhen = () => shell.ToolPointCount > 0,
+        });
         void MeshToolCommand(string id, string label, string icon, Func<bool> run, string description, MeshElement? kind = null) =>
             commands.Register(new Command(id, label, () => run())
             {

@@ -31,6 +31,7 @@ public static class MeshCut
         {
             return (new ToolResult(mesh, MeshElement.Vertices, []), "a cut needs two points or more");
         }
+        points = Extended(mesh, points);
         var positions = mesh.Vertices.ToBuilder();
         var faces = mesh.Faces.Select(f => f.Corners.ToList()).ToList();
         var slots = mesh.Faces.Select(f => (f.Slot, f.Mapping)).ToList();
@@ -135,6 +136,105 @@ public static class MeshCut
         }
         var result = mesh.With(vertices: positions, faces: faces.Select((c, i) => new MeshFace(slots[i].Slot, [.. c], slots[i].Mapping)), sharpEdges: sharp);
         return (new ToolResult(result, MeshElement.Vertices, added), null);
+    }
+
+    // Points inside a face with no boundary point on one side of them, or both, get one: the line through the run's
+    // points goes on to where it leaves the face, as Hammer's clipping line does, so two clicks inside a wall cut it
+    // across. A lone point inside a face next to a boundary point of that face extends away from it.
+    static List<CutPoint> Extended(MeshData mesh, IReadOnlyList<CutPoint> points)
+    {
+        var result = new List<CutPoint>();
+        var i = 0;
+        while (i < points.Count)
+        {
+            if (points[i] is not CutPoint.OnFace first)
+            {
+                result.Add(points[i]);
+                i++;
+                continue;
+            }
+            var j = i;
+            while (j < points.Count && points[j] is CutPoint.OnFace p && p.Face == first.Face)
+            {
+                j++;
+            }
+            var run = points.Skip(i).Take(j - i).Cast<CutPoint.OnFace>().ToList();
+            var face = first.Face;
+            var before = i > 0 && IsOn(mesh, points[i - 1], face) ? Position(mesh, points[i - 1]) : null;
+            var after = j < points.Count && IsOn(mesh, points[j], face) ? Position(mesh, points[j]) : null;
+            if (before == null)
+            {
+                var through = run.Count > 1 ? run[1].Position : after;
+                if (through is { } t && Leave(mesh, face, t, run[0].Position) is { } edge)
+                {
+                    result.Add(edge);
+                }
+            }
+            result.AddRange(run);
+            if (after == null)
+            {
+                var through = run.Count > 1 ? run[^2].Position : before;
+                if (through is { } t && Leave(mesh, face, t, run[^1].Position) is { } edge)
+                {
+                    result.Add(edge);
+                }
+            }
+            i = j;
+        }
+        return result;
+    }
+
+    static bool IsOn(MeshData mesh, CutPoint point, int face) => point switch
+    {
+        CutPoint.OnVertex v => mesh.Faces[face].Corners.Contains(v.Vertex),
+        CutPoint.OnEdge e => mesh.FacesOfEdge(new MeshEdge(e.A, e.B)).Contains(face),
+        _ => false,
+    };
+
+    static Vec3? Position(MeshData mesh, CutPoint point) => point switch
+    {
+        CutPoint.OnVertex v when v.Vertex < mesh.Vertices.Length => mesh.Vertices[v.Vertex],
+        CutPoint.OnEdge e when e.A < mesh.Vertices.Length && e.B < mesh.Vertices.Length => mesh.Vertices[e.A] + (mesh.Vertices[e.B] - mesh.Vertices[e.A]) * Math.Clamp(e.T, 0, 1),
+        CutPoint.OnFace f => f.Position,
+        _ => null,
+    };
+
+    // Where the line from one point through another leaves a face: the first edge it crosses past the second point,
+    // as a point on that edge, or null when it crosses none.
+    static CutPoint.OnEdge? Leave(MeshData mesh, int face, Vec3 from, Vec3 through)
+    {
+        var direction = through - from;
+        if (direction.Length < 1e-9)
+        {
+            return null;
+        }
+        var normal = mesh.FaceNormal(face);
+        var (u, v) = Axes(normal);
+        var corners = mesh.Faces[face].Corners;
+        CutPoint.OnEdge? best = null;
+        var bestAlong = double.MaxValue;
+        for (var k = 0; k < corners.Length; k++)
+        {
+            var (a, b) = (corners[k], corners[(k + 1) % corners.Length]);
+            var (pa, pb) = (mesh.Vertices[a], mesh.Vertices[b]);
+            // The ray from the second point along the direction, against the edge, in the face's plane.
+            var (dx, dy) = (direction[u], direction[v]);
+            var (ex, ey) = (pb[u] - pa[u], pb[v] - pa[v]);
+            var denominator = dx * ey - dy * ex;
+            if (Math.Abs(denominator) < 1e-12)
+            {
+                continue;
+            }
+            var (ox, oy) = (pa[u] - through[u], pa[v] - through[v]);
+            var along = (ox * ey - oy * ex) / denominator;
+            var t = (ox * dy - oy * dx) / denominator;
+            if (along > 1e-9 && t >= -1e-9 && t <= 1 + 1e-9 && along < bestAlong)
+            {
+                bestAlong = along;
+                best = new CutPoint.OnEdge(a, b, Math.Clamp(t, 0, 1));
+            }
+        }
+        return best;
     }
 
     // Splits the face that has both corners along the chord between them, through the points inside, and reports

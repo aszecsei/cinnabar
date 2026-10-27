@@ -40,6 +40,8 @@ SELECTED_EDGE_PIXELS :: 2.5
 @(private = "file")
 VERTEX_PIXELS :: 6
 @(private = "file")
+MARK_PIXELS :: 9
+@(private = "file")
 GRID_PIXELS :: 1
 // The grid reaches this many lines each way from its origin.
 @(private = "file")
@@ -57,6 +59,7 @@ set_mesh_overlay :: proc(e: ^Editor, m: link.Mesh_Overlay) {
 		o.meshes[i].selected_vertices = slice.clone(mesh.selected_vertices, heap)
 		o.meshes[i].selected_edges = slice.clone(mesh.selected_edges, heap)
 		o.meshes[i].selected_faces = slice.clone(mesh.selected_faces, heap)
+		o.meshes[i].marks = slice.clone(mesh.marks, heap)
 	}
 	e.mesh_overlay = o
 }
@@ -68,6 +71,7 @@ clear_mesh_overlay :: proc(e: ^Editor) {
 		delete(mesh.selected_vertices, heap)
 		delete(mesh.selected_edges, heap)
 		delete(mesh.selected_faces, heap)
+		delete(mesh.marks, heap)
 	}
 	delete(e.mesh_overlay.meshes, heap)
 	e.mesh_overlay = {}
@@ -152,6 +156,12 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 				a, d := positions[c], positions[next]
 				ribbon(&b, a, d, size((a + d) * 0.5, forward, pixel, pixels), pack_color(color))
 			}
+		}
+		// A Cut's or a Draw's points, as larger squares in the highlight.
+		for k in 0 ..< len(mesh.marks) / 3 {
+			p := to_view(origin, pose, {mesh.marks[k * 3], mesh.marks[k * 3 + 1], mesh.marks[k * 3 + 2]})
+			h := size(p, forward, pixel, MARK_PIXELS) * 0.5
+			quad(&b, p - right * h - up * h, p + right * h - up * h, p + right * h + up * h, p - right * h + up * h, pack_color(HOT))
 		}
 		if o.element == .Vertices {
 			for p, i in positions {

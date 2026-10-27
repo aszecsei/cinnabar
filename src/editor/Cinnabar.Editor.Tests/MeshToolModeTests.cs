@@ -132,18 +132,19 @@ public sealed class MeshToolModeTests : IDisposable
         using var shell = NewShell();
         shell.Commands.Get(EditorCommands.MeshCut).Execute();
         Assert.Equal(MeshTool.Cut, shell.MeshTool);
-        // The middles of the front face's left and right edges.
-        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(-0.5, 0, -0.5))));
-        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(0.5, 0, -0.5))));
+        // Two clicks inside the front face: the line extends to its edges.
+        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(-0.25, 0, -0.5))));
+        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(0.25, 0, -0.5))));
         Assert.Equal(2, shell.ToolPointCount);
         Assert.Contains("Cut: 2 points", shell.MeshStatus);
+        Assert.True(shell.Commands.Get(EditorCommands.MeshApplyPoints).CanExecute);
         shell.ApplyToolPoints();
         Assert.Equal(0, shell.ToolPointCount);
         var mesh = Mesh(shell);
         Assert.Equal(7, mesh.Faces.Length);
-        Assert.Equal(10, mesh.Vertices.Length);
+        Assert.Equal(12, mesh.Vertices.Length);
         Assert.Equal(MeshElement.Vertices, shell.MeshElement);
-        Assert.Equal(2, shell.MeshSelection.Count);
+        Assert.Equal(4, shell.MeshSelection.Count);
         Assert.Equal("Cut", Assert.Single(shell.Scene!.History).Label);
         // Backspace and Escape.
         Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(0, 0.5, -0.5))));
@@ -223,19 +224,24 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal(18, shell.Meshes.Find(guid)!.Data.Faces.Length);
         Assert.Single(shell.Scene.History);
 
-        // Eight sides: made again in place of the same entry.
+        // Eight sides, then six: made again in place of the same entry each time.
         ((ChoiceCommand)shell.Commands.Get(EditorCommands.MeshSides)).Select("8");
         Assert.Single(shell.Scene.History);
         var again = shell.Scene.Scene.Entities.Single(e => e.Name == "cylinder");
         var againGuid = again.Components.Single(c => c.Id == SceneEdits.MeshRendererId).Fields.Single(f => f.Name == "mesh").Value.Asset;
         Assert.Equal(10, shell.Meshes.Find(againGuid)!.Data.Faces.Length);
         Assert.Empty(shell.Meshes.Find(againGuid)!.Data.Validate());
+        ((ChoiceCommand)shell.Commands.Get(EditorCommands.MeshSides)).Select("6");
+        Assert.Single(shell.Scene.History);
+        againGuid = shell.Scene.Scene.Entities.Single(e => e.Name == "cylinder").Components.Single(c => c.Id == SceneEdits.MeshRendererId).Fields.Single(f => f.Name == "mesh").Value.Asset;
+        Assert.Equal(8, shell.Meshes.Find(againGuid)!.Data.Faces.Length);
+        Assert.Equal(2, shell.Scene.Scene.Entities.Count);
 
         // After another edit, a parameter change makes nothing.
         shell.Selection.Select(Handle(0));
         shell.Commands.Get(EditorCommands.CreateEntity).Execute();
-        ((ChoiceCommand)shell.Commands.Get(EditorCommands.MeshSides)).Select("6");
-        Assert.Equal(10, shell.Meshes.Find(againGuid)!.Data.Faces.Length);
+        ((ChoiceCommand)shell.Commands.Get(EditorCommands.MeshSides)).Select("12");
+        Assert.Equal(8, shell.Meshes.Find(againGuid)!.Data.Faces.Length);
         Assert.Equal(2, shell.Scene.History.Count);
     }
 

@@ -114,7 +114,7 @@ static class DefaultRibbon
                     [
                         new LargeButton(EditorCommands.MeshCreate),
                         new ComboBox(EditorCommands.MeshPrimitive),
-                        new SmallStack([EditorCommands.MeshCut, EditorCommands.MeshDraw]),
+                        new SmallStack([EditorCommands.MeshCut, EditorCommands.MeshDraw, EditorCommands.MeshApplyPoints]),
                         new ComboBox(EditorCommands.MeshSides),
                         new ComboBox(EditorCommands.MeshSegments),
                         new ComboBox(EditorCommands.MeshRings),

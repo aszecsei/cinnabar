@@ -991,10 +991,11 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	overlay.meshes[0].hovered_face = 2
 	step(f, 1, overlay)
 	testing.expect_value(t, count(f, view), edges + 2 * 3 + 2 * 3)
-	// The grid is 81 lines each way.
+	// The grid is 81 lines each way, and two marks are two squares.
 	overlay.grid, overlay.grid_size = true, 0.25
+	overlay.meshes[0].marks = {0, 0, 0, 1, 1, 1}
 	step(f, 1, overlay)
-	testing.expect_value(t, count(f, view), edges + 12 + 81 * 2 * 6)
+	testing.expect_value(t, count(f, view), edges + 12 + 81 * 2 * 6 + 2 * 6)
 	// Off again, and gone with a new connection.
 	step(f, 1, link.Mesh_Overlay{})
 	testing.expect_value(t, count(f, view), 0)

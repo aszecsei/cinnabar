@@ -1074,6 +1074,8 @@ Mesh_Overlay_Mesh :: struct {
 	hovered_edge:      Live_Edge,
 	has_hovered_edge:  bool,
 	hovered_face:      i32,
+	// The points of a Cut or a Draw so far, x, y, z each, in the mesh's space.
+	marks:             []f32,
 }
 
 // Editor to game: what mesh mode shows this frame, or with active false, nothing. The grid is on the plane through

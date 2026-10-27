@@ -416,13 +416,28 @@ public sealed partial class EditorShell
     public void SetPrimitiveParameters(PrimitiveParameters parameters)
     {
         PrimitiveParameters = parameters;
-        if (_lastPrimitive is { } last && Scene != null && Scene.Position == last.Position && Scene.History.Count == last.Position && !Scene.InTransaction)
+        if (_lastPrimitive is { } last && CanRemakePrimitive(last))
         {
-            Scene.Undo();
-            MakePrimitive(last.Corner, last.Size, last.Axis, last.Mesh);
+            // The remake's own undo fires selection and mesh events, which must not forget the primitive.
+            _remaking = true;
+            try
+            {
+                Scene!.Undo();
+                MakePrimitive(last.Corner, last.Size, last.Axis, last.Mesh);
+            }
+            finally
+            {
+                _remaking = false;
+            }
         }
         OnMeshModeChanged();
     }
+
+    bool _remaking;
+
+    // The last primitive's entry is the last edit, and nothing is open.
+    bool CanRemakePrimitive(LastPrimitive last) =>
+        Scene != null && !Scene.InTransaction && Scene.Position == last.Position && Scene.History.Count == last.Position;
 
     // The primitive filling a box, as faces of an edited mesh or as a new mesh and entity.
     void MakePrimitive(long[] corner, Vec3 size, int axis, string? mesh)
@@ -431,7 +446,8 @@ public sealed partial class EditorShell
         {
             return;
         }
-        var position = Scene.History.Count;
+        // The entry goes where the position is: a remake has undone the entry before, which the new one replaces.
+        var position = Scene.Position;
         if (mesh != null && FindMeshData(mesh) is { } data && PlacementOf(mesh) is { } placement)
         {
             var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, material: data.Materials[0]);
@@ -651,6 +667,31 @@ public sealed partial class EditorShell
         {
             SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
         }
+    }
+
+    // The points of a Cut or a Draw on a mesh, as the overlay marks them: x, y, z each, in the mesh's space.
+    float[] ToolMarks(string guid, MeshData mesh)
+    {
+        if (_toolMesh != guid)
+        {
+            return [];
+        }
+        var marks = new List<float>();
+        foreach (var point in _toolPoints)
+        {
+            Vec3? position = point switch
+            {
+                CutPoint.OnVertex v when v.Vertex < mesh.Vertices.Length => mesh.Vertices[v.Vertex],
+                CutPoint.OnEdge e when e.A < mesh.Vertices.Length && e.B < mesh.Vertices.Length => mesh.Vertices[e.A] + (mesh.Vertices[e.B] - mesh.Vertices[e.A]) * e.T,
+                CutPoint.OnFace f => f.Position,
+                _ => null,
+            };
+            if (position is { } p)
+            {
+                marks.AddRange([(float)p.X, (float)p.Y, (float)p.Z]);
+            }
+        }
+        return [.. marks];
     }
 
     /// <summary>Backspace: drops the last point.</summary>

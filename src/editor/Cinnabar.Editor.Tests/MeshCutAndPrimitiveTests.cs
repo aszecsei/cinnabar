@@ -35,6 +35,19 @@ public class MeshCutAndPrimitiveTests
         Assert.Equal(9, bent.Mesh.Vertices.Length);
         Assert.Empty(bent.Mesh.Validate());
 
+        // Two points inside the top extend to its edges, as Hammer's clipping line does: the top splits across.
+        var (across, acrossReason) = MeshCut.Cut(box, [new CutPoint.OnFace(1, new Vec3(0.25, 1, 0.5)), new CutPoint.OnFace(1, new Vec3(0.75, 1, 0.5))]);
+        Assert.Null(acrossReason);
+        Assert.Equal(7, across.Mesh.Faces.Length);
+        Assert.Equal(12, across.Mesh.Vertices.Length);
+        Assert.Contains(across.Mesh.Vertices, v => v == new Vec3(0, 1, 0.5));
+        Assert.Contains(across.Mesh.Vertices, v => v == new Vec3(1, 1, 0.5));
+        Assert.Empty(across.Mesh.Validate());
+        // An edge point and a point inside extend past the inside one.
+        var (half, halfReason) = MeshCut.Cut(box, [new CutPoint.OnEdge(4, 7, 0.5), new CutPoint.OnFace(1, new Vec3(0.5, 1, 0.5))]);
+        Assert.Null(halfReason);
+        Assert.Equal(7, half.Mesh.Faces.Length);
+
         // A cut along an existing edge, or of one point, is refused.
         Assert.NotNull(MeshCut.Cut(box, [new CutPoint.OnVertex(4), new CutPoint.OnVertex(5)]).Reason);
         Assert.NotNull(MeshCut.Cut(box, [new CutPoint.OnVertex(4)]).Reason);

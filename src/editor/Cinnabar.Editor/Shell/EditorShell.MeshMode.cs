@@ -630,7 +630,7 @@ public sealed partial class EditorShell
     void OnMeshModeChanged()
     {
         // Any edit but a primitive's own parameter change ends its parameters' editability.
-        if (_lastPrimitive is { } last && Scene != null && (Scene.History.Count != last.Position || Scene.Position != last.Position))
+        if (!_remaking && _lastPrimitive is { } last && Scene != null && (Scene.History.Count != last.Position || Scene.Position != last.Position))
         {
             _lastPrimitive = null;
         }
@@ -668,13 +668,14 @@ public sealed partial class EditorShell
                     MeshElement == MeshElement.Vertices ? hovered : -1,
                     hoveredEdge is { } he ? new Wire.LiveEdge((uint)he.A, (uint)he.B) : new Wire.LiveEdge(0, 0),
                     hoveredEdge != null,
-                    MeshElement == MeshElement.Faces ? hovered : -1));
+                    MeshElement == MeshElement.Faces ? hovered : -1,
+                    ToolMarks(guid, mesh)));
             }
             var (origin, axis) = GridPlane();
             message = new Wire.MeshOverlay(true, (Wire.MeshElement)MeshElement, [.. meshes], ShowGrid, (float)GridSize, origin, (byte)axis);
         }
         var key = $"{message.Active}|{message.Element}|{message.Grid}|{message.GridSize}|{string.Join(",", message.GridOrigin)}|{message.GridAxis}|"
-            + string.Join(";", message.Meshes.Select(m => $"{Convert.ToHexStringLower(m.Guid)}:{m.Entity}:{string.Join(",", m.SelectedVertices)}:{string.Join(",", m.SelectedEdges.Select(e => $"{e.A}-{e.B}"))}:{string.Join(",", m.SelectedFaces)}:{m.HoveredVertex}:{m.HasHoveredEdge}:{m.HoveredEdge.A}-{m.HoveredEdge.B}:{m.HoveredFace}"));
+            + string.Join(";", message.Meshes.Select(m => $"{Convert.ToHexStringLower(m.Guid)}:{m.Entity}:{string.Join(",", m.SelectedVertices)}:{string.Join(",", m.SelectedEdges.Select(e => $"{e.A}-{e.B}"))}:{string.Join(",", m.SelectedFaces)}:{m.HoveredVertex}:{m.HasHoveredEdge}:{m.HoveredEdge.A}-{m.HoveredEdge.B}:{m.HoveredFace}:{string.Join(",", m.Marks)}"));
         if (key != _sentOverlay && Host.Linked)
         {
             _sentOverlay = key;
