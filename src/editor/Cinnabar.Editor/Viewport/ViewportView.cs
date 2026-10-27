@@ -348,11 +348,11 @@ public sealed class ViewportView : Grid
             {
                 _gesture = Gesture.Orbit;
             }
-            else if (_control.FramePoint(point.Position) is { } pixel && _shell.PressGizmo(pixel))
+            else if (_control.FramePoint(point.Position) is { } pixel && _shell.PressGizmo(pixel, extrude: e.KeyModifiers.HasFlag(KeyModifiers.Shift)))
             {
                 _gesture = Gesture.Gizmo;
             }
-            else if (_shell.MeshTool == MeshTool.Block && _control.FramePoint(point.Position) is { } corner && _shell.BeginBlock(corner))
+            else if (_shell.MeshTool == MeshTool.Create && _control.FramePoint(point.Position) is { } corner && _shell.BeginBlock(corner))
             {
                 _gesture = Gesture.Block;
             }
@@ -449,7 +449,7 @@ public sealed class ViewportView : Grid
                 _shell.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
             case Gesture.Click:
-                if (_control.FramePoint(position) is { } pixel)
+                if (_control.FramePoint(position) is { } pixel && !_shell.AddToolPoint(pixel))
                 {
                     _shell.PickAt(pixel, mode);
                 }
@@ -564,9 +564,26 @@ public sealed class ViewportView : Grid
             _shell.EscapeMeshMode();
             e.Handled = true;
         }
-        else if (e.Key == Key.Escape && _shell.MeshTool == MeshTool.Block)
+        else if (e.Key == Key.Escape && (_shell.MeshTool != MeshTool.Select || _shell.ToolPointCount > 0))
         {
-            _shell.SetMeshTool(MeshTool.Select);
+            if (_shell.ToolPointCount > 0)
+            {
+                _shell.CancelToolPoints();
+            }
+            else
+            {
+                _shell.SetMeshTool(MeshTool.Select);
+            }
+            e.Handled = true;
+        }
+        else if (e.Key is Key.Enter or Key.Return && _shell.ToolPointCount > 0)
+        {
+            _shell.ApplyToolPoints();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Back && _shell.ToolPointCount > 0)
+        {
+            _shell.RemoveLastToolPoint();
             e.Handled = true;
         }
         else if (command != null)

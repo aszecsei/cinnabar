@@ -38,6 +38,33 @@ static class EditorCommands
     public const string MeshGridFiner = "mesh.gridFiner";
     public const string MeshGridCoarser = "mesh.gridCoarser";
     public const string MeshSelectThrough = "mesh.selectThrough";
+    public const string MeshCreate = "mesh.create";
+    public const string MeshPrimitive = "mesh.primitive";
+    public const string MeshSides = "mesh.sides";
+    public const string MeshSegments = "mesh.segments";
+    public const string MeshRings = "mesh.rings";
+    public const string MeshSteps = "mesh.steps";
+    public const string MeshArc = "mesh.arc";
+    public const string MeshThickness = "mesh.thickness";
+    public const string MeshTubeRadius = "mesh.tubeRadius";
+    public const string MeshCut = "mesh.cut";
+    public const string MeshDraw = "mesh.draw";
+    public const string MeshExtrude = "mesh.extrude";
+    public const string MeshPushPull = "mesh.pushPull";
+    public const string MeshOffset = "mesh.offset";
+    public const string MeshInset = "mesh.inset";
+    public const string MeshOutset = "mesh.outset";
+    public const string MeshDuplicate = "mesh.duplicate";
+    public const string MeshCollapse = "mesh.collapse";
+    public const string MeshMergeFaces = "mesh.mergeFaces";
+    public const string MeshInvert = "mesh.invert";
+    public const string MeshRecalculateNormals = "mesh.recalculateNormals";
+    public const string MeshNormalAngle = "mesh.normalAngle";
+    public const string MeshClean = "mesh.clean";
+    public const string MeshDetach = "mesh.detach";
+    public const string MeshExtract = "mesh.extract";
+    public const string MeshBevel = "mesh.bevel";
+    public const string MeshBevelSegments = "mesh.bevelSegments";
     public const string NewFolder = "content.newFolder";
     public const string RenameAsset = "content.rename";
     public const string DuplicateAsset = "content.duplicate";
@@ -214,12 +241,100 @@ static class EditorCommands
         ElementCommand(MeshVertices, MeshElement.Vertices, "Vertices", "select", "Select and move vertices. 1 in the viewport.");
         ElementCommand(MeshEdges, MeshElement.Edges, "Edges", "local", "Select and move edges. 2 in the viewport.");
         ElementCommand(MeshFaces, MeshElement.Faces, "Faces", "mesh", "Select and move faces. 3 in the viewport.");
-        commands.Register(new Command(MeshBlock, "Block", () => shell.SetMeshTool(shell.MeshTool == MeshTool.Block ? MeshTool.Select : MeshTool.Block))
+        commands.Register(new Command(MeshBlock, "Block", () =>
+        {
+            if (shell.MeshTool == MeshTool.Create && shell.Primitive == PrimitiveKind.Block)
+            {
+                shell.SetMeshTool(MeshTool.Select);
+            }
+            else
+            {
+                shell.SetPrimitive(PrimitiveKind.Block);
+            }
+        })
         {
             Description = "Drag a rectangle on the grid to add a box a grid cell high: a new mesh file and entity, or faces of the edited mesh in mesh mode. Ctrl at the release makes a new entity anyway.",
             Icon = "add",
             CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
-            IsCheckedWhen = () => shell.MeshTool == MeshTool.Block,
+            IsCheckedWhen = () => shell.MeshTool == MeshTool.Create && shell.Primitive == PrimitiveKind.Block,
+        });
+        commands.Register(new Command(MeshCreate, "Create", () => shell.SetMeshTool(shell.MeshTool == MeshTool.Create ? MeshTool.Select : MeshTool.Create))
+        {
+            Description = "Drag a rectangle on the grid to add the chosen primitive, a grid cell high, with its parameters, which stay editable until the next edit.",
+            Icon = "add",
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            IsCheckedWhen = () => shell.MeshTool == MeshTool.Create,
+        });
+        commands.Register(new ChoiceCommand(MeshPrimitive, "Primitive", [.. Enum.GetNames<PrimitiveKind>()], () => shell.Primitive.ToString(), name => shell.SetPrimitive(Enum.Parse<PrimitiveKind>(name)))
+        {
+            Description = "The primitive that Create makes: a block, a wedge, a cylinder, a cone, a sphere, an arch, stairs, a torus or a plane.",
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+        });
+        void Parameter(string id, string label, IReadOnlyList<string> options, Func<PrimitiveParameters, string> get, Func<PrimitiveParameters, string, PrimitiveParameters> set, string description) =>
+            commands.Register(new ChoiceCommand(id, label, options, () => get(shell.PrimitiveParameters), value => shell.SetPrimitiveParameters(set(shell.PrimitiveParameters, value)))
+            {
+                Description = description,
+                CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            });
+        static string Nearest(IReadOnlyList<string> options, double value) => options.MinBy(o => Math.Abs(double.Parse(o, System.Globalization.CultureInfo.InvariantCulture) - value))!;
+        static double Number(string value) => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
+        Parameter(MeshSides, "Sides", EditorShell.SideOptions, p => Nearest(EditorShell.SideOptions, p.Sides), (p, v) => p with { Sides = (int)Number(v) }, "The sides of a cylinder, a cone, an arch, or a torus's tube.");
+        Parameter(MeshSegments, "Segments", EditorShell.SegmentOptions, p => Nearest(EditorShell.SegmentOptions, p.Segments), (p, v) => p with { Segments = (int)Number(v) }, "The segments around a sphere or a torus.");
+        Parameter(MeshRings, "Rings", EditorShell.RingOptions, p => Nearest(EditorShell.RingOptions, p.Rings), (p, v) => p with { Rings = (int)Number(v) }, "The rings of a sphere, from pole to pole.");
+        Parameter(MeshSteps, "Steps", EditorShell.StepOptions, p => Nearest(EditorShell.StepOptions, p.Steps), (p, v) => p with { Steps = (int)Number(v) }, "The steps of a staircase.");
+        Parameter(MeshArc, "Arc", EditorShell.ArcOptions, p => Nearest(EditorShell.ArcOptions, p.Arc), (p, v) => p with { Arc = Number(v) }, "An arch's arc, in degrees.");
+        Parameter(MeshThickness, "Thickness", EditorShell.ThicknessOptions, p => Nearest(EditorShell.ThicknessOptions, p.Thickness), (p, v) => p with { Thickness = Number(v) }, "An arch's wall, in meters.");
+        Parameter(MeshTubeRadius, "Tube", EditorShell.TubeOptions, p => Nearest(EditorShell.TubeOptions, p.TubeRadius), (p, v) => p with { TubeRadius = Number(v) }, "A torus's tube radius, in meters.");
+        void ModeTool(string id, MeshTool tool, string label, string icon, string description) =>
+            commands.Register(new Command(id, label, () => shell.SetMeshTool(shell.MeshTool == tool ? MeshTool.Select : tool))
+            {
+                Description = description,
+                Icon = icon,
+                CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+                IsCheckedWhen = () => shell.MeshTool == tool,
+            });
+        ModeTool(MeshCut, MeshTool.Cut, "Cut", "scale-tool", "Click points on the edited mesh, on vertices, edges or faces, and press Enter to split every face the line crosses. Backspace drops a point.");
+        ModeTool(MeshDraw, MeshTool.Draw, "Draw", "graph", "Click the corners of a polygon on a face, or on the grid, and press Enter or click the first corner to close it: a face cut into the face, or a new plane.");
+        void MeshToolCommand(string id, string label, string icon, Func<bool> run, string description, MeshElement? kind = null) =>
+            commands.Register(new Command(id, label, () => run())
+            {
+                Description = description,
+                Icon = icon,
+                CanExecuteWhen = () => shell.CanRunMeshTool(kind),
+            });
+        MeshToolCommand(MeshExtrude, "Extrude", "move", shell.Extrude, "Pull the selected faces out along their normal with walls, or open edges out as quads; then drag the gizmo for the distance. Shift at the start of a Move drag does the same.");
+        MeshToolCommand(MeshPushPull, "Push/Pull", "move", shell.PushPull, "Move the selected faces along their normal, stretching their neighbors; then drag the gizmo for the distance.", MeshElement.Faces);
+        MeshToolCommand(MeshOffset, "Offset", "scale-tool", shell.Offset, "Move each selected face along its own normal, keeping corners sharp where they meet; then drag the gizmo for the distance.", MeshElement.Faces);
+        MeshToolCommand(MeshInset, "Inset", "collapse", shell.Inset, "Shrink the selected faces inside a ring of new faces; then drag the gizmo for the distance.", MeshElement.Faces);
+        MeshToolCommand(MeshOutset, "Outset", "panels", shell.Outset, "Grow the selected faces outside a ring of new faces; then drag the gizmo for the distance.", MeshElement.Faces);
+        MeshToolCommand(MeshDuplicate, "Duplicate Faces", "copy", shell.DuplicateFaces, "Copy the selected faces in place and select the copies, so a drag moves them.", MeshElement.Faces);
+        MeshToolCommand(MeshCollapse, "Collapse", "collapse", shell.Collapse, "Merge the selected vertices into one at their centroid, each edge into its middle, or each face into a point.");
+        MeshToolCommand(MeshMergeFaces, "Merge Faces", "mesh", shell.MergeFaces, "Dissolve the edges between selected faces that share a plane into one face.", MeshElement.Faces);
+        MeshToolCommand(MeshInvert, "Invert", "rotate", shell.InvertFaces, "Turn the selected faces to face the other way, with their textures reading the same.", MeshElement.Faces);
+        MeshToolCommand(MeshDetach, "Detach", "scene", () => shell.Detach(keepSource: false), "Move the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);
+        MeshToolCommand(MeshExtract, "Extract", "copy", () => shell.Detach(keepSource: true), "Copy the selected faces into a new mesh file and entity at the same pose.", MeshElement.Faces);
+        MeshToolCommand(MeshBevel, "Bevel", "rotate", shell.Bevel, "Replace the selected vertices with a face each, or the selected edges with a strip of faces in segments; then drag the gizmo for the width.");
+        commands.Register(new Command(MeshRecalculateNormals, "Recalculate Normals", () => shell.RecalculateNormals())
+        {
+            Description = "Mark an edge sharp where its faces' normals differ by more than the angle, and smooth otherwise, on the selected faces or the whole mesh.",
+            Icon = "reset",
+            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+        });
+        commands.Register(new ChoiceCommand(MeshNormalAngle, "Angle", EditorShell.NormalAngles, () => Nearest(EditorShell.NormalAngles, shell.NormalAngle), v => shell.SetNormalAngle(Number(v)))
+        {
+            Description = "The angle, in degrees, beyond which Recalculate Normals marks an edge sharp.",
+            CanExecuteWhen = () => shell.InMeshMode,
+        });
+        commands.Register(new ChoiceCommand(MeshBevelSegments, "Segments", EditorShell.BevelSegmentOptions, () => Nearest(EditorShell.BevelSegmentOptions, shell.BevelSegments), v => shell.SetBevelSegments((int)Number(v)))
+        {
+            Description = "The segments of an edge bevel's strip: one is a chamfer.",
+            CanExecuteWhen = () => shell.InMeshMode,
+        });
+        commands.Register(new Command(MeshClean, "Clean", () => shell.Clean())
+        {
+            Description = "Merge vertices within a tenth of a millimeter, remove degenerate faces and unused vertices, dissolve vertices on straight edges, and report edges with more than two faces.",
+            Icon = "reset",
+            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
         });
         commands.Register(new Command(MeshGridToggle, "Show Grid", shell.ToggleShowGrid)
         {

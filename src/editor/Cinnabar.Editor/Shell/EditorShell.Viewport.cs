@@ -171,7 +171,7 @@ public sealed partial class EditorShell
         {
             return MeshGizmoPose();
         }
-        if (Gizmo.KindOf(Tool) == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
+        if (ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
             || SceneEdits.WorldPose(Scene.Scene, primary) is not { } pose)
         {
             return null;
@@ -192,7 +192,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var (width, height) = FrameSize;
-            part = Gizmo.HitTest(Gizmo.KindOf(Tool), Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+            part = Gizmo.HitTest(ActiveGizmoKind, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         }
         if (part != HotPart)
         {
@@ -201,8 +201,11 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Starts a drag if the press is on a gizmo part, and reports whether it is.</summary>
-    public bool PressGizmo(Vec2 pixel)
+    /// <summary>
+    /// Starts a drag if the press is on a gizmo part, and reports whether it is. <paramref name="extrude"/> is Shift,
+    /// which in mesh mode extrudes the selection first and drags the distance.
+    /// </summary>
+    public bool PressGizmo(Vec2 pixel, bool extrude = false)
     {
         HoverGizmo(pixel);
         if (HotPart == GizmoPart.None || GizmoPose() is not var (pivot, axes) || Scene == null)
@@ -211,7 +214,7 @@ public sealed partial class EditorShell
         }
         if (InMeshMode)
         {
-            return PressMeshGizmo(pixel);
+            return PressMeshGizmo(pixel, extrude);
         }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
         _poseEdit = new PoseEdit(Scene.Scene, ids);
@@ -233,7 +236,7 @@ public sealed partial class EditorShell
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap)
     {
-        if (_meshDrag != null)
+        if (_meshDrag != null || _pending != null)
         {
             DragMeshGizmo(pixel, invertSnap);
             return;
@@ -266,8 +269,14 @@ public sealed partial class EditorShell
         _drag = null;
         _poseEdit = null;
         _meshDrag = null;
+        var pending = _pending != null;
+        _pending = null;
         CommitEdit();
         SendGizmo();
+        if (pending)
+        {
+            OnMeshModeChanged();
+        }
     }
 
     /// <summary>Ends a drag and puts the selection back where it was.</summary>
@@ -280,8 +289,15 @@ public sealed partial class EditorShell
         _drag = null;
         _poseEdit = null;
         _meshDrag = null;
+        var pending = _pending != null;
+        _pending = null;
         CancelEdit();
         SendGizmo();
+        if (pending)
+        {
+            MeshSelection = MeshSelection.Pruned(FindMeshData);
+            OnMeshModeChanged();
+        }
     }
 
     /// <summary>Moves the camera so the selected entities fill the view.</summary>
@@ -367,7 +383,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var size = Gizmo.Size(Camera, Camera.RelativeTo(pivot), FrameSize.Height);
-            state = new GizmoState(Gizmo.KindOf(Tool), pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _drag != null);
+            state = new GizmoState(ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _drag != null);
         }
         var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
         if (key != _sentGizmo && Host.Linked)

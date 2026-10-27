@@ -5,15 +5,18 @@ using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
+using GizmoPart = Cinnabar.Editor.Link.Protocol.GizmoPart;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Shell;
 
-/// <summary>What the left button creates in mesh mode: nothing, or a Block by a drag on the grid.</summary>
+/// <summary>What the left button does in mesh mode besides selecting: creates a primitive by a drag on the grid, or takes the points of a Cut or a Draw.</summary>
 public enum MeshTool
 {
     Select,
-    Block,
+    Create,
+    Cut,
+    Draw,
 }
 
 /// <summary>
@@ -57,9 +60,27 @@ public sealed partial class EditorShell
     /// <summary>The mode, the element kind, the sub-selection, the grid or the tool changed.</summary>
     public event Action? MeshModeChanged;
 
-    /// <summary>The status bar's text for the mode: "Faces: 3 of 2 meshes".</summary>
-    public string MeshStatus =>
-        !InMeshMode ? "" : $"{MeshElement}: {MeshSelection.Count} of {_editedMeshes.Count} {(_editedMeshes.Count == 1 ? "mesh" : "meshes")}";
+    /// <summary>The status bar's text for the mode: "Faces: 3 of 2 meshes", and what a tool waits for.</summary>
+    public string MeshStatus
+    {
+        get
+        {
+            if (!InMeshMode)
+            {
+                return ToolPointCount > 0 ? $"{MeshTool}: {ToolPointCount} points, Enter applies" : "";
+            }
+            var status = $"{MeshElement}: {MeshSelection.Count} of {_editedMeshes.Count} {(_editedMeshes.Count == 1 ? "mesh" : "meshes")}";
+            if (_pending != null)
+            {
+                status += $"  ·  {_pending.Label}: drag the gizmo";
+            }
+            else if (ToolPointCount > 0)
+            {
+                status += $"  ·  {MeshTool}: {ToolPointCount} points, Enter applies";
+            }
+            return status;
+        }
+    }
 
     /// <summary>Whether the selected entities place mesh files, which Edit Mesh and Tab can edit.</summary>
     public bool CanEditMesh => IsEditing && Scene != null && (InMeshMode || MeshEntities(SelectedSceneEntities).Count > 0);
@@ -138,8 +159,10 @@ public sealed partial class EditorShell
         {
             return;
         }
+        CancelPendingDistance();
         CancelGizmo();
         CancelBlock();
+        CancelToolPoints();
         InMeshMode = false;
         MeshTool = MeshTool.Select;
         MeshSelection = new MeshSelection(MeshElement, []);
@@ -162,12 +185,24 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Escape in mesh mode: clears the sub-selection, or with none, leaves the mode.</summary>
+    /// <summary>Escape in mesh mode: cancels a tool that waits, clears the sub-selection, or with none, leaves the mode.</summary>
     public void EscapeMeshMode()
     {
         if (_blockDrag != null)
         {
             CancelBlock();
+        }
+        else if (_pending != null)
+        {
+            CancelPendingDistance();
+        }
+        else if (ToolPointCount > 0)
+        {
+            CancelToolPoints();
+        }
+        else if (MeshTool != MeshTool.Select)
+        {
+            SetMeshTool(MeshTool.Select);
         }
         else if (!MeshSelection.IsEmpty)
         {
@@ -204,6 +239,7 @@ public sealed partial class EditorShell
         {
             return;
         }
+        CommitPendingDistance();
         CancelGizmo();
         MeshElement = kind;
         MeshSelection = MeshSelection.As(kind, FindMeshData);
@@ -214,6 +250,7 @@ public sealed partial class EditorShell
     public void SetMeshTool(MeshTool tool)
     {
         CancelBlock();
+        CancelToolPoints();
         MeshTool = tool;
         OnMeshModeChanged();
     }
@@ -249,9 +286,15 @@ public sealed partial class EditorShell
         SetMeshSelection(MeshSelection.With(items));
     }
 
-    public void SetMeshSelection(MeshSelection selection)
+    /// <summary>Sets the sub-selection, converted to the current kind, or with <paramref name="switchKind"/>, switching to its kind as a tool's result does.</summary>
+    public void SetMeshSelection(MeshSelection selection, bool switchKind = false)
     {
-        if (selection.Kind != MeshElement)
+        CommitPendingDistance();
+        if (switchKind)
+        {
+            MeshElement = selection.Kind;
+        }
+        else if (selection.Kind != MeshElement)
         {
             selection = selection.As(MeshElement, FindMeshData);
         }
@@ -358,7 +401,7 @@ public sealed partial class EditorShell
     /// <summary>The gizmo's pivot and axes in mesh mode: the selected vertices' centroid, with the primary mesh's axes in local space.</summary>
     (long[] Pivot, Quat Axes)? MeshGizmoPose()
     {
-        if (!InMeshMode || Gizmo.KindOf(Tool) == GizmoKind.None || Scene == null || MeshSelection.IsEmpty)
+        if (!InMeshMode || ActiveGizmoKind == GizmoKind.None || Scene == null || MeshSelection.IsEmpty)
         {
             return null;
         }
@@ -383,7 +426,7 @@ public sealed partial class EditorShell
         {
             return null;
         }
-        var local = Space == Space.Local || Tool == Tool.Scale;
+        var local = _pending == null && (Space == Space.Local || Tool == Tool.Scale);
         return ((sum / count).Offset(origin), local ? primary ?? Quat.Identity : Quat.Identity);
     }
 
@@ -411,18 +454,34 @@ public sealed partial class EditorShell
         return MeshGrid.Snap(local, GridSize).Offset(anchor);
     }
 
-    bool PressMeshGizmo(Vec2 pixel)
+    bool PressMeshGizmo(Vec2 pixel, bool extrude)
     {
+        // Shift at the start of a Move drag extrudes first, as in Hammer; the drag then sets the distance.
+        if (extrude && _pending == null && Tool == Tool.Move && MeshElement != MeshElement.Vertices)
+        {
+            Extrude();
+            HoverGizmo(pixel);
+        }
         if (MeshGizmoPose() is not var (pivot, axes) || Scene == null)
         {
             return false;
+        }
+        var (width, height) = FrameSize;
+        if (_pending != null)
+        {
+            if (HotPart == GizmoPart.None)
+            {
+                return false;
+            }
+            _drag = new GizmoDrag(GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+            SendGizmo();
+            return true;
         }
         var drag = new MeshDrag(this, pivot, axes);
         if (drag.IsEmpty)
         {
             return false;
         }
-        var (width, height) = FrameSize;
         _drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         _meshDrag = drag;
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
@@ -433,6 +492,11 @@ public sealed partial class EditorShell
 
     void DragMeshGizmo(Vec2 pixel, bool invertSnap)
     {
+        if (_pending != null)
+        {
+            DragDistance(pixel, invertSnap);
+            return;
+        }
         if (_drag == null || _meshDrag == null || Scene is not { InTransaction: true })
         {
             return;
@@ -476,13 +540,14 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Starts a Block: a drag on the grid plane from a pixel, which becomes the block's footprint.</summary>
+    /// <summary>Starts a primitive: a drag on the grid plane from a pixel, which becomes its footprint.</summary>
     public bool BeginBlock(Vec2 pixel)
     {
-        if (!IsEditing || Scene == null || MeshTool != MeshTool.Block)
+        if (!IsEditing || Scene == null || MeshTool != MeshTool.Create)
         {
             return false;
         }
+        CommitPendingDistance();
         var (origin, axis) = GridPlane();
         if (PointOnGrid(pixel, origin, axis) is not { } start)
         {
@@ -522,12 +587,8 @@ public sealed partial class EditorShell
         var min = new Vec3(Math.Min(size.X, 0), Math.Min(size.Y, 0), Math.Min(size.Z, 0));
         var max = new Vec3(Math.Max(size.X, 0), Math.Max(size.Y, 0), Math.Max(size.Z, 0)) + up;
         var corner = min.Offset(drag.Start);
-        if (InMeshMode && !forceEntity && _editedMeshes.Keys.FirstOrDefault() is { } primary && FindMeshData(primary) is { } mesh && PlacementOf(primary) is { } placement)
-        {
-            AddBlockFaces(primary, mesh, placement, corner, max - min);
-            return;
-        }
-        CreateBlockEntity(corner, max - min);
+        var primary = InMeshMode && !forceEntity ? _editedMeshes.Keys.FirstOrDefault(g => FindMeshData(g) != null && PlacementOf(g) != null) : null;
+        MakePrimitive(corner, max - min, drag.Axis, primary);
     }
 
     public void CancelBlock()
@@ -553,55 +614,6 @@ public sealed partial class EditorShell
         return SnapToGrid(hit);
     }
 
-    // A block as faces of an edited mesh, in its space, with the mesh's slot 0 material.
-    void AddBlockFaces(string guid, MeshData mesh, MeshPlacement placement, long[] corner, Vec3 size)
-    {
-        var block = Primitives.Block(placement.ToLocal(Camera.RelativeTo(corner)), placement.ToLocal(Camera.RelativeTo(size.Offset(corner))), material: mesh.Materials[0]);
-        var offset = mesh.Vertices.Length;
-        var faces = block.Faces.Select(f => f with { Corners = [.. f.Corners.Select(c => c + offset)] });
-        var sharp = block.SharpEdges.Select(e => new MeshEdge(e.A + offset, e.B + offset));
-        var after = mesh.With(vertices: mesh.Vertices.AddRange(block.Vertices), faces: mesh.Faces.AddRange(faces), sharpEdges: mesh.SharpEdges.AddRange(sharp));
-        if (Edit("Block", new MeshOperation(guid, mesh, after, Meshes)))
-        {
-            var added = Enumerable.Range(mesh.Faces.Length, 6).Select(i => new MeshItem(guid, i));
-            SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. added]));
-        }
-    }
-
-    // A block as a new mesh file beside the scene and an entity at its corner, in one undo entry. The file is written
-    // at the scene's next save; the host draws the mesh live until then.
-    void CreateBlockEntity(long[] corner, Vec3 size)
-    {
-        if (Scene == null)
-        {
-            return;
-        }
-        var material = DefaultMeshMaterial;
-        var data = Primitives.Block(Vec3.Zero, size, material: material);
-        var name = NewMeshName("block");
-        var guid = Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
-        var directory = Path.Combine(Path.GetDirectoryName(Scene.Path)!, $"{Path.GetFileNameWithoutExtension(Scene.Path)}_meshes");
-        var document = new MeshDocument(Path.Combine(directory, name + MeshFile.Extension), guid, data, saved: false);
-        var create = SceneEdits.NewEntity(Scene.Scene, corner);
-        create.Created.Name = name;
-        create.Created.Components.Add(new SceneComponent(SceneEdits.MeshRendererId, "Mesh_Renderer",
-        [
-            new SceneField("mesh", SceneValue.AssetRef(guid)),
-            new SceneField("materials.0", SceneValue.AssetRef(material)),
-            new SceneField("cast_shadows", SceneValue.Of(true)),
-        ]));
-        if (!Edit("Block", new CreateMesh(document, Meshes), create))
-        {
-            return;
-        }
-        SelectScene(create.Created.Id);
-        if (InMeshMode)
-        {
-            _editedMeshes[guid] = create.Created.Id;
-            SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, 6).Select(i => new MeshItem(guid, i))]));
-        }
-    }
-
     // A name that no entity of the scene and no open mesh has: block, block_2 and on.
     string NewMeshName(string stem)
     {
@@ -617,6 +629,11 @@ public sealed partial class EditorShell
 
     void OnMeshModeChanged()
     {
+        // Any edit but a primitive's own parameter change ends its parameters' editability.
+        if (_lastPrimitive is { } last && Scene != null && (Scene.History.Count != last.Position || Scene.Position != last.Position))
+        {
+            _lastPrimitive = null;
+        }
         Commands.InvalidateAll();
         SendGizmo();
         SendMeshOverlay();

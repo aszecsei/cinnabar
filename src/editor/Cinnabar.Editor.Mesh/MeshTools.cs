@@ -7,7 +7,7 @@ namespace Cinnabar.Editor.Mesh;
 /// The mesh tools (see docs/editor/mesh-editing.md#mesh-tools): each takes a mesh and the selection and gives a new
 /// mesh. They are pure, so every one is a unit test without a host.
 /// </summary>
-public static class MeshTools
+public static partial class MeshTools
 {
     /// <summary>
     /// Deletes elements: vertices with every face that uses them; edges' faces; faces, then the vertices that nothing

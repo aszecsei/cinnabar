@@ -210,7 +210,7 @@ public sealed class MeshModeTests : IDisposable
     {
         using var shell = NewShell();
         shell.Commands.Get(EditorCommands.MeshBlock).Execute();
-        Assert.Equal(MeshTool.Block, shell.MeshTool);
+        Assert.Equal(MeshTool.Create, shell.MeshTool);
         // Nothing is selected, so the grid's plane faces the camera through its pivot, 5 m ahead. The drag covers the
         // middle of the view: about a meter and a half across at that distance.
         Assert.True(shell.BeginBlock(Center + new Vec2(-100, -100)));
@@ -253,7 +253,7 @@ public sealed class MeshModeTests : IDisposable
         // A second block gets the next name, and in mesh mode a block joins the edited mesh instead.
         shell.Selection.Select(Handle(0));
         shell.EnterMeshMode();
-        shell.SetMeshTool(MeshTool.Block);
+        shell.SetPrimitive(PrimitiveKind.Block);
         Assert.True(shell.BeginBlock(Center + new Vec2(-50, -50)));
         shell.DragBlock(Center + new Vec2(50, 50));
         shell.EndBlock();
