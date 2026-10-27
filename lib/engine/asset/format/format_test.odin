@@ -216,6 +216,7 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 		flags            = {.Two_Sided},
 		blend            = .Masked,
 		cutoff           = 0.5,
+		displacement_bound = 0.25,
 		params           = {{"tint", .Color, 0}, {"albedo", .Texture, 16}},
 		switches         = {"use_detail"},
 		default_switches = 1,
@@ -231,6 +232,7 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect_value(t, blob.blend, Material_Blend.Masked)
+	testing.expect_value(t, blob.displacement_bound, 0.25)
 	testing.expect_value(t, blob_string(data, material_params(data, blob)[1].name), "albedo")
 	testing.expect_value(t, blob_string(data, material_switches(data, blob)[0]), "use_detail")
 	testing.expect_value(t, material_textures(data, blob)[0].default, Material_Texture_Default.Normal)

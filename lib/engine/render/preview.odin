@@ -156,9 +156,11 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	}
 	mesh, mesh_ready := resident_mesh(&r.residency, desc.mesh)
 	pipeline, block, material_ok := preview_use(r, &table, desc)
-	if mesh_ready && material_ok {
+	// A patches material draws one patch in the mesh's place (see docs/rendering/surfaces.md#surfaces).
+	patches := material_ok && pipeline.patches
+	if (mesh_ready || patches) && material_ok {
 		pf.pipeline = pipeline
-		pf.draw_count = mesh.submesh_count
+		pf.draw_count = patches ? 1 : mesh.submesh_count
 		ready := platform.gpu_pipeline_ready != nil
 		pipelines, count := preview_pipelines(pipeline)
 		for p in pipelines[:count] {
@@ -168,7 +170,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 			// The output pass tone maps with the lookup table only once it is baked.
 			desc.complete^ = ready && !table.waiting && r.post.lut_baked
 		}
-		write_preview_records(f, pf, mesh, block, &table, view_projection)
+		write_preview_records(f, pf, patches ? nil : mesh, block, &table, view_projection)
 	}
 
 	pf.target = import_texture(g, desc.target, .Color)
@@ -213,14 +215,18 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 }
 
 // write_preview_records uploads the preview's records: its instance, relative to its camera, a draw for each submesh,
-// the mesh's record, the material table, its light, and its Frame_Constants.
+// the mesh's record, the material table, its light, and its Frame_Constants. Without a mesh, the preview is a
+// patches material's one patch, with a surface record in the mesh record's place.
 @(private = "file")
 write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mesh, block: u32, table: ^Material_Table, view_projection: matrix[4, 4]f32) {
 	r := f.renderer
 	platform := r.platform
 	desc := pf.desc
 	// The mesh's middle is at the orbit's center, and the camera is distance behind it along its own +z.
-	center := mesh.bounds.center
+	center: [3]f32
+	if mesh != nil {
+		center = mesh.bounds.center
+	}
 	camera := linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0, 0, -desc.distance})
 	offset := -center - camera
 	rows := [3][4]f32{{1, 0, 0, offset.x}, {0, 1, 0, offset.y}, {0, 0, 1, offset.z}}
@@ -230,12 +236,20 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	}
 	draws := make([]Draw_Record, pf.draw_count, platform.frame_allocator)
 	arguments := make([]gpu.Draw_Indirect_Args, pf.draw_count, platform.frame_allocator)
-	for s in 0 ..< pf.draw_count {
-		submesh := mesh.submeshes[s]
-		draws[s] = {instance = 0, mesh = 0, first = submesh.first_index, material = block, count = submesh.index_count}
-		arguments[s] = {draw_id = s, vertex_count = submesh.index_count, instance_count = 1}
+	record: Mesh_Record
+	surface: Surface_Record
+	if mesh == nil {
+		draws[0] = {instance = 0, mesh = 0, first = 0, material = block, count = SURFACE_PATCH_VERTICES}
+		arguments[0] = {draw_id = 0, vertex_count = SURFACE_PATCH_VERTICES, instance_count = 1}
+		surface = preview_surface(r, pf.pipeline.displacement_bound)
+	} else {
+		for s in 0 ..< pf.draw_count {
+			submesh := mesh.submeshes[s]
+			draws[s] = {instance = 0, mesh = 0, first = submesh.first_index, material = block, count = submesh.index_count}
+			arguments[s] = {draw_id = s, vertex_count = submesh.index_count, instance_count = 1}
+		}
+		record = mesh_record(mesh)
 	}
-	record := mesh_record(mesh)
 	// The light comes from over the camera's left shoulder, so it turns with the camera.
 	direction := linalg.normalize(linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0.55, -0.6, 0.6}))
 	light := Light_Record {
@@ -261,6 +275,7 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	pf.draws_at = place(&bytes, slice.to_bytes(draws))
 	pf.args_at = place(&bytes, slice.to_bytes(arguments))
 	mesh_at := place(&bytes, slice.bytes_from_ptr(&record, size_of(record)))
+	surface_at := place(&bytes, slice.bytes_from_ptr(&surface, size_of(surface)))
 	table_at := place(&bytes, table.bytes[:])
 	light_at := place(&bytes, slice.bytes_from_ptr(&light, size_of(light)))
 	upload, ok := upload_bytes(platform, bytes[:])
@@ -283,8 +298,11 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 		materials                = buffer,
 		sampler_index            = gpu.sampler_index(r.materials.sampler),
 		time                     = frame_time(r),
+		previous_time            = frame_time(r),
 		meshes_offset            = upload.offset + mesh_at,
 		materials_offset         = upload.offset + table_at,
+		surfaces                 = buffer,
+		surfaces_offset          = upload.offset + surface_at,
 		lights                   = buffer,
 		lights_offset            = upload.offset + light_at,
 		directional_count        = 1,

@@ -1,0 +1,59 @@
+material 1
+# Water on a patch surface (see docs/rendering/surfaces.md#surfaces): three waves raise and lower the vertices with the
+# time, the same waves give each pixel its normal, and the surface is bluer and clearer where it is seen from above,
+# and brighter and more opaque where it is seen edge on.
+shading = lit
+geometry = patches
+blend = transparent
+two_sided = true
+displacement_bound = 1
+param shallow color = [0.12, 0.42, 0.48, 1]
+param deep color = [0.01, 0.07, 0.14, 1]
+param amplitude float = 0.35
+param opacity float = 0.8
+---
+// Each wave: its direction, its wavelength in meters, and its period in seconds. A wavelength that divides 1024 m along
+// each axis goes on without a seam when the render origin moves, and a period that divides an hour without a jump
+// when the time wraps.
+static const float2 WAVE_DIRECTIONS[3] = {float2(1, 0), float2(0, 1), float2(0.6, 0.8)};
+static const float WAVE_LENGTHS[3] = {16, 1024.0 / 112, 12.8};
+static const float WAVE_PERIODS[3] = {8, 6, 10};
+static const float WAVE_WEIGHTS[3] = {0.5, 0.3, 0.2};
+
+float wave_phase(uint i, float2 p, float time) {
+	return 2 * PI * (dot(p, WAVE_DIRECTIONS[i]) / WAVE_LENGTHS[i] - time / WAVE_PERIODS[i]);
+}
+
+float wave_height(float2 p, float time) {
+	float h = 0;
+	for (uint i = 0; i < 3; i++) {
+		h += sin(wave_phase(i, p, time)) * WAVE_WEIGHTS[i];
+	}
+	return h * params.amplitude;
+}
+
+// The height's slope along x and z.
+float2 wave_slope(float2 p, float time) {
+	float2 g = 0;
+	for (uint i = 0; i < 3; i++) {
+		g += cos(wave_phase(i, p, time)) * WAVE_WEIGHTS[i] * WAVE_DIRECTIONS[i] * (2 * PI / WAVE_LENGTHS[i]);
+	}
+	return g * params.amplitude;
+}
+
+float3 displace(Vertex_Inputs v) {
+	return float3(0, wave_height(world_position(v).xz, v.time), 0);
+}
+
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	float2 slope = wave_slope(world_position(inputs).xz, inputs.time);
+	// The patch's tangent frame is its x, its z and up, so the height field's normal is (-dh/dx, -dh/dz, 1) in it.
+	s.normal = normalize(float3(-slope, 1));
+	float fresnel = pow(1 - saturate(dot(inputs.normal, inputs.view)), 5);
+	s.base_color = lerp(params.deep.rgb, params.shallow.rgb, fresnel);
+	s.metallic = 0;
+	s.roughness = 0.06;
+	s.opacity = lerp(params.opacity, 1, fresnel);
+	return s;
+}

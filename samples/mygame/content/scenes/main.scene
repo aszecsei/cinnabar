@@ -43,7 +43,7 @@ component 1 Transform
 	scale = [0.6, 0.6, 0.6]
 component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
-	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
 	cast_shadows = true
 
 entity 52f2b689117aa80c

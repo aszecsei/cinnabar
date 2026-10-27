@@ -46,6 +46,12 @@ TEXTURE_SETTINGS := []Setting_Info {
 		default = "repeat",
 		description = "How the mip filter treats the edges. The sampler is the material's choice.",
 	},
+	{
+		key = "filter",
+		values = {"kaiser", "box"},
+		default = "kaiser",
+		description = "The mip filter: a Kaiser-windowed sinc, or the plain average of the covered texels, which keeps a mask's mips as the share of its texels that are set.",
+	},
 }
 
 // texture_usage_for is the usage that a new texture's .meta file gets, from its name: .hdr files are hdr, a name that
@@ -61,7 +67,7 @@ texture_usage_for :: proc(path: string) -> string {
 			return "normal"
 		}
 	}
-	for suffix in ([]string{"_r", "_rough", "_ao", "_m", "_metal", "_mask"}) {
+	for suffix in ([]string{"_r", "_rough", "_ao", "_m", "_metal", "_mask", "_height", "_hole"}) {
 		if strings.has_suffix(name, suffix) {
 			return "mask"
 		}
@@ -148,16 +154,17 @@ cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems:
 		usage = .Color
 	}
 	wrap := texture_setting(a, "wrap") == "repeat"
+	box := texture_setting(a, "filter") == "box"
 	max_size := strconv.parse_int(texture_setting(a, "max_size")) or_else 16384
 
 	image := decode_image(a, usage, problems) or_return
 	for max(image.width, image.height) > max_size {
-		image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap)
+		image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap, box)
 	}
 	tex_format := texture_format_of(usage)
 	// Mip 0 of a block-compressed texture is whole blocks, so a texture that is not is resized up to the next one.
 	if format.texture_format_block(tex_format) != 0 && (image.width % 4 != 0 || image.height % 4 != 0) {
-		image = resample(image, (image.width + 3) / 4 * 4, (image.height + 3) / 4 * 4, wrap)
+		image = resample(image, (image.width + 3) / 4 * 4, (image.height + 3) / 4 * 4, wrap, box)
 	}
 	if usage == .Normal {
 		normalize(&image)
@@ -174,7 +181,7 @@ cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems:
 	level := image
 	for mip in 0 ..< mip_count {
 		if mip > 0 {
-			level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap)
+			level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap, box)
 			if usage == .Normal {
 				normalize(&level)
 			}
@@ -281,23 +288,25 @@ normalize :: proc(image: ^Image) {
 
 // resample resizes an image with a Kaiser-windowed sinc filter, one axis after the other. When it shrinks, the filter
 // widens by the scale, so it averages every source texel that a destination texel covers. wrap repeats the edges
-// instead of clamping them.
-resample :: proc(image: Image, width, height: int, wrap: bool) -> Image {
+// instead of clamping them. box takes the plain average of the texels that a destination texel covers instead, whose
+// weights are never negative, so a mask's mips are the share of its texels that are set (see
+// docs/rendering/surfaces.md#holes).
+resample :: proc(image: Image, width, height: int, wrap: bool, box := false) -> Image {
 	if width == image.width && height == image.height {
 		return image
 	}
 	// Horizontal, then vertical.
 	across := Image{width, image.height, make([][4]f32, width * image.height, context.temp_allocator)}
-	resample_axis(image.pixels, image.width, image.height, across.pixels, width, true, wrap)
+	resample_axis(image.pixels, image.width, image.height, across.pixels, width, true, wrap, box)
 	result := Image{width, height, make([][4]f32, width * height, context.temp_allocator)}
-	resample_axis(across.pixels, width, image.height, result.pixels, height, false, wrap)
+	resample_axis(across.pixels, width, image.height, result.pixels, height, false, wrap, box)
 	return result
 }
 
 // resample_axis resizes along x (horizontal) or y. src is src_width x src_height, and dst has the other axis's size
 // unchanged and dst_length along this one.
 @(private = "file")
-resample_axis :: proc(src: [][4]f32, src_width, src_height: int, dst: [][4]f32, dst_length: int, horizontal, wrap: bool) {
+resample_axis :: proc(src: [][4]f32, src_width, src_height: int, dst: [][4]f32, dst_length: int, horizontal, wrap, box: bool) {
 	src_length := horizontal ? src_width : src_height
 	lines := horizontal ? src_height : src_width
 	scale := f32(src_length) / f32(dst_length)
@@ -308,12 +317,16 @@ resample_axis :: proc(src: [][4]f32, src_width, src_height: int, dst: [][4]f32, 
 	for d in 0 ..< dst_length {
 		center := (f32(d) + 0.5) * scale - 0.5
 		first, last := int(math.floor(center - radius)), int(math.ceil(center + radius))
+		if box {
+			// The source texels whose middles the destination texel covers.
+			first, last = int(math.floor(f32(d) * scale)), max(int(math.ceil(f32(d + 1) * scale)) - 1, int(math.floor(f32(d) * scale)))
+		}
 		clear(&weights)
 		clear(&indices)
 		total: f32
 		for s in first ..= last {
 			x := (f32(s) - center) / support
-			w := kaiser_sinc(x)
+			w := box ? 1 : kaiser_sinc(x)
 			if w == 0 {
 				continue
 			}

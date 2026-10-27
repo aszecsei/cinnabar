@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
 | [Transparency](transparency.md) | Moment-based and sorted transparency. |
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
+| [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
 | [Global illumination](global-illumination.md) | Screen-space radiance cascades. |
 | [Volumetric fog](fog.md) | The froxel volume. |
@@ -36,6 +37,7 @@ Read them in this order the first time.
 | `settings.odin` | The settings components on volumes and `resolve_settings` ([Settings](frame.md#settings)) |
 | `quality.odin` | `Quality`, its presets, `Caps`, `default_quality`, `clamp_quality` and `apply_quality` ([Quality](quality.md#quality)) |
 | `scene.odin` | `Gpu_Scene`: every instance's record at a stable slot, the render origin, culling into bins ([GPU scene](gpu-scene.md#gpu-scene)) |
+| `surfaces.odin` | `Surface_Record`, the patch surfaces' items, their selection and culling passes ([Surfaces](surfaces.md#surfaces)) |
 | `components.odin` | The render components' stable IDs: `Camera`, `Mesh_Renderer`, the lights, `View_Model` ([Components](assets.md#components)) |
 | `materials.odin` | `Material_Table`, pipelines by material, bins, the default material ([Runtime](materials.md#runtime)) |
 | `shaders.odin` | `Shader_Pipeline` and the `sync_*_pipeline` procedures that compile from shader assets ([GPU residency](assets.md#gpu-residency)) |
@@ -53,7 +55,7 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 

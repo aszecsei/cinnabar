@@ -72,6 +72,7 @@ Renderer :: struct {
 	debug:           debug.Draw,
 	// Registrations, created again in renderer_reload.
 	meshes:          Extractor,
+	surfaces:        Extractor,
 	volumes:         volume.Volumes,
 	materials:       Materials,
 	scene:           Gpu_Scene,
@@ -288,6 +289,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.caps = device_caps(platform)
 	r.quality = default_quality(r.caps)
 	r.meshes = mesh_extractor(w)
+	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
 		p = shader_pipeline(OUTPUT_SHADER)
@@ -321,6 +323,7 @@ mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
 renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.World) {
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
 	// The effects' procedures were in the old code, so the game registers them again.

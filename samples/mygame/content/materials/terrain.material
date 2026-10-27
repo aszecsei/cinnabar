@@ -1,0 +1,39 @@
+material 1
+# Terrain on a patch surface (see docs/rendering/surfaces.md#surfaces): a height map raises the vertices, the slope of the
+# same map gives each pixel its normal, and the color goes from sand through grass to rock by the height and the
+# slope. size is the Surface_Renderer's size in meters, which the slope needs per texel.
+shading = lit
+geometry = patches
+param height texture = $9b3e5d7f2c1a4e8b9d0c1f2e3a4b5c6d
+param height_scale float = 30
+param size float = 256
+param sand color = [0.6, 0.55, 0.4, 1]
+param grass color = [0.18, 0.3, 0.1, 1]
+param rock color = [0.35, 0.32, 0.3, 1]
+---
+float terrain_height(float2 uv) {
+	return cn_sample_level(params.height, uv, 0).r * params.height_scale;
+}
+
+float3 displace(Vertex_Inputs v) {
+	return float3(0, terrain_height(v.uv0), 0);
+}
+
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	uint width, height;
+	cn_texture(params.height).GetDimensions(width, height);
+	float2 texel = 1.0 / float2(width, height);
+	float2 uv = inputs.uv0;
+	float dx = terrain_height(uv + float2(texel.x, 0)) - terrain_height(uv - float2(texel.x, 0));
+	float dz = terrain_height(uv + float2(0, texel.y)) - terrain_height(uv - float2(0, texel.y));
+	float2 slope = float2(dx, dz) / (2 * texel * params.size);
+	// The patch's tangent frame is its x, its z and up.
+	s.normal = normalize(float3(-slope, 1));
+	float steep = 1 - s.normal.z;
+	float h = terrain_height(uv);
+	float3 flat = lerp(params.sand.rgb, params.grass.rgb, smoothstep(9, 12, h));
+	s.base_color = lerp(flat, params.rock.rgb, smoothstep(0.25, 0.5, steep));
+	s.roughness = 0.9;
+	return s;
+}

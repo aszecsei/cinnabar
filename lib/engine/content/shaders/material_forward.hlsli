@@ -74,6 +74,9 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 		return shade_emission(s);
 #endif
 	}
+	if (debug_view == DEBUG_EMISSION) {
+		return shade_emission(s) * frame_exposure();
+	}
 	// Lit in grey where the light comes from a cluster, so the light count shows over the shapes.
 	float lambert = 0.5 + 0.5 * saturate(dot(inputs.normal, normalize(float3(0.3, 1, 0.5))));
 	if (debug_view == DEBUG_LIGHT_COMPLEXITY) {

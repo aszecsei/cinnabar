@@ -1,0 +1,40 @@
+material 1
+# Bricks in relief on a flat face: the height map, marched by the Parallax Occlusion node, gives the UV that each pixel
+# sees and the height there, which picks the brick's color over the mortar's. The short box wears it.
+shading = lit
+param height texture = $3c9f1b7e5a2d4e8f9b1c6d0a7e4f2b58
+param brick color = [0.52, 0.2, 0.14, 1]
+param mortar color = [0.66, 0.63, 0.57, 1]
+param depth float = 0.04
+
+node 1 output
+	position = [520, -40]
+	base_color = @5.out
+	roughness = @6.out
+node 2 parameter
+	position = [-420, -60]
+	name = "height"
+node 3 parallax_occlusion
+	position = [-160, -40]
+	height = @2.value
+	scale = @7.value
+	steps = 24
+node 4 parameter
+	position = [60, -160]
+	name = "brick"
+node 5 lerp
+	position = [300, -100]
+	a = @8.value
+	b = @4.value
+	t = @3.height
+node 6 lerp
+	position = [300, 80]
+	a = 0.95
+	b = 0.6
+	t = @3.height
+node 7 parameter
+	position = [-420, 60]
+	name = "depth"
+node 8 parameter
+	position = [60, -40]
+	name = "mortar"

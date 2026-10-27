@@ -50,6 +50,108 @@ Surface evaluate(Material_Inputs inputs) {
 }
 `
 
+@(private = "file")
+WAVE :: `material 1
+# A surface that rises and falls: displace moves each vertex along its normal with the time.
+shading = lit
+displacement_bound = 0.5
+param amplitude float = 0.2
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = float3(0.3, 0.5, 0.7);
+	return s;
+}
+
+float3 displace(Vertex_Inputs v) {
+	return v.normal * params.amplitude * sin(v.time + world_position(v).x);
+}
+`
+
+@(test)
+displacing_materials_compile_every_pass_and_keep_their_bound :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/wave.material", WAVE},
+			{"content/wave.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+		},
+	)
+	defer remove_tree(tree)
+	options := material_options(t, tree)
+	pass := cook(options, {.Material})
+	for p in pass.problems.list {
+		if p.error {
+			testing.expectf(t, false, "%s:%d: %s", p.file, p.line, p.text)
+		}
+	}
+	testing.expect_value(t, pass.cooked[.Material], 1)
+	data := tree_blob(t, tree, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	blob, ok := format.material_view(data)
+	testing.expect(t, ok)
+	if ok {
+		// The same passes as any opaque material, the mesh shader path's included, which all place vertices with the
+		// displacement.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 11)
+		testing.expect(t, .Displaces in blob.flags)
+		testing.expect(t, .Reads_Time in blob.flags)
+		testing.expect_value(t, blob.displacement_bound, 0.5)
+	}
+
+	// A bound below 0 is an error, with its line.
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	bad := "material 1\nshading = lit\ndisplacement_bound = -1\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/wave.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(t, !cook(options, {.Material}).ok)
+	expect_error(t, &errors, "wave.material:3: displacement_bound is a number of meters, 0 or more")
+}
+
+@(test)
+patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/ground.material", "material 1\nshading = lit\ngeometry = patches\n---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.uv0.xyx;\n\treturn s;\n}\n\nfloat3 displace(Vertex_Inputs v) {\n\treturn float3(0, sin(v.uv0.x * 6.28) * 0.5, 0);\n}\n"},
+			{"content/ground.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+		},
+	)
+	defer remove_tree(tree)
+	options := material_options(t, tree)
+	pass := cook(options, {.Material})
+	for p in pass.problems.list {
+		if p.error {
+			testing.expectf(t, false, "%s:%d: %s", p.file, p.line, p.text)
+		}
+	}
+	testing.expect_value(t, pass.cooked[.Material], 1)
+	data := tree_blob(t, tree, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	blob, ok := format.material_view(data)
+	testing.expect(t, ok)
+	if ok {
+		// The forward pass's and the prepass's two stages, and the depth pass's vertex stage, from the patch vertex
+		// path; no amplification or mesh stages.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 5)
+		testing.expect(t, .Patches in blob.flags)
+		testing.expect(t, .Displaces in blob.flags)
+		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Amplification) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Vertex) != nil)
+	}
+
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	bad := "material 1\nshading = lit\ngeometry = cloth\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ground.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(t, !cook(options, {.Material}).ok)
+	expect_error(t, &errors, "ground.material:3: geometry is mesh or patches")
+}
+
 @(test)
 materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^testing.T) {
 	tree := make_tree(

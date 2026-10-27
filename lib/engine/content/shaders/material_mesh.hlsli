@@ -61,23 +61,24 @@ bool lod_selected(Meshlet c, float4 rows[3], float scale) {
 	return projected_error(rows, scale, c.error_sphere, c.error) <= 1 && projected_error(rows, scale, c.parent_sphere, c.parent_error) > 1;
 }
 
-// cluster_visible is whether a meshlet of an instance draws in the view: its level is selected, its sphere is in the
-// frustum, and its normal cone does not point away from the view. The cone is not tested for a two-sided material,
-// for an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull.
-bool cluster_visible(Meshlet c, Instance_Record instance) {
+// cluster_visible is whether a meshlet of an instance draws in the view: its level is selected, its sphere, grown by
+// the material's displacement bound, is in the frustum, and its normal cone does not point away from the view. The
+// cone is not tested for a two-sided material, for a material that displaces its vertices, which may turn them, for
+// an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull.
+bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	float3 scales = axis_scales(instance.rows);
 	float scale = max(scales.x, max(scales.y, scales.z));
 	if (!lod_selected(c, instance.rows, scale)) {
 		return false;
 	}
 	float3 center = transform_point(instance.rows, c.sphere.xyz) - frame.camera_offset.xyz;
-	float radius = c.sphere.w * scale;
+	float radius = c.sphere.w * scale + bound;
 	for (uint i = 0; i < 6; i++) {
 		if (dot(frame.planes[i].xyz, center) + frame.planes[i].w < -radius) {
 			return false;
 		}
 	}
-#if !MATERIAL_TWO_SIDED
+#if !MATERIAL_TWO_SIDED && !MATERIAL_DISPLACES
 	int4 packed = int4(c.cone << 24, c.cone << 16, c.cone << 8, c.cone) >> 24;
 	float uniformity = min(scales.x, min(scales.y, scales.z)) / scale;
 	if (packed.w < 127 && uniformity > 0.99) {
@@ -109,7 +110,7 @@ void as_cluster(uint group : SV_GroupID, uint thread : SV_GroupIndex) {
 		uint meshlet = d.first + local;
 		Mesh_Record m = load_mesh(d);
 		Meshlet c = cn_buffer(m.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
-		if (cluster_visible(c, load_instance(d))) {
+		if (cluster_visible(c, load_instance(d), d.bound)) {
 			uint slot;
 			InterlockedAdd(cluster_count, 1, slot);
 			cluster_payload.meshlets[slot] = meshlet;

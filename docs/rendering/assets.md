@@ -42,4 +42,5 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 - **`Line_Light`** (41): a tube of light along its entity's x, with a length and a radius in meters; a radius of 0 is an ideal line. Also a color, an intensity, a range beyond its shape, and whether it casts shadows.
 - **Defaults:** a light's color of 0 means white, a range of 0 means `DEFAULT_LIGHT_RANGE` (10 m), an outer angle of 0 means `DEFAULT_SPOT_OUTER` (45°), and an inner angle of 0 means the outer angle. An area light's width, height or length of 0 means `DEFAULT_AREA_SIZE` (1 m). An intensity of 0 is a light that is off.
 - **`View_Model`** (37): a tag that makes a `Mesh_Renderer` part of the view model (see [View model](layers-and-output.md#view-model)).
+- **`Surface_Renderer`** (51): a patch surface's size, material, hole mask, finest cell, height range and whether it casts shadows (see [Surfaces](surfaces.md#surfaces)).
 - **The settings components** (38 and 43 to 50), which volumes carry (see [Settings](frame.md#settings)).
