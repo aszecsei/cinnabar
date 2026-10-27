@@ -24,6 +24,12 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// <summary>Where autosaves go (see docs/editor/processes-and-projects.md#crash-recovery).</summary>
     public string AutosaveDirectory { get; init; } = InRepository("build", "obj", "editor", "autosave");
 
+    /// <summary>Where screenshots, GIFs and their sidecars go (see docs/editor/capture.md#capture).</summary>
+    public string CaptureDirectory { get; init; } = InRepository("build", "captures");
+
+    /// <summary>Where the editor writes its automation port for tools such as editorctl (see docs/editor/capture.md#automation).</summary>
+    public string AutomationFile { get; init; } = InRepository("build", "obj", "editor", "automation.json");
+
     /// <summary>How the editor runs the cook daemon (see docs/editor/processes-and-projects.md#processes). The defaults are the repository's.</summary>
     public CookOptions Cook { get; init; } = new(
         InRepository("build", "tools", "cook.exe"),

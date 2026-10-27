@@ -31,6 +31,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 
 - A command has an ID such as `edit.undo`, a label, an icon, a default shortcut, a can-execute check and an execute procedure.
 - **Editor commands** are C#. **Game commands** are described by the DLL and run in the game through `Game_API.editor_poll`. A game command that changes the scene returns operations, and the editor applies them as for any edit, so they can be undone.
+- **Screenshot** (F12) and **Record Last 5 s** (Shift+F12), in the View tab's Capture group, ask the host for a PNG of the next frame or a GIF of the last five seconds, and write a sidecar of the editor's state beside it (see [Capture](capture.md#capture)). They need a linked host, and one capture runs at a time.
 
 ### Game commands
 

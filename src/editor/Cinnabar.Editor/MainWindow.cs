@@ -99,6 +99,7 @@ public sealed class MainWindow : Window
         Opened += (_, _) =>
         {
             shell.StartCook();
+            shell.StartAutomation();
             if (shell.PendingRestore != null)
             {
                 _ = OfferRestore();

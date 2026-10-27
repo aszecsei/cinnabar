@@ -82,6 +82,8 @@ Message :: union {
 	Profile_Capture_Request,
 	Profile_Capture,
 	Profile_Recording,
+	Capture_Request,
+	Capture_Result,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -945,4 +947,46 @@ Preview_Acknowledged :: struct {
 	id:         u32,
 	generation: u32,
 	frame:      u64,
+}
+
+// Captures (see docs/editor/capture.md#capture). The host handles both messages: the frames are its own.
+
+Capture_Kind :: enum u8 {
+	// The next frame, as a PNG.
+	Screenshot,
+	// The history ring's last frames, as a looping GIF.
+	Gif,
+}
+
+// Matches gpu.Output_Mode.
+Output_Mode :: enum u8 {
+	Sdr,
+	Hdr10,
+	Scrgb,
+}
+
+// Editor to host: write the next frame as a PNG, or the history ring as a GIF, to path, an absolute path whose
+// directory the host makes, or to captures/<utc time>-f<frame>.<png|gif> beside the host when path is "". The host
+// answers with a Capture_Result with the same id, once the file is written.
+Capture_Request :: struct {
+	id:   u32,
+	kind: Capture_Kind,
+	path: string,
+}
+
+// Host to editor: the file that a request made, or why it made none. frame is the captured frame's number in the
+// host's count, or a GIF's last frame; frames and duration_ms are a GIF's frames and the time they span; output is
+// the frame's output mode, which says how the colors were converted.
+Capture_Result :: struct {
+	id:          u32,
+	kind:        Capture_Kind,
+	ok:          bool,
+	reason:      string,
+	path:        string,
+	frame:       u64,
+	width:       u32,
+	height:      u32,
+	frames:      u32,
+	duration_ms: f32,
+	output:      Output_Mode,
 }

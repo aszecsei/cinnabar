@@ -88,6 +88,7 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.CaptureFrame),
                         new SmallStack([EditorCommands.CaptureWorstFrame, EditorCommands.RecordZones]),
                     ]),
+                    new RibbonGroup("Capture", [new LargeButton(EditorCommands.Screenshot), new SmallStack([EditorCommands.CaptureGif])]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
             ]);

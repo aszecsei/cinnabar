@@ -98,6 +98,10 @@ main :: proc() {
 		return
 	}
 	defer core.shutdown()
+	// Stopped before core.shutdown: its worker holds the backend's capture memory.
+	capture: Capture
+	capture_start(&capture, &editor)
+	defer capture_stop(&capture)
 
 	game, result := game_load(source_path, 0)
 	if result != .Loaded {
@@ -140,6 +144,8 @@ main :: proc() {
 			}
 		}
 		link_poll(&editor, game.api, state)
+		// After the poll, so a request handled in it gets the very next frame.
+		capture_tick(&capture)
 	}
 	game.api.shutdown(state)
 }

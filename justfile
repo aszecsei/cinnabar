@@ -59,7 +59,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -292,6 +292,19 @@ viewer:
     mkdir -p "{{tools_dir}}"
     odin build tools/viewer {{collections}} -out:"{{tools_dir}}/viewer.exe" -debug
 
+# Build editorctl, which drives a running editor from a terminal (see docs/editor/capture.md#automation)
+editorctl:
+    mkdir -p "{{tools_dir}}"
+    odin build tools/editorctl -collection:cinnabar=lib -out:"{{tools_dir}}/editorctl.exe" -o:speed
+
+# Write a screenshot of the running editor's viewport, with a JSON sidecar, and print the files: just screenshot --view depth
+screenshot *args: editorctl
+    "./{{tools_dir}}/editorctl.exe" screenshot {{args}}
+
+# Write the last five seconds of the running editor's viewport as a GIF, and print the files
+gif *args: editorctl
+    "./{{tools_dir}}/editorctl.exe" gif {{args}}
+
 # Fit the area lights' lookup tables to the Lit shading model's specular, into lib/engine/render/ltc_ggx.bin (see
 # docs/rendering/lighting-and-shadows.md#area-lights). Run it after changing Lit's specular, and commit the table.
 ltc-fit:
@@ -330,7 +343,7 @@ edit: build editor
 release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
-    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
@@ -362,7 +375,7 @@ fmt:
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau compressonator meshoptimizer link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
+    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

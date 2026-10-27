@@ -49,6 +49,9 @@ public sealed class HostSession : IDisposable
     /// <summary>The game that the linked host runs.</summary>
     public string? Game { get; private set; }
 
+    /// <summary>The running host's process id, for the capture sidecar and the automation status.</summary>
+    public int? ProcessId => _process?.Id;
+
     /// <summary>The host can start once the viewport has found the adapter.</summary>
     public bool CanStart => _adapter != 0;
 

@@ -24,6 +24,20 @@ public sealed class ShellTests : IDisposable
     }
 
     [Fact]
+    public void TheCaptureCommandsNeedALinkedHost()
+    {
+        using var shell = NewShell();
+        var screenshot = shell.Commands.Get(EditorCommands.Screenshot);
+        var gif = shell.Commands.Get(EditorCommands.CaptureGif);
+        Assert.Equal("F12", screenshot.Shortcut);
+        Assert.Equal("Shift+F12", gif.Shortcut);
+        Assert.False(screenshot.CanExecute);
+        Assert.False(gif.CanExecute);
+        Assert.False(shell.Captures.Busy);
+        Assert.Equal(0, shell.AutomationPort);
+    }
+
+    [Fact]
     public void TheViewportsRenderingCommandsChangeItsSettingsAndTheyStay()
     {
         using (var shell = NewShell())

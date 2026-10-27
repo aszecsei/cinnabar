@@ -36,6 +36,8 @@ static class EditorCommands
     public const string CaptureFrame = "profile.captureFrame";
     public const string CaptureWorstFrame = "profile.captureWorst";
     public const string RecordZones = "profile.record";
+    public const string Screenshot = "capture.screenshot";
+    public const string CaptureGif = "capture.gif";
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
     public const string SelectAll = "edit.selectAll";
@@ -369,6 +371,7 @@ static class EditorCommands
         });
         RegisterRendering(shell);
         RegisterProfiler(shell);
+        RegisterCapture(shell);
         RegisterGameWindow(shell);
     }
 
@@ -437,6 +440,25 @@ static class EditorCommands
             Icon = "stats",
             IsCheckedWhen = () => shell.Profiler.Recording,
             CanExecuteWhen = () => shell.Host.Linked,
+        });
+    }
+
+    static void RegisterCapture(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        commands.Register(new Command(Screenshot, "Screenshot", () => _ = shell.Screenshot())
+        {
+            Description = "Write the viewport's next frame as a PNG, with a JSON sidecar of the editor's state, to the capture directory.",
+            Icon = "viewport",
+            Shortcut = "F12",
+            CanExecuteWhen = () => shell.Host.Linked && !shell.Captures.Busy,
+        });
+        commands.Register(new Command(CaptureGif, "Record Last 5 s", () => _ = shell.Gif())
+        {
+            Description = "Write the last five seconds of the viewport, at half size and ten frames a second, as a GIF to the capture directory.",
+            Icon = "monitor",
+            Shortcut = "Shift+F12",
+            CanExecuteWhen = () => shell.Host.Linked && !shell.Captures.Busy,
         });
     }
 

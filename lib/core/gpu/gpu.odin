@@ -250,6 +250,21 @@ Preview_Target :: struct {
 	size:       [2]u32,
 }
 
+// Frame_Capture is a copy of a frame's final frame target in CPU memory, as the backend's readback gives it (see
+// docs/gpu/presentation.md#frame-capture). The pixels are the backend's, row_pitch bytes per row, and stay valid until
+// release_frame_capture. The format is the frame target's: RGBA8 sRGB bytes in Sdr, RGB10A2 PQ in Hdr10 and RGBA16F in
+// Scrgb, with the display's SDR white in nits for the HDR modes, or 0 when unknown.
+Frame_Capture :: struct {
+	// The backend's slot, which release_frame_capture frees.
+	slot:      u32,
+	size:      [2]u32,
+	format:    Format,
+	mode:      Output_Mode,
+	sdr_white: f32,
+	row_pitch: u32,
+	pixels:    []byte,
+}
+
 is_depth_format :: proc(format: Format) -> bool {
 	#partial switch format {
 	case .D32_Float, .D32_Float_S8_Uint:

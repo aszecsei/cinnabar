@@ -418,6 +418,9 @@ public sealed partial class EditorShell
             case Link.Protocol.ProfileCapture capture:
                 Profiler.Apply(capture);
                 return;
+            case Link.Protocol.CaptureResult result:
+                Captures.Apply(result);
+                return;
             case Link.Protocol.PreviewTarget target:
                 OnPreviewTarget(target);
                 return;

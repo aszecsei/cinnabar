@@ -345,6 +345,14 @@ memory_stats :: proc() -> (permanent, frame_max: u64) {
 	return
 }
 
+// Frame captures copy a frame's final frame target to CPU memory (see docs/gpu/presentation.md#frame-capture). The
+// host drives them for its screenshots and history ring; the game has no part in them. request_frame_capture asks
+// for this frame's, poll_frame_capture returns the oldest finished one, and release_frame_capture frees its slot,
+// from any thread.
+request_frame_capture :: backend.request_frame_capture
+poll_frame_capture :: backend.poll_frame_capture
+release_frame_capture :: backend.release_frame_capture
+
 // pace_shared_frames turns the reader's back-pressure on or off (see docs/editor/viewport.md#viewport).
 pace_shared_frames :: backend.pace_shared_frames
 

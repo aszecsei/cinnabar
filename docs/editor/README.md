@@ -14,6 +14,7 @@ Read them in this order the first time.
 | [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos and viewport settings. |
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
+| [Capture](capture.md) | Screenshots and GIFs of the host, the sidecar, and the automation socket that `editorctl` drives. |
 
 ## Overview
 
