@@ -70,7 +70,7 @@ float fog_shadow(Light_Record light, Light reaching, float3 p, float depth) {
 #endif
 	}
 	int view = shadow_view(light, p, depth);
-	return view < 0 ? 1 : shadow_map(uint(view), p, 0);
+	return view < 0 ? 1 : shadow_map(uint(view), p, 0, reaching.direction);
 }
 
 // fog_light is the light that a point in the fog scatters toward the camera, per unit of scattering.

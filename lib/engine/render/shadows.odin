@@ -100,7 +100,9 @@ Mask_Constants :: struct {
 	lights_offset: u32,
 	size:          [2]u32,
 	stencil:       u32,
-	padding:       [3]u32,
+	// The camera's jitter, which the prepass drew with (see Frame.jitter).
+	jitter:        [2]f32,
+	padding:       u32,
 }
 
 // Shadow_Passes is the shadows' state between frames, in the Renderer.
@@ -550,6 +552,7 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 		lights_offset = f.lights.upload.offset,
 		size          = f.size,
 		stencil       = gpu.stencil_index(gpu_texture(g, f.depth)),
+		jitter        = f.jitter,
 	}
 	for c in 0 ..< sf.mask_count {
 		constants.light_index[c] = sf.mask_lights[c]
