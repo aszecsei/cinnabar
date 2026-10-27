@@ -1,7 +1,8 @@
 // tools/cook compiles source assets. See docs/content/identity-and-cooking.md#cooking.
 //
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
-// shaders (see shaders.odin), and `cook daemon` cooks every kind whenever the content changes (see daemon.odin).
+// shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
+// mesh_files.odin), and `cook daemon` cooks every kind whenever the content changes (see daemon.odin).
 package cook
 
 import "core:fmt"
@@ -16,6 +17,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook scenes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook materials --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook models --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook meshes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
@@ -45,6 +47,10 @@ main :: proc() {
 	case "models":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Model)
+		}
+	case "meshes":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Mesh)
 		}
 	case "textures":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {

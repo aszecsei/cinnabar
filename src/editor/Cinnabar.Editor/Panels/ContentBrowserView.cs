@@ -576,7 +576,8 @@ public sealed class ContentBrowserView : DockPanel
             foreach (var (label, template) in new (string, AssetTemplate?)[]
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
-                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Folder", null),
+                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
+                    ("New Folder", null),
                 })
             {
                 menu.Items.Add(new MenuItem

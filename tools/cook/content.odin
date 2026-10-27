@@ -147,6 +147,9 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	if .Model in kinds {
 		pass.ok = cook_models(options, pass.assets, &pass) && pass.ok
 	}
+	if .Mesh in kinds {
+		pass.ok = cook_mesh_files(options, pass.assets, &pass) && pass.ok
+	}
 	if kinds & {.Shading_Model, .Material, .Material_Instance, .Material_Function} != {} {
 		pass.ok = cook_materials(options, pass.assets, &pass) && pass.ok
 	}

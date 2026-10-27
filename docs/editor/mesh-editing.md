@@ -1,6 +1,6 @@
 # Mesh editing
 
-*This is a design for work that has not started. Nothing it names exists yet unless the text says so. The phases at the end are the order to build it in.*
+*This is a design for work in progress. Phase 1, the asset, is built, and is documented in [Content: Meshes](../content/kinds/meshes.md#mesh-files); nothing else it names exists yet unless the text says so. The phases at the end are the order to build it in.*
 
 Level geometry built in the editor, as Hammer builds it, but as polygon meshes instead of brushes: a mesh asset kind that the editor writes and the cooker cooks, a mesh mode in the viewport that selects vertices, edges and faces and runs the mesh and texture tools on them, and a live path over the editor link so the host draws an unsaved mesh while it is edited. Read [Document and scenes](document-and-scenes.md), [Viewport](viewport.md) and [Content: Meshes](../content/kinds/meshes.md) first.
 
@@ -31,7 +31,7 @@ flowchart LR
 
 ## Mesh assets
 
-A new importer in `tools/cook`, `meshes_source.odin`, cooks `.mesh` files to `Mesh` blobs. The kind stays `Mesh` (`format.Asset_Kind`): `IMPORTERS[.Mesh]` gains the extension, and a `.mesh` file is a file asset with one blob under its own GUID, not a sub-asset. The content browser shows it with the mesh icon, it drags onto a `Mesh_Renderer`'s mesh field, and Rename, Duplicate and Delete act on it as on any file.
+A new importer in `tools/cook`, `mesh_files.odin`, cooks `.mesh` files to `Mesh` blobs. The kind stays `Mesh` (`format.Asset_Kind`): `IMPORTERS[.Mesh]` gains the extension, and a `.mesh` file is a file asset with one blob under its own GUID, not a sub-asset. The content browser shows it with the mesh icon, it drags onto a `Mesh_Renderer`'s mesh field, and Rename, Duplicate and Delete act on it as on any file.
 
 - **Text source**, for the same reasons as scenes: it diffs and merges, and the editor and the cooker both read it. `format.mesh_text_parse` in `lib/engine/asset/format` and `MeshFile` in `Cinnabar.Editor.Mesh` must agree, as `scene_parse` and `SceneFile` do. The file starts with `mesh 1`.
 - **Lines:** `material <slot> $<guid>` names a material slot, at most 8 (`render.MAX_MATERIAL_SLOTS`); a slot that names no material draws the engine's default. `v <x> <y> <z>` is a vertex in meters, in the mesh's space. `f <slot> <v0> <v1> <v2> ...` is a face of three or more vertex indices, clockwise seen from its front, as the cooker leaves glTF faces (see [Content: Meshes](../content/kinds/meshes.md#meshes)). A face's `map` line follows it: `map <ux uy uz> <vx vy vz> <su sv> <tu tv> <rotation>`, the two texture axes in the mesh's space, the scale in meters per texture repeat, the shift in texture repeats, and the rotation in degrees. `e <a> <b> sharp` marks a hard edge. The writer puts vertices, then faces in order, so an edit changes the lines of the face it touches.
@@ -218,7 +218,7 @@ The cook link's `Asset` gains `size` for textures and `tool_texture` and `hotspo
 
 - **Tools** (`Cinnabar.Editor.Tests/MeshToolsTests.cs`): each tool on a box and on a concave face, checking counts, planarity, winding and the mappings of new faces; Cut across a box; Bevel with segments; Clean on a mesh with a doubled vertex and a collinear one; refusal when validation fails.
 - **Mappings** (`MeshMappingTests.cs`): each texture tool's effect on the derived UVs, Fit and Justify against a rectangle, Hotspot's choice among rectangles of known aspect.
-- **Format** (`MeshFileTests.cs` and `format_test.odin`): a round trip of the sample mesh in both parsers, and a file with a bad face's problem on its line.
+- **Format** (`MeshFileTests.cs` and `mesh_text_test.odin`): a round trip of the sample mesh in both parsers, and a file with a bad face's problem on its line.
 - **Bake** (`mesh_bake_test.odin`): sharp edges split vertices and smooth ones do not, UVs match the mapping's formula, the tangent is the projected `UAxis`, and ear clipping of a concave face gives the right triangle count. `build_simple_meshlets` keeps every meshlet within the limits and covers every triangle once.
 - **Undo** (`MeshDocumentTests.cs`): a drag is one entry with the first `before`; a mixed Detach entry undoes the entity and the document together; dirty states of scene and mesh are independent; save order.
 - **Primitives and Draw** (`PrimitivesTests.cs`): each primitive is closed where it should be, fronts out, has the face count of the table and a mapping on every face; a cylinder's sides are continuous in u; Draw on a face cuts it into a ring and an inner face; Draw on nothing gives a Plane; a crossing polygon is refused.
@@ -229,7 +229,7 @@ The cook link's `Asset` gains `size` for textures and `tool_texture` and `hotspo
 
 ## Phases
 
-1. **The asset.** `.mesh` files: the format and both parsers, `mesh_bake`, the cooker's importer, the `mesh` template, and the sample's content gets a `.mesh` room. Meshes made by hand cook and draw.
+1. **The asset.** `.mesh` files: the format and both parsers, `mesh_bake`, the cooker's importer, the `mesh` template, and the sample's content gets a `.mesh` room. Meshes made by hand cook and draw. *Built.*
 2. **The live path.** `live_meshes`, `build_simple_meshlets`, the residency override, the three live messages, and the editor's `MeshSet` with `MeshOperation` on the scene's stack. Save and release. A mesh that the editor loads and sends draws the same as its cooked blob.
 3. **The mode.** Entering and leaving, element kinds, `MeshPick`, box selection, `Mesh_Overlay` and the overlay's drawing, the gizmo on the sub-selection with Move, Rotate and Scale, the grid, and Delete. Block, and the dev materials, so that the first blocked-out room is measured and colored.
 4. **The mesh tools** in the order of the table, with Extrude, Push/Pull and Duplicate first because they make rooms, and Cut and Bevel last because they are the hardest. Draw comes with Cut, which it shares its splitting with, and the other primitives with their parameters come after Block.

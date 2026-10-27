@@ -24,6 +24,8 @@ REBASE_CELLS :: 1.5
 MAX_INSTANCES :: 16384
 // A Mesh_Renderer's material slots, one for each of its mesh's first submeshes.
 MAX_MATERIAL_SLOTS :: 8
+// A mesh file names its slots by the same count.
+#assert(MAX_MATERIAL_SLOTS == format.MESH_MAX_SLOTS)
 CULL_GROUP_SIZE :: 64
 // Each amplification group of the mesh shader path tests this many meshlets. Matches MESHLETS_PER_GROUP in
 // material_mesh.hlsli.

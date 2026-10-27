@@ -208,6 +208,7 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Scene => ("New Scene", "scene"),
             Link.Cook.AssetTemplate.Material => ("New Material", "material"),
             Link.Cook.AssetTemplate.MaterialFunction => ("New Material Function", "material function"),
+            Link.Cook.AssetTemplate.Mesh => ("New Mesh", "mesh, a 1 m box,"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";

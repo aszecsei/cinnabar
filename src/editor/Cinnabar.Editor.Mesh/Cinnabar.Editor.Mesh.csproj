@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Cinnabar.Editor.Mesh</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Cinnabar.Editor.Tools\Cinnabar.Editor.Tools.csproj" />
+  </ItemGroup>
+</Project>

@@ -11,7 +11,8 @@ import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // IMPORTERS gives the extensions of each kind of asset that the cooker cooks, lowercase, the first one for new assets.
-// Other files in the content roots are not assets.
+// Other files in the content roots are not assets. A Mesh is a .mesh file of its own, or a glTF model's sub-asset,
+// which has no extension.
 IMPORTERS :: [format.Asset_Kind][]string {
 	.None    = nil,
 	.Script  = {SCRIPT_EXTENSION},
@@ -19,7 +20,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Shader  = {format.SHADER_EXTENSION},
 	.Texture = TEXTURE_EXTENSIONS,
 	.Model   = MODEL_EXTENSIONS,
-	.Mesh    = nil,
+	.Mesh    = {format.MESH_EXTENSION},
 	.Shading_Model = {format.SHADING_EXTENSION},
 	.Material = {format.MATERIAL_EXTENSION},
 	.Material_Instance = {format.MATERIAL_INSTANCE_EXTENSION},
@@ -53,6 +54,8 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 		return TEXTURE_SETTINGS
 	case .Model:
 		return MODEL_SETTINGS
+	case .Mesh:
+		return MESH_SETTINGS
 	}
 	return nil
 }
@@ -97,7 +100,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Shading_Model, .Material, .Material_Instance, .Material_Function}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.

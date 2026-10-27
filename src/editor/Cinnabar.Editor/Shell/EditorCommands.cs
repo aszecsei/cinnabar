@@ -26,6 +26,7 @@ static class EditorCommands
     public const string NewSceneAsset = "content.newScene";
     public const string NewMaterial = "content.newMaterial";
     public const string NewMaterialFunction = "content.newMaterialFunction";
+    public const string NewMesh = "content.newMesh";
     public const string NewFolder = "content.newFolder";
     public const string RenameAsset = "content.rename";
     public const string DuplicateAsset = "content.duplicate";
@@ -311,6 +312,7 @@ static class EditorCommands
         NewAssetCommand(NewSceneAsset, Link.Cook.AssetTemplate.Scene, "New Scene", "scene", "Add an empty scene to the content browser's folder.");
         NewAssetCommand(NewMaterial, Link.Cook.AssetTemplate.Material, "New Material", "material", "Add a material graph, lit, to the content browser's folder.");
         NewAssetCommand(NewMaterialFunction, Link.Cook.AssetTemplate.MaterialFunction, "New Material Function", "material-function", "Add a material function, a graph that materials call as a node, to the content browser's folder.");
+        NewAssetCommand(NewMesh, Link.Cook.AssetTemplate.Mesh, "New Mesh", "mesh", "Add a mesh file, a 1 m box to build level geometry from, to the content browser's folder.");
         NewAssetCommand(NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
         {

@@ -220,6 +220,8 @@ Asset_Template :: enum u8 {
 	Material,
 	// A material function with one input and one output, linked.
 	Material_Function,
+	// A mesh file of a 1 m box with world-aligned mappings.
+	Mesh,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.
