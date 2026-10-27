@@ -51,7 +51,7 @@ public sealed class GameCommandTests : IDisposable
         ];
         foreach (var op in ops)
         {
-            var back = Operation.FromWire(op.ToWire());
+            var back = Operation.FromWire(op.ToWire()!);
             Assert.Equal(SceneFile.Write(Apply(op)), SceneFile.Write(Apply(back)));
         }
     }

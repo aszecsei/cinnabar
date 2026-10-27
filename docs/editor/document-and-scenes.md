@@ -41,6 +41,8 @@ The editor owns the scene: edits are operations with inverses, the host's world 
 - **Input:** while the game plays and the viewport has focus, the viewport sends its keyboard and mouse to the host as `Editor_Input` events: keys and buttons down and up, the mouse's position in frame pixels, and the wheel. The host queues them in `core`, which applies them to the frame's `core.Input` after the window's own messages, so the game reads them as it reads a window. The function keys stay the editor's as well, so F5 and Shift+F5 work while the game has the keys. Losing focus, and the editor's link closing, release every key.
 - Entities that the game spawns at run time have no scene ID. The outliner shows them in play mode under their handle.
 
+The mesh files that the scene's entities place are documents of their own beside the scene, `MeshDocument`s in a `MeshSet`, whose edits are `MeshOperation`s on the scene's undo stack, so one Ctrl+Z undoes the last thing the user did whichever file it touched; the host draws them from memory while they are edited (see [Mesh editing](mesh-editing.md#undo-and-saving)). Save writes the scene, then every dirty mesh.
+
 ## Scenes
 
 A scene is a source asset with a GUID and a `.meta` file, like every other asset (see [Content pipeline](../content/identity-and-cooking.md#identity)). The cooker parses scenes with `asset_format.scene_parse`, and the editor with `SceneFile` in `Cinnabar.Editor.Document`. The two must agree.

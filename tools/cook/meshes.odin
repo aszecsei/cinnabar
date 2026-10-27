@@ -747,32 +747,7 @@ bounds_of :: proc(vertices: []Vertex, indices: []c.uint) -> (b: format.Mesh_Boun
 	return
 }
 
-// octahedral folds a unit vector onto the square [-1, 1]².
-octahedral :: proc(n: [3]f32) -> [2]f32 {
-	sum := abs(n.x) + abs(n.y) + abs(n.z)
-	if sum == 0 {
-		return {0, 0}
-	}
-	p := n.xy / sum
-	if n.z < 0 {
-		sign := [2]f32{p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1}
-		p = (1 - [2]f32{abs(p.y), abs(p.x)}) * sign
-	}
-	return p
-}
-
-encode_normal :: proc(n: [3]f32) -> [2]i16 {
-	p := octahedral(n)
-	return {i16(math.round(clamp(p.x, -1, 1) * 32767)), i16(math.round(clamp(p.y, -1, 1) * 32767))}
-}
-
-// encode_tangent stores the tangent in unorm16 pairs, with the bitangent's sign in the lowest bit of the second.
-encode_tangent :: proc(t: [4]f32) -> [2]u16 {
-	p := octahedral(t.xyz) * 0.5 + 0.5
-	x := u16(math.round(clamp(p.x, 0, 1) * 65535))
-	y := u16(math.round(clamp(p.y, 0, 1) * 65535)) & ~u16(1)
-	if t.w < 0 {
-		y |= 1
-	}
-	return {x, y}
-}
+// The attribute encoders are the format's, so the game's live meshes encode as the cooker does.
+octahedral :: format.mesh_octahedral
+encode_normal :: format.mesh_encode_normal
+encode_tangent :: format.mesh_encode_tangent

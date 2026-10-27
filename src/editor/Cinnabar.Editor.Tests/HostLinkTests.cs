@@ -174,7 +174,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         var spinner = Spinning(1, "Spinner");
         var path = Path.Combine(Path.GetTempPath(), $"cinnabar-test-{Guid.NewGuid():N}.scene");
         var document = new Document.SceneDocument(path, Scene(spinner));
-        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire())]));
+        document.Applied += ops => editor.Link.Send(new ApplyOperations([.. ops.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>()]));
         await editor.Next<EntitySnapshot>();
         await Load(editor, document.Scene);
 

@@ -329,7 +329,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
-	editor.init(&s.editor, platform, &s.assets)
+	editor.init(&s.editor, platform, &s.assets, &s.renderer.residency)
 	register_editor_commands(s)
 
 	vertices := [3]Vertex {

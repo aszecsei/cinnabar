@@ -54,7 +54,7 @@ The code is in three places:
 | | `shaders.odin` | Shaders: DXC as a child process, includes, problems from its messages |
 | | `textures.odin`, `compressonator.odin` | Textures: decoding, resizing, mips, block compression through `CMP_Core` |
 | | `meshes.odin`, `meshoptimizer.odin` | Models and meshes: glTF through cgltf, the two vertex streams, meshoptimizer |
-| | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half |
+| | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half. The game bakes the same files live while the editor edits them (see [Mesh editing](../editor/mesh-editing.md#live-meshes)) |
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |

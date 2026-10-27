@@ -1,6 +1,7 @@
 package editor
 
 import "base:runtime"
+import "core:log"
 import "core:mem/virtual"
 import "core:slice"
 import "core:testing"
@@ -15,6 +16,43 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
+
+// LIVE_BOX is a 1 m box as a mesh file: the cooker's template, with every edge sharp.
+@(private = "file")
+LIVE_BOX :: `mesh 1
+v 0 0 0
+v 1 0 0
+v 1 0 1
+v 0 0 1
+v 0 1 0
+v 1 1 0
+v 1 1 1
+v 0 1 1
+f 0 0 1 2 3
+map 1 0 0 0 0 -1 1 1 0 0 0
+f 0 4 7 6 5
+map 1 0 0 0 0 -1 1 1 0 0 0
+f 0 0 4 5 1
+map 1 0 0 0 -1 0 1 1 0 0 0
+f 0 2 6 7 3
+map 1 0 0 0 -1 0 1 1 0 0 0
+f 0 3 7 4 0
+map 0 0 1 0 -1 0 1 1 0 0 0
+f 0 1 5 6 2
+map 0 0 1 0 -1 0 1 1 0 0 0
+e 0 1 sharp
+e 1 2 sharp
+e 2 3 sharp
+e 3 0 sharp
+e 4 5 sharp
+e 5 6 sharp
+e 6 7 sharp
+e 7 4 sharp
+e 0 4 sharp
+e 1 5 sharp
+e 2 6 sharp
+e 3 7 sharp
+`
 
 Mode :: enum u8 {
 	Idle,
@@ -791,4 +829,121 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	step(f, 0)
 	_, ok = viewport_quality(&f.editor, renderer)
 	testing.expect(t, !ok, "without an editor, the game's quality")
+}
+// A fake GPU for the live meshes' residency, whose transfers are done at once.
+@(private = "file")
+live_buffers: int
+
+@(test)
+live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	live_buffers = 0
+	// Letting go of a live mesh loads its asset, which reads a file.
+	f.platform.file_read = core.file_read
+	f.platform.file_modified = core.file_modified
+	f.platform.asset_allocator = runtime.heap_allocator()
+	f.platform.gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
+		live_buffers += 1
+		return transmute(gpu.Buffer)[2]u32{u32(live_buffers), 1}
+	}
+	f.platform.gpu_destroy_buffer = proc(buffer: gpu.Buffer) {
+		if buffer != {} {
+			live_buffers -= 1
+		}
+	}
+	f.platform.gpu_stream_buffer = proc(buffer: gpu.Buffer, offset: u32, data: []byte) -> gpu.Transfer {return 1}
+	f.platform.gpu_transfer_done = proc(transfer: gpu.Transfer) -> bool {return true}
+	assets: asset.Assets
+	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
+	defer asset.destroy(&assets)
+	residency := new(render.Residency)
+	defer free(residency)
+	render.residency_init(residency, &f.platform, &assets)
+	defer render.residency_destroy(residency)
+	f.editor.residency = residency
+	// The residency goes before the editor does.
+	defer f.editor.residency = nil
+
+	box, _, parsed := format.mesh_text_parse(LIVE_BOX, context.temp_allocator)
+	testing.expect(t, parsed)
+	guid := format.guid_parse("3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d") or_else {}
+
+	// A Live_Mesh bakes as the cooker does and streams in place of the asset, which is not even cooked.
+	step(f, 1, live_message(guid, box, context.temp_allocator))
+	testing.expect(t, render.is_live(residency, guid))
+	testing.expect_value(t, len(f.editor.live_meshes), 1)
+	render.residency_update(residency)
+	mesh, ready := render.resident_mesh(residency, guid)
+	testing.expect(t, ready)
+	testing.expect_value(t, mesh.vertex_count, 24)
+	testing.expect_value(t, mesh.index_count, 36)
+	testing.expect_value(t, mesh.index_format, gpu.Index_Format.U16)
+	testing.expect_value(t, mesh.submesh_count, 1)
+	testing.expect_value(t, mesh.submeshes[0].meshlet_count, 1)
+	testing.expect_value(t, mesh.bounds.max, [3]f32{1, 1, 1})
+	testing.expect_value(t, live_buffers, 6)
+
+	// A drag's step moves the vertices, and the mesh bakes again where they are.
+	positions := make([]f32, 24, context.temp_allocator)
+	for v, i in box.vertices {
+		positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2] = v.x * 2, v.y * 2, v.z * 2
+	}
+	step(f, 1, link.Live_Mesh_Vertices{guid = ([16]u8)(guid), positions = positions})
+	render.residency_update(residency)
+	mesh, _ = render.resident_mesh(residency, guid)
+	testing.expect_value(t, mesh.bounds.max, [3]f32{2, 2, 2})
+	testing.expect_value(t, live_buffers, 6)
+	// A step of the wrong count is refused.
+	context.logger = log.nil_logger()
+	step(f, 1, link.Live_Mesh_Vertices{guid = ([16]u8)(guid), positions = positions[:6]})
+	render.residency_update(residency)
+	mesh, _ = render.resident_mesh(residency, guid)
+	testing.expect_value(t, mesh.bounds.max, [3]f32{2, 2, 2})
+
+	// Letting go leaves the asset, which is not cooked, so nothing draws.
+	step(f, 1, link.Release_Live_Mesh{guid = ([16]u8)(guid)})
+	testing.expect(t, !render.is_live(residency, guid))
+	testing.expect_value(t, len(f.editor.live_meshes), 0)
+	render.residency_update(residency)
+	_, ready = render.resident_mesh(residency, guid)
+	testing.expect(t, !ready)
+
+	// A new editor's connection drops what the old one sent.
+	step(f, 1, live_message(guid, box, context.temp_allocator))
+	testing.expect(t, render.is_live(residency, guid))
+	step(f, 2)
+	testing.expect(t, !render.is_live(residency, guid))
+	testing.expect_value(t, len(f.editor.live_meshes), 0)
+}
+
+@(test)
+a_live_blob_is_the_cookers_mesh_without_its_levels :: proc(t: ^testing.T) {
+	box, _, parsed := format.mesh_text_parse(LIVE_BOX, context.temp_allocator)
+	testing.expect(t, parsed)
+	guid := format.guid_parse("3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d") or_else {}
+	blob, problems := live_blob(guid, box, context.temp_allocator)
+	testing.expect_value(t, len(problems), 0)
+	view, ok := format.mesh_view(blob)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, view.header.guid, guid)
+	testing.expect_value(t, view.vertex_count, 24)
+	testing.expect_value(t, view.index_count, 36)
+	testing.expect_value(t, view.flags, format.Mesh_Flags{})
+	submeshes := format.mesh_submeshes(blob, view)
+	testing.expect_value(t, len(submeshes), 1)
+	meshlets := format.mesh_meshlets(blob, view)
+	testing.expect_value(t, len(meshlets), 1)
+	testing.expect(t, meshlets[0].depth == 0 && meshlets[0].error == 0 && meshlets[0].cone_cutoff == 127)
+	testing.expect_value(t, view.bounds.center, [3]f32{0.5, 0.5, 0.5})
+
+	// A mesh with no faces that bake gives no blob, with the faces' problems.
+	bad := box
+	bad.faces = {{slot = 0, corners = {0, 1, 1}, mapping = box.faces[0].mapping, line = 0}}
+	blob, problems = live_blob(guid, bad, context.temp_allocator)
+	testing.expect(t, blob == nil)
+	testing.expect_value(t, len(problems), 1)
 }

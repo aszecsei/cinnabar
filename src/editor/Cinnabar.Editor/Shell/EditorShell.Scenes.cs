@@ -100,7 +100,10 @@ public sealed partial class EditorShell
         PendingRestore = null;
     }
 
-    /// <summary>Saves the open scene, to its file or to a new path. A failure goes to the console.</summary>
+    /// <summary>
+    /// Saves the open scene, to its file or to a new path, and then every dirty mesh document of the scene. A failure
+    /// goes to the console.
+    /// </summary>
     public bool SaveScene(string? path = null)
     {
         if (Scene == null)
@@ -117,6 +120,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"scene: cannot save {path ?? old}: {e.Message}");
             return false;
         }
+        var meshesSaved = SaveMeshes();
         Autosave.Delete(old);
         Autosave.Delete(Scene.Path);
         // Save As keeps what the user hid and locked for the new file.
@@ -125,7 +129,7 @@ public sealed partial class EditorShell
             SaveSceneView();
         }
         Console.Add(LogLevel.Info, $"scene: saved {Scene.Path}");
-        return true;
+        return meshesSaved;
     }
 
     /// <summary>Forgets the open scene's unsaved changes and their autosave, as when the user closes without saving.</summary>
@@ -349,6 +353,7 @@ public sealed partial class EditorShell
         {
             Scene.Applied -= SendOperations;
             Scene.Changed -= OnDocumentChanged;
+            CloseMeshes();
         }
         Scene = document;
         document.Applied += SendOperations;
@@ -364,7 +369,12 @@ public sealed partial class EditorShell
 
     void SendOperations(IReadOnlyList<Operation> operations)
     {
-        Host.Send(new ApplyOperations([.. operations.Select(o => o.ToWire())]));
+        // A mesh operation has nothing here: the mesh set's change sends the live mesh.
+        var wire = operations.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>().ToArray();
+        if (wire.Length > 0)
+        {
+            Host.Send(new ApplyOperations(wire));
+        }
         // The gizmo sits on the primary entity, which an edit can move.
         SendGizmo();
     }

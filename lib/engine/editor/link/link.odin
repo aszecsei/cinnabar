@@ -84,6 +84,9 @@ Message :: union {
 	Profile_Recording,
 	Capture_Request,
 	Capture_Result,
+	Live_Mesh,
+	Live_Mesh_Vertices,
+	Release_Live_Mesh,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -990,4 +993,60 @@ Capture_Result :: struct {
 	frames:      u32,
 	duration_ms: f32,
 	output:      Output_Mode,
+}
+
+// Live meshes (see docs/editor/mesh-editing.md#live-meshes). The editor edits a mesh file as a structured mesh, and the
+// game draws it from memory in place of the mesh's cooked blob while the editor holds it, so a drag shows at frame
+// rate. The structure is the file's, as a Load_Scene is a scene's, so the game bakes it with the parser's result type.
+
+// A material slot of a live mesh that names a material.
+Live_Material :: struct {
+	slot: u32,
+	guid: [16]u8,
+}
+
+// A face's texture mapping, as the file's map line has it.
+Live_Mapping :: struct {
+	u_axis:   [3]f32,
+	v_axis:   [3]f32,
+	// Meters per texture repeat.
+	scale:    [2]f32,
+	// In repeats.
+	shift:    [2]f32,
+	// Degrees.
+	rotation: f32,
+}
+
+// A polygon of three or more vertex indices, clockwise seen from its front.
+Live_Face :: struct {
+	slot:    u32,
+	corners: []u32,
+	mapping: Live_Mapping,
+}
+
+// A sharp edge between two vertices.
+Live_Edge :: struct {
+	a, b: u32,
+}
+
+// Editor to game: the whole structured mesh of the mesh asset guid. The game bakes it and makes it resident in place
+// of the asset, until a Release_Live_Mesh. positions are x, y, z per vertex, in meters in the mesh's space.
+Live_Mesh :: struct {
+	guid:      [16]u8,
+	materials: []Live_Material,
+	positions: []f32,
+	faces:     []Live_Face,
+	sharp:     []Live_Edge,
+}
+
+// Editor to game: a drag's step: the positions only, for a mesh that a Live_Mesh gave, with the same count. The game
+// bakes it again and streams it again.
+Live_Mesh_Vertices :: struct {
+	guid:      [16]u8,
+	positions: []f32,
+}
+
+// Editor to game: the editor has let go of the mesh. The game clears the override and draws the asset's blob.
+Release_Live_Mesh :: struct {
+	guid: [16]u8,
 }

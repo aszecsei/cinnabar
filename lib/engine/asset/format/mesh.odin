@@ -1,5 +1,6 @@
 package asset_format
 
+import "core:math"
 import "core:mem"
 
 import "cinnabar:core/layout"
@@ -82,6 +83,38 @@ Mesh_Attributes :: struct {
 	tangent: [2]u16,
 	uv0:     [2]f32,
 	// Then, when the flags say, the second UV set as [2]f32 and the color as RGBA8 unorm.
+}
+
+// mesh_octahedral folds a unit vector onto the square [-1, 1]².
+mesh_octahedral :: proc "contextless" (n: [3]f32) -> [2]f32 {
+	sum := abs(n.x) + abs(n.y) + abs(n.z)
+	if sum == 0 {
+		return {0, 0}
+	}
+	p := n.xy / sum
+	if n.z < 0 {
+		sign := [2]f32{p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1}
+		p = (1 - [2]f32{abs(p.y), abs(p.x)}) * sign
+	}
+	return p
+}
+
+// mesh_encode_normal stores a normal as Mesh_Attributes has it: octahedral, in snorm16 pairs.
+mesh_encode_normal :: proc "contextless" (n: [3]f32) -> [2]i16 {
+	p := mesh_octahedral(n)
+	return {i16(math.round(clamp(p.x, -1, 1) * 32767)), i16(math.round(clamp(p.y, -1, 1) * 32767))}
+}
+
+// mesh_encode_tangent stores a tangent as Mesh_Attributes has it: octahedral, in unorm16 pairs, with the bitangent's
+// sign in the lowest bit of the second.
+mesh_encode_tangent :: proc "contextless" (t: [4]f32) -> [2]u16 {
+	p := mesh_octahedral(t.xyz) * 0.5 + 0.5
+	x := u16(math.round(clamp(p.x, 0, 1) * 65535))
+	y := u16(math.round(clamp(p.y, 0, 1) * 65535)) & ~u16(1)
+	if t.w < 0 {
+		y |= 1
+	}
+	return {x, y}
 }
 
 // mesh_attribute_stride is the size of one vertex's attributes for the flags: from 16 to 28 bytes.

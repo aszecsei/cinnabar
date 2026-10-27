@@ -4,15 +4,16 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// An edit of a scene (see docs/editor/document-and-scenes.md#document-model). <see cref="Apply"/> changes the document and returns the
-/// operation that undoes it. The same operation goes to the host as <see cref="ToWire"/>. An operation that does not
-/// fit the document, such as one for an entity that is not there, throws <see cref="InvalidOperationException"/> and
-/// changes nothing.
+/// operation that undoes it. The same operation goes to the host as <see cref="ToWire"/>, or null for an operation
+/// that the host hears of another way, such as a mesh document's, which goes as a live mesh. An operation that does
+/// not fit the document, such as one for an entity that is not there, throws <see cref="InvalidOperationException"/>
+/// and changes nothing.
 /// </summary>
 public abstract record Operation(ulong Entity)
 {
     public abstract Operation Apply(Scene scene);
 
-    public abstract Wire.Operation ToWire();
+    public abstract Wire.Operation? ToWire();
 
     /// <summary>
     /// True when <paramref name="later"/> replaces this operation, as each step of a drag replaces the step before:

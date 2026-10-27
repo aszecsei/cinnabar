@@ -94,15 +94,24 @@ public sealed class MeshData
         IEnumerable<MeshEdge> sharpEdges,
         IEnumerable<string>? headerComments = null)
     {
-        var slots = materials.Take(MaxSlots).ToList();
-        while (slots.Count < MaxSlots)
+        // An array that is given as it is stays the same array, so a change that keeps the faces keeps their array,
+        // which is how the live path tells a move from an edit of the topology.
+        if (materials is ImmutableArray<string> { Length: MaxSlots } sameMaterials)
         {
-            slots.Add("");
+            Materials = sameMaterials;
         }
-        Materials = [.. slots];
-        Vertices = [.. vertices];
-        Faces = [.. faces];
-        SharpEdges = [.. sharpEdges];
+        else
+        {
+            var slots = materials.Take(MaxSlots).ToList();
+            while (slots.Count < MaxSlots)
+            {
+                slots.Add("");
+            }
+            Materials = [.. slots];
+        }
+        Vertices = vertices as ImmutableArray<Vec3>? ?? [.. vertices];
+        Faces = faces as ImmutableArray<MeshFace>? ?? [.. faces];
+        SharpEdges = sharpEdges as ImmutableArray<MeshEdge>? ?? [.. sharpEdges];
         HeaderComments = [.. headerComments ?? []];
     }
 

@@ -154,14 +154,17 @@ public sealed class MainWindow : Window
         return true;
     }
 
-    /// <summary>Asks about unsaved changes before they would be lost, and returns whether to go on.</summary>
+    /// <summary>Asks about unsaved changes, the scene's and its meshes', before they would be lost, and returns whether to go on.</summary>
     async Task<bool> ConfirmDiscard(string doing)
     {
-        if (_shell.Scene is not { IsDirty: true } scene)
+        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Meshes.AnyDirty))
         {
             return true;
         }
-        var answer = await Dialogs.Ask(this, "Unsaved changes", $"{scene.Title} has changes that are not saved. Save them before {doing}?",
+        var what = scene.IsDirty
+            ? _shell.Meshes.AnyDirty ? $"{scene.Title} and its meshes have" : $"{scene.Title} has"
+            : $"The meshes of {scene.Title} have";
+        var answer = await Dialogs.Ask(this, "Unsaved changes", $"{what} changes that are not saved. Save them before {doing}?",
             "Save", "Don't Save", "Cancel");
         switch (answer)
         {

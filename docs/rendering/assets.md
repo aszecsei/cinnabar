@@ -19,6 +19,7 @@ The asset runtime keeps blobs on the CPU. The renderer's residency table, in `Re
 - **Failures:** an asset that is not cooked, or whose blob is not of its kind, is logged once and tried again every `RESIDENT_RETRY_FRAMES` frames, or when a newer blob arrives.
 - **Unused assets** stay resident. Unloading by use, and streaming mips by distance, come with larger scenes.
 - **Acceleration structures:** with `Ray_Query` (`Residency.accels`), a mesh that becomes ready gets a bottom-level acceleration structure of all its triangles, which the renderer builds the next frame that traces shadows (`unbuilt_accels`).
+- **Live meshes:** `render.set_live(&residency, guid, blob)` makes a mesh blob in memory resident under a GUID in place of the asset's blob, and `clear_live` lets the asset stream again, whatever its version. A live blob streams and swaps in as an asset's does; one that arrives while another streams waits for it, and the newest wins. The editor's mesh files draw this way while they are edited (see [Mesh editing](../editor/mesh-editing.md#live-meshes)), baked by the game with `format.mesh_bake` and cut into level-0 meshlets by `render.build_simple_meshlets` (`meshlets.odin`): meshlets of at most 64 vertices and 124 triangles in index order, each with its sphere and a normal cone as conservative as meshoptimizer's, with an error of 0 and no parent, so the cluster LOD selection always takes them. A live mesh gets an acceleration structure as any mesh does, built again after each step.
 
 ## Asset fields
 
