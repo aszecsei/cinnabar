@@ -200,6 +200,23 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	testing.expect(t, draw_frame(r, w, {view = desc.view, size = desc.size}))
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
+	// A frame with no_debug, as the editor's in Play, draws its lines nowhere and still drops them, and runs the debug
+	// hook without a layer, so the editor's picks still read the IDs and the depth.
+	debug.line(&r.debug, {}, ecs.position_offset({}, {0, 0, 1}), {1, 0, 0, 1})
+	record.debug = true
+	no_debug := desc
+	no_debug.no_debug = true
+	no_debug.hooks.debug = proc(f: ^Frame) {
+		(^Hook_Record)(f.data).debug = f.debug != 0
+		p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
+		read(f.graph, p, f.ids)
+		read(f.graph, p, f.depth)
+	}
+	testing.expect(t, draw_frame(r, w, no_debug), "the frame without a debug layer did not execute")
+	testing.expect(t, !record.debug, "the debug hook saw a debug layer")
+	testing.expect_value(t, len(debug.frame_lines(&r.debug)), 0)
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
 	// With the pipelines of post-processing, the ambient occlusion, the global illumination and the fog, which the
 	// test's cache cannot cook, every pass runs: the frames after the first read their histories, and the lookup table
 	// bakes once. The ambient occlusion and the global illumination run on the compute queue. The null backend checks every barrier and wait.

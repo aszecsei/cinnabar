@@ -9,6 +9,7 @@ import "core:time"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
+import "cinnabar:engine/debug"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor/link"
@@ -602,6 +603,40 @@ the_editors_mode_decides_whether_the_world_runs :: proc(t: ^testing.T) {
 	step(f, 1, link.Set_Mode{mode = .Edit})
 	_, ok = view(&f.editor)
 	testing.expect(t, ok)
+}
+
+@(test)
+the_editors_overlays_and_the_debug_layer_draw_only_while_editing :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+	render.register_components(&w.registry)
+	lamp := ecs.spawn(w)
+	ecs.add(w, lamp, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, lamp, render.Point_Light{intensity = 1, range = 2})
+	lines: debug.Draw
+	debug.init(&lines, context.allocator)
+	defer debug.destroy(&lines)
+
+	// Without an editor, the game is not editing, and its debug layer shows.
+	testing.expect(t, !editing(&f.editor) && debug_shown(&f.editor))
+	// A new editor starts in Edit, where both show.
+	step(f, 1, link.Viewport_Settings{helpers = .All})
+	testing.expect(t, editing(&f.editor) && debug_shown(&f.editor))
+	draw_helpers(&f.editor, w, &lines)
+	testing.expect(t, len(debug.frame_lines(&lines)) > 0, "the helpers drew nothing in Edit")
+	debug.end_frame(&lines)
+
+	// Play and Paused show the game's frame alone, with or without the free camera.
+	for mode in ([]link.Set_Mode{{mode = .Play}, {mode = .Play, free_camera = true}, {mode = .Paused}}) {
+		step(f, 1, mode)
+		testing.expectf(t, !editing(&f.editor) && !debug_shown(&f.editor), "overlays in %v", mode)
+		draw_helpers(&f.editor, w, &lines)
+		testing.expectf(t, len(debug.frame_lines(&lines)) == 0, "the helpers drew in %v", mode)
+	}
+	// Stop sets Edit, and they are back.
+	step(f, 1, link.Set_Mode{mode = .Edit})
+	testing.expect(t, editing(&f.editor) && debug_shown(&f.editor))
 }
 
 @(test)

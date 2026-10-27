@@ -29,11 +29,11 @@ FRUSTUM_LENGTH :: 1
 @(private = "file")
 FRUSTUM_ASPECT :: 16.0 / 9.0
 
-// draw_helpers draws the helpers of this frame into d, while an editor is linked. Call it before the frame draws d's
-// lines, while editing. Hidden entities have none.
+// draw_helpers draws the helpers of this frame into d, while a linked editor is in Edit. Call it before the frame draws
+// d's lines. Hidden entities have none, and Play and Paused have none.
 draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 	mode := e.viewport.settings.helpers
-	if !active(e) || mode == .None {
+	if !editing(e) || mode == .None {
 		return
 	}
 	shown := visibility(e, w)
@@ -238,8 +238,8 @@ icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.al
 	return icons[:]
 }
 
-// icons_shown is whether the viewport shows the icons.
+// icons_shown is whether the viewport shows the icons: while editing, when the editor asks for them.
 @(private)
 icons_shown :: proc(e: ^Editor) -> bool {
-	return active(e) && e.viewport.settings.show_icons
+	return editing(e) && e.viewport.settings.show_icons
 }

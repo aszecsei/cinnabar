@@ -110,6 +110,11 @@ Frame_Desc :: struct {
 	size:              [2]u32,
 	// Keeps the IDs and the depth after the frame's passes need them, for the editor's picking and outline.
 	keep_ids:          bool,
+	// No debug layer this frame: the debug lines are not drawn, though those with a duration still expire, and the
+	// output pass composites no debug layer. The debug hook still runs, with Frame.debug 0, so passes that read the IDs
+	// and the depth after post-processing, such as the editor's picks, still run; nothing may draw into Frame.debug
+	// then. The editor sets it outside Edit (see docs/rendering/layers-and-output.md#debug).
+	no_debug:          bool,
 	// The entity slots not to draw, a bit each, as the editor hides them. nil hides nothing.
 	hidden:            []u32,
 	// The frame's settings (see docs/rendering/frame.md#settings). nil takes them from the volumes at the view, as
@@ -150,7 +155,8 @@ Frame_Hooks :: struct {
 	before_post:  proc(f: ^Frame),
 	// Adds the passes that draw the UI into Frame.ui, after a pass that clears it. They load it.
 	ui:           proc(f: ^Frame),
-	// Adds passes that draw into Frame.debug after the debug lines, such as the editor's tools. They load it.
+	// Adds passes that draw into Frame.debug after the debug lines, such as the editor's tools. They load it. With
+	// Frame_Desc.no_debug the hook still runs, but Frame.debug is 0 and nothing may draw into it.
 	debug:        proc(f: ^Frame),
 }
 
@@ -403,7 +409,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	begin_gi(f, settings.gi, settings.ambient)
 	add_scene_passes(f, settings.ambient)
 	lines := debug.frame_lines(&r.debug)
-	has_debug := len(lines) > 0 || desc.hooks.debug != nil
+	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
 
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
@@ -466,9 +472,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		p = add_render_pass(&g, "debug", draw_debug_lines, f)
 		color(&g, p, f.debug, .Clear)
 		depth(&g, p, f.depth, .Load, store = desc.keep_ids ? .Store : .Discard)
-		if desc.hooks.debug != nil {
-			desc.hooks.debug(f)
-		}
+	}
+	// Without the layer, the hook still adds the passes that need no target, such as the editor's picks.
+	if desc.hooks.debug != nil {
+		desc.hooks.debug(f)
 	}
 
 	p = add_render_pass(&g, "output", draw_output, f)

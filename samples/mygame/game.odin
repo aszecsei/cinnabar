@@ -672,9 +672,10 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		pass_constants = pass_constants,
 	}
 	extract_triangles(frame)
+	// A linked editor, in any mode: the frame writes the IDs for its picks and takes its viewport settings.
 	editing := editor.active(&s.editor)
 	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
-	// none without an editor.
+	// none without an editor. The shapes draw only in Edit.
 	overrides := editor.render_overrides(&s.editor)
 	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
@@ -682,6 +683,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		view            = view,
 		size            = size,
 		keep_ids        = editing,
+		// The debug layer, with the editor's overlays and the debug lines, only while editing or without an editor.
+		no_debug        = !editor.debug_shown(&s.editor),
 		hidden          = editor.visibility(&s.editor, &s.world).hidden,
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
@@ -792,7 +795,8 @@ draw_hud :: proc(ctx: ^render.Pass_Context) {
 	gpu.cmd_draw(ctx.cb, 3)
 }
 
-// draw_editor_tools adds the editor's pick and its outline and gizmo, which draw into the debug layer.
+// draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo, which draw into the debug layer.
+// In Play and Paused the frame has no debug layer, so only the pick runs.
 draw_editor_tools :: proc(f: ^render.Frame) {
 	s := (^Frame)(f.data).state
 	editor.add_viewport_passes(

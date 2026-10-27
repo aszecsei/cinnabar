@@ -7,11 +7,23 @@ import "cinnabar:engine/editor/link"
 
 // Modes (see docs/editor/document-and-scenes.md#modes). While an editor is linked, it decides whether the game's world runs: in Edit
 // nothing runs, so the editor's document is the world; in Play the full frame runs; and while Paused, only a frame
-// for each step runs. Without an editor, the world always runs.
+// for each step runs. Without an editor, the world always runs. The mode also decides what the viewport shows over the
+// game: the editor's overlays and the debug layer draw only in Edit.
 
 // mode is the editor's mode, or Play without an editor.
 mode :: proc(e: ^Editor) -> link.Editor_Mode {
 	return e.mode if active(e) else .Play
+}
+
+// editing is true while a linked editor is in Edit: the editor's outline, gizmo, icons and helpers draw only then.
+editing :: proc(e: ^Editor) -> bool {
+	return active(e) && e.mode == .Edit
+}
+
+// debug_shown is whether the frame draws its debug layer: always without an editor, and only while editing with one,
+// so the viewport in Play and Paused shows what the game shows.
+debug_shown :: proc(e: ^Editor) -> bool {
+	return !active(e) || e.mode == .Edit
 }
 
 // simulation reports whether this frame runs the world, its systems and scripts, and with what time step: the frame's
