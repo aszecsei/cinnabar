@@ -22,7 +22,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - **Item kinds:** large button, a stack of up to three small buttons, split button, dropdown, and combo box. A toggle command shows as a toggle in any of them, with a check in menus. A combo box needs a choice command, which has a list of options. A gallery comes later.
 - **Validation:** `RibbonLayout.Validate` finds unknown commands, unknown categories, repeated tabs and items of the wrong shape. The shell reports them in the console, and a test checks the default ribbon.
 - **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs, with its name over the first tab of each run. The editor's tabs have no categories yet, so no band shows.
-- **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true. A condition is a named context, such as `host.running`, that the editor sets.
+- **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true. A condition is a named context, such as `host.running`, that the editor sets. The Mesh tab shows in `mode.mesh`, while mesh mode is on (see [Mesh editing](mesh-editing.md#mesh-mode)).
 - **Game commands** that the DLL describes can name a tab and a group. They appear in the ribbon, and they come and go with a code reload.
 - Double-clicking a tab, or Ctrl+F1, collapses the ribbon to its tabs, and clicking a tab opens it again. When the window is too narrow, the ribbon scrolls.
 - *Later:* groups that shrink as the window narrows, key tips, and a quick access toolbar.

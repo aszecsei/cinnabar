@@ -3,6 +3,7 @@ package editor
 import "base:runtime"
 import "core:log"
 import "core:mem"
+import "core:slice"
 
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
@@ -14,10 +15,15 @@ import "cinnabar:engine/render"
 // blob; a Live_Mesh_Vertices replaces the positions and bakes again, which is a drag's step; a Release_Live_Mesh lets
 // the asset's blob draw again. The table is the host's, so a code reload keeps it, and a new connection drops it.
 
-// Live_Mesh is one live mesh: its structure as the editor last gave it, in the host's heap.
+// Live_Mesh is one live mesh: its structure as the editor last gave it, and of its bake what the overlay draws, in the
+// host's heap.
 @(private)
 Live_Mesh :: struct {
-	source: format.Mesh_Source,
+	source:         format.Mesh_Source,
+	// The baked vertices' positions, the triangles' indices into them, and the source face of each triangle.
+	bake_positions: [][3]f32,
+	bake_indices:   []u32,
+	triangle_faces: []u32,
 }
 
 // handle_live_message handles a live mesh's messages, and reports whether the message was one.
@@ -51,6 +57,8 @@ handle_live_message :: proc(e: ^Editor, message: link.Message) -> bool {
 			v = {m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]}
 		}
 		bake_live_mesh(e, guid)
+	case link.Mesh_Overlay:
+		set_mesh_overlay(e, m)
 	case link.Release_Live_Mesh:
 		guid := format.Guid(m.guid)
 		release_live_mesh(e, guid)
@@ -66,8 +74,9 @@ handle_live_message :: proc(e: ^Editor, message: link.Message) -> bool {
 // release_live_meshes forgets every live mesh, and lets their assets draw, for a new editor or the end.
 @(private)
 release_live_meshes :: proc(e: ^Editor) {
+	clear_mesh_overlay(e)
 	for guid, &live in e.live_meshes {
-		free_source(live.source, e.platform.heap_allocator)
+		free_live(e, &live)
 		if e.residency != nil {
 			render.clear_live(e.residency, guid)
 		}
@@ -77,18 +86,38 @@ release_live_meshes :: proc(e: ^Editor) {
 
 @(private = "file")
 release_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
-	if live, found := e.live_meshes[guid]; found {
-		free_source(live.source, e.platform.heap_allocator)
+	if live, found := &e.live_meshes[guid]; found {
+		free_live(e, live)
 		delete_key(&e.live_meshes, guid)
 	}
+}
+
+@(private = "file")
+free_live :: proc(e: ^Editor, live: ^Live_Mesh) {
+	heap := e.platform.heap_allocator
+	free_source(live.source, heap)
+	delete(live.bake_positions, heap)
+	delete(live.bake_indices, heap)
+	delete(live.triangle_faces, heap)
+	live^ = {}
 }
 
 // bake_live_mesh bakes a live mesh into a blob in frame memory and streams it. A face the bake refuses is logged at
 // its index, as the cooker logs it at its line.
 @(private = "file")
 bake_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
-	live := e.live_meshes[guid]
-	blob, problems := live_blob(guid, live.source, e.platform.frame_allocator)
+	live := &e.live_meshes[guid]
+	blob, problems, bake := live_blob(guid, live.source, e.platform.frame_allocator)
+	heap := e.platform.heap_allocator
+	delete(live.bake_positions, heap)
+	delete(live.bake_indices, heap)
+	delete(live.triangle_faces, heap)
+	live.bake_positions = make([][3]f32, len(bake.vertices), heap)
+	for v, i in bake.vertices {
+		live.bake_positions[i] = v.position
+	}
+	live.bake_indices = slice.clone(bake.indices, heap)
+	live.triangle_faces = slice.clone(bake.triangle_faces, heap)
 	buffer: [32]u8
 	for p in problems {
 		log.warnf("editor: the live mesh %s, face %d: %s", format.guid_format(guid, &buffer), p.line, p.message)
@@ -103,13 +132,14 @@ bake_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
 
 // live_blob bakes a mesh and builds its meshlets into a mesh blob, as the cooker's blob of the same file would be
 // without meshoptimizer's reordering and levels of detail, in allocator at the alignment the runtime loads blobs at.
-// It is nil for a mesh with no faces that bake. The problems are the bake's, with each face's index as its line.
-live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runtime.Allocator) -> (blob: []byte, problems: []format.Mesh_Problem) {
-	bake := format.mesh_bake(source, context.temp_allocator)
+// It is nil for a mesh with no faces that bake. The problems are the bake's, with each face's index as its line, and
+// the bake itself is in temporary memory, for the overlay.
+live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runtime.Allocator) -> (blob: []byte, problems: []format.Mesh_Problem, bake: format.Mesh_Bake) {
+	bake = format.mesh_bake(source, context.temp_allocator)
 	problems = make([]format.Mesh_Problem, len(bake.problems), allocator)
 	copy(problems, bake.problems)
 	if len(bake.indices) == 0 {
-		return nil, problems
+		return nil, problems, bake
 	}
 	vertex_count := len(bake.vertices)
 	flags: format.Mesh_Flags
@@ -170,10 +200,10 @@ live_blob :: proc(guid: format.Guid, source: format.Mesh_Source, allocator: runt
 	written := format.mesh_write(contents, context.temp_allocator)
 	aligned, err := mem.alloc_bytes(len(written), format.BLOB_ALIGN, allocator)
 	if err != nil {
-		return nil, problems
+		return nil, problems, bake
 	}
 	copy(aligned, written)
-	return aligned, problems
+	return aligned, problems, bake
 }
 
 // source_of_live is a Live_Mesh as the format has it, in allocator. It fails when the positions are not triples.

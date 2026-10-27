@@ -27,6 +27,7 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.CreateEntity),
                         new SmallStack([EditorCommands.CreateVolume, EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
                         new SmallStack([EditorCommands.HideSelected, EditorCommands.ShowAll, EditorCommands.LockSelected]),
+                        new SmallStack([EditorCommands.EditMesh, EditorCommands.MeshBlock]),
                     ]),
                     new RibbonGroup("Tools",
                     [
@@ -91,6 +92,23 @@ static class DefaultRibbon
                     new RibbonGroup("Capture", [new LargeButton(EditorCommands.Screenshot), new SmallStack([EditorCommands.CaptureGif])]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
+                // The contextual Mesh tab, while mesh mode is on (see docs/editor/mesh-editing.md#mesh-mode).
+                new RibbonTab("mesh", "Mesh",
+                [
+                    new RibbonGroup("Selection",
+                    [
+                        new SmallStack([EditorCommands.MeshVertices, EditorCommands.MeshEdges, EditorCommands.MeshFaces]),
+                        new SmallStack([EditorCommands.SelectAll, EditorCommands.MeshSelectThrough]),
+                    ]),
+                    new RibbonGroup("Edit", [new LargeButton(EditorCommands.DeleteEntity)]),
+                    new RibbonGroup("Create", [new LargeButton(EditorCommands.MeshBlock)]),
+                    new RibbonGroup("Options",
+                    [
+                        new SmallStack([EditorCommands.MeshGridToggle, EditorCommands.MeshGridFiner, EditorCommands.MeshGridCoarser]),
+                        new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace]),
+                    ]),
+                    new RibbonGroup("Mode", [new LargeButton(EditorCommands.ObjectMode)]),
+                ]) { Context = EditorShell.MeshContext },
             ]);
     }
 }

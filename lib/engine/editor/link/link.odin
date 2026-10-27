@@ -87,6 +87,7 @@ Message :: union {
 	Live_Mesh,
 	Live_Mesh_Vertices,
 	Release_Live_Mesh,
+	Mesh_Overlay,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -1049,4 +1050,41 @@ Live_Mesh_Vertices :: struct {
 // Editor to game: the editor has let go of the mesh. The game clears the override and draws the asset's blob.
 Release_Live_Mesh :: struct {
 	guid: [16]u8,
+}
+
+// Mesh mode's overlay (see docs/editor/mesh-editing.md#overlay-and-picking). The editor does the picking itself, and
+// tells the game what to draw over each live mesh: its edges and vertices, with the selected and the hovered elements
+// highlighted, the selected faces filled, and the grid.
+
+Mesh_Element :: enum u8 {
+	Vertices,
+	Edges,
+	Faces,
+}
+
+// One edited mesh: the live mesh guid, drawn at entity's pose, with its selected elements by index, edges by their
+// vertices, and the hovered one of each kind, -1 or none for none.
+Mesh_Overlay_Mesh :: struct {
+	guid:              [16]u8,
+	entity:            u64,
+	selected_vertices: []u32,
+	selected_edges:    []Live_Edge,
+	selected_faces:    []u32,
+	hovered_vertex:    i32,
+	hovered_edge:      Live_Edge,
+	has_hovered_edge:  bool,
+	hovered_face:      i32,
+}
+
+// Editor to game: what mesh mode shows this frame, or with active false, nothing. The grid is on the plane through
+// grid_origin, a World_Position, facing the world axis grid_axis (0 for x, 1 for y, 2 for z), with lines grid_size
+// apart.
+Mesh_Overlay :: struct {
+	active:      bool,
+	element:     Mesh_Element,
+	meshes:      []Mesh_Overlay_Mesh,
+	grid:        bool,
+	grid_size:   f32,
+	grid_origin: [3]i64,
+	grid_axis:   u8,
 }

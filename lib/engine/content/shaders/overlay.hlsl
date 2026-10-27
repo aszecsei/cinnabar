@@ -1,6 +1,7 @@
 #include "cinnabar.hlsli"
 
-// The editor's overlay on the frame: the selection outline, then the gizmo. Matches Overlay_Constants in viewport.odin.
+// The editor's overlay on the frame: the selection outline, mesh mode's overlay, then the gizmo. Matches
+// Overlay_Constants in viewport.odin.
 struct Push {
 	float4x4 view_projection;
 	uint ids;
@@ -11,7 +12,7 @@ struct Push {
 	// The gizmo's vertices, in an upload.
 	uint vertices;
 	uint vertex_offset;
-	// 0 draws the outline, 1 the gizmo.
+	// 0 draws the outline, 1 the gizmo over everything, and 2 mesh mode's overlay, faded where the scene is in front.
 	uint mode;
 	// The scene's depth, which tells the selection's own edges from the edges of what is in front of it, and its
 	// stencil, whose view model bit puts a pixel in front of every pixel of the world.
@@ -53,8 +54,11 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	}
 	Vertex v = cn_buffer(push.vertices).Load<Vertex>(push.vertex_offset + vertex_id * 16);
 	o.position = mul(push.view_projection, float4(v.position, 1));
-	// The gizmo is drawn over everything, so its depth does not matter.
-	o.position.z = 0;
+	// The gizmo is drawn over everything, so its depth does not matter. The mesh overlay keeps its depth, which the
+	// pixel shader compares with the scene's.
+	if (push.mode == 1) {
+		o.position.z = 0;
+	}
 	o.color = unpack_color(v.color);
 	return o;
 }
@@ -90,9 +94,23 @@ bool in_front(int2 a, int2 b) {
 	return depth_at(a) > depth_at(b);
 }
 
+// How much of the mesh overlay shows where the scene is in front of it.
+static const float HIDDEN_ALPHA = 0.22;
+// The mesh overlay's own geometry is at its depth: it counts as behind only a scene depth this much nearer, in the
+// reversed depth's terms, so an edge on a face is not hidden by the face.
+static const float DEPTH_BIAS = 1.004;
+
 float4 ps_main(Varyings i) : SV_Target {
-	if (push.mode != 0) {
+	if (push.mode == 1) {
 		return i.color;
+	}
+	if (push.mode == 2) {
+		float4 color = i.color;
+		float scene = depth_at(int2(i.position.xy));
+		if (scene > i.position.z * DEPTH_BIAS) {
+			color.a *= HIDDEN_ALPHA;
+		}
+		return color;
 	}
 	// A pixel is on the outline where the selection's edge is near: some pixel within the radius differs from it. The
 	// edge must be the selection's silhouette, where the other side is behind it or is the background. Where the other

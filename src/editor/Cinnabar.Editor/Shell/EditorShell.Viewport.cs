@@ -91,12 +91,28 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Selects what is drawn at a pixel of the frame. A click on nothing clears the selection, unless it adds.</summary>
-    public void PickAt(Vec2 pixel, SelectMode mode) => Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, mode);
+    /// <summary>
+    /// Selects what is drawn at a pixel of the frame. A click on nothing clears the selection, unless it adds. In mesh
+    /// mode, the editor picks the element itself, at once.
+    /// </summary>
+    public void PickAt(Vec2 pixel, SelectMode mode)
+    {
+        if (InMeshMode)
+        {
+            PickMeshAt(pixel, mode);
+            return;
+        }
+        Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, mode);
+    }
 
     /// <summary>Selects what is drawn in a rectangle of the frame, between two corners.</summary>
     public void PickBox(Vec2 a, Vec2 b, SelectMode mode)
     {
+        if (InMeshMode)
+        {
+            PickMeshBox(a, b, mode);
+            return;
+        }
         var (x0, y0) = ((int)Math.Floor(Math.Min(a.X, b.X)), (int)Math.Floor(Math.Min(a.Y, b.Y)));
         var (x1, y1) = ((int)Math.Ceiling(Math.Max(a.X, b.X)), (int)Math.Ceiling(Math.Max(a.Y, b.Y)));
         Pick(x0, y0, Math.Max(x1 - x0, 1), Math.Max(y1 - y0, 1), mode);
@@ -145,9 +161,16 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>The gizmo's pivot and axes: the primary entity's world pose in the document, or null for no gizmo.</summary>
+    /// <summary>
+    /// The gizmo's pivot and axes: the primary entity's world pose in the document, or in mesh mode the sub-selection's
+    /// centroid, or null for no gizmo.
+    /// </summary>
     public (long[] Pivot, Quat Axes)? GizmoPose()
     {
+        if (InMeshMode)
+        {
+            return MeshGizmoPose();
+        }
         if (Gizmo.KindOf(Tool) == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
             || SceneEdits.WorldPose(Scene.Scene, primary) is not { } pose)
         {
@@ -186,6 +209,10 @@ public sealed partial class EditorShell
         {
             return false;
         }
+        if (InMeshMode)
+        {
+            return PressMeshGizmo(pixel);
+        }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
         _poseEdit = new PoseEdit(Scene.Scene, ids);
         if (_poseEdit.IsEmpty)
@@ -206,6 +233,11 @@ public sealed partial class EditorShell
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap)
     {
+        if (_meshDrag != null)
+        {
+            DragMeshGizmo(pixel, invertSnap);
+            return;
+        }
         if (_drag == null || _poseEdit == null)
         {
             return;
@@ -233,6 +265,7 @@ public sealed partial class EditorShell
         }
         _drag = null;
         _poseEdit = null;
+        _meshDrag = null;
         CommitEdit();
         SendGizmo();
     }
@@ -246,6 +279,7 @@ public sealed partial class EditorShell
         }
         _drag = null;
         _poseEdit = null;
+        _meshDrag = null;
         CancelEdit();
         SendGizmo();
     }
@@ -352,6 +386,7 @@ public sealed partial class EditorShell
         SendSelection();
         ResendHidden();
         SendViewportSettings();
+        ResendMeshOverlay();
     }
 
     void OnPickResult(PickResult result)

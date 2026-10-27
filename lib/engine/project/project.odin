@@ -11,11 +11,15 @@ import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/render"
 
 // The user file is the project file's name with .user before its extension: project.settings has
 // project.user.settings. Version control ignores it.
 USER_SUFFIX :: ".user"
+
+// The editor's default mesh material, as the settings file names it.
+MESH_DEFAULT_MATERIAL_KEY :: "mesh.default_material"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -27,6 +31,9 @@ Settings :: struct {
 	quality_given: Quality_Keys,
 	preset:        render.Quality_Preset,
 	quality:       render.Quality,
+	// The material of new faces in the editor's mesh mode, by GUID, or zero for the engine's dev_gray (see
+	// docs/editor/mesh-editing.md#dev-materials). The editor reads it; the game only knows the key.
+	mesh_default_material: format.Guid,
 }
 
 // Quality_Key is a render quality key of the settings files, by its name in QUALITY_KEY_NAMES.
@@ -112,6 +119,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				settings.output = output
 			} else {
 				problem(problems, line, "output takes Auto, Sdr, Hdr10 or Scrgb, not %q", value)
+			}
+			continue
+		}
+		if key == MESH_DEFAULT_MATERIAL_KEY {
+			if guid, ok := format.guid_parse(value); ok {
+				settings.mesh_default_material = guid
+			} else {
+				problem(problems, line, "%s takes a material's GUID of 32 hex digits, not %q", key, value)
 			}
 			continue
 		}

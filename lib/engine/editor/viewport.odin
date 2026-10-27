@@ -254,7 +254,16 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			overlay.vertex_count = u32(len(vertices))
 		}
 	}
-	if overlay.outline || overlay.vertex_count > 0 {
+	if e.mesh_overlay.active {
+		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
+		mesh_overlay_vertices(e, w, frame.view, frame.size.y, &vertices)
+		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
+			copy(upload.data, ([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)])
+			overlay.mesh_vertices = upload
+			overlay.mesh_vertex_count = u32(len(vertices))
+		}
+	}
+	if overlay.outline || overlay.vertex_count > 0 || overlay.mesh_vertex_count > 0 {
 		p := render.add_render_pass(g, "editor overlay", draw_overlay, overlay)
 		render.color(g, p, frame.target, .Load)
 		render.read(g, p, frame.ids)
@@ -359,6 +368,9 @@ Overlay_Pass :: struct {
 	selection:       gpu.Upload,
 	vertices:        gpu.Upload,
 	vertex_count:    u32,
+	// Mesh mode's overlay, which draws before the gizmo, faded where the scene hides it (see mesh_overlay.odin).
+	mesh_vertices:     gpu.Upload,
+	mesh_vertex_count: u32,
 }
 
 @(private)
@@ -377,6 +389,13 @@ draw_overlay :: proc(ctx: ^render.Pass_Context) {
 		constants.selection_offset = o.selection.offset
 		gpu.cmd_push_constants(ctx.cb, &constants)
 		gpu.cmd_draw(ctx.cb, 3)
+	}
+	if o.mesh_vertex_count > 0 {
+		constants.vertices = gpu.read_index(o.mesh_vertices.buffer)
+		constants.vertex_offset = o.mesh_vertices.offset
+		constants.mode = 2
+		gpu.cmd_push_constants(ctx.cb, &constants)
+		gpu.cmd_draw(ctx.cb, o.mesh_vertex_count)
 	}
 	if o.vertex_count > 0 {
 		constants.vertices = gpu.read_index(o.vertices.buffer)

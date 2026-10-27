@@ -35,7 +35,8 @@ public sealed partial class EditorShell
         }
         if (Mode == EditorMode.Edit)
         {
-            // A drag or a scrub that is under way ends as it is.
+            // A drag or a scrub that is under way ends as it is, and mesh mode with it.
+            LeaveMeshMode();
             CancelGizmo();
             // A material that a drag only shows was never dropped.
             CancelMaterial();

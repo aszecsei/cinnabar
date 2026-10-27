@@ -59,6 +59,8 @@ Editor :: struct {
 	// residency that draws them, in Game_State, or nil without a renderer.
 	live_meshes:  map[format.Guid]Live_Mesh,
 	residency:    ^render.Residency,
+	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
+	mesh_overlay: link.Mesh_Overlay,
 }
 
 @(private)

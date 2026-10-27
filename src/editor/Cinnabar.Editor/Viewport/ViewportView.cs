@@ -38,6 +38,7 @@ public sealed class ViewportView : Grid
         Orbit,
         Pan,
         Dolly,
+        Block,
     }
 
     readonly EditorShell _shell;
@@ -49,6 +50,7 @@ public sealed class ViewportView : Grid
     readonly TextBlock _speed;
     readonly Border _modeFrame;
     readonly List<(ToggleButton Button, string Command)> _tools = [];
+    StackPanel _elements = new();
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
     readonly HashSet<Key> _held = [];
@@ -112,10 +114,18 @@ public sealed class ViewportView : Grid
             _held.Clear();
             _shell.SendInput(GameInput.ReleaseAll());
         };
+        DoubleTapped += (_, e) =>
+        {
+            if (!_shell.InputGoesToGame && _control.FramePoint(e.GetPosition(this)) is { } pixel)
+            {
+                _shell.EnterMeshModeAt(pixel);
+            }
+        };
         AttachedToVisualTree += (_, _) =>
         {
             _session.ViewChanged += ShowOverlay;
             _shell.ToolsChanged += ShowTools;
+            _shell.MeshModeChanged += ShowTools;
             _shell.Camera.Changed += ShowSpeed;
             _shell.ModeChanged += ShowMode;
             _timer.Start();
@@ -127,6 +137,7 @@ public sealed class ViewportView : Grid
         {
             _session.ViewChanged -= ShowOverlay;
             _shell.ToolsChanged -= ShowTools;
+            _shell.MeshModeChanged -= ShowTools;
             _shell.Camera.Changed -= ShowSpeed;
             _shell.ModeChanged -= ShowMode;
             _timer.Stop();
@@ -175,6 +186,16 @@ public sealed class ViewportView : Grid
         panel.Children.Add(new Border { Height = 6 });
         Add(EditorCommands.LocalSpace);
         Add(EditorCommands.Snap);
+        // The element kinds, while mesh mode is on.
+        _elements = new StackPanel { Spacing = 2, IsVisible = false };
+        _elements.Children.Add(new Border { Height = 6 });
+        panel.Children.Add(_elements);
+        var elementPanel = panel;
+        panel = _elements;
+        Add(EditorCommands.MeshVertices);
+        Add(EditorCommands.MeshEdges);
+        Add(EditorCommands.MeshFaces);
+        panel = elementPanel;
         var palette = Overlay(panel, HorizontalAlignment.Left, VerticalAlignment.Top);
         palette.Padding = new Thickness(3);
         return palette;
@@ -183,6 +204,7 @@ public sealed class ViewportView : Grid
     void ShowTools()
     {
         ShowSpeed();
+        _elements.IsVisible = _shell.InMeshMode;
         foreach (var (button, command) in _tools)
         {
             button.IsChecked = _shell.Commands.Get(command).IsChecked;
@@ -200,7 +222,8 @@ public sealed class ViewportView : Grid
         ShowSpeed();
     }
 
-    void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}";
+    void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
+        + (_shell.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.GridSize)}" : "");
 
     static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
 
@@ -329,6 +352,10 @@ public sealed class ViewportView : Grid
             {
                 _gesture = Gesture.Gizmo;
             }
+            else if (_shell.MeshTool == MeshTool.Block && _control.FramePoint(point.Position) is { } corner && _shell.BeginBlock(corner))
+            {
+                _gesture = Gesture.Block;
+            }
             else
             {
                 _gesture = Gesture.Click;
@@ -359,6 +386,13 @@ public sealed class ViewportView : Grid
                 if (_control.FramePoint(position) is { } hover)
                 {
                     _shell.HoverGizmo(hover);
+                    _shell.HoverMesh(hover);
+                }
+                break;
+            case Gesture.Block:
+                if (_control.FramePoint(position) is { } corner)
+                {
+                    _shell.DragBlock(corner);
                 }
                 break;
             case Gesture.Fly:
@@ -411,6 +445,9 @@ public sealed class ViewportView : Grid
             case Gesture.Gizmo:
                 _shell.ReleaseGizmo();
                 break;
+            case Gesture.Block:
+                _shell.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                break;
             case Gesture.Click:
                 if (_control.FramePoint(position) is { } pixel)
                 {
@@ -434,6 +471,10 @@ public sealed class ViewportView : Grid
         if (_gesture == Gesture.Gizmo)
         {
             _shell.ReleaseGizmo();
+        }
+        if (_gesture == Gesture.Block)
+        {
+            _shell.CancelBlock();
         }
         EndGesture();
     }
@@ -497,12 +538,35 @@ public sealed class ViewportView : Grid
             Key.X => EditorCommands.LocalSpace,
             Key.F => EditorCommands.FrameSelected,
             Key.H => EditorCommands.HideSelected,
+            // Mesh mode's keys (see docs/editor/mesh-editing.md#mesh-mode).
+            Key.Tab => EditorCommands.EditMesh,
+            Key.D1 when _shell.InMeshMode => EditorCommands.MeshVertices,
+            Key.D2 when _shell.InMeshMode => EditorCommands.MeshEdges,
+            Key.D3 when _shell.InMeshMode => EditorCommands.MeshFaces,
+            Key.OemOpenBrackets => EditorCommands.MeshGridFiner,
+            Key.OemCloseBrackets => EditorCommands.MeshGridCoarser,
             _ => null,
         };
         if (e.Key == Key.Escape && _gesture == Gesture.Gizmo)
         {
             _shell.CancelGizmo();
             _gesture = Gesture.None;
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _gesture == Gesture.Block)
+        {
+            _shell.CancelBlock();
+            EndGesture();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _shell.InMeshMode)
+        {
+            _shell.EscapeMeshMode();
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape && _shell.MeshTool == MeshTool.Block)
+        {
+            _shell.SetMeshTool(MeshTool.Select);
             e.Handled = true;
         }
         else if (command != null)

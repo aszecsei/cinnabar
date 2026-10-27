@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
 
@@ -27,6 +28,16 @@ static class EditorCommands
     public const string NewMaterial = "content.newMaterial";
     public const string NewMaterialFunction = "content.newMaterialFunction";
     public const string NewMesh = "content.newMesh";
+    public const string EditMesh = "mesh.edit";
+    public const string ObjectMode = "mesh.objectMode";
+    public const string MeshVertices = "mesh.vertices";
+    public const string MeshEdges = "mesh.edges";
+    public const string MeshFaces = "mesh.faces";
+    public const string MeshBlock = "mesh.block";
+    public const string MeshGridToggle = "mesh.grid";
+    public const string MeshGridFiner = "mesh.gridFiner";
+    public const string MeshGridCoarser = "mesh.gridCoarser";
+    public const string MeshSelectThrough = "mesh.selectThrough";
     public const string NewFolder = "content.newFolder";
     public const string RenameAsset = "content.rename";
     public const string DuplicateAsset = "content.duplicate";
@@ -172,10 +183,67 @@ static class EditorCommands
         });
         commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
         {
-            Description = "Delete the selected entities and their children.",
+            Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces.",
             Icon = "delete",
             Shortcut = "Delete",
-            CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.InMeshMode ? !shell.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
+        });
+        // Mesh mode (see docs/editor/mesh-editing.md#mesh-mode). Its keys, Tab, 1, 2, 3, [ and ], are the viewport's, as the
+        // tools' are.
+        commands.Register(new Command(EditMesh, "Edit Mesh", shell.ToggleMeshMode)
+        {
+            Description = "Edit the selected entities' mesh files: select their vertices, edges and faces and move them. Tab in the viewport enters and leaves.",
+            Icon = "mesh",
+            CanExecuteWhen = () => shell.CanEditMesh,
+            IsCheckedWhen = () => shell.InMeshMode,
+        });
+        commands.Register(new Command(ObjectMode, "Object Mode", shell.LeaveMeshMode)
+        {
+            Description = "Leave mesh mode and select entities again. The meshes stay live until they are saved and cooked.",
+            Icon = "select",
+            CanExecuteWhen = () => shell.InMeshMode,
+        });
+        void ElementCommand(string id, MeshElement kind, string label, string icon, string description) =>
+            commands.Register(new Command(id, label, () => shell.SetMeshElement(kind))
+            {
+                Description = description,
+                Icon = icon,
+                CanExecuteWhen = () => shell.InMeshMode,
+                IsCheckedWhen = () => shell.InMeshMode && shell.MeshElement == kind,
+            });
+        ElementCommand(MeshVertices, MeshElement.Vertices, "Vertices", "select", "Select and move vertices. 1 in the viewport.");
+        ElementCommand(MeshEdges, MeshElement.Edges, "Edges", "local", "Select and move edges. 2 in the viewport.");
+        ElementCommand(MeshFaces, MeshElement.Faces, "Faces", "mesh", "Select and move faces. 3 in the viewport.");
+        commands.Register(new Command(MeshBlock, "Block", () => shell.SetMeshTool(shell.MeshTool == MeshTool.Block ? MeshTool.Select : MeshTool.Block))
+        {
+            Description = "Drag a rectangle on the grid to add a box a grid cell high: a new mesh file and entity, or faces of the edited mesh in mesh mode. Ctrl at the release makes a new entity anyway.",
+            Icon = "add",
+            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            IsCheckedWhen = () => shell.MeshTool == MeshTool.Block,
+        });
+        commands.Register(new Command(MeshGridToggle, "Show Grid", shell.ToggleShowGrid)
+        {
+            Description = "Draw the grid that mesh mode snaps to, on the plane through the selection facing the camera.",
+            Icon = "snap",
+            IsCheckedWhen = () => shell.ShowGrid,
+        });
+        commands.Register(new Command(MeshGridFiner, "Finer Grid", shell.FinerGrid)
+        {
+            Description = "Halve the grid's size, down to 1/64 m. [ in the viewport.",
+            Icon = "chevron-down",
+            CanExecuteWhen = () => shell.GridSize > MeshGrid.MinSize,
+        });
+        commands.Register(new Command(MeshGridCoarser, "Coarser Grid", shell.CoarserGrid)
+        {
+            Description = "Double the grid's size, up to 16 m. ] in the viewport.",
+            Icon = "collapse",
+            CanExecuteWhen = () => shell.GridSize < MeshGrid.MaxSize,
+        });
+        commands.Register(new Command(MeshSelectThrough, "Select Through", shell.ToggleSelectThrough)
+        {
+            Description = "Let a box and a click in mesh mode take faces that face away, and their vertices and edges.",
+            Icon = "visible",
+            IsCheckedWhen = () => shell.SelectThrough,
         });
         commands.Register(new Command(PlayMode, "Play", shell.Play)
         {
@@ -213,9 +281,19 @@ static class EditorCommands
             Icon = "free-camera",
             IsCheckedWhen = () => shell.FreeCamera,
         });
-        commands.Register(new Command(SelectAll, "Select All", () => shell.Selection.Set(shell.World.Entities.Select(e => e.Handle)))
+        commands.Register(new Command(SelectAll, "Select All", () =>
         {
-            Description = "Select every entity.",
+            if (shell.InMeshMode)
+            {
+                shell.SelectAllMeshElements();
+            }
+            else
+            {
+                shell.Selection.Set(shell.World.Entities.Select(e => e.Handle));
+            }
+        })
+        {
+            Description = "Select every entity, or in mesh mode every vertex, edge or face of the edited meshes.",
             Shortcut = "Ctrl+A",
             CanExecuteWhen = () => shell.World.HasWorld,
         });

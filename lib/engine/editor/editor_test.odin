@@ -922,7 +922,7 @@ a_live_blob_is_the_cookers_mesh_without_its_levels :: proc(t: ^testing.T) {
 	box, _, parsed := format.mesh_text_parse(LIVE_BOX, context.temp_allocator)
 	testing.expect(t, parsed)
 	guid := format.guid_parse("3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d") or_else {}
-	blob, problems := live_blob(guid, box, context.temp_allocator)
+	blob, problems, _ := live_blob(guid, box, context.temp_allocator)
 	testing.expect_value(t, len(problems), 0)
 	view, ok := format.mesh_view(blob)
 	testing.expect(t, ok)
@@ -943,7 +943,63 @@ a_live_blob_is_the_cookers_mesh_without_its_levels :: proc(t: ^testing.T) {
 	// A mesh with no faces that bake gives no blob, with the faces' problems.
 	bad := box
 	bad.faces = {{slot = 0, corners = {0, 1, 1}, mapping = box.faces[0].mapping, line = 0}}
-	blob, problems = live_blob(guid, bad, context.temp_allocator)
+	blob, problems, _ = live_blob(guid, bad, context.temp_allocator)
 	testing.expect(t, blob == nil)
 	testing.expect_value(t, len(problems), 1)
+}
+
+@(test)
+the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	box, _, parsed := format.mesh_text_parse(LIVE_BOX, context.temp_allocator)
+	testing.expect(t, parsed)
+	guid := format.guid_parse("3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d") or_else {}
+	entity := ecs.spawn(&f.world)
+	ecs.add(&f.world, entity, ecs.TRANSFORM_IDENTITY)
+	view := render.View {
+		position     = {{0, 0, -5 * (1 << 24)}},
+		rotation     = 1,
+		vertical_fov = 1,
+		near         = 0.05,
+	}
+	count :: proc(f: ^Fixture, view: render.View) -> int {
+		vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
+		mesh_overlay_vertices(&f.editor, &f.world, view, 900, &vertices)
+		return len(vertices)
+	}
+
+	// Without a live mesh, or with an inactive overlay, nothing draws.
+	overlay := link.Mesh_Overlay {
+		active  = true,
+		element = .Edges,
+		meshes  = {{guid = ([16]u8)(guid), entity = u64(entity), hovered_vertex = -1, hovered_face = -1}},
+	}
+	step(f, 1, overlay)
+	testing.expect_value(t, count(f, view), 0)
+	step(f, 1, live_message(guid, box, context.temp_allocator))
+	// The box's twelve edges, each a ribbon of two triangles.
+	edges := count(f, view)
+	testing.expect_value(t, edges, 12 * 6)
+	// In the vertices kind, eight squares of two triangles more.
+	overlay.element = .Vertices
+	step(f, 1, overlay)
+	testing.expect_value(t, count(f, view), edges + 8 * 6)
+	// In the faces kind, a selected face fills with its two triangles, and a hovered one too.
+	overlay.element = .Faces
+	overlay.meshes[0].selected_faces = {1}
+	overlay.meshes[0].hovered_face = 2
+	step(f, 1, overlay)
+	testing.expect_value(t, count(f, view), edges + 2 * 3 + 2 * 3)
+	// The grid is 81 lines each way.
+	overlay.grid, overlay.grid_size = true, 0.25
+	step(f, 1, overlay)
+	testing.expect_value(t, count(f, view), edges + 12 + 81 * 2 * 6)
+	// Off again, and gone with a new connection.
+	step(f, 1, link.Mesh_Overlay{})
+	testing.expect_value(t, count(f, view), 0)
+	step(f, 1, overlay)
+	testing.expect(t, f.editor.mesh_overlay.active)
+	step(f, 2)
+	testing.expect(t, !f.editor.mesh_overlay.active)
 }

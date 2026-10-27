@@ -3,3 +3,6 @@
 
 # The window's output mode: Auto (HDR10 on a display in HDR, SDR otherwise), Sdr, Hdr10 or Scrgb.
 output = Sdr
+
+# The material of new faces in the editor's mesh mode: a material or an instance by GUID. The engine's dev_gray.
+mesh.default_material = 5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d

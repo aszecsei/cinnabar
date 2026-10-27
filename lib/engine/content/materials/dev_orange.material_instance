@@ -1,0 +1,4 @@
+material_instance 1
+# Orange.
+parent = $7b3d1f5a9c2e4b6d8f0a2c4e6b8d0f13
+tint = [0.98, 0.62, 0.28, 1]

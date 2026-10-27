@@ -124,6 +124,67 @@ public sealed class MeshData
 
     public bool IsSharp(int a, int b) => SharpEdges.Contains(new MeshEdge(a, b));
 
+    // The connectivity that the tools need, built once per snapshot, the first time it is asked for.
+    Lazy<Connectivity> Links => _links ??= new Lazy<Connectivity>(() => new Connectivity(this));
+    Lazy<Connectivity>? _links;
+
+    /// <summary>Every edge of the mesh once, in the order the faces first use them, with the lower vertex first.</summary>
+    public ImmutableArray<MeshEdge> Edges => Links.Value.Edges;
+
+    /// <summary>An edge's index in <see cref="Edges"/>, or -1 for two vertices that no face joins.</summary>
+    public int EdgeIndex(int a, int b) => Links.Value.EdgeIndices.GetValueOrDefault(new MeshEdge(a, b), -1);
+
+    /// <summary>The faces that use a vertex, in face order.</summary>
+    public IReadOnlyList<int> FacesOfVertex(int vertex) => Links.Value.VertexFaces.GetValueOrDefault(vertex) ?? [];
+
+    /// <summary>The faces on each side of an edge: one or two, or more for an edge the Clean tool reports.</summary>
+    public IReadOnlyList<int> FacesOfEdge(MeshEdge edge) => Links.Value.EdgeFaces.GetValueOrDefault(edge) ?? [];
+
+    sealed class Connectivity
+    {
+        public ImmutableArray<MeshEdge> Edges { get; }
+        public Dictionary<MeshEdge, int> EdgeIndices { get; } = [];
+        public Dictionary<MeshEdge, List<int>> EdgeFaces { get; } = [];
+        public Dictionary<int, List<int>> VertexFaces { get; } = [];
+
+        public Connectivity(MeshData mesh)
+        {
+            var edges = new List<MeshEdge>();
+            for (var i = 0; i < mesh.Faces.Length; i++)
+            {
+                var corners = mesh.Faces[i].Corners;
+                for (var k = 0; k < corners.Length; k++)
+                {
+                    var (a, b) = (corners[k], corners[(k + 1) % corners.Length]);
+                    if (!VertexFaces.TryGetValue(a, out var faces))
+                    {
+                        VertexFaces[a] = faces = [];
+                    }
+                    if (!faces.Contains(i))
+                    {
+                        faces.Add(i);
+                    }
+                    if (a == b)
+                    {
+                        continue;
+                    }
+                    var edge = new MeshEdge(Math.Min(a, b), Math.Max(a, b));
+                    if (!EdgeIndices.ContainsKey(edge))
+                    {
+                        EdgeIndices[edge] = edges.Count;
+                        edges.Add(edge);
+                        EdgeFaces[edge] = [];
+                    }
+                    if (!EdgeFaces[edge].Contains(i))
+                    {
+                        EdgeFaces[edge].Add(i);
+                    }
+                }
+            }
+            Edges = [.. edges];
+        }
+    }
+
     /// <summary>
     /// A face's plane normal by Newell's method, which gives a bent n-gon its average plane: unit, or zero for a face
     /// without area. Faces are clockwise seen from their front, so the normal is the cross product of the first

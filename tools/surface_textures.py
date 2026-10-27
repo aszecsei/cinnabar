@@ -71,7 +71,31 @@ def island_hole(size=256):
     return size, size, rows
 
 
+# dev_grid: the engine's dev texture (see docs/editor/mesh-editing.md#dev-materials), 1024 texels square: a thick
+# line every 256 texels, a thinner one every 64, and 128-texel checks of two greys between them. At 256 texels per
+# meter it is 4 m across, with the thick lines a meter apart and the thin ones at the grid's quarter meter, so a
+# surface reads as a ruler.
+def dev_grid(size=1024, major=256, minor=64, check=128, major_px=4, minor_px=2):
+    rows = []
+    for y in range(size):
+        line = []
+        for x in range(size):
+            on_major = x % major < major_px or y % major < major_px
+            on_minor = x % minor < minor_px or y % minor < minor_px
+            light = ((x // check) + (y // check)) % 2 == 0
+            if on_major:
+                v = 40
+            elif on_minor:
+                v = 96
+            else:
+                v = 176 if light else 148
+            line.append(v)
+        rows.append(line)
+    return size, size, rows
+
+
 TEXTURES = {
+    "lib/engine/content/textures/dev_grid.png": dev_grid,
     "samples/mygame/content/textures/bricks_height.png": bricks_height,
     "samples/mygame/content/textures/terrain_height.png": terrain_height,
     "samples/mygame/content/textures/island_hole.png": island_hole,

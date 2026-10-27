@@ -93,6 +93,7 @@ public sealed class MainWindow : Window
         shell.World.EntitiesChanged += UpdateWorldStatus;
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
         shell.ModeChanged += UpdateModeStatus;
+        shell.MeshModeChanged += UpdateModeStatus;
         _autosave.Tick += (_, _) => shell.Tick(DateTime.UtcNow);
         _autosave.Start();
         // The command line's scene opened before the window could ask about its autosave.
@@ -364,7 +365,7 @@ public sealed class MainWindow : Window
         {
             Link.Protocol.EditorMode.Play => _shell.FreeCamera ? "Play, free camera" : "Play",
             Link.Protocol.EditorMode.Paused => "Paused",
-            _ => "Edit",
+            _ => _shell.InMeshMode ? $"Mesh  ·  {_shell.MeshStatus}" : "Edit",
         };
         _status?.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
         _status?.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);

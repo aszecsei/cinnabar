@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
@@ -22,6 +23,25 @@ public sealed partial class EditorShell
     void WireMeshes()
     {
         Meshes.Changed += OnMeshChanged;
+        // A mesh the editor made draws live from the start; one whose creation is undone is let go of.
+        Meshes.Added += document =>
+        {
+            if (!document.IsLive)
+            {
+                SendLiveMesh(document);
+            }
+            MeshesChanged?.Invoke();
+        };
+        Meshes.Removed += document =>
+        {
+            ReleaseLiveMesh(document);
+            _editedMeshes.Remove(document.Guid);
+            if (InMeshMode)
+            {
+                SetMeshSelection(MeshSelection.Pruned(FindMeshData));
+            }
+            MeshesChanged?.Invoke();
+        };
         // A saved mesh is let go of once its cooked blob is current, so the host draws the blob with its levels of
         // detail. A mesh that is dirty, or whose cook failed, stays live.
         Cook.Cooked += _ => ReleaseCookedMeshes();
@@ -62,8 +82,6 @@ public sealed partial class EditorShell
             return null;
         }
         Meshes.Add(document);
-        SendLiveMesh(document);
-        MeshesChanged?.Invoke();
         return document;
     }
 
@@ -104,6 +122,13 @@ public sealed partial class EditorShell
         {
             try
             {
+                // A new mesh's .meta file, with its GUID, is the editor's to write, so the scene's reference resolves
+                // at the daemon's next pass. The daemon owns it from then on.
+                var meta = document.Path + ".meta";
+                if (document.Saved == null && !File.Exists(meta))
+                {
+                    SceneDocument.WriteAtomically(meta, "# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).\n" + $"guid = {document.Guid}\n");
+                }
                 document.Save();
                 Console.Add(LogLevel.Info, $"mesh: saved {document.Path}");
             }
@@ -143,7 +168,8 @@ public sealed partial class EditorShell
     }
 
     // An edit, an undo or a redo changed a mesh: the host gets the positions for a change that moved vertices only,
-    // and the whole mesh otherwise.
+    // and the whole mesh otherwise. A change of the topology can leave the sub-selection with indices the mesh no
+    // longer has.
     void OnMeshChanged(MeshDocument document, MeshData before)
     {
         if (document.IsLive && LiveMeshes.IsVerticesOnly(before, document.Data))
@@ -153,6 +179,14 @@ public sealed partial class EditorShell
         else
         {
             SendLiveMesh(document);
+            if (InMeshMode && _meshDrag == null)
+            {
+                MeshSelection = MeshSelection.Pruned(FindMeshData);
+            }
+        }
+        if (InMeshMode)
+        {
+            ResendMeshOverlay();
         }
         MeshesChanged?.Invoke();
     }
@@ -171,6 +205,7 @@ public sealed partial class EditorShell
     // The scene's mesh documents close with it.
     void CloseMeshes()
     {
+        LeaveMeshMode();
         foreach (var document in Meshes.Documents.ToList())
         {
             ReleaseLiveMesh(document);

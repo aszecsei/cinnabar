@@ -117,6 +117,7 @@ public sealed partial class EditorShell : IDisposable
         World.Reset += () =>
         {
             SendLiveMeshes();
+            ResendMeshOverlay();
             foreach (var entity in Selection.Entities)
             {
                 Host.Send(new WatchEntity(entity));

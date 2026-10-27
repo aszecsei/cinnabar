@@ -295,9 +295,14 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Deletes the selected entities with their descendants.</summary>
+    /// <summary>Deletes the selected entities with their descendants, or in mesh mode the selected elements.</summary>
     public void DeleteSelected()
     {
+        if (InMeshMode)
+        {
+            DeleteMeshSelection();
+            return;
+        }
         var roots = TopmostSelected();
         if (Scene == null || roots.Count == 0)
         {

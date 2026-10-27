@@ -84,11 +84,29 @@ public sealed class MeshSet
     /// <summary>A document's data changed: by an edit, an undo or a redo, with the data before it.</summary>
     public event Action<MeshDocument, MeshData>? Changed;
 
+    /// <summary>A document joined the set, as a new mesh does, or an undone removal.</summary>
+    public event Action<MeshDocument>? Added;
+
+    /// <summary>A document left the set, as an undone creation does.</summary>
+    public event Action<MeshDocument>? Removed;
+
     public MeshDocument? Find(string guid) => _documents.GetValueOrDefault(guid);
 
-    public void Add(MeshDocument document) => _documents[document.Guid] = document;
+    public void Add(MeshDocument document)
+    {
+        _documents[document.Guid] = document;
+        Added?.Invoke(document);
+    }
 
-    public bool Remove(string guid) => _documents.Remove(guid);
+    public bool Remove(string guid)
+    {
+        if (!_documents.Remove(guid, out var document))
+        {
+            return false;
+        }
+        Removed?.Invoke(document);
+        return true;
+    }
 
     public void Clear() => _documents.Clear();
 
