@@ -547,6 +547,7 @@ Debug_View :: enum u8 {
 	Transparent_Overdraw,
 	Meshlets,
 	Lod_Depth,
+	Emission,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.

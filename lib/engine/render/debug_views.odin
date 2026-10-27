@@ -7,8 +7,9 @@ import "cinnabar:core/gpu"
 
 DEBUG_VIEW_SHADER :: #load("../content/shaders/debug_view.hlsl.meta", string)
 
-// Debug_View is what the frame shows. The forward pass draws the views up to Shadow_Cascades, and a pass from the
-// frame's textures the rest. Matches DEBUG_* in material_common.hlsli and debug_view.hlsl.
+// Debug_View is what the frame shows. The forward pass draws the views up to Shadow_Cascades, Meshlets, Lod_Depth and
+// Emission, and a pass from the frame's textures the rest. Matches DEBUG_* in material_common.hlsli and
+// debug_view.hlsl, and link.Debug_View, so a new view goes at the end.
 Debug_View :: enum u8 {
 	Lit,
 	// The lighting on a grey surface, without emission.
@@ -42,6 +43,8 @@ Debug_View :: enum u8 {
 	// The mesh shader path's meshlets, each in a color of its own, and their levels of detail as heat colors to 8.
 	Meshlets,
 	Lod_Depth,
+	// The shading model's emission alone.
+	Emission,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -64,7 +67,7 @@ Features :: bit_set[Feature;u16]
 // are, which the output pass only encodes.
 debug_view_shaded :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular:
+	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission:
 		return true
 	}
 	return false
@@ -73,7 +76,7 @@ debug_view_shaded :: proc(view: Debug_View) -> bool {
 // debug_view_from_textures is whether a view comes from the frame's textures, not the forward pass.
 debug_view_from_textures :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth:
+	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth, .Emission:
 		return false
 	}
 	return true

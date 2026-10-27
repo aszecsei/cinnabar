@@ -1,0 +1,12 @@
+material 1
+# The material of a Surface_Renderer without one, or whose material draws meshes or cannot draw: a flat, grey, lit
+# surface (see docs/rendering/surfaces.md#surfaces).
+shading = lit
+geometry = patches
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = float3(0.6, 0.6, 0.6);
+	s.roughness = 0.8;
+	return s;
+}

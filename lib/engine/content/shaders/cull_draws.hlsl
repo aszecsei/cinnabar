@@ -21,7 +21,14 @@ struct Cull_Constants {
 	uint views_offset;
 	uint bin_count;
 	uint mesh_arguments;
-	uint2 padding;
+	// The patch surfaces' records and patches, which select_patches.hlsl and cull_patches.hlsl take.
+	uint surfaces;
+	uint surfaces_offset;
+	uint surface_count;
+	uint patches;
+	uint patch_counts;
+	uint patches_read;
+	uint patch_counts_read;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -40,10 +47,13 @@ struct Cull_View {
 };
 
 // Matches Cull_Item in lib/engine/render/scene.odin: one submesh of one instance, its bin, and its bounding sphere in
-// the mesh's space. first and count are its indices, or on the mesh shader path its meshlets.
+// the mesh's space. first and count are its indices, or on the mesh shader path its meshlets. bound is how far the
+// material's displacement may move a vertex, in meters, which grows the sphere after the instance's scale.
 static const uint ITEM_CASTS_SHADOWS = 1;
 static const uint ITEM_VIEW_MODEL = 2;
 static const uint ITEM_MESH_PATH = 4;
+// A patch surface's item, whose draws cull_patches.hlsl writes.
+static const uint ITEM_SURFACE = 8;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -54,6 +64,8 @@ struct Item {
 	uint flags;
 	uint submesh;
 	float4 sphere;
+	float bound;
+	uint3 padding;
 };
 
 // Matches ID_ENTITY_BITS in lib/engine/render/renderer.odin.
@@ -77,6 +89,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + id.y * sizeof(Cull_View));
 	Item item = cn_buffer(cull.items).Load<Item>(cull.items_offset + id.x * sizeof(Item));
+	if ((item.flags & ITEM_SURFACE) != 0) {
+		return;
+	}
 	if ((view.flags & VIEW_CASTERS) != 0 && (item.flags & ITEM_CASTS_SHADOWS) == 0) {
 		return;
 	}
@@ -89,7 +104,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	// The largest scale of an axis, a column's length, scales the radius.
 	float3 scales = instance.rows[0].xyz * instance.rows[0].xyz + instance.rows[1].xyz * instance.rows[1].xyz + instance.rows[2].xyz * instance.rows[2].xyz;
 	float scale = sqrt(max(scales.x, max(scales.y, scales.z)));
-	float radius = item.sphere.w * scale;
+	float radius = item.sphere.w * scale + item.bound;
 	for (uint i = 0; i < 6; i++) {
 		if (dot(view.planes[i].xyz, p) + view.planes[i].w < -radius) {
 			return;
@@ -106,7 +121,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.count, 1, 0));
 		cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
 	}
-	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count.
+	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count and the bound.
 	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first, item.material));
-	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, 0, 0, 0));
+	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, asuint(item.bound), 0, 0));
 }

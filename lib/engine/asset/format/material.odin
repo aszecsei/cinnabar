@@ -36,6 +36,10 @@ Material_Flag :: enum u32 {
 	Reads_Time,
 	// A Transparent material that draws sorted back to front instead of with moment-based transparency.
 	Sorted,
+	// The material defines displace, which moves its vertices (see docs/rendering/materials.md#vertex-displacement).
+	Displaces,
+	// The material draws the patches of Surface_Renderers, not meshes (see docs/rendering/surfaces.md#surfaces).
+	Patches,
 }
 
 Material_Flags :: bit_set[Material_Flag;u32]
@@ -111,7 +115,9 @@ Material_Blob :: struct {
 	flags:            Material_Flags,
 	blend:            Material_Blend,
 	// The opacity below which a Masked material discards.
-	cutoff:           f32,
+	cutoff:             f32,
+	// How far displace may move a vertex, in meters, which culling adds to each sphere.
+	displacement_bound: f32,
 	// Material_Param records, in the block's order.
 	params:           Slice,
 	// The switches' names, a Slice each, a switch's bit being its index.
@@ -266,6 +272,7 @@ Material_Contents :: struct {
 	flags:            Material_Flags,
 	blend:            Material_Blend,
 	cutoff:           f32,
+	displacement_bound: f32,
 	params:           []Material_Param_Entry,
 	switches:         []string,
 	default_switches: u32,
@@ -306,6 +313,7 @@ material_write :: proc(contents: Material_Contents, allocator := context.allocat
 		flags = contents.flags,
 		blend = contents.blend,
 		cutoff = contents.cutoff,
+		displacement_bound = contents.displacement_bound,
 		params = params,
 		switches = switches,
 		default_switches = contents.default_switches,

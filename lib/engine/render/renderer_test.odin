@@ -127,6 +127,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	lamp := ecs.spawn(w)
 	ecs.add(w, lamp, ecs.Transform{position = ecs.position_offset({}, {0, 0, 2}), rotation = 1, scale = 1})
 	ecs.add(w, lamp, Point_Light{intensity = 1, cast_shadows = true})
+	// A patch surface, whose material the test's cache cannot cook, so it has a slot and no item.
+	pond := ecs.spawn(w)
+	ecs.add(w, pond, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, pond, Surface_Renderer{size = {64, 64}, cell = 1, height_range = {-1, 1}, cast_shadows = true})
 	mist := ecs.spawn(w)
 	ecs.add(w, mist, ecs.TRANSFORM_IDENTITY)
 	// The fog is a setting of the volume around the camera.
@@ -240,6 +244,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.fog.integrate,
 		&r.fog.background,
 		&r.post.upscalers.motion,
+		&r.scene.select_pipeline,
+		&r.scene.cull_patches_pipeline,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})

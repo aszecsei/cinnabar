@@ -2,7 +2,7 @@
 
 Shading models, materials as node graphs or HLSL, their permutations, instances, the runtime's material table and pipelines, and the editor's previews. The cooker's side is in [Content pipeline](../content/kinds/materials.md).
 
-**In this document:** [Shading models](#shading-models) · [Material](#material) · [Permutations](#permutations) · [Material instance](#material-instance) · [Runtime](#runtime) · [Material previews](#material-previews) · [Future work](README.md#future-work)
+**In this document:** [Shading models](#shading-models) · [Material](#material) · [Parallax occlusion mapping](#parallax-occlusion-mapping) · [Vertex displacement](#vertex-displacement) · [Permutations](#permutations) · [Material instance](#material-instance) · [Runtime](#runtime) · [Material previews](#material-previews) · [Future work](README.md#future-work)
 
 ```mermaid
 flowchart LR
@@ -40,6 +40,7 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 - **The engine's:** `lib/engine/content/shading/lit` (GGX specular with Smith visibility and Schlick's Fresnel, Lambert diffuse, linearly transformed cosines for area lights, and Karis's fit of the environment BRDF for indirect specular) and `unlit` (its color, as it is).
 - **Area lights:** `shade_area` multiplies the light's radiance by `ltc_integral` of each of its lobes. A lobe is given by a 3x3 matrix's inverse: the identity for Lambert's diffuse, or `ltc_ggx`'s for Lit's specular (see [Area lights](lighting-and-shadows.md#area-lights)). A shading model with another specular fits its own tables as `tools/ltc_fit` does.
 - **A tangent-space normal:** a shading model whose inputs include a `float3 normal` takes it in tangent space, as a normal map gives it, and the template maps it to the world before shading.
+- **Emission** is radiance in the scene's linear units, the units of the lights' colors: a surface whose emission is 1 is as bright as a white surface lit by a directional light of 1 from straight on. The graph's Emission node gives it as a color at a brightness in stops, color × 2^EV, which is how the sample's glowing panel and a material instance keep a sane number; the `Emission` [debug view](post-processing.md#debug-views) shows the emission alone. Emission reaches bloom and the [global illumination](global-illumination.md#global-illumination) as any light in the scene does.
 - The engine's forward template owns the light loop. For each directional light and each light in the pixel's cluster, it calls `shade_direct` with the light's color after its falloff and its shadow, or `shade_area` for an area light (see [Lights and clusters](lighting-and-shadows.md#lights-and-clusters)). Then it calls `shade_indirect`, and adds the emission. `Unlit` has `No_Lighting` and only emits.
 - The indirect light is the [global illumination](global-illumination.md#global-illumination)'s diffuse and specular light, or without it the ambient light: the sky's color from above and the ground's from below (`Environment`). The template scales both by the [ambient occlusion](ambient-occlusion.md#ambient-occlusion) before it calls `shade_indirect`.
 - The material graph's output node has one input for each surface input of its shading model. The cook link sends the shading models to the editor with the importers, so the editor shows the right inputs.
@@ -49,7 +50,7 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 
 A material is a `.material` text file (see [Content pipeline](../content/kinds/materials.md#materials)). The editor's material editor writes its graph, as the editor writes scenes (see [Editor](../editor/material-editor.md#material-editor)). It has:
 
-- **Settings:** the shading model, the blend mode (`Opaque`, `Masked`, `Transparent` or `Additive`, see [Transparency](transparency.md#transparency)), a transparent material's transparency (moment-based or sorted), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows.
+- **Settings:** the shading model, the blend mode (`Opaque`, `Masked`, `Transparent` or `Additive`, see [Transparency](transparency.md#transparency)), a transparent material's transparency (moment-based or sorted), the geometry (`mesh`, or `patches` for a [patch surface](surfaces.md#materials-for-patches)), the domain (`Surface`, later `Decal`, `Post_Process`, `UI`), two-sided, casts shadows, and the displacement bound (see [Vertex displacement](#vertex-displacement)).
 - **Parameters:** scalars, vectors, colors, textures and static switches, each with a name, a default and a group for the editor.
 - **The graph:** nodes and links (see [Content pipeline](../content/kinds/materials.md#material-graphs)). Nodes include math, texture samples, parameters, time, world position (relative to the render origin, see below), object position (in the mesh's own space), vertex attributes, static switches, material functions (`.material_function` assets, graphs that a node calls) and a custom HLSL node.
 
@@ -59,6 +60,25 @@ The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inp
 
 **No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs. A later visibility buffer path can then fill the inputs from barycentrics and analytic derivatives without changing a material (see [Open questions](README.md#open-questions)).
 
+## Parallax occlusion mapping
+
+The Parallax Occlusion node (`cn_parallax`, in `material_parallax.hlsli`) gives a flat surface relief: a height map marched along the view, so that each pixel samples its textures where the view ray meets the relief, not where it meets the face.
+
+- **The height map** is a `mask` texture (see [Content pipeline](../content/kinds/textures.md#textures)) whose red channel is 1 at the surface and 0 at the node's `scale` below it, in UV units. The node takes the map, the UV, the scale and the steps, and gives the UV that the pixel sees and the height there, which a material feeds to its texture samples and can use to pick colors or darken crevices.
+- **The march** goes from the surface down in equal layers, as many as `steps` where the view is edge on and a quarter of that head on, at most `PARALLAX_MAX_STEPS` (64), and interpolates between the last two layers for where the ray crossed the relief. It samples with the pixel's derivatives of the UV taken before the march (`cn_sample_grad`), since the march's steps differ between neighbouring pixels, which would break the implicit derivatives inside the loop.
+- **Depth is not moved.** The forward pass tests depth `Equal` against the prepass, so a per-pixel depth offset would have to be written by both and would turn early depth off. The relief therefore changes what a pixel samples, and through the prepass's normal what it shades, but not the silhouette, and not where a shadow falls on it. The node runs in the prepass too, so the normal map and the opacity mask follow the relief.
+- The sample's bricks material (`samples/mygame/content/materials/bricks.material`) is a graph that uses it, on the Cornell box's short box, with a height map that `just sample-textures` writes.
+
+## Vertex displacement
+
+A material can move its vertices: waves, wind, a height map. It defines `float3 displace(Vertex_Inputs v)`, which gives an offset in meters in the world, in HLSL after the `---` line, or as a graph with a Vertex Offset node (`vertex_output`), whose nodes run in the vertex shaders.
+
+- **`Vertex_Inputs`** is the vertex before its offset, placed by its instance's pose: `position` relative to the camera, `object_position` in the mesh's space, `normal`, `tangent`, both UV sets, the color, and `time`. `world_position(v)` gives the position relative to the render origin, as it does for `Material_Inputs`.
+- **Both poses.** `finish_vertex` (`material_vertex.hlsli`) adds `displace` to the vertex at this frame's pose and time, and again at last frame's pose and `Frame_Constants.previous_time`, so an offset that moves with time gives a velocity, and temporal AA follows a wave. Every vertex path goes through it: vertex pulling, the mesh shaders and the patch surfaces, so the prepass, the shadow maps and the forward pass agree.
+- **In a graph,** the vertex offset's nodes read `Material_Inputs` made from the vertex (`vertex_material_inputs`), so the same nodes, custom HLSL and material functions serve both; a material function that both outputs reach is generated once for each stage. A texture sample takes its first mip, since a vertex shader has no derivatives. The View Direction, Front Facing, Fresnel and Parallax Occlusion nodes read what only a pixel has, and reaching one from the Vertex Offset is an error on that node. The Time node reads `inputs.time`, which is the frame's in evaluate and the pose's in the offset.
+- **Culling.** The material's `displacement_bound` setting is how far the offset may reach, in meters. Culling adds it to each item's sphere after the instance's scale (`Cull_Item.bound`), and the mesh shader path adds it to each meshlet's sphere (`Draw_Record.bound`) and skips the normal cone test, since the offset may turn a meshlet. A material that leaves it 0 may vanish at the frustum's edge when it moves far.
+- **Limits.** The offset is in the vertex, so the prepass normal is the mesh's unless the material gives one: a wave lights right only with an analytic normal through the shading model's `normal` input. Ray-traced shadows trace the mesh as it is, without the offset. The levels of detail pick by the mesh's own errors, which the offset does not change. The blob flag `Displaces` marks such a material.
+
 ## Permutations
 
 The cooker compiles each material for each pass and each vertex path:
@@ -66,7 +86,7 @@ The cooker compiles each material for each pass and each vertex path:
 | Axis | Values |
 |---|---|
 | Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps) |
-| Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)); skinning later |
+| Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)); or for a `patches` material the patch path alone (see [Surfaces](surfaces.md#patches)); skinning later |
 | Static switches | Each combination that the material or an instance uses |
 
 - One generated source holds every pass, each by its entry points (see [Content pipeline](../content/kinds/materials.md#materials)). DXC keeps only what each pass's outputs need: the depth pass of an opaque material has no pixel shader and no material code. *Later,* such materials share one depth pipeline.

@@ -52,6 +52,7 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 | Add a render pass | [GPU: Render graph](gpu/render-graph.md), then [Rendering: Frame](rendering/frame.md) for the hooks |
 | Add a shading model or material | [Rendering: Materials](rendering/materials.md) and [Content: Materials](content/kinds/materials.md) |
 | Add a renderer setting | [World: Volumes](world/volumes.md) and [Rendering: Frame](rendering/frame.md#settings) |
+| Add water or terrain | [Rendering: Surfaces](rendering/surfaces.md) and [Materials: Vertex displacement](rendering/materials.md#vertex-displacement) |
 | Write a behaviour | [Scripting: Behaviours](scripting/behaviours.md) and [Unity mapping](scripting/api.md#unity-mapping) |
 | Expose a native type or function to scripts | [Scripting: API](scripting/api.md#the-entity-and-component-view) |
 | Add an asset kind | [Content: Identity and cooking](content/identity-and-cooking.md) and [Blobs and loading](content/blobs-and-loading.md) |

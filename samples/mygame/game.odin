@@ -45,6 +45,8 @@ HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
 // The transparency scene, which F7 switches to and back (see docs/rendering/transparency.md#transparency).
 GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
+// The patch surfaces scene, a lake with an island (see docs/rendering/surfaces.md#surfaces).
+SURFACES_SCENE_META :: #load("content/scenes/surfaces.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -236,8 +238,8 @@ Game_State :: struct {
 	next_project_check: f64,
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
-	// F7 switches between the main scene and the glass scene.
-	glass_scene:        bool,
+	// F7 cycles the main scene, the glass scene and the surfaces scene.
+	scene_index:        u8,
 	elapsed:            time.Duration,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
@@ -1051,16 +1053,18 @@ update_output :: proc(s: ^Game_State) {
 	}
 }
 
-// switch_scene loads the glass scene, or the main scene again, when F7 is pressed. A linked editor owns the scene, so
-// the key does nothing then.
+// switch_scene loads the next scene, the glass scene, the surfaces scene, then the main scene again, when F7 is
+// pressed. A linked editor owns the scene, so the key does nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	s.glass_scene = !s.glass_scene
-	if guid, ok := format.meta_guid(s.glass_scene ? GLASS_SCENE_META : MAIN_SCENE_META); ok {
+	metas := [3]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META}
+	names := [3]string{"main", "glass", "surfaces"}
+	s.scene_index = (s.scene_index + 1) % 3
+	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
-		log.infof("mygame: the %s scene (F7 switches it)", s.glass_scene ? "glass" : "main")
+		log.infof("mygame: the %s scene (F7 cycles them)", names[s.scene_index])
 	}
 }
 

@@ -154,6 +154,129 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(source, fmt.tprintf("#line 14 \"%s/content/tinted.material\"", tree.dir)))
 }
 
+@(private = "file")
+RELIEF :: `material 1
+# A height map in relief, glowing in the mortar.
+shading = lit
+param height texture = white
+param glow color = [1, 0.5, 0.2, 1]
+
+node 1 output
+	position = [400, 0]
+	base_color = @3.height
+	emission = @4.out
+node 2 parameter
+	position = [-200, -100]
+	name = "height"
+node 3 parallax_occlusion
+	position = [0, 0]
+	height = @2.value
+	scale = 0.1
+node 4 emission
+	position = [200, 200]
+	color = @5.value
+	ev = @6.out
+node 5 parameter
+	position = [-200, 200]
+	name = "glow"
+node 6 one_minus
+	position = [0, 300]
+	x = @3.height
+`
+
+@(test)
+parallax_and_emission_nodes_generate_and_compile :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/shading/lit.shading", engine_text("shading/lit.shading")}, {"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")}, {"content/relief.material", RELIEF}})
+	defer remove_tree(tree)
+	options := graph_options(t, tree)
+	pass := cook(options, {.Material})
+	expect_no_errors(t, pass)
+	testing.expect_value(t, pass.cooked[.Material], 1)
+	source := generated(tree)
+	// The march is one helper call, whose later outputs are parts of it.
+	testing.expect(t, strings.contains(source, "cn_parallax((n2_value), (inputs.uv0), (0.1), (16.0), inputs);"))
+	testing.expect(t, strings.contains(source, "float n3_height = n3_result.z;"))
+	testing.expect(t, strings.contains(source, "* exp2((n6_out));"))
+	testing.expect(t, strings.contains(source, "s.emission = n4_out;"))
+}
+
+@(private = "file")
+RIPPLE :: `material 1
+# A texture under a tint, whose vertices ripple along their normals by the texture's red and the time.
+shading = lit
+param albedo texture = white
+
+node 1 output
+	position = [400, 0]
+	base_color = @5.rgb
+node 2 vertex_output
+	position = [400, 200]
+	offset = @3.out
+node 3 multiply
+	position = [200, 200]
+	a = @4.normal
+	b = @9.out
+node 4 normal
+	position = [0, 150]
+node 5 texture_sample
+	position = [0, 0]
+	texture = @7.value
+node 6 sin
+	position = [0, 300]
+	x = @8.time
+node 7 parameter
+	position = [-200, 0]
+	name = "albedo"
+node 8 time
+	position = [-200, 300]
+node 9 multiply
+	position = [100, 250]
+	a = @6.out
+	b = @5.r
+`
+
+@(test)
+vertex_output_generates_displace_in_the_vertex_stage :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_text("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")},
+			{"content/ripple.material", RIPPLE},
+			{"content/ripple.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+		},
+	)
+	defer remove_tree(tree)
+	options := graph_options(t, tree)
+	pass := cook(options, {.Material})
+	expect_no_errors(t, pass)
+	testing.expect_value(t, pass.cooked[.Material], 1)
+	data := tree_blob(t, tree, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	blob, ok := format.material_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect(t, .Displaces in blob.flags)
+		testing.expect(t, .Reads_Time in blob.flags)
+	}
+	source := generated(tree)
+	testing.expect(t, strings.contains(source, "#define MATERIAL_DISPLACES 1"))
+	testing.expect(t, strings.contains(source, "float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);"))
+	// The same texture sample is reached from both outputs: with derivatives in evaluate, and one mip in displace.
+	testing.expect_value(t, strings.count(source, "cn_sample((n7_value), (inputs.uv0));"), 1)
+	testing.expect_value(t, strings.count(source, "cn_sample_level((n7_value), (inputs.uv0), 0);"), 1)
+	testing.expect_value(t, strings.count(source, "float n8_time = inputs.time;"), 1)
+	testing.expect(t, strings.contains(source, "\treturn n3_out;"))
+
+	// A node that reads what only a pixel has cannot feed the vertex offset.
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	bad := "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\nnode 2 vertex_output\n\tposition = [0, 0]\n\toffset = @3.out\nnode 3 fresnel\n\tposition = [0, 0]\n"
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ripple.material", tree.dir), transmute([]byte)bad) == nil)
+	testing.expect(t, !cook(options, {.Material}).ok)
+	expect_error(t, &errors, "ripple.material:9: the fresnel node reads what only a pixel has, so the vertex offset cannot use it")
+}
+
 @(test)
 graph_sources_compile_once_and_keep_their_bytecode :: proc(t: ^testing.T) {
 	tree := make_tree(t, {{"content/shading/lit.shading", engine_text("shading/lit.shading")}, {"content/shading/lit.hlsli", engine_text("shading/lit.hlsli")}, {"content/tinted.material", TINTED}})

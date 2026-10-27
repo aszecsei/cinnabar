@@ -89,6 +89,12 @@ struct Frame_Constants {
 	// camera's, so each draws the same levels as the camera does.
 	float lod_scale;
 	float lod_near;
+	// Last frame's time, which a material's displacement takes for the previous pose (see Vertex_Inputs).
+	float previous_time;
+	// The frame's Surface_Records, in the upload ring at this offset of its buffer (see material_patch.hlsli).
+	uint surfaces;
+	uint surfaces_offset;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -107,6 +113,8 @@ static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 // The mesh shader path's meshlets, each in a color of its own, and their levels of detail as heat colors.
 static const uint DEBUG_MESHLETS = 18;
 static const uint DEBUG_LOD_DEPTH = 19;
+// The shading model's emission alone, exposed as the scene is.
+static const uint DEBUG_EMISSION = 20;
 
 // load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
 // default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
@@ -163,14 +171,16 @@ static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 
 // Matches Draw_Record in lib/engine/render/scene.odin: one indirect draw, by its draw ID. material is the byte offset
 // of the draw's parameter block in the material table. mesh has the submesh's index above ID_ENTITY_BITS. first and
-// count are the submesh's indices, or on the mesh shader path its meshlets.
+// count are the submesh's indices, or on the mesh shader path its meshlets. bound is how far the material's
+// displacement may move a vertex, in meters, which the mesh shader path's culling adds to each meshlet's sphere.
 struct Draw_Record {
 	uint instance;
 	uint mesh;
 	uint first;
 	uint material;
 	uint count;
-	uint3 padding;
+	float bound;
+	uint2 padding;
 };
 
 // Matches Mesh_Record in lib/engine/render/scene.odin.
@@ -212,6 +222,23 @@ struct Material_Inputs {
 	// Toward the camera.
 	float3 view;
 	bool front_facing;
+	// The frame's time in seconds, which wraps every hour. A displacement's previous pose takes last frame's.
+	float time;
+};
+
+// What a material's displace reads (see docs/rendering/materials.md#vertex-displacement): a vertex before its offset, placed
+// by its instance's pose. position is relative to the camera and the directions are in the world, as Material_Inputs
+// has them. time is the frame's, or last frame's for the previous pose, so an offset that moves with time gives a
+// velocity.
+struct Vertex_Inputs {
+	float3 position;
+	float3 object_position;
+	float3 normal;
+	float4 tangent;
+	float2 uv0;
+	float2 uv1;
+	float4 color;
+	float time;
 };
 
 // Matches Light_Record in lib/engine/render/lights.odin. position is relative to the camera, and direction is where
@@ -297,6 +324,28 @@ float3 world_position(Material_Inputs inputs) {
 	return inputs.position + frame.origin_offset.xyz;
 }
 
+float3 world_position(Vertex_Inputs v) {
+	return v.position + frame.origin_offset.xyz;
+}
+
+// vertex_material_inputs gives a vertex as Material_Inputs, so that the nodes, custom HLSL and material functions of a
+// graph's vertex offset read what they read in evaluate. There is no face yet, so it is the front, and the view is
+// the direction from the vertex to the camera.
+Material_Inputs vertex_material_inputs(Vertex_Inputs v) {
+	Material_Inputs inputs;
+	inputs.position = v.position;
+	inputs.object_position = v.object_position;
+	inputs.normal = v.normal;
+	inputs.tangent = v.tangent;
+	inputs.uv0 = v.uv0;
+	inputs.uv1 = v.uv1;
+	inputs.color = v.color;
+	inputs.view = normalize(-v.position);
+	inputs.front_facing = true;
+	inputs.time = v.time;
+	return inputs;
+}
+
 // frame_exposure scales the colors that the forward pass writes, so the scene is pre-exposed.
 float frame_exposure() {
 	return cn_buffer(frame.exposure).Load<float>(0);
@@ -308,9 +357,26 @@ float4 cn_sample(uint texture_index, float2 uv) {
 	return cn_texture(texture_index).Sample(cn_sampler(frame.sampler_index), uv);
 }
 
+// cn_sample_grad samples with the derivatives given, for a sample inside a loop or a branch, where the pixel shader's
+// own derivatives are not defined.
+float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
+	return cn_texture(texture_index).SampleGrad(cn_sampler(frame.sampler_index), uv, uv_dx, uv_dy);
+}
+
+// cn_sample_level samples one mip, for a vertex shader, which has no derivatives, or a sample whose level the material
+// chooses.
+float4 cn_sample_level(uint texture_index, float2 uv, float level) {
+	return cn_texture(texture_index).SampleLevel(cn_sampler(frame.sampler_index), uv, level);
+}
+
 // cn_normal_map reads a tangent-space normal from a two-channel normal map (BC5), which keeps x and y.
 float3 cn_normal_map(uint texture_index, float2 uv) {
 	float2 xy = cn_sample(texture_index, uv).xy * 2 - 1;
+	return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
+}
+
+float3 cn_normal_map_level(uint texture_index, float2 uv, float level) {
+	float2 xy = cn_sample_level(texture_index, uv, level).xy * 2 - 1;
 	return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
 }
 
@@ -349,5 +415,6 @@ float4 unpack_unorm8(uint c) {
 }
 
 #include "ltc.hlsli"
+#include "material_parallax.hlsli"
 
 #endif

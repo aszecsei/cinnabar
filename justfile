@@ -366,6 +366,11 @@ lint:
 docs-check:
     python -I tools/check_docs.py .
 
+# Write the sample's generated textures, such as the bricks' height map (see docs/rendering/materials.md#parallax-occlusion-mapping).
+# Commit what it writes.
+sample-textures:
+    python -I tools/surface_textures.py .
+
 fmt:
     odinfmt lib src samples -w
 

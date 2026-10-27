@@ -1,0 +1,4 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content-pipeline.md#identity).
+guid = 9b3e5d7f2c1a4e8b9d0c1f2e3a4b5c6d
+usage = mask
+wrap = clamp

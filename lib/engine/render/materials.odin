@@ -17,6 +17,9 @@ MATERIAL_RETRY_FRAMES :: 60
 // DEFAULT_MATERIAL is the engine's default material (lib/engine/content/materials/default.material), which a submesh
 // without a material, or with one that cannot draw, draws with.
 DEFAULT_MATERIAL :: #load("../content/materials/default.material.meta", string)
+// DEFAULT_SURFACE_MATERIAL is the engine's default surface material (default_surface.material), which a Surface_Renderer
+// without a material, or with one that draws meshes or cannot draw, draws with (see docs/rendering/surfaces.md#surfaces).
+DEFAULT_SURFACE_MATERIAL :: #load("../content/materials/default_surface.material.meta", string)
 
 // Materials is the material runtime (see docs/rendering/materials.md#runtime): the materials and instances that the frames
 // draw, their pipelines, and the textures that a texture parameter without its texture samples. It lives in the
@@ -27,6 +30,7 @@ Materials :: struct {
 	pipelines:      [MAX_MATERIAL_PIPELINES]Material_Pipeline,
 	pipeline_count: int,
 	default_guid:   format.Guid,
+	default_surface_guid: format.Guid,
 	// White, black and a flat normal, by Material_Texture_Default.
 	defaults:       [format.Material_Texture_Default]gpu.Texture,
 	sampler:        gpu.Sampler,
@@ -55,6 +59,10 @@ Material_Pipeline :: struct {
 	blend:        format.Material_Blend,
 	// A Transparent material that draws sorted back to front, not with moment-based transparency.
 	sorted:       bool,
+	// How far the material's displacement may move a vertex, in meters, which culling adds to each sphere.
+	displacement_bound: f32,
+	// The material draws the patches of Surface_Renderers, with the patch vertex path, not meshes.
+	patches:      bool,
 	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
 	// material, which have no moments (see docs/rendering/transparency.md#transparency).
@@ -108,6 +116,7 @@ Material_Use :: struct {
 
 materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 	m.default_guid, _ = format.meta_guid(DEFAULT_MATERIAL)
+	m.default_surface_guid, _ = format.meta_guid(DEFAULT_SURFACE_MATERIAL)
 	texels := [format.Material_Texture_Default][4]u8 {
 		.White  = {255, 255, 255, 255},
 		.Black  = {0, 0, 0, 255},
@@ -403,6 +412,8 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	p.two_sided = two_sided
 	p.cast_shadows = .Cast_Shadows in blob.flags
 	p.blend, p.sorted = blob.blend, sorted
+	p.displacement_bound = .Displaces in blob.flags ? blob.displacement_bound : 0
+	p.patches = .Patches in blob.flags
 }
 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.

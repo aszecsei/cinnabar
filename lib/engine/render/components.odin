@@ -16,6 +16,8 @@ FOG_ID :: ecs.Component_Id(38)
 QUAD_LIGHT_ID :: ecs.Component_Id(39)
 DISK_LIGHT_ID :: ecs.Component_Id(40)
 LINE_LIGHT_ID :: ecs.Component_Id(41)
+// 42 is the Volume, and 43 to 50 the settings components (see settings.odin).
+SURFACE_RENDERER_ID :: ecs.Component_Id(51)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -43,6 +45,21 @@ View_Model :: struct {}
 Mesh_Renderer :: struct {
 	mesh:         format.Guid `asset:"mesh"`,
 	materials:    [MAX_MATERIAL_SLOTS]format.Guid `asset:"material"`,
+	cast_shadows: bool,
+}
+
+// Surface_Renderer draws a patch surface (see docs/rendering/surfaces.md#surfaces): a rectangle of size meters along its
+// entity's x and z, about its position, as grid patches that the GPU picks by their distance from the camera, with
+// its material, which must draw patches (geometry = patches), or the engine's default surface material without one.
+// The surface has a hole where hole_mask, a mask texture over the rectangle, reads 0. cell is the finest quad's size
+// in meters (0 means DEFAULT_SURFACE_CELL), and height_range how far below and above its plane the material's
+// displacement reaches, which culling allows for.
+Surface_Renderer :: struct {
+	size:         [2]f32,
+	material:     format.Guid `asset:"material"`,
+	hole_mask:    format.Guid `asset:"texture"`,
+	cell:         f32 `editor:"range=0,100"`,
+	height_range: [2]f32,
 	cast_shadows: bool,
 }
 
@@ -132,6 +149,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Quad_Light, QUAD_LIGHT_ID)
 	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID)
 	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
+	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID)
 	register_settings_components(r)
 }
 

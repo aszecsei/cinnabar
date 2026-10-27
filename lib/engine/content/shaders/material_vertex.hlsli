@@ -73,6 +73,45 @@ uint draw_index(Draw_Record d, Mesh_Record m, uint vertex_id) {
 	return (corner & 1) != 0 ? word >> 16 : word & 0xffff;
 }
 
+// finish_vertex places a vertex of the mesh's space by its instance's pose, and moves it by the material's displacement
+// when it has one (see docs/rendering/materials.md#vertex-displacement): what the vertex paths and the patch path all
+// draw. The displacement is read at this frame's time for this frame's pose and at last frame's for the previous, so
+// an offset that moves gives a velocity.
+Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 local, float3 normal, float3 tangent, float bitangent_sign, float2 uv0, float2 uv1, float4 color) {
+	Material_Vertex v;
+	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
+	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
+	v.local = local;
+	v.normal = transform_direction(instance.rows, normal);
+	v.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
+	v.uv0 = uv0;
+	v.uv1 = uv1;
+	v.color = color;
+	v.material = d.material;
+	v.id = instance.id | (d.mesh & ~ID_ENTITY_MASK);
+	v.cluster = 0;
+#if MATERIAL_DISPLACES
+	params = cn_buffer(frame.materials).Load<Params>(frame.materials_offset + d.material);
+	Vertex_Inputs now;
+	now.position = v.world;
+	now.object_position = local;
+	now.normal = v.normal;
+	now.tangent = v.tangent;
+	now.uv0 = uv0;
+	now.uv1 = uv1;
+	now.color = color;
+	now.time = frame.time;
+	v.world += displace(now);
+	Vertex_Inputs before = now;
+	before.position = v.previous;
+	before.normal = transform_direction(instance.previous_rows, normal);
+	before.tangent = float4(transform_direction(instance.previous_rows, tangent), bitangent_sign);
+	before.time = frame.previous_time;
+	v.previous += displace(before);
+#endif
+	return v;
+}
+
 // place_vertex is a mesh's vertex, placed by its instance's pose: what both vertex paths draw.
 Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record instance, uint index) {
 	float3 local = cn_buffer(m.positions).Load<float3>(index * 12);
@@ -94,28 +133,20 @@ Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record insta
 	if (m.flags & MESH_COLOR) {
 		color = unpack_unorm8(attributes.Load(offset));
 	}
-
-	Material_Vertex v;
-	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
-	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
-	v.local = local;
-	v.normal = transform_direction(instance.rows, normal);
-	v.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
-	v.uv0 = uv0;
-	v.uv1 = uv1;
-	v.color = color;
-	v.material = d.material;
-	v.id = instance.id | (d.mesh & ~ID_ENTITY_MASK);
-	v.cluster = 0;
-	return v;
+	return finish_vertex(d, instance, local, normal, tangent, bitangent_sign, uv0, uv1, color);
 }
 
+#if MATERIAL_PATCHES
+// A patches material's vertices are a surface's patches, not a mesh's (see docs/rendering/surfaces.md#surfaces).
+#include "material_patch.hlsli"
+#else
 // load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID.
 Material_Vertex load_vertex(uint vertex_id) {
 	Draw_Record d = load_draw();
 	Mesh_Record m = load_mesh(d);
 	return place_vertex(d, m, load_instance(d), draw_index(d, m, vertex_id));
 }
+#endif
 
 // clip_position is where every pass places a vertex. It is precise, so each pass computes the same depth.
 float4 clip_position(float3 world) {
@@ -152,6 +183,7 @@ Material_Inputs material_inputs(Varyings i, bool front) {
 	inputs.color = i.color;
 	inputs.view = normalize(-i.world);
 	inputs.front_facing = front;
+	inputs.time = frame.time;
 #if MATERIAL_TWO_SIDED
 	// A back face shades as the other side of the surface.
 	if (!front) {

@@ -19,6 +19,14 @@ TEXTURE_WIDTH :: 5
 Pin_Type :: cook_link.Pin_Type
 Property_Kind :: cook_link.Property_Kind
 
+// The stages that a graph's code runs in: evaluate, in the pixel shaders, and the vertex offset, in the vertex shaders
+// (see docs/rendering/materials.md#vertex-displacement).
+Stage :: enum {
+	Pixel,
+	Vertex,
+}
+Stages :: bit_set[Stage]
+
 Node_Pin :: struct {
 	name:          string,
 	type:          Pin_Type,
@@ -28,6 +36,8 @@ Node_Pin :: struct {
 	// node's earlier output o.
 	code:          string,
 	default_label: string,
+	// An output's HLSL in the vertex stage, when it differs: a texture sample without derivatives.
+	vertex_code:   string,
 }
 
 Node_Property :: struct {
@@ -47,6 +57,8 @@ Node_Kind :: struct {
 	properties:  []Node_Property,
 	pins_from:   cook_link.Node_Pins_From,
 	scope:       cook_link.Node_Scope,
+	// The stages whose code may reach the node: {} for both. A node that reads what only a pixel has is Pixel only.
+	stages:      Stages,
 }
 
 @(private = "file")
@@ -63,6 +75,15 @@ NODE_KINDS := []Node_Kind {
 		description = "The material's surface: an input for each input of its shading model. An input without a link or a value keeps the shading model's default.",
 		pins_from = .Shading_Model,
 		scope = .Material,
+	},
+	{
+		name = "vertex_output",
+		label = "Vertex Offset",
+		category = "Output",
+		description = "Moves the mesh's vertices by an offset in meters, in the world, before the surface is shaded: waves, wind, a height map. A material has at most one. Its nodes run in the vertex shaders, where textures sample their first mip and there is no view direction or face.",
+		inputs = {{name = "offset", type = .Float3}},
+		scope = .Material,
+		stages = {.Vertex},
 	},
 	{
 		name = "parameter",
@@ -84,9 +105,9 @@ NODE_KINDS := []Node_Kind {
 	{name = "object_position", label = "Object Position", category = "Inputs", description = "The point's position in the mesh's own space, in meters, before its entity's pose, so a pattern moves, turns and scales with the object.", outputs = {{name = "position", type = .Float3, code = "inputs.object_position"}}},
 	{name = "normal", label = "World Normal", category = "Inputs", description = "The mesh's normal in the world, before a normal map.", outputs = {{name = "normal", type = .Float3, code = "inputs.normal"}}},
 	{name = "tangent", label = "World Tangent", category = "Inputs", description = "The mesh's tangent in the world, with the bitangent's sign in w.", outputs = {{name = "tangent", type = .Float4, code = "inputs.tangent"}}},
-	{name = "view", label = "View Direction", category = "Inputs", description = "The direction from the point toward the camera.", outputs = {{name = "view", type = .Float3, code = "inputs.view"}}},
-	{name = "time", label = "Time", category = "Inputs", description = "The frame's time in seconds, which wraps every hour.", outputs = {{name = "time", type = .Float, code = "frame.time"}}},
-	{name = "front_facing", label = "Front Facing", category = "Inputs", description = "1 on the front of a face, and 0 on the back of a two-sided one.", outputs = {{name = "front", type = .Float, code = "(inputs.front_facing ? 1.0 : 0.0)"}}},
+	{name = "view", label = "View Direction", category = "Inputs", description = "The direction from the point toward the camera.", outputs = {{name = "view", type = .Float3, code = "inputs.view"}}, stages = {.Pixel}},
+	{name = "time", label = "Time", category = "Inputs", description = "The frame's time in seconds, which wraps every hour. In the vertex offset's previous pose, last frame's.", outputs = {{name = "time", type = .Float, code = "inputs.time"}}},
+	{name = "front_facing", label = "Front Facing", category = "Inputs", description = "1 on the front of a face, and 0 on the back of a two-sided one.", outputs = {{name = "front", type = .Float, code = "(inputs.front_facing ? 1.0 : 0.0)"}}, stages = {.Pixel}},
 	{
 		name = "texture_sample",
 		label = "Texture Sample",
@@ -94,7 +115,7 @@ NODE_KINDS := []Node_Kind {
 		description = "Samples a texture parameter.",
 		inputs = {{name = "texture", type = .Texture}, {name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"}},
 		outputs = {
-			{name = "rgba", type = .Float4, code = "cn_sample({texture}, {uv})"},
+			{name = "rgba", type = .Float4, code = "cn_sample({texture}, {uv})", vertex_code = "cn_sample_level({texture}, {uv}, 0)"},
 			{name = "rgb", type = .Float3, code = "{=rgba}.rgb"},
 			{name = "r", type = .Float, code = "{=rgba}.r"},
 			{name = "g", type = .Float, code = "{=rgba}.g"},
@@ -108,7 +129,25 @@ NODE_KINDS := []Node_Kind {
 		category = "Textures",
 		description = "Samples a two-channel normal map, and gives the tangent-space normal.",
 		inputs = {{name = "texture", type = .Texture}, {name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"}},
-		outputs = {{name = "normal", type = .Float3, code = "cn_normal_map({texture}, {uv})"}},
+		outputs = {{name = "normal", type = .Float3, code = "cn_normal_map({texture}, {uv})", vertex_code = "cn_normal_map_level({texture}, {uv}, 0)"}},
+	},
+	{
+		name = "parallax_occlusion",
+		label = "Parallax Occlusion",
+		category = "Textures",
+		description = "Marches a height map along the view to where it meets the surface, and gives the UV there, so a flat surface shows relief. The map's red channel is the height: 1 at the surface, 0 scale below it, in UV units. The depth is not moved, so silhouettes do not change.",
+		inputs = {
+			{name = "height", type = .Texture},
+			{name = "uv", type = .Float2, code = "inputs.uv0", default_label = "UV0"},
+			{name = "scale", type = .Float, default = {0.05, 0, 0, 0}},
+			{name = "steps", type = .Float, default = {16, 0, 0, 0}},
+		},
+		outputs = {
+			{name = "result", type = .Float3, code = "cn_parallax({height}, {uv}, {scale}, {steps}, inputs)"},
+			{name = "uv", type = .Float2, code = "{=result}.xy"},
+			{name = "height", type = .Float, code = "{=result}.z"},
+		},
+		stages = {.Pixel},
 	},
 	{
 		name = "add",
@@ -261,6 +300,15 @@ NODE_KINDS := []Node_Kind {
 		description = "1 where the surface is seen edge on, and 0 where it faces the camera, with a falloff.",
 		inputs = {{name = "exponent", type = .Float, default = {5, 0, 0, 0}}, {name = "normal", type = .Float3, code = "inputs.normal", default_label = "World normal"}},
 		outputs = {{name = "out", type = .Float, code = "pow(1 - saturate(dot(normalize({normal}), inputs.view)), {exponent})"}},
+		stages = {.Pixel},
+	},
+	{
+		name = "emission",
+		label = "Emission",
+		category = "Vector",
+		description = "A color at a brightness in stops: color × 2^ev, which is the radiance that a shading model's emission takes, in the scene's linear units, so a surface at 0 EV is as bright as a white surface in light of 1.",
+		inputs = {{name = "color", type = .Float3, default = {1, 1, 1, 1}}, {name = "ev", type = .Float, default = {0, 0, 0, 0}}},
+		outputs = {{name = "out", type = .Float3, code = "{color} * exp2({ev})"}},
 	},
 	{
 		name = "switch",
@@ -717,7 +765,7 @@ graph_check :: proc(
 	problems: ^Problems,
 ) -> bool {
 	ok := true
-	outputs := 0
+	outputs, vertex_outputs := 0, 0
 	for &n in g.nodes {
 		k := n.kind
 		if k.scope != .Both && k.scope != scope {
@@ -726,6 +774,7 @@ graph_check :: proc(
 			continue
 		}
 		outputs += int(k.name == "output")
+		vertex_outputs += int(k.name == "vertex_output")
 		for f in n.fields {
 			if f.name == "position" {
 				if f.value.kind != .Numbers || f.value.count != 2 {
@@ -760,6 +809,10 @@ graph_check :: proc(
 	}
 	if scope == .Material && outputs != 1 {
 		report_error(problems, path, 0, 0, "a material's graph has one output node, not %d", outputs)
+		ok = false
+	}
+	if vertex_outputs > 1 {
+		report_error(problems, path, 0, 0, "a material's graph has at most one vertex_output node, not %d", vertex_outputs)
 		ok = false
 	}
 	return ok
@@ -830,6 +883,9 @@ Generator :: struct {
 	written:    map[format.Guid]string,
 	writing:    [dynamic]format.Guid,
 	reads_time: bool,
+	// The stage being written: evaluate, or the vertex offset, whose functions are written again with v before their
+	// names, since a texture samples differently there.
+	stage:      Stage,
 	ok:         bool,
 }
 
@@ -849,9 +905,11 @@ Graph_Body :: struct {
 }
 
 // generate_evaluate writes the evaluate of a material's graph for one combination of switches, and the functions that
-// it needs before it, into globals and body.
-generate_evaluate :: proc(gen: ^Generator, g: ^Graph, path: string) -> (body: string) {
+// it needs before it, into globals and body; and displace from its vertex_output node, if it has one, after the
+// functions that it needs, written again for the vertex stage (see docs/rendering/materials.md#vertex-displacement).
+generate_evaluate :: proc(gen: ^Generator, g: ^Graph, path: string) -> (body: string, displace: string) {
 	gen.ok = true
+	gen.stage = .Pixel
 	gen.globals = strings.builder_make(context.temp_allocator)
 	gen.written = make(map[format.Guid]string, context.temp_allocator)
 	gen.writing = make([dynamic]format.Guid, context.temp_allocator)
@@ -863,7 +921,23 @@ generate_evaluate :: proc(gen: ^Generator, g: ^Graph, path: string) -> (body: st
 		}
 	}
 	strings.write_string(&gb.b, "\treturn s;\n}\n")
-	return strings.to_string(gb.b)
+	body = strings.to_string(gb.b)
+	vertex_output := -1
+	for &n, i in g.nodes {
+		if n.kind.name == "vertex_output" {
+			vertex_output = i
+		}
+	}
+	if vertex_output < 0 {
+		return
+	}
+	gen.stage = .Vertex
+	gen.written = make(map[format.Guid]string, context.temp_allocator)
+	vb := new_body(gen, g, path, "v", nil)
+	strings.write_string(&vb.b, "float3 displace(Vertex_Inputs v) {\n\tMaterial_Inputs inputs = vertex_material_inputs(v);\n")
+	visit(vb, vertex_output)
+	strings.write_string(&vb.b, "}\n")
+	return body, strings.to_string(vb.b)
 }
 
 @(private = "file")
@@ -1029,9 +1103,15 @@ visit :: proc(gb: ^Graph_Body, index: int) -> bool {
 	gb.state[index] = 1
 	defer gb.state[index] = 2
 	n := &gb.g.nodes[index]
+	if n.kind.stages != {} && gb.gen.stage not_in n.kind.stages {
+		fail(gb, n.line, "the %s node reads what only a pixel has, so the vertex offset cannot use it", n.kind.name)
+		return false
+	}
 	switch n.kind.name {
 	case "output":
 		return write_output(gb, n)
+	case "vertex_output":
+		return write_vertex_output(gb, n)
 	case "parameter":
 		return write_parameter(gb, index)
 	case "switch":
@@ -1077,7 +1157,11 @@ write_template :: proc(gb: ^Graph_Body, index: int) -> bool {
 	widths := make([]int, len(k.outputs), context.temp_allocator)
 	for out, i in k.outputs {
 		widths[i] = out.type == .Any ? generic : pin_width(out.type)
-		expr := expand(out.code, n, inputs)
+		code := out.code
+		if gb.gen.stage == .Vertex && out.vertex_code != "" {
+			code = out.vertex_code
+		}
+		expr := expand(code, n, inputs)
 		fmt.sbprintfln(&gb.b, "\t%s n%d_%s = %s;", width_type(widths[i]), n.id, out.name, expr)
 	}
 	gb.widths[index] = widths
@@ -1150,6 +1234,16 @@ write_output :: proc(gb: ^Graph_Body, n: ^Graph_Node) -> bool {
 	for a in assignments {
 		fmt.sbprintln(&gb.b, a)
 	}
+	gb.widths[slice_index(gb, n)] = {}
+	return true
+}
+
+// write_vertex_output returns the offset from displace.
+@(private = "file")
+write_vertex_output :: proc(gb: ^Graph_Body, n: ^Graph_Node) -> bool {
+	expr := input_expr(gb, n, n.kind.inputs[0], 3) or_return
+	line_directive(gb, n.line)
+	fmt.sbprintfln(&gb.b, "\treturn %s;", expr)
 	gb.widths[slice_index(gb, n)] = {}
 	return true
 }
@@ -1295,7 +1389,7 @@ write_function :: proc(gb: ^Graph_Body, f: ^Function_Decl) -> (name: string, ok:
 	}
 	append(&gen.writing, f.guid)
 	defer pop(&gen.writing)
-	name = fmt.tprintf("mf%d", len(gen.written))
+	name = fmt.tprintf("%smf%d", gen.stage == .Vertex ? "v" : "", len(gen.written))
 	fb := new_body(gen, &f.graph, f.path, fmt.tprintf("%s_", name), f)
 	for &n, i in f.graph.nodes {
 		if n.kind.name == "function_output" {

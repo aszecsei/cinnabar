@@ -99,6 +99,13 @@ Frame_Constants :: struct {
 	// The mesh shader path's level of detail: the camera's, in every view (see lod_scale).
 	lod_scale:                f32,
 	lod_near:                 f32,
+	// Last frame's time, for the previous pose of a material's displacement (see
+	// docs/rendering/materials.md#vertex-displacement).
+	previous_time:            f32,
+	// The frame's Surface_Records in the upload ring, at this offset of its buffer.
+	surfaces:                 u32,
+	surfaces_offset:          u32,
+	padding:                  u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -120,14 +127,16 @@ Material_Push :: struct {
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
 // mesh is the mesh's index, with the submesh's index in its mesh above ID_ENTITY_BITS, as the ID buffer has it. first
-// and count are the submesh's indices, or on the mesh shader path its meshlets.
+// and count are the submesh's indices, or on the mesh shader path its meshlets. bound is the material's displacement
+// bound in meters, which the mesh shader path's culling adds to each meshlet's sphere.
 Draw_Record :: struct {
 	instance: u32,
 	mesh:     u32,
 	first:    u32,
 	material: u32,
 	count:    u32,
-	padding:  [3]u32,
+	bound:    f32,
+	padding:  [2]u32,
 }
 
 MESH_RECORD_INDEX32 :: 1
@@ -162,9 +171,13 @@ ITEM_CASTS_SHADOWS :: 1
 ITEM_VIEW_MODEL :: 2
 // An item that draws on the mesh shader path, whose first and count are its meshlets.
 ITEM_MESH_PATH :: 4
+// A patch surface's item, whose draws the GPU adds (see docs/rendering/surfaces.md#surfaces): cull_draws.hlsl skips
+// it, and cull_patches.hlsl writes a draw for each of its visible patches.
+ITEM_SURFACE :: 8
 
 // Cull_Item matches Item in cull_draws.hlsl. first and count are the submesh's indices, or with ITEM_MESH_PATH its
-// meshlets.
+// meshlets. bound is how far the material's displacement may move a vertex, in meters, which culling adds to the
+// sphere's radius after the instance's scale (see docs/rendering/materials.md#vertex-displacement).
 Cull_Item :: struct {
 	instance: u32,
 	mesh:     u32,
@@ -176,6 +189,8 @@ Cull_Item :: struct {
 	// The index of the submesh in its mesh, which the ID buffer gets (see ID_ENTITY_BITS).
 	submesh:  u32,
 	sphere:   [4]f32,
+	bound:    f32,
+	padding:  [3]u32,
 }
 
 // A view that draws only the items that cast shadows, and the view that draws only the view model's items, which every
@@ -210,11 +225,19 @@ Cull_Constants :: struct {
 	bin_count:          u32,
 	// The mesh shader path's indirect draws.
 	mesh_arguments:     u32,
-	padding:            [2]u32,
+	// The surfaces' records in the upload ring, how many, and the patches that the selection writes and the culling
+	// reads, with each surface's count (see docs/rendering/surfaces.md#surfaces).
+	surfaces:           u32,
+	surfaces_offset:    u32,
+	surface_count:      u32,
+	patches:            u32,
+	patch_counts:       u32,
+	patches_read:       u32,
+	patch_counts_read:  u32,
 }
 
-#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 48 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 560)
+#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 64 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 32)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 576)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -234,6 +257,8 @@ Gpu_Scene :: struct {
 	previous_position:        ecs.World_Position,
 	previous_view_projection: matrix[4, 4]f32,
 	previous_view_model:      matrix[4, 4]f32,
+	// Last frame's time, which a displacement's previous pose takes.
+	previous_time:            f32,
 	has_previous:             bool,
 	instances:                gpu.Buffer,
 	// This frame's indirect draws, the mesh shader path's in a buffer of their own, and draw records, and each view's
@@ -245,6 +270,11 @@ Gpu_Scene :: struct {
 	capacity:                 int,
 	count_capacity:           int,
 	cull_pipeline:            Shader_Pipeline,
+	// The patch surfaces' selected patches and each surface's count, and the passes that select and cull them.
+	patches:                  gpu.Buffer,
+	patch_counts:             gpu.Buffer,
+	select_pipeline:          Shader_Pipeline,
+	cull_patches_pipeline:    Shader_Pipeline,
 }
 
 // Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
@@ -264,6 +294,11 @@ Scene_Frame :: struct {
 	bin_pipelines:   []int,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
+	// The draws of one view: the items, with each surface's reserved patches.
+	draws_per_view:  int,
+	// The patch surfaces' records, and their upload.
+	surfaces:        []Surface_Record,
+	surface_upload:  gpu.Upload,
 	// Each group's first bin and the bin after its last.
 	groups:          [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
@@ -286,22 +321,30 @@ Scene_Frame :: struct {
 	mesh_arguments:  Buffer,
 	draws:           Buffer,
 	counts:          Buffer,
+	patches:         Buffer,
+	patch_counts:    Buffer,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.slots = make(map[ecs.Entity]u32, platform.heap_allocator)
 	s.free = make([dynamic]u32, platform.heap_allocator)
 	s.instances = platform.gpu_create_buffer({size = MAX_INSTANCES * size_of(Instance_Record), label = "gpu scene instances"}, nil)
+	s.patches = platform.gpu_create_buffer({size = MAX_SURFACES * MAX_SURFACE_PATCHES * 4, usage = {.Storage}, label = "surface patches"}, nil)
+	s.patch_counts = platform.gpu_create_buffer({size = MAX_SURFACES * 4, usage = {.Storage}, label = "surface patch counts"}, nil)
 	s.cull_pipeline = shader_pipeline(CULL_SHADER)
+	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
+	s.cull_patches_pipeline = shader_pipeline(CULL_PATCHES_SHADER)
 }
 
 scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	delete(s.slots)
 	delete(s.free)
-	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts}) {
+	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
+	destroy_shader_pipeline(&s.select_pipeline, platform)
+	destroy_shader_pipeline(&s.cull_patches_pipeline, platform)
 }
 
 // snap_origin is the corner of the 1024 m cell that holds a position.
@@ -325,6 +368,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		s.origin, s.origin_set = snap_origin(f.view.position), true
 	}
 	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
+	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
+	sync_compute_pipeline(&s.cull_patches_pipeline, r.platform, r.residency.assets, {label = "cull patches"}, r.reloaded)
 
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
@@ -371,7 +416,36 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 			}
 		}
 	}
-	// A slot whose entity has no Mesh_Renderer any more is free again.
+	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
+	// docs/rendering/surfaces.md#surfaces).
+	surfaces := make([dynamic]Surface_Record, r.platform.frame_allocator)
+	camera_offset := ecs.position_sub(f.view.position, s.origin)
+	lod := lod_scale(f.view, f.size.y, f.lod_error)
+	surface_it := ecs.query_iter(w, r.surfaces.query)
+	for view in ecs.query_next(&surface_it) {
+		entities := ecs.entities(view)
+		current := ecs.column(view, 0, ecs.Transform)
+		previous := ecs.column(view, 1, ecs.Previous_Transform)
+		renderers := ecs.column(view, EXTRACT_TERMS, Surface_Renderer)
+		for e, i in entities {
+			slot, slot_ok := scene_slot(s, e)
+			if !slot_ok {
+				continue
+			}
+			pose := current[i]
+			if previous != nil {
+				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
+			}
+			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
+			records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
+			s.previous[slot], s.seen[slot] = pose, s.frame
+			if is_hidden(hidden, e) || len(surfaces) >= MAX_SURFACES {
+				continue
+			}
+			add_surface(r, &table, &items, &surfaces, renderers[i], slot, records[slot].rows, camera_offset, lod)
+		}
+	}
+	// A slot whose entity has no Mesh_Renderer or Surface_Renderer any more is free again.
 	for slot in 0 ..< s.high {
 		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
 			delete_key(&s.slots, s.slot_entities[slot])
@@ -394,13 +468,12 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
 	sf.items = items[:]
-	sf.bin_offsets = make([]u32, max(len(sf.bin_pipelines), 1), r.platform.frame_allocator)
-	sf.bin_counts = make([]u32, max(len(sf.bin_pipelines), 1), r.platform.frame_allocator)
-	for item in items {
-		sf.bin_counts[item.bin] += 1
-	}
-	for b in 1 ..< len(sf.bin_pipelines) {
-		sf.bin_offsets[b] = sf.bin_offsets[b - 1] + sf.bin_counts[b - 1]
+	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
+	// The surfaces' records name their items, now that the bins' order is the items'.
+	for item, i in items {
+		if item.flags & ITEM_SURFACE != 0 {
+			surfaces[item.mesh].item = u32(i)
+		}
 	}
 
 	platform := r.platform
@@ -412,12 +485,14 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	table_upload, table_ok := upload_bytes(platform, table.bytes[:])
 	bin_upload, bins_ok := upload_bytes(platform, slice.to_bytes(sf.bin_offsets))
 	accel_upload, accel_ok := upload_bytes(platform, slice.to_bytes(accel_instances[:]))
-	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok) {
+	surface_upload, surfaces_ok := upload_bytes(platform, slice.to_bytes(surfaces[:]))
+	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && surfaces_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
 		return
 	}
 	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload = item_upload, mesh_upload, table_upload, bin_upload
+	sf.surfaces, sf.surface_upload = surfaces[:], surface_upload
 	sf.accel_instances, sf.accel_count = accel_upload, len(accel_instances)
 }
 
@@ -496,9 +571,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	view_model := view_projection(view_model_view(f.view), f32(f.size.x) / f32(max(f.size.y, 1)))
 	f.previous_view_projection = s.has_previous ? s.previous_view_projection : f.view_projection
 	f.camera_motion = s.has_previous ? ecs.position_sub(f.view.position, s.previous_position) : {}
+	now := frame_time(r)
 	defer {
 		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
 		s.previous_view_model = view_model
+		s.previous_time = now
 	}
 	// The fog's injection reads the camera's constants, so they are written without draws too.
 	has_items := len(sf.items) > 0
@@ -508,7 +585,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
 	ok: bool
 	if has_items {
-		ensure_draw_buffers(r, len(sf.items) * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
+		ensure_draw_buffers(r, sf.draws_per_view * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
 		zeros := make([]byte, len(sf.bin_pipelines) * sf.view_count * 4, platform.frame_allocator)
 		sf.zero_upload, ok = upload_bytes(platform, zeros)
 		if !ok {
@@ -541,9 +618,12 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		meshes                   = gpu.read_index(sf.mesh_upload.buffer),
 		materials                = gpu.read_index(sf.table_upload.buffer),
 		sampler_index            = gpu.sampler_index(r.materials.sampler),
-		time                     = frame_time(r),
+		time                     = now,
+		previous_time            = s.has_previous ? s.previous_time : now,
 		meshes_offset            = sf.mesh_upload.offset,
 		materials_offset         = sf.table_upload.offset,
+		surfaces                 = gpu.read_index(sf.surface_upload.buffer),
+		surfaces_offset          = sf.surface_upload.offset,
 		lights                   = gpu.read_index(lf.upload.buffer),
 		lights_offset            = lf.upload.offset,
 		directional_count        = u32(lf.directional_count),
@@ -579,7 +659,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	views := make([]Cull_View, sf.view_count, platform.frame_allocator)
 	for v in 0 ..< sf.view_count {
 		c := constants
-		views[v].first_draw = u32(v * len(sf.items))
+		views[v].first_draw = u32(v * sf.draws_per_view)
 		views[v].offset = constants.camera_offset
 		switch v {
 		case VIEW_CAMERA, VIEW_VIEW_MODEL:
@@ -643,6 +723,13 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		views_offset       = view_upload.offset,
 		bin_count          = u32(len(sf.bin_pipelines)),
 		mesh_arguments     = gpu.write_index(s.mesh_arguments),
+		surfaces           = gpu.read_index(sf.surface_upload.buffer),
+		surfaces_offset    = sf.surface_upload.offset,
+		surface_count      = u32(len(sf.surfaces)),
+		patches            = gpu.write_index(s.patches),
+		patch_counts       = gpu.write_index(s.patch_counts),
+		patches_read       = gpu.read_index(s.patches),
+		patch_counts_read  = gpu.read_index(s.patch_counts),
 	}
 	sf.cull_constants, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -654,12 +741,14 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	p := add_compute_pass(g, "update scene", update_scene, f)
 	copy_dest(g, p, sf.instances)
 	copy_dest(g, p, sf.counts)
+	add_select_patches_pass(f)
 	p = add_compute_pass(g, "cull draws", cull_draws, f)
 	read(g, p, sf.instances)
 	write(g, p, sf.arguments)
 	write(g, p, sf.mesh_arguments)
 	write(g, p, sf.draws)
 	write(g, p, sf.counts)
+	add_cull_patches_pass(f)
 }
 
 // declare_scene_draws declares what a pass that draws the scene's bins reads.
@@ -739,6 +828,10 @@ add_items :: proc(
 		if !ok {
 			continue
 		}
+		// A material that draws patches draws no mesh: the default material stands in.
+		if r.materials.pipelines[use.pipeline].patches {
+			use = use_material(r, table, {}) or_continue
+		}
 		// The view model casts no shadows: its pose is not its place in the world.
 		flags: u32 = view_model ? ITEM_VIEW_MODEL : 0
 		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows && !view_model {
@@ -764,6 +857,7 @@ add_items :: proc(
 				flags = flags,
 				submesh = u32(min(s, ID_MAX_SUBMESH)),
 				sphere = {b.center.x, b.center.y, b.center.z, b.radius},
+				bound = pipeline.displacement_bound,
 			},
 		)
 	}
@@ -891,7 +985,7 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
 		}
-		first := u32(view * len(sf.items)) + sf.bin_offsets[bin]
+		first := u32(view * sf.draws_per_view) + sf.bin_offsets[bin]
 		for pipeline in pipelines {
 			if pipeline == {} {
 				continue
