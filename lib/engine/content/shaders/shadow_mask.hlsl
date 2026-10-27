@@ -6,7 +6,8 @@
 // Matches Mask_Constants in lib/engine/render/shadows.odin. The view's axes and its projection rebuild each pixel's
 // position relative to the camera from its depth; camera_offset moves it into the acceleration structure's space, which
 // is the render origin's. A pixel with the view model's stencil bit uses the view model's projection. light_index holds
-// the light of each channel, or ~0.
+// the light of each channel, or ~0. jitter is the camera's, which the prepass drew with, in normalized device
+// coordinates.
 struct Mask_Constants {
 	float4 right;
 	float4 up;
@@ -24,7 +25,8 @@ struct Mask_Constants {
 	uint lights_offset;
 	uint2 size;
 	uint stencil;
-	uint3 padding;
+	float2 jitter;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Mask_Constants, constants);
 
@@ -73,12 +75,23 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(id.xy, 0)).g & VIEW_MODEL_STENCIL) != 0;
 		float3 projection = view_model ? constants.view_model_projection.xyz : constants.projection.xyz;
 		float z = projection.z / depth;
-		float2 ndc = float2((id.x + 0.5) / constants.size.x * 2 - 1, 1 - (id.y + 0.5) / constants.size.y * 2);
+		// The depth is the surface's where the jittered projection put the pixel's center, so the position is rebuilt
+		// there. At the unjittered center, a sloped surface's point would be off its plane by the jitter times the
+		// slope, far more than the hair below.
+		float2 ndc = float2((id.x + 0.5) / constants.size.x * 2 - 1, 1 - (id.y + 0.5) / constants.size.y * 2) - constants.jitter;
 		float2 xy = ndc / projection.xy * z;
 		float3 p = constants.right.xyz * xy.x + constants.up.xyz * xy.y + constants.forward.xyz * z;
 		float3 normal = octahedral(cn_texture(constants.normals).Load(int3(id.xy, 0)).xy);
-		// The ray starts off the surface by an amount that grows with the distance, as depth's precision falls.
-		float3 origin = p + normal * (0.01 + z * 0.001);
+		// The ray starts off the surface along the normal by a hair: enough for the precision of the depth, of the
+		// position rebuilt from it and of the acceleration structure's space, and no more. An offset along the normal
+		// moves the shadow's edge across the surface by the offset over the tangent of the light's angle to the
+		// normal, so two surfaces that meet at a crease disagree on where the shadow crosses their seam by as much.
+		// The ray skips the same hair along itself instead, which moves no edge.
+		// The render origin is a corner of a 1024 m grid, so the position in the structure's space is hundreds of
+		// meters in a small scene, where a float's unit is a twentieth of a millimeter: that term is a few units.
+		float3 world = p + constants.camera_offset.xyz;
+		float epsilon = 1e-4 * max(1, z) + 2e-6 * max(abs(world.x), max(abs(world.y), abs(world.z)));
+		float3 origin = p + normal * epsilon;
 		RaytracingAccelerationStructure accel = cn_accel(constants.accel);
 		[unroll] for (uint c = 0; c < 4; c++) {
 			if (constants.light_index[c] == ~0u) {
@@ -87,7 +100,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			Light_Record l = cn_buffer(constants.lights).Load<Light_Record>(constants.lights_offset + constants.light_index[c] * sizeof(Light_Record));
 			RayDesc ray;
 			ray.Origin = origin + constants.camera_offset.xyz;
-			ray.TMin = 0;
+			ray.TMin = epsilon;
 			if (l.type == LIGHT_DIRECTIONAL) {
 				ray.Direction = -l.direction;
 				ray.TMax = DIRECTIONAL_DISTANCE;

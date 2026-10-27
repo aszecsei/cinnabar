@@ -55,13 +55,21 @@ float4 shadow_clip(Shadow_View view, float3 p) {
 
 // shadow_map is how lit a point is in one shadow view: the fraction of a texel neighbourhood that is nearer the light
 // than the point, from frame.shadow_filter bilinear comparisons, a render.Shadow_Filter: 1 for 2x2 texels, 4 for 3x3,
-// 9 for 4x4. Every pixel takes the same branch. The point moves along its normal by a texel's size first, so a surface
-// does not shadow itself. Outside the view, it is lit.
-float shadow_map(uint view_index, float3 p, float3 normal) {
+// 9 for 4x4. Every pixel takes the same branch. Outside the view, it is lit.
+//
+// The point moves half a texel toward the light first, so the map's own depth precision does not shadow the surface
+// that wrote it; that moves no shadow edge. It also moves along its normal by half a texel times the sine of the
+// light's angle to the normal, against the taps' spread on a surface the light grazes. An offset along the normal
+// moves the shadow's edge across the surface by the offset over the tangent of that angle, so two surfaces that meet
+// at a crease disagree on where the shadow crosses their seam by as much; the sine keeps that under half a texel,
+// and at nothing where the surface faces the light. The casters' slope bias (SHADOW_SLOPE_BIAS) covers the rest.
+float shadow_map(uint view_index, float3 p, float3 normal, float3 to_light) {
 	Shadow_View view = cn_buffer(frame.shadow_views).Load<Shadow_View>(frame.shadow_views_offset + view_index * sizeof(Shadow_View));
 	float4 clip = shadow_clip(view, p);
 	float texel = view.texel * (view.perspective != 0 ? clip.w : 1);
-	clip = shadow_clip(view, p + normal * texel * 1.5);
+	float cos_light = dot(normal, to_light);
+	float sin_light = sqrt(saturate(1 - cos_light * cos_light));
+	clip = shadow_clip(view, p + to_light * (texel * 0.5) + normal * (texel * 0.5 * sin_light));
 	float3 ndc = clip.xyz / clip.w;
 	float2 uv = ndc.xy * float2(0.5, -0.5) + 0.5;
 	if (clip.w <= 0 || any(uv < 0) || any(uv > 1) || ndc.z < 0) {
@@ -127,7 +135,8 @@ int shadow_view(Light_Record light, float3 p, float depth) {
 
 // light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1. The mask is
 // the opaque surfaces', from the prepass's depth, so a transparent surface is lit by the lights that have a channel.
-float light_shadow(Light_Record light, float3 p, float3 normal, float4 position) {
+// to_light is the direction toward the light, which the shadow maps' lookup offsets along.
+float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light, float4 position) {
 	if (light.mask >= 0) {
 #if MATERIAL_TRANSPARENT
 		return 1;
@@ -136,7 +145,7 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float4 position)
 #endif
 	}
 	int view = shadow_view(light, p, frame.near / max(position.z, 1e-7));
-	return view < 0 ? 1 : shadow_map(uint(view), p, normal);
+	return view < 0 ? 1 : shadow_map(uint(view), p, normal, to_light);
 }
 
 // range_window is 1 near a light and 0 at its range: saturate(1 - (d / range)^4)^2.
@@ -174,7 +183,7 @@ Light light_falloff(Light_Record l, float3 p) {
 Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
 	Light light = light_falloff(l, p);
 	if (any(light.color > 0) && dot(normal, light.direction) > 0) {
-		light.color *= light_shadow(l, p, normal, position);
+		light.color *= light_shadow(l, p, normal, light.direction, position);
 	}
 	return light;
 }
@@ -207,7 +216,7 @@ Area_Light area_light_at(Light_Record l, float3 p, float3 normal, float4 positio
 	}
 	light.color = l.color / max(area, 1e-7) * range_window(dot(light.center, light.center), l.range);
 	if (any(light.color > 0)) {
-		light.color *= light_shadow(l, p, normal, position);
+		light.color *= light_shadow(l, p, normal, normalize(light.center), position);
 	}
 	return light;
 }
