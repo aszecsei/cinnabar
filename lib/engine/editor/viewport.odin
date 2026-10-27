@@ -71,6 +71,7 @@ Viewport_Frame :: struct {
 	size:        [2]u32,
 	output_size: [2]u32,
 	// The debug layer, which the tools draw into, over the debug lines (see docs/rendering/layers-and-output.md#debug).
+	// 0 when the frame has no debug layer, outside Edit, where only the pick runs.
 	target: render.Texture,
 	// The ID buffer, in ID_FORMAT, and the depth that the scene pass wrote with render.view_projection.
 	ids:    render.Texture,
@@ -168,16 +169,20 @@ entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
 	return render.entity_id(entity)
 }
 
-// add_viewport_passes adds the pick and the overlay to the frame's graph. Add them after the passes that write the
-// target, the ID buffer and the depth.
+// add_viewport_passes adds the pick, the icons and the overlay to the frame's graph. Add them after the passes that
+// write the target, the ID buffer and the depth. The pick runs in every mode, so a click in Play still selects; the
+// icons and the overlay draw only while editing, so the viewport in Play shows what the game shows.
 add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewport_Frame) {
 	v := &e.viewport
 	if !active(e) || !create_viewport_gpu(e) {
 		return
 	}
 	sync_viewport_pipelines(e)
+	overlays := editing(e)
 	// The icons first, so the pick and the outline find them.
-	add_icons_pass(e, g, w, frame)
+	if overlays {
+		add_icons_pass(e, g, w, frame)
+	}
 	platform := e.platform
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
@@ -222,6 +227,9 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		}
 	}
 
+	if !overlays {
+		return
+	}
 	overlay := new(Overlay_Pass, platform.frame_allocator)
 	overlay^ = {
 		pipeline = v.overlay_pipeline.pipeline,

@@ -15,7 +15,7 @@ The world, the view model, the UI and debug drawing each have their own target a
 
 - The world, the view model and the debug layer have the scene's size, `Frame.size`, and the UI the frame's, `Frame.output_size`. They differ at a render scale below 1 (see [Anti-aliasing](anti-aliasing.md#upscaling)).
 
-- The renderer makes the UI target only with a `ui` hook, and the debug layer only with debug lines or a `debug` hook. Without them, the output pass reads neither.
+- The renderer makes the UI target only with a `ui` hook, and the debug layer only with debug lines or a `debug` hook, and not with `Frame_Desc.no_debug`. Without them, the output pass reads neither.
 
 ### View model
 
@@ -49,6 +49,7 @@ A first-person view model needs its own field of view, and it must never go into
 - The colors are exactly the colors given: no exposure, no tone mapping, no fog.
 - The debug layer has the scene's size, as its depth does, which the output pass stretches to the frame's.
 - The editor's selection outline and gizmo draw into the debug layer: the game adds `editor.add_viewport_passes` in its `debug` hook, with `Frame.debug` as the target (see [Editor](../editor/viewport.md#viewport)).
+- **Only while editing.** The layer is the editor's and the developer's, not the game's, so the viewport in Play and Paused shows the game's frame alone: the game sets `Frame_Desc.no_debug` from `editor.debug_shown`, which is false while a linked editor is out of Edit. The frame then draws no lines, though lines with a duration still expire, makes no layer and composites none. The `debug` hook still runs, with `Frame.debug` 0, so the editor's picks, which read only the IDs and the depth, still answer a click; `add_viewport_passes` adds its icons and its overlay only while `editor.editing`. Without an editor, `debug_shown` is true, and a standalone game keeps its debug lines.
 - Release builds compile the debug calls out: the justfile's release build sets `DEBUG_DRAW` false.
 
 ### Output
