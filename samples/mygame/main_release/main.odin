@@ -1,4 +1,5 @@
-// Release entry point: links core, engine and the game statically and calls Game_API directly.
+// Release entry point: links core, engine and the game statically and calls Game_API directly. The game's content
+// and project.settings are beside the executable (see docs/overview/building-and-running.md#build-layout).
 package main
 
 import "core:log"

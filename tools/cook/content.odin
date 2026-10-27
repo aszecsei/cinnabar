@@ -52,8 +52,9 @@ Pass :: struct {
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...
-// --root <name>=<dir>...`. The daemon always cooks the dev configuration, so it takes no --config, and it takes
-// `--link <port>`.
+// --root <name>=<dir>...`. --cache is the loose cache itself, where the blobs go, such as build/dev/content, and
+// --config is what to cook into it. The daemon always cooks the dev configuration, so it takes no --config, and it
+// takes `--link <port>`.
 parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Options, ok: bool) {
 	options.roots = make([dynamic]Root, context.temp_allocator)
 	options.includes = make([dynamic]string, context.temp_allocator)
@@ -164,9 +165,9 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	return
 }
 
-// config_dir is the configuration's directory in the cache, where its blobs and its generation are.
+// config_dir is the loose cache, where the blobs and the generation go: --cache, which names one configuration's.
 config_dir :: proc(options: Cook_Options) -> string {
-	return fmt.tprintf("%s/%s", options.cache, options.config == .Dev ? "dev" : "release")
+	return options.cache
 }
 
 // read_generation reads the counter in a configuration directory's generation file. It is 0 if there is none.

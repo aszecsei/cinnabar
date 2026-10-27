@@ -1,6 +1,6 @@
 # Shaders
 
-Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shaders --cache build/cache --config dev|release --root game=<content root> --root engine=lib/engine/content --include lib/core/gpu/shaders`, and the daemon cooks them like any other kind.
+Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shaders --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content --include lib/core/gpu/shaders`, and the daemon cooks them like any other kind.
 
 - **One asset per file.** The cooker compiles each of the file's `vs_main`, `ps_main`, `cs_main`, `as_main` and `ms_main` entry points into one blob. A file with `[shader("...")]` attributes is a ray tracing library and has one library entry (see [GPU](../../gpu/shaders.md#shaders)).
 - **Includes are not assets.** `.hlsli` files have no GUID and no `.meta` file. The cooker resolves an include next to the including file first, then in each `--include` directory. The daemon also watches the `--include` directories.

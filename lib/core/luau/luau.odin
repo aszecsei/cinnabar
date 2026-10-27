@@ -12,16 +12,16 @@ import "core:c"
 LUAU_SHARED :: #config(LUAU_SHARED, false)
 
 when LUAU_SHARED {
-	foreign import lib "../../../build/luau/shared/out/luau.lib"
+	foreign import lib "../../../build/obj/luau/shared/out/luau.lib"
 } else {
 	foreign import lib {
-		"../../../build/luau/static/out/Luau.VM.lib",
-		"../../../build/luau/static/out/Luau.CodeGen.lib",
-		"../../../build/luau/static/out/Luau.Compiler.lib",
-		"../../../build/luau/static/out/Luau.Ast.lib",
-		"../../../build/luau/static/out/Luau.Bytecode.lib",
-		"../../../build/luau/static/out/Luau.Common.lib",
-		"../../../build/luau/static/out/luau_shim.lib",
+		"../../../build/obj/luau/static/out/Luau.VM.lib",
+		"../../../build/obj/luau/static/out/Luau.CodeGen.lib",
+		"../../../build/obj/luau/static/out/Luau.Compiler.lib",
+		"../../../build/obj/luau/static/out/Luau.Ast.lib",
+		"../../../build/obj/luau/static/out/Luau.Bytecode.lib",
+		"../../../build/obj/luau/static/out/Luau.Common.lib",
+		"../../../build/obj/luau/static/out/luau_shim.lib",
 	}
 }
 

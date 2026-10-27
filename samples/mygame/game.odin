@@ -36,11 +36,9 @@ LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
 SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
 UI_SHADER :: #load("content/shaders/ui.hlsl.meta", string)
-// The loose cache that `just scripts` cooks into. Release builds read the release cache until bundles exist.
-CONTENT_CACHE :: #config(CINNABAR_CONTENT_CACHE, "build/cache/dev")
-// The project's settings, which the editor edits, and the user's file beside them (see docs/overview/architecture.md#project-settings).
-PROJECT_SETTINGS :: #config(CINNABAR_PROJECT, "samples/mygame/project.settings")
-// How often the game looks for a change to the settings' files, in seconds.
+// The game reads its cooked content from platform.content_dir, the loose cache, until bundles exist, and its
+// settings from platform.project_path, which the editor edits, with the user's file beside them (see
+// docs/overview/architecture.md#project-settings). The game looks for a change to the settings' files this often, in seconds.
 PROJECT_CHECK_INTERVAL :: 0.5
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
@@ -405,9 +403,9 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		log.panic("mygame: cannot create the world")
 	}
 	register_world(s)
-	asset.init(&s.assets, platform, asset.loose_cache(CONTENT_CACHE))
+	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
-	s.script_quality = project.script_quality(&s.renderer, PROJECT_SETTINGS)
+	s.script_quality = project.script_quality(&s.renderer, platform.project_path)
 	register_post_effects(s)
 	sync_pipelines(s)
 	if !script.init(&s.scripts, platform, &s.world, &s.assets, register_scripts) {
@@ -1035,7 +1033,7 @@ update_output :: proc(s: ^Game_State) {
 	changed := false
 	if now >= s.next_project_check {
 		s.next_project_check = now + PROJECT_CHECK_INTERVAL
-		if project.refresh(&s.project, s.platform, PROJECT_SETTINGS) {
+		if project.refresh(&s.project, s.platform, s.platform.project_path) {
 			changed = true
 			s.output_override = nil
 			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))

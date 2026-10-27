@@ -4,7 +4,7 @@ using Cinnabar.Editor.Link.Cook;
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>
-/// The cook link against the real daemon, build/cook.exe, cooking a content root in a temporary directory. The tests
+/// The cook link against the real daemon, build/tools/cook.exe, cooking a content root in a temporary directory. The tests
 /// are skipped when the cooker is not built.
 /// </summary>
 public sealed class CookLinkTests : IDisposable
@@ -17,7 +17,7 @@ public sealed class CookLinkTests : IDisposable
 
     public CookLinkTests()
     {
-        _cook = Path.Combine(RepositoryRoot(), "build", "cook.exe");
+        _cook = Path.Combine(RepositoryRoot(), "build", "tools", "cook.exe");
         _dir = Directory.CreateTempSubdirectory("cook_link_test_").FullName;
         _content = Path.Combine(_dir, "content");
         Write("scripts/util.luau", "return {speed = 2}");
@@ -37,7 +37,7 @@ public sealed class CookLinkTests : IDisposable
     {
         if (!File.Exists(_cook))
         {
-            Assert.Skip("build/cook.exe is not built");
+            Assert.Skip("build/tools/cook.exe is not built");
         }
         var session = new CookSession(new CookOptions(_cook, Path.Combine(_dir, "cache"), null, [("game", _content)], _dir), index);
         session.Start();
@@ -74,7 +74,7 @@ public sealed class CookLinkTests : IDisposable
         Assert.NotNull(session.LastCook);
 
         // A removed asset leaves the index, and its blob leaves the cache, so a game that starts later does not run it.
-        var blob = Path.Combine(_dir, "cache", "dev", util.Guid + ".blob");
+        var blob = Path.Combine(_dir, "cache", util.Guid + ".blob");
         Assert.True(File.Exists(blob));
         File.Delete(Path.Combine(_content, "scripts", "util.luau"));
         await Until(() => index.Find(util.Guid) == null && index.Find(door.Guid)?.Status == AssetStatus.Failed, session, output);
@@ -126,7 +126,7 @@ public sealed class CookLinkTests : IDisposable
         var dxc = Path.Combine(root, "vendor", "dxc", "1.9.2609", "dxc.exe");
         if (!File.Exists(_cook) || !File.Exists(dxc))
         {
-            Assert.Skip("build/cook.exe or DXC is missing");
+            Assert.Skip("build/tools/cook.exe or DXC is missing");
         }
         Write("shading/lit.shading", File.ReadAllText(Path.Combine(root, "lib", "engine", "content", "shading", "lit.shading")));
         Write("shading/lit.hlsli", File.ReadAllText(Path.Combine(root, "lib", "engine", "content", "shading", "lit.hlsli")));
@@ -151,7 +151,7 @@ public sealed class CookLinkTests : IDisposable
         // An unsaved graph cooks into the preview area, and its problems come back with its lines.
         var cooked = await session.CookPreview(red.Guid, Graph.Replace("[1, 0, 0, 1]", "[0, 1, 0, 1]"));
         Assert.Equal("", cooked.Error);
-        Assert.True(File.Exists(Path.Combine(_dir, "cache", "dev", "preview", red.Guid + ".blob")));
+        Assert.True(File.Exists(Path.Combine(_dir, "cache", "preview", red.Guid + ".blob")));
         var broken = await session.CookPreview(red.Guid, Graph.Replace("@2.value", "@3.value"));
         Assert.NotEqual("", broken.Error);
         Assert.Equal(7u, Assert.Single(broken.Problems).Line);

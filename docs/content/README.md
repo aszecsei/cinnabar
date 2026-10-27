@@ -26,7 +26,7 @@ Content has one path into a game. A source file and its `.meta` sidecar are cook
 flowchart LR
     SRC["source + .meta<br/>(content root)"]
     COOK["tools/cook<br/>importer for the kind"]
-    BLOB["build/cache/&lt;config&gt;/&lt;guid&gt;.blob"]
+    BLOB["build/&lt;target&gt;/content/&lt;guid&gt;.blob"]
     GEN[".generation"]
     LOAD["asset.load / asset.poll<br/>(lib/engine/asset)"]
     USE["consumer: residency table,<br/>script runtime, scene loader"]

@@ -17,8 +17,9 @@ public enum CookState
 }
 
 /// <summary>
-/// How the editor runs the cook daemon: its executable, the cache, the definition file, the content roots by name, and
-/// what it compiles shaders with: DXC and the include directories. Paths are relative to <see cref="WorkingDirectory"/>.
+/// How the editor runs the cook daemon: its executable, the loose cache that the game reads, which the daemon writes
+/// into as it is, the definition file, the content roots by name, and what it compiles shaders with: DXC and the include
+/// directories. Paths are relative to <see cref="WorkingDirectory"/>.
 /// </summary>
 public sealed record CookOptions(
     string CookPath,

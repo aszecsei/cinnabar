@@ -104,7 +104,7 @@ tree_guid :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Guid {
 @(private)
 tree_blob :: proc(t: ^testing.T, tree: Tree, guid: format.Guid) -> []byte {
 	buffer: [32]u8
-	data, err := os.read_entire_file(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, format.guid_format(guid, &buffer)), context.temp_allocator)
+	data, err := os.read_entire_file(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(guid, &buffer)), context.temp_allocator)
 	testing.expect(t, err == nil)
 	aligned, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
 	copy(aligned, data)
@@ -234,7 +234,7 @@ a_content_root_cooks_with_aliases :: proc(t: ^testing.T) {
 	guid := tree_guid(t, tree, "main.luau")
 	testing.expect(t, cook(options, {.Script}).ok)
 	testing.expect_value(t, tree_guid(t, tree, "main.luau"), guid)
-	testing.expect_value(t, cooked_script_key(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, guid_text(guid))), key)
+	testing.expect_value(t, cooked_script_key(fmt.tprintf("%s/cache/%s.blob", tree.dir, guid_text(guid))), key)
 }
 
 @(private)
@@ -430,8 +430,8 @@ type_errors_fail_the_cook :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(errors.messages), 2)
 	// A script with type errors gets no blob.
 	buffer: [32]u8
-	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "a.luau"), &buffer))))
-	testing.expect(t, os.exists(fmt.tprintf("%s/cache/dev/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "fine.luau"), &buffer))))
+	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "a.luau"), &buffer))))
+	testing.expect(t, os.exists(fmt.tprintf("%s/cache/%s.blob", tree.dir, format.guid_format(tree_guid(t, tree, "fine.luau"), &buffer))))
 }
 
 @(test)

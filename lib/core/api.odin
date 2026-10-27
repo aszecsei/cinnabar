@@ -22,6 +22,13 @@ Platform_API :: struct {
 	// world. Its memory is the host's.
 	heap_allocator:      runtime.Allocator,
 
+	// Where the game's files are, as absolute paths in the host's memory: the loose cache of cooked blobs, and the
+	// project's settings file, with the user's beside it (see docs/overview/building-and-running.md#build-layout). The
+	// host fills them from its command line, else from the executable's directory: <exe>/content and
+	// <exe>/project.settings.
+	content_dir:  string,
+	project_path: string,
+
 	// Virtual memory for game-side stores that must not move, such as world storage. Reserved memory is usable only
 	// after it is committed, and committed memory starts zeroed. Committing a range again is allowed. core releases
 	// every reservation that the game still holds at a soft restart.
@@ -33,7 +40,8 @@ Platform_API :: struct {
 	// The keyboard and mouse at the start of the frame. In shared mode the window is hidden, so the input is empty
 	// until the editor link sends input.
 	input:            proc() -> Input,
-	// File I/O for the asset runtime. Paths are relative to the working directory. file_read reads a whole file into
+	// File I/O for the asset runtime. The game's own files are at content_dir and project_path, which are absolute; a
+	// relative path is relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
 	// or 0 if it does not exist. file_write replaces a whole file, such as the user's settings, so a reader never sees
 	// half of it.

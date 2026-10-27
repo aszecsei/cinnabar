@@ -14,7 +14,8 @@ import "cinnabar:core"
 import "cinnabar:core/profile"
 import "cinnabar:engine/editor/link"
 
-DEFAULT_GAME_PATH :: "build/mygame.dll"
+// The game DLL, beside the host, when no argument names one.
+DEFAULT_GAME_NAME :: "mygame.dll"
 
 Game_Module :: struct {
 	source_path: string,
@@ -26,18 +27,33 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	// host [game.dll] [--shared <name>] [--adapter <luid>] [--link <port>] [--emit-script-types <file>]
-	// [--emit-link-schema <file>]. --shared renders into shared textures for the editor or tools/viewer. --adapter
-	// names the GPU by its LUID in hex, so that the editor can open the shared textures on its own device. --link
-	// serves the editor link on that port of 127.0.0.1. --emit-script-types writes the scripts' definition file, and
-	// --emit-link-schema the editor link's schema, and each exits.
-	source_path := DEFAULT_GAME_PATH
+	// host [game.dll] [--content <dir>] [--project <file>] [--shared <name>] [--adapter <luid>] [--link <port>]
+	// [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is mygame.dll beside the host by default.
+	// --content is the game's loose cache and --project its settings file, which are content and project.settings
+	// beside the host by default (see docs/overview/building-and-running.md#build-layout). --shared renders into shared
+	// textures for the editor or tools/viewer. --adapter names the GPU by its LUID in hex, so that the editor can open
+	// the shared textures on its own device. --link serves the editor link on that port of 127.0.0.1.
+	// --emit-script-types writes the scripts' definition file, and --emit-link-schema the editor link's schema, and
+	// each exits.
+	exe_dir, exe_err := os.get_executable_directory(context.temp_allocator)
+	if exe_err != nil {
+		log.fatalf("host: cannot find the executable's directory: %v", exe_err)
+		return
+	}
+	source_path, _ := filepath.join({exe_dir, DEFAULT_GAME_NAME}, context.temp_allocator)
+	content_dir, project_path := "", ""
 	shared_target := ""
 	adapter: u64
 	link_port := -1
 	script_types := ""
 	for i := 1; i < len(os.args); i += 1 {
 		switch {
+		case os.args[i] == "--content" && i + 1 < len(os.args):
+			content_dir = os.args[i + 1]
+			i += 1
+		case os.args[i] == "--project" && i + 1 < len(os.args):
+			project_path = os.args[i + 1]
+			i += 1
 		case os.args[i] == "--shared" && i + 1 < len(os.args):
 			shared_target = os.args[i + 1]
 			i += 1
@@ -78,7 +94,7 @@ main :: proc() {
 	// Before core.init, so the job system's threads take the link's logger with the rest of the context. Not inside
 	// an if: a change to the context lasts only to the end of its scope.
 	context.logger = link_logger(&editor) if link_port >= 0 else context.logger
-	if !core.init("cinnabar host", shared_target = shared_target, adapter = adapter) {
+	if !core.init("cinnabar host", shared_target = shared_target, adapter = adapter, content_dir = content_dir, project_path = project_path) {
 		return
 	}
 	defer core.shutdown()

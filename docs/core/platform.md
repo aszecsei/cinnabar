@@ -16,13 +16,14 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 
 ## Platform_API
 
-`Platform_API` is a struct of procedure pointers, filled by `core` and handed to `init` and `on_reload`. The game stores the struct in `Game_State` (the pointers are host code, so they are safe there). Its fields fall into groups:
+`Platform_API` is a struct of procedure pointers and a few values, filled by `core` and handed to `init` and `on_reload`. The game stores the struct in `Game_State` (the pointers are host code, so they are safe there). Its fields fall into groups:
 
 | Group | Procedures | Notes |
 |---|---|---|
 | Memory | `permanent_allocator`, `frame_allocator`, `asset_allocator`, `heap_allocator`, `memory_reserve`, `memory_commit`, `memory_release` | See [Memory](jobs-and-memory.md#memory). |
+| Paths | `content_dir`, `project_path` | Where the game's loose cache and its project settings are, as absolute strings in host memory: beside the executable, unless the host's command line says otherwise. See [Building and running](../overview/building-and-running.md#build-layout). |
 | Time and input | `time_seconds`, `input` | `input` is the state at the start of the frame. See [Input](input.md#input). |
-| Files | `file_read`, `file_modified` | What the asset runtime reads the loose cache with. |
+| Files | `file_read`, `file_modified`, `file_write` | What the asset runtime reads the loose cache with, and the project package writes the user's settings with. |
 | Window | `window_size`, `set_window_title` | The size is read once per frame. |
 | Jobs | `jobs_run`, `jobs_wait`, `jobs_lock`, `jobs_unlock`, `jobs_worker_count` | See [Job system](jobs-and-memory.md#job-system). Background jobs are deliberately absent. |
 | Profiler | `profile` | A `profile.Procs`, which the profile package's front-end takes. See [Profiling](profiling.md#zones). |

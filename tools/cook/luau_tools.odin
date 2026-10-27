@@ -5,9 +5,9 @@ import "core:c"
 // lib/core/luau/luau_tools.cpp, which `just luau` builds with the static Luau libraries. The analyzer and its
 // configuration library are only the cooker's.
 foreign import luau_tools {
-	"../../build/luau/static/out/luau_tools.lib",
-	"../../build/luau/static/out/Luau.Analysis.lib",
-	"../../build/luau/static/out/Luau.Config.lib",
+	"../../build/obj/luau/static/out/luau_tools.lib",
+	"../../build/obj/luau/static/out/Luau.Analysis.lib",
+	"../../build/obj/luau/static/out/Luau.Config.lib",
 }
 
 // Luau_Report receives a require path, or an error message. line is 1-based.

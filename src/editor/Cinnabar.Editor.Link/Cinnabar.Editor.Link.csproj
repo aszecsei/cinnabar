@@ -2,8 +2,8 @@
   <PropertyGroup>
     <RootNamespace>Cinnabar.Editor.Link</RootNamespace>
     <!-- Written by just link-schema. The generator reports a missing file. -->
-    <LinkSchema>$(MSBuildThisFileDirectory)..\..\..\build\link\link-schema.json</LinkSchema>
-    <CookSchema>$(MSBuildThisFileDirectory)..\..\..\build\link\cook-schema.json</CookSchema>
+    <LinkSchema>$(MSBuildThisFileDirectory)..\..\..\build\obj\link\link-schema.json</LinkSchema>
+    <CookSchema>$(MSBuildThisFileDirectory)..\..\..\build\obj\link\cook-schema.json</CookSchema>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinnabar.Editor.Link.Generator\Cinnabar.Editor.Link.Generator.csproj"

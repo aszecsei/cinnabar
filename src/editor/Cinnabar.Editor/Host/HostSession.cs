@@ -90,8 +90,8 @@ public sealed class HostSession : IDisposable
         try
         {
             process = ChildProcess.Start(_options.HostPath,
-                [_options.GamePath, "--shared", name, "--adapter", _adapter.ToString("x16"), "--link", port.ToString()],
-                Environment.CurrentDirectory);
+                _options.HostArguments("--shared", name, "--adapter", _adapter.ToString("x16"), "--link", port.ToString()),
+                _options.HostDirectory);
         }
         catch (Exception e)
         {

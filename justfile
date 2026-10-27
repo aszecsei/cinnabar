@@ -8,7 +8,13 @@ set script-interpreter := ["C:/Program Files/Git/bin/bash.exe"]
 # Configuration
 # =================================
 game := "mygame"
+# The build's layout (see docs/overview/building-and-running.md#build-layout): each thing you run is a folder of its
+# own, with the content and the runtime libraries it needs beside its executable, and obj holds the intermediates.
 build_dir := "build"
+dev_dir := build_dir + "/dev"
+release_dir := build_dir + "/release"
+tools_dir := build_dir + "/tools"
+obj_dir := build_dir + "/obj"
 gpu_backend := "d3d12"
 # The D3D12 Agility SDK. Its minor version must match AGILITY_SDK_VERSION in lib/core/gpu/d3d12.
 agility_version := "1.619.6"
@@ -28,12 +34,12 @@ direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
 luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
 # The development host and game DLL share luau.dll (see docs/scripting/embedding.md#embedding). Everything else links Luau statically.
 dev_defines := "-define:LUAU_SHARED=true " + luau_features
-# lib/core/luau/luau.odin links the Luau libraries from build/luau, so build_dir must stay "build".
-luau_dir := build_dir + "/luau"
+# lib/core/luau/luau.odin and the cooker link their libraries from build/obj, so obj_dir must stay "build/obj".
+luau_dir := obj_dir + "/luau"
 cmake_generator := "Visual Studio 17 2022"
-compressonator_dir := build_dir + "/compressonator"
-meshoptimizer_dir := build_dir + "/meshoptimizer"
-clusterlod_dir := build_dir + "/clusterlod"
+compressonator_dir := obj_dir + "/compressonator"
+meshoptimizer_dir := obj_dir + "/meshoptimizer"
+clusterlod_dir := obj_dir + "/clusterlod"
 # What tools/cook/compressonator builds from vendor/compressonator, which is checked out sparsely.
 compressonator_paths := "cmp_core license applications/_libs/cmp_math"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
@@ -48,9 +54,11 @@ roots := "--root game=" + content_root + " --root engine=lib/engine/content"
 # What the cooker compiles shaders and materials with: DXC, the directory of the fixed header, cinnabar.hlsli, and the
 # engine's material templates and SMAA's reference shader (vendor/smaa).
 shader_tools := "--dxc " + dxc + " --include lib/core/gpu/shaders --include lib/engine/content/shaders --include vendor/smaa"
-cache_dir := build_dir + "/cache"
+# The loose caches, which the host and the release executable read from beside themselves.
+cache_dir := dev_dir + "/content"
+release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
-script_types := build_dir + "/script-types/cinnabar.d.luau"
+script_types := obj_dir + "/script-types/cinnabar.d.luau"
 packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
@@ -180,9 +188,9 @@ alias b := build
 build: host game-dll script-types scripts scenes shaders textures models materials
 
 # Build the development host
-host: agility-runtime fidelityfx-runtime luau
-    mkdir -p "{{build_dir}}"
-    odin build src/host {{collections}} {{dev_defines}} -out:"{{build_dir}}/host.exe" -debug
+host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau
+    mkdir -p "{{dev_dir}}"
+    odin build src/host {{collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
 
 # Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
 [script]
@@ -196,7 +204,8 @@ luau:
         cmake --build "$dir" --config Release --target $targets -- -m -nologo -v:quiet
     done
     # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
-    cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{build_dir}}/"
+    mkdir -p "{{dev_dir}}"
+    cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{dev_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{dev_dir}}/"
 
 # Build Compressonator's block compression core for the cooker
 compressonator: install-compressonator
@@ -212,99 +221,99 @@ meshoptimizer:
 
 # Build the cooker
 cook: luau compressonator meshoptimizer
-    mkdir -p "{{build_dir}}"
-    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -out:"{{build_dir}}/cook.exe" -o:speed
+    mkdir -p "{{tools_dir}}"
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -out:"{{tools_dir}}/cook.exe" -o:speed
 
-# Cook the game's scripts into the loose cache, build/cache/<config>. A script without a .meta file gets one: commit it.
+# Cook the game's scripts into the loose cache of the configuration. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
-    "./{{build_dir}}/cook.exe" scripts --cache "{{cache_dir}}" --config {{config}} --definitions "{{script_types}}" {{roots}}
+    "./{{tools_dir}}/cook.exe" scripts --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} --definitions "{{script_types}}" {{roots}}
 
-# Cook the game's scenes into the loose cache, build/cache/<config>. A scene without a .meta file gets one: commit it.
+# Cook the game's scenes into the loose cache of the configuration. A scene without a .meta file gets one: commit it.
 scenes config="dev": cook
-    "./{{build_dir}}/cook.exe" scenes --cache "{{cache_dir}}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" scenes --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
-# Run the cook daemon, which cooks the game's and the engine's content into build/cache/dev whenever they change, until it is
-# stopped. A running game swaps the new blobs (see docs/content/daemon-and-operations.md#cook-daemon).
+# Run the cook daemon, which cooks the game's and the engine's content into build/dev/content whenever they change, until
+# it is stopped. A running game swaps the new blobs (see docs/content/daemon-and-operations.md#cook-daemon).
 watch: cook install-dxc
-    "./{{build_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
+    "./{{tools_dir}}/cook.exe" daemon --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}}
 
 # Write the scripts' type definitions from the game's bindings
 script-types: host game-dll
-    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --emit-script-types "{{script_types}}"
 
-# Cook the game's textures and the engine's into the loose cache, build/cache/<config>. A texture without a .meta file
+# Cook the game's textures and the engine's into the loose cache of the configuration. A texture without a .meta file
 # gets one, with its usage guessed from its name: commit it.
 textures config="dev": cook
-    "./{{build_dir}}/cook.exe" textures --cache "{{cache_dir}}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" textures --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
-# Cook the shading models, materials and material instances of the game and the engine into the loose cache,
-# build/cache/<config>: each material compiles a variant for each set of static switches that it or an instance uses.
+# Cook the shading models, materials and material instances of the game and the engine into the loose cache of the
+# configuration: each material compiles a variant for each set of static switches that it or an instance uses.
 materials config="dev": install-dxc cook
-    "./{{build_dir}}/cook.exe" materials --cache "{{cache_dir}}" --config {{config}} {{shader_tools}} {{roots}}
+    "./{{tools_dir}}/cook.exe" materials --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
-# Cook the game's models and the engine's into the loose cache, build/cache/<config>: each glTF mesh becomes a mesh with
+# Cook the game's models and the engine's into the loose cache of the configuration: each glTF mesh becomes a mesh with
 # its own GUID in its model's .meta file. A model without a .meta file gets one: commit it, with the GUIDs it gains.
 models config="dev": cook
-    "./{{build_dir}}/cook.exe" models --cache "{{cache_dir}}" --config {{config}} {{roots}}
+    "./{{tools_dir}}/cook.exe" models --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
-# Cook the game's shaders and the engine's into the loose cache, build/cache/<config>: each <name>.hlsl becomes one blob
+# Cook the game's shaders and the engine's into the loose cache of the configuration: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
 shaders config="dev": install-dxc cook
-    "./{{build_dir}}/cook.exe" shaders --cache "{{cache_dir}}" --config {{config}} {{shader_tools}} {{roots}}
+    "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
 game-dll: luau
-    mkdir -p "{{build_dir}}/pdb"
+    mkdir -p "{{dev_dir}}" "{{obj_dir}}/pdb"
     odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
-        -out:"{{build_dir}}/{{game}}.dll" \
-        -pdb-name:"{{build_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
+        -out:"{{dev_dir}}/{{game}}.dll" \
+        -pdb-name:"{{obj_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
         -debug
 
-# Copy the Agility SDK runtime next to the executables, where D3D12SDKPath points
+# Copy the Agility SDK runtime next to an executable, where D3D12SDKPath points
 [private]
-agility-runtime: install-agility
-    mkdir -p "{{build_dir}}/D3D12"
-    cp "{{agility_dir}}/D3D12Core.dll" "{{agility_dir}}/d3d12SDKLayers.dll" "{{build_dir}}/D3D12/"
+agility-runtime dir: install-agility
+    mkdir -p "{{dir}}/D3D12"
+    cp "{{agility_dir}}/D3D12Core.dll" "{{agility_dir}}/d3d12SDKLayers.dll" "{{dir}}/D3D12/"
 
-# Copy FSR's libraries next to the executables, where the D3D12 backend loads them, with their license. A running host
+# Copy FSR's libraries next to an executable, where the D3D12 backend loads them, with their license. A running host
 # keeps them loaded, so only changed ones are copied.
 [private]
-fidelityfx-runtime: install-fidelityfx
-    mkdir -p "{{build_dir}}"
-    for dll in amd_fidelityfx_loader_dx12.dll amd_fidelityfx_upscaler_dx12.dll; do cmp -s "{{fidelityfx_dir}}/$dll" "{{build_dir}}/$dll" || cp "{{fidelityfx_dir}}/$dll" "{{build_dir}}/"; done
-    cp vendor/fidelityfx/LICENSE.txt "{{build_dir}}/amd_fidelityfx_LICENSE.txt"
+fidelityfx-runtime dir: install-fidelityfx
+    mkdir -p "{{dir}}"
+    for dll in amd_fidelityfx_loader_dx12.dll amd_fidelityfx_upscaler_dx12.dll; do cmp -s "{{fidelityfx_dir}}/$dll" "{{dir}}/$dll" || cp "{{fidelityfx_dir}}/$dll" "{{dir}}/"; done
+    cp vendor/fidelityfx/LICENSE.txt "{{dir}}/amd_fidelityfx_LICENSE.txt"
 
-# Build and run the game in the development host
+# Build and run the game in the development host, with the sample's project settings
 dev: build
-    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll"
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --project "samples/{{game}}/project.settings"
 
 # Build the viewer, which shows a host's shared frames in place of the editor's viewport
 viewer:
-    mkdir -p "{{build_dir}}"
-    odin build tools/viewer {{collections}} -out:"{{build_dir}}/viewer.exe" -debug
+    mkdir -p "{{tools_dir}}"
+    odin build tools/viewer {{collections}} -out:"{{tools_dir}}/viewer.exe" -debug
 
 # Fit the area lights' lookup tables to the Lit shading model's specular, into lib/engine/render/ltc_ggx.bin (see
 # docs/rendering/lighting-and-shadows.md#area-lights). Run it after changing Lit's specular, and commit the table.
 ltc-fit:
-    mkdir -p "{{build_dir}}"
-    odin run tools/ltc_fit -o:speed -out:"{{build_dir}}/ltc_fit.exe" -- lib/engine/render/ltc_ggx.bin
+    mkdir -p "{{tools_dir}}"
+    odin run tools/ltc_fit -o:speed -out:"{{tools_dir}}/ltc_fit.exe" -- lib/engine/render/ltc_ggx.bin
 
 # Run the game in shared mode, as the editor will, and show its frames in the viewer
 [script]
 dev-shared name="cinnabar": build viewer
     set -euo pipefail
-    "./{{build_dir}}/host.exe" "{{build_dir}}/{{game}}.dll" --shared "{{name}}" &
+    "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --project "samples/{{game}}/project.settings" --shared "{{name}}" &
     host=$!
     trap 'kill $host 2>/dev/null || true' EXIT
     # The viewer opens the shared objects, so the host must create them first.
     sleep 2
-    "./{{build_dir}}/viewer.exe" "{{name}}"
+    "./{{tools_dir}}/viewer.exe" "{{name}}"
 
 # Write the editor link's and the cook link's schemas, which the editor's source generator reads (see
 # docs/editor/link.md#editor-link)
 link-schema: host cook
-    "./{{build_dir}}/host.exe" --emit-link-schema "{{build_dir}}/link/link-schema.json"
-    "./{{build_dir}}/cook.exe" --emit-link-schema "{{build_dir}}/link/cook-schema.json"
+    "./{{dev_dir}}/host.exe" --emit-link-schema "{{obj_dir}}/link/link-schema.json"
+    "./{{tools_dir}}/cook.exe" --emit-link-schema "{{obj_dir}}/link/cook-schema.json"
 
 # Build the editor (see docs/editor/processes-and-projects.md#projects)
 editor: link-schema
@@ -312,18 +321,20 @@ editor: link-schema
 
 # Build everything and run the game in the editor
 edit: build editor
-    "./{{build_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{build_dir}}/host.exe" --game "{{build_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene" \
-        --cook "{{build_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}} \
+    "./{{obj_dir}}/dotnet/bin/Cinnabar.Editor/debug/editor.exe" --host "{{dev_dir}}/host.exe" --game "{{dev_dir}}/{{game}}.dll" --scene "{{content_root}}/scenes/main.scene" \
+        --cook "{{tools_dir}}/cook.exe" --cache "{{cache_dir}}" --definitions "{{script_types}}" {{shader_tools}} {{roots}} \
         --project "samples/{{game}}/project.settings"
 
-# Build the statically linked release executable
-release: agility-runtime fidelityfx-runtime luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
-    mkdir -p "{{build_dir}}"
-    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:CINNABAR_CONTENT_CACHE="{{cache_dir}}/release" -define:DEBUG_DRAW=false -define:PROFILE=false -out:"{{build_dir}}/{{game}}.exe" -o:speed
+# Build the statically linked release executable into build/release, with its content and project settings beside it,
+# so the folder runs from anywhere as it is
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
+    mkdir -p "{{release_dir}}"
+    cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
+    odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
 
 # Build and run the release executable
 run-release: release
-    "./{{build_dir}}/{{game}}.exe"
+    "./{{release_dir}}/{{game}}.exe"
 
 # =================================
 # Code Quality

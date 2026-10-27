@@ -51,7 +51,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed, and `Shading_Models` when a shading model changed. It sends `Cook_Finished` after every pass.
 - **An entry has everything that the editor shows,** the import settings, the behaviour class, a sub-asset's parent and name, and a material's permutations included, so the editor never asks for an asset's details. It finds an asset's dependents in the dependencies of the others.
 - **Previews:** `Cook_Preview` gives the text of a material that the editor has not saved. The daemon scans the roots, cooks the text as the material with that GUID, for its default switches only, into the preview area of the cache, `<cache>/dev/preview/<guid>.blob`, and answers with a `Preview_Result` of the same request ID: the first error, or `""`, and the problems with the lines of the text. A preview cooks between passes, writes no generation and changes no index; its problems go in the answer and not to the log. The daemon deletes the preview area when it starts (see [Rendering](../rendering/materials.md#material-previews)).
-- **Schema:** `cook --emit-link-schema` writes `build/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
+- **Schema:** `cook --emit-link-schema` writes `build/obj/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
 
 | Group | Messages |
 |---|---|

@@ -1,6 +1,6 @@
 # Textures
 
-Textures are `.png`, `.jpg`, `.tga` and `.hdr` files, read with `vendor:stb/image`. `just textures` runs `cook textures --cache build/cache --config dev|release` with the roots. *`.exr` files, with `vendor:OpenEXRCore`, come later.*
+Textures are `.png`, `.jpg`, `.tga` and `.hdr` files, read with `vendor:stb/image`. `just textures` runs `cook textures --cache build/<target>/content --config dev|release` with the roots. *`.exr` files, with `vendor:OpenEXRCore`, come later.*
 
 | Setting | Values | Default | Effect |
 |---|---|---|---|
