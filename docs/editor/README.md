@@ -62,6 +62,7 @@ The three designs that the editor's model makes room for but does not contain. E
 - **Large worlds:** positions reach ±2^38 m, and one scene file per world does not scale. Level and world streaming will split the world into scenes that load separately, and the editor will then edit several scenes at once.
 - **Edit-mode scripts:** some tools need behaviours that run in edit mode, like Unity's `ExecuteInEditMode`. Edit mode runs no scripts until then.
 - **More than one viewport:** each viewport has its own shared target and camera, so the host renders the scene once for each viewport.
+- **Mesh editing:** level geometry built in the viewport as polygon meshes, with Hammer's mesh and texture tools. Its design is written: [Mesh editing](mesh-editing.md).
 
 ## Future work
 
