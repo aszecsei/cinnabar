@@ -23,6 +23,7 @@ Read them in this order the first time.
 | `lib/core/jobs` | The fiber job system: workers, fibers, counters and the fiber-aware mutex. |
 | `lib/core/profile` | The frame profiler: zones, the frame ring, costs and captures ([Profiling](profiling.md#profiler)). |
 | `lib/core/layout` | The type layout hash that `Game_API.layout_hash` and the blob headers use. |
+| `lib/core/capture` | Frame captures as images: the conversion from each output mode, the half-size downscale, and the PNG and GIF encoders ([Editor: Capture](../editor/capture.md#capture)). |
 | `lib/core/gpu` | The GPU interface, validation, the null backend and the D3D12 backend ([GPU](../gpu/README.md)). |
 | `lib/core/luau`, `lib/core/script` | The Luau bindings and the VM's host side ([Scripting](../scripting/embedding.md#embedding)). |
 

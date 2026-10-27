@@ -16,6 +16,7 @@ Everything goes through the [justfile](../../justfile). The recipes that matter 
 | `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
 | `just script-types`, `link-schema`, `ltc-fit` | Regenerate derived files: the Luau definition file, the links' JSON schemas, and the area lights' tables. |
+| `just screenshot`, `just gif` | With the editor open, write a screenshot or a GIF of its viewport, with a JSON sidecar, into `build/captures` and print the files; `just screenshot --view depth` adds a debug view (see [Editor: Capture](../editor/capture.md#automation)). |
 
 The justfile's variables are the single source of versions: the Agility SDK, DXC, the GPU backend collection, and the `LUAU_*` defines. A change there flows into the cache keys of the assets it affects, so the next cook rebuilds them.
 
@@ -28,9 +29,10 @@ build/
 ├── dev/        host.exe, mygame.dll (and the mygame_N.dll copies the host loads), luau.dll,
 │               D3D12/ and the FSR libraries, content/        the development loose cache
 ├── release/    mygame.exe, D3D12/ and the FSR libraries, content/, project.settings
-├── tools/      cook.exe, viewer.exe, ltc_fit.exe
+├── tools/      cook.exe, viewer.exe, ltc_fit.exe, editorctl.exe
+├── captures/   the editor's screenshots, GIFs and their sidecars
 └── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/   the CMake builds the executables link
-                pdb/, link/, script-types/, dotnet/, editor/autosave/
+                pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json
 ```
 
 A game finds its files beside its executable, never through the working directory: `core.init` fills `Platform_API.content_dir` and `project_path` with `content` and `project.settings` in the executable's directory, as absolute paths, so `build/release` runs from Explorer or from any shell, and the folder can be copied or zipped as it is. The development host is the exception that takes `--content <dir>` and `--project <file>`, because the project's settings are in the source tree, where the editor edits them: `just dev` passes the sample's, and the editor passes its own (see [Editor](../editor/processes-and-projects.md#processes)). The cooker's `--cache` names a loose cache itself, so `just build` cooks into `build/dev/content` and `just release` into `build/release/content`, and the Agility SDK and FSR libraries are copied beside each executable that renders. `build/obj/luau` is where `lib/core/luau` links Luau from, so that path is fixed.

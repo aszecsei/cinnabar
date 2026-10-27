@@ -66,7 +66,7 @@ The order in which the daemon was built. Phases 1 to 4 are done; phase 5 is in [
 5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Editor
-The order in which the editor was built. Phases 1 to 12 are done; phase 13 is in [Future work](editor/README.md#future-work).
+The order in which the editor was built. Phases 1 to 13 are done; phase 14 is in [Future work](editor/README.md#future-work).
 
 1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
 2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
@@ -80,4 +80,5 @@ The order in which the editor was built. Phases 1 to 12 are done; phase 13 is in
 10. **Content browser:** after the cook daemon's first phase (see [Content pipeline](#content-pipeline)), `Cinnabar.Editor.Content`, the cook link and its schema in the generator, the daemon's log and problems in the console, and the read-only content browser: the index, search, opening scenes and scripts, and dragging a script to add a behaviour.
 11. **Asset operations:** create from a template, folders, rename, move, duplicate, delete with its dependents, import settings, and re-import.
 12. **Rendering parity:** field tags as lists, colors with a picker, sliders for ranged numbers and two-number fields; volume settings with override check boxes; the viewport's debug views, feature toggles and exposure (see [Rendering](#rendering)).
-13. **Later:** prefabs, which are their own design.
+13. **Capture:** screenshots with a JSON sidecar and the renderer's debug views, the host's history ring and the GIF encoder, the frame target's readback in the backend, the automation socket, and `editorctl` with `just screenshot` and `just gif` (see [Editor](editor/capture.md#capture)).
+14. **Later:** prefabs, which are their own design.

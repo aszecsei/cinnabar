@@ -32,6 +32,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
 | Profile | `Profile_Summary`, `Profile_Capture_Request`, `Profile_Capture` and `Profile_Recording`, which the host handles (see [Profile](#profile)) |
 | Previews | `Open_Preview`, `Preview_Settings`, `Close_Preview`, `Preview_Target`, and `Preview_Acknowledged`, which the host handles (see [Rendering](../rendering/materials.md#material-previews)) |
+| Capture | `Capture_Request` and `Capture_Result`, which the host handles: the frames are its own (see [Capture](capture.md#capture)) |
 
 ### Profile
 

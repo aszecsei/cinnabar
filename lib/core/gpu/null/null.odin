@@ -18,6 +18,21 @@ PACKET_TIME :: 1000
 // A frame's GPU spans reach the profiler this many frames later, as on a real backend.
 FRAMES_IN_FLIGHT :: 2
 
+// A frame capture's slots, as on a real backend (see docs/gpu/presentation.md#frame-capture).
+CAPTURE_SLOTS :: FRAMES_IN_FLIGHT + 2
+
+// Null_Capture is a frame capture: zeroed pixels with rows aligned as D3D12 aligns a copyable footprint, ready at
+// once.
+@(private = "file")
+Null_Capture :: struct {
+	taken:  bool,
+	ready:  bool,
+	size:   [2]u32,
+	format: gpu.Format,
+	mode:   gpu.Output_Mode,
+	pixels: []byte,
+}
+
 // Null_Frame is a frame's fake GPU spans, until begin_frame gives them to the profiler.
 @(private = "file")
 Null_Frame :: struct {
@@ -69,6 +84,9 @@ state: struct {
 	frames:        [FRAMES_IN_FLIGHT]Null_Frame,
 	frame_index:   int,
 	timing_mutex:  sync.Mutex,
+	// Whether this frame copies the frame target, and the slots.
+	capture_requested: bool,
+	captures:          [CAPTURE_SLOTS]Null_Capture,
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
@@ -101,6 +119,9 @@ shutdown :: proc() {
 	delete(state.readbacks)
 	for f in state.frames {
 		delete(f.spans)
+	}
+	for c in state.captures {
+		delete(c.pixels)
 	}
 	gpu.pool_destroy(&state.buffers)
 	gpu.pool_destroy(&state.textures)
@@ -253,10 +274,61 @@ time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
 	f.end = max(f.end, clock^)
 }
 
-// end_frame checks that the game left the frame target in the render target layout.
+// end_frame checks that the game left the frame target in the render target layout, and fills a requested capture.
 end_frame :: proc() {
 	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target); layout != .Render_Target {
 		log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
+	}
+	if state.capture_requested {
+		state.capture_requested = false
+		for &c in state.captures {
+			if c.taken {
+				continue
+			}
+			desc := gpu.pool_get(&state.textures, state.frame_target)
+			size := desc.size
+			delete(c.pixels)
+			c = {taken = true, ready = true, size = size, format = desc.format, mode = state.output.mode, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
+			break
+		}
+	}
+}
+
+// capture_row_pitch is a captured row's bytes: four per pixel, aligned to 256 as D3D12's footprints are.
+capture_row_pitch :: proc(width: u32) -> u32 {
+	return (width * 4 + 255) &~ 255
+}
+
+// request_frame_capture takes a slot for this frame's frame target, or is false when every slot is held.
+request_frame_capture :: proc() -> bool {
+	if state.capture_requested {
+		return true
+	}
+	for c in state.captures {
+		if !c.taken {
+			state.capture_requested = true
+			return true
+		}
+	}
+	return false
+}
+
+// poll_frame_capture gives a ready capture to the caller, which holds it until release_frame_capture.
+poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
+	for &c, i in state.captures {
+		if c.taken && c.ready {
+			c.ready = false
+			return {slot = u32(i), size = c.size, format = c.format, mode = c.mode, row_pitch = capture_row_pitch(c.size.x), pixels = c.pixels}, true
+		}
+	}
+	return
+}
+
+release_frame_capture :: proc(capture: gpu.Frame_Capture) {
+	if capture.slot < CAPTURE_SLOTS {
+		c := &state.captures[capture.slot]
+		delete(c.pixels)
+		c^ = {}
 	}
 }
 

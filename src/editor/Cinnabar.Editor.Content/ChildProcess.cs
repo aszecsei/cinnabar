@@ -12,6 +12,8 @@ namespace Cinnabar.Editor.Content;
 public sealed partial class ChildProcess : IDisposable
 {
     readonly Process _process;
+
+    public int Id => _process.Id;
     readonly SafeFileHandle _job;
     // Set by Dispose. The process's events can still arrive afterwards, on a thread-pool thread.
     volatile bool _disposed;

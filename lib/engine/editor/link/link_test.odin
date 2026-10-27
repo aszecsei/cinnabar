@@ -73,6 +73,8 @@ every_message_round_trips :: proc(t: ^testing.T) {
 			zones = {{start = -5, duration = 100, name = 1, detail = 2, lane = 1, depth = 3, flags = 5, fiber = 9}},
 		},
 		Profile_Recording{recording = true},
+		Capture_Request{id = 5, kind = .Gif, path = "E:/captures/clip.gif"},
+		Capture_Result{id = 5, kind = .Gif, ok = true, path = "E:/captures/clip.gif", frame = 900, width = 640, height = 360, frames = 50, duration_ms = 4900, output = .Sdr},
 	}
 	for message in messages {
 		decoded := round_trip(t, message)

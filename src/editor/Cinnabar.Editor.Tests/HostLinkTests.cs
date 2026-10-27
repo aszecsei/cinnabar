@@ -346,6 +346,55 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheHostWritesScreenshotsAndGifs()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        await editor.Next<FrameTarget>();
+        editor.Link.Send(new ViewportSize(320, 180));
+        await editor.Next<FrameTarget>(t => t.Width == 320);
+        var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-capture-{Guid.NewGuid():N}");
+        try
+        {
+            // The history ring samples ten times a second, so a second and a half gives it frames at the new size.
+            await Task.Delay(1500, TestContext.Current.CancellationToken);
+
+            var shot = Path.Combine(directory, "shot.png");
+            editor.Link.Send(new CaptureRequest(1, CaptureKind.Screenshot, shot));
+            var written = await editor.Next<CaptureResult>(r => r.Id == 1);
+            Assert.True(written.Ok, written.Reason);
+            Assert.Equal((shot, 320u, 180u, OutputMode.Sdr), (written.Path, written.Width, written.Height, written.Output));
+            Assert.True(written.Frame > 0);
+            Assert.Equal(new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }, File.ReadAllBytes(shot).Take(8));
+
+            var clip = Path.Combine(directory, "clip.gif");
+            editor.Link.Send(new CaptureRequest(2, CaptureKind.Gif, clip));
+            var recorded = await editor.Next<CaptureResult>(r => r.Id == 2);
+            Assert.True(recorded.Ok, recorded.Reason);
+            Assert.Equal((clip, 160u, 90u), (recorded.Path, recorded.Width, recorded.Height));
+            Assert.True(recorded.Frames >= 5, $"{recorded.Frames} frames");
+            Assert.True(recorded.DurationMs > 300, $"{recorded.DurationMs} ms");
+            Assert.Equal("GIF89a"u8.ToArray(), File.ReadAllBytes(clip).Take(6));
+
+            // Without a path, the host names the file beside itself.
+            editor.Link.Send(new CaptureRequest(3, CaptureKind.Screenshot, ""));
+            var named = await editor.Next<CaptureResult>(r => r.Id == 3);
+            Assert.True(named.Ok, named.Reason);
+            Assert.Contains(Path.Combine("build", "dev", "captures"), named.Path);
+            Assert.True(File.Exists(named.Path));
+            File.Delete(named.Path);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task TheGameDrawsMaterialPreviewsWhenTheyChange()
     {
         await using var editor = await Connect();

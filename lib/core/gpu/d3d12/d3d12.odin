@@ -116,6 +116,8 @@ dev: struct {
 	// Shared mode renders into shared textures instead of the swapchain (see shared.odin).
 	shared_mode:       bool,
 	shared:            Shared_State,
+	// The host's frame captures (see capture.odin).
+	captures:          Captures,
 	using resources:   Resources,
 	using pipelines:   Pipelines,
 	using uploads:     Uploads,
@@ -181,6 +183,7 @@ init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) 
 	init_streaming() or_return
 	init_upscalers()
 	init_timestamps() or_return
+	init_captures()
 	for &frame in dev.frames {
 		init_upload_ring(&frame.upload) or_return
 	}
@@ -206,6 +209,7 @@ shutdown :: proc() {
 	shutdown_streaming()
 	shutdown_pipelines()
 	shutdown_timestamps()
+	shutdown_captures()
 	shutdown_resources()
 	shutdown_upscalers()
 	for &frame in dev.frames {
@@ -450,6 +454,7 @@ end_frame :: proc() {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
 		stamp_readbacks(dev.fence_value)
+		cancel_capture()
 		return
 	}
 	when ODIN_DEBUG {
@@ -460,7 +465,11 @@ end_frame :: proc() {
 	frame := &dev.frames[dev.frame_index % FRAMES_IN_FLIGHT]
 	target := gpu.pool_get(&dev.textures, dev.frame_target)
 	list := acquire_list(frame, .Graphics)
-	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	if slot := pending_capture(); slot != nil {
+		record_capture(slot, list, target)
+	} else {
+		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
+	}
 	if dev.shared_mode {
 		end_shared_previews(list)
 	}
@@ -501,6 +510,7 @@ end_frame :: proc() {
 	frame.fence_value = dev.fence_value
 	stamp_releases(dev.fence_value)
 	stamp_readbacks(dev.fence_value)
+	stamp_capture(dev.fence_value)
 	dev.frame_index += 1
 }
 

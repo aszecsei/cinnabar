@@ -311,3 +311,44 @@ when profile.ENABLED {
 		testing.expect(t, c.frame.gpu_end > c.frame.gpu_begin)
 	}
 }
+
+@(test)
+frame_captures_are_ready_after_end_frame :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	begin_frame({1280, 720})
+	testing.expect(t, request_frame_capture())
+	// A second request in the frame is the same capture.
+	testing.expect(t, request_frame_capture())
+	_, ok := poll_frame_capture()
+	testing.expect(t, !ok)
+	end_frame()
+
+	capture, ready := poll_frame_capture()
+	testing.expect(t, ready)
+	testing.expect_value(t, capture.size, [2]u32{1280, 720})
+	testing.expect_value(t, capture.format, gpu.FRAME_TARGET_FORMAT)
+	testing.expect(t, capture.row_pitch >= 4 * 1280 && capture.row_pitch % 256 == 0)
+	testing.expect_value(t, len(capture.pixels), int(capture.row_pitch) * 720)
+	_, again := poll_frame_capture()
+	testing.expect(t, !again)
+
+	// A held slot stays held until it is released; the others are free.
+	for _ in 1 ..< CAPTURE_SLOTS {
+		begin_frame({1280, 720})
+		testing.expect(t, request_frame_capture())
+		end_frame()
+		held, got := poll_frame_capture()
+		testing.expect(t, got)
+		release_frame_capture(held)
+	}
+	release_frame_capture(capture)
+	begin_frame({1280, 720})
+	testing.expect(t, request_frame_capture())
+	end_frame()
+	last, got := poll_frame_capture()
+	testing.expect(t, got)
+	release_frame_capture(last)
+}

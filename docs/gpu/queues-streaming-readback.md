@@ -30,3 +30,4 @@ Streaming copies data into resources on the copy queue, beside the frame's work.
 - A buffer that nothing has copied into reads as ready. A caller that must know its copy ran, such as the editor's picks, writes a ticket into the data.
 - **D3D12:** a readback buffer is a committed resource in a readback heap, mapped for its whole life. Translating a copy into one marks it in flight, `end_frame` stamps it with the frame's fence value, and `gpu_read_buffer` compares that with the fence's completed value.
 - **Null backend:** a readback buffer is zeroed memory, always ready.
+- The frame captures' readback buffers are the backend's own, outside the pool (see [Presentation: Frame capture](presentation.md#frame-capture)).

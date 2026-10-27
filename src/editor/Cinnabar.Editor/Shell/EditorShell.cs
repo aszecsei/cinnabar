@@ -221,6 +221,7 @@ public sealed partial class EditorShell : IDisposable
 
     public void Dispose()
     {
+        StopAutomation();
         StopGame();
         Host.Dispose();
         Cook.Dispose();
