@@ -355,6 +355,7 @@ public sealed partial class EditorShell
         {
             return;
         }
+        HoverCut(pixel);
         var hovered = MeshElementAt(pixel);
         if (hovered != _hovered)
         {

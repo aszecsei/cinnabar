@@ -287,6 +287,71 @@ public static class MeshCut
     }
 
     /// <summary>
+    /// The points of a loop cut from an edge: a share of the way along it, then through each quad beside it to the
+    /// opposite edge at the same share, both ways around the mesh, until the loop closes or a face that is not a quad
+    /// or an open edge stops it. The points are in order along the loop, and a closed loop ends with its first point.
+    /// </summary>
+    public static List<CutPoint.OnEdge> Loop(MeshData mesh, int edge, double t)
+    {
+        if (edge < 0 || edge >= mesh.Edges.Length)
+        {
+            return [];
+        }
+        var start = mesh.Edges[edge];
+        t = Math.Clamp(t, 0, 1);
+        var points = new List<CutPoint.OnEdge> { new(start.A, start.B, t) };
+        var visited = new HashSet<int>();
+        // One way around, then the other from the start, prepended.
+        var forward = Walk(mesh, start, t, visited, out var closed);
+        points.AddRange(forward);
+        if (closed)
+        {
+            points.Add(points[0]);
+            return points;
+        }
+        var backward = Walk(mesh, start, t, visited, out _);
+        backward.Reverse();
+        return [.. backward, .. points];
+    }
+
+    // From an edge at a share along it, through the quads beside it that are not yet visited.
+    static List<CutPoint.OnEdge> Walk(MeshData mesh, MeshEdge start, double t, HashSet<int> visited, out bool closed)
+    {
+        var points = new List<CutPoint.OnEdge>();
+        closed = false;
+        var (a, b, share) = (start.A, start.B, t);
+        while (true)
+        {
+            var face = mesh.FacesOfEdge(new MeshEdge(a, b)).FirstOrDefault(f => !visited.Contains(f), -1);
+            if (face < 0 || mesh.Faces[face].Corners.Length != 4)
+            {
+                return points;
+            }
+            visited.Add(face);
+            var corners = mesh.Faces[face].Corners;
+            var k = corners.IndexOf(a);
+            // The entry edge is a to b, in or against the face's winding; the exit is the opposite edge, so that the
+            // same share from the entry's a lands across from it.
+            var forward = corners[(k + 1) % 4] == b;
+            var (c, d) = forward ? (corners[(k + 3) % 4], corners[(k + 2) % 4]) : (corners[(k + 1) % 4], corners[(k + 2) % 4]);
+            if (c == start.A && d == start.B || c == start.B && d == start.A)
+            {
+                closed = true;
+                return points;
+            }
+            points.Add(new CutPoint.OnEdge(c, d, share));
+            (a, b) = (c, d);
+        }
+    }
+
+    /// <summary>A loop cut from an edge, as <see cref="Loop"/> gives it, applied with <see cref="Cut"/>.</summary>
+    public static (ToolResult Result, string? Reason) LoopCut(MeshData mesh, int edge, double t)
+    {
+        var points = Loop(mesh, edge, t);
+        return points.Count < 2 ? (new ToolResult(mesh, MeshElement.Vertices, []), "a loop cut goes through a quad beside the edge") : Cut(mesh, [.. points]);
+    }
+
+    /// <summary>
     /// Cuts a polygon into a face: the polygon becomes a new face with the face's slot and mapping, selected, and the
     /// face keeps its outside as a ring of two faces around it. The polygon's corners are in the mesh's space, on the
     /// face's plane, and are turned to front as the face does. A polygon that crosses itself, has fewer than three

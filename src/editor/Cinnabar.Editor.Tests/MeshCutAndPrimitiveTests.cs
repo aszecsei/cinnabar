@@ -54,6 +54,38 @@ public class MeshCutAndPrimitiveTests
     }
 
     [Fact]
+    public void ALoopCutGoesAroundTheQuads()
+    {
+        var box = Box();
+        // From a vertical edge at a third of its height, around the four sides and back.
+        var loop = MeshCut.Loop(box, box.EdgeIndex(0, 4), 1.0 / 3);
+        Assert.Equal(5, loop.Count);
+        Assert.Equal(loop[0], loop[4]);
+        var (result, reason) = MeshCut.LoopCut(box, box.EdgeIndex(0, 4), 1.0 / 3);
+        Assert.Null(reason);
+        Assert.Equal(10, result.Mesh.Faces.Length);
+        Assert.Equal(12, result.Mesh.Vertices.Length);
+        Assert.Equal(4, result.Selected.Count);
+        Assert.All(result.Selected, v => Assert.Equal(1.0 / 3, result.Mesh.Vertices[v].Y, 9));
+        Assert.Empty(result.Mesh.Validate());
+        Assert.All(result.Mesh.Edges, e => Assert.Equal(2, result.Mesh.FacesOfEdge(e).Count));
+
+        // A wedge's slope, bottom and back are quads, so a loop from the slope's edge closes through the three; a
+        // loop from the bottom's left edge crosses the bottom and stops at the right side's triangle.
+        var wedge = Primitives.Make(PrimitiveKind.Wedge, Vec3.Zero, new Vec3(1, 1, 1), 1, PrimitiveParameters.Default);
+        var around = MeshCut.Loop(wedge, wedge.EdgeIndex(4, 5), 0.5);
+        Assert.Equal(4, around.Count);
+        Assert.Equal(around[0], around[^1]);
+        var partial = MeshCut.Loop(wedge, wedge.EdgeIndex(0, 3), 0.5);
+        Assert.Equal(2, partial.Count);
+        Assert.NotEqual(partial[0], partial[^1]);
+        var (cutWedge, wedgeReason) = MeshCut.LoopCut(wedge, wedge.EdgeIndex(0, 3), 0.5);
+        Assert.Null(wedgeReason);
+        Assert.Equal(6, cutWedge.Mesh.Faces.Length);
+        Assert.Empty(cutWedge.Mesh.Validate());
+    }
+
+    [Fact]
     public void DrawCutsAPolygonIntoAFaceAndMakesPlanesOnNothing()
     {
         var box = Box();

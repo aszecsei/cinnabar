@@ -24,6 +24,8 @@ public sealed partial class EditorShell
     sealed record LastPrimitive(int Position, long[] Corner, Vec3 Size, int Axis, string? Mesh);
 
     PendingDistance? _pending;
+    // The loop that the Cut tool would make from the edge under the mouse: its mesh and its points.
+    (string Guid, List<CutPoint.OnEdge> Points)? _loopPreview;
     readonly List<CutPoint> _toolPoints = [];
     string? _toolMesh;
     readonly List<long[]> _planePoints = [];
@@ -42,8 +44,102 @@ public sealed partial class EditorShell
 
     public PrimitiveParameters PrimitiveParameters { get; private set; } = PrimitiveParameters.Default;
 
-    /// <summary>The points a Cut or a Draw has so far.</summary>
+    /// <summary>The points a Draw has so far.</summary>
     public int ToolPointCount => _toolPoints.Count + _planePoints.Count;
+
+    /// <summary>The edge of an edited mesh under a pixel, by its mesh and its index, with how far along it the mouse is, or null.</summary>
+    (string Guid, int Edge, double T)? EdgeAt(Vec2 pixel)
+    {
+        var (width, height) = FrameSize;
+        var ray = Camera.Ray(pixel, width, height);
+        (string, int, double)? best = null;
+        var bestDistance = double.MaxValue;
+        foreach (var guid in InMeshMode ? _editedMeshes.Keys.ToList() : [])
+        {
+            if (FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement)
+            {
+                continue;
+            }
+            var hit = MeshPick.Face(mesh, placement, ray, SelectThrough);
+            if (MeshPick.Edge(mesh, placement, Camera, pixel, width, height, hit?.Distance) is not { } edge)
+            {
+                continue;
+            }
+            var e = mesh.Edges[edge];
+            var (a, b) = (placement.ToView(mesh.Vertices[e.A]), placement.ToView(mesh.Vertices[e.B]));
+            var distance = hit?.Distance ?? Vec3.Dot(a, Camera.Forward);
+            if (distance < bestDistance)
+            {
+                var t = AlongRay(a, b, ray);
+                if (Snap)
+                {
+                    // The point along the edge nearest a grid point.
+                    var snapped = Camera.RelativeTo(SnapToGrid(a + (b - a) * t));
+                    t = AlongSegment(a, b, snapped);
+                }
+                best = (guid, edge, t);
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    static double AlongSegment(Vec3 a, Vec3 b, Vec3 p)
+    {
+        var ab = b - a;
+        var length = Vec3.Dot(ab, ab);
+        return length < 1e-12 ? 0 : Math.Clamp(Vec3.Dot(p - a, ab) / length, 0, 1);
+    }
+
+    /// <summary>With the Cut tool, shows the loop that a click on the edge under the mouse would cut.</summary>
+    public void HoverCut(Vec2 pixel)
+    {
+        if (MeshTool != MeshTool.Cut || !InMeshMode)
+        {
+            return;
+        }
+        (string, List<CutPoint.OnEdge>)? preview = null;
+        if (EdgeAt(pixel) is var (guid, edge, t) && FindMeshData(guid) is { } mesh)
+        {
+            preview = (guid, MeshCut.Loop(mesh, edge, t));
+        }
+        if (preview?.Item1 != _loopPreview?.Guid || !(preview?.Item2 ?? []).SequenceEqual(_loopPreview?.Points ?? []))
+        {
+            _loopPreview = preview;
+            SendMeshOverlay();
+        }
+    }
+
+    /// <summary>A click with the Cut tool: a loop cut from the edge under it, at once.</summary>
+    public bool CutAt(Vec2 pixel)
+    {
+        if (MeshTool != MeshTool.Cut || !InMeshMode || !IsEditing || Scene == null)
+        {
+            return false;
+        }
+        CommitPendingDistance();
+        if (EdgeAt(pixel) is not var (guid, edge, t) || FindMeshData(guid) is not { } mesh)
+        {
+            return true;
+        }
+        var (result, reason) = MeshCut.LoopCut(mesh, edge, t);
+        if (reason != null)
+        {
+            Console.Add(LogLevel.Warning, $"mesh: {reason}");
+            return true;
+        }
+        if (result.Mesh.Validate() is { Count: > 0 } problems)
+        {
+            Console.Add(LogLevel.Error, $"mesh: cannot cut: {string.Join("; ", problems)}");
+            return true;
+        }
+        _loopPreview = null;
+        if (Edit("Cut", new MeshOperation(guid, mesh, result.Mesh, Meshes)))
+        {
+            SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
+        }
+        return true;
+    }
 
     public static readonly IReadOnlyList<string> NormalAngles = ["15", "30", "45", "60", "90"];
     public static readonly IReadOnlyList<string> BevelSegmentOptions = ["1", "2", "3", "4", "6", "8"];
@@ -484,7 +580,11 @@ public sealed partial class EditorShell
     /// </summary>
     public bool AddToolPoint(Vec2 pixel)
     {
-        if (MeshTool is not (MeshTool.Cut or MeshTool.Draw) || !IsEditing || Scene == null)
+        if (MeshTool == MeshTool.Cut)
+        {
+            return CutAt(pixel);
+        }
+        if (MeshTool != MeshTool.Draw || !IsEditing || Scene == null)
         {
             return false;
         }
@@ -669,15 +769,13 @@ public sealed partial class EditorShell
         }
     }
 
-    // The points of a Cut or a Draw on a mesh, as the overlay marks them: x, y, z each, in the mesh's space.
+    // The points of a Draw on a mesh, or of the loop a Cut would make, as the overlay marks them: x, y, z each, in
+    // the mesh's space.
     float[] ToolMarks(string guid, MeshData mesh)
     {
-        if (_toolMesh != guid)
-        {
-            return [];
-        }
+        IEnumerable<CutPoint> points = _loopPreview is { } preview && preview.Guid == guid ? preview.Points : _toolMesh == guid ? _toolPoints : [];
         var marks = new List<float>();
-        foreach (var point in _toolPoints)
+        foreach (var point in points)
         {
             Vec3? position = point switch
             {
@@ -717,6 +815,7 @@ public sealed partial class EditorShell
         _toolPoints.Clear();
         _planePoints.Clear();
         _toolMesh = null;
+        _loopPreview = null;
         OnMeshModeChanged();
     }
 }

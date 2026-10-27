@@ -294,11 +294,11 @@ static class EditorCommands
                 CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
                 IsCheckedWhen = () => shell.MeshTool == tool,
             });
-        ModeTool(MeshCut, MeshTool.Cut, "Cut", "scale-tool", "Click points on the edited mesh, on vertices, edges or faces, and press Enter to split every face the line crosses. Backspace drops a point.");
+        ModeTool(MeshCut, MeshTool.Cut, "Cut", "scale-tool", "A loop cut: hover an edge to see the loop through the quads around the mesh, and click to cut it there. Snap puts the cut on the grid.");
         ModeTool(MeshDraw, MeshTool.Draw, "Draw", "graph", "Click the corners of a polygon on a face, or on the grid, and press Enter or click the first corner to close it: a face cut into the face, or a new plane.");
         commands.Register(new Command(MeshApplyPoints, "Apply Points", shell.ApplyToolPoints)
         {
-            Description = "Cut or draw with the points clicked so far, as Enter in the viewport does.",
+            Description = "Draw with the corners clicked so far, as Enter in the viewport does.",
             Icon = "play",
             CanExecuteWhen = () => shell.ToolPointCount > 0,
         });

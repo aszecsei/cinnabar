@@ -127,29 +127,25 @@ public sealed class MeshToolModeTests : IDisposable
     }
 
     [Fact]
-    public void CutTakesPointsOnEdgesAndEnterSplits()
+    public void CutIsALoopCutFromTheEdgeClicked()
     {
         using var shell = NewShell();
         shell.Commands.Get(EditorCommands.MeshCut).Execute();
         Assert.Equal(MeshTool.Cut, shell.MeshTool);
-        // Two clicks inside the front face: the line extends to its edges.
-        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(-0.25, 0, -0.5))));
-        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(0.25, 0, -0.5))));
-        Assert.Equal(2, shell.ToolPointCount);
-        Assert.Contains("Cut: 2 points", shell.MeshStatus);
-        Assert.True(shell.Commands.Get(EditorCommands.MeshApplyPoints).CanExecute);
-        shell.ApplyToolPoints();
-        Assert.Equal(0, shell.ToolPointCount);
+        // Hovering the front face's left edge a quarter up shows the loop; a click cuts it, with no Enter.
+        var pixel = PixelOf(shell, new Vec3(-0.5, -0.25, -0.5)) + new Vec2(2, 0);
+        shell.HoverMesh(pixel);
+        Assert.True(shell.AddToolPoint(pixel));
         var mesh = Mesh(shell);
-        Assert.Equal(7, mesh.Faces.Length);
+        Assert.Equal(10, mesh.Faces.Length);
         Assert.Equal(12, mesh.Vertices.Length);
         Assert.Equal(MeshElement.Vertices, shell.MeshElement);
         Assert.Equal(4, shell.MeshSelection.Count);
+        Assert.All(shell.MeshSelection.Of(MeshGuid), v => Assert.Equal(-0.25, mesh.Vertices[v].Y, 2));
         Assert.Equal("Cut", Assert.Single(shell.Scene!.History).Label);
-        // Backspace and Escape.
-        Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(0, 0.5, -0.5))));
-        shell.RemoveLastToolPoint();
-        Assert.Equal(0, shell.ToolPointCount);
+        // A click on nothing with the tool is taken and cuts nothing.
+        Assert.True(shell.AddToolPoint(new Vec2(5, 5)));
+        Assert.Single(shell.Scene.History);
     }
 
     [Fact]
