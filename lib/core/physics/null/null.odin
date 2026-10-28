@@ -27,6 +27,7 @@ Null_World :: struct {
 	alive:      bool,
 	bodies:     []Null_Body,
 	shapes:     []u32,
+	joints:     []u32,
 }
 
 // The host is one per process, so the backend's state is too.
@@ -95,6 +96,7 @@ world_create :: proc "c" (desc: ^physics.World_Desc) -> physics.World {
 	d := desc^ if desc != nil else {}
 	max_bodies := d.max_bodies if d.max_bodies != 0 else physics.DEFAULT_MAX_BODIES
 	max_shapes := d.max_shapes if d.max_shapes != 0 else physics.DEFAULT_MAX_SHAPES
+	max_joints := d.max_joints if d.max_joints != 0 else physics.DEFAULT_MAX_JOINTS
 	for &w, i in state.worlds {
 		if w.alive {
 			continue
@@ -105,6 +107,7 @@ world_create :: proc "c" (desc: ^physics.World_Desc) -> physics.World {
 			alive      = true,
 			bodies     = make([]Null_Body, max_bodies, runtime.heap_allocator()),
 			shapes     = make([]u32, max_shapes, runtime.heap_allocator()),
+			joints     = make([]u32, max_joints, runtime.heap_allocator()),
 		}
 		return {u32(i), generation}
 	}
@@ -115,6 +118,7 @@ world_create :: proc "c" (desc: ^physics.World_Desc) -> physics.World {
 destroy :: proc(w: ^Null_World) {
 	delete(w.bodies, runtime.heap_allocator())
 	delete(w.shapes, runtime.heap_allocator())
+	delete(w.joints, runtime.heap_allocator())
 	w^ = {generation = w.generation}
 }
 
@@ -243,6 +247,25 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return find_body(w, physics.payload(command, physics.Body_Command).body) != nil
 	case .Set_Enabled:
 		return find_body(w, physics.payload(command, physics.Set_Enabled).body) != nil
+	case .Create_Joint:
+		c := physics.payload(command, physics.Create_Joint)
+		if c.joint.generation == 0 || int(c.joint.index) >= len(w.joints) || find_body(w, c.a) == nil {
+			return false
+		}
+		if c.b.generation != 0 && find_body(w, c.b) == nil {
+			return false
+		}
+		w.joints[c.joint.index] = c.joint.generation
+		return true
+	case .Destroy_Joint, .Set_Joint:
+		joint := physics.payload(command, physics.Destroy_Joint).joint
+		if joint.generation == 0 || int(joint.index) >= len(w.joints) || w.joints[joint.index] != joint.generation {
+			return false
+		}
+		if command.kind == .Destroy_Joint {
+			w.joints[joint.index] = 0
+		}
+		return true
 	case .Create_Compound:
 		c := physics.payload(command, physics.Create_Compound)
 		if c.shape.generation == 0 || int(c.shape.index) >= len(w.shapes) || c.count == 0 {

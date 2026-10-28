@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 4
+#define CN_PHYSICS_API_VERSION 5
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -18,6 +18,7 @@ typedef struct cn_handle { uint32_t index, generation; } cn_handle;
 typedef cn_handle cn_world;
 typedef cn_handle cn_body;
 typedef cn_handle cn_shape;
+typedef cn_handle cn_joint;
 
 enum cn_feature {
     CN_FEATURE_RIGID_BODIES = 1u << 0,
@@ -43,7 +44,7 @@ typedef struct cn_backend_info {
 } cn_backend_info;
 
 typedef struct cn_world_desc {
-    uint32_t max_bodies, max_shapes, max_body_pairs, max_contact_constraints, temp_size, _pad;
+    uint32_t max_bodies, max_shapes, max_body_pairs, max_contact_constraints, temp_size, max_joints;
 } cn_world_desc;
 
 enum cn_motion { CN_MOTION_STATIC, CN_MOTION_KINEMATIC, CN_MOTION_DYNAMIC };
@@ -75,7 +76,14 @@ enum cn_command_kind {
     CN_CMD_DEACTIVATE,
     CN_CMD_SET_ENABLED,
     CN_CMD_CREATE_COMPOUND,
+    CN_CMD_CREATE_JOINT,
+    CN_CMD_DESTROY_JOINT,
+    CN_CMD_SET_JOINT,
 };
+
+enum cn_joint_kind { CN_JOINT_FIXED, CN_JOINT_POINT, CN_JOINT_HINGE, CN_JOINT_SLIDER, CN_JOINT_DISTANCE, CN_JOINT_CONE, CN_JOINT_SIX_DOF };
+enum cn_joint_flag { CN_JOINT_COLLIDE_CONNECTED = 1u << 0, CN_JOINT_DISABLED = 1u << 1, CN_JOINT_HAS_LIMITS = 1u << 2 };
+enum cn_motor_mode { CN_MOTOR_OFF, CN_MOTOR_VELOCITY, CN_MOTOR_POSITION };
 
 typedef struct cn_command_header { uint16_t kind, size; uint32_t _pad; } cn_command_header;
 
@@ -133,6 +141,33 @@ typedef struct cn_set_velocity { cn_body body; float linear[3], angular[3]; } cn
 typedef struct cn_add_vector { cn_body body; float vector[3]; uint32_t _pad; } cn_add_vector;
 typedef struct cn_add_force_at { cn_body body; float force[3]; uint32_t _pad; double point[3]; } cn_add_force_at;
 typedef struct cn_body_command { cn_body body; } cn_body_command;
+
+typedef struct cn_create_joint {
+    cn_joint joint;
+    cn_body a, b;
+    uint8_t kind, flags, motor, _pad0;
+    float limit_min, limit_max;
+    float spring_frequency, spring_damping;
+    float motor_target, motor_max;
+    float break_force, break_torque;
+    uint32_t _pad1;
+    double position_a[3];
+    float rotation_a[4];
+    double position_b[3];
+    float rotation_b[4];
+    float six_min[6], six_max[6];
+} cn_create_joint;
+
+typedef struct cn_destroy_joint { cn_joint joint; } cn_destroy_joint;
+
+typedef struct cn_set_joint {
+    cn_joint joint;
+    uint32_t enabled;
+    uint8_t motor, _pad[3];
+    float motor_target, motor_max;
+} cn_set_joint;
+
+typedef struct cn_joint_break { cn_joint joint; float force, torque; } cn_joint_break;
 typedef struct cn_set_enabled { cn_body body; uint32_t enabled, _pad; } cn_set_enabled;
 
 enum cn_body_state_flag { CN_BODY_STATE_ASLEEP = 1u << 0 };
@@ -164,6 +199,8 @@ typedef struct cn_step_results {
     const cn_body_state* moved;
     uint32_t moved_count, contact_count;
     const cn_contact_event* contacts;
+    const cn_joint_break* broken;
+    uint32_t broken_count, _pad;
 } cn_step_results;
 
 typedef struct cn_ray { double origin[3]; float direction[3]; float max_distance; } cn_ray;
@@ -252,7 +289,10 @@ static_assert(sizeof(cn_add_force_at) == 48);
 static_assert(sizeof(cn_world_desc) == 24);
 static_assert(sizeof(cn_backend_info) == 24);
 static_assert(sizeof(cn_body_state) == 88);
-static_assert(sizeof(cn_step_results) == 24);
+static_assert(sizeof(cn_step_results) == 40);
+static_assert(sizeof(cn_create_joint) == 192);
+static_assert(sizeof(cn_set_joint) == 24);
+static_assert(sizeof(cn_joint_break) == 16);
 static_assert(sizeof(cn_contact_event) == 96);
 static_assert(sizeof(cn_shape_desc) == 16);
 static_assert(sizeof(cn_shape_cast) == 72);

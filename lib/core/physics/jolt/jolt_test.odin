@@ -96,3 +96,18 @@ sensor :: proc(t: ^testing.T) {
 queries :: proc(t: ^testing.T) {
 	with_backend(t, conformance.queries)
 }
+
+@(test)
+joints :: proc(t: ^testing.T) {
+	with_backend(t, conformance.joints)
+}
+
+@(test)
+joint_breaks :: proc(t: ^testing.T) {
+	with_backend(t, conformance.joint_breaks)
+}
+
+@(test)
+motor :: proc(t: ^testing.T) {
+	with_backend(t, conformance.motor)
+}

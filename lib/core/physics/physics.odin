@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 4
+API_VERSION :: 5
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -28,6 +28,7 @@ Handle :: struct {
 World :: distinct Handle
 Body :: distinct Handle
 Shape :: distinct Handle
+Joint :: distinct Handle
 
 // The most object layers a world has. A layer's mask is a u32 of the layers it collides with.
 MAX_LAYERS :: 32
@@ -67,7 +68,7 @@ World_Desc :: struct {
 	max_contact_constraints: u32, // 16384
 	// The per-step scratch memory, in bytes.
 	temp_size:               u32, // 8 MiB
-	_:                       u32,
+	max_joints:              u32, // 16384
 }
 
 DEFAULT_MAX_BODIES :: 65536
@@ -75,6 +76,7 @@ DEFAULT_MAX_SHAPES :: 16384
 DEFAULT_MAX_BODY_PAIRS :: 65536
 DEFAULT_MAX_CONTACT_CONSTRAINTS :: 16384
 DEFAULT_TEMP_SIZE :: 8 * mem.Megabyte
+DEFAULT_MAX_JOINTS :: 16384
 
 Motion :: enum u8 {
 	Static,
@@ -134,6 +136,9 @@ Command_Kind :: enum u16 {
 	Deactivate,
 	Set_Enabled,
 	Create_Compound,
+	Create_Joint,
+	Destroy_Joint,
+	Set_Joint,
 }
 
 // size includes the header and the padding after the payload. Payloads start 8-byte aligned.
@@ -257,6 +262,87 @@ Add_Force_At :: struct {
 	force: [3]f32,
 	_:     u32,
 	point: Position,
+}
+
+Joint_Kind :: enum u8 {
+	// Holds b where it was relative to a.
+	Fixed,
+	// A ball and socket: the frames' points stay together.
+	Point,
+	// Turns about the frame's x, between limit_min and limit_max radians with Has_Limits.
+	Hinge,
+	// Slides along the frame's x, between limit_min and limit_max meters with Has_Limits.
+	Slider,
+	// Keeps the frames' points between limit_min and limit_max meters apart; a negative one is the distance at
+	// creation.
+	Distance,
+	// A ball and socket whose b x axis stays within limit_max radians of a's.
+	Cone,
+	// Each axis, x, y and z of translation and then of rotation, free, fixed or limited by six_min and six_max.
+	Six_DOF,
+}
+
+Joint_Flag :: enum u8 {
+	// The two bodies collide with each other. Without it, they pass through each other, as most joints want.
+	Collide_Connected,
+	// The joint does nothing until Set_Joint enables it.
+	Disabled,
+	// A hinge's or a slider's limits apply.
+	Has_Limits,
+}
+
+Joint_Flags :: bit_set[Joint_Flag;u8]
+
+Motor_Mode :: enum u8 {
+	Off,
+	// motor_target is a velocity: radians a second for a hinge, meters a second for a slider.
+	Velocity,
+	// motor_target is an angle or a distance, which a spring reaches.
+	Position,
+}
+
+// Create_Joint joins a and b, or a and the world when b is nil, at two frames in world space, positions offset from
+// the world's anchor: the joint's frame on a, and where it sits on b, usually the same. A frame's x is the hinge's and
+// the slider's axis, and the cone's twist axis. spring_frequency in Hz and spring_damping soften the limits; 0 makes
+// them hard. motor_max is the motor's most force or torque, 0 for no limit. break_force and break_torque, in N and N m,
+// break the joint when it carries more for a step; 0 never breaks it.
+Create_Joint :: struct {
+	joint:            Joint,
+	a, b:             Body,
+	kind:             Joint_Kind,
+	flags:            Joint_Flags,
+	motor:            Motor_Mode,
+	_:                u8,
+	limit_min:        f32,
+	limit_max:        f32,
+	spring_frequency: f32,
+	spring_damping:   f32,
+	motor_target:     f32,
+	motor_max:        f32,
+	break_force:      f32,
+	break_torque:     f32,
+	_:                u32,
+	position_a:       Position,
+	rotation_a:       Rotation,
+	position_b:       Position,
+	rotation_b:       Rotation,
+	// A six-DOF joint's limits on each axis: free when min is -max(f32) and max is max(f32), fixed when min >= max.
+	six_min:          [6]f32,
+	six_max:          [6]f32,
+}
+
+Destroy_Joint :: struct {
+	joint: Joint,
+}
+
+// Set_Joint changes what a joint changes in place: whether it is enabled, and its motor.
+Set_Joint :: struct {
+	joint:        Joint,
+	enabled:      b32,
+	motor:        Motor_Mode,
+	_:            [3]u8,
+	motor_target: f32,
+	motor_max:    f32,
 }
 
 // Activate and Deactivate.
@@ -412,6 +498,18 @@ cmd_set_enabled :: proc(list: ^Command_List, body: Body, enabled: bool) {
 	push(list, .Set_Enabled, Set_Enabled{body = body, enabled = b32(enabled)})
 }
 
+cmd_create_joint :: proc(list: ^Command_List, desc: Create_Joint) {
+	push(list, .Create_Joint, desc)
+}
+
+cmd_destroy_joint :: proc(list: ^Command_List, joint: Joint) {
+	push(list, .Destroy_Joint, Destroy_Joint{joint})
+}
+
+cmd_set_joint :: proc(list: ^Command_List, joint: Joint, enabled: bool, motor: Motor_Mode, target, max: f32) {
+	push(list, .Set_Joint, Set_Joint{joint = joint, enabled = b32(enabled), motor = motor, motor_target = target, motor_max = max})
+}
+
 // Command is a command read from a chunk. data is the payload and its padding.
 Command :: struct {
 	kind: Command_Kind,
@@ -463,6 +561,10 @@ Format :: struct {
 	create_shape:   Create_Shape,
 	release_shape:  Release_Shape,
 	compound:       Create_Compound,
+	create_joint:   Create_Joint,
+	destroy_joint:  Destroy_Joint,
+	set_joint:      Set_Joint,
+	joint_break:    Joint_Break,
 	create_body:    Create_Body,
 	destroy_body:   Destroy_Body,
 	set_pose:       Set_Pose,
@@ -524,6 +626,17 @@ Step_Results :: struct {
 	contact_count: u32,
 	// The contacts that began and ended since the last step, sorted by a, then b, then kind.
 	contacts:      [^]Contact_Event,
+	// The joints that broke in the step, by handle. A broken joint stays disabled.
+	broken:        [^]Joint_Break,
+	broken_count:  u32,
+	_:             u32,
+}
+
+// Joint_Break is a joint that carried more than its break_force or break_torque, with what it carried.
+Joint_Break :: struct {
+	joint:  Joint,
+	force:  f32,
+	torque: f32,
 }
 
 Contact_Kind :: enum u8 {
@@ -684,7 +797,10 @@ Host :: struct {
 #assert(size_of(World_Desc) == 24)
 #assert(size_of(Backend_Info) == 24)
 #assert(size_of(Body_State) == 88)
-#assert(size_of(Step_Results) == 24)
+#assert(size_of(Step_Results) == 40)
+#assert(size_of(Create_Joint) == 192)
+#assert(size_of(Set_Joint) == 24)
+#assert(size_of(Joint_Break) == 16)
 #assert(size_of(Contact_Event) == 96)
 #assert(size_of(Shape_Desc) == 16)
 #assert(size_of(Shape_Cast) == 72)

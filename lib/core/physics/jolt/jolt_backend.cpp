@@ -20,6 +20,13 @@
 #include <Jolt/Physics/Collision/ContactListener.h>
 #include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
+#include <Jolt/Physics/Constraints/ConeConstraint.h>
+#include <Jolt/Physics/Constraints/DistanceConstraint.h>
+#include <Jolt/Physics/Constraints/FixedConstraint.h>
+#include <Jolt/Physics/Constraints/HingeConstraint.h>
+#include <Jolt/Physics/Constraints/PointConstraint.h>
+#include <Jolt/Physics/Constraints/SixDOFConstraint.h>
+#include <Jolt/Physics/Constraints/SliderConstraint.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
@@ -248,6 +255,15 @@ public:
         return x < y ? (x << 32 | y) : (y << 32 | x);
     }
 
+    // The body pairs that a joint without Collide_Connected keeps from colliding, with how many joints do. Only
+    // submit changes it, so the step's threads only read it.
+    UnorderedMap<uint64, uint32> joined;
+
+    ValidateResult OnContactValidate(const Body& body1, const Body& body2, RVec3Arg, const CollideShapeResult&) override
+    {
+        return joined.find(key(body1.GetID(), body2.GetID())) != joined.end() ? ValidateResult::RejectAllContactsForThisBodyPair
+                                                                             : ValidateResult::AcceptAllContactsForThisBodyPair;
+    }
     void OnContactAdded(const Body& body1, const Body& body2, const ContactManifold& manifold, ContactSettings& settings) override;
     void OnContactRemoved(const SubShapeIDPair& pair) override;
     // end_pairs ends every pair of a body that is destroyed or leaves the simulation, which Jolt does not report.
@@ -260,6 +276,17 @@ public:
 struct Body_Slot {
     uint32 generation = 0;
     BodyID id;
+};
+
+struct Joint_Slot {
+    uint32 generation = 0;
+    // Null when the joint was destroyed, or went with one of its bodies.
+    Ref<TwoBodyConstraint> constraint;
+    uint8_t kind = 0;
+    bool collide = false;
+    bool broken = false;
+    float break_force = 0, break_torque = 0;
+    BodyID a, b;
 };
 
 struct Shape_Slot {
@@ -279,6 +306,8 @@ struct World_Impl {
     Contact_Listener contacts;
     Array<Body_Slot> bodies;
     Array<Shape_Slot> shapes;
+    Array<Joint_Slot> joints;
+    Array<cn_joint_break> broken;
     // The engine's handle, user value and flags of each Jolt body, by BodyID index.
     Array<cn_body> handles;
     Array<uint64> users;
@@ -295,6 +324,7 @@ struct World_Impl {
         , handles(desc.max_bodies)
         , users(desc.max_bodies)
         , flags(desc.max_bodies)
+        , joints(desc.max_joints)
     {
         system.Init(desc.max_bodies, 0, desc.max_body_pairs, desc.max_contact_constraints, broad_layers, object_vs_broad,
             pairs);
@@ -648,6 +678,8 @@ bool run_create_body(World_Impl& w, const cn_create_body& c)
     return true;
 }
 
+void remove_body_joints(World_Impl& w, const BodyID& id);
+
 bool run_destroy_body(World_Impl& w, cn_body body)
 {
     BodyID id;
@@ -656,6 +688,7 @@ bool run_destroy_body(World_Impl& w, cn_body body)
     }
     BodyInterface& bodies = w.system.GetBodyInterface();
     w.contacts.end_pairs(id);
+    remove_body_joints(w, id);
     if (bodies.IsAdded(id)) {
         bodies.RemoveBody(id);
     }
@@ -667,11 +700,269 @@ bool run_destroy_body(World_Impl& w, cn_body body)
 
 template <typename T> const T& read(const uint8_t* data) { return *reinterpret_cast<const T*>(data); }
 
+Joint_Slot* find_joint(World_Impl& w, cn_joint handle)
+{
+    if (handle.generation == 0 || handle.index >= w.joints.size()) {
+        return nullptr;
+    }
+    Joint_Slot& slot = w.joints[handle.index];
+    return slot.generation == handle.generation ? &slot : nullptr;
+}
+
+// remove_joint takes a joint out of the system, and lets its bodies collide again if it kept them apart.
+void remove_joint(World_Impl& w, Joint_Slot& slot)
+{
+    if (slot.constraint == nullptr) {
+        return;
+    }
+    w.system.RemoveConstraint(slot.constraint);
+    slot.constraint = nullptr;
+    if (!slot.collide) {
+        auto found = w.contacts.joined.find(Contact_Listener::key(slot.a, slot.b));
+        if (found != w.contacts.joined.end() && --found->second == 0) {
+            w.contacts.joined.erase(found);
+        }
+    }
+}
+
+// remove_body_joints removes the joints of a body that is destroyed: a constraint holds its bodies. Their handles stay
+// valid until the engine destroys them.
+void remove_body_joints(World_Impl& w, const BodyID& id)
+{
+    for (Joint_Slot& slot : w.joints) {
+        if (slot.constraint != nullptr && (slot.a == id || slot.b == id)) {
+            remove_joint(w, slot);
+        }
+    }
+}
+
+void set_motor(Joint_Slot& slot, uint8_t mode, float target, float max)
+{
+    EMotorState state = mode == CN_MOTOR_VELOCITY ? EMotorState::Velocity
+        : mode == CN_MOTOR_POSITION               ? EMotorState::Position
+                                                  : EMotorState::Off;
+    float limit = max > 0 ? max : FLT_MAX;
+    if (slot.kind == CN_JOINT_HINGE) {
+        auto* hinge = static_cast<HingeConstraint*>(slot.constraint.GetPtr());
+        hinge->GetMotorSettings().SetTorqueLimit(limit);
+        hinge->SetMotorState(state);
+        if (state == EMotorState::Velocity) {
+            hinge->SetTargetAngularVelocity(target);
+        } else if (state == EMotorState::Position) {
+            hinge->SetTargetAngle(target);
+        }
+    } else if (slot.kind == CN_JOINT_SLIDER) {
+        auto* slider = static_cast<SliderConstraint*>(slot.constraint.GetPtr());
+        slider->GetMotorSettings().SetForceLimit(limit);
+        slider->SetMotorState(state);
+        if (state == EMotorState::Velocity) {
+            slider->SetTargetVelocity(target);
+        } else if (state == EMotorState::Position) {
+            slider->SetTargetPosition(target);
+        }
+    }
+}
+
+Ref<TwoBodyConstraintSettings> joint_settings(const cn_create_joint& c)
+{
+    RVec3 pa = to_rvec3(c.position_a), pb = to_rvec3(c.position_b);
+    Quat ra = to_quat(c.rotation_a), rb = to_quat(c.rotation_b);
+    Vec3 xa = ra.RotateAxisX(), ya = ra.RotateAxisY(), xb = rb.RotateAxisX(), yb = rb.RotateAxisY();
+    SpringSettings spring(ESpringMode::FrequencyAndDamping, c.spring_frequency, c.spring_damping);
+    // A position motor is a spring: the joint's, or a firm one.
+    MotorSettings motor(c.spring_frequency > 0 ? c.spring_frequency : 2.0f, c.spring_frequency > 0 ? c.spring_damping : 1.0f);
+    bool limits = (c.flags & CN_JOINT_HAS_LIMITS) != 0;
+    switch (c.kind) {
+    case CN_JOINT_FIXED: {
+        auto* s = new FixedConstraintSettings();
+        s->mPoint1 = pa;
+        s->mAxisX1 = xa;
+        s->mAxisY1 = ya;
+        s->mPoint2 = pb;
+        s->mAxisX2 = xb;
+        s->mAxisY2 = yb;
+        return s;
+    }
+    case CN_JOINT_POINT: {
+        auto* s = new PointConstraintSettings();
+        s->mPoint1 = pa;
+        s->mPoint2 = pb;
+        return s;
+    }
+    case CN_JOINT_HINGE: {
+        auto* s = new HingeConstraintSettings();
+        s->mPoint1 = pa;
+        s->mHingeAxis1 = xa;
+        s->mNormalAxis1 = ya;
+        s->mPoint2 = pb;
+        s->mHingeAxis2 = xb;
+        s->mNormalAxis2 = yb;
+        if (limits) {
+            s->mLimitsMin = c.limit_min;
+            s->mLimitsMax = c.limit_max;
+            s->mLimitsSpringSettings = spring;
+        }
+        s->mMotorSettings = motor;
+        return s;
+    }
+    case CN_JOINT_SLIDER: {
+        auto* s = new SliderConstraintSettings();
+        s->mPoint1 = pa;
+        s->mSliderAxis1 = xa;
+        s->mNormalAxis1 = ya;
+        s->mPoint2 = pb;
+        s->mSliderAxis2 = xb;
+        s->mNormalAxis2 = yb;
+        if (limits) {
+            s->mLimitsMin = c.limit_min;
+            s->mLimitsMax = c.limit_max;
+            s->mLimitsSpringSettings = spring;
+        }
+        s->mMotorSettings = motor;
+        return s;
+    }
+    case CN_JOINT_DISTANCE: {
+        auto* s = new DistanceConstraintSettings();
+        s->mPoint1 = pa;
+        s->mPoint2 = pb;
+        s->mMinDistance = c.limit_min;
+        s->mMaxDistance = c.limit_max;
+        s->mLimitsSpringSettings = spring;
+        return s;
+    }
+    case CN_JOINT_CONE: {
+        auto* s = new ConeConstraintSettings();
+        s->mPoint1 = pa;
+        s->mTwistAxis1 = xa;
+        s->mPoint2 = pb;
+        s->mTwistAxis2 = xb;
+        s->mHalfConeAngle = c.limit_max;
+        return s;
+    }
+    case CN_JOINT_SIX_DOF: {
+        auto* s = new SixDOFConstraintSettings();
+        s->mPosition1 = pa;
+        s->mAxisX1 = xa;
+        s->mAxisY1 = ya;
+        s->mPosition2 = pb;
+        s->mAxisX2 = xb;
+        s->mAxisY2 = yb;
+        for (int i = 0; i < 6; i++) {
+            s->mLimitMin[i] = c.six_min[i];
+            s->mLimitMax[i] = c.six_max[i];
+        }
+        return s;
+    }
+    default:
+        return nullptr;
+    }
+}
+
+bool run_create_joint(World_Impl& w, const cn_create_joint& c)
+{
+    if (c.joint.generation == 0 || c.joint.index >= w.joints.size()) {
+        report(CN_LOG_ERROR, "physics: Create_Joint: joint index %u is outside the world's %u", c.joint.index, uint32(w.joints.size()));
+        return false;
+    }
+    Joint_Slot& slot = w.joints[c.joint.index];
+    if (slot.constraint != nullptr) {
+        report(CN_LOG_ERROR, "physics: Create_Joint: joint index %u is in use", c.joint.index);
+        return false;
+    }
+    BodyID a, b;
+    if (!find_body(w, c.a, a) || (c.b.generation != 0 && !find_body(w, c.b, b))) {
+        report(CN_LOG_ERROR, "physics: Create_Joint: a body is missing");
+        return false;
+    }
+    Ref<TwoBodyConstraintSettings> settings = joint_settings(c);
+    if (settings == nullptr) {
+        report(CN_LOG_ERROR, "physics: Create_Joint: unknown kind %u", c.kind);
+        return false;
+    }
+    settings->mEnabled = !(c.flags & CN_JOINT_DISABLED);
+    BodyInterface& bodies = w.system.GetBodyInterface();
+    TwoBodyConstraint* constraint = bodies.CreateConstraint(settings, a, b);
+    if (constraint == nullptr) {
+        report(CN_LOG_ERROR, "physics: Create_Joint: Jolt could not make it");
+        return false;
+    }
+    slot = {};
+    slot.generation = c.joint.generation;
+    slot.constraint = constraint;
+    slot.kind = c.kind;
+    slot.collide = (c.flags & CN_JOINT_COLLIDE_CONNECTED) != 0;
+    slot.break_force = c.break_force;
+    slot.break_torque = c.break_torque;
+    slot.a = a;
+    slot.b = b;
+    w.system.AddConstraint(constraint);
+    if (!slot.collide) {
+        w.contacts.joined[Contact_Listener::key(a, b)]++;
+    }
+    set_motor(slot, c.motor, c.motor_target, c.motor_max);
+    bodies.ActivateConstraint(constraint);
+    return true;
+}
+
+// check_breaks disables the joints that carried more than their limits in a step of dt, and reports them.
+void check_breaks(World_Impl& w, float dt)
+{
+    for (uint32 i = 0; i < w.joints.size(); i++) {
+        Joint_Slot& slot = w.joints[i];
+        if (slot.constraint == nullptr || slot.broken || (slot.break_force <= 0 && slot.break_torque <= 0)) {
+            continue;
+        }
+        TwoBodyConstraint* c = slot.constraint;
+        float position = 0, rotation = 0;
+        switch (slot.kind) {
+        case CN_JOINT_FIXED:
+            position = static_cast<FixedConstraint*>(c)->GetTotalLambdaPosition().Length();
+            rotation = static_cast<FixedConstraint*>(c)->GetTotalLambdaRotation().Length();
+            break;
+        case CN_JOINT_POINT:
+            position = static_cast<PointConstraint*>(c)->GetTotalLambdaPosition().Length();
+            break;
+        case CN_JOINT_HINGE: {
+            auto* h = static_cast<HingeConstraint*>(c);
+            position = h->GetTotalLambdaPosition().Length();
+            Vector<2> r = h->GetTotalLambdaRotation();
+            rotation = sqrt(r[0] * r[0] + r[1] * r[1]) + abs(h->GetTotalLambdaRotationLimits());
+            break;
+        }
+        case CN_JOINT_SLIDER: {
+            auto* s = static_cast<SliderConstraint*>(c);
+            Vector<2> p = s->GetTotalLambdaPosition();
+            position = sqrt(p[0] * p[0] + p[1] * p[1]) + abs(s->GetTotalLambdaPositionLimits());
+            rotation = s->GetTotalLambdaRotation().Length();
+            break;
+        }
+        case CN_JOINT_DISTANCE:
+            position = abs(static_cast<DistanceConstraint*>(c)->GetTotalLambdaPosition());
+            break;
+        case CN_JOINT_CONE:
+            position = static_cast<ConeConstraint*>(c)->GetTotalLambdaPosition().Length();
+            rotation = abs(static_cast<ConeConstraint*>(c)->GetTotalLambdaRotation());
+            break;
+        case CN_JOINT_SIX_DOF:
+            position = static_cast<SixDOFConstraint*>(c)->GetTotalLambdaPosition().Length();
+            rotation = static_cast<SixDOFConstraint*>(c)->GetTotalLambdaRotation().Length();
+            break;
+        }
+        float force = position / dt, torque = rotation / dt;
+        if ((slot.break_force > 0 && force > slot.break_force) || (slot.break_torque > 0 && torque > slot.break_torque)) {
+            c->SetEnabled(false);
+            slot.broken = true;
+            w.broken.push_back({ { i, slot.generation }, force, torque });
+        }
+    }
+}
+
 const char* command_name(uint16_t kind)
 {
     static const char* names[] = { "Set_World", "Create_Shape", "Release_Shape", "Create_Body", "Destroy_Body",
         "Set_Pose", "Move_Kinematic", "Set_Velocity", "Add_Force", "Add_Force_At", "Add_Torque", "Add_Impulse",
-        "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled", "Create_Compound" };
+        "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled", "Create_Compound", "Create_Joint", "Destroy_Joint",
+        "Set_Joint" };
     return kind < sizeof(names) / sizeof(names[0]) ? names[kind] : "unknown";
 }
 
@@ -699,6 +990,33 @@ bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data, uint32_t siz
     }
     case CN_CMD_CREATE_BODY:
         return run_create_body(w, read<cn_create_body>(data));
+    case CN_CMD_CREATE_JOINT:
+        return run_create_joint(w, read<cn_create_joint>(data));
+    case CN_CMD_DESTROY_JOINT: {
+        cn_joint joint = read<cn_destroy_joint>(data).joint;
+        Joint_Slot* slot = find_joint(w, joint);
+        if (slot == nullptr) {
+            return false;
+        }
+        remove_joint(w, *slot);
+        *slot = {};
+        return true;
+    }
+    case CN_CMD_SET_JOINT: {
+        const auto& c = read<cn_set_joint>(data);
+        Joint_Slot* slot = find_joint(w, c.joint);
+        if (slot == nullptr) {
+            return false;
+        }
+        if (slot->constraint != nullptr) {
+            slot->constraint->SetEnabled(c.enabled && !slot->broken);
+            set_motor(*slot, c.motor, c.motor_target, c.motor_max);
+            if (c.enabled) {
+                w.system.GetBodyInterface().ActivateConstraint(slot->constraint);
+            }
+        }
+        return true;
+    }
     case CN_CMD_CREATE_COMPOUND: {
         const auto& c = read<cn_create_compound>(data);
         if (c.count > CN_PHYSICS_MAX_COMPOUND_CHILDREN || sizeof(c) + c.count * sizeof(cn_shape) > size) {
@@ -839,7 +1157,7 @@ void collect_moved(World_Impl& w)
 
 cn_backend_info info()
 {
-    uint32_t features = CN_FEATURE_RIGID_BODIES | CN_FEATURE_QUERIES | CN_FEATURE_SENSORS;
+    uint32_t features = CN_FEATURE_RIGID_BODIES | CN_FEATURE_QUERIES | CN_FEATURE_SENSORS | CN_FEATURE_JOINTS;
 #ifdef JPH_DOUBLE_PRECISION
     features |= CN_FEATURE_DOUBLE_PRECISION;
 #endif
@@ -859,6 +1177,7 @@ cn_world world_create(const cn_world_desc* in)
     desc.max_body_pairs = or_default(desc.max_body_pairs, 65536);
     desc.max_contact_constraints = or_default(desc.max_contact_constraints, 16384);
     desc.temp_size = or_default(desc.temp_size, 8u << 20);
+    desc.max_joints = or_default(desc.max_joints, 16384);
     if (desc.max_bodies > PhysicsSystem::cMaxBodiesLimit) {
         report(CN_LOG_ERROR, "physics: world_create: %u bodies is over Jolt's limit of %u", desc.max_bodies,
             PhysicsSystem::cMaxBodiesLimit);
@@ -880,6 +1199,9 @@ cn_world world_create(const cn_world_desc* in)
 void destroy(World_Entry& entry)
 {
     World_Impl* w = entry.world;
+    for (Joint_Slot& slot : w->joints) {
+        remove_joint(*w, slot);
+    }
     BodyInterface& bodies = w->system.GetBodyInterface();
     for (Body_Slot& slot : w->bodies) {
         if (!slot.id.IsInvalid()) {
@@ -925,6 +1247,7 @@ uint32_t submit(cn_world handle, const void* data, uint32_t size)
         w->stepped = false;
         w->moved.clear();
         w->contacts.events.clear();
+        w->broken.clear();
     }
     bool ok = true;
     const uint8_t* bytes = static_cast<const uint8_t*>(data);
@@ -955,6 +1278,7 @@ uint32_t step(cn_world handle, float dt, int32_t substeps)
     if (w->stepped) {
         w->moved.clear();
         w->contacts.events.clear();
+        w->broken.clear();
     }
     if (w->added_since_optimize >= OPTIMIZE_AFTER) {
         w->system.OptimizeBroadPhase();
@@ -963,6 +1287,7 @@ uint32_t step(cn_world handle, float dt, int32_t substeps)
     EPhysicsUpdateError error = w->system.Update(dt, substeps > 0 ? substeps : 1, &w->temp, job_system);
     job_system->WaitForFiberJobs();
     w->contacts.apply_removed();
+    check_breaks(*w, dt);
     collect_moved(*w);
     Array<cn_contact_event>& events = w->contacts.events;
     QuickSort(events.begin(), events.end(), [](const cn_contact_event& x, const cn_contact_event& y) {
@@ -990,6 +1315,8 @@ void results(cn_world handle, cn_step_results* out)
         out->moved_count = uint32_t(w->moved.size());
         out->contacts = w->contacts.events.data();
         out->contact_count = uint32_t(w->contacts.events.size());
+        out->broken = w->broken.data();
+        out->broken_count = uint32_t(w->broken.size());
     }
 }
 

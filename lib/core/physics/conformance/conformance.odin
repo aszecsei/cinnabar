@@ -347,3 +347,132 @@ queries :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	testing.expect_value(t, batch[0].body, HIGH)
 	testing.expect_value(t, batch[1].body, physics.Body{})
 }
+
+// A frame whose x is the world's z, for a hinge that swings in the x-y plane.
+@(private)
+X_TO_Z :: physics.Rotation{0, -0.70710678, 0, 0.70710678}
+
+@(private)
+joint_desc :: proc(joint: physics.Joint, kind: physics.Joint_Kind, a, b: physics.Body, at: physics.Position, rotation := physics.Rotation{0, 0, 0, 1}) -> physics.Create_Joint {
+	return {joint = joint, kind = kind, a = a, b = b, position_a = at, rotation_a = rotation, position_b = at, rotation_b = rotation}
+}
+
+@(private)
+distance_to :: proc(api: ^physics.Physics_API, w: physics.World, body: physics.Body, point: physics.Position) -> f64 {
+	d := state(api, w, body).position - point
+	return math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+}
+
+// joints: a box hinged to the world swings at its distance from the pivot, a disabled joint lets it fall, and a box
+// joined to another passes through it unless the joint lets them collide.
+joints :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	PIVOT :: physics.Position{0, 5, 0}
+	HINGE :: physics.Joint{0, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {2, 5, 0}))
+	physics.cmd_create_joint(&list, joint_desc(HINGE, .Hinge, BOX, {}, PIVOT, X_TO_Z))
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 40 {
+		api.step(w, STEP, 1)
+	}
+	s := state(api, w, BOX)
+	testing.expectf(t, s.position.y < 4.5, "the box swung down: %v", s.position)
+	testing.expectf(t, abs(distance_to(api, w, BOX, PIVOT) - 2) < 0.05, "at its distance from the pivot: %v", distance_to(api, w, BOX, PIVOT))
+	testing.expectf(t, abs(s.position.z) < 1e-3, "in the hinge's plane: %v", s.position)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_joint(&list, HINGE, false, .Off, 0, 0)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 60 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, distance_to(api, w, BOX, PIVOT) > 2.5, "a disabled hinge lets go: %v", state(api, w, BOX).position)
+
+	// Two boxes joined at a distance: without Collide_Connected the upper one falls through the lower one.
+	LOWER :: physics.Body{2, 1}
+	UPPER :: physics.Body{3, 1}
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(LOWER, BOX_SHAPE, .Static, {10, 1, 0}))
+	physics.cmd_create_body(&list, physics.body_desc(UPPER, BOX_SHAPE, .Dynamic, {10, 3, 0}))
+	far := joint_desc({1, 1}, .Distance, UPPER, LOWER, {10, 3, 0})
+	far.limit_min, far.limit_max = 0, 10
+	physics.cmd_create_joint(&list, far)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 120 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, abs(state(api, w, UPPER).position.y - 0.5) < 0.03, "it fell through to the ground: %v", state(api, w, UPPER).position)
+
+	// The same with Collide_Connected: it rests on the lower box.
+	ABOVE :: physics.Body{4, 1}
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(ABOVE, BOX_SHAPE, .Dynamic, {10, 3, 5}))
+	physics.cmd_create_body(&list, physics.body_desc({5, 1}, BOX_SHAPE, .Static, {10, 1, 5}))
+	near := joint_desc({2, 1}, .Distance, ABOVE, {5, 1}, {10, 3, 5})
+	near.limit_min, near.limit_max = 0, 10
+	near.flags = {.Collide_Connected}
+	physics.cmd_create_joint(&list, near)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 120 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, abs(state(api, w, ABOVE).position.y - 2) < 0.03, "it rests on the lower box: %v", state(api, w, ABOVE).position)
+}
+
+// joint_breaks: a joint that carries more than its break force breaks in the step and is reported, and the box falls;
+// a destroyed body takes its joints with it, and the joint's handle can still be destroyed.
+joint_breaks :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	HOLD :: physics.Joint{0, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {0, 5, 0}))
+	weak := joint_desc(HOLD, .Point, BOX, {}, {0, 5.5, 0})
+	// The box weighs about 9800 N.
+	weak.break_force = 1000
+	physics.cmd_create_joint(&list, weak)
+	testing.expect(t, physics.submit(api, w, list))
+	api.step(w, STEP, 1)
+	results: physics.Step_Results
+	api.results(w, &results)
+	testing.expect_value(t, results.broken_count, 1)
+	if results.broken_count == 1 {
+		testing.expect_value(t, results.broken[0].joint, HOLD)
+		testing.expectf(t, results.broken[0].force > 1000, "it carried the box: %v", results.broken[0].force)
+	}
+	for _ in 0 ..< 30 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, state(api, w, BOX).position.y < 4, "the box falls: %v", state(api, w, BOX).position)
+
+	OTHER :: physics.Body{2, 1}
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(OTHER, BOX_SHAPE, .Dynamic, {5, 5, 0}))
+	physics.cmd_create_joint(&list, joint_desc({1, 1}, .Fixed, OTHER, {}, {5, 5, 0}))
+	physics.cmd_destroy_body(&list, OTHER)
+	physics.cmd_destroy_joint(&list, {1, 1})
+	testing.expect(t, physics.submit(api, w, list))
+	api.step(w, STEP, 1)
+}
+
+// motor: a hinge's velocity motor turns its body at the target rate.
+motor :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	list := physics.command_list(context.temp_allocator)
+	desc := physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {0, 5, 0})
+	desc.gravity_factor = 0
+	physics.cmd_create_body(&list, desc)
+	// A hinge about y, through the box's center.
+	spin := joint_desc({0, 1}, .Hinge, BOX, {}, {0, 5, 0}, {0, 0, 0.70710678, 0.70710678})
+	spin.motor, spin.motor_target = .Velocity, 2
+	physics.cmd_create_joint(&list, spin)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 30 {
+		api.step(w, STEP, 1)
+	}
+	v := state(api, w, BOX).angular_velocity
+	testing.expectf(t, abs(abs(v.y) - 2) < 0.05 && abs(v.x) < 1e-3 && abs(v.z) < 1e-3, "it turns at 2 rad/s about y: %v", v)
+}
