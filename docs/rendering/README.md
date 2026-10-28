@@ -39,7 +39,7 @@ Read them in this order the first time.
 | `scene.odin` | `Gpu_Scene`: every instance's record at a stable slot, the render origin, culling into bins ([GPU scene](gpu-scene.md#gpu-scene)) |
 | `surfaces.odin` | `Surface_Record`, the patch surfaces' items, their selection and culling passes ([Surfaces](surfaces.md#surfaces)) |
 | `components.odin` | The render components' stable IDs: `Camera`, `Mesh_Renderer`, the lights, `View_Model` ([Components](assets.md#components)) |
-| `materials.odin` | `Material_Table`, pipelines by material, bins, the default material ([Runtime](materials.md#runtime)) |
+| `materials.odin` | `Material_Table`, pipelines by material, bins, the default material, the substitutes for pipelines that compile ([Runtime](materials.md#runtime)) |
 | `shaders.odin` | `Shader_Pipeline` and the `sync_*_pipeline` procedures that compile from shader assets ([GPU residency](assets.md#gpu-residency)) |
 | `residency.odin` | `Residency`: the GPU resources of texture and mesh assets ([GPU residency](assets.md#gpu-residency)) |
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |

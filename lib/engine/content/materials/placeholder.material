@@ -1,0 +1,12 @@
+material 1
+# What an opaque or masked material's draws draw with while its pipelines compile: the default material's grey, rough,
+# lit surface, without parameters, so it reads none of the draw's block (see docs/rendering/materials.md#runtime).
+shading = lit
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = 0.8 * inputs.color.rgb;
+	s.roughness = 0.6;
+	s.metallic = 0;
+	return s;
+}

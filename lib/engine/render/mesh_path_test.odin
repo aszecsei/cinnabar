@@ -107,7 +107,7 @@ opaque_materials_draw_meshlets_where_the_device_has_mesh_shaders :: proc(t: ^tes
 	f.scene_frame = sf
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
 	sf.items[0].flags = ITEM_MESH_PATH
-	sf.bin_pipelines = {0}
+	sf.bin_pipelines, sf.bin_draws = {0}, {0}
 	sf.groups[.Opaque] = {0, 1}
 	sf.bin_offsets, sf.bin_counts = {0}, {1}
 	sf.view_count = 1
