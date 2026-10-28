@@ -98,7 +98,8 @@ static class DefaultRibbon
                     new RibbonGroup("Selection",
                     [
                         new SmallStack([EditorCommands.MeshVertices, EditorCommands.MeshEdges, EditorCommands.MeshFaces]),
-                        new SmallStack([EditorCommands.SelectAll, EditorCommands.MeshSelectThrough]),
+                        new SmallStack([EditorCommands.SelectAll, EditorCommands.MeshSelectThrough, EditorCommands.MeshSelectLinked]),
+                        new SmallStack([EditorCommands.MeshGrow, EditorCommands.MeshShrink]),
                     ]),
                     new RibbonGroup("Edit",
                     [
@@ -107,6 +108,7 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.MeshCollapse, EditorCommands.MeshMergeFaces, EditorCommands.MeshInvert]),
                         new SmallStack([EditorCommands.DeleteEntity, EditorCommands.MeshDetach, EditorCommands.MeshExtract]),
                         new SmallStack([EditorCommands.MeshBevel, EditorCommands.MeshClean, EditorCommands.MeshRecalculateNormals]),
+                        new SmallStack([EditorCommands.MeshEditPivot, EditorCommands.MeshCenterPivot, EditorCommands.MeshPivotToGrid]),
                         new ComboBox(EditorCommands.MeshBevelSegments),
                         new ComboBox(EditorCommands.MeshNormalAngle),
                     ]),
@@ -139,7 +141,7 @@ static class DefaultRibbon
                     new RibbonGroup("Options",
                     [
                         new SmallStack([EditorCommands.MeshGridToggle, EditorCommands.MeshGridFiner, EditorCommands.MeshGridCoarser]),
-                        new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace]),
+                        new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace, EditorCommands.MeshKeepPlanar]),
                     ]),
                     new RibbonGroup("Mode", [new LargeButton(EditorCommands.ObjectMode)]),
                 ]) { Context = EditorShell.MeshContext },

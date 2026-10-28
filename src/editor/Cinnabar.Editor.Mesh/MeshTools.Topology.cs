@@ -276,4 +276,53 @@ public static partial class MeshTools
         }
         return remap;
     }
+
+    /// <summary>
+    /// Keep Planar: after some vertices move, the faces they bend take back their shape by moving their other vertices
+    /// onto each face's plane, pass after pass, since a vertex moved for one face can bend another. The moved vertices
+    /// stay where they are. The relaxation stops when no face bends beyond the planar tolerance, or after the passes.
+    /// </summary>
+    public static MeshData KeepPlanar(MeshData mesh, IEnumerable<int> moved, int passes = 16)
+    {
+        var pinned = moved.ToHashSet();
+        var vertices = mesh.Vertices.ToArray();
+        var touched = mesh.Faces.Select((f, i) => (f, i)).Where(p => p.f.Corners.Length > 3 && p.f.Corners.Any(pinned.Contains)).Select(p => p.i).ToList();
+        if (touched.Count == 0)
+        {
+            return mesh;
+        }
+        // The faces beside the touched ones bend as their vertices are projected, so they relax too.
+        var around = touched.SelectMany(f => mesh.Faces[f].Corners).Distinct().SelectMany(mesh.FacesOfVertex).Distinct().Where(f => mesh.Faces[f].Corners.Length > 3).ToList();
+        var changed = false;
+        for (var pass = 0; pass < passes; pass++)
+        {
+            var bent = false;
+            foreach (var f in around)
+            {
+                var corners = mesh.Faces[f].Corners;
+                var normal = MeshData.FaceNormal([.. vertices], corners);
+                if (normal == Vec3.Zero)
+                {
+                    continue;
+                }
+                // The plane goes through the moved corners, or through the face's middle when none of its corners moved.
+                IReadOnlyList<int> anchors = corners.Where(pinned.Contains).ToList();
+                var distance = (anchors.Count > 0 ? anchors : (IReadOnlyList<int>)corners).Average(c => Vec3.Dot(normal, vertices[c]));
+                foreach (var c in corners.Where(c => !pinned.Contains(c)))
+                {
+                    var off = Vec3.Dot(normal, vertices[c]) - distance;
+                    if (Math.Abs(off) > MeshData.PlanarTolerance / 10)
+                    {
+                        vertices[c] -= normal * off;
+                        bent = changed = true;
+                    }
+                }
+            }
+            if (!bent)
+            {
+                break;
+            }
+        }
+        return changed ? mesh.With(vertices: vertices) : mesh;
+    }
 }

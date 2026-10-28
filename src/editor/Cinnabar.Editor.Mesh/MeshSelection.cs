@@ -127,4 +127,82 @@ public sealed class MeshSelection
         }));
         return new MeshSelection(Kind, [.. kept]);
     }
+
+    /// <summary>
+    /// The neighbors of an element: the vertices across an edge from a vertex, the edges that share a vertex with an
+    /// edge, and the faces that share a vertex with a face.
+    /// </summary>
+    public static IEnumerable<int> Neighbors(MeshData mesh, MeshElement kind, int index)
+    {
+        switch (kind)
+        {
+            case MeshElement.Vertices:
+                foreach (var f in mesh.FacesOfVertex(index))
+                {
+                    var corners = mesh.Faces[f].Corners;
+                    var k = corners.IndexOf(index);
+                    yield return corners[(k + 1) % corners.Length];
+                    yield return corners[(k + corners.Length - 1) % corners.Length];
+                }
+                break;
+            case MeshElement.Edges when index < mesh.Edges.Length:
+                var edge = mesh.Edges[index];
+                foreach (var f in mesh.FacesOfVertex(edge.A).Concat(mesh.FacesOfVertex(edge.B)).Distinct())
+                {
+                    var corners = mesh.Faces[f].Corners;
+                    for (var k = 0; k < corners.Length; k++)
+                    {
+                        var other = mesh.EdgeIndex(corners[k], corners[(k + 1) % corners.Length]);
+                        if (other >= 0 && other != index && (mesh.Edges[other].A == edge.A || mesh.Edges[other].A == edge.B || mesh.Edges[other].B == edge.A || mesh.Edges[other].B == edge.B))
+                        {
+                            yield return other;
+                        }
+                    }
+                }
+                break;
+            case MeshElement.Faces when index < mesh.Faces.Length:
+                foreach (var c in mesh.Faces[index].Corners)
+                {
+                    foreach (var f in mesh.FacesOfVertex(c))
+                    {
+                        if (f != index)
+                        {
+                            yield return f;
+                        }
+                    }
+                }
+                break;
+        }
+    }
+
+    /// <summary>Grow: the selection with every neighbor of a selected element.</summary>
+    public MeshSelection Grown(Func<string, MeshData?> meshes) =>
+        new(Kind, Items.Union(Items.SelectMany(i => meshes(i.Guid) is { } mesh ? Neighbors(mesh, Kind, i.Index).Select(n => new MeshItem(i.Guid, n)) : [])));
+
+    /// <summary>Shrink: the selection without the elements on its boundary, those with a neighbor that is not selected.</summary>
+    public MeshSelection Shrunk(Func<string, MeshData?> meshes) =>
+        new(Kind, [.. Items.Where(i => meshes(i.Guid) is { } mesh && Neighbors(mesh, Kind, i.Index).All(n => Items.Contains(new MeshItem(i.Guid, n))))]);
+
+    /// <summary>Select Linked: every element that the selected ones reach through their neighbors, in each mesh.</summary>
+    public MeshSelection Linked(Func<string, MeshData?> meshes)
+    {
+        var items = Items.ToBuilder();
+        var queue = new Queue<MeshItem>(Items);
+        while (queue.TryDequeue(out var item))
+        {
+            if (meshes(item.Guid) is not { } mesh)
+            {
+                continue;
+            }
+            foreach (var n in Neighbors(mesh, Kind, item.Index))
+            {
+                var next = new MeshItem(item.Guid, n);
+                if (items.Add(next))
+                {
+                    queue.Enqueue(next);
+                }
+            }
+        }
+        return new MeshSelection(Kind, items.ToImmutable());
+    }
 }

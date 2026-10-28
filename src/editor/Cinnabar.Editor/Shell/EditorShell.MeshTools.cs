@@ -348,7 +348,7 @@ public sealed partial class EditorShell
     }
 
     /// <summary>The gizmo while a distance is pending: Move, whatever the tool.</summary>
-    GizmoKind ActiveGizmoKind => InMeshMode && _pending != null ? GizmoKind.Translate : Gizmo.KindOf(Tool);
+    GizmoKind ActiveGizmoKind => InMeshMode && (_pending != null || EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(Tool);
 
     // A gizmo drag with a distance pending: the change along the axis, or its length.
     void DragDistance(Vec2 pixel, bool invertSnap)
@@ -414,7 +414,25 @@ public sealed partial class EditorShell
         ? RunMeshTool("Recalculate Normals", (m, s) => new ToolResult(MeshTools.RecalculateNormals(m, NormalAngle, s), MeshElement.Faces, [.. s]), MeshElement.Faces)
         : RunWholeMeshTool("Recalculate Normals", m => (MeshTools.RecalculateNormals(m, NormalAngle), []));
 
-    public bool Clean() => RunWholeMeshTool("Clean", MeshTools.Clean);
+    /// <summary>Clean, whose report is the edges with more than two faces: they are selected, in the Edges kind, so they can be found.</summary>
+    public bool Clean()
+    {
+        var cleaned = RunWholeMeshTool("Clean", MeshTools.Clean);
+        var reported = new List<MeshItem>();
+        foreach (var guid in _editedMeshes.Keys)
+        {
+            if (FindMeshData(guid) is { } mesh)
+            {
+                reported.AddRange(Enumerable.Range(0, mesh.Edges.Length).Where(e => mesh.FacesOfEdge(mesh.Edges[e]).Count > 2).Select(e => new MeshItem(guid, e)));
+            }
+        }
+        if (reported.Count > 0)
+        {
+            SetMeshSelection(new MeshSelection(MeshElement.Edges, [.. reported]), switchKind: true);
+            Console.Add(LogLevel.Warning, $"mesh: clean: {reported.Count} {(reported.Count == 1 ? "edge has" : "edges have")} more than two faces, and {(reported.Count == 1 ? "is" : "are")} selected");
+        }
+        return cleaned;
+    }
 
     /// <summary>
     /// Detach moves the selected faces into a new mesh asset and entity at the first source's pose, as Extract copies

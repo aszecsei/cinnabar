@@ -67,6 +67,13 @@ static class EditorCommands
     public const string MeshBevel = "mesh.bevel";
     public const string MeshBevelSegments = "mesh.bevelSegments";
     public const string MeshTransformTexture = "mesh.transformTexture";
+    public const string MeshSelectLinked = "mesh.selectLinked";
+    public const string MeshGrow = "mesh.grow";
+    public const string MeshShrink = "mesh.shrink";
+    public const string MeshKeepPlanar = "mesh.keepPlanar";
+    public const string MeshEditPivot = "mesh.editPivot";
+    public const string MeshCenterPivot = "mesh.centerPivot";
+    public const string MeshPivotToGrid = "mesh.pivotToGrid";
     public const string MeshDevMaterial = "mesh.devMaterial";
     public const string MeshTexelDensity = "mesh.texelDensity";
     public const string TextureShiftLeft = "texture.shiftLeft";
@@ -429,6 +436,50 @@ static class EditorCommands
         {
             Description = "The project's texel density, in texels per meter: what new faces and Reset Scale map the texture at. Saved in the project's settings.",
             CanExecuteWhen = () => shell.IsEditing,
+        });
+        commands.Register(new Command(MeshSelectLinked, "Select Linked", shell.SelectLinked)
+        {
+            Description = "Select every element that the selected ones connect to, in each mesh.",
+            Icon = "select",
+            CanExecuteWhen = () => shell.InMeshMode && !shell.MeshSelection.IsEmpty,
+        });
+        commands.Register(new Command(MeshGrow, "Grow", shell.GrowSelection)
+        {
+            Description = "Add the selected elements' neighbors to the selection.",
+            Icon = "add",
+            CanExecuteWhen = () => shell.InMeshMode && !shell.MeshSelection.IsEmpty,
+        });
+        commands.Register(new Command(MeshShrink, "Shrink", shell.ShrinkSelection)
+        {
+            Description = "Drop the selection's boundary: the elements with a neighbor that is not selected.",
+            Icon = "collapse",
+            CanExecuteWhen = () => shell.InMeshMode && !shell.MeshSelection.IsEmpty,
+        });
+        commands.Register(new Command(MeshKeepPlanar, "Keep Planar", shell.ToggleKeepPlanar)
+        {
+            Description = "A Move drag keeps the faces it would bend flat, by moving their other vertices along.",
+            Icon = "mesh",
+            CanExecuteWhen = () => shell.InMeshMode,
+            IsCheckedWhen = () => shell.KeepPlanar,
+        });
+        commands.Register(new Command(MeshEditPivot, "Edit Pivot", shell.ToggleEditPivot)
+        {
+            Description = "The gizmo moves the mesh's entity, with the geometry staying where it is. Snap puts the pivot on the grid.",
+            Icon = "move",
+            CanExecuteWhen = () => shell.InMeshMode,
+            IsCheckedWhen = () => shell.EditPivot,
+        });
+        commands.Register(new Command(MeshCenterPivot, "Center Pivot", () => shell.CenterPivot())
+        {
+            Description = "Put the mesh's entity at the center of its bounds, with the geometry staying where it is.",
+            Icon = "frame",
+            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+        });
+        commands.Register(new Command(MeshPivotToGrid, "Pivot to Grid", () => shell.PivotToGrid())
+        {
+            Description = "Snap the mesh's entity to the grid, with the geometry staying where it is.",
+            Icon = "snap",
+            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
         });
         commands.Register(new Command(MeshGridToggle, "Show Grid", shell.ToggleShowGrid)
         {

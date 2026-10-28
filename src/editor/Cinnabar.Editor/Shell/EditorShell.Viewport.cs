@@ -236,7 +236,7 @@ public sealed partial class EditorShell
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap)
     {
-        if (_meshDrag != null || _textureDrag != null || _pending != null)
+        if (_meshDrag != null || _textureDrag != null || _pivotDrag != null || _pending != null)
         {
             DragMeshGizmo(pixel, invertSnap);
             return;
@@ -270,6 +270,7 @@ public sealed partial class EditorShell
         _poseEdit = null;
         _meshDrag = null;
         _textureDrag = null;
+        _pivotDrag = null;
         var pending = _pending != null;
         _pending = null;
         CommitEdit();
@@ -291,6 +292,7 @@ public sealed partial class EditorShell
         _poseEdit = null;
         _meshDrag = null;
         _textureDrag = null;
+        _pivotDrag = null;
         var pending = _pending != null;
         _pending = null;
         CancelEdit();

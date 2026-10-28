@@ -407,6 +407,10 @@ public sealed partial class EditorShell
     /// <summary>The gizmo's pivot and axes in mesh mode: the selected vertices' centroid, with the primary mesh's axes in local space.</summary>
     (long[] Pivot, Quat Axes)? MeshGizmoPose()
     {
+        if (PivotGizmoPose() is { } pivotPose)
+        {
+            return pivotPose;
+        }
         if (!InMeshMode || ActiveGizmoKind == GizmoKind.None || Scene == null || MeshSelection.IsEmpty)
         {
             return null;
@@ -487,6 +491,10 @@ public sealed partial class EditorShell
             SendGizmo();
             return true;
         }
+        if (EditPivot)
+        {
+            return PressPivotGizmo(pixel, pivot);
+        }
         if (TextureGizmo && MeshElement == MeshElement.Faces)
         {
             // Transform Texture: the drag moves, turns or scales the selected faces' textures about the pivot.
@@ -523,6 +531,11 @@ public sealed partial class EditorShell
         }
         if (_drag == null || Scene is not { InTransaction: true })
         {
+            return;
+        }
+        if (_pivotDrag != null)
+        {
+            DragPivotGizmo(pixel, invertSnap);
             return;
         }
         if (_textureDrag != null)
@@ -796,6 +809,10 @@ public sealed partial class EditorShell
                     }
                     return placement.ToLocal(world);
                 });
+                if (_shell.KeepPlanar)
+                {
+                    after = MeshTools.KeepPlanar(after, vertices);
+                }
                 ops.Add(new MeshOperation(guid, _shell.FindMeshData(guid) ?? start, after, _shell.Meshes));
             }
             return ops;
