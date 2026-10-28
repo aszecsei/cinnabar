@@ -126,7 +126,7 @@ ticks :: proc(f: ^Fixture, n: int) {
 		it := ecs.begin_ticks(&f.world, ecs.tick_start(clock, clock.tick + 1) - clock.time)
 		begin_frame(&f.physics)
 		for ecs.next_tick(&it) {
-			ecs.run_tick_systems(&it, nil)
+			ecs.run_tick_systems(&it, f)
 			if f.scripts {
 				script.fixed_update(&f.runtime, &it, {})
 			}
@@ -581,7 +581,7 @@ Test.box():add(Jumper)
 @(private = "file")
 native_push :: proc(f: ^Fixture) -> bool {
 	e := spawn_at(f, {9, 9, 9})
-	return !add_impulse(&f.physics, &f.world, e, {0, 1, 0}) && add_impulse(&f.physics, &f.world, f.box, {0, 1, 0})
+	return !add_impulse(effects(&f.physics), &f.world, e, {0, 1, 0}) && add_impulse(effects(&f.physics), &f.world, f.box, {0, 1, 0})
 }
 
 // A script's effect on an entity without a body raises an error, which names it.
@@ -593,4 +593,44 @@ effects_need_a_body :: proc(t: ^testing.T) {
 	context.logger = log.nil_logger()
 	_, ok := script.spawn_source(&f.runtime, "=bodiless", `Physics.add_force(World.spawn(), vector.create(0, 1, 0))`)
 	testing.expect(t, !ok)
+}
+
+@(private = "file")
+Marked :: struct {}
+
+@(private = "file")
+Other :: struct {}
+
+// push_up gives each body that its job sees an upward impulse, through the job's own effects.
+@(private = "file")
+push_up :: proc(ctx: ^ecs.System_Context) {
+	f := (^Fixture)(ctx.user)
+	to := job_effects(&f.physics, ctx)
+	it := ecs.query_iter(ctx.world, ctx.query, ctx.first_chunk, ctx.chunk_count)
+	for view in ecs.query_next(&it) {
+		for e in ecs.entities(view) {
+			add_impulse(to, ctx.world, e, {0, 2000, 0})
+		}
+	}
+}
+
+// A Fixed system's jobs record effects into their own lists, which the world flushes after the stage, and the same
+// tick's step applies them: boxes in three archetypes, one chunk a job, all go up.
+@(test)
+systems_push_from_jobs :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ecs.register_component(&f.world.registry, Marked, ecs.Component_Id(9001))
+	ecs.register_component(&f.world.registry, Other, ecs.Component_Id(9002))
+	boxes := [3]ecs.Entity{box(f, {0, 1, 0}), box(f, {3, 1, 0}), box(f, {6, 1, 0})}
+	ecs.add(&f.world, boxes[1], Marked{})
+	ecs.add(&f.world, boxes[2], Other{})
+	ticks(f, 1)
+	w := &f.world
+	ecs.register_system(w, {name = "push up", stage = .Fixed, procedure = push_up, terms = {ecs.read(w, Physics_Body)}, batch_chunks = 1})
+	ticks(f, 1)
+	for b, i in boxes {
+		v := ecs.get(w, b, Physics_Body).linear_velocity
+		testing.expectf(t, v.y > 1, "box %d went up in the tick: %v", i, v)
+	}
 }

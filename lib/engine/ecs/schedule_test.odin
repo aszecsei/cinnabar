@@ -1,5 +1,6 @@
 package ecs
 
+import "base:runtime"
 import "core:log"
 import "core:sync"
 import "core:testing"
@@ -258,4 +259,71 @@ when profile.ENABLED {
 		}
 		testing.expect(t, counted)
 	}
+}
+
+@(private = "file")
+Chunk_Log :: struct {
+	kind:    Job_Buffer,
+	flushed: [dynamic]int,
+}
+
+// note_chunk asks for its job's buffer, except in the second chunk's job, and writes the job's first chunk in it.
+@(private = "file")
+note_chunk :: proc(ctx: ^System_Context) {
+	if ctx.first_chunk == 1 {
+		return
+	}
+	l := (^Chunk_Log)(ctx.user)
+	(^int)(job_buffer(ctx, l.kind))^ = ctx.first_chunk
+}
+
+// A job's buffer is made when it asks, and the stage's buffers reach flush in job order, only from the jobs that
+// asked. A reload clears the kinds.
+@(test)
+job_buffers_flush_in_job_order :: proc(t: ^testing.T) {
+	sync.guard(&scheduler_lock)
+	testing.expect(t, jobs.init())
+	defer jobs.shutdown()
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	// Three archetypes, so three chunks and, at one chunk a job, three jobs.
+	for _ in 0 ..< 3 {
+		e := spawn(w)
+		add(w, e, Health{1})
+	}
+	player := spawn(w)
+	add(w, player, Health{2})
+	add(w, player, Player{})
+	e := spawn(w)
+	add(w, e, Health{3})
+	add(w, e, Velocity{})
+
+	l := Chunk_Log{flushed = make([dynamic]int, context.temp_allocator)}
+	l.kind = register_job_buffer(w, {
+		name = "chunks",
+		user = &l,
+		make = proc(user: rawptr, allocator: runtime.Allocator) -> rawptr {
+			return new(int, allocator)
+		},
+		flush = proc(user: rawptr, buffers: []rawptr) {
+			l := (^Chunk_Log)(user)
+			for b in buffers {
+				append(&l.flushed, (^int)(b)^)
+			}
+		},
+	})
+	testing.expect(t, l.kind != 0)
+	register_system(w, {name = "note", stage = .Update, procedure = note_chunk, terms = {read(w, Health)}, batch_chunks = 1})
+	run_stage(w, .Update, 0, &l)
+	testing.expect_value(t, len(l.flushed), 2)
+	if len(l.flushed) == 2 {
+		testing.expect_value(t, l.flushed[0], 0)
+		testing.expect_value(t, l.flushed[1], 2)
+	}
+	testing.expect(t, jobs.drain_frame())
+
+	reload(w, &f.platform)
+	testing.expect_value(t, w.schedule.job_buffer_count, 0)
 }

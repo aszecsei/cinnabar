@@ -433,6 +433,11 @@ next_command :: proc(data: []byte, offset: ^int) -> (command: Command, ok: bool)
 	return command, true
 }
 
+// push_command copies a command that next_command read, as when one list's commands move into another.
+push_command :: proc(list: ^Command_List, command: Command) {
+	push(list, command.kind, struct {}{}, command.data)
+}
+
 payload :: proc(command: Command, $T: typeid) -> ^T {
 	assert(len(command.data) >= size_of(T))
 	return (^T)(raw_data(command.data))

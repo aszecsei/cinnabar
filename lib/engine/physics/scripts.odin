@@ -41,27 +41,27 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 
 	script.define(r, "Physics.add_force", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		add_force(s, w, e, script.check_vector(L, 2))
+		add_force(effects(s), w, e, script.check_vector(L, 2))
 		return 0
 	}, "(entity: Entity, force: vector) -> ()")
 	script.define(r, "Physics.add_force_at", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		add_force_at(s, w, e, script.check_vector(L, 2), script.check_position(L, 3))
+		add_force_at(effects(s), w, e, script.check_vector(L, 2), script.check_position(L, 3))
 		return 0
 	}, "(entity: Entity, force: vector, point: WorldPosition) -> ()")
 	script.define(r, "Physics.add_torque", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		add_torque(s, w, e, script.check_vector(L, 2))
+		add_torque(effects(s), w, e, script.check_vector(L, 2))
 		return 0
 	}, "(entity: Entity, torque: vector) -> ()")
 	script.define(r, "Physics.add_impulse", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		add_impulse(s, w, e, script.check_vector(L, 2))
+		add_impulse(effects(s), w, e, script.check_vector(L, 2))
 		return 0
 	}, "(entity: Entity, impulse: vector) -> ()")
 	script.define(r, "Physics.add_angular_impulse", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		add_angular_impulse(s, w, e, script.check_vector(L, 2))
+		add_angular_impulse(effects(s), w, e, script.check_vector(L, 2))
 		return 0
 	}, "(entity: Entity, impulse: vector) -> ()")
 	script.define(r, "Physics.velocity", proc(L: ^luau.State) -> c.int {
@@ -77,23 +77,23 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	script.define(r, "Physics.set_velocity", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
 		pb := ecs.get(w, e, Physics_Body)
-		set_velocity(s, w, e, script.check_vector(L, 2), pb.angular_velocity)
+		set_velocity(effects(s), w, e, script.check_vector(L, 2), pb.angular_velocity)
 		return 0
 	}, "(entity: Entity, velocity: vector) -> ()")
 	script.define(r, "Physics.set_angular_velocity", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
 		pb := ecs.get(w, e, Physics_Body)
-		set_velocity(s, w, e, pb.linear_velocity, script.check_vector(L, 2))
+		set_velocity(effects(s), w, e, pb.linear_velocity, script.check_vector(L, 2))
 		return 0
 	}, "(entity: Entity, velocity: vector) -> ()")
 	script.define(r, "Physics.sleep", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		sleep(s, w, e)
+		sleep(effects(s), w, e)
 		return 0
 	}, "(entity: Entity) -> ()")
 	script.define(r, "Physics.wake", proc(L: ^luau.State) -> c.int {
 		s, w, e := body_args(L)
-		wake(s, w, e)
+		wake(effects(s), w, e)
 		return 0
 	}, "(entity: Entity) -> ()")
 	script.define(r, "Physics.is_sleeping", proc(L: ^luau.State) -> c.int {

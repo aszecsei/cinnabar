@@ -163,8 +163,10 @@ State :: struct {
 	// The contacts of the last tick, and of every tick since begin_frame (see Contact).
 	tick_contacts:  [dynamic]Contact,
 	frame_contacts: [dynamic]Contact,
-	// The effects that gameplay recorded since the last tick (see effects.odin), in the host's heap.
+	// The effects that gameplay recorded since the last tick (see effects.odin), in the host's heap, and the kind of
+	// the systems' jobs' own lists, which the world flushes into it.
 	pending:        core_physics.Command_List,
+	job_effects:    ecs.Job_Buffer,
 	queries:  struct {
 		new_colliders: ecs.Query,
 		new_bodies:    ecs.Query,
@@ -205,6 +207,7 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	)
 	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body)})
 	s.queries.parts = ecs.query(w, {ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)})
+	s.job_effects = ecs.register_job_buffer(w, {name = "physics effects", user = s, make = make_job_effects, flush = flush_job_effects})
 }
 
 // reload takes the new Platform_API after a code reload. The world and its bodies stay.

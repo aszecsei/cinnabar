@@ -76,6 +76,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - To spawn, a job calls `reserve`, which takes an entity index with one atomic. Later commands in the same buffer can use the new handle. `apply` creates every reserved entity first.
 - A command for an entity that is no longer alive does nothing.
 - The buffers are applied in system order and then job order, not in the order that jobs finish. This keeps the world deterministic.
+- **Job buffers** give other packages the same rule. A package registers a kind with `register_job_buffer`: a `make` that makes a buffer in frame memory, and a `flush` that takes a stage's buffers. A job gets its own with `job_buffer(ctx, kind)`, made the first time it asks, and after the stage, or after a tick's `Fixed` systems, the world hands the kind's `flush` the buffers of the jobs that asked, in system order and then job order. Kinds are registrations, like systems. Physics records the effects that systems have on bodies this way ([Physics: Scripts](../physics/design.md#scripts)).
 - The slot index that a reservation gets depends on timing. Do not order or hash anything by entity handle value.
 
 ## The script view

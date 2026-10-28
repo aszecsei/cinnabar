@@ -1,5 +1,6 @@
 package ecs
 
+import "base:runtime"
 import "core:log"
 import "core:time"
 
@@ -11,6 +12,7 @@ MAX_SYSTEM_ACCESS :: 32
 MAX_SYSTEM_AFTER :: 8
 DEFAULT_BATCH_CHUNKS :: 4
 MAX_TICKS_PER_FRAME :: 4
+MAX_JOB_BUFFERS :: 8
 DEFAULT_TICK_RATE :: 60
 
 // Stage is when a system runs. See docs/world/ecs.md#systems.
@@ -39,6 +41,28 @@ System_Context :: struct {
 	first_tick:  bool,
 	// Applied after the stage, or after the tick in Fixed systems.
 	commands:    ^Commands,
+	// The job's buffers of each registered kind, made when the job first asks (see job_buffer).
+	job_buffers: [MAX_JOB_BUFFERS]rawptr,
+}
+
+// Job_Buffer is a kind of per-job buffer that a package other than the world keeps for systems, as the world keeps
+// Commands: each job gets its own, which job_buffer makes the first time the job asks, and after the stage, or after a
+// tick's Fixed systems, the kind's flush takes the buffers of every job that asked, in system order and then job
+// order. What jobs record therefore lands in an order that does not depend on their timing. Physics records its
+// effects on bodies this way (see docs/physics/design.md#scripts). Kinds are registrations, like systems: reload
+// clears them, and the game registers them again. The zero Job_Buffer is none.
+Job_Buffer :: distinct u8
+
+Job_Buffer_Desc :: struct {
+	name:  string,
+	// The data that make and flush get, such as the package's state in Game_State.
+	user:  rawptr,
+	// make returns a new buffer for a job, from allocator, which is frame memory. Jobs call it, so it must be safe for
+	// them.
+	make:  proc(user: rawptr, allocator: runtime.Allocator) -> rawptr,
+	// flush takes the buffers of a stage's jobs that asked for one, in order. It runs in the frame code, after the
+	// stage's commands are applied.
+	flush: proc(user: rawptr, buffers: []rawptr),
 }
 
 System_Desc :: struct {
@@ -83,6 +107,8 @@ Schedule :: struct {
 	waits:   [MAX_SYSTEMS][MAX_SYSTEMS / 64]u64,
 	built:   bool,
 	failed:  bool,
+	job_buffers:      [MAX_JOB_BUFFERS]Job_Buffer_Desc,
+	job_buffer_count: int,
 }
 
 @(private)
@@ -219,6 +245,33 @@ run_tick_systems :: proc(it: ^Ticks, user: rawptr) {
 	run_systems(w, .Fixed, 1 / f32(w.clock.tick_rate), user, first_tick(it))
 }
 
+// register_job_buffer adds a kind of per-job buffer. Call it with the game's other registrations.
+register_job_buffer :: proc(w: ^World, desc: Job_Buffer_Desc) -> Job_Buffer {
+	s := &w.schedule
+	if s.job_buffer_count == MAX_JOB_BUFFERS || desc.make == nil || desc.flush == nil {
+		log.errorf("ecs: cannot register job buffer %s", desc.name)
+		return 0
+	}
+	s.job_buffers[s.job_buffer_count] = desc
+	s.job_buffer_count += 1
+	return Job_Buffer(s.job_buffer_count)
+}
+
+// job_buffer is the job's buffer of a kind, which it makes the first time the job asks. It returns nil for a kind
+// that is not registered.
+job_buffer :: proc(ctx: ^System_Context, kind: Job_Buffer) -> rawptr {
+	s := &ctx.world.schedule
+	if kind == 0 || int(kind) > s.job_buffer_count {
+		return nil
+	}
+	b := &ctx.job_buffers[kind - 1]
+	if b^ == nil {
+		desc := &s.job_buffers[kind - 1]
+		b^ = desc.make(desc.user, ctx.world.platform.frame_allocator)
+	}
+	return b^
+}
+
 // run_fixed advances the world time by dt and runs the fixed ticks that are due, at most MAX_TICKS_PER_FRAME, for a
 // game whose ticks run only the Fixed systems. Each tick copies Transform to Previous_Transform, runs the Fixed
 // systems, applies their commands and propagates transforms. It returns the number of ticks.
@@ -268,6 +321,7 @@ set_tick_rate :: proc(w: ^World, rate: u32) {
 @(private)
 reset_schedule :: proc(w: ^World) {
 	w.schedule.count = 0
+	w.schedule.job_buffer_count = 0
 	w.schedule.built = false
 	w.schedule.failed = false
 }
@@ -398,6 +452,26 @@ run_systems :: proc(w: ^World, stage: Stage, dt: f32, user: rawptr, first_tick: 
 		}
 	}
 	apply(w, buffers[:])
+	flush_job_buffers(w, drivers)
+}
+
+// flush_job_buffers hands each kind the buffers that the stage's jobs made, in system order and then job order.
+@(private)
+flush_job_buffers :: proc(w: ^World, drivers: []Driver) {
+	s := &w.schedule
+	for k in 0 ..< s.job_buffer_count {
+		made := make([dynamic]rawptr, w.platform.frame_allocator)
+		for &d in drivers {
+			for &b in d.batches {
+				if buffer := b.ctx.job_buffers[k]; buffer != nil {
+					append(&made, buffer)
+				}
+			}
+		}
+		if len(made) > 0 {
+			s.job_buffers[k].flush(s.job_buffers[k].user, made[:])
+		}
+	}
 }
 
 @(private = "file")
