@@ -1,6 +1,6 @@
 # Physics
 
-Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. Nothing here is built yet; the design and its phases are in [Design](design.md).
+Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary and the Jolt backend are built (phase 1); the rest of the design and its phases are in [Design](design.md).
 
 ## Documents
 
@@ -12,7 +12,9 @@ Rigid bodies, constraints, collision queries and sensors: the boundary between t
 
 | Package | Side | Responsibility |
 |---|---|---|
-| `lib/core/physics` | Shared | The boundary: handles, descriptions, the command format, `Physics_API` and `Physics_Host`. |
+| `lib/core/physics` | Shared | The boundary: handles, descriptions, the command format, `Physics_API` and `Host`, and `physics.h`, the same in C. |
+| `lib/core/physics/host` | Host | The `Host` table: the heap, the job system and the log for a backend. |
+| `lib/core/physics/conformance` | Shared | The tests that every simulating backend passes. |
 | `lib/core/physics/jolt` | Host | The Jolt backend, built as `physics_jolt.dll` in development and statically in release. |
 | `lib/core/physics/null` | Host | A backend that simulates nothing, for tests and for games without physics. |
 | `lib/engine/physics` | Game | Components, the sync between the world and the backend, the physics tick, queries, events and script bindings. |

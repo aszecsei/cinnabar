@@ -7,6 +7,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 import "cinnabar:core/luau"
+import "cinnabar:core/physics"
 import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 
@@ -149,6 +150,11 @@ Platform_API :: struct {
 	// Makes the VM call Bindings.direct for a userdata tag (see docs/scripting/embedding.md#direct-field-access). It returns
 	// false when the host was built without LUAU_DIRECT_ACCESS.
 	script_direct_access: proc(L: ^luau.State, tag: i32) -> bool,
+
+	// The physics backend that the build chose, or the null backend (see docs/physics/design.md#the-boundary). Its
+	// procedures are host code. world_destroy_all and shutdown are the host's; a soft restart destroys the worlds that
+	// the game left.
+	physics: physics.Physics_API,
 }
 
 // Game_API is what the game side provides to the host (game -> host).
@@ -162,7 +168,8 @@ Game_API :: struct {
 	state_size:  proc() -> int,
 	layout_hash: proc() -> u64,
 	// The host refuses a DLL whose abi_hash differs from its own: a different GPU command format (see
-	// docs/gpu/command-buffers.md#command-buffers) or Platform_API.
+	// docs/gpu/command-buffers.md#command-buffers), physics format (see docs/physics/design.md#the-boundary) or
+	// Platform_API.
 	abi_hash:    proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
@@ -181,10 +188,10 @@ Editor_Message :: struct {
 	payload: []byte,
 }
 
-// abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format and Platform_API's
-// layout.
+// abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format, the physics format
+// and Platform_API's layout.
 abi_hash :: proc() -> u64 {
-	return gpu.format_hash() ~ layout.hash(Platform_API)
+	return gpu.format_hash() ~ physics.format_hash() ~ layout.hash(Platform_API)
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

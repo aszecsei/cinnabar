@@ -13,6 +13,8 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import "cinnabar:core/physics"
+import physics_host "cinnabar:core/physics/host"
 import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 
@@ -25,6 +27,8 @@ OUTPUT_VARIABLE :: "CINNABAR_OUTPUT"
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
+// And the physics backend the same way (see docs/physics/design.md#where-jolt-lives).
+import physics_backend "physics_backend:."
 
 PERMANENT_RESERVE :: 4 * mem.Gigabyte
 FRAME_RESERVE :: 256 * mem.Megabyte
@@ -50,6 +54,8 @@ Platform :: struct {
 	frame_peak:  uint,
 	// Input from the editor, for the next frame.
 	input_queue: [dynamic]Input_Event,
+	// What the physics backend calls. The backend keeps its address.
+	physics_host: physics.Host,
 	api:         Platform_API,
 }
 
@@ -84,6 +90,15 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		log.error("core: failed to start the job system")
 		return false
 	}
+	platform.physics_host = physics_host.table()
+	physics_api := physics_backend.load(&platform.physics_host)
+	if physics_api == nil {
+		log.errorf("core: the physics backend does not have physics API version %d", physics.API_VERSION)
+		return false
+	}
+	physics_host.bind(physics_api)
+	info := physics_api.info()
+	log.infof("core: physics %s %s", info.name, info.version)
 	if !_window_open(title, width, height, visible = shared_target == "") {
 		log.error("core: failed to open window")
 		return false
@@ -165,6 +180,7 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		script_push_binding          = script_host.push_binding,
 		script_atom                  = script_host.atom,
 		script_direct_access         = script_host.direct_access,
+		physics                      = physics_api^,
 	}
 	return true
 }
@@ -192,6 +208,7 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	platform.api.physics.shutdown()
 	backend.shutdown()
 	_window_close()
 	jobs.shutdown()
@@ -257,11 +274,14 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, the virtual memory reservations and the script VMs, which the old game may have left, and frees all
-// permanent allocations.
+// Game scope, the virtual memory reservations, the script VMs and the physics worlds, which the old game may have left,
+// and frees all permanent allocations.
 soft_restart :: proc() {
 	if count := script_host.close_all(); count > 0 {
 		log.debugf("core: closed %d script VMs that the game left open", count)
+	}
+	if count := platform.api.physics.world_destroy_all(); count > 0 {
+		log.debugf("core: destroyed %d physics worlds that the game left", count)
 	}
 	if count := backend.destroy_scope(.Game); count > 0 {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)

@@ -103,7 +103,7 @@ cinnabar/
 │   ├── editorctl/           Drives a running editor from a terminal: screenshots and GIFs
 │   └── ltc_fit/             Fits the area lights' lookup tables
 ├── samples/mygame/          The sample game: game.odin, main_release/, content/, project.settings
-└── vendor/                  luau, compressonator, meshoptimizer (submodules); agility, dxc (downloaded)
+└── vendor/                  luau, compressonator, meshoptimizer, jolt (submodules); agility, dxc (downloaded)
 ```
 
 Packages are small and single-purpose. A package's tests are beside it as `*_test.odin`, and the justfile's `test` recipe lists every package with tests.
@@ -137,6 +137,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `src/editor` | — | The C# editor application. It runs `host.exe` and the cook daemon as child processes. |
 | `tools/cook` | — | The asset compiler and the cook daemon, which watches the content roots and does the editor's asset operations. |
 | `vendor/luau` | Shared | The Luau VM and compiler. |
+| `vendor/jolt` | Host | Jolt Physics, which the physics backend in `lib/core/physics/jolt` builds into (see [Physics](../physics/design.md#where-jolt-lives)). |
 | `vendor/dxc` | Tools | The DXC shader compiler. Only `tools/cook` uses it. |
 | `vendor/` | — | Other third-party code. |
 

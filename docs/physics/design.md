@@ -28,7 +28,7 @@ flowchart LR
         JOLT["JPH::PhysicsSystem<br/>per physics world"]
         BUF["results: moved bodies,<br/>contact events"]
     end
-    HOST["host: Physics_Host<br/>heap, jobs, log, profiler"]
+    HOST["host: physics.Host<br/>heap, jobs, log"]
 
     COMP --> SYNC --> CMDS --> API --> JOLT
     JOLT --> BUF --> SYNC --> COMP
@@ -40,14 +40,16 @@ flowchart LR
 
 | Package | Side | What it holds |
 |---|---|---|
-| `lib/core/physics` | Shared | The boundary: handle types, descriptions, the command format and its hash, `Physics_API`, `Physics_Host`, `Features`. Plain data and procedure types only. |
+| `lib/core/physics` | Shared | The boundary: handle types, descriptions, the command format and its hash, `Physics_API`, `Host`, `Features`. Plain data and procedure types only. `physics.h` is the same layouts in C, and both sides assert their sizes. |
+| `lib/core/physics/host` | Host | The `Host` table that a backend calls: the heap, the job system and the log, as C procedures. |
+| `lib/core/physics/conformance` | Shared | The suite that every simulating backend passes, driven through `Physics_API` with no world ([Tests](#tests)). |
 | `lib/core/physics/jolt` | Host | `CMakeLists.txt` that builds Jolt from `vendor/jolt` (a submodule at a release tag) and `jolt_backend.cpp`, which implements `Physics_API` and exports `cinnabar_physics_api`. |
 | `lib/core/physics/null` | Host | A backend that keeps bodies where they are put, steps nothing and hits nothing. For headless tests of the sync layer, and the backend of a game with physics turned off. |
 | `lib/engine/physics` | Game | Components, the handle pools, the sync, the physics tick, layers, events, queries for native code, script bindings, and collider drawing for the editor. |
 
-- **Build:** `just jolt` builds `lib/core/physics/jolt/CMakeLists.txt` twice, as `just luau` does: `physics_jolt.dll` for development and a static library for release and tests, both with the static CRT. Jolt's options: `DOUBLE_PRECISION=ON`, `CROSS_PLATFORM_DETERMINISTIC` as a project choice ([Determinism](#determinism)), `OBJECT_LAYER_BITS=32`, the debug renderer only in development. A running host keeps the DLL locked, and a changed backend needs a host restart, as `luau.dll` does.
-- **Memory:** the backend sets Jolt's `Allocate`, `Free`, `Reallocate`, `AlignedAllocate` and `AlignedFree` to the host heap that `Physics_Host` gives it, and each world's `TempAllocatorImpl` takes one block from it at creation (8 MiB by default, in `World_Desc`).
-- **Jobs:** the backend implements `JPH::JobSystemWithBarrier` over the host's fiber job system. `QueueJob` and `QueueJobs` start cinnabar jobs through `Physics_Host.jobs_run`, and `GetMaxConcurrency` is the worker count. A Jolt job runs to completion and never waits, so a fiber that runs one never moves threads mid-job, which is what [the job rule](../core/jobs-and-memory.md#job-system) needs. Only the caller of `PhysicsSystem::Update` waits, inside the barrier, and that caller is the physics tick's job. *Later:* the stock barrier sleeps on a semaphore while it has no job of its own to run, which holds a worker thread; a barrier that waits on a `jobs.Counter` instead frees the thread ([Future work](#future-work)).
+- **Build:** `just jolt` builds `lib/core/physics/jolt/CMakeLists.txt` twice, as `just luau` does: `physics_jolt.dll` for development and a static library for release and tests, both with the static CRT. The `physics_backend` collection picks the backend package, as `gpu_backend` picks the GPU's, and `-define:PHYSICS_SHARED=true` links the DLL in the host and the game DLL; the game never calls it directly, only through `Platform_API.physics`. Jolt's options: `DOUBLE_PRECISION=ON`, `CROSS_PLATFORM_DETERMINISTIC` as a project choice ([Determinism](#determinism)), `OBJECT_LAYER_BITS=32`, the debug renderer only in development. A running host keeps the DLL locked, and a changed backend needs a host restart, as `luau.dll` does.
+- **Memory:** the backend sets Jolt's `Allocate`, `Free`, `Reallocate`, `AlignedAllocate` and `AlignedFree` to the host heap that `physics.Host` gives it, and each world's `TempAllocatorImpl` takes one block from it at creation (8 MiB by default, in `World_Desc`).
+- **Jobs:** the backend implements `JPH::JobSystemWithBarrier` over the host's fiber job system. `QueueJob` and `QueueJobs` start cinnabar jobs through `Host.jobs_run`, whose data is the Jolt job, and the host runs each by calling the backend's `run_job`. `GetMaxConcurrency` is the worker count. After `PhysicsSystem::Update`, the step waits for the backend's counter too, so no fiber job that holds a Jolt job outlives the step, even one whose job the barrier's waiter already ran. A Jolt job runs to completion and never waits, so a fiber that runs one never moves threads mid-job, which is what [the job rule](../core/jobs-and-memory.md#job-system) needs. Only the caller of `PhysicsSystem::Update` waits, inside the barrier, and that caller is the physics tick's job. *Later:* the stock barrier sleeps on a semaphore while it has no job of its own to run, which holds a worker thread; a barrier that waits on a `jobs.Counter` instead frees the thread ([Future work](#future-work)).
 - **Lifetime:** the game creates a physics world in `init` and destroys it in `shutdown`. The backend tracks every world it made, and at a soft restart the host destroys the ones the old game left, as it closes script VMs and destroys the `Game` GPU scope ([What survives](../overview/hot-reload.md#what-survives)). A code reload keeps them, with every body.
 
 | | Code reload | Soft restart | Host restart |
@@ -88,7 +90,7 @@ flowchart LR
 | `raycast`, `shape_cast`, `overlap`, `point_query`, each with a closest, any or all form | [Queries](#queries) |
 | `debug_lines(world, filter, out)` | The backend's own view of its shapes as lines, for the editor, where the backend can draw it |
 
-**`Physics_Host`** is what the host gives a backend when it loads it: the heap's allocate and free, `jobs_run`, `jobs_wait`, the worker count, the log and the profiler's zones, all as C procedures in the host's image. The backend calls nothing else of the engine's.
+**`Host`** is what the host gives a backend when it loads it: the heap's allocate, reallocate and free, `jobs_run`, `jobs_wait`, the worker count and the log, all as C procedures in the host's image. The backend calls nothing else of the engine's. *Later:* the profiler's zones, so the step's jobs show in the editor's profiler.
 
 **How the game reaches it.** `Platform_API` gains `physics: physics.Physics_API`, by value, so its layout is in the ABI hash. The host fills it from the backend it loaded, or from the null backend. In release, `main_release` fills it with direct references to the static library's procedures, as it does every other field.
 
@@ -265,13 +267,13 @@ The reading here is a 2D simulation inside cinnabar, for 2D games and 2D parts o
 - **Precision.** Box2D is `f32`. Its world also has a `World_Position` anchor, and the same advice holds: a 2D world spanning more than tens of kilometers uses several worlds.
 - A 2D world and a 3D world in the same game do not interact. A game that needs both on one entity bridges them in its own code.
 
-If the "separate 2D engine" is instead a separate program that should reuse this physics, the C boundary serves it unchanged: it needs only `Physics_Host` from its own platform layer.
+If the "separate 2D engine" is instead a separate program that should reuse this physics, the C boundary serves it unchanged: it needs only `physics.Host` from its own platform layer.
 
 ## Plugins
 
 The first phases link one backend. The boundary is already the plugin's; what the plugin phase adds is choosing.
 
-- **A backend is a library that exports `cinnabar_physics_api(host: ^Physics_Host) -> ^Physics_API`.** The host checks `PHYSICS_API_VERSION` and the command format's hash against its own before it uses one, and falls back to the null backend with an error otherwise.
+- **A backend is a library that exports `cinnabar_physics_api(host: ^physics.Host) -> ^Physics_API`.** The host checks `PHYSICS_API_VERSION` and the command format's hash against its own before it uses one, and falls back to the null backend with an error otherwise.
 - **The project chooses:** `physics.backend = jolt`, `none`, or the name of another backend, in the project's settings, which the host reads for this one key before it loads the game; `--physics` on the host's command line overrides it. In release, `main_release` links the chosen backend statically, chosen by a build define, so a shipped game has no plugin loading.
 - **Features gate components.** A component whose feature the backend lacks (a `Vehicle` on a backend without `Vehicles`) is logged once and ignored, rather than failing.
 - The plugin phase also writes the backend author's document: the command semantics, the threading rules, what `results` must contain, and the conformance tests that any backend runs ([Tests](#tests)).
@@ -287,7 +289,7 @@ The first phases link one backend. The boundary is already the plugin's; what th
 
 ## Phases
 
-1. **The boundary and the backend:** `lib/core/physics`, the command format, `Physics_Host`, Jolt as a submodule with `just jolt`, `physics_jolt.dll` and the static library, the allocator and the job system on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite's falling box and ray, driven through the API with no world.
+1. *Built.* **The boundary and the backend:** `lib/core/physics`, the command format, `Host`, Jolt 5.6.0 as a submodule with `just jolt`, `physics_jolt.dll` and the static library, the allocator and the job system on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite's falling box, ray, stale handles and determinism, driven through the API with no world. The boundary has the commands and the closest ray that this phase needs; `Set_Body`, the joints' commands, the other queries, contact events and `debug_lines` come with the phases that use them, each a change of `API_VERSION`.
 2. **Scripts in fixed ticks,** which needs no physics and can come first: `ecs.next_tick` and `run_tick_systems` with `run_fixed` as their short form, `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, the definitions file and the Unity mapping's row, and the sample's frame driving its ticks.
 3. **Rigid bodies in the world:** the components and their IDs, `Physics_Body`, the handle pools, `position_sub_f64` and `position_offset_f64`, `physics.tick` in the tick loop, the sync in and out, primitive shapes with scale, compounds from child colliders, layers in the project's settings, edit-mode sync, and collider drawing. The sample game drops a stack of boxes.
 4. **Queries, sensors and events:** the native queries and their batch form, `Physics_Events`, events into scripts through `script.fixed_events`, the `Physics` library and `RigidBody`'s methods, and the Unity mapping. The sample's door opens on `on_trigger_enter`.
@@ -303,7 +305,7 @@ Each item with the condition that makes it worth doing.
 - **Vehicles.** Jolt's `VehicleConstraint`, with wheeled, tracked and motorcycle controllers, as a `Vehicle` component on a body and `Wheel` components on child entities whose poses the sync writes. Jolt takes the vehicle's up and forward axes, so the engine's left-handed +y up and +z forward pass straight through. When a game has something to drive.
 - **Buoyancy.** `Body::GetSubmergedVolume` and `ApplyBuoyancyImpulse` against a water surface's plane, as a `Buoyancy` component that a system updates each tick from the water's height at the body. Waves need the surface's displacement evaluated on the CPU, as [Surfaces](../rendering/surfaces.md) would need for any gameplay on water. When the sample has water to float on.
 - **Soft bodies and cloth.** Jolt's soft bodies, from a cooked mesh with its constraints, with cloth as a soft body whose pinned vertices follow a skinned mesh. Both need a renderer path for meshes whose vertices change every frame, and cloth needs skinning, which waits for animation. When animation exists.
-- **Hair.** Jolt's strand hair (5.6) runs on the GPU through Jolt's own compute abstraction. Using it means implementing that abstraction over [the GPU interface](../gpu/interface.md), which gives a backend GPU access through `Physics_Host` and changes the boundary's scope. Weigh it against hair in the renderer's own compute passes, which collide with physics shapes uploaded to the GPU. When a game needs hair.
+- **Hair.** Jolt's strand hair (5.6) runs on the GPU through Jolt's own compute abstraction. Using it means implementing that abstraction over [the GPU interface](../gpu/interface.md), which gives a backend GPU access through `physics.Host` and changes the boundary's scope. Weigh it against hair in the renderer's own compute passes, which collide with physics shapes uploaded to the GPU. When a game needs hair.
 - **Ragdolls.** Joints between bodies that follow a skeleton, and blending back to animation. With animation.
 - **A fiber-aware barrier.** The stock `JobSystemWithBarrier` sleeps on a semaphore when its caller has no job to run, holding a worker. A barrier over `jobs.Counter` frees it. When the physics tick shows idle worker time in the profiler.
 - **Several physics worlds with handover.** One world per region, each anchored near its action, with bodies moved between them as they cross. For worlds whose action spans more than a few thousand kilometers ([Positions and precision](#positions-and-precision)).

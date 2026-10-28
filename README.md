@@ -52,7 +52,7 @@ The documentation starts at [docs/README.md](docs/README.md), which gives a read
 | `tools/cook` | The asset cooker and cook daemon |
 | `tools/viewer`, `tools/ltc_fit` | A viewer for a host's shared frames, and the area lights' table fitter |
 | `samples/mygame` | The sample game, which exercises most features |
-| `vendor/` | Luau, Compressonator, meshoptimizer, the Agility SDK and DXC |
+| `vendor/` | Luau, Jolt Physics, Compressonator, meshoptimizer, the Agility SDK and DXC |
 
 ## License
 
