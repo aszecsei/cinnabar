@@ -18,8 +18,9 @@ import "cinnabar:engine/render"
 // project.user.settings. Version control ignores it.
 USER_SUFFIX :: ".user"
 
-// The editor's default mesh material, as the settings file names it.
+// The editor's default mesh material and texel density, as the settings file names them.
 MESH_DEFAULT_MATERIAL_KEY :: "mesh.default_material"
+MESH_TEXEL_DENSITY_KEY :: "mesh.texel_density"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -34,6 +35,9 @@ Settings :: struct {
 	// The material of new faces in the editor's mesh mode, by GUID, or zero for the engine's dev_gray (see
 	// docs/editor/mesh-editing.md#dev-materials). The editor reads it; the game only knows the key.
 	mesh_default_material: format.Guid,
+	// The texel density of the editor's texture tools, in texels per meter, or 0 for the editor's default (see
+	// docs/editor/mesh-editing.md#texture-tools). The editor reads it; the game only knows the key.
+	mesh_texel_density:    f32,
 }
 
 // Quality_Key is a render quality key of the settings files, by its name in QUALITY_KEY_NAMES.
@@ -127,6 +131,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				settings.mesh_default_material = guid
 			} else {
 				problem(problems, line, "%s takes a material's GUID of 32 hex digits, not %q", key, value)
+			}
+			continue
+		}
+		if key == MESH_TEXEL_DENSITY_KEY {
+			if density, ok := strconv.parse_f32(value); ok && density > 0 {
+				settings.mesh_texel_density = density
+			} else {
+				problem(problems, line, "%s takes a number of texels per meter above 0, not %q", key, value)
 			}
 			continue
 		}

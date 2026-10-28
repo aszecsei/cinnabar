@@ -38,7 +38,7 @@ public sealed class MeshModeTests : IDisposable
         var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
             new EditorSettings(Path.Combine(_directory, "settings")));
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
-        shell.Assets.Apply(new AssetSnapshot([new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0)], []));
+        shell.Assets.Apply(new AssetSnapshot([new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [])], []));
         shell.OnGameMessage(new EntitySnapshot(
         [
             new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33]),

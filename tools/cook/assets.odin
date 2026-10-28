@@ -124,6 +124,11 @@ Asset_Source :: struct {
 	subassets:    [dynamic]Subasset,
 	// For a material, the combinations of static switches that it and its instances use.
 	permutations: int,
+	// For a texture, its cooked size, from its blob. For a material or an instance, the texture that the editor's
+	// texture tools measure by, and the material's hotspot rectangles in its texels, each x0 y0 x1 y1.
+	size:         [2]u32,
+	tool_texture: format.Guid,
+	hotspots:     [][4]u32,
 }
 
 // Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.

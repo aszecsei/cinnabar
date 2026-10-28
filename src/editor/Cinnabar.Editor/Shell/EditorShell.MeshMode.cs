@@ -369,6 +369,11 @@ public sealed partial class EditorShell
     {
         var hit = MeshElementAt(pixel);
         IEnumerable<MeshItem> items = hit is { } h ? [h] : [];
+        if (MeshElement == MeshElement.Faces)
+        {
+            // The face clicked last is the active one, which Align to Face copies from and the texture gizmo aligns to.
+            ActiveFace = hit;
+        }
         ApplyMeshPick(items, mode);
     }
 
@@ -427,6 +432,10 @@ public sealed partial class EditorShell
         {
             return null;
         }
+        if (_pending == null && TextureGizmoAxes() is { } textureAxes)
+        {
+            return ((sum / count).Offset(origin), textureAxes);
+        }
         var local = _pending == null && (Space == Space.Local || Tool == Tool.Scale);
         return ((sum / count).Offset(origin), local ? primary ?? Quat.Identity : Quat.Identity);
     }
@@ -478,6 +487,20 @@ public sealed partial class EditorShell
             SendGizmo();
             return true;
         }
+        if (TextureGizmo && MeshElement == MeshElement.Faces)
+        {
+            // Transform Texture: the drag moves, turns or scales the selected faces' textures about the pivot.
+            var textureDrag = new TextureDrag(this, pivot);
+            if (textureDrag.IsEmpty)
+            {
+                return false;
+            }
+            _drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+            _textureDrag = textureDrag;
+            BeginEdit($"{Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
+            SendGizmo();
+            return true;
+        }
         var drag = new MeshDrag(this, pivot, axes);
         if (drag.IsEmpty)
         {
@@ -498,7 +521,24 @@ public sealed partial class EditorShell
             DragDistance(pixel, invertSnap);
             return;
         }
-        if (_drag == null || _meshDrag == null || Scene is not { InTransaction: true })
+        if (_drag == null || Scene is not { InTransaction: true })
+        {
+            return;
+        }
+        if (_textureDrag != null)
+        {
+            var textureChange = _drag.Update(pixel, Snap != invertSnap && Tool != Tool.Move ? Snapping : null);
+            try
+            {
+                Scene.Preview(_textureDrag.Apply(textureChange, Snap != invertSnap && Tool == Tool.Move));
+            }
+            catch (InvalidOperationException e)
+            {
+                Console.Add(LogLevel.Error, $"edit: {e.Message}");
+            }
+            return;
+        }
+        if (_meshDrag == null)
         {
             return;
         }

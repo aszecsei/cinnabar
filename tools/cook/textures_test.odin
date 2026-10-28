@@ -11,7 +11,7 @@ import format "cinnabar:engine/asset/format"
 
 // write_test_image writes a width x height image into the tree: a PNG of RGBA8 gradients, or an HDR file whose values
 // pass 1.
-@(private = "file")
+@(private)
 write_test_image :: proc(t: ^testing.T, tree: Tree, path: string, width, height: int) {
 	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
 	written: i32

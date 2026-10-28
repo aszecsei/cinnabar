@@ -6,10 +6,10 @@ namespace Cinnabar.Editor.Tests;
 public class AssetIndexTests
 {
     static Asset Script(string guid, string path, string behaviour = "", AssetStatus status = AssetStatus.Current, params string[] dependencies) =>
-        new(guid, AssetKind.Script, "game", path, status, 0, 0, behaviour, [], dependencies, "", "", 0);
+        new(guid, AssetKind.Script, "game", path, status, 0, 0, behaviour, [], dependencies, "", "", 0, [0, 0], "", []);
 
     static Asset Scene(string guid, string path, params string[] dependencies) =>
-        new(guid, AssetKind.Scene, "game", path, AssetStatus.Current, 0, 0, "", [], dependencies, "", "", 0);
+        new(guid, AssetKind.Scene, "game", path, AssetStatus.Current, 0, 0, "", [], dependencies, "", "", 0, [0, 0], "", []);
 
     static AssetIndex Index(Asset[] assets, params string[] folders)
     {
@@ -36,10 +36,10 @@ public class AssetIndexTests
     }
 
     static Asset Model(string guid, string path) =>
-        new(guid, AssetKind.Model, "game", path, AssetStatus.Current, 0, 0, "", [], [], "", "", 0);
+        new(guid, AssetKind.Model, "game", path, AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []);
 
     static Asset Mesh(string guid, Asset model, string name) =>
-        new(guid, AssetKind.Mesh, model.Root, model.Path, model.Status, 0, 0, "", [], [], model.Guid, name, 0);
+        new(guid, AssetKind.Mesh, model.Root, model.Path, model.Status, 0, 0, "", [], [], model.Guid, name, 0, [0, 0], "", []);
 
     [Fact]
     public void SubassetsListUnderTheirFile()

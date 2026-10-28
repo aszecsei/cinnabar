@@ -245,6 +245,12 @@ public sealed class ViewportView : Grid
         }
         e.DragEffects = DragDropEffects.Link;
         e.Handled = true;
+        if (_shell.InMeshMode)
+        {
+            // In mesh mode the editor picks the face itself, so the drag shows at once.
+            _shell.PreviewFaceMaterial(pixel, guid);
+            return;
+        }
         _dragPixel = ((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y));
         PickUnderDrag(guid);
     }
@@ -280,6 +286,11 @@ public sealed class ViewportView : Grid
             return;
         }
         e.Handled = true;
+        if (_shell.InMeshMode)
+        {
+            _shell.DropFaceMaterial(pixel, guid);
+            return;
+        }
         var generation = _dragGeneration;
         if (!_shell.PickPixel(pixel, result =>
             {
@@ -524,6 +535,29 @@ public sealed class ViewportView : Grid
             _held.Add(e.Key);
             e.Handled = true;
             return;
+        }
+        // The texture tools' keys, on the selected faces (see docs/editor/mesh-editing.md#texture-tools): Shift makes the
+        // step ten times and Ctrl a tenth.
+        if (_shell.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
+        {
+            var multiplier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
+            var ran = e.Key switch
+            {
+                Key.Left => _shell.ShiftTexture(1, 0, multiplier),
+                Key.Right => _shell.ShiftTexture(-1, 0, multiplier),
+                Key.Up => _shell.ShiftTexture(0, 1, multiplier),
+                Key.Down => _shell.ShiftTexture(0, -1, multiplier),
+                Key.OemComma => _shell.RotateTexture(1, multiplier),
+                Key.OemPeriod => _shell.RotateTexture(-1, multiplier),
+                Key.OemPlus => _shell.ScaleTexture(1, multiplier),
+                Key.OemMinus => _shell.ScaleTexture(-1, multiplier),
+                _ => (bool?)null,
+            };
+            if (ran != null)
+            {
+                e.Handled = true;
+                return;
+            }
         }
         if (e.KeyModifiers != KeyModifiers.None)
         {

@@ -166,6 +166,7 @@ public sealed partial class EditorShell : IDisposable
     {
         yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(this));
         yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
+        yield return new PanelTool("faceEditor", "Face", "mesh", EditorLayout.RightDock, () => new FaceEditorView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));

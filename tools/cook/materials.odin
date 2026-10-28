@@ -79,6 +79,10 @@ Material_Decl :: struct {
 	body_line:    int,
 	has_body:     bool,
 	graph:        Graph,
+	// The texture that the editor's texture tools measure by, from a `tool_texture` line, or zero for the first texture
+	// that the graph samples, and the hotspot rectangles in its texels (see docs/editor/mesh-editing.md#texture-tools).
+	tool_texture: format.Guid,
+	hotspots:     [dynamic][4]u32,
 	ok:           bool,
 }
 
@@ -90,10 +94,12 @@ Override :: struct {
 
 // Instance_Decl is a parsed .material_instance file.
 Instance_Decl :: struct {
-	asset:     int,
-	parent:    format.Guid,
-	overrides: [dynamic]Override,
-	ok:        bool,
+	asset:        int,
+	parent:       format.Guid,
+	overrides:    [dynamic]Override,
+	// Its own `tool_texture` line, or zero to take its parent's.
+	tool_texture: format.Guid,
+	ok:           bool,
 }
 
 // Resolved is a material or an instance with its values resolved through its parents: its material, its switches,
@@ -105,6 +111,9 @@ Resolved :: struct {
 	params:   []Param_Decl,
 	// The sources of it and every parent, which its key covers.
 	chain:    [dynamic][]byte,
+	// The texture that the editor's texture tools measure by: the nearest `tool_texture` line, else the first texture
+	// that the material samples, with the instances' overrides.
+	tool_texture: format.Guid,
 	ok:       bool,
 }
 
@@ -211,6 +220,7 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	}
 	for guid, decl in materials {
 		a := &assets[decl.asset]
+		a.tool_texture, a.hotspots = resolved[guid].tool_texture, decl.hotspots[:]
 		shading, found := set.shadings[decl.shading]
 		if found {
 			append(&a.dependencies, assets[shading.asset].meta.guid)
@@ -243,6 +253,10 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 		}
 		r := resolved[guid]
 		add_texture_dependencies(a, r.params)
+		a.tool_texture = r.tool_texture
+		if r.material != nil {
+			a.hotspots = r.material.hotspots[:]
+		}
 		if !decl.ok || !r.ok || !check_settings(a^, problems) {
 			a.failed = true
 			ok = false
@@ -455,6 +469,7 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 		cutoff       = 0.5,
 		params       = make([dynamic]Param_Decl, context.temp_allocator),
 		switches     = make([dynamic]Switch_Decl, context.temp_allocator),
+		hotspots     = make([dynamic][4]u32, context.temp_allocator),
 		ok           = true,
 	}
 	cutoff_line, transparency_line := 0, 0
@@ -498,6 +513,26 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			added, added_ok := graph_node_start(&decl.graph, rest, l.number, a.path, problems)
 			node, skipping = added, !added_ok
 			decl.ok &&= added_ok
+			continue
+		}
+		if word == "hotspot" {
+			fields := strings.fields(rest, context.temp_allocator)
+			rect: [4]u32
+			rect_ok := len(fields) == 4
+			for f, i in fields {
+				if !rect_ok {
+					break
+				}
+				n, n_ok := strconv.parse_uint(f)
+				rect[i] = u32(n)
+				rect_ok = n_ok && n <= 1 << 16
+			}
+			if !rect_ok || rect[2] <= rect[0] || rect[3] <= rect[1] {
+				report_error(problems, a.path, l.number, 0, "a hotspot is `hotspot <x0> <y0> <x1> <y1>`, in texels of the tool texture, with x1 above x0 and y1 above y0")
+				decl.ok = false
+				continue
+			}
+			append(&decl.hotspots, rect)
 			continue
 		}
 		if word == "param" || word == "switch" {
@@ -612,6 +647,13 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 				decl.ok = false
 			}
 			decl.displacement_bound = bound
+		case "tool_texture":
+			guid, _, message := parse_texture(value, kinds)
+			if message != "" || guid == {} {
+				report_error(problems, a.path, l.number, 0, "tool_texture is a texture's GUID after $")
+				decl.ok = false
+			}
+			decl.tool_texture = guid
 		case "two_sided", "cast_shadows":
 			if value != "true" && value != "false" {
 				report_error(problems, a.path, l.number, 0, "%s is true or false", key)
@@ -708,6 +750,15 @@ parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 			decl.parent = parent
 			continue
 		}
+		if key == "tool_texture" {
+			guid, guid_ok := format.guid_parse(strings.trim_prefix(value, "$"))
+			if !guid_ok || !strings.has_prefix(value, "$") {
+				report_error(problems, a.path, l.number, 0, "tool_texture is a texture's GUID after $")
+				decl.ok = false
+			}
+			decl.tool_texture = guid
+			continue
+		}
 		append(&decl.overrides, Override{key, value, l.number})
 	}
 	if decl.parent == {} && decl.ok {
@@ -767,10 +818,14 @@ resolve :: proc(
 	}
 	r.params = slice.clone(m.params[:], context.temp_allocator)
 	r.ok = m.ok
+	r.tool_texture = m.tool_texture
 	// The material's parameters, then each instance's overrides, from the one nearest the material.
 	#reverse for decl in path {
 		a := assets[decl.asset]
 		append(&r.chain, a.source)
+		if decl.tool_texture != {} {
+			r.tool_texture = decl.tool_texture
+		}
 		for o in decl.overrides {
 			if switch_index, found := find_switch(m, o.name); found {
 				if o.value != "true" && o.value != "false" {
@@ -799,7 +854,48 @@ resolve :: proc(
 			}
 		}
 	}
+	if r.tool_texture == {} {
+		r.tool_texture = sampled_texture(m, r.params)
+	}
 	return
+}
+
+// sampled_texture is the texture that a material's first texture sample node names, through its parameter, or its
+// first texture parameter for a material in HLSL, with the parameters' values as an instance resolves them. Zero for
+// a material that samples nothing.
+@(private = "file")
+sampled_texture :: proc(m: ^Material_Decl, params: []Param_Decl) -> format.Guid {
+	param_texture :: proc(params: []Param_Decl, name: string) -> format.Guid {
+		for p in params {
+			if p.name == name && p.type == .Texture {
+				return p.texture
+			}
+		}
+		return {}
+	}
+	for n in m.graph.nodes {
+		if n.kind == nil || n.kind.name != "texture_sample" {
+			continue
+		}
+		for f in n.fields {
+			if f.name != "texture" || f.value.kind != .Link {
+				continue
+			}
+			if index, linked := m.graph.ids[f.value.node]; linked {
+				for g in m.graph.nodes[index].fields {
+					if g.name == "name" && g.value.kind == .Text {
+						return param_texture(params, g.value.text)
+					}
+				}
+			}
+		}
+	}
+	for p in params {
+		if p.type == .Texture {
+			return p.texture
+		}
+	}
+	return {}
 }
 
 @(private = "file")

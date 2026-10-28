@@ -33,10 +33,15 @@ public readonly record struct Mapping(Vec3 UAxis, Vec3 VAxis, double ScaleU, dou
     /// </summary>
     public (double U, double V) Uv(Vec3 p)
     {
-        var a = Vec3.Dot(p, UAxis) / ScaleU;
-        var b = Vec3.Dot(p, VAxis) / ScaleV;
+        var (u, v) = Turn(Vec3.Dot(p, UAxis) / ScaleU, Vec3.Dot(p, VAxis) / ScaleV);
+        return (u + ShiftU, v + ShiftV);
+    }
+
+    /// <summary>A point in repeats along the axes, turned by the rotation: the UV before the shift.</summary>
+    public (double U, double V) Turn(double a, double b)
+    {
         var (sin, cos) = Math.SinCos(Rotation * Math.PI / 180);
-        return (a * cos - b * sin + ShiftU, a * sin + b * cos + ShiftV);
+        return (a * cos - b * sin, a * sin + b * cos);
     }
 }
 

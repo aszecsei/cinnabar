@@ -49,6 +49,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 |---|---|
 | Outliner | The entity hierarchy, with a filter, visibility and lock toggles, drag to reparent, and multi-select |
 | Properties | The components and behaviours of the selection |
+| Face | In mesh mode, the selected faces' material and texture mapping, with the texture tools (see [Mesh editing](mesh-editing.md#mesh-mode)) |
 | Viewport | The frames, the overlays, the gizmo and the camera |
 | Content Browser | The content roots' folders and assets, from the cook daemon's index, with each asset's cook status |
 | Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
@@ -82,6 +83,10 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 - **Multi-select:** the panel shows the components that every selected entity has, without the behaviours. A field whose values differ shows "—", and setting it, dragging it or resetting it makes one operation for each entity, in one undo entry; an axis edit keeps each entity's own other axes. Removing a component removes it from each, Add Component adds to each that lacks it, and the Active badge sets all. The fields edit only when the document has every selected entity.
 - **How values show:** vectors, positions and rotations are three boxes marked red, green and blue for x, y and z. A rotation shows Euler angles in degrees, in the engine's order (z, then x, then y, as `Quaternion.euler` in scripts), with the quaternion in the tooltip. A position shows a distance in the largest unit of m, km, Mm and Gm that keeps it short, with the exact meters in the tooltip, and sets raw values. Numbers have grouped thousands and at most three decimals. A `bool` is a check box, an enum its value's name, and names read as words: `Previous_Transform` is "Previous Transform". Components without fields, such as tags, are chips under the groups, and a behaviour's group has a Script badge.
 - An entity reference shows the target's name, and accepts a drag from the outliner. An asset reference (see [Rendering](../rendering/assets.md#asset-fields)) shows the asset's name, or its name in its file for a sub-asset such as a mesh; a click on the name shows the asset in the content browser. With the `…` button it picks from the assets of the field's kind, it accepts a drag from the content browser of an asset of that kind only, and `×` clears it. An asset that is not in the content shows as missing, with its GUID in the tooltip.
+
+### Face
+
+- The Face panel is mesh mode's face edit sheet (see [Mesh editing](mesh-editing.md#mesh-mode)): with faces selected, their material, with the properties panel's asset picker and drop target, the dev materials first; the material's tool texture and its size; the faces' texel density beside the scale, and the project's; the mapping's axes, read-only; its scale, shift and rotation, typed or dragged as the properties panel's numbers are, each drag one undo entry; the hotspot the faces sit on, in the warning color when the texture leaves it; and the texture tools as buttons. A field whose values differ among the faces shows a dash, and an edit sets every face.
 
 ### Resource monitor
 

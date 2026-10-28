@@ -57,6 +57,7 @@ Surface evaluate(Material_Inputs inputs) {
 - **Dependencies:** its shading model, its textures, and the material functions that its graph calls.
 - **Reads time:** a material whose HLSL reads the time (`frame.time`, `inputs.time` or `v.time`), or whose graph has a Time node, has the blob flag `Reads_Time`, so the editor's previews draw it every frame.
 - **Permutations:** the index gives each material the number of combinations of switches that it and its instances use, which the material editor shows.
+- **Tool texture and hotspots:** `tool_texture = $<guid>` names the texture that the editor's texture tools measure a face's texel density by (see [Mesh editing](../../editor/mesh-editing.md#texture-tools)). Without the line, it is the texture that the graph's first Texture Sample node samples, through its parameter, or an HLSL material's first texture parameter, which may be none. `hotspot <x0> <y0> <x1> <y1>` lines, in texels of that texture with `x1` above `x0` and `y1` above `y0`, are the material's hotspot rectangles, each a complete tileable piece that the Hotspot tool maps a face onto. The index carries both, with a texture's cooked size; an instance takes its parent's, except that its own `tool_texture` line replaces the texture, as does its override of the sampled parameter.
 
 A **material instance** is a `.material_instance` file:
 
@@ -66,6 +67,7 @@ parent = $00112233445566778899aabbccddeeff
 roughness = 0.9
 albedo = $11112222333344445555666677778888
 use_albedo = false
+tool_texture = $11112222333344445555666677778888
 ```
 
 - Its parent is a material or another instance. It overrides parameters and switches by name, with the parameter's syntax; a name that its material does not have is an error, and so is a loop of parents.

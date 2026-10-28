@@ -143,7 +143,7 @@ public sealed class EditorLayout
                 new ProportionalDockSplitter(),
                 center,
                 new ProportionalDockSplitter(),
-                Tools(RightDock, Alignment.Right, 0.20, "properties", "undoHistory")),
+                Tools(RightDock, Alignment.Right, 0.20, "properties", "faceEditor", "undoHistory")),
         };
         return NewRoot(main);
     }

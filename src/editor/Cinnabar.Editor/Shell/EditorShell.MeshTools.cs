@@ -381,8 +381,8 @@ public sealed partial class EditorShell
     /// <summary>Extrude: faces out along their average normal with walls, or open edges out as quads, by a dragged distance.</summary>
     public bool Extrude() => MeshElement switch
     {
-        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d), requires: MeshElement.Faces),
-        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d), requires: MeshElement.Edges),
+        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d, ScaleForFaces(m, s)), requires: MeshElement.Faces),
+        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d, ScaleForEdges(m, s)), requires: MeshElement.Edges),
         _ => false,
     };
 
@@ -546,7 +546,7 @@ public sealed partial class EditorShell
         var position = Scene.Position;
         if (mesh != null && FindMeshData(mesh) is { } data && PlacementOf(mesh) is { } placement)
         {
-            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, material: data.Materials[0]);
+            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, NewFaceScale(data.Materials[0]), data.Materials[0]);
             var cornerRelative = Camera.RelativeTo(corner);
             var local = made.With(vertices: made.Vertices.Select(v => placement.ToLocal(cornerRelative + v)));
             var after = Append(data, local);
@@ -557,7 +557,7 @@ public sealed partial class EditorShell
             }
             return;
         }
-        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, material: DefaultMeshMaterial);
+        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, NewFaceScale(DefaultMeshMaterial), DefaultMeshMaterial);
         var name = NewMeshName(Primitive.ToString().ToLowerInvariant());
         var (create, document) = NewMeshEntity(name, block, new Pose(corner, Quat.Identity, [1, 1, 1]), []);
         if (!Edit(Primitive.ToString(), new CreateMesh(document, Meshes), create))
@@ -717,7 +717,7 @@ public sealed partial class EditorShell
             var axis = MeshGrid.NearestAxis(Camera.Forward);
             // The plane fronts toward the camera.
             var front = MeshGrid.AxisVector(axis) * (Vec3.Dot(MeshGrid.AxisVector(axis), Camera.Forward) > 0 ? -1 : 1);
-            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, DefaultMeshMaterial);
+            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, DefaultMeshMaterial, NewFaceScale(DefaultMeshMaterial));
             CancelToolPoints();
             if (data == null)
             {
