@@ -14,6 +14,7 @@ Read them in this order the first time.
 | [Layers and output](layers-and-output.md) | The world, view model, UI and debug layers, the output pass and HDR output. |
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
 | [Transparency](transparency.md) | Moment-based and sorted transparency, and compute sprites. |
+| [Particles](particles.md) | Particle systems, their simulation and collision. |
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
 | [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
@@ -45,6 +46,7 @@ Read them in this order the first time.
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |
 | `shadows.odin` | Shadow assignment, the atlas, cascades, the ray-traced mask ([Shadows](lighting-and-shadows.md#shadows)) |
 | `transparency.odin` | Moment-based and sorted transparency ([Transparency](transparency.md#transparency)) |
+| `particles.odin` | `Particle_System`, the pool, the systems' slots and the simulation's passes ([Particles](particles.md#particles)) |
 | `sprites.odin` | Compute sprites: `Sprite`, the records that the CPU and GPU passes write, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
 | `ambient_occlusion.odin` | GTAO, HBAO or SSAO on the compute queue ([Ambient occlusion](ambient-occlusion.md#ambient-occlusion)) |
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
@@ -56,7 +58,7 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 

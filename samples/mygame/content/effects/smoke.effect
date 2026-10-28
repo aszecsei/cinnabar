@@ -1,0 +1,31 @@
+effect 1
+# The glass scene's smoke and sparks (see docs/rendering/particles.md#particles): smoke that rises beside the
+# moment-based glass and drifts through it, glowing where it starts, and sparks that fall and bounce on the floor.
+
+emitter smoke
+	capacity = 512
+	rate = 45
+	lifetime = 4 6
+	speed = 0.3 0.6
+	spin = -0.4 0.4
+	shape = cone 0.15 15
+	softness = 0.3
+	# Rises, slowly, and drifts toward the camera.
+	module gravity 0 0.2 -0.2
+	module drag 0.2
+	module noise 0.25 1.2
+	curve color = 0:0.3,0.3,0.32,0 0.15:0.3,0.3,0.32,0.6 1:0.36,0.36,0.38,0
+	curve size = 0:0.15 1:0.7
+	curve emission = 0:4,1.2,0.2 0.2:0,0,0
+
+emitter sparks
+	capacity = 256
+	rate = 25
+	lifetime = 1.5 2.5
+	speed = 1.5 3
+	shape = cone 0.05 25
+	module gravity 0 -9.8 0
+	module collide 0.45 0.2
+	curve color = 0:1,0.8,0.4,1 1:1,0.4,0.1,0
+	curve size = 0:0.05 1:0.02
+	curve emission = 0:30,12,3 1:6,1,0

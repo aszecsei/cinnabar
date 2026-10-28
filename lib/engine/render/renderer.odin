@@ -99,6 +99,8 @@ Renderer :: struct {
 	transparency_composite: Shader_Pipeline,
 	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
 	sprites:         Sprites,
+	// The particle systems' pool and state (see docs/rendering/particles.md#particles).
+	particles:       Particles,
 	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
 	// set_quality).
 	caps:            Caps,
@@ -138,6 +140,9 @@ Frame_Desc :: struct {
 	// The sprites that the frame draws with the moment-based transparent surfaces, at most MAX_SPRITES (see
 	// docs/rendering/transparency.md#sprites).
 	sprites:           []Sprite,
+	// The time that the particles step this frame, in seconds: the game's simulation time, which is 0 while the editor
+	// is in Edit or paused (see docs/rendering/particles.md#time).
+	delta:             f32,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -212,6 +217,8 @@ Frame :: struct {
 	moments:                  Texture,
 	// nil without sprites.
 	sprites:                  ^Sprite_Frame,
+	// nil without particles to step.
+	particles:                ^Particle_Frame,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:                       Texture,
 	debug:                    Texture,
@@ -318,6 +325,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	gi_init(&r.gi)
 	fog_init(&r.fog)
 	sprites_init(&r.sprites)
+	particles_init(&r.particles, w)
 	post_init(&r.post, platform)
 }
 
@@ -334,6 +342,7 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
+	particles_register(&r.particles, w)
 	// The effects' procedures were in the old code, so the game registers them again.
 	r.effect_count = 0
 	r.reloaded = true
@@ -354,6 +363,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	sprites_destroy(&r.sprites, r.platform)
+	particles_destroy(&r.particles, r.platform)
 	post_destroy(&r.post, r.platform)
 	for &p in r.output_pipelines {
 		destroy_shader_pipeline(&p, r.platform)
@@ -421,9 +431,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	begin_gi(f, settings.gi, settings.ambient)
 	add_scene_passes(f, settings.ambient)
 	begin_sprites(f, desc.sprites)
+	begin_particles(f, w, desc.delta, desc.hidden)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
 
+	add_particle_passes(f)
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
 	}
@@ -436,6 +448,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
 	depth(&g, p, f.depth, .Clear)
 	declare_scene_draws(f, p)
+	add_particle_history_pass(f)
 	if desc.hooks.after_prepass != nil {
 		desc.hooks.after_prepass(f)
 	}
@@ -543,6 +556,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
+	sync_particle_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
 	sync_compute_pipeline(&r.transparency_composite, r.platform, assets, {label = "transparency composite"}, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {

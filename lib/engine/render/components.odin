@@ -18,6 +18,7 @@ DISK_LIGHT_ID :: ecs.Component_Id(40)
 LINE_LIGHT_ID :: ecs.Component_Id(41)
 // 42 is the Volume, and 43 to 50 the settings components (see settings.odin).
 SURFACE_RENDERER_ID :: ecs.Component_Id(51)
+// 52 is the Particle_System (see particles.odin).
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -150,6 +151,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Disk_Light, DISK_LIGHT_ID)
 	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
 	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID)
+	ecs.register_component(r, Particle_System, PARTICLE_SYSTEM_ID)
 	register_settings_components(r)
 }
 

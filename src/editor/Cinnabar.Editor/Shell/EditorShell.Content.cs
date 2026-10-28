@@ -53,7 +53,8 @@ public sealed partial class EditorShell
             case AssetKind.Material when !IsHlslMaterial(path):
                 OpenMaterial(asset);
                 break;
-            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance:
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
+                or AssetKind.Effect:
                 OpenScript(path);
                 break;
         }
@@ -74,7 +75,7 @@ public sealed partial class EditorShell
     /// <summary>Whether a double click opens the asset (see <see cref="OpenAsset"/>).</summary>
     public static bool CanOpen(Link.Cook.Asset asset) =>
         asset.Kind is AssetKind.Scene or AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-            or AssetKind.MaterialFunction;
+            or AssetKind.MaterialFunction or AssetKind.Effect;
 
     /// <summary>What opening an asset is called in its menu.</summary>
     public string OpenLabel(Link.Cook.Asset asset) => asset.Kind switch

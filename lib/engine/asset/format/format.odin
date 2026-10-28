@@ -174,6 +174,8 @@ Asset_Kind :: enum u32 {
 	Material_Function,
 	// A scene with one root that scenes instantiate. Its blob is a flat Scene blob.
 	Prefab,
+	// Emitters of particles, which a Particle_System places.
+	Effect,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

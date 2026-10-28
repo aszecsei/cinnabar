@@ -111,6 +111,7 @@ Asset_Kind :: enum u8 {
 	Material_Instance,
 	Material_Function,
 	Prefab,
+	Effect,
 }
 
 Asset_Status :: enum u8 {
@@ -237,6 +238,8 @@ Asset_Template :: enum u8 {
 	Mesh,
 	// A prefab with one root, named for the file, at the origin.
 	Prefab,
+	// An effect with one emitter of soft puffs.
+	Effect,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.
