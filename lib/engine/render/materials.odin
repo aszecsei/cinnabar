@@ -20,6 +20,20 @@ DEFAULT_MATERIAL :: #load("../content/materials/default.material.meta", string)
 // DEFAULT_SURFACE_MATERIAL is the engine's default surface material (default_surface.material), which a Surface_Renderer
 // without a material, or with one that draws meshes or cannot draw, draws with (see docs/rendering/surfaces.md#surfaces).
 DEFAULT_SURFACE_MATERIAL :: #load("../content/materials/default_surface.material.meta", string)
+// The placeholders that a bin draws with while its material's pipelines compile, one for each blend mode, without
+// parameters, so they read nothing of the draws' blocks (see docs/rendering/materials.md#runtime).
+PLACEHOLDER_MATERIAL :: #load("../content/materials/placeholder.material.meta", string)
+PLACEHOLDER_TRANSPARENT_MATERIAL :: #load("../content/materials/placeholder_transparent.material.meta", string)
+PLACEHOLDER_ADDITIVE_MATERIAL :: #load("../content/materials/placeholder_additive.material.meta", string)
+
+// Substitute is what a bin draws with while its material's pipelines compile: a placeholder in its blend mode, or the
+// default surface material for a bin of patches.
+Substitute :: enum u8 {
+	Opaque,
+	Transparent,
+	Additive,
+	Patches,
+}
 
 // Materials is the material runtime (see docs/rendering/materials.md#runtime): the materials and instances that the frames
 // draw, their pipelines, and the textures that a texture parameter without its texture samples. It lives in the
@@ -31,6 +45,7 @@ Materials :: struct {
 	pipeline_count: int,
 	default_guid:   format.Guid,
 	default_surface_guid: format.Guid,
+	substitutes:    [Substitute]format.Guid,
 	// White, black and a flat normal, by Material_Texture_Default.
 	defaults:       [format.Material_Texture_Default]gpu.Texture,
 	sampler:        gpu.Sampler,
@@ -117,6 +132,10 @@ Material_Use :: struct {
 materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 	m.default_guid, _ = format.meta_guid(DEFAULT_MATERIAL)
 	m.default_surface_guid, _ = format.meta_guid(DEFAULT_SURFACE_MATERIAL)
+	m.substitutes[.Opaque], _ = format.meta_guid(PLACEHOLDER_MATERIAL)
+	m.substitutes[.Transparent], _ = format.meta_guid(PLACEHOLDER_TRANSPARENT_MATERIAL)
+	m.substitutes[.Additive], _ = format.meta_guid(PLACEHOLDER_ADDITIVE_MATERIAL)
+	m.substitutes[.Patches] = m.default_surface_guid
 	texels := [format.Material_Texture_Default][4]u8 {
 		.White  = {255, 255, 255, 255},
 		.Black  = {0, 0, 0, 255},
@@ -171,6 +190,77 @@ make_use :: proc(r: ^Renderer, table: ^Material_Table, guid: format.Guid) -> (us
 	use.pipeline = material_pipeline(r, b.material, b.switches) or_return
 	use.block = add_block(r, table, b)
 	return use, true
+}
+
+// bin_draws gives the pipeline that each bin draws with this frame: its own, or while its own compiles, its blend
+// mode's substitute (see docs/rendering/materials.md#runtime). The frame chooses once, so a bin's prepass and its
+// forward pass draw the same surface, and it draws with its own pipeline the frame after that one compiles.
+@(private)
+bin_draws :: proc(r: ^Renderer, bin_pipelines: []int) -> []int {
+	draws := make([]int, len(bin_pipelines), r.platform.frame_allocator)
+	for index, bin in bin_pipelines {
+		draws[bin] = index
+		p := &r.materials.pipelines[index]
+		kind := substitute_kind(p) or_continue
+		if material_ready(r.platform, p) || p.material == r.materials.substitutes[kind] {
+			continue
+		}
+		if substitute, ok := substitute_pipeline(r, kind); ok {
+			draws[bin] = substitute
+		}
+	}
+	return draws
+}
+
+// substitute_kind is the substitute that a material's bins draw with while it compiles. A transparent material of
+// patches has none.
+@(private)
+substitute_kind :: proc(p: ^Material_Pipeline) -> (kind: Substitute, ok: bool) {
+	if p.patches {
+		return .Patches, material_group(p) == .Opaque
+	}
+	switch p.blend {
+	case .Opaque, .Masked:
+		return .Opaque, true
+	case .Transparent:
+		return .Transparent, true
+	case .Additive:
+		return .Additive, true
+	}
+	return
+}
+
+// material_ready is whether each of a material's pipelines is compiled.
+@(private)
+material_ready :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> bool {
+	if platform.gpu_pipeline_ready == nil {
+		return true
+	}
+	for pipeline in p.pipelines {
+		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
+			return false
+		}
+	}
+	for pipeline in p.meshes {
+		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
+			return false
+		}
+	}
+	for pipeline in p.over {
+		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
+			return false
+		}
+	}
+	return true
+}
+
+// substitute_pipeline gives a substitute's pipelines, which it loads and makes the first time a bin waits for its own.
+@(private = "file")
+substitute_pipeline :: proc(r: ^Renderer, kind: Substitute) -> (index: int, ok: bool) {
+	guid := r.materials.substitutes[kind]
+	data := material_data(r, guid) or_return
+	b := material_block(data, guid) or_return
+	return material_pipeline(r, b.material, b.switches)
 }
 
 // Material_Block is what a material's or an instance's blob gives a draw: its material, its switches, and its

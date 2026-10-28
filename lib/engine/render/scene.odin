@@ -294,6 +294,8 @@ Scene_Frame :: struct {
 	items:           []Cull_Item,
 	// A material pipeline for each bin, and each bin's first draw and its count of items, within a view's draws.
 	bin_pipelines:   []int,
+	// The pipeline that each bin draws with this frame: its own, or a substitute while its own compiles.
+	bin_draws:       []int,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
 	// The draws of one view: the items, with each surface's reserved patches.
@@ -469,6 +471,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		}
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
+	sf.bin_draws = bin_draws(r, sf.bin_pipelines)
 	sf.items = items[:]
 	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	// The surfaces' records name their items, now that the bins' order is the items'.
@@ -954,10 +957,11 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 }
 
 // draw_scene_view draws each bin of a view's group with one indirect draw, with its material's pipeline for a pass (see
-// VIEW_CAMERA). A bin whose pipeline is not compiled yet draws nothing. The forward and transparent passes push the
-// frame's textures. The sorted transparent draws blend over the scene, a two-sided one's back faces first. Every pass
-// but the shadow maps' draws with the view model's stencil bit as the reference: set for the view model, clear for the
-// world (see docs/rendering/layers-and-output.md#view-model).
+// VIEW_CAMERA). A bin whose pipeline is not compiled yet draws with its blend mode's substitute, which bin_draws chose
+// (see docs/rendering/materials.md#runtime). The forward and transparent passes push the frame's textures. The sorted
+// transparent draws blend over the scene, a two-sided one's back faces first. Every pass but the shadow maps' draws with
+// the view model's stencil bit as the reference: set for the view model, clear for the world (see
+// docs/rendering/layers-and-output.md#view-model).
 @(private)
 draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque) {
 	sf := f.scene_frame
@@ -977,13 +981,14 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	bin_count := len(sf.bin_pipelines)
 	bins := sf.groups[group]
 	for bin in bins[0] ..< bins[1] {
-		p := &f.renderer.materials.pipelines[sf.bin_pipelines[bin]]
+		p := &f.renderer.materials.pipelines[sf.bin_draws[bin]]
 		pipelines := [2]gpu.Pipeline{{}, p.pipelines[pass]}
 		if pass == .Transparent && group == .Sorted {
 			pipelines = p.over
 		}
-		// The same test as add_items, so the bin's items are all on the path that it draws.
-		mesh_path := p.mesh_path && group == .Opaque
+		// The same test as add_items, of the bin's own material, so the bin's items are all on the path that it draws. A
+		// substitute without the path draws nothing there.
+		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
 		}

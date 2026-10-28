@@ -93,7 +93,7 @@ cinnabar/
 │       ├── project/         The project settings file
 │       ├── debug/           The immediate-mode debug drawing API
 │       ├── wire/            Framing, wire format and schema writer, shared by both links
-│       └── content/         Engine content: shaders, shading models, the default material, the preview meshes
+│       └── content/         Engine content: shaders, shading models, the default and placeholder materials, the preview meshes
 ├── src/
 │   ├── host/                The development host: main.odin (the reload loop), link.odin (the editor link server)
 │   └── editor/              The C# editor solution, one project per concern
