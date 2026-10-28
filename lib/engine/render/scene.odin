@@ -115,6 +115,10 @@ Frame_Constants :: struct {
 	surfaces_offset:          u32,
 	// The particle ribbons' vertices (see docs/rendering/particles.md#ribbons).
 	ribbon_vertices:          u32,
+	// The mesh particles' instances, which a draw with DRAW_PARTICLES reads (see
+	// docs/rendering/particles.md#mesh-particles).
+	particle_instances:       u32,
+	padding:                  [3]u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -137,7 +141,9 @@ Material_Push :: struct {
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
 // mesh is the mesh's index, with the submesh's index in its mesh above ID_ENTITY_BITS, as the ID buffer has it. first
 // and count are the submesh's indices, or on the mesh shader path its meshlets. bound is the material's displacement
-// bound in meters, which the mesh shader path's culling adds to each meshlet's sphere.
+// bound in meters, which the mesh shader path's culling adds to each meshlet's sphere. A draw with DRAW_PARTICLES draws
+// its submesh once for each of its emitter's living particles, whose instances start at instance in
+// Frame_Constants.particle_instances (see docs/rendering/particles.md#mesh-particles).
 Draw_Record :: struct {
 	instance: u32,
 	mesh:     u32,
@@ -145,8 +151,12 @@ Draw_Record :: struct {
 	material: u32,
 	count:    u32,
 	bound:    f32,
-	padding:  [2]u32,
+	flags:    u32,
+	padding:  u32,
 }
+
+// Matches DRAW_PARTICLES in material_common.hlsli and particle_meshes.hlsl.
+DRAW_PARTICLES :: 1
 
 MESH_RECORD_INDEX32 :: 1
 MESH_RECORD_UV1 :: 2
@@ -177,7 +187,9 @@ Instance_Record :: struct {
 	previous_rows: [3][4]f32,
 	id:            u32,
 	flags:         u32,
-	padding:       [2]u32,
+	// A mesh particle's color, as unorm8, which scales its mesh's vertex colors.
+	color:         u32,
+	padding:       u32,
 }
 
 // An item that casts shadows: its Mesh_Renderer's cast_shadows, and its material's.
@@ -198,6 +210,10 @@ ITEM_HAS_IMPOSTOR :: 64
 // A particle ribbon's item, whose draw the GPU writes (see docs/rendering/particles.md#ribbons): cull_draws.hlsl skips
 // it, and ribbon_build.hlsl writes its draw in the camera's view.
 ITEM_RIBBON :: 128
+// A mesh particle emitter's item of a submesh, whose draws particle_meshes.hlsl writes (see
+// docs/rendering/particles.md#mesh-particles): cull_draws.hlsl skips it, and sort_bins gives it a bin of its own,
+// which draws with vertex pulling.
+ITEM_PARTICLES :: 256
 // The vertices of an impostor's quad.
 IMPOSTOR_VERTICES :: 6
 
@@ -219,7 +235,9 @@ Cull_Item :: struct {
 	sphere:   [4]f32,
 	bound:    f32,
 	impostor_error: f32,
-	padding:  [2]u32,
+	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles.
+	entry:    u32,
+	padding:  u32,
 	lod_sphere: [4]f32,
 }
 
@@ -273,7 +291,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 640 && size_of(Cull_Constants) == 112)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 656 && size_of(Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -331,8 +349,10 @@ Scene_Frame :: struct {
 	bin_pipelines:   []int,
 	// The pipeline that each bin draws with this frame: its own, or a substitute while its own compiles.
 	bin_draws:       []int,
-	// The bins of impostors, which draw with their pipelines' impostor passes.
+	// The bins of impostors, which draw with their pipelines' impostor passes, and of mesh particles, which draw with
+	// vertex pulling.
 	bin_impostors:   []bool,
+	bin_particles:   []bool,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
 	// The draws of one view: the items, with each surface's reserved patches.
@@ -344,6 +364,10 @@ Scene_Frame :: struct {
 	// docs/rendering/particles.md#ribbons).
 	ribbons:         []Ribbon_Entry,
 	ribbon_vertices: Buffer,
+	// The mesh particles' items, and their instances once the particles' update writes them (see
+	// docs/rendering/particles.md#mesh-particles).
+	mesh_particles:     []Mesh_Particle_Entry,
+	particle_instances: Buffer,
 	// Each group's first bin and the bin after its last.
 	groups:          [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
@@ -492,7 +516,9 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	}
 	// The particle ribbons: a slot each, at their systems' anchors, and an item each, whose draw the GPU writes.
 	ribbons := add_ribbon_items(f, w, &table, &items, records, hidden)
-	// A slot whose entity has no Mesh_Renderer, Surface_Renderer or ribbon any more is free again.
+	// The mesh particles: an item for each submesh of each mesh emitter, whose draws the GPU writes.
+	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, records, hidden)
+	// A slot whose entity has no Mesh_Renderer, Surface_Renderer or particle system any more is free again.
 	for slot in 0 ..< s.high {
 		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
 			delete_key(&s.slots, s.slot_entities[slot])
@@ -516,6 +542,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
 	sf.bin_draws = bin_draws(r, sf.bin_pipelines)
 	sf.bin_impostors = bin_impostors(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
+	sf.bin_particles = bin_particles(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.items = items[:]
 	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	// The surfaces' records name their items, now that the bins' order is the items'.
@@ -526,8 +553,11 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		if item.flags & ITEM_RIBBON != 0 {
 			ribbons[item.mesh].item = u32(i)
 		}
+		if item.flags & ITEM_PARTICLES != 0 {
+			mesh_particles[item.entry].item = u32(i)
+		}
 	}
-	sf.ribbons = ribbons
+	sf.ribbons, sf.mesh_particles = ribbons, mesh_particles
 
 	platform := r.platform
 	ok := true
@@ -560,7 +590,8 @@ Sort_Item :: struct {
 
 // sort_bins writes the items in their bins' order, each with its bin, and gives each bin's material pipeline and each
 // group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, with its
-// impostors' items in a bin after its own, then a bin for each sorted item, the farthest first.
+// impostors' items and its mesh particles' items each in a bin after its own, then a bin for each sorted item, the
+// farthest first.
 @(private)
 sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
 	slice.sort_by(sorting, proc(a, b: Sort_Item) -> bool {
@@ -573,15 +604,15 @@ sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context
 		if a.item.bin != b.item.bin {
 			return a.item.bin < b.item.bin
 		}
-		return a.item.flags & ITEM_IMPOSTOR < b.item.flags & ITEM_IMPOSTOR
+		return a.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES) < b.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES)
 	})
 	bins := make([dynamic]int, allocator)
 	group_bins: [Bin_Group]int
 	for entry, i in sorting {
 		pipeline := int(entry.item.bin)
 		previous := sorting[max(i - 1, 0)]
-		impostor := entry.item.flags & ITEM_IMPOSTOR != previous.item.flags & ITEM_IMPOSTOR
-		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) || impostor {
+		kind := entry.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES) != previous.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES)
+		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) || kind {
 			append(&bins, pipeline)
 			group_bins[entry.group] += 1
 		}
@@ -604,6 +635,16 @@ bin_impostors :: proc(items: []Cull_Item, bins: int, allocator := context.alloca
 		impostors[item.bin] = item.flags & ITEM_IMPOSTOR != 0
 	}
 	return impostors
+}
+
+// bin_particles gives whether each bin is of mesh particles, whose items sort_bins gives bins of their own.
+@(private)
+bin_particles :: proc(items: []Cull_Item, bins: int, allocator := context.allocator) -> []bool {
+	particles := make([]bool, bins, allocator)
+	for item in items {
+		particles[item.bin] = item.flags & ITEM_PARTICLES != 0
+	}
+	return particles
 }
 
 // squared_distance is the squared distance to a point in an instance's space, moved by its rows, from another point.
@@ -701,6 +742,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		surfaces                 = gpu.read_index(sf.surface_upload.buffer),
 		surfaces_offset          = sf.surface_upload.offset,
 		ribbon_vertices          = gpu.read_index(r.particles.ribbon_vertices),
+		particle_instances       = gpu.read_index(r.particles.mesh_instances),
 		lights                   = gpu.read_index(lf.upload.buffer),
 		lights_offset            = lf.upload.offset,
 		directional_count        = u32(lf.directional_count),
@@ -846,6 +888,9 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	read(g, p, sf.instances)
 	if sf.ribbon_vertices != 0 {
 		read(g, p, sf.ribbon_vertices)
+	}
+	if sf.particle_instances != 0 {
+		read(g, p, sf.particle_instances)
 	}
 }
 
@@ -1083,9 +1128,10 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 			pipelines = p.over
 		}
 		// The same test as add_items, of the bin's own material, so the bin's items are all on the path that it draws. A
-		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes.
+		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes, and a mesh
+		// particles' bin with vertex pulling.
 		impostors := sf.bin_impostors[bin]
-		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors
+		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors && !sf.bin_particles[bin]
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
 		}

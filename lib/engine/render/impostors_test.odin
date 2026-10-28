@@ -127,7 +127,7 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 	// The material is on the mesh shader path, but its impostors' bin draws quads with vertex pulling.
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
 	sf.items[0].flags = ITEM_IMPOSTOR
-	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors = {0}, {0}, {true}
+	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles = {0}, {0}, {true}, {false}
 	sf.groups[.Opaque] = {0, 1}
 	sf.bin_offsets, sf.bin_counts = {0}, {1}
 	sf.view_count = 1

@@ -439,6 +439,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 
 	add_particle_passes(f)
 	add_ribbon_pass(f)
+	add_particle_mesh_pass(f)
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
 	}

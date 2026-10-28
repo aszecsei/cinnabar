@@ -33,8 +33,9 @@ emitter smoke
 | `texture` | `$<guid>` of a texture, whose colors tint the sprites and whose alpha scales their opacity. | a soft round puff |
 | `flipbook` | The texture's columns and rows of frames, and frames a second. | 1 1 0 |
 | `softness` | Meters in front of an opaque surface over which a sprite fades. | 0 |
-| `render` | `sprite`, a sprite for each particle, or `ribbon`, one ribbon through the particles in the order that they spawned (see [Ribbons](../../rendering/particles.md#ribbons)). | `sprite` |
-| `material` | `$<guid>` of a material with `geometry = ribbon`, which a ribbon draws with. | the engine's default ribbon material |
+| `render` | `sprite`, a sprite for each particle; `ribbon`, one ribbon through the particles in the order that they spawned (see [Ribbons](../../rendering/particles.md#ribbons)); or `mesh`, a mesh at each particle (see [Mesh particles](../../rendering/particles.md#mesh-particles)). | `sprite` |
+| `material` | `$<guid>` of a material: for a ribbon, one with `geometry = ribbon`; for a mesh, one that each of its submeshes draws with. | the engine's default ribbon material, or default material |
+| `mesh` | `$<guid>` of the mesh that a mesh emitter draws, which it needs. | none |
 
 **Modules** act on each living particle every step, in their order, at most `MAX_EFFECT_MODULES` (8):
 - `module gravity <x> <y> <z>`: an acceleration in the world, in meters per second squared.
@@ -43,8 +44,8 @@ emitter smoke
 - `module collide <restitution> <friction>`: bounces off what the camera saw last frame (see [Collision](../../rendering/particles.md#collision)), keeping `restitution` of the speed into the surface and `1 - friction` of the speed along it.
 
 **Curves** set a sprite's look, or a ribbon's at each particle, over a particle's life, from its birth at 0 to its death at 1. `curve <name> = <t>:<value> ...` gives keys in rising t, linear between them and held beyond them:
-- `color`: r, g, b and opacity, linear. An alpha left out is 1. Default: white and opaque.
-- `size`: half a side, or half a ribbon's width, in meters. Default: 0.1.
+- `color`: r, g, b and opacity, linear, which scale a mesh's vertex colors. An alpha left out is 1. Default: white and opaque.
+- `size`: half a side, half a ribbon's width, or a mesh's scale. Default: 0.1.
 - `emission`: r, g and b, the light that the sprite gives. Default: none.
 
 **The blob.** The cooker bakes each curve to `EFFECT_CURVE_SAMPLES` (64) evenly spaced samples, so the simulation reads a row and never keys. An `Effect_Blob` (`lib/engine/asset/format/effect.odin`) holds `Effect_Emitter` records, with their settings and a slice of `Effect_Module` records each, and the rows of every emitter's curves.

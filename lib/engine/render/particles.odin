@@ -20,6 +20,7 @@ import "cinnabar:engine/ecs"
 
 PARTICLE_UPDATE_SHADER :: #load("../content/shaders/particle_update.hlsl.meta", string)
 RIBBON_BUILD_SHADER :: #load("../content/shaders/ribbon_build.hlsl.meta", string)
+PARTICLE_MESHES_SHADER :: #load("../content/shaders/particle_meshes.hlsl.meta", string)
 PARTICLE_HISTORY_SHADER :: #load("../content/shaders/particle_history.hlsl.meta", string)
 
 PARTICLE_SYSTEM_ID :: ecs.Component_Id(52)
@@ -27,6 +28,9 @@ PARTICLE_SYSTEM_ID :: ecs.Component_Id(52)
 // The pool's size, in particles, and the systems that can be alive at once.
 MAX_PARTICLES :: 1 << 18
 MAX_PARTICLE_SYSTEMS :: 256
+// A frame's most emitters, whose counters of new particles are the first half of the counters, and whose counts of
+// mesh instances the second half. Matches MAX_FRAME_EMITTERS in particles.hlsli.
+MAX_FRAME_EMITTERS :: MAX_PARTICLE_SYSTEMS * format.MAX_EFFECT_EMITTERS
 // The pool's free ranges, which a pool of many small systems that come and go may fill.
 MAX_PARTICLE_RANGES :: 1024
 // A frame steps its particles by this much time at most, in seconds, so a long frame does not throw them far.
@@ -39,6 +43,10 @@ PARTICLE_HISTORY_FORMAT :: gpu.Format.RGBA16_Float
 // An emitter record's flag: a ribbon's emitter, which spawns in its range's order and appends no sprites. Matches
 // EMITTER_RIBBON in particles.hlsli.
 EMITTER_RIBBON :: 1
+// An emitter record's flag: a mesh emitter's, whose living particles append instances, not sprites, at its record's
+// first instance, or none at NO_PARTICLE_INSTANCES. Matches particles.hlsli.
+EMITTER_MESH :: 2
+NO_PARTICLE_INSTANCES :: 0xffffffff
 // Matches Ribbon_Vertex in ribbons.hlsli: two for each particle of a ribbon.
 RIBBON_VERTEX_SIZE :: 64
 
@@ -93,6 +101,10 @@ Particles :: struct {
 	// The ribbons' vertices, which ribbon_build.hlsl writes and ribbon materials draw, and how many it holds.
 	ribbon_vertices:          gpu.Buffer,
 	ribbon_capacity:          int,
+	meshes:                   Shader_Pipeline,
+	// The mesh particles' instances, which the update writes and their draws draw, and how many it holds.
+	mesh_instances:           gpu.Buffer,
+	mesh_capacity:            int,
 	// A registration, made again in renderer_reload.
 	systems:                  Extractor,
 	pool:                     gpu.Buffer,
@@ -154,6 +166,10 @@ Emitter_Record :: struct {
 	time:            f32,
 	head:            u32,
 	flags:           u32,
+	// A mesh emitter's anchor relative to the GPU scene's origin, its first instance, and its system's ID.
+	scene_anchor:    [3]f32,
+	instances:       u32,
+	id:              u32,
 }
 
 // Particle_Constants matches Particle_Constants in particles.hlsli, the update pass's pass constants.
@@ -174,7 +190,8 @@ Particle_Constants :: struct {
 	has_history:              u32,
 	history_size:             [2]u32,
 	near:                     f32,
-	padding:                  [3]u32,
+	mesh_instances:           u32,
+	padding:                  [2]u32,
 }
 
 // History_Push matches History_Push in particle_history.hlsl.
@@ -225,7 +242,43 @@ Ribbon_Push :: struct {
 	vertices:           u32,
 }
 
-#assert(size_of(Emitter_Record) == 180 && size_of(Particle_Constants) <= 256)
+// Mesh_Particle_Entry is a mesh particle emitter's item of one submesh this frame, in frame memory: build_scene gives
+// it its item and its emitter's first instance, and begin_particles its emitter's record, once its system steps.
+Mesh_Particle_Entry :: struct {
+	entity:         ecs.Entity,
+	emitter:        int,
+	item:           u32,
+	first_instance: u32,
+	record:         u32,
+	stepped:        bool,
+}
+
+// Mesh_Particle_Record matches Mesh_Particle_Record in particle_meshes.hlsl.
+@(private = "file")
+Mesh_Particle_Record :: struct {
+	emitter: u32,
+	item:    u32,
+}
+
+// Mesh_Particle_Push matches Mesh_Particle_Push in particle_meshes.hlsl.
+@(private = "file")
+Mesh_Particle_Push :: struct {
+	records:            u32,
+	records_offset:     u32,
+	count:              u32,
+	items:              u32,
+	items_offset:       u32,
+	views:              u32,
+	views_offset:       u32,
+	bin_offsets:        u32,
+	bin_offsets_offset: u32,
+	bin_count:          u32,
+	counts:             u32,
+	arguments:          u32,
+	draws:              u32,
+}
+
+#assert(size_of(Emitter_Record) == 200 && size_of(Particle_Constants) <= 256)
 
 // Particle_Frame is what one frame's particle passes need, in frame memory.
 @(private)
@@ -239,6 +292,8 @@ Particle_Frame :: struct {
 	target:    Sprite_Target,
 	pool:      Buffer,
 	counters:  Buffer,
+	// The mesh particles' instances, when the frame has mesh particles.
+	instances: Buffer,
 	history:   History,
 	// The history's label, one for each view that keeps one.
 	history_label: string,
@@ -260,6 +315,7 @@ particles_init :: proc(p: ^Particles, w: ^ecs.World) {
 	p.update = shader_pipeline(PARTICLE_UPDATE_SHADER)
 	p.history = shader_pipeline(PARTICLE_HISTORY_SHADER)
 	p.ribbon = shader_pipeline(RIBBON_BUILD_SHADER)
+	p.meshes = shader_pipeline(PARTICLE_MESHES_SHADER)
 	particles_register(p, w)
 }
 
@@ -272,7 +328,8 @@ particles_destroy :: proc(p: ^Particles, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&p.update, platform)
 	destroy_shader_pipeline(&p.history, platform)
 	destroy_shader_pipeline(&p.ribbon, platform)
-	for b in ([]gpu.Buffer{p.pool, p.counters, p.ribbon_vertices}) {
+	destroy_shader_pipeline(&p.meshes, platform)
+	for b in ([]gpu.Buffer{p.pool, p.counters, p.ribbon_vertices, p.mesh_instances}) {
 		if b != {} {
 			platform.gpu_destroy_buffer(b)
 		}
@@ -285,6 +342,7 @@ sync_particle_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&p.update, r.platform, r.residency.assets, {label = "particle update"}, force)
 	sync_compute_pipeline(&p.history, r.platform, r.residency.assets, {label = "particle history"}, force)
 	sync_compute_pipeline(&p.ribbon, r.platform, r.residency.assets, {label = "ribbon build"}, force)
+	sync_compute_pipeline(&p.meshes, r.platform, r.residency.assets, {label = "particle meshes"}, force)
 }
 
 // begin_particles steps the systems' state on the CPU, after begin_sprites: what each emitter spawns this frame, from
@@ -349,11 +407,20 @@ begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32, pla
 			anchor := ecs.position_sub(slot.anchor, f.view.position)
 			previous_anchor := ecs.position_sub(slot.anchor, p.previous_position)
 			records := step_slot(r, step, slot, data, pose_rows(pose, slot.anchor), anchor, previous_anchor, system_dt, scale, system.paused)
-			// The frame's ribbons of this system draw from their emitters' records.
+			// The frame's ribbons and mesh particles of this system draw from their emitters' records, and a mesh
+			// emitter's record names its instances.
 			if f.scene_frame != nil {
 				for &ribbon in f.scene_frame.ribbons {
 					if ribbon.entity == e && records[ribbon.emitter] >= 0 {
 						ribbon.record, ribbon.stepped = u32(records[ribbon.emitter]), true
+					}
+				}
+				for &entry in f.scene_frame.mesh_particles {
+					if entry.entity == e && records[entry.emitter] >= 0 {
+						entry.record, entry.stepped = u32(records[entry.emitter]), true
+						record := &step.emitters[entry.record]
+						record.instances, record.id = entry.first_instance, entity_id(e)
+						record.scene_anchor = ecs.position_sub(slot.anchor, r.scene.origin)
 					}
 				}
 			}
@@ -381,7 +448,7 @@ particles_ready :: proc(f: ^Frame) -> bool {
 	}
 	if p.pool == {} {
 		p.pool = platform.gpu_create_buffer({size = MAX_PARTICLES * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
-		p.counters = platform.gpu_create_buffer({size = MAX_PARTICLE_SYSTEMS * format.MAX_EFFECT_EMITTERS * 4, usage = {.Storage}, label = "particle counters"}, nil)
+		p.counters = platform.gpu_create_buffer({size = MAX_FRAME_EMITTERS * 2 * 4, usage = {.Storage}, label = "particle counters"}, nil)
 		p.free[0], p.free_count = {0, MAX_PARTICLES}, 1
 	}
 	return true
@@ -433,7 +500,8 @@ slot_effect :: proc(p: ^Particles, slot: ^Particle_Slot, assets: ^asset.Assets, 
 
 // step_slot steps a started system by dt and appends its emitters' records: what each spawns from its rate, its
 // carried fraction and its bursts, and the records of its ranges. It gives each emitter's record in the step, or -1
-// for an emitter without one. A ribbon's emitter spawns in its range's order and reserves no sprites.
+// for an emitter without one. A ribbon's emitter spawns in its range's order, and neither it nor a mesh emitter
+// reserves sprites.
 @(private = "file")
 step_slot :: proc(
 	r: ^Renderer,
@@ -472,6 +540,7 @@ step_slot :: proc(
 		em_modules := format.effect_modules(data, em)
 		spawned := u32(min(spawn, int(rng.count)))
 		ribbon := em.render == .Ribbon
+		mesh := em.render == .Mesh
 		head := slot.head[k]
 		if ribbon {
 			slot.head[k] = (head + spawned) % rng.count
@@ -483,7 +552,8 @@ step_slot :: proc(
 			spawn           = spawned,
 			reset           = u32(slot.reset),
 			head            = head,
-			flags           = ribbon ? EMITTER_RIBBON : 0,
+			flags           = ribbon ? EMITTER_RIBBON : mesh ? EMITTER_MESH : 0,
+			instances       = NO_PARTICLE_INSTANCES,
 			rows            = rows,
 			anchor          = anchor,
 			seed            = u32(p.frame) * 2654435761 ~ u32(len(step.emitters)) * 40503 ~ rng.first,
@@ -505,7 +575,7 @@ step_slot :: proc(
 		})
 		append(&step.modules, ..em_modules)
 		append(&step.curves, ..effect_curves[em.curves:][:len(format.Effect_Curve)])
-		if !ribbon {
+		if em.render == .Sprite {
 			step.capacity += int(rng.count)
 		}
 	}
@@ -594,11 +664,22 @@ begin_preview_particles :: proc(f: ^Frame, desc: ^Preview_Desc, camera: [3]f32) 
 	finish_particles(f, step, previous.view_projection, has_previous, "particle history (preview)")
 }
 
-// ribbon_key is the GPU scene's key for a system's ribbons' instance: its entity with the generation's top bit set,
+// particle_key is the GPU scene's key for a system's anchor's instance: its entity with the generation's top bit set,
 // which no entity's generation reaches, so the system's entity keeps its own slot for a Mesh_Renderer.
 @(private = "file")
-ribbon_key :: proc(e: ecs.Entity) -> ecs.Entity {
+particle_key :: proc(e: ecs.Entity) -> ecs.Entity {
 	return e | ecs.Entity(1 << 63)
+}
+
+// anchor_instance writes a system's instance at its anchor, which stays, and gives its slot: what its ribbons'
+// vertices are relative to, and what the sorted draws of its mesh particles sort by.
+@(private = "file")
+anchor_instance :: proc(s: ^Gpu_Scene, slot: ^Particle_Slot, e: ecs.Entity, records: []Instance_Record) -> (instance: u32, ok: bool) {
+	instance = scene_slot(s, particle_key(e)) or_return
+	rows := pose_rows({position = slot.anchor, rotation = 1, scale = 1}, s.origin)
+	records[instance] = {rows = rows, previous_rows = rows, id = entity_id(e)}
+	s.previous[instance], s.seen[instance] = {}, s.frame
+	return instance, true
 }
 
 // add_ribbon_items adds, while build_scene writes the instances, an item for each ribbon of each started system that
@@ -641,14 +722,10 @@ add_ribbon_items :: proc(f: ^Frame, w: ^ecs.World, table: ^Material_Table, items
 					continue
 				}
 				if !has_instance {
-					instance, has_instance = scene_slot(s, ribbon_key(e))
+					instance, has_instance = anchor_instance(s, slot, e, records)
 					if !has_instance {
 						break
 					}
-					// The ribbons' vertices are relative to the anchor, which stays.
-					rows := pose_rows({position = slot.anchor, rotation = 1, scale = 1}, s.origin)
-					records[instance] = {rows = rows, previous_rows = rows, id = entity_id(e)}
-					s.previous[instance], s.seen[instance] = {}, s.frame
 				}
 				append(items, Cull_Item{
 					instance = instance,
@@ -684,6 +761,98 @@ use_ribbon_material :: proc(r: ^Renderer, table: ^Material_Table, guid: format.G
 		return {}, false
 	}
 	return
+}
+
+// add_mesh_particle_items adds, while build_scene writes the instances, an item for each submesh of each mesh emitter
+// of each started system that is not hidden: in a bin of its material's own for mesh particles, the emitter's or the
+// engine's default material, and a range of the mesh particles' instances for each emitter, which grow to hold them.
+// It gives the frame's mesh particles, whose items build_scene sets once the bins are sorted. An item's instance is
+// the system's anchor, which the sorted draws sort by; its draws draw at the particles' instances.
+@(private)
+add_mesh_particle_items :: proc(
+	f: ^Frame,
+	w: ^ecs.World,
+	table: ^Material_Table,
+	meshes: ^[dynamic]Mesh_Record,
+	mesh_indices: ^map[^Resident_Mesh]u32,
+	items: ^[dynamic]Cull_Item,
+	records: []Instance_Record,
+	hidden: []u32,
+) -> []Mesh_Particle_Entry {
+	r := f.renderer
+	p := &r.particles
+	s := &r.scene
+	entries := make([dynamic]Mesh_Particle_Entry, r.platform.frame_allocator)
+	assets := r.residency.assets
+	if assets == nil || p.systems.query == 0 {
+		return entries[:]
+	}
+	instances := 0
+	it := ecs.query_iter(w, p.systems.query)
+	for view in ecs.query_next(&it) {
+		for e in ecs.entities(view) {
+			slot := find_particle_slot(p, e)
+			if slot == nil || !slot.started || is_hidden(hidden, e) {
+				continue
+			}
+			data, loaded := asset.data(assets, slot.handle)
+			blob, ok := format.effect_view(data)
+			if !loaded || !ok {
+				continue
+			}
+			emitters := format.effect_emitters(data, blob)
+			for em, k in emitters[:min(len(emitters), format.MAX_EFFECT_EMITTERS)] {
+				if em.render != .Mesh || slot.ranges[k].count == 0 {
+					continue
+				}
+				mesh, ready := resident_mesh(&r.residency, em.mesh)
+				if !ready {
+					continue
+				}
+				anchor := anchor_instance(s, slot, e, records) or_break
+				mesh_index, known := mesh_indices[mesh]
+				if !known {
+					mesh_index = u32(len(meshes))
+					append(meshes, mesh_record(mesh))
+					mesh_indices[mesh] = mesh_index
+				}
+				for submesh, sub in mesh.submeshes[:mesh.submesh_count] {
+					use := use_material(r, table, em.material) or_continue
+					// A material that draws patches or ribbons draws no mesh: the default material stands in.
+					if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
+						use = use_material(r, table, {}) or_continue
+					}
+					pipeline := &r.materials.pipelines[use.pipeline]
+					flags: u32 = ITEM_PARTICLES
+					if pipeline.cast_shadows {
+						flags |= ITEM_CASTS_SHADOWS
+					}
+					b := mesh.submesh_bounds[sub] if sub < MAX_SUBMESHES else mesh.bounds
+					append(items, Cull_Item {
+						instance = anchor,
+						mesh     = mesh_index,
+						first    = submesh.first_index,
+						count    = submesh.index_count,
+						material = use.block,
+						bin      = u32(use.pipeline),
+						flags    = flags,
+						submesh  = u32(min(sub, ID_MAX_SUBMESH)),
+						sphere   = {b.center.x, b.center.y, b.center.z, b.radius},
+						bound    = pipeline.displacement_bound,
+						entry    = u32(len(entries)),
+					})
+					append(&entries, Mesh_Particle_Entry{entity = e, emitter = k, first_instance = u32(instances)})
+				}
+				instances += int(slot.ranges[k].count)
+			}
+		}
+	}
+	if instances > p.mesh_capacity {
+		r.platform.gpu_destroy_buffer(p.mesh_instances)
+		p.mesh_capacity = instances
+		p.mesh_instances = r.platform.gpu_create_buffer({size = u32(instances * size_of(Instance_Record)), usage = {.Storage}, label = "particle instances"}, nil)
+	}
+	return entries[:]
 }
 
 // find_particle_slot is a system's slot, or nil before its first frame.
@@ -768,6 +937,77 @@ run_ribbon_build :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pass_constants(ctx.cb, f.particles.constants)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_dispatch(ctx.cb, {u32(rf.count), 1, 1})
+}
+
+// add_particle_mesh_pass adds the mesh particles' draws after the particles' update, which wrote their instances: a
+// draw of each submesh item of each mesh emitter in each view, for each of its living particles. A mesh emitter whose
+// system did not step this frame draws nothing.
+@(private)
+add_particle_mesh_pass :: proc(f: ^Frame) {
+	pf := f.particles
+	sf := f.scene_frame
+	r := f.renderer
+	if pf == nil || sf == nil || pf.instances == 0 || len(sf.items) == 0 || !pipeline_ready(r.platform, &r.particles.meshes) {
+		return
+	}
+	records := make([dynamic]Mesh_Particle_Record, r.platform.frame_allocator)
+	for entry in sf.mesh_particles {
+		if entry.stepped {
+			append(&records, Mesh_Particle_Record{emitter = entry.record, item = entry.item})
+		}
+	}
+	if len(records) == 0 {
+		return
+	}
+	upload, ok := upload_bytes(r.platform, slice.to_bytes(records[:]))
+	if !ok {
+		return
+	}
+	mf := new(Mesh_Particle_Frame, r.platform.frame_allocator)
+	mf^ = {frame = f, records = upload, count = len(records)}
+	g := f.graph
+	pass := add_compute_pass(g, "particle meshes", run_particle_meshes, mf)
+	// The counts of instances are read through the counters' write view, which Particle_Constants names.
+	write(g, pass, pf.counters)
+	write(g, pass, sf.counts)
+	write(g, pass, sf.arguments)
+	write(g, pass, sf.draws)
+}
+
+// Mesh_Particle_Frame is the mesh particles' draws' data, in frame memory.
+@(private = "file")
+Mesh_Particle_Frame :: struct {
+	frame:   ^Frame,
+	records: gpu.Upload,
+	count:   int,
+}
+
+@(private = "file")
+run_particle_meshes :: proc(ctx: ^Pass_Context) {
+	mf := (^Mesh_Particle_Frame)(ctx.data)
+	f := mf.frame
+	sf := f.scene_frame
+	g := ctx.graph
+	cull := (^Cull_Constants)(raw_data(sf.cull_constants.data))
+	push := Mesh_Particle_Push {
+		records            = gpu.read_index(mf.records.buffer),
+		records_offset     = mf.records.offset,
+		count              = u32(mf.count),
+		items              = cull.items,
+		items_offset       = cull.items_offset,
+		views              = cull.views,
+		views_offset       = cull.views_offset,
+		bin_offsets        = cull.bin_offsets,
+		bin_offsets_offset = cull.bin_offsets_offset,
+		bin_count          = cull.bin_count,
+		counts             = gpu.write_index(gpu_buffer(g, sf.counts)),
+		arguments          = gpu.write_index(gpu_buffer(g, sf.arguments)),
+		draws              = gpu.write_index(gpu_buffer(g, sf.draws)),
+	}
+	gpu.cmd_set_pipeline(ctx.cb, f.renderer.particles.meshes.pipeline)
+	gpu.cmd_set_pass_constants(ctx.cb, f.particles.constants)
+	gpu.cmd_push_constants(ctx.cb, &push)
+	gpu.cmd_dispatch(ctx.cb, {(u32(mf.count) + 63) / 64, u32(sf.view_count), 1})
 }
 
 // particle_slot is a system's slot, or a new one the first time that it is seen, or nil when every slot is in use.
@@ -883,7 +1123,10 @@ add_particle_passes :: proc(f: ^Frame) {
 	pf.history = history_texture(g, {size = f.size, format = PARTICLE_HISTORY_FORMAT, label = pf.history_label})
 	pass := add_compute_pass(g, "particle counters", proc(ctx: ^Pass_Context) {
 		pf := (^Frame)(ctx.data).particles
-		gpu.cmd_copy_buffer(ctx.cb, pf.zeros.buffer, pf.zeros.offset, gpu_buffer(ctx.graph, pf.counters), 0, u32(pf.count * 4))
+		// The new particles' counters, and the mesh emitters' counts of instances.
+		counters := gpu_buffer(ctx.graph, pf.counters)
+		gpu.cmd_copy_buffer(ctx.cb, pf.zeros.buffer, pf.zeros.offset, counters, 0, u32(pf.count * 4))
+		gpu.cmd_copy_buffer(ctx.cb, pf.zeros.buffer, pf.zeros.offset, counters, MAX_FRAME_EMITTERS * 4, u32(pf.count * 4))
 	}, f)
 	copy_dest(g, pass, pf.counters)
 	pass = add_compute_pass(g, "particle update", run_particle_update, f)
@@ -891,6 +1134,12 @@ add_particle_passes :: proc(f: ^Frame) {
 	write(g, pass, pf.counters)
 	write(g, pass, pf.target.records)
 	write(g, pass, pf.target.count)
+	// The mesh particles' instances, which only the main frame's systems write.
+	if sf := f.scene_frame; sf != nil && len(sf.mesh_particles) > 0 && p.mesh_instances != {} {
+		pf.instances = import_buffer(g, p.mesh_instances)
+		sf.particle_instances = pf.instances
+		write(g, pass, pf.instances)
+	}
 	if pf.history.previous != 0 && pf.history.valid {
 		read(g, pass, pf.history.previous)
 	}
@@ -937,6 +1186,9 @@ run_particle_update :: proc(ctx: ^Pass_Context) {
 	c.counters = gpu.write_index(gpu_buffer(g, pf.counters))
 	c.sprites = gpu.write_index(gpu_buffer(g, pf.target.records))
 	c.sprite_count = gpu.write_index(gpu_buffer(g, pf.target.count))
+	if pf.instances != 0 {
+		c.mesh_instances = gpu.write_index(gpu_buffer(g, pf.instances))
+	}
 	if pf.history.valid && pf.history.previous != 0 && pf.has_previous {
 		c.history = gpu.read_index(gpu_texture(g, pf.history.previous))
 		c.has_history = 1

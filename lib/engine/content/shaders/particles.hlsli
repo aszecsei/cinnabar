@@ -19,8 +19,13 @@ static const uint CURVE_SIZE = 1;
 static const uint CURVE_EMISSION = 2;
 // Matches format.EFFECT_CURVE_SAMPLES.
 static const uint CURVE_SAMPLES = 64;
-// Matches EMITTER_RIBBON in lib/engine/render/particles.odin.
+// Matches EMITTER_RIBBON, EMITTER_MESH and NO_PARTICLE_INSTANCES in lib/engine/render/particles.odin.
 static const uint EMITTER_RIBBON = 1;
+static const uint EMITTER_MESH = 2;
+static const uint NO_PARTICLE_INSTANCES = 0xffffffff;
+// The second half of the counters, after a frame's most emitters: each mesh emitter's living particles. Matches
+// MAX_FRAME_EMITTERS in lib/engine/render/particles.odin.
+static const uint MAX_FRAME_EMITTERS = 2048;
 
 // Matches PARTICLE_SIZE in lib/engine/render/particles.odin: a particle of the pool, relative to its system's anchor.
 // A lifetime of 0 is a dead particle.
@@ -67,6 +72,11 @@ struct Emitter_Record {
 	// A ribbon's emitter spawns in its range's order, from head, so its particles stay in the order that they spawned.
 	uint head;
 	uint flags;
+	// A mesh emitter's anchor relative to the GPU scene's origin, its first instance in the frame's particle instances,
+	// or NO_PARTICLE_INSTANCES when it draws none, and its system's value in the ID buffer.
+	float3 scene_anchor;
+	uint instances;
+	uint id;
 };
 
 // Matches format.Effect_Module.
@@ -94,7 +104,9 @@ struct Particle_Constants {
 	uint has_history;
 	uint2 history_size;
 	float near;
-	uint3 padding;
+	// The mesh particles' instances, which the update writes (see docs/rendering/particles.md#mesh-particles).
+	uint mesh_instances;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Particle_Constants, constants);
 

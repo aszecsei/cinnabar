@@ -12,7 +12,7 @@ import format "cinnabar:engine/asset/format"
 // Effects are .effect text files: emitters of particles, each with settings, modules and curves, which the renderer's
 // simulation runs (see docs/content/kinds/effects.md#effects). The cooker parses one, bakes its curves to
 // format.EFFECT_CURVE_SAMPLES samples and writes an Effect blob.
-EFFECT_COOK_VERSION :: "effects 2"
+EFFECT_COOK_VERSION :: "effects 3"
 
 // EFFECT_TEMPLATE is a new effect's text: one emitter of soft puffs that rise and fade.
 EFFECT_TEMPLATE :: `effect 1
@@ -110,7 +110,7 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 		return true
 	}
 	for e in emitters {
-		for dependency in ([]format.Guid{e.emitter.texture, e.emitter.material}) {
+		for dependency in ([]format.Guid{e.emitter.texture, e.emitter.material, e.emitter.mesh}) {
 			if dependency != {} {
 				append(&a.dependencies, dependency)
 			}
@@ -142,6 +142,9 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 	check_emitter :: proc(found: ^[dynamic]Effect_Problem, e: format.Effect_Emitter, line: int) {
 		if e.render == .Ribbon && e.capacity > format.MAX_RIBBON_CAPACITY {
 			append(found, Effect_Problem{line, fmt.aprintf("a ribbon emitter holds at most %d particles", format.MAX_RIBBON_CAPACITY)})
+		}
+		if e.render == .Mesh && e.mesh == {} {
+			append(found, Effect_Problem{line, fmt.aprintf("a mesh emitter needs a mesh")})
 		}
 	}
 	finish :: proc(e: ^format.Effect_Emitter_Contents, modules: ^[dynamic]format.Effect_Module, keys: ^[format.Effect_Curve][dynamic]Curve_Key) {
@@ -365,7 +368,7 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 			return ""
 		}
 		return fmt.tprintf("unknown shape %q: point, sphere, box or cone", values[0])
-	case "texture", "material":
+	case "texture", "material", "mesh":
 		if len(values) != 1 || !strings.has_prefix(values[0], "$") {
 			return fmt.tprintf("%s is $<guid>", key)
 		}
@@ -373,10 +376,13 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 		if !ok {
 			return fmt.tprintf("%s: %q is not a GUID", key, values[0])
 		}
-		if key == "texture" {
+		switch key {
+		case "texture":
 			e.texture = guid
-		} else {
+		case "material":
 			e.material = guid
+		case:
+			e.mesh = guid
 		}
 	case "render":
 		switch len(values) == 1 ? values[0] : "" {
@@ -384,8 +390,10 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 			e.render = .Sprite
 		case "ribbon":
 			e.render = .Ribbon
+		case "mesh":
+			e.render = .Mesh
 		case:
-			return "render is sprite or ribbon"
+			return "render is sprite, ribbon or mesh"
 		}
 	case "flipbook":
 		if len(values) != 3 {

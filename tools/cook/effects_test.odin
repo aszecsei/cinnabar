@@ -32,11 +32,15 @@ emitter trail
 	render = ribbon
 	capacity = 300
 	material = $00112233445566778899aabbccddeeff
+
+emitter debris
+	render = mesh
+	mesh = $ffeeddccbbaa99887766554433221100
 `
 	emitters, problems := effect_parse(text, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
-	testing.expect_value(t, len(emitters), 3)
-	if len(emitters) != 3 {
+	testing.expect_value(t, len(emitters), 4)
+	if len(emitters) != 4 {
 		return
 	}
 	smoke := emitters[0]
@@ -73,6 +77,9 @@ emitter trail
 	trail := emitters[2].emitter
 	testing.expect_value(t, trail.render, format.Effect_Render.Ribbon)
 	testing.expect_value(t, trail.material, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	debris := emitters[3].emitter
+	testing.expect_value(t, debris.render, format.Effect_Render.Mesh)
+	testing.expect_value(t, debris.mesh, format.guid_parse("ffeeddccbbaa99887766554433221100") or_else {})
 }
 
 @(test)
@@ -92,7 +99,9 @@ effect_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 		{"effect 1\nemitter a\n\tcolour = 1\n", 3},
 		{"effect 1\nemitter a\n\ttexture = abc\n", 3},
 		{"effect 1\n\tcapacity = 1\nemitter a\n", 2},
-		{"effect 1\nemitter a\n\trender = mesh\n", 3},
+		{"effect 1\nemitter a\n\trender = cube\n", 3},
+		// A mesh emitter needs a mesh, which its emitter's line names.
+		{"effect 1\nemitter a\n\trender = mesh\n", 2},
 		// A ribbon emitter holds at most MAX_RIBBON_CAPACITY particles, which its emitter's line names.
 		{"effect 1\n\nemitter a\n\trender = ribbon\n\tcapacity = 2000\n", 3},
 	}
