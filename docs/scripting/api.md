@@ -61,6 +61,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
+| `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, and the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
 - `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
@@ -133,13 +134,16 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `behaviour.enabled`, `OnEnable`, `OnDisable` | `self.enabled`, `on_enable`, `on_disable` |
 | `SetActive`, `activeSelf`, `activeInHierarchy` | `entity:set_active(b)`, `entity.active_self`, `entity.active_in_hierarchy` |
 | `FixedUpdate` | `fixed_update(dt)`, or a native `Fixed` system for heavy work ([Fixed step](behaviours.md#fixed-step)) |
+| `Rigidbody`, `Collider` | `RigidBody`, `Collider` |
+| `rb.AddForce(f)`, `rb.velocity` | `Physics.add_force(entity, f)`, `Physics.velocity(entity)` |
+| `Physics.Raycast`, `SphereCast`, `OverlapSphere` | `Physics.raycast`, `Physics.sphere_cast`, `Physics.overlap_sphere` |
+| `OnCollisionEnter`, `OnCollisionExit`, `OnTriggerEnter`, `OnTriggerExit` | `on_collision_enter(other, point, normal, velocity, impulse)`, `on_collision_exit(other)`, `on_trigger_enter(other)`, `on_trigger_exit(other)`; no `stay` (see [Physics: Events](../physics/design.md#events)) |
 | `GameObject.Find` | Not provided. Use fields or a `Name` index. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
 
 ## Future work
 
 - **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
-- **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). The design is [Physics: Events](../physics/design.md#events).
 - **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
 - **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.
 - **A `Name` index.** `GameObject.Find` stays absent; a maintained index on `Name` would give `World.find(name)` without a scan ([World](../world/README.md#future-work)).

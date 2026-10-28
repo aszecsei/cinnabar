@@ -125,6 +125,15 @@ declare Behaviour: {
 	define: (name: string, fields: { [string]: FieldSpec }?) -> { [any]: any },
 }
 
+-- A physics query's hit (see docs/physics/design.md#scripts): the entity whose body it hit, the point, the surface's
+-- normal there, and the distance along the ray or the sweep.
+type RaycastHit = {
+	entity: Entity,
+	position: WorldPosition,
+	normal: vector,
+	distance: number,
+}
+
 declare function wait(seconds: number?): ()
 declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()

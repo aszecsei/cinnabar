@@ -111,6 +111,7 @@ Event_Arg :: union {
 	string,
 	[3]f32,
 	ecs.Entity,
+	ecs.World_Position,
 }
 
 // send queues an event for an entity's behaviours, like a script's entity:send. Call it from the frame code, not
@@ -132,6 +133,8 @@ send :: proc(r: ^Runtime, e: ecs.Entity, name: string, args: ..Event_Arg) {
 			push_vector(L, v)
 		case ecs.Entity:
 			push_entity(L, v)
+		case ecs.World_Position:
+			push_position(L, v)
 		}
 	}
 	queue_event(r, L, base + 1, luau.gettop(L) - base)

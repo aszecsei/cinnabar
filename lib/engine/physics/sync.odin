@@ -27,6 +27,26 @@ tick :: proc(s: ^State, w: ^ecs.World) {
 	results: core_physics.Step_Results
 	api(s).results(s.world, &results)
 	write_back(s, w, results.moved[:results.moved_count])
+	clear(&s.tick_contacts)
+	for e in results.contacts[:results.contact_count] {
+		c := Contact {
+			kind              = e.kind,
+			sensor            = e.sensor,
+			a                 = ecs.Entity(e.a_user),
+			b                 = ecs.Entity(e.b_user),
+			point             = ecs.position_offset_f64(s.anchor, e.point),
+			normal            = e.normal,
+			relative_velocity = e.relative_velocity,
+			impulse           = e.impulse,
+		}
+		append(&s.tick_contacts, c)
+		append(&s.frame_contacts, c)
+	}
+}
+
+// begin_frame starts the frame's contacts. Call it before the frame's ticks.
+begin_frame :: proc(s: ^State) {
+	clear(&s.frame_contacts)
 }
 
 // sync makes the backend's world match the components without stepping it, as the editor's edit mode does, so that
@@ -35,6 +55,8 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	if s.world.generation == 0 {
 		return false
 	}
+	// Before the sync's own commands, which may destroy the bodies that the effects name.
+	submit_pending(s)
 	list := core_physics.command_list(allocator_of(s))
 	commands := ecs.commands(allocator_of(s))
 	if s.settings_dirty {
@@ -318,6 +340,12 @@ create_body :: proc(
 	}
 	if material.sensor {
 		desc.flags += {.Sensor}
+	}
+	if material.detect_static {
+		desc.flags += {.Detect_Static}
+	}
+	if body.report_contacts {
+		desc.flags += {.Report_Contacts}
 	}
 	if body.ccd {
 		desc.flags += {.Ccd}

@@ -1,6 +1,7 @@
 package physics
 
 import "base:runtime"
+import "core:c"
 import "core:log"
 import "core:mem/virtual"
 import "core:sync"
@@ -8,11 +9,14 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/jobs"
+import "cinnabar:core/luau"
 import core_physics "cinnabar:core/physics"
 import physics_host "cinnabar:core/physics/host"
 import physics_jolt "cinnabar:core/physics/jolt"
 import physics_null "cinnabar:core/physics/null"
+import script_host "cinnabar:core/script"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/script"
 
 // The scheduler and the backends are singletons, and the test runner runs tests on several threads.
 @(private = "file")
@@ -25,10 +29,15 @@ Fixture :: struct {
 	host:     core_physics.Host,
 	world:    ecs.World,
 	physics:  State,
+	// With scripts: the runtime, the entity that Test.box gives, and what Test.report reported.
+	scripts:  bool,
+	runtime:  script.Runtime,
+	box:      ecs.Entity,
+	reports:  [dynamic]f64,
 }
 
 @(private = "file")
-setup :: proc(t: ^testing.T, null := false, quiet := false) -> ^Fixture {
+setup :: proc(t: ^testing.T, null := false, quiet := false, scripts := false) -> ^Fixture {
 	sync.lock(&lock)
 	testing.expect(t, jobs.init())
 	f := new(Fixture)
@@ -55,17 +64,49 @@ setup :: proc(t: ^testing.T, null := false, quiet := false) -> ^Fixture {
 			virtual.release(ptr, uint(size))
 		},
 		physics = api^,
+		time_seconds = proc() -> f64 {return 0},
+		script_open = script_host.open,
+		script_close = script_host.close,
+		script_push_binding = script_host.push_binding,
+		script_atom = script_host.atom,
+		script_direct_access = script_host.direct_access,
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	register_components(&f.world.registry)
 	testing.expect(t, init(&f.physics, &f.platform))
 	register(&f.physics, &f.world)
+	if scripts {
+		f.scripts = true
+		f.reports = make([dynamic]f64)
+		script.register_components(&f.world.registry)
+		context.user_ptr = f
+		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+	}
 	return f
 }
 
 @(private = "file")
+register_test_scripts :: proc(r: ^script.Runtime) {
+	f := (^Fixture)(context.user_ptr)
+	register_scripts(r, &f.physics)
+	script.define(r, "Test.report", proc(L: ^luau.State) -> c.int {
+		f := (^Fixture)(context.user_ptr)
+		append(&f.reports, luau.L_checknumber(L, 1))
+		return 0
+	})
+	script.define(r, "Test.box", proc(L: ^luau.State) -> c.int {
+		script.push_entity(L, (^Fixture)(context.user_ptr).box)
+		return 1
+	})
+}
+
+@(private = "file")
 teardown :: proc(t: ^testing.T, f: ^Fixture) {
+	if f.scripts {
+		script.destroy(&f.runtime)
+		delete(f.reports)
+	}
 	destroy(&f.physics)
 	testing.expect_value(t, f.platform.physics.world_destroy_all(), 0)
 	ecs.destroy(&f.world)
@@ -83,10 +124,18 @@ ticks :: proc(f: ^Fixture, n: int) {
 		// To the start of the next tick exactly: a tick's length in nanoseconds is rounded.
 		clock := &f.world.clock
 		it := ecs.begin_ticks(&f.world, ecs.tick_start(clock, clock.tick + 1) - clock.time)
+		begin_frame(&f.physics)
 		for ecs.next_tick(&it) {
 			ecs.run_tick_systems(&it, nil)
+			if f.scripts {
+				script.fixed_update(&f.runtime, &it, {})
+			}
 			ecs.update_transforms(&f.world)
 			tick(&f.physics, &f.world)
+			if f.scripts {
+				send_events(&f.physics, &f.world, &f.runtime)
+				script.fixed_events(&f.runtime)
+			}
 			ecs.update_transforms(&f.world)
 		}
 		free_all(f.platform.frame_allocator)
@@ -394,4 +443,154 @@ a_stack_rests_far_from_the_origin :: proc(t: ^testing.T) {
 		testing.expectf(t, abs(y - want) < 0.03, "box %d rests on the one below: y = %v, not %v", i, y, want)
 		testing.expectf(t, pb.asleep, "box %d is asleep", i)
 	}
+}
+
+// A box landing on the ground is one contact in the tick's list and the frame's, with the entities and the point in
+// world positions; begin_frame starts the frame's again.
+@(test)
+contacts_reach_the_lists :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	g := ground(f)
+	b := box(f, {0, 1, 0})
+	begins := 0
+	for _ in 0 ..< 60 {
+		ticks(f, 1)
+		for c in tick_contacts(&f.physics) {
+			testing.expect_value(t, c.kind, Contact_Kind.Begin)
+			testing.expect(t, c.a == g && c.b == b)
+			testing.expectf(t, abs(ecs.position_to_meters(c.point).y) < 0.05, "at the ground's top: %v", c.point)
+			begins += 1
+		}
+		testing.expect_value(t, len(frame_contacts(&f.physics)), len(tick_contacts(&f.physics)))
+	}
+	testing.expect_value(t, begins, 1)
+}
+
+// A box with a behaviour falls through a sensor and onto the ground: it gets on_trigger_enter and on_trigger_exit,
+// then on_collision_enter with the normal from it to the ground and an impulse; the ground's behaviour gets
+// on_collision_exit when the box is despawned.
+@(test)
+contacts_reach_behaviours :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	g := ground(f)
+	trigger := spawn_at(f, {0, 2, 0})
+	c := DEFAULT_COLLIDER
+	c.sensor = true
+	ecs.add(&f.world, trigger, c)
+	f.box = box(f, {0, 4, 0})
+	context.user_ptr = f
+	_, ok := script.spawn_source(&f.runtime, "=watcher", `
+local Watcher = Behaviour.define("Watcher")
+function Watcher:on_trigger_enter(other) Test.report(2) end
+function Watcher:on_trigger_exit(other) Test.report(3) end
+function Watcher:on_collision_enter(other, point, normal, velocity, impulse)
+	local code = 1
+	if normal.y < -0.9 then code += 10 end
+	if impulse > 0 then code += 100 end
+	if velocity.y > 0 then code += 1000 end
+	Test.report(code)
+end
+function Watcher:on_collision_exit(other) Test.report(4) end
+Test.box():add(Watcher)
+`)
+	testing.expect(t, ok)
+	ticks(f, 120)
+	testing.expectf(t, len(f.reports) == 3 && f.reports[0] == 2 && f.reports[1] == 3 && f.reports[2] == 1111, "reports %v", f.reports[:])
+	clear(&f.reports)
+
+	falling := f.box
+	f.box = g
+	_, ok = script.spawn_source(&f.runtime, "=ground", `
+local Ground = Behaviour.define("Ground")
+function Ground:on_collision_exit(other) Test.report(5) end
+Test.box():add(Ground)
+`)
+	testing.expect(t, ok)
+	ecs.despawn(&f.world, falling)
+	ticks(f, 1)
+	testing.expectf(t, len(f.reports) == 1 && f.reports[0] == 5, "the ground's behaviour sees the box go: %v", f.reports[:])
+}
+
+// Queries in world positions: a ray that ignores the first box hits the second, a swept sphere stops on a box, and an
+// overlap finds a box's entity.
+@(test)
+native_queries :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ground(f)
+	low := box(f, {0, 1, 0}, .Static)
+	high := box(f, {0, 4, 0}, .Static)
+	ticks(f, 1)
+	above := ecs.position_from_meters({0, 10, 0})
+	hit, ok := raycast(&f.physics, &f.world, above, {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == high)
+	testing.expectf(t, abs(ecs.position_to_meters(hit.position).y - 4.5) < 1e-3, "the top of the high box: %v", hit.position)
+	ignore := []ecs.Entity{high}
+	hit, ok = raycast(&f.physics, &f.world, above, {0, -2, 0}, 20, {layers = max(u32), ignore = ignore})
+	testing.expect(t, ok && hit.entity == low, "a ray that ignores the high box hits the low one")
+
+	hits: [4]Hit
+	testing.expect_value(t, raycast_all(&f.physics, &f.world, above, {0, -1, 0}, 20, hits[:]), 3)
+	testing.expect(t, hits[0].entity == high && hits[1].entity == low)
+
+	hit, ok = shape_cast(&f.physics, &f.world, {shape = .Sphere, radius = 0.5}, above, 1, {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == high)
+	testing.expectf(t, abs(hit.distance - 5) < 1e-3, "the sphere stops on the high box: %v", hit.distance)
+
+	found: [4]ecs.Entity
+	n := overlap(&f.physics, &f.world, {shape = .Box, size = 0.5}, ecs.position_from_meters({0, 1, 0.6}), 1, found[:])
+	testing.expect(t, n == 1 && found[0] == low)
+}
+
+// Scripts query, name layers, and push bodies: an impulse from fixed_update applies in the same tick.
+@(test)
+scripts_query_and_push :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	ground(f)
+	f.box = box(f, {0, 0.5, 0})
+	ticks(f, 1)
+	context.user_ptr = f
+	_, ok := script.spawn_source(&f.runtime, "=query", `
+local hit = Physics.raycast(WorldPosition.from_meters(0, 10, 0), vector.create(0, -1, 0))
+Test.report(hit and hit.entity == Test.box() and 1 or 0)
+Test.report(hit and math.abs(hit.distance - 9) < 0.05 and 1 or 0)
+Test.report(#Physics.overlap_sphere(WorldPosition.from_meters(0, 0.5, 0), 0.25))
+Test.report(Physics.layers("Default"))
+Test.report(Physics.raycast(WorldPosition.from_meters(30, 10, 30), vector.create(0, 1, 0)) == nil and 1 or 0)
+local Jumper = Behaviour.define("Jumper")
+function Jumper:fixed_update(dt)
+	if not self.jumped then
+		self.jumped = true
+		Physics.add_impulse(self.entity, vector.create(0, 1000, 0))
+	end
+end
+Test.box():add(Jumper)
+`)
+	testing.expect(t, ok)
+	testing.expectf(t, len(f.reports) == 5 && f.reports[0] == 1 && f.reports[1] == 1 && f.reports[2] == 1 && f.reports[3] == 1 && f.reports[4] == 1, "reports %v", f.reports[:])
+	ticks(f, 1)
+	testing.expectf(t, ecs.get(&f.world, f.box, Physics_Body).linear_velocity.y > 0.5, "the impulse applied in the tick: %v", ecs.get(&f.world, f.box, Physics_Body).linear_velocity)
+	ok = native_push(f)
+	testing.expect(t, ok)
+}
+
+// native_push is the same from native code, and an entity without a body is refused.
+@(private = "file")
+native_push :: proc(f: ^Fixture) -> bool {
+	e := spawn_at(f, {9, 9, 9})
+	return !add_impulse(&f.physics, &f.world, e, {0, 1, 0}) && add_impulse(&f.physics, &f.world, f.box, {0, 1, 0})
+}
+
+// A script's effect on an entity without a body raises an error, which names it.
+@(test)
+effects_need_a_body :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	context.user_ptr = f
+	context.logger = log.nil_logger()
+	_, ok := script.spawn_source(&f.runtime, "=bodiless", `Physics.add_force(World.spawn(), vector.create(0, 1, 0))`)
+	testing.expect(t, !ok)
 }

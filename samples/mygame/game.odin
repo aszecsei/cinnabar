@@ -527,6 +527,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	// The Render bindings read the Game_State's script_quality only when a script calls them, which the runtime of
 	// script_types, outside any Game_State, never does.
 	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
+	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -571,11 +572,13 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		// Each fixed tick runs the Fixed systems, the scripts' fixed step, the physics tick and the tick's events (see
 		// docs/physics/design.md#scripts-in-fixed-ticks).
 		ticks := ecs.begin_ticks(&s.world, step)
+		physics.begin_frame(&s.physics)
 		for ecs.next_tick(&ticks) {
 			ecs.run_tick_systems(&ticks, s)
 			script.fixed_update(&s.scripts, &ticks, input)
 			ecs.update_transforms(&s.world)
 			physics.tick(&s.physics, &s.world)
+			physics.send_events(&s.physics, &s.world, &s.scripts)
 			script.fixed_events(&s.scripts)
 			ecs.update_transforms(&s.world)
 		}

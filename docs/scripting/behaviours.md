@@ -92,7 +92,7 @@ Unity has two switches, and so does cinnabar:
 
 ### Events
 
-- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors or entities. Call it from the frame code: the queue is not safe for jobs. *Physics contacts will become `on_trigger_enter`, `on_collision_enter` and similar, sent from the frame code after the ticks ([Physics: Events](../physics/design.md#events)).*
+- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors, entities or world positions. Call it from the frame code: the queue is not safe for jobs. Physics contacts arrive this way as `on_collision_enter`, `on_trigger_enter` and the rest, sent by `physics.send_events` in each tick ([Physics: Events](../physics/design.md#events)).
 - `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase: events are delivered before `update` and again after the coroutines. Events that handlers send are delivered in the next round, for up to 16 rounds.
 - The script phase calls `on_<name>` on every enabled instance on the entity that defines it, in the order that the instances were added. An inactive entity gets no events.
 - An error in a handler logs the message with a traceback. The other handlers still run.
@@ -122,6 +122,9 @@ ticks := ecs.begin_ticks(&s.world, dt)
 for ecs.next_tick(&ticks) {
 	ecs.run_tick_systems(&ticks, s)
 	script.fixed_update(&s.scripts, &ticks, input)
+	ecs.update_transforms(&s.world)
+	physics.tick(&s.physics, &s.world)
+	physics.send_events(&s.physics, &s.world, &s.scripts)
 	script.fixed_events(&s.scripts)
 	ecs.update_transforms(&s.world)
 }
@@ -135,6 +138,6 @@ for ecs.next_tick(&ticks) {
 4. `fixed_update` for the classes that define it, in instance slot order.
 5. Deliver the events that it sent, and apply its structural changes.
 
-`script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. Physics contacts will be delivered here ([Physics: Events](../physics/design.md#events)).
+`script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. The tick's physics contacts are delivered here, after `physics.send_events` queues them ([Physics: Events](../physics/design.md#events)).
 
 What stays per frame: `update`, the other waits, events that `Update` systems queue, and the collector's step. The editor's edit mode runs no ticks, so no `fixed_update`, and a paused step runs one.

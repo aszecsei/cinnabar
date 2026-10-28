@@ -48,6 +48,7 @@ component 33 Mesh_Renderer
 	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
 	cast_shadows = true
 component 65 Collider
+behaviour ecc996e9308f4bf1b7d7b4d623429249
 
 entity 52f2b689117aa80c
 name = "Tall Box"
@@ -161,6 +162,7 @@ component 33 Mesh_Renderer
 	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
 component 64 Rigid_Body
+	mass = 1.0
 component 65 Collider
 
 entity f1a2b3c4d5e6f702
@@ -174,7 +176,9 @@ component 33 Mesh_Renderer
 	materials.0 = $7d2e4a9c1f6b4c3d8e5a2b7f9c0d1e64
 	cast_shadows = true
 component 64 Rigid_Body
+	mass = 1.0
 component 65 Collider
+	density = 1.0
 
 entity f1a2b3c4d5e6f703
 name = "Falling Box 3"
@@ -187,7 +191,9 @@ component 33 Mesh_Renderer
 	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
 component 64 Rigid_Body
+	mass = 1.0
 component 65 Collider
+	density = 1.0
 
 entity f1a2b3c4d5e6f704
 name = "Falling Box 4"
@@ -201,3 +207,4 @@ component 33 Mesh_Renderer
 	cast_shadows = true
 component 64 Rigid_Body
 component 65 Collider
+	density = 1.0

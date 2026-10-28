@@ -29,6 +29,8 @@ Rigid_Body :: struct {
 	// Continuous collision detection, for a fast body that would pass through thin ones.
 	ccd:             bool,
 	start_asleep:    bool,
+	// Its contacts reach Physics_Events and its entity's behaviours (see docs/physics/design.md#events).
+	report_contacts: bool,
 }
 
 DEFAULT_RIGID_BODY :: Rigid_Body {
@@ -36,6 +38,7 @@ DEFAULT_RIGID_BODY :: Rigid_Body {
 	linear_damping  = 0.05,
 	angular_damping = 0.05,
 	gravity_factor  = 1,
+	report_contacts = true,
 }
 
 Shape :: enum u8 {
@@ -64,6 +67,8 @@ Collider :: struct {
 	density:     f32 `editor:"range=1,20000"`,
 	// A sensor detects bodies and does not touch them (see docs/physics/design.md#events).
 	sensor:      bool,
+	// A sensor that does not move detects only bodies that move, unless this is set.
+	detect_static: bool,
 	// The object layer, an index into the project's physics.layers (see docs/physics/design.md#layers).
 	layer:       u8 `editor:"range=0,31"`,
 }
@@ -155,6 +160,11 @@ State :: struct {
 	layers:   Layers,
 	// Set_World goes to the backend before the next submit.
 	settings_dirty: bool,
+	// The contacts of the last tick, and of every tick since begin_frame (see Contact).
+	tick_contacts:  [dynamic]Contact,
+	frame_contacts: [dynamic]Contact,
+	// The effects that gameplay recorded since the last tick (see effects.odin), in the host's heap.
+	pending:        core_physics.Command_List,
 	queries:  struct {
 		new_colliders: ecs.Query,
 		new_bodies:    ecs.Query,
@@ -177,6 +187,9 @@ init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_D
 		bodies         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
 		shapes         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
 		records        = make([dynamic]Body_Record, allocator),
+		tick_contacts  = make([dynamic]Contact, allocator),
+		frame_contacts = make([dynamic]Contact, allocator),
+		pending        = core_physics.command_list(allocator),
 	}
 	s.layers = default_layers()
 	s.world = platform.physics.world_create(&desc)
@@ -201,11 +214,14 @@ reload :: proc(s: ^State, platform: ^core.Platform_API) {
 
 destroy :: proc(s: ^State) {
 	if s.platform != nil && s.world.generation != 0 {
+		submit_pending(s)
 		s.platform.physics.world_destroy(s.world)
 	}
 	pool_destroy(&s.bodies)
 	pool_destroy(&s.shapes)
 	delete(s.records)
+	delete(s.tick_contacts)
+	delete(s.frame_contacts)
 	s^ = {}
 }
 
