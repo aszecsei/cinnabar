@@ -9,8 +9,22 @@ public sealed record Transaction(string Label, IReadOnlyList<Operation> Operatio
 /// waits for the host. An interaction such as a drag groups its operations with <see cref="Begin"/>,
 /// <see cref="Preview"/> and <see cref="Commit"/> into one entry.
 /// </summary>
-public sealed class SceneDocument(string path, Scene scene)
+public sealed class SceneDocument
 {
+    /// <summary>
+    /// A document of a scene. <paramref name="openPrefab"/> opens a prefab's document by GUID, for the prefabs that
+    /// the scene instantiates, or gives null for one that it cannot find.
+    /// </summary>
+    public SceneDocument(string path, Scene scene, Func<string, PrefabDocument?>? openPrefab = null)
+    {
+        Path = path;
+        Scene = scene;
+        Prefabs = new PrefabSet(openPrefab ?? (_ => null));
+        Prefabs.Changed += Invalidate;
+    }
+
+    Expansion? _expanded;
+
     readonly List<Transaction> _history = [];
     // The open transaction: its label, its operations and their inverses in the order applied.
     string? _label;
@@ -18,9 +32,23 @@ public sealed class SceneDocument(string path, Scene scene)
     readonly List<Operation> _pendingInverses = [];
 
     /// <summary>The file's full path.</summary>
-    public string Path { get; private set; } = path;
+    public string Path { get; private set; }
 
-    public Scene Scene { get; } = scene;
+    /// <summary>The scene as its file has it, with instance blocks and override blocks.</summary>
+    public Scene Scene { get; }
+
+    /// <summary>The prefabs that the scene instantiates and those that its edits made, which it saves with it.</summary>
+    public PrefabSet Prefabs { get; }
+
+    /// <summary>
+    /// The scene with its instances expanded into plain entities, as the host loads it, and where each instance's
+    /// entity comes from (see docs/editor/prefabs.md#the-editors-documents). The panels, the gizmo and picking read
+    /// it, and an operation names its entities.
+    /// </summary>
+    public Expansion Expanded => _expanded ??= PrefabExpansion.Expand(Scene, Prefabs.SceneOf);
+
+    /// <summary>The expansion is out of date, as after an edit or a change of a prefab, and is made again when next read.</summary>
+    public void Invalidate() => _expanded = null;
 
     public string Title => System.IO.Path.GetFileName(Path);
 
@@ -47,7 +75,7 @@ public sealed class SceneDocument(string path, Scene scene)
     public event Action? Changed;
 
     /// <summary>Reads and parses a scene file. The document is null when the file cannot be read or has an error.</summary>
-    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path)
+    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, Func<string, PrefabDocument?>? openPrefab = null)
     {
         var full = System.IO.Path.GetFullPath(path);
         string text;
@@ -60,11 +88,12 @@ public sealed class SceneDocument(string path, Scene scene)
             return (null, [new SceneProblem(0, e.Message, true)]);
         }
         var (scene, problems) = SceneFile.Parse(text);
-        return (scene == null ? null : new SceneDocument(full, scene), problems);
+        return (scene == null ? null : new SceneDocument(full, scene, openPrefab), problems);
     }
 
     /// <summary>A document with the scene of an autosave for the file at path, with changes that the file lacks.</summary>
-    public static SceneDocument Restored(string path, Scene scene) => new(System.IO.Path.GetFullPath(path), scene) { SavedPosition = -1 };
+    public static SceneDocument Restored(string path, Scene scene, Func<string, PrefabDocument?>? openPrefab = null) =>
+        new(System.IO.Path.GetFullPath(path), scene, openPrefab) { SavedPosition = -1 };
 
     /// <summary>Applies operations as one undo entry.</summary>
     public void Apply(string label, params Operation[] operations)
@@ -96,7 +125,8 @@ public sealed class SceneDocument(string path, Scene scene)
 
     /// <summary>
     /// Applies an operation of the open entry at once, and sends it. An operation that replaces an earlier one, such
-    /// as the next step of a drag, takes its place, so the entry keeps the last value and the first inverse.
+    /// as the next step of a drag, takes its place, so the entry keeps the last value and the first inverse. An
+    /// operation on an instance's entity becomes the edit of its block that <see cref="PrefabEdits.Route"/> gives.
     /// </summary>
     public void Preview(Operation op) => Preview([op]);
 
@@ -110,9 +140,11 @@ public sealed class SceneDocument(string path, Scene scene)
         var applied = new List<Operation>();
         try
         {
-            foreach (var op in ops)
+            foreach (var given in ops)
             {
+                var op = PrefabEdits.Route(this, given);
                 var inverse = op.Apply(Scene);
+                Invalidate();
                 applied.Add(op);
                 if (Replaced(op) is var at and >= 0)
                 {
@@ -146,7 +178,7 @@ public sealed class SceneDocument(string path, Scene scene)
             {
                 return k;
             }
-            if (_pending[k] is not (SetField or SetBehaviourField))
+            if (_pending[k] is not (SetField or SetBehaviourField or BlockOperation { Key: not "" }))
             {
                 return -1;
             }
@@ -186,6 +218,7 @@ public sealed class SceneDocument(string path, Scene scene)
         foreach (var op in inverses)
         {
             op.Apply(Scene);
+            Invalidate();
         }
         if (inverses.Count > 0)
         {
@@ -233,6 +266,7 @@ public sealed class SceneDocument(string path, Scene scene)
         foreach (var op in operations)
         {
             op.Apply(Scene);
+            Invalidate();
         }
         Applied?.Invoke(operations);
         if (notify)
@@ -241,10 +275,17 @@ public sealed class SceneDocument(string path, Scene scene)
         }
     }
 
-    /// <summary>Writes the scene to its file, or to another path, which the document then has.</summary>
+    /// <summary>
+    /// Writes the scene to its file, or to another path, which the document then has, and every prefab that is dirty,
+    /// so a prefab that an edit made has its file when the scene that names it does.
+    /// </summary>
     public void Save(string? path = null)
     {
         var target = path == null ? Path : System.IO.Path.GetFullPath(path);
+        foreach (var prefab in Prefabs.Documents.Where(d => d.IsDirty))
+        {
+            prefab.Save();
+        }
         WriteAtomically(target, SceneFile.Write(Scene));
         Path = target;
         SavedPosition = Position;
