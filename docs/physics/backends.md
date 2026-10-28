@@ -2,7 +2,7 @@
 
 How a physics backend plugs into cinnabar, and what it must do: the library it is, how the host chooses and loads it, the contract of `Physics_API` and `Host`, and the conformance suite that every simulating backend passes. Read [Design](design.md#the-boundary) first for why the boundary is plain data and C. The Jolt backend, `lib/core/physics/jolt/jolt_backend.cpp`, is the reference, and the null backend, `lib/core/physics/null`, is the smallest one.
 
-**In this document:** [Loading](#loading) · [Choosing](#choosing) · [The contract](#the-contract) · [Features](#features) · [Writing a backend](#writing-a-backend) · [Conformance](#conformance) · [Future work](#future-work)
+**In this document:** [Loading](#loading) · [Choosing](#choosing) · [The contract](#the-contract) · [Features](#features) · [Writing a backend](#writing-a-backend) · [Conformance](#conformance)
 
 ## Loading
 
@@ -55,7 +55,7 @@ The host reads the key itself, from the user's file first, before the game start
 | `Sensors` | A sensor collider makes no body. |
 | `Joints` | Joint components are ignored. |
 | `Queries` | Every query misses. |
-| `Characters`, `Vehicles`, `Soft_Bodies`, `Cloth`, `Hair`, `Buoyancy`, `Save_State` | Reserved for the components of [Future work](design.md#future-work). |
+| `Characters`, `Vehicles`, `Soft_Bodies`, `Cloth`, `Hair`, `Buoyancy`, `Save_State` | Reserved: no component needs them, and the Jolt backend reports none of them. |
 | `Deterministic`, `Double_Precision` | Informative: the build's options. |
 
 The null backend reports `Rigid_Bodies`, `Joints`, `Queries` and `Sensors`: it takes every command and simulates none.
@@ -71,9 +71,3 @@ The null backend reports `Rigid_Bodies`, `Joints`, `Queries` and `Sensors`: it t
 ## Conformance
 
 `lib/core/physics/conformance` is the suite that every simulating backend passes, driven through `Physics_API` with no engine world: a falling box that rests and sleeps; rays with filters; stale handles; determinism to the bit; an offset shape and a disabled body; contacts that begin, last through sleep and end; a sensor; every query; joints, a break and a motor; and mesh and hull shapes. A backend's tests call each procedure with its table on the host's job system, as `lib/core/physics/jolt/jolt_test.odin` does, and `lib/core/physics/plugin/plugin_test.odin` runs a test through the DLL as the host loads it.
-
-## Future work
-
-- **A 2D boundary.** `Physics2D_API` follows the same rules, with a Box2D backend (see [Design](design.md#future-work)). When a game is 2D.
-- **Choosing at run time.** The backend is chosen when the host starts, so changing it means the editor's Restart Host. When switching backends while editing is common.
-- **A backend's own settings.** A backend reads nothing of the project's; a key such as `physics.jolt.threads` needs the host to pass them. When a backend has a setting worth exposing.

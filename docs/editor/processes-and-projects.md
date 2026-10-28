@@ -19,11 +19,11 @@ The editor uses Avalonia on .NET 10, not WPF. The deciding factor is the viewpor
 - **WPF cannot show a D3D12 texture directly.** `D3DImage` takes only D3D9Ex surfaces, so each frame would go from D3D12 through D3D11 to a legacy shared texture and into D3D9Ex: an extra copy, BGRA8 only, and pacing tied to WPF's render thread. A child swapchain in an `HwndHost` avoids the copy, but WPF content cannot draw over it (the airspace problem), so the tool palette and the stats overlay would each need their own window.
 - **Avalonia imports external GPU images into its compositor.** `ICompositionGpuInterop` imports D3D11 textures, so the viewport is an ordinary composited control, and other controls draw over it. On Windows the import needs a keyed mutex, which a D3D12 resource cannot have, so the editor copies each frame once (see [Viewport](viewport.md#viewport)).
 - **What WPF has that Avalonia lacks** is a mature ribbon and a wider set of third-party controls. The editor builds its own ribbon (see [Ribbon](shell-and-panels.md#ribbon)), and it would build its own property grid in either framework, because the types come from the DLL over the link and not from CLR objects.
-- Avalonia also runs on other platforms. That is not a goal, but it means a later Vulkan or Metal port does not force a new editor.
+- Avalonia also runs on other platforms, though the editor runs on Windows only.
 
 ## Projects
 
-The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI. A project is added with the phase that first needs it: phase 2 added `Commands` and `Tests`, phase 3 added `Link` and its generator, phase 4 added `Model`, phase 5 added `Document`, phase 7 added `Tools`, and phase 10 adds `Content`.
+The editor is in `src/editor`. Only the application project references Avalonia. The others are plain .NET libraries, so tests run without UI.
 
 | Project | Responsibility |
 |---|---|
@@ -35,7 +35,7 @@ The editor is in `src/editor`. Only the application project references Avalonia.
 | `Cinnabar.Editor.Tools` | The viewport's tools: the editor camera, the gizmo's hit test and drag math, snapping, and the pose edits that a drag makes. The node canvas's geometry and hit test. |
 | `Cinnabar.Editor.Commands` | The command registry. The ribbon, menus, shortcuts and the command palette all run commands from it. |
 | `Cinnabar.Editor` | The Avalonia application: the shell, docking, the ribbon, the panels and the viewport. |
-| `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. Later, tests against a real host with the null backend. |
+| `Cinnabar.Editor.Tests` | Tests for the libraries and for the shell, which has no controls of its own, so a test can build one without a window. |
 
 `just editor` builds the solution with `dotnet build`, `just edit` builds everything and starts the editor with the game's `scenes/main.scene`, and `just test` runs the editor's tests with the engine's. Build output goes to `build/obj/dotnet`. The editor's settings are in `%LOCALAPPDATA%\cinnabar\editor`.
 

@@ -22,8 +22,3 @@ The host's screenshots and history ring read the frame target back (see [Editor:
 - **The copy** goes on the frame's final graphics list in `end_frame`, where the frame target would move to the present layout: a barrier to the copy-source layout, `CopyTextureRegion` with the placed footprint, and a barrier to the present layout, which is the common layout that shared mode ends in too. So a capture frame ends as any frame does, and the copy sees every submission, the scratch target of a paced frame included. The slot gets the frame's fence value when the frame is signaled.
 - **Polling** gives the oldest slot whose fence has passed, as a `gpu.Frame_Capture`: the size, the frame target's format and output mode, the display's SDR white, the row pitch, which D3D12 aligns to 256 bytes, and the backend's mapped bytes, valid until the capture is released. A release is an atomic store, so the host's worker thread releases from where it reads.
 - **Null backend:** a capture is zeroed pixels with the same row alignment, ready the frame after its request, so the host's tests run without a GPU.
-
-## Future work
-
-- **HDR10 metadata.** The swapchain gets no `DXGI_HDR_METADATA_HDR10`. Setting the display's luminances and the content's would let displays that honour it tone map less. Belongs with the calibration screen in [Rendering](../rendering/layers-and-output.md#hdr-output).
-- **Frame pacing beyond vsync.** Standalone presentation paces on vsync, and shared mode on a 60 Hz timer. A frame latency waitable object and a configurable frame cap would give lower latency and a stable cadence on variable-refresh displays.

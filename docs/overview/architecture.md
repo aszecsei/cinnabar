@@ -16,7 +16,7 @@ Details: [Hot reload](hot-reload.md).
 
 ## Platform layer
 
-All platform-specific and graphics-backend-specific code lives in `lib/core`. Windows and D3D12 are the first targets. A later port must only add files to `core`. It must not require changes to `engine` or to games. The procedures in `Platform_API` are the complete porting surface.
+All platform-specific and graphics-backend-specific code lives in `lib/core`. Windows and D3D12 are the only targets. `engine` and games hold no platform code, so the procedures in `Platform_API` are the complete porting surface.
 
 `core` also provides the two services that everything else is built on:
 
@@ -122,19 +122,17 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 flowchart TB
     SOURCE[("source/<br/>png, gltf, hlsl, scripts, scenes, materials<br/>+ .meta sidecars")]
     CACHE[("build/&lt;target&gt;/content/<br/>one blob per asset,<br/>a cache per configuration")]
-    BUNDLES[("bundles/*.cbb")]
     DEVRT["Development runtime"]
     RELRT["Release runtime"]
 
     SOURCE -->|"tools/cook"| CACHE
-    CACHE -->|"package step"| BUNDLES
     CACHE --> DEVRT
-    BUNDLES --> RELRT
+    CACHE --> RELRT
 ```
 
 - Every source asset has a GUID. Content refers to other content only by GUID.
 - `tools/cook` compiles source assets into a cache of blobs. `tools/cook` and the runtime share the asset type definitions from `lib/engine`.
-- In development, the runtime reads blobs from the cache. In release, it reads them from bundles. The blob format is the same in both.
+- The runtime reads blobs from the loose cache of its configuration: `build/dev/content` in development, and the `content` folder beside the executable in release. The blob format is the same in both.
 - In development, the cook daemon watches the source files and cooks what changes. After each pass, it writes a counter to the cache, and the running game swaps every new blob in place in one frame.
 - The cook daemon is the only program that writes `.meta` files. The editor's content browser asks it to create, move, rename and delete assets.
 

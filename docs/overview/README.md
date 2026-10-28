@@ -15,10 +15,10 @@ Read them in this order the first time.
 
 ## Overview
 
-A shipped game is one executable and a set of content bundles.
+A shipped game is one executable and a folder of cooked content.
 
 - The **executable** contains the engine and the game code, compiled together. In release builds they are statically linked. In development, they are built as a DLL that a host process loads and hot-reloads.
-- The **bundles** contain all content data. The asset pipeline compiles them from source assets.
+- The **content folder** is a loose cache of blobs, one per asset, which the asset pipeline compiles from source assets.
 
 ```mermaid
 flowchart TB
@@ -50,8 +50,8 @@ flowchart TB
             RELGAME["samples/mygame"]
             RELLUAU["Luau (static)"]
         end
-        BUNDLES[("bundles/*.cbb")]
-        EXE --> BUNDLES
+        RELCACHE[("content/<br/>loose cooked assets")]
+        EXE --> RELCACHE
     end
 ```
 
@@ -151,18 +151,6 @@ The two sides communicate only through two structs of procedures, both in `lib/c
 - **`Game_API`** (game → host): `init`, `update`, `shutdown`, `on_reload`, `state_size`, `layout_hash`, `abi_hash` (the GPU command format and `Platform_API`), `script_types` (see [Scripting](../scripting/tooling-and-hot-reload.md#types-and-tooling)), and `editor_poll`, the game's side of the editor link (see [Editor](../editor/link.md#world)).
 
 In development, the host gets `Game_API` from the DLL's exported `cinnabar_game_api` procedure. In release, `main_release` fills both structs with direct procedure references, so the code paths are the same in both configurations. Code must not branch on `HOT_RELOAD` outside `src/host` and the per-game `main_release` stubs.
-
-## Future work
-
-Cross-cutting items. Each document has its own Future work section for its part.
-
-- **Other platforms and GPU APIs.** A port adds files to `lib/core` and a backend package to `lib/core/gpu`: Vulkan or Metal, with SPIR-V or a metallib as more entries in the same shader blobs. Nothing in `lib/engine` or in games changes. The null backend and the shared command-buffer validation are the test bed for a new backend before any hardware (see [GPU](../gpu/README.md#future-work)).
-- **Bundles.** Release builds still read the release loose cache. Bundles (`*.cbb`) are designed: a table of contents by GUID, aligned and individually compressed blobs, one bundle per load unit with dependencies (see [Content pipeline](../content/blobs-and-loading.md#loading)).
-- **Prefabs from glTF.** A model's node hierarchy does not become a prefab yet (see [Editor: Prefabs](../editor/prefabs.md#future-work)).
-- **Animation and audio.** The architecture reserves their places: native `Fixed` systems on the job system, `Previous_Transform` interpolation for presentation, and events into scripts. The platform layer has no audio device yet. When a game animates characters or plays sound.
-- **Large worlds.** Positions already reach ±2^38 m, and the render origin rebases. What is missing is streaming: splitting a world into scenes that load and unload separately, and bundles as streaming chunks (see [Editor](../editor/README.md#deferred)).
-- **A remote host.** The editor link is TCP over loopback by design, so that the same protocol can later drive a host on another machine or a console, with the viewport's frames sent over the link instead of a shared texture.
-- **Engine-side change tracking.** Several consumers scan the whole world every frame or several times a second: the editor's entity deltas, the GPU scene's full rewrite, and script queries. An ECS that reports changed entities would let each of them do work proportional to what changed (see [World](../world/README.md#future-work), [Rendering](../rendering/README.md#future-work)).
 
 ## References
 

@@ -58,21 +58,6 @@ The game side is small and lives in `lib/engine/editor`:
 
 Everything in the game's `Editor` is a handle, an ID or a copy, so a code reload keeps it; the commands are registrations, made again in `on_reload` ([Game commands](shell-and-panels.md#game-commands)).
 
-## Deferred
-
-The three designs that the editor's model makes room for but does not contain. Each is in [Future work](#future-work) with the rest.
-
-- **Large worlds:** positions reach ±2^38 m, and one scene file per world does not scale. Level and world streaming will split the world into scenes that load separately, and the editor will then edit several scenes at once.
-- **Edit-mode scripts:** some tools need behaviours that run in edit mode, like Unity's `ExecuteInEditMode`. Edit mode runs no scripts until then.
-- **More than one viewport:** each viewport has its own shared target and camera, so the host renders the scene once for each viewport.
-
-## Future work
-
-- **Edit-mode scripts.** Tools such as a procedural placer need behaviours that run in edit mode, like Unity's `ExecuteInEditMode`. The script runtime is quiet in Edit, so this needs a per-class opt-in, a script phase that runs only those classes, and a rule that their writes become operations on the document rather than raw world changes, as game commands' do (see [Game commands](shell-and-panels.md#game-commands)).
-- **Change tracking for entity deltas.** The game scans every entity ten times a second to find what changed, which suits tens of thousands of entities. Per-chunk change versions in the ECS ([World](../world/README.md#future-work)) would let `poll` visit only the chunks that changed since its last delta. Do this when the scan shows in `Host_Stats`.
-- **A remote host.** The editor link is TCP so that the same protocol can drive a host on another machine or a console. Over a network the viewport cannot read a shared texture, so the host would encode and send frames over the link, and `Frame_Acknowledged` already paces them. The editor's child-process management would become a launcher on the target.
-- **More than one viewport.** Each viewport needs its own shared target, its own `Editor_Camera` and its own pick and outline passes, and the host renders the scene once for each. The shared-target code already supports named generations beside the frame target (previews use them, see [GPU](../gpu/presentation.md#presentation)).
-
 ## References
 
 - Avalonia, [avaloniaui.net](https://avaloniaui.net) and the [composition GPU interop API](https://docs.avaloniaui.net/docs/guides/graphics-and-animation/graphics-and-animations) (`ICompositionGpuInterop`): the compositor that [Viewport](viewport.md#viewport) imports its D3D11 textures into.
@@ -82,4 +67,4 @@ The three designs that the editor's model makes room for but does not contain. E
 - Microsoft, [Shared Surfaces (Direct3D 11)](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/surface-sharing-between-windows-graphics-apis) and [`IDXGIKeyedMutex`](https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nn-dxgi-idxgikeyedmutex): the keyed-mutex import and the typed-format rule that [Viewport](viewport.md#viewport) works within.
 - Microsoft, [Ribbon design guidelines](https://learn.microsoft.com/en-us/windows/win32/uxguide/cmd-ribbons): the tabs, groups, item kinds, contextual tabs and collapse behaviour that [Ribbon](shell-and-panels.md#ribbon) follows.
 - Unity, [Scene view navigation](https://docs.unity3d.com/Manual/SceneViewNavigation.html), and Epic, [Viewport controls](https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-controls-in-unreal-engine): the fly and orbit scheme that the editor camera takes.
-- Unity, [`ExecuteInEditMode`](https://docs.unity3d.com/ScriptReference/ExecuteInEditMode.html) and [Prefabs](https://docs.unity3d.com/Manual/Prefabs.html): the behaviours that [Future work](#future-work) refers to.
+- Unity, [Prefabs](https://docs.unity3d.com/Manual/Prefabs.html): the model of instances, overrides and variants that [Prefabs](prefabs.md) follows.

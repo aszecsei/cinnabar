@@ -31,7 +31,7 @@ Not everyone needs every layer.
 | Writing native game code | Everything in order; [Overview: Conventions](overview/conventions.md) and [Hot reload](overview/hot-reload.md) first |
 | Working on the renderer | [GPU](gpu/README.md), then [Rendering](rendering/README.md) in order |
 | Working on the editor or the cooker | [Editor](editor/README.md) and [Content pipeline](content/README.md); [Editor: Editor link](editor/link.md) for the protocol they share |
-| Porting | [Core: Platform](core/platform.md), [GPU: Interface](gpu/interface.md), and each layer's Future work |
+| Porting | [Core: Platform](core/platform.md) and [GPU: Interface](gpu/interface.md) |
 
 ## What each document contains
 
@@ -39,7 +39,8 @@ Every document has the same shape:
 
 1. **An introduction** that says what the document covers and what to read first.
 2. **The design**, section by section. Heading names are stable, because source comments link to them.
-3. **Future work**, where the topic has any: optimizations known to pay off and features that are missing, each with the condition under which it is worth doing. An item here is a plan, not a promise.
+
+A document describes the code as it is. Plans for what is not built, such as missing features and optimizations known to pay off, are issues in the [backlog](https://github.com/aszecsei/cinnabar/issues), each with the condition under which it is worth doing.
 
 Each layer's README also has an **Overview** of its packages and data flow, and a **References** section with the papers, specifications and reference implementations that its documents follow, such as [XeGTAO](https://github.com/GameTechDev/XeGTAO) for the ambient occlusion.
 
@@ -68,6 +69,5 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 - `lib/core` is "core" and `lib/engine` is "engine". "Host side" and "game side" are defined in [Overview: Modules](overview/README.md#modules).
 - A name in code style, such as `Game_State` or `ecs.apply`, is a type or procedure in the source. Odin's `Snake_Case` types become `PascalCase` in the editor's C#.
 - Numbers in parentheses after a constant are its current value, such as `MAX_LIGHTS` (1024). The constant is the truth; the number is a guide.
-- Text in *italics* that starts with *Later* is a note about future work, in the place where it will apply. The document's Future work section collects them.
 - The sample game, `samples/mygame`, is used as the example throughout. It is also the test bed for most features.
 - Adding a document: put it in its layer's folder, add it to the layer README's Documents table, and run `just docs-check`. Renaming a heading that a source comment links to breaks that link, and the check reports it.

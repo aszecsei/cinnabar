@@ -34,16 +34,6 @@ The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that
 
 The data flow in a frame: systems read and write components through queries, in parallel jobs; their structural changes go to command buffers, which `apply` runs at fixed points; the script phase edits the world directly because it is serial; and at the end, [render extraction](render-extraction.md#render-extraction) writes what the GPU needs into frame memory. Two packages sit directly on `ecs`: `lib/engine/volume` ([Volumes](volumes.md#volumes)) and `lib/engine/scene`, the loader that fills a world from a cooked scene or the editor's snapshot ([Editor](../editor/document-and-scenes.md#scenes)).
 
-## Future work
-
-- **Change tracking.** Several consumers scan the whole world: the editor's entity deltas ten times a second ([Editor](../editor/link.md#world)), the GPU scene's rewrite of every slot each frame ([Rendering](../rendering/gpu-scene.md#gpu-scene)), and `World.query` from scripts. A per-chunk change version for each column, bumped when a system with write access runs over the chunk (as Unity's DOTS does), lets a query ask for only the chunks that changed since a version it remembers. Do this when the editor's deltas or the GPU scene's upload show in the profile, which the designs expect at around 50 000 entities.
-- **Animation,** as native `Fixed` systems with `Previous_Transform` interpolation, as physics has ([Physics](../physics/design.md#scripts-in-fixed-ticks)). When a game animates characters.
-- **Spawning prefabs from systems.** A native system runs as a job, so it cannot call `scene.spawn_prefab` at once; it needs a `command_spawn_prefab` on the command buffer ([Editor: Prefabs](../editor/prefabs.md#future-work)). Do this with the first system that spawns.
-- **Child lists.** Entities do not store their children, so despawning a parent and finding a child both scan. A per-entity first-child and next-sibling pair, maintained by `apply`, would make both O(children). Do this when hierarchies are large or despawns show in the profile.
-- **A name index.** Unity's `GameObject.Find` is deliberately absent. If content needs lookups by name, a `Name` index maintained by `apply` is the place, so that it never scans.
-- **Query cache by version.** A query's archetype cache is rebuilt at every `apply` that created an archetype. An archetype version on the world would let queries skip the rebuild when nothing new appeared, which matters once many queries exist.
-- **A deeper hierarchy limit and a parallel `apply`.** The 64-level limit and the serial `apply` are fine for the sample. `apply` could run the buffers of independent archetypes in parallel once structural changes per frame are large.
-
 ## References
 
 - Sander Mertens, [flecs](https://github.com/SanderMertens/flecs) and the [*ECS FAQ*](https://github.com/SanderMertens/ecs-faq): the vocabulary of archetypes, tables and deferred operations, and the trade-offs between archetype and sparse-set storage.

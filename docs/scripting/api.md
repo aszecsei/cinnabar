@@ -2,7 +2,7 @@
 
 What scripts see: the value types, entities and component references, the engine's global libraries, and the mapping from Unity's names. Behaviours have [their own document](behaviours.md).
 
-**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Unity mapping](#unity-mapping) · [Future work](README.md#future-work)
+**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Unity mapping](#unity-mapping)
 
 ## Values
 
@@ -58,7 +58,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Time` | `delta` (the frame, or the tick in the fixed step), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction), `in_fixed` (true in the fixed step) |
 | `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
-| `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
+| `Debug` | `log`, `warn`, `error` |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
@@ -126,8 +126,8 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Mathf` | `math` and the `vector` library |
 | `Time.deltaTime`, `Time.time` | `Time.delta`, `Time.time` |
 | `Input.GetKey(KeyCode.Space)`, `GetKeyDown` | `Input.is_down(Key.Space)`, `Input.was_pressed` |
-| `Debug.Log`, `Debug.DrawLine` | `Debug.log`, `Debug.draw_line` |
-| `Random` | `Random`, seeded per world |
+| `Debug.Log` | `Debug.log` |
+| `Random` | Luau's `math.random`, one generator per VM, not seeded by the world |
 | `StartCoroutine`, `yield return new WaitForSeconds(t)` | `self:start_coroutine(fn)`, `wait(t)` |
 | `yield return new WaitForFixedUpdate()` | `wait_fixed()` |
 | `SendMessage` | `entity:send(name, ...)` |
@@ -139,12 +139,5 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere` | `Physics.raycast`, `Physics.sphere_cast`, `Physics.overlap_sphere` |
 | `OnCollisionEnter`, `OnCollisionExit`, `OnTriggerEnter`, `OnTriggerExit` | `on_collision_enter(other, point, normal, velocity, impulse)`, `on_collision_exit(other)`, `on_trigger_enter(other)`, `on_trigger_exit(other)`; no `stay` (see [Physics: Events](../physics/design.md#events)) |
 | `HingeJoint`, `OnJointBreak` | `Hinge_Joint` and the other joints, `on_joint_break(force, torque)` |
-| `GameObject.Find` | Not provided. Use fields or a `Name` index. |
+| `GameObject.Find` | Not provided. Use entity fields. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
-
-## Future work
-
-- **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
-- **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
-- **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.
-- **A `Name` index.** `GameObject.Find` stays absent; a maintained index on `Name` would give `World.find(name)` without a scan ([World](../world/README.md#future-work)).

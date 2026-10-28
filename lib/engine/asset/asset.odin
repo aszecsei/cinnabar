@@ -25,8 +25,7 @@ Loose_Cache :: struct {
 	dir_len: int,
 }
 
-// Source is where blobs come from. A union, so it holds no procedure pointers into the DLL image. Bundles are added
-// with the package step.
+// Source is where blobs come from. A union, so it holds no procedure pointers into the DLL image.
 Source :: union {
 	Loose_Cache,
 }

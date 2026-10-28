@@ -45,7 +45,7 @@ Luau's experimental `lua_registeruserdatadirectaccess` lets the VM call a get, s
 
 ## Watchdog
 
-The `interrupt` callback checks a deadline at loop back edges and calls. A script that runs past its budget in one resume raises an error with a traceback, and only that coroutine or handler stops. The budget is generous in development (100 ms) and is a crash-report signal in release.
+The `interrupt` callback checks a deadline at loop back edges and calls. A script that runs past its budget in one resume raises an error with a traceback, and only that coroutine or handler stops. The budget is `DEFAULT_BUDGET` (100 ms), in development and release alike.
 
 ## Garbage collection
 

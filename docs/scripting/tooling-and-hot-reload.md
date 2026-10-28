@@ -2,7 +2,7 @@
 
 Modules and `require`, the type definitions that the cooker checks against and `luau-lsp` reads, script hot reload, and native code generation.
 
-**In this document:** [Modules and `require`](#modules-and-require) · [Types and tooling](#types-and-tooling) · [Script hot reload](#script-hot-reload) · [Native code generation](#native-code-generation) · [Future work](README.md#future-work)
+**In this document:** [Modules and `require`](#modules-and-require) · [Types and tooling](#types-and-tooling) · [Script hot reload](#script-hot-reload) · [Native code generation](#native-code-generation)
 
 ## Modules and `require`
 
@@ -22,7 +22,7 @@ Modules and `require`, the type definitions that the cooker checks against and `
   - `Key`.
   - Each exposed component: `HealthType` for the global `Health`, and `HealthRef` with the fields' types. An enum field is a union of its value names, so a typo is a type error.
   - The game's bindings, with the signature that the game passes to `define`, such as `script.define(r, "Game.frame", procedure, "() -> number")`. A binding without a signature takes and returns `any`.
-- **Behaviours are loosely typed for now.** `Behaviour.define` returns `{ [any]: any }`, so methods can be defined on the class, and `self` and instances are untyped.
+- **Behaviours are loosely typed.** `Behaviour.define` returns `{ [any]: any }`, so methods can be defined on the class, and `self` and instances are untyped.
 - `luau-lsp` reads the definition file and `.luaurc`, so editors get completion and type errors. The repository does not keep editor settings, so set it up yourself. It needs the standard platform, the definition file, the old type solver (see below), and no Rojo sourcemap. In VS Code, add this to `.vscode/settings.json`:
 
   ```jsonc
@@ -38,12 +38,12 @@ Modules and `require`, the type definitions that the cooker checks against and `
   }
   ```
 - **`tools/cook` type checks** each script that it cooks against the same file (see [Content pipeline](../content/kinds/scripts.md#scripts)). A type error is a cook error, so the script keeps its old blob, and the running game keeps the previous version. Each file's `--!strict`, `--!nonstrict` or `--!nocheck` applies, and the nearest `.luaurc`'s `languageMode` sets the default, which is nonstrict without one. Without the definition file, as on the first build, the cooker warns and does not type check. The file's hash is in each script's cache key, so the scripts are checked once it exists.
-- **The old type solver.** Under the new solver, `self` in `function Door:update()` gets a type inferred from the method's body, with read-only fields, so `self.phase += 1` is an error, and every behaviour would need annotations. The old solver gives `self` the class's type. The cooker uses the old solver, and the editor setting matches it. Revisit when behaviours get real class types.
+- **The old type solver.** Under the new solver, `self` in `function Door:update()` gets a type inferred from the method's body, with read-only fields, so `self.phase += 1` is an error, and every behaviour would need annotations. The old solver gives `self` the class's type. The cooker uses the old solver, and the editor setting matches it.
 - **The build order:** `just build` builds the host and the game DLL, writes the definitions from the DLL, and then cooks the scripts. The DLL embeds only committed `.meta` files, so it does not wait for the cook.
 
 ## Script hot reload
 
-In development, a changed script reloads at the end of the frame in which the asset runtime swaps its blob. The game calls `script.reload_changed(r, asset.poll(assets))` there, when no script runs. Release builds read bundles and do not reload scripts.
+In development, a changed script reloads at the end of the frame in which the asset runtime swaps its blob. The game calls `script.reload_changed(r, asset.poll(assets))` there, when no script runs.
 
 1. The asset runtime swaps the blob behind the script's handle (see [Content pipeline](../content/blobs-and-loading.md#loading)). A script with a type error keeps its old blob, so the game never sees it.
 2. The script runtime runs the new version's top level in a fresh environment. If it fails, the old version stays and the error is logged.
@@ -67,14 +67,5 @@ A module that starts with `--!native`, or that has `native = true` in its `.meta
 - `init` creates the code generator with `luau_codegen_create`. It is part of `luau.dll`, so its executable memory survives a code reload, and `lua_close` releases it.
 - Luau compiles every function of the module except the ones that it considers cold, such as the top level, which runs once.
 - The watchdog still works: native code calls the interrupt callback at the same safepoints.
-- The whole module is native or not. Luau's `@native` attribute on one function needs the C++ code generation API, which the bindings do not have yet.
-- *Not yet:* the cooker does not pass the engine's userdata type names in `userdataTypes`. Typed native code needs the runtime to map them to userdata tags with the C++ code generation API.
-
-## Future work
-
-- **Typed behaviour classes.** `Behaviour.define` returns `{ [any]: any }`, so `self` and instances are untyped and the cooker runs the old type solver ([Types and tooling](#types-and-tooling)). Two routes: emit a class type per behaviour into the definition file from the cooker's field schema, or adopt Luau's `class` syntax once it leaves `DebugLuauUserDefinedClasses`. Either lets the new solver (`LuauSolverV2`) replace the old one. When: when the old solver is deprecated upstream, or when field typos in behaviours become a common bug.
-- **Typed native code.** Pass the engine's userdata type names in `userdataTypes` at compile time and map them to tags in the runtime with the C++ code generation API, so that native code specializes `vector` and userdata field access ([Native code generation](#native-code-generation)). Per-function `@native` needs the same API. When: when a profile shows a native module's time in generic field access.
-
-- **Editor inspector for fields** (phase 8): the properties panel shows and edits behaviour fields today through `inspect` and `edit`; what is missing is editing of fields whose kinds have no editor yet, such as asset references once they exist ([Editor](../editor/shell-and-panels.md#properties)).
-- **Bundles** (phase 8): scripts load from bundles in release like every other asset; nothing script-specific is needed beyond the asset runtime's `Bundle` source ([Content pipeline](../content/blobs-and-loading.md#loading)). Script hot reload stays development-only.
-- **Edit-mode scripts.** Behaviours that run in the editor's edit mode, like Unity's `ExecuteInEditMode`, for tools ([Editor](../editor/README.md#deferred)).
+- The whole module is native or not. Luau's `@native` attribute on one function needs the C++ code generation API, which the bindings do not have.
+- The cooker does not pass the engine's userdata type names in `userdataTypes`, so native code does not specialize userdata field access.

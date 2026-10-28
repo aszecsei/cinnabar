@@ -2,7 +2,7 @@
 
 Screenshots and GIFs of a running host, for the editor and for tools: how the host copies its frame out, the history ring behind the GIF, the sidecar that makes a screenshot debuggable, and the automation socket that `editorctl` drives.
 
-**In this document:** [Capture](#capture) · [Screenshots](#screenshots) · [History ring](#history-ring) · [Sidecar](#sidecar) · [Automation](#automation) · [Future work](#future-work)
+**In this document:** [Capture](#capture) · [Screenshots](#screenshots) · [History ring](#history-ring) · [Sidecar](#sidecar) · [Automation](#automation)
 
 ## Capture
 
@@ -10,7 +10,7 @@ A capture is a request to a running host for an image of what it draws: its next
 
 - **Who asks.** The editor's Screenshot (F12) and Record Last 5 s (Shift+F12) commands, on the View tab's Capture group, and the [automation](#automation) socket, through which `editorctl`, and so a terminal or an LLM tool, asks for the same. A capture needs a linked host, and one runs at a time.
 - **What comes out.** The image, and beside it a [sidecar](#sidecar) JSON with the editor's state at the capture. A screenshot can bring the renderer's debug views too: the request names them, and each becomes an image of its own.
-- **Where.** `build/captures` in the repository, named `<utc time>-<sequence>.<png|gif>`, with `.<view>.png` for each debug view and `.json` for the sidecar. A request can name the file instead. The host chooses `captures/<utc time>-f<frame>.<png|gif>` beside its executable when it is given no path, which a future hotkey in a standalone host would use.
+- **Where.** `build/captures` in the repository, named `<utc time>-<sequence>.<png|gif>`, with `.<view>.png` for each debug view and `.json` for the sidecar. A request can name the file instead. The host chooses `captures/<utc time>-f<frame>.<png|gif>` beside its executable when it is given no path.
 - **The host's side** is `src/host/capture.odin`. The editor's is `CaptureModel` in `Cinnabar.Editor.Model`, which the shell drives; the model knows only how to send and what to write, so its tests run without a host.
 
 ## Screenshots
@@ -45,7 +45,7 @@ Beside every capture the editor writes `<name>.json`, so an image can be read ba
 | `context.hostStats`, `gameStats` | The last `Host_Stats` and `Game_Stats`: frame times, memory, resource counts, entities and script memory |
 | `context.game`, `hostPid`, `hostArguments`, `editorPid` | Which game, which processes |
 
-In play mode the camera is the game's, which the sidecar does not have yet; `freeCamera` says whether the editor's camera was the one drawn.
+In play mode the camera is the game's, which the sidecar does not have; `freeCamera` says whether the editor's camera was the one drawn.
 
 ## Automation
 
@@ -80,11 +80,3 @@ editorctl [--automation <file>] [--json] gif [--out <path>]
 It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.
 
 An LLM tool working in the repository uses it like this: with the editor open, `just screenshot --view depth` writes the lit frame, the depth view and the sidecar and prints their paths; the tool reads the sidecar for the frame, the camera, the mode and the stats, and the images to look at them. `just gif` shows motion over the last five seconds. `build/tools/editorctl.exe status --json` says whether a host is linked before asking.
-
-## Future work
-
-- **Game-side context.** The sidecar has the editor's camera. In play mode the game's camera, the entity under the cursor and the game's own state would come from a `Capture_Context` that the game answers through `editor_poll`. Add it when a capture in play mode needs more than the image.
-- **A capture by frame number.** The profiler captures a frame by number, from its ring; a screenshot of a past frame would need the ring to keep full frames, which is the memory the history ring avoids. Worth it only with a smaller window.
-- **A palette from the frames.** The fixed palette shows its steps on smooth skies. A median-cut palette per GIF, from the ring's frames, costs one pass over them and would look better.
-- **Video.** A GIF is enough to see a stutter or a flicker. A longer or sharper recording wants a video encoder, which Media Foundation provides on Windows.
-- **A standalone hotkey.** The host writes to `captures/` beside itself when no path is given, so a key in the host, or a `Debug.screenshot` script binding, needs only to queue a request.

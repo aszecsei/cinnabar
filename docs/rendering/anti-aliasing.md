@@ -1,6 +1,6 @@
 # Anti-aliasing
 
-**In this document:** [Upscaling](#upscaling) · [FSR](#fsr) · [FXAA](#fxaa) · [SMAA](#smaa) · [Future work](#future-work)
+**In this document:** [Upscaling](#upscaling) · [FSR](#fsr) · [FXAA](#fxaa) · [SMAA](#smaa)
 
 The [quality](quality.md#quality) chooses the anti-aliasing's technique (`Quality.aa`, an `Aa_Technique`), and the `Anti_Aliasing` settings on volumes or the editor's `Temporal_Aa` feature can turn it off, whichever technique it is (see [Settings](frame.md#settings) and [Debug views](post-processing.md#debug-views)). A view that is not shaded has none.
 
@@ -16,7 +16,7 @@ The [quality](quality.md#quality) chooses the anti-aliasing's technique (`Qualit
 - **The presets** take temporal AA: the frame's ambient occlusion, GI and fog are noisy, and expect temporal AA to average them. FXAA and SMAA suit a game that does not want the blur in motion, or a cheaper frame.
 - **No jitter** without temporal AA or FSR, so FXAA and SMAA see the same pixels every frame.
 - **FSR needs the device** to run it (`Caps.upscalers`): on others, `clamp_quality` gives temporal AA (see [Quality](quality.md#hardware-caps)).
-- **Choosing:** both techniques' pipelines are synced whether or not the frame uses them (`sync_spatial_aa_pipelines`), so the quality can switch from one frame to the next. Until a technique's pipelines are compiled, the frame has no anti-aliasing.
+- **Choosing:** both techniques' pipelines are synced whether or not the frame uses them (`sync_spatial_aa_pipelines`), so the quality can switch from one frame to the next. While a technique's pipelines are not compiled, the frame has no anti-aliasing.
 
 **The tone map pass.** FXAA and SMAA find edges by luma, which they expect perceptual, so they run after tone mapping, where the display's colors are sRGB-encoded. Without them, the output pass tone maps the scene as it draws the frame target, and the frame has no extra pass. With them, the tone map pass (`tone_map.hlsl`) does what the output pass does first (bloom, the lookup table, a debug view's raw colors), into the `DISPLAY_FORMAT` (`RGBA16_Float`) scene, and the technique writes the result into `Frame.display`. The output pass then reads `Frame.display` (`Output_Push.tone_mapped`), and only blends the UI and the debug layer over it and encodes it, so neither is smoothed. Both passes take their tone mapping from `output.hlsli`, so the two paths give the same colors.
 
@@ -74,14 +74,3 @@ SMAA 1x is the reference implementation (Jimenez et al. 2012) at its High preset
 
 - **The tables** are the reference's `AreaTex` (160x560, `RG8_Unorm`) and `SearchTex` (64x16, `R8_Unorm`), whose bytes are in `vendor/smaa/area.bin` and `vendor/smaa/search.bin` (see `vendor/smaa/README.md`). `spatial_aa_init` makes them with `#load`.
 - **Samplers:** the post-processing's bilinear sampler, and a point sampler of the spatial AA's own.
-
-## Future work
-
-- **SMAA T2x:** SMAA with temporal AA's jitter and a history of two frames, sharper in motion than temporal AA. Needs the velocities that temporal AA reads, and SMAA's subsample indices by frame.
-- **Levels for FXAA and SMAA**, with their presets' search steps and thresholds, if their cost shows in a profile. `Quality.aa` has no level now.
-- **DLSS and XeSS** as `Aa_Technique`s beside FSR (see [Quality](quality.md#future-work)).
-- **FSR's reactive mask** from the transparency pass's alpha, and its transparency mask, so glass and particles do not trail. FSR can make one from the scene with and without the transparency (`ffxDispatchDescUpscaleGenerateReactiveMask`).
-- **FSR's exposure** from the engine's, as a 1x1 texture that FSR reads, in place of its auto exposure.
-- **FSR's sharpening** (RCAS), which `Upscale.sharpness` already passes, as a setting.
-- **A mip bias** for the materials' textures below full size, `log2(render_scale)`, so they keep the frame's detail once temporal AA upscales. Needs a bias in `gpu.Sampler_Desc`, and the material samplers made again when the scale changes.
-- **Debug lines at the frame's size,** which needs the scene's depth there to test against.

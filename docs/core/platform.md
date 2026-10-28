@@ -6,7 +6,7 @@ How `core` selects the platform and the GPU backend at compile time, the `Platfo
 
 ## Platform and backend abstraction
 
-Windows and D3D12 are the first targets. A later port must only add files to `core`.
+Windows and D3D12 are the only targets. All code that depends on either is in `core`, so a port adds files to `core` and changes nothing in `engine` or in games.
 
 - **OS layer:** Odin's file-suffix convention (`*_windows.odin`) selects the platform implementation at compile time.
 - **GPU backend:** the `gpu_backend` collection selects the backend at compile time. There is no runtime dispatch. See [GPU](../gpu/interface.md#packages).

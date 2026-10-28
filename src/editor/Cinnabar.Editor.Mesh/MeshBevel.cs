@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Mesh;
 /// <summary>
 /// Bevel (see docs/editor/mesh-editing.md#mesh-tools): a vertex becomes a small face, and an edge a strip of faces
 /// along a circular profile, with segments and a width. Each edge bevels on its own: where beveled edges meet at a
-/// vertex, the end caps overlap, which a Clean does not yet mend.
+/// vertex, the end caps overlap, which a Clean does not mend.
 /// </summary>
 public static class MeshBevel
 {

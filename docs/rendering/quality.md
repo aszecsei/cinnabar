@@ -26,7 +26,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
-- **Each enum lists only what exists.** DLSS and XeSS join `Aa_Technique` when they are built (see [Future work](#future-work)), so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
+- **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
@@ -99,11 +99,3 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 - **Scripts** read, set and save the quality through the `Render` bindings (see [Scripting: Render](../scripting/api.md#render)), which a game defines with `project.define_quality_bindings`.
 - **The editor** sets the project's preset and this machine's in the Game Window group, and draws its viewport at a quality of its own (see [Editor: Quality](../editor/viewport.md#quality)).
 - **The sample** applies the files' quality when they change. Its `quality_keys.luau` is a settings menu on keys, through the `Render` bindings: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale (1, 0.75, 0.67 and 0.5), and F6 the next anti-aliasing technique that the device runs; not Alt+F9, which the NVIDIA app takes. Each saves the quality to `project.user.settings`.
-
-## Future work
-
-The phases that follow this one, in order, each worth doing on its own:
-
-- **DLSS and XeSS** as `Aa_Technique`s beside FSR, through the GPU interface's upscalers, once their licenses are reviewed (see [Anti-aliasing](anti-aliasing.md#future-work)).
-- **Levels for the transparency and the bloom**, when their cost shows in a profile.
-- **A Custom panel** in the editor's viewport, with each feature's technique and level, beside its preset.

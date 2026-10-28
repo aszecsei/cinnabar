@@ -27,7 +27,6 @@ The pattern is the same everywhere: split work into chunks, start one job per ba
 | Arena | Lifetime | Survives code reload |
 |---|---|---|
 | Permanent | Process | Yes |
-| Level | Until the level unloads | Yes |
 | Frame | One frame, double-buffered | Not applicable |
 | Asset | Managed by the asset runtime, which allocates from `asset_allocator` (the host's heap) | Yes |
 | Script heap | Managed by the script VM | Yes |

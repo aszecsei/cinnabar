@@ -13,7 +13,7 @@ A behaviour is Unity's `MonoBehaviour`: a script class whose instances are attac
 local Door = Behaviour.define("Door", {
 	open_angle = Field.number(90),
 	speed = Field.number(2),
-	open_sound = Field.asset("Sound"),
+	open_effect = Field.asset("prefab"),
 	trigger = Field.entity(),
 })
 
@@ -28,7 +28,7 @@ function Door:on_trigger_enter(other: Entity)
 end
 
 function Door:open()
-	Audio.play(self.open_sound, self.transform.position)
+	World.spawn(self.open_effect, self.transform.position)
 	local target = self.closed_rotation * Quaternion.euler(vector.create(0, self.open_angle, 0))
 	while not self.transform.rotation:approx(target) do
 		self.transform.rotation = self.transform.rotation:rotate_towards(target, self.speed * Time.delta)

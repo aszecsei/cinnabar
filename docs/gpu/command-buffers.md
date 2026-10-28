@@ -43,7 +43,7 @@ A large render pass can be recorded in parallel as pieces, in consecutive comman
 - `Undefined` as the layout before discards the contents, whatever the texture's layout is.
 - The backend does not track resource states to translate barriers. State tracking would serialize parallel recording.
 - Validation in debug builds and in the null backend tracks texture layouts. It rejects a barrier whose layout before is wrong, and a render pass whose attachments are not in the render target or depth write layout.
-- **Frame boundary:** a frame starts after the GPU completes the work of the previous frame, on both queues. A resource therefore needs no barrier for work in an earlier frame, only a layout change. In D3D12, the completion of an `ExecuteCommandLists` call finishes all work and flushes all caches, and the compute queue's first work in a frame waits for the previous frame's end. A Vulkan backend adds a full barrier at the start of each frame.
+- **Frame boundary:** a frame starts after the GPU completes the work of the previous frame, on both queues. A resource therefore needs no barrier for work in an earlier frame, only a layout change. In D3D12, the completion of an `ExecuteCommandLists` call finishes all work and flushes all caches, and the compute queue's first work in a frame waits for the previous frame's end.
 - **Cross-queue use** works the same way: after a fence wait, the earlier work of the other queue is complete and visible, so only a layout change needs a barrier (see [Queues](queues-streaming-readback.md#queues)).
 - The render graph in `lib/engine/render` records all barriers.
 

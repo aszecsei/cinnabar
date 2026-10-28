@@ -2,7 +2,7 @@
 
 GUIDs and `.meta` files, and what every cook has in common: shared schemas, cache keys, the single scan, the generation counter, the lock and problems. Each asset kind's own cook is in [kinds](README.md#documents).
 
-**In this document:** [Identity](#identity) · [Cooking](#cooking) · [Future work](README.md#future-work)
+**In this document:** [Identity](#identity) · [Cooking](#cooking)
 
 ## Identity
 
@@ -25,18 +25,9 @@ Every source asset has a GUID, stored in a `.meta` sidecar file next to it with 
 - **One cook at a time:** a cook holds `<cache>/.cook.lock` while it runs. Otherwise two cooks could both give a new asset a `.meta` file, each with its own GUID. Windows deletes the lock when the cook exits, also when it crashes. A dev batch cook that finds the lock held leaves the cache to the cook daemon, which keeps it up to date, so `just build` works while the editor is open. Any other cook stops with an error.
 - **Problems:** each error and warning names its file (the asset's source or `.meta` file, or another file such as the definition file), and its line and column when it has them. A batch cook logs each one as `cook: <file>:<line>:<column>: <text>`.
 - **Kinds:** scripts, scenes, shaders, textures, models, mesh files and materials. Each kind has an importer: its extensions, its import settings and its cook (see the sections below).
-- **Slow kinds use every core.** A texture can take seconds, so block compression spreads each mip's rows of blocks over the CPU's threads. A 2048×2048 color texture with its mips cooks in about 1 s for development and 3 s for release. *Cooking several textures at once, and a pass that reports the assets that it has left so the editor can show progress, come when content grows.*
+- **Slow kinds use every core.** A texture can take seconds, so block compression spreads each mip's rows of blocks over the CPU's threads. A 2048×2048 color texture with its mips cooks in about 1 s for development and 3 s for release.
 - **Third-party code** for the importers is in `vendor/`, built with CMake into `build/` like Luau, and linked into `tools/cook` only: Compressonator's `CMP_Core` for block compression, and meshoptimizer for meshes. Odin's `vendor:stb/image` and `vendor:cgltf` read the source files. The runtime links none of them.
 - **Compressonator** is a submodule pinned to a release, but its repository is over 700 MB, so `vendor/compressonator` is a blobless clone that checks out only `cmp_core`, `license` and `applications/_libs/cmp_math`. `.gitmodules` marks it `update = none`, so `git submodule update` never checks out the rest, and `just install-compressonator` makes the sparse clone at the pinned commit. `just update-compressonator <tag>` moves the pin. `tools/cook/compressonator` builds `CMP_Core` with its own CMake project, and `cn_compress.cpp` gives the cooker a C API that compresses a whole mip, because `CMP_Core`'s API is C++ and compresses one block at a time.
 
 The kinds below are in the order a game meets them: scripts and scenes are what gameplay is made of, and shaders, textures, meshes and materials are what the renderer draws.
 
-## Future work
-
-- **Parallel DXC.** The cooker runs child processes one at a time, because Windows children inherit every inheritable handle and one DXC can hold another's pipes. The fix is `PROC_THREAD_ATTRIBUTE_HANDLE_LIST` in the startup attributes, which names the handles a child may inherit. Do this when shader and material cooks dominate a pass; a material with many variants already waits on it.
-- **Cooking several textures at once, and progress.** Block compression uses every core for one texture, but textures cook one after another, and the editor sees only the finished pass. A pass that reports the assets it has left lets the content browser show progress. Do this when content grows past a few hundred textures.
-- **`.exr` textures** with `vendor:OpenEXRCore`, for HDR sources with more than `.hdr`'s RGBE precision. Do this with environment lighting.
-- **Cube maps and texture arrays**, which environment lighting needs for sky and reflection captures (see [Rendering](../rendering/lighting-and-shadows.md#future-work)). The blob gains a layer count; the GPU side already has the formats.
-- **Alpha-coverage-preserving mips.** A masked texture's coverage shrinks down the mip chain, so cut-outs thin out in the distance. Scaling each mip's alpha so that its coverage at the cutoff matches mip 0's keeps them, as NVIDIA Texture Tools does. Do this when masked materials show it.
-- **glTF as a scene.** A model also makes a prefab of its node hierarchy that places its meshes, and its textures and materials become sub-assets (texture assets and material instances) (see [Editor: Prefabs](../editor/prefabs.md#future-work)).
-- **Skins and animations.** Not imported. They wait for the animation system (see [World](../world/README.md#future-work)); the mesh blob would gain joint indices and weights as a third stream, so the depth passes still read positions only.
