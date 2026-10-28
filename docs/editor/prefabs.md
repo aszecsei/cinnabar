@@ -2,7 +2,7 @@
 
 A prefab is a scene asset that other scenes instantiate: an entity tree authored once, placed many times, with each instance keeping only what differs from the prefab. This document is the design: the asset, the scene format's instance and override blocks, how an instance becomes plain entities everywhere it is used, how the editor edits instances and prefabs, and how a script spawns one. Read [Document and scenes](document-and-scenes.md), [Content: Scenes](../content/kinds/scenes.md) and [Mesh editing](mesh-editing.md#design) first: the mesh design's split between the editor's document and the host's world is the one taken here.
 
-*This is a design for work in progress. Phase 1 is built: the format, the expansion in Odin, and the cooker, with the scene format's version 2 in `SceneFile` too. The sections below say where what is built differs from the plan. Nothing else it names exists yet unless the text says so. The phases at the end are the order to build it in.*
+*This is a design for work in progress. Phases 1 and 2 are built: the format, the expansion in Odin and the cooker, with the scene format's version 2 in `SceneFile` too, and instances in the editor's document, its shell and its panels. The sections below say where what is built differs from the plan. Nothing else it names exists yet unless the text says so. The phases at the end are the order to build it in.*
 
 **In this document:** [Design](#design) · [Prefab assets](#prefab-assets) · [Recursion](#recursion) · [Instances in a scene](#instances-in-a-scene) · [Expansion](#expansion) · [Cooking](#cooking) · [The editor's documents](#the-editors-documents) · [Editing an instance](#editing-an-instance) · [Editing a prefab](#editing-a-prefab) · [Panels and the viewport](#panels-and-the-viewport) · [Spawning at run time](#spawning-at-run-time) · [Tests](#tests) · [Phases](#phases) · [Future work](#future-work)
 
@@ -92,7 +92,7 @@ entity 8c2e7b19d4f0a3c5
 name = "Sticker"
 parent = @5f3a9c01e2b47d10#a90b3e7f15c4d2e8
 component 2 Local_Transform
-	position = [0.1, 1.2, 0.02]
+	offset = [0.1, 1.2, 0.02]
 ```
 
 ## Expansion
@@ -139,6 +139,8 @@ The editor keeps the scene as it is written, with instances and override blocks,
 - **Changes on disk.** When the index reports a prefab that an open scene uses as changed, and its document is clean, the editor reads the file again and re-expands, so an edit in another editor, or a pull, shows at once. A dirty document keeps the editor's version, with a line in the console.
 - **Problems** from the host, `Edit_Problems`, name a path's ID; the editor maps it back to the path, and the mark shows on the instance's entity in the outliner.
 
+*Built in `Cinnabar.Editor.Document`, with these differences. `PrefabExpansion.Expand` gives an `Expansion`: the flat `Scene`, an `InstanceEntity` for each flat entity inside an instance, with its path and the prefab whose root it is, and the problems, which the console shows when the scene opens. `SceneDocument.Expanded` is made again after every operation, which is fast enough for the scenes there are; caching each prefab's flat scene waits for a scene that needs it. Rather than `ToWire` taking the document, `PrefabEdits.Route` turns an operation on an instance's entity into a `BlockOperation`, a swap of the entity's instance block or override block that holds the document and finds its wire form, `PrefabExpansion.Diff` of the expansion before and after, when it applies; `Operation.ToWires` gives it, and an operation's own `ToWire` otherwise. The swap writes only what differs from the prefab, and leaves out an override block that no longer differs, so an undo is exact and Reset sends the prefab's value. `CreateInstance`, the instance's removal and Duplicate are such swaps, made by `PrefabEdits`, not operations of their own; a drag's steps on one field of one entity replace each other. The `PrefabSet` opens a prefab from the file that the content index names when an expansion first asks for it, and an instance whose prefab the index did not have yet expands when the index arrives. Make Prefab adds its document with a `PrefabSetOperation` on the undo stack. Ctrl+S writes the dirty prefabs before the scene; the autosave does not write them yet, so a restored autosave with a prefab that was never saved has that instance as its root alone, and closing asks about the scene's changes, which hold Make Prefab, but not about a prefab by name.*
+
 ## Editing an instance
 
 An instance's entities edit like any others. The difference is what the document records.
@@ -151,6 +153,8 @@ An instance's entities edit like any others. The difference is what the document
 - **Unpack** (in the menu) makes the instance's flat entities ordinary scene entities, with their path IDs as their scene IDs and their current values, in one entry. Unpack Completely does the same through every nesting. The world does not change.
 - **Apply and Revert.** A field's menu has Apply to Prefab, which sets the value in the prefab's document and removes the override, so other instances in the scene take it through the re-expansion; and Revert, which is Reset. The instance's header has Apply All and Revert All, which do every override of the instance, including added and removed entities, components and behaviours. Each is one entry of the `PrefabOperation` and the override operations together, so undo brings both back. An Apply writes to the prefab the file names; through a nested instance it writes to the innermost prefab that has the entity, as Unity's does. An Apply that would put a prefab inside one it contains is refused ([Recursion](#recursion)).
 - **Selection** in the viewport picks the instance's outermost root on a click, so a door is one thing to move; a double click selects the entity under the mouse. The outliner selects anything. Box selection takes roots.
+
+*Built in `PrefabEdits` and `EditorShell.Prefabs.cs`, with these differences. Make Prefab is Ctrl+Shift+M, since Ctrl+Shift+P is the command palette; it takes a plain entity, writes the prefab in the content browser's folder, or the game root without one, and refuses a name that a file has. The descendants' scene IDs become their paths', so Make Prefab, and Unpack of an instance that has instances inside it, whose entities move onto paths from the inner instance, send the host the difference rather than nothing; Unpack Completely keeps every ID and sends nothing. A reference to an instance's entity, and a parent inside one, are written as paths, so they follow the prefab. A double click on an instance's entity that is not selected selects it, and a second one enters mesh mode as on any entity. Apply and Revert, Apply All and Revert All, and Make Variant come with phase 3.*
 
 ## Editing a prefab
 
@@ -171,6 +175,8 @@ A prefab opens as the document, in the scene's place, and is edited as a scene.
 - **Undo history** names instance entries as "Create Instance Door", "Override Point_Light.intensity", "Apply Door" and so on.
 - **The viewport** draws nothing new: the game shows flat entities, so the selection outline, the icons and the helpers are as for any entity.
 
+*Built: the outliner's icon, dot and plus, its menu's Select Prefab Asset, Unpack, Unpack Completely and Make Prefab, and its filter; the properties header's "Instance of" line with the prefab's link, the overridden fields in bold with the reset as Revert, an added component's "Added" badge and the removed ones as chips with Revert; and the content browser's drop on the viewport, a row and the space below the rows, and `kind:prefab`. The header's Open, Apply All, Revert All and dirty mark, the field's Apply menu, the outliner's Open Prefab, Make Variant, Apply All and Revert All, the drop on a `prefab` asset field and a double click on a prefab in the content browser come with phases 3 and 4.*
+
 ## Spawning at run time
 
 A game spawns an instance from a script, or from native code at a serial point, by copying the prefab's flat blob into the world.
@@ -183,7 +189,7 @@ A game spawns an instance from a script, or from native code at a serial point, 
 
 ## Tests
 
-- **One fixture, two expansions.** `lib/engine/asset/format/testdata/prefabs/` holds a scene, the prefabs it uses at two levels of nesting, with overrides of every kind, an added entity, a removed one, a variant, a missing prefab and a dangling override, and the expected flat scene as a `.scene` file. The Odin test expands and compares with the expected file, and the C# test reads the same files and does the same, so the two implementations agree on every ID, reference and order. A test for `scene_path_id` in each language pins the hash with known values. *Built for Odin, with the prefabs' GUIDs in `.meta` files beside them; the C# tests parse every file of the fixture and write the editor's files back unchanged until `PrefabExpansion` comes in phase 2. The depth limit is tested in `format`, not the cooker.*
+- **One fixture, two expansions.** `lib/engine/asset/format/testdata/prefabs/` holds a scene, the prefabs it uses at two levels of nesting, with overrides of every kind, an added entity, a removed one, a variant, a missing prefab and a dangling override, and the expected flat scene as a `.scene` file. The Odin test expands and compares with the expected file, and the C# test reads the same files and does the same, so the two implementations agree on every ID, reference and order. A test for `scene_path_id` in each language pins the hash with known values. *Built, with the prefabs' GUIDs in `.meta` files beside them: `asset_format`'s test and `PrefabTests` expand the fixture to the same flat scene, and the C# tests also write the editor's files back unchanged. The depth limit is tested in `format`, not the cooker. The document's tests are `PrefabTests` and the shell's `PrefabShellTests`, which run without a host, so the viewport's pick of an instance's root is not under test.*
 - **Cooker:** a prefab with two roots, a direct cycle and one through a third prefab, a depth beyond the limit, a scene whose prefab is missing, the cache key changing with a nested prefab's source, and the dependencies in the index.
 - **Document:** round trip of the version 2 file, an override through each operation and its inverse, the wire form of each operation on an instance's entity, `CreateInstance` and Duplicate, Make Prefab with references remapped, Unpack, Apply and Revert, each refused edit of [Recursion](#recursion), the diff of a re-expansion after each kind of prefab change, and dirty state and save order.
 - **Runtime:** `spawn_prefab` with references inside the prefab, a nested prefab, `awake` before `World.spawn` returns, and a soft restart keeping the spawned entities.
@@ -192,7 +198,7 @@ A game spawns an instance from a script, or from native code at a serial point, 
 ## Phases
 
 1. **Format and cooker:** the version 2 keys in `scene_text.odin` and `SceneFile`, `scene_path_id`, `scene_expand`, the `Prefab` kind and extension, `cook scenes` cooking both kinds flat with the checks, the keys and the dependencies, the `prefab` template, and the fixture. A cooked scene with instances then loads in the game with no runtime change. *Built.*
-2. **Instances in the editor:** `PrefabSet` and `PrefabDocument`, `PrefabExpansion` and `Expanded`, wire forms against the expansion, `CreateInstance`, drag from the content browser, the outliner's and the properties panel's marks, overrides through every operation, Reset as revert, Duplicate, Unpack, and Make Prefab with the file written at save.
+2. **Instances in the editor:** `PrefabSet` and `PrefabDocument`, `PrefabExpansion` and `Expanded`, wire forms against the expansion, `CreateInstance`, drag from the content browser, the outliner's and the properties panel's marks, overrides through every operation, Reset as revert, Duplicate, Unpack, and Make Prefab with the file written at save. *Built.*
 3. **Prefab editing:** a prefab as the open document with its rules, `PrefabOperation`, Apply and Revert, the re-expansion diff, reload from disk, dirty state and save, Make Variant, and Play from a prefab.
 4. **Spawning:** the asset reference slice, `spawn_prefab`, `World.spawn(prefab, ...)`, and the Unity mapping's row.
 

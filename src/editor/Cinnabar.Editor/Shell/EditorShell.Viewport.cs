@@ -139,11 +139,16 @@ public sealed partial class EditorShell
         return true;
     }
 
+    // The handle of the outermost root of the instance that an entity is inside, or the entity's own.
+    ulong InstanceRootOf(ulong handle, ulong sceneId) =>
+        IsEditing && InstanceOf(sceneId) is { IsInstanceRoot: false } info && World.FindScene(info.Instance) is { } root ? root.Handle : handle;
+
     void OnPicked(PickResult result, SelectMode mode, bool click)
     {
         // Locked entities are drawn but not picked. A pick leaves the camera's pivot where it is: it is ahead of the
-        // camera, and what was clicked usually is not.
-        var hits = result.Hits.Select(h => h.Entity).Where(Pickable).ToList();
+        // camera, and what was clicked usually is not. An instance is one thing to pick, so a hit inside one picks its
+        // outermost root; a double click picks the entity itself.
+        var hits = result.Hits.Where(h => Pickable(h.Entity)).Select(h => InstanceRootOf(h.Entity, h.SceneId)).Distinct().ToList();
         switch (mode)
         {
             case SelectMode.Replace:
@@ -172,7 +177,7 @@ public sealed partial class EditorShell
             return MeshGizmoPose();
         }
         if (ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
-            || SceneEdits.WorldPose(Scene.Scene, primary) is not { } pose)
+            || SceneEdits.WorldPose(Scene.Expanded.Flat, primary) is not { } pose)
         {
             return null;
         }
@@ -217,7 +222,7 @@ public sealed partial class EditorShell
             return PressMeshGizmo(pixel, extrude);
         }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
-        _poseEdit = new PoseEdit(Scene.Scene, ids);
+        _poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
         if (_poseEdit.IsEmpty)
         {
             _poseEdit = null;
@@ -228,7 +233,7 @@ public sealed partial class EditorShell
         (_dragPivot, _dragAxes) = (pivot, axes);
         var count = _poseEdit.Moved.Count();
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        BeginEdit(count == 1 ? $"{verb} {Label(Scene.Scene.Find(_poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
+        BeginEdit(count == 1 ? $"{verb} {Label(Scene.Expanded.Flat.Find(_poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
         SendGizmo();
         return true;
     }
@@ -311,7 +316,7 @@ public sealed partial class EditorShell
         {
             return;
         }
-        var entities = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Scene.Find(id)).OfType<SceneEntity>();
+        var entities = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Expanded.Flat.Find(id)).OfType<SceneEntity>();
         Frame(entities);
     }
 
@@ -320,7 +325,7 @@ public sealed partial class EditorShell
     {
         if (Scene != null)
         {
-            Frame(Scene.Scene.Entities);
+            Frame(Scene.Expanded.Flat.Entities);
         }
     }
 
@@ -336,7 +341,7 @@ public sealed partial class EditorShell
     // its scale around it, or null for entities without a pose.
     (long[] Center, double Radius)? Bounds(IEnumerable<SceneEntity> entities)
     {
-        var poses = Scene == null ? [] : entities.Select(e => SceneEdits.WorldPose(Scene.Scene, e)).OfType<Pose>().ToList();
+        var poses = Scene == null ? [] : entities.Select(e => SceneEdits.WorldPose(Scene.Expanded.Flat, e)).OfType<Pose>().ToList();
         if (poses.Count == 0)
         {
             return null;

@@ -62,8 +62,17 @@ public sealed class OutlinerView : DockPanel
         Children.Add(new Panel { Children = { _list, _empty } });
         // A drop below the rows, on the list itself, makes the entity a root.
         DragDrop.SetAllowDrop(_list, true);
-        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
-        _list.AddHandler(DragDrop.DropEvent, (_, e) => Drop(e, 0));
+        // A prefab from the content browser dropped there makes an instance at the root.
+        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DroppedPrefab(e) != null ? DragDropEffects.Copy : CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
+        _list.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (DroppedPrefab(e) is { } prefab)
+            {
+                _shell.CreateInstance(prefab, 0);
+                return;
+            }
+            Drop(e, 0);
+        });
 
         _list.ItemTemplate = new FuncDataTemplate<OutlinerRow>((row, _) => row == null ? new Control() : RowView(row));
         // The rows that a click adds come last, so the one clicked is the primary entity. Entities that the filter hides
@@ -145,7 +154,8 @@ public sealed class OutlinerView : DockPanel
         var matches = filter.Length == 0
             || label.Contains(filter, StringComparison.OrdinalIgnoreCase)
             || node.ToString().Contains(filter, StringComparison.OrdinalIgnoreCase)
-            || summary.Contains(filter, StringComparison.OrdinalIgnoreCase);
+            || summary.Contains(filter, StringComparison.OrdinalIgnoreCase)
+            || _shell.InstanceOf(node.SceneId) is { Prefab: not "" } instance && _shell.PrefabName(instance.Prefab).Contains(filter, StringComparison.OrdinalIgnoreCase);
         var childMatches = false;
         if (row.Expanded || filter.Length > 0)
         {
@@ -216,6 +226,7 @@ public sealed class OutlinerView : DockPanel
             view.Children.Add(eyeButton);
         }
         view.Children.Add(content);
+        Mark(content, row.Node.SceneId);
         if (_shell.ProblemsOf(row.Node.SceneId) is { Count: > 0 } problems)
         {
             var warning = new TextBlock { Text = "⚠", Classes = { "warning" } };
@@ -261,8 +272,12 @@ public sealed class OutlinerView : DockPanel
         DragDrop.SetAllowDrop(view, true);
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
-            // A script from the content browser adds its behaviour to the entity.
-            if (ContentBrowserView.Dropped(e) is { } script)
+            // A prefab from the content browser makes an instance under the entity; a script adds its behaviour.
+            if (DroppedPrefab(e) != null)
+            {
+                e.DragEffects = row.Node.SceneId != 0 ? DragDropEffects.Copy : DragDropEffects.None;
+            }
+            else if (ContentBrowserView.Dropped(e) is { } script)
             {
                 e.DragEffects = _shell.CanAddBehaviour([row.Node.SceneId], script) ? DragDropEffects.Link : DragDropEffects.None;
             }
@@ -274,7 +289,11 @@ public sealed class OutlinerView : DockPanel
         });
         view.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (ContentBrowserView.Dropped(e) is { } script)
+            if (DroppedPrefab(e) is { } prefab)
+            {
+                _shell.CreateInstance(prefab, row.Node.SceneId);
+            }
+            else if (ContentBrowserView.Dropped(e) is { } script)
             {
                 _shell.AddBehaviour([row.Node.SceneId], script);
             }
@@ -287,6 +306,9 @@ public sealed class OutlinerView : DockPanel
         view.ContextMenu = RowMenu(row);
         return view;
     }
+
+    string? DroppedPrefab(DragEventArgs e) =>
+        _shell.IsEditing && _shell.Scene != null && ContentBrowserView.Dropped(e) is { } guid && _shell.IsPrefab(guid) ? guid : null;
 
     // An entity can go under any scene entity that is not itself or one of its descendants, or to the root.
     bool CanDrop(DragEventArgs e, ulong parent)
@@ -311,6 +333,39 @@ public sealed class OutlinerView : DockPanel
         if (CanDrop(e, parent) && _world.Find(EntityView.Dropped(e)) is { } dragged)
         {
             _shell.Reparent(dragged.SceneId, parent);
+        }
+    }
+
+    // An instance's root has the prefab's icon before its name; an entity of an instance with overrides a dot after
+    // it; and one that the scene added to an instance a plus.
+    void Mark(StackPanel content, ulong id)
+    {
+        if (id == 0)
+        {
+            return;
+        }
+        var instance = _shell.InstanceOf(id);
+        if (instance is { Prefab: not "" } && CommandViews.Icon("prefab", 12) is { } icon)
+        {
+            icon.Classes.Add("prefab");
+            ToolTip.SetTip(icon, $"An instance of {_shell.PrefabName(instance.Prefab)}");
+            content.Children.Insert(1, icon);
+        }
+        TextBlock? mark = null;
+        if (instance is { IsInstanceRoot: false } && _shell.IsOverridden(id))
+        {
+            mark = new TextBlock { Text = "•", Classes = { "prefab" } };
+            ToolTip.SetTip(mark, "Overrides its prefab");
+        }
+        else if (instance == null && _shell.IsAddedToInstance(id))
+        {
+            mark = new TextBlock { Text = "+", Classes = { "prefab" } };
+            ToolTip.SetTip(mark, "Added to the instance, not in its prefab");
+        }
+        if (mark != null)
+        {
+            var name = content.Children.OfType<TextBlock>().First(t => t.Text != "" && !t.Classes.Contains("dim"));
+            content.Children.Insert(content.Children.IndexOf(name) + 1, mark);
         }
     }
 
@@ -346,6 +401,20 @@ public sealed class OutlinerView : DockPanel
         if (row.Node.Parent != 0)
         {
             menu.Items.Add(new MenuItem { Header = "Move to Root", Command = new RelayCommand(() => _shell.Reparent(row.Node.SceneId, 0)) });
+        }
+        menu.Items.Add(new Separator());
+        if (_shell.InstanceOf(row.Node.SceneId) is { } instance)
+        {
+            menu.Items.Add(Item("Select Prefab Asset", EditorCommands.SelectPrefabAsset));
+            if (instance.IsInstanceRoot)
+            {
+                menu.Items.Add(Item("Unpack", EditorCommands.UnpackPrefab));
+                menu.Items.Add(Item("Unpack Completely", EditorCommands.UnpackPrefabCompletely));
+            }
+        }
+        else
+        {
+            menu.Items.Add(Item("Make Prefab", EditorCommands.MakePrefab));
         }
         menu.Items.Insert(0, Item("Focus", EditorCommands.FrameSelected));
         menu.Items.Insert(1, new Separator());

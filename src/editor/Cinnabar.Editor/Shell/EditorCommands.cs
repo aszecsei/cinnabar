@@ -29,6 +29,10 @@ static class EditorCommands
     public const string NewMaterialFunction = "content.newMaterialFunction";
     public const string NewMesh = "content.newMesh";
     public const string NewPrefab = "content.newPrefab";
+    public const string MakePrefab = "prefab.make";
+    public const string UnpackPrefab = "prefab.unpack";
+    public const string UnpackPrefabCompletely = "prefab.unpackCompletely";
+    public const string SelectPrefabAsset = "prefab.selectAsset";
     public const string EditMesh = "mesh.edit";
     public const string ObjectMode = "mesh.objectMode";
     public const string MeshVertices = "mesh.vertices";
@@ -245,6 +249,31 @@ static class EditorCommands
             Icon = "copy",
             Shortcut = "Ctrl+D",
             CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(MakePrefab, "Make Prefab", shell.RequestMakePrefab)
+        {
+            Description = "Make a prefab of the selected entity and its children in the content browser's folder, and put an instance of it in their place.",
+            Icon = "prefab",
+            Shortcut = "Ctrl+Shift+M",
+            CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) == null,
+        });
+        commands.Register(new Command(UnpackPrefab, "Unpack", () => shell.UnpackSelected(completely: false))
+        {
+            Description = "Make the selected instances' entities the scene's own, keeping the prefabs inside them as instances.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) is { IsInstanceRoot: true }),
+        });
+        commands.Register(new Command(UnpackPrefabCompletely, "Unpack Completely", () => shell.UnpackSelected(completely: true))
+        {
+            Description = "Make the selected instances' entities the scene's own, through every prefab inside them.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) is { IsInstanceRoot: true }),
+        });
+        commands.Register(new Command(SelectPrefabAsset, "Select Prefab Asset", shell.SelectPrefabAsset)
+        {
+            Description = "Show the prefab of the selected entity's instance in the content browser.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) != null,
         });
         commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
         {

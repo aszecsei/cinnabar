@@ -20,7 +20,7 @@ entity 2000000000000002
 name = "Frame"
 parent = @2000000000000001
 component 2 Local_Transform
-	position = [0, 0, 0]
+	offset = [0, 0, 0]
 component 35 Point_Light
 	intensity = 1.0
 
@@ -28,7 +28,7 @@ entity 2000000000000003
 name = "Handle"
 parent = @2000000000000002
 component 2 Local_Transform
-	position = [0.4, 1, 0]
+	offset = [0.4, 1, 0]
 behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 	frame = @2000000000000002
 
@@ -36,14 +36,14 @@ entity 2000000000000004
 name = "Hinge"
 parent = @2000000000000002
 component 2 Local_Transform
-	position = [-0.5, 1, 0]
+	offset = [-0.5, 1, 0]
 
 entity 2000000000000005
 name = "Porch Lamp"
 parent = @2000000000000001
 prefab = $11111111111111111111111111111111
 component 2 Local_Transform
-	position = [0, 2.5, 0]
+	offset = [0, 2.5, 0]
 
 entity 2000000000000005#1000000000000002
 component 35 Point_Light

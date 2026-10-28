@@ -158,6 +158,7 @@ public sealed partial class EditorShell : IDisposable
         }
         _pendingMaterials.AddRange(options.MaterialPaths);
         Assets.Changed += OpenPendingMaterials;
+        Assets.Changed += ExpandArrivedPrefabs;
     }
 
     public void RequestPalette() => PaletteRequested?.Invoke();

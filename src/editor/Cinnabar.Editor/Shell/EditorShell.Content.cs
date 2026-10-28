@@ -129,7 +129,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Warning, "edit: only a script that defines a behaviour adds one");
             return false;
         }
-        var entities = sceneIds.Select(id => Scene?.Scene.Find(id)).OfType<SceneEntity>()
+        var entities = sceneIds.Select(id => Scene?.Expanded.Flat.Find(id)).OfType<SceneEntity>()
             .Where(e => !e.Behaviours.Any(b => b.Script == script)).ToList();
         if (entities.Count == 0)
         {
@@ -143,7 +143,7 @@ public sealed partial class EditorShell
     /// <summary>Whether a drop of an asset could add a behaviour to the scene entities.</summary>
     public bool CanAddBehaviour(IEnumerable<ulong> sceneIds, string script) =>
         IsEditing && Assets.Find(script) is { Kind: AssetKind.Script, Behaviour: not "" }
-        && sceneIds.Select(id => Scene?.Scene.Find(id)).OfType<SceneEntity>().Any(e => !e.Behaviours.Any(b => b.Script == script));
+        && sceneIds.Select(id => Scene?.Expanded.Flat.Find(id)).OfType<SceneEntity>().Any(e => !e.Behaviours.Any(b => b.Script == script));
 
     void WireCook()
     {

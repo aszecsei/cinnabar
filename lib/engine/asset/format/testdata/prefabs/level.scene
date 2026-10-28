@@ -47,7 +47,7 @@ entity 6000000000000002
 name = "Sticker"
 parent = @5000000000000001#2000000000000002
 component 2 Local_Transform
-	position = [0.1, 1.2, 0.02]
+	offset = [0.1, 1.2, 0.02]
 
 entity 6000000000000003
 name = "Under Hinge"

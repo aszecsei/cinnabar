@@ -66,6 +66,7 @@ public sealed class MainWindow : Window
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
         shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.MakePrefabRequested += name => _ = AskMakePrefab(name);
         shell.RenameRequested += item => _ = AskRename(item);
         shell.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
@@ -196,6 +197,16 @@ public sealed class MainWindow : Window
         else
         {
             _shell.DiscardAutosave();
+        }
+    }
+
+    async Task AskMakePrefab(string suggested)
+    {
+        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var name = await Dialogs.AskName(this, "Make Prefab", $"Name the prefab, which the next save writes in {place}.", suggested, "Make");
+        if (name != null)
+        {
+            _shell.MakePrefab(name);
         }
     }
 

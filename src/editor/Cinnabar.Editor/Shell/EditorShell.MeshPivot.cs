@@ -58,7 +58,7 @@ public sealed partial class EditorShell
 
     // The pivot gizmo's pose: the entity's world position with the world's axes.
     (long[] Pivot, Quat Axes)? PivotGizmoPose() =>
-        EditPivot && _pending == null && PivotMesh() is var (_, entity) && Scene?.Scene.Find(entity) is { } document && SceneEdits.WorldPose(Scene.Scene, document) is { } pose
+        EditPivot && _pending == null && PivotMesh() is var (_, entity) && Scene?.Expanded.Flat.Find(entity) is { } document && SceneEdits.WorldPose(Scene.Expanded.Flat, document) is { } pose
             ? (pose.Position, Quat.Identity) : null;
 
     bool PressPivotGizmo(Vec2 pixel, long[] pivot)
@@ -68,7 +68,7 @@ public sealed partial class EditorShell
             return false;
         }
         var (width, height) = FrameSize;
-        _poseEdit = new PoseEdit(Scene.Scene, [entity]);
+        _poseEdit = new PoseEdit(Scene.Expanded.Flat, [entity]);
         if (_poseEdit.IsEmpty)
         {
             _poseEdit = null;
@@ -138,7 +138,7 @@ public sealed partial class EditorShell
     {
         CommitPendingDistance();
         if (PivotMesh() is not var (guid, entity) || FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement || Scene is not { InTransaction: false }
-            || Scene.Scene.Find(entity) is not { } document || SceneEdits.WorldPose(Scene.Scene, document) is not { } pose)
+            || Scene.Expanded.Flat.Find(entity) is not { } document || SceneEdits.WorldPose(Scene.Expanded.Flat, document) is not { } pose)
         {
             return false;
         }
@@ -149,7 +149,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
             return false;
         }
-        _poseEdit = new PoseEdit(Scene.Scene, [entity]);
+        _poseEdit = new PoseEdit(Scene.Expanded.Flat, [entity]);
         (_dragPivot, _dragAxes) = (pose.Position, Quat.Identity);
         var ops = PivotOperations(guid, mesh, placement, pivot, t);
         _poseEdit = null;

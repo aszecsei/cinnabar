@@ -204,6 +204,25 @@ public sealed class PrefabTests : IDisposable
     }
 
     [Fact]
+    public void RevertingARemovedComponentLeavesNoOverride()
+    {
+        var (document, sent) = Open();
+        var frame = InDoor(FrameId);
+
+        document.Apply("Remove", new RemoveComponent(frame, 35));
+        Assert.Equal([35UL], document.Scene.Find(frame)!.RemovedComponents);
+        Assert.DoesNotContain(document.Expanded.Flat.Find(frame)!.Components, c => c.Id == 35);
+
+        // The properties panel's Revert adds the prefab's component back as the prefab gives it.
+        var prefab = PrefabEdits.Base(document, frame)!.Components.Single(c => c.Id == 35);
+        sent.Clear();
+        document.Apply("Revert", new AddComponent(frame, prefab));
+        Assert.Null(document.Scene.Find(frame));
+        Assert.Equal(Wire.OperationKind.AddComponent, Assert.Single(sent).Kind);
+        Assert.Equal(SceneValue.Of(SceneNumber.Of(1.0)), Intensity(document, frame));
+    }
+
+    [Fact]
     public void AReferenceToAnInstancesEntityIsWrittenAsItsPath()
     {
         var (document, _) = Open("scene 2\n\nentity 5000000000000001\nprefab = $22222222222222222222222222222222\n\nentity 6000000000000001\ncomponent 1001 Spin\n\ttarget = @0\n");
