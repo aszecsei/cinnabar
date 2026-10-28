@@ -129,10 +129,19 @@ Triangle_Instance :: struct {
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
 LENS_ID :: ecs.Component_Id(1003)
+SMOKE_ID :: ecs.Component_Id(1004)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
 	speed: f32,
+}
+
+// Smoke rises from an entity as compute sprites (see docs/rendering/transparency.md#sprites): puffs of it, each of
+// which rises height meters in lifetime seconds, spreading, turning and fading as it goes.
+Smoke :: struct {
+	puffs:    u32,
+	lifetime: f32,
+	height:   f32,
 }
 
 // Triangle marks one of the large triangles, with its HDR brightness.
@@ -449,6 +458,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
+	ecs.register_component(r, Smoke, SMOKE_ID)
 }
 
 // register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
@@ -712,19 +722,22 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	overrides := editor.render_overrides(&s.editor)
 	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
+	hidden := editor.visibility(&s.editor, &s.world).hidden
 	desc := render.Frame_Desc {
 		view            = view,
 		size            = size,
 		keep_ids        = editing,
 		// The debug layer, with the editor's overlays and the debug lines, only while editing or without an editor.
 		no_debug        = !editor.debug_shown(&s.editor),
-		hidden          = editor.visibility(&s.editor, &s.world).hidden,
+		hidden          = hidden,
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
 		exposure_offset = overrides.exposure_offset,
 		quality         = viewport_quality ? &quality : nil,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),
+		// The scene's smoke (see Smoke).
+		sprites         = smoke_sprites(s, hidden),
 		hooks           = {
 			data         = frame,
 			before_world = before_world,
@@ -739,6 +752,43 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	if render.draw_frame(&s.renderer, &s.world, desc) && frame.building_blas {
 		s.blas_built = true
 	}
+}
+
+// smoke_sprites is this frame's puffs of every Smoke, in frame memory, leaving out the entities that the editor hides.
+// Each puff's place is a function of the time, so a Smoke keeps no state: puffs start at times spread over the
+// lifetime and leave in directions spread by the golden angle, drift toward -z as they rise, and glow at the bottom.
+smoke_sprites :: proc(s: ^Game_State, hidden: []u32) -> []render.Sprite {
+	smokes := make([dynamic]ecs.Entity, s.platform.frame_allocator)
+	ecs.collect(&s.world, {SMOKE_ID}, &smokes)
+	sprites := make([dynamic]render.Sprite, s.platform.frame_allocator)
+	t := time.duration_seconds(s.elapsed)
+	for e in smokes {
+		if render.is_hidden(hidden, e) {
+			continue
+		}
+		smoke := ecs.get(&s.world, e, Smoke)
+		pose, ok := ecs.presented(&s.world, e)
+		if !ok || smoke.lifetime <= 0 {
+			continue
+		}
+		for i in 0 ..< int(smoke.puffs) {
+			age := f32(math.mod(t / f64(smoke.lifetime) + f64(i) * 0.618034, 1))
+			angle := f32(i) * 2.399963
+			spread := 0.05 + age * 0.5
+			offset := [3]f32{math.cos(angle) * spread, age * smoke.height, math.sin(angle) * spread - age * 1.2}
+			offset.x += math.sin(f32(t) * 0.7 + age * 4) * 0.25 * age
+			fade := min(age * 6, 1) * (1 - age)
+			append(&sprites, render.Sprite {
+				position = ecs.position_offset(pose.position, offset),
+				size     = 0.15 + age * 0.55,
+				rotation = angle + f32(t) * (i % 2 == 0 ? 0.3 : -0.3),
+				color    = {0.3, 0.3, 0.32, 0.6 * fade},
+				emission = [3]f32{4, 1.2, 0.2} * max(1 - age * 5, 0),
+				softness = 0.3,
+			})
+		}
+	}
+	return sprites[:]
 }
 
 // before_world imports the sample's resources, and culls the objects on the compute queue. The mesh path culls in its

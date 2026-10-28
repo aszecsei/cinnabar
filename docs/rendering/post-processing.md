@@ -39,7 +39,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
 | `Entity_Ids` | `debug_view.hlsl` | Each entity in a color of its own | No |
 | `Luminance` | `debug_view.hlsl` | The scene's EV100 as heat colors, from -4 to 16 | No |
-| `Transparent_Overdraw` | `debug_view.hlsl` | The transparent layers at each pixel, which the moments pass counts, as heat colors from 1 to 8 | No |
+| `Transparent_Overdraw` | `debug_view.hlsl` | The transparent layers at each pixel, sprites included, which the moments passes count, as heat colors from 1 to 8 | No |
 | `Meshlets`, `Lod_Depth` | The forward pass | The [mesh shader path](gpu-scene.md#mesh-shader-path)'s meshlets, and the [patch surfaces](surfaces.md#patches)' patches, each in a color of its own, and their levels of detail as heat colors up to 8, which an [impostor](gpu-scene.md#impostors) is | No |
 | `Emission` | The forward pass | The shading model's emission alone, of opaque and transparent surfaces (see [Materials](materials.md#shading-models)) | Yes |
 

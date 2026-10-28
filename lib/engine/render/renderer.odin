@@ -97,6 +97,8 @@ Renderer :: struct {
 	debug_view:      Shader_Pipeline,
 	// Moment-based transparency's composite over the scene (see docs/rendering/transparency.md#transparency).
 	transparency_composite: Shader_Pipeline,
+	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
+	sprites:         Sprites,
 	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
 	// set_quality).
 	caps:            Caps,
@@ -133,6 +135,9 @@ Frame_Desc :: struct {
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering/materials.md#material-previews). draw_frame sets each one's complete.
 	previews:          []Preview_Desc,
+	// The sprites that the frame draws with the moment-based transparent surfaces, at most MAX_SPRITES (see
+	// docs/rendering/transparency.md#sprites).
+	sprites:           []Sprite,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -205,6 +210,8 @@ Frame :: struct {
 	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering/transparency.md#transparency).
 	moments_zeroth:           Texture,
 	moments:                  Texture,
+	// nil without sprites.
+	sprites:                  ^Sprite_Frame,
 	// Zero without a UI hook, and without debug lines or a debug hook.
 	ui:                       Texture,
 	debug:                    Texture,
@@ -310,6 +317,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	ao_init(&r.ao)
 	gi_init(&r.gi)
 	fog_init(&r.fog)
+	sprites_init(&r.sprites)
 	post_init(&r.post, platform)
 }
 
@@ -345,6 +353,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
+	sprites_destroy(&r.sprites, r.platform)
 	post_destroy(&r.post, r.platform)
 	for &p in r.output_pipelines {
 		destroy_shader_pipeline(&p, r.platform)
@@ -411,6 +420,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, settings.ambient)
 	add_scene_passes(f, settings.ambient)
+	begin_sprites(f, desc.sprites)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
 
@@ -439,8 +449,8 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.scene, .Clear, {settings.background.r, settings.background.g, settings.background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, the
-	// transparent surfaces, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || reads_depth(f) || desc.debug_view == .Depth
+	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || f.sprites != nil || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -532,6 +542,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
+	sync_sprite_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
 	sync_compute_pipeline(&r.transparency_composite, r.platform, assets, {label = "transparency composite"}, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {
