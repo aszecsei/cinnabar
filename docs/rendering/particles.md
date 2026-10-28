@@ -2,7 +2,7 @@
 
 GPU particles: a `Particle_System` places an effect asset, whose emitters the GPU simulates in frame time and draws as compute sprites among the moment-based transparent surfaces. Read [Transparency](transparency.md#sprites) first for the sprites that they draw as, and [Effects](../content/kinds/effects.md#effects) for the asset.
 
-**In this document:** [Particles](#particles) · [Systems](#systems) · [Time](#time) · [Simulation](#simulation) · [Collision](#collision)
+**In this document:** [Particles](#particles) · [Systems](#systems) · [Time](#time) · [Simulation](#simulation) · [Collision](#collision) · [Previews](#previews)
 
 ## Particles
 
@@ -31,7 +31,10 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 
 ## Time
 
-`Frame_Desc.delta` is the time that the particles step this frame, in seconds, at most `MAX_PARTICLE_DELTA` (0.1 s). The game passes the time that its simulation stepped, so the particles stand still in the editor's Edit mode and while it pauses, and step with Step Frame. The sample passes the step that `editor.simulation` gives. The noise's time is the sum of the steps.
+`Frame_Desc.delta` is the time that the particles step this frame, in seconds, at most `MAX_PARTICLE_DELTA` (0.1 s). The game passes the time that its simulation stepped, so the particles stand still in the editor's Edit mode and while it pauses, and step with Step Frame. The sample passes the step that `editor.simulation` gives.
+
+- **Playing in the editor.** While `delta` is 0, the systems in `Frame_Desc.playing` step by the host's time since the last frame instead, at most `MAX_PARTICLE_DELTA`. `editor.playing` gives the editor's selection, so a selected effect plays in Edit and while paused, every other one stays where it is, and one that is deselected stops where it is. In Play, every system steps by `delta`.
+- **Each system's time** is its own: an emitter's record carries the time that its system steps this frame, and its age, which the noise moves with.
 
 ## Simulation
 
@@ -52,3 +55,13 @@ The simulation runs before the prepass, so it collides with what the camera saw 
 - **The history.** After the prepass, `particle_history.hlsl` writes each pixel's view depth and world normal into a history texture (`PARTICLE_HISTORY_FORMAT`, `RGBA16_Float`), which the next frame's update reads. Where nothing drew, the depth is as far as the format holds.
 - **A collision.** A particle with `collide` projects with last frame's view projection. When it is behind the depth there by less than a thickness, 0.3 m or twice its step, whichever is more, and moving into the surface, it bounces: it keeps `restitution` of its speed into the surface and `1 - friction` of its speed along it, and moves back out by how far it went in.
 - **No collision** happens off last frame's screen, in the first frame, after the frame's size changes, or behind what last frame showed.
+
+## Previews
+
+The editor shows an effect in a preview of its own, as it shows a material (see [Material previews](materials.md#material-previews)). A preview of an effect is the same `Open_Preview` with the effect's GUID: the game's `editor` package finds that its blob is an effect's, sets `Preview_Desc.effect`, and draws the preview in every frame that it can, since the effect plays.
+
+`add_preview_passes` draws an effect's preview into its target:
+- **The ground:** the engine's default material on the preview plane, `EFFECT_PREVIEW_GROUND` (6 m) a side, drawn as a material preview draws its mesh, with the camera orbiting a point `EFFECT_PREVIEW_HEIGHT` (0.75 m) over it. Until the plane and the material are ready, the effect plays over the background.
+- **A frame of its own:** the preview's targets, its constants as its camera's, one directional light and the ambient light. Its sprites have buffers of their own (`Sprites.preview`), since the frame's are in use, and its particles a history of their own, so they collide with the ground.
+- **The system:** a slot for each preview (`Particles.previews`), which plays the effect at the preview's origin by the host's time. A new effect, or a new version of its blob, starts it again, so each save of the effect restarts it once it cooks.
+- Then the moments, the sprites' passes and the composite, and the output pass's tone mapping into the target.

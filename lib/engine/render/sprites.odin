@@ -83,15 +83,22 @@ Sprite_Target :: struct {
 	count:   Buffer,
 }
 
-// Sprites is the sprites' pipelines and the buffers that their passes share, in the Renderer. The buffers that depend on
-// the frame's size and capacity grow with them.
+// Sprites is the sprites' pipelines and buffers, in the Renderer: the main view's buffers, and the effect previews'
+// (see docs/rendering/particles.md#previews), since a preview draws its sprites in the same frame.
 Sprites :: struct {
-	arguments:       Shader_Pipeline,
-	tiles:           Shader_Pipeline,
-	bin:             Shader_Pipeline,
-	light:           Shader_Pipeline,
-	moments:         Shader_Pipeline,
-	shade:           Shader_Pipeline,
+	arguments: Shader_Pipeline,
+	tiles:     Shader_Pipeline,
+	bin:       Shader_Pipeline,
+	light:     Shader_Pipeline,
+	moments:   Shader_Pipeline,
+	shade:     Shader_Pipeline,
+	main:      Sprite_Buffers,
+	preview:   Sprite_Buffers,
+}
+
+// Sprite_Buffers is the buffers that one view's sprite passes share. Those that depend on the view's size and capacity
+// grow with them.
+Sprite_Buffers :: struct {
 	// MAX_SPRITES records, their counter, and the dispatches that sprite_arguments.hlsl writes from it (a
 	// Sprite_Arguments).
 	records:         gpu.Buffer,
@@ -191,6 +198,8 @@ Raster_Push :: struct {
 // Sprite_Frame is what one frame's sprite passes need, in frame memory.
 @(private)
 Sprite_Frame :: struct {
+	// The view's buffers.
+	buffers:     ^Sprite_Buffers,
 	// Frame_Desc.sprites as records in the upload ring, and their count, which starts the counter.
 	cpu:         gpu.Upload,
 	cpu_count:   u32,
@@ -228,9 +237,11 @@ sprites_destroy :: proc(s: ^Sprites, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&s.arguments, &s.tiles, &s.bin, &s.light, &s.moments, &s.shade}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	for b in ([]gpu.Buffer{s.records, s.count, s.dispatches, s.screen, s.tile_depths, s.bins}) {
-		if b != {} {
-			platform.gpu_destroy_buffer(b)
+	for buffers in ([]^Sprite_Buffers{&s.main, &s.preview}) {
+		for b in ([]gpu.Buffer{buffers.records, buffers.count, buffers.dispatches, buffers.screen, buffers.tile_depths, buffers.bins}) {
+			if b != {} {
+				platform.gpu_destroy_buffer(b)
+			}
 		}
 	}
 }
@@ -265,11 +276,11 @@ has_sprites :: proc(f: ^Frame) -> bool {
 	return f.sprites != nil && f.sprites.capacity > 0
 }
 
-// begin_sprites makes the frame's sprites, with Frame_Desc.sprites as records relative to the camera. It runs after
-// add_scene_passes, whose camera constants the passes read. Before the sprites' pipelines compile, Frame.sprites stays
-// nil, and the frame draws none and GPU passes can reserve none.
+// begin_sprites makes the frame's sprites, with Frame_Desc.sprites as records relative to the camera, in a view's
+// buffers. It runs after add_scene_passes, whose camera constants the passes read. Before the sprites' pipelines
+// compile, Frame.sprites stays nil, and the frame draws none and GPU passes can reserve none.
 @(private)
-begin_sprites :: proc(f: ^Frame, sprites: []Sprite) {
+begin_sprites :: proc(f: ^Frame, sprites: []Sprite, buffers: ^Sprite_Buffers) {
 	r := f.renderer
 	if f.scene_frame == nil || len(f.scene_frame.view_constants) == 0 || !sprites_ready(r) {
 		return
@@ -281,6 +292,7 @@ begin_sprites :: proc(f: ^Frame, sprites: []Sprite) {
 		sprites = sprites[:MAX_SPRITES]
 	}
 	sf := new(Sprite_Frame, platform.frame_allocator)
+	sf.buffers = buffers
 	sf.scale = projection_scale(f.view_projection)
 	f.sprites = sf
 	if len(sprites) == 0 {
@@ -347,7 +359,7 @@ start_sprites :: proc(f: ^Frame) {
 	}
 	r := f.renderer
 	platform := r.platform
-	s := &r.sprites
+	s := sf.buffers
 	if s.records == {} {
 		s.records = platform.gpu_create_buffer({size = MAX_SPRITES * size_of(Sprite_Record), usage = {.Storage}, label = "sprites"}, nil)
 		s.count = platform.gpu_create_buffer({size = 4, usage = {.Storage}, label = "sprite count"}, nil)
@@ -394,7 +406,7 @@ add_sprite_bin_passes :: proc(f: ^Frame) {
 	g := f.graph
 	r := f.renderer
 	platform := r.platform
-	s := &r.sprites
+	s := sf.buffers
 	sf.words = (sf.capacity + 31) / 32
 	sf.tiles = (f.size + SPRITE_TILE - 1) / SPRITE_TILE
 	rows := (sf.capacity + SPRITE_LIGHT_COLUMNS - 1) / SPRITE_LIGHT_COLUMNS

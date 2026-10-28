@@ -26,6 +26,16 @@ debug_shown :: proc(e: ^Editor) -> bool {
 	return !active(e) || e.mode == .Edit
 }
 
+// playing is the Particle_Systems that play while the world stands still, for render.Frame_Desc.playing: the editor's
+// selection, so a selected effect plays in Edit and while paused (see docs/rendering/particles.md#time). Without an
+// editor, none.
+playing :: proc(e: ^Editor) -> []ecs.Entity {
+	if !active(e) {
+		return nil
+	}
+	return e.viewport.selection[:]
+}
+
 // simulation reports whether this frame runs the world, its systems and scripts, and with what time step: the frame's
 // in Play, and one fixed tick for a step while paused. A frame that does not run the world still propagates transforms
 // and renders. Call it once per frame.

@@ -45,6 +45,7 @@ public sealed class MaterialTests : IDisposable
 
     const string MaterialGuid = "f7eadea8bd278c0ae71b61b681352a82";
     const string FunctionGuid = "11112222333344445555666677778888";
+    const string EffectGuid = "99998888777766665555444433332222";
 
     static string Text(string text) => text.Replace("\r\n", "\n");
 
@@ -225,6 +226,7 @@ public sealed class MaterialTests : IDisposable
         File.WriteAllText(Path.Combine(_directory, "checker.material"), Text(Checker));
         File.WriteAllText(Path.Combine(_directory, "rim.material_function"), Text(Rim));
         File.WriteAllText(Path.Combine(_directory, "glow.material"), "material 1\nshading = lit\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n");
+        File.WriteAllText(Path.Combine(_directory, "smoke.effect"), "effect 1\nemitter puffs\n");
         var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", null) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
             new EditorSettings(Path.Combine(_directory, "settings")));
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [], Nodes));
@@ -234,6 +236,7 @@ public sealed class MaterialTests : IDisposable
             new Asset(MaterialGuid, AssetKind.Material, "game", "checker.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", []),
             new Asset(FunctionGuid, AssetKind.MaterialFunction, "game", "rim.material_function", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
             new Asset("22", AssetKind.Material, "game", "glow.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", []),
+            new Asset(EffectGuid, AssetKind.Effect, "game", "smoke.effect", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
         ], []));
         return shell;
     }
@@ -295,6 +298,29 @@ public sealed class MaterialTests : IDisposable
         Assert.Same(function, shell.ActiveMaterial);
         shell.CloseMaterial(function, discard: true);
         Assert.Single(shell.Materials);
+    }
+
+    [Fact]
+    public void EffectsOpenInPreviewsThatShareTheMaterialEditorsPreviews()
+    {
+        using var shell = NewShell();
+        var material = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!);
+        var effect = shell.OpenEffect(shell.Assets.Find(EffectGuid)!);
+        Assert.NotNull(effect);
+        // The effect takes the first preview that the material editor does not have, and picks no mesh.
+        Assert.Equal(0, material!.PreviewId);
+        Assert.Equal(1, effect.PreviewId);
+        Assert.False(effect.PicksMesh);
+        Assert.Equal(Path.Combine(_directory, "smoke.effect"), effect.Path);
+        // Opening it again shows the same preview.
+        Assert.Same(effect, shell.OpenEffect(shell.Assets.Find(EffectGuid)!));
+        Assert.Equal("Open Preview", shell.OpenLabel(shell.Assets.Find(EffectGuid)!));
+
+        // Closing its document frees its preview for the next one.
+        shell.Layout.CloseDocument(effect);
+        Assert.Empty(shell.Effects);
+        shell.CloseMaterial(material, discard: true);
+        Assert.Equal(0, shell.OpenEffect(shell.Assets.Find(EffectGuid)!)!.PreviewId);
     }
 
     public void Dispose()

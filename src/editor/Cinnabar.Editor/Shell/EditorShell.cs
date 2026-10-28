@@ -157,6 +157,7 @@ public sealed partial class EditorShell : IDisposable
             OpenScene(options.ScenePath);
         }
         _pendingMaterials.AddRange(options.MaterialPaths);
+        _pendingMaterials.AddRange(options.EffectPaths);
         Assets.Changed += OpenPendingMaterials;
         Assets.Changed += ExpandArrivedPrefabs;
         Assets.Changed += ReloadChangedPrefabs;

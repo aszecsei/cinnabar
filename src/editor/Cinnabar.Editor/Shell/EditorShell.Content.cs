@@ -53,8 +53,10 @@ public sealed partial class EditorShell
             case AssetKind.Material when !IsHlslMaterial(path):
                 OpenMaterial(asset);
                 break;
-            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.Effect:
+            case AssetKind.Effect:
+                OpenEffect(asset);
+                break;
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance:
                 OpenScript(path);
                 break;
         }
@@ -82,6 +84,7 @@ public sealed partial class EditorShell
     {
         AssetKind.Scene => "Open Scene",
         AssetKind.MaterialFunction => "Open in Material Editor",
+        AssetKind.Effect => "Open Preview",
         AssetKind.Material when Assets.FullPath(asset) is { } path && !IsHlslMaterial(path) => "Open in Material Editor",
         _ => "Open in Script Editor",
     };

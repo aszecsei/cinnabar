@@ -663,6 +663,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		previews        = editor.previews(&s.editor),
 		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
 		delta           = s.frame_step,
+		// The editor's selected systems play while the world stands still.
+		playing         = editor.playing(&s.editor),
 		hooks           = {
 			data         = frame,
 			before_world = before_world,

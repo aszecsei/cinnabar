@@ -52,7 +52,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `viewport.odin` | The camera, the selection, hidden entities, the ID buffer's pick pass, the outline and the gizmo |
 | `helpers.odin`, `icons.odin` | The shapes of lights, volumes and cameras as debug lines, and their clickable icons |
 | `commands.odin` | Game commands: registered by the game, shown in the ribbon, run through `poll` |
-| `preview.odin` | Material previews for the material editor (see [Rendering](../rendering/materials.md#material-previews)) |
+| `preview.odin` | Material previews for the material editor, and effect previews (see [Rendering](../rendering/materials.md#material-previews) and [Particles](../rendering/particles.md#previews)) |
 | `live.odin`, `mesh_overlay.odin` | Live meshes baked and made resident in place of their blobs, and mesh mode's overlay (see [Mesh editing](mesh-editing.md#live-meshes)) |
 | `link/link.odin` | The editor link's messages, shared with the host |
 

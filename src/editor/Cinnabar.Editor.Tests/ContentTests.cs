@@ -173,6 +173,7 @@ public sealed class ContentTests : IDisposable
         Assert.Equal([("game", Path.GetFullPath("content")), ("engine", Path.GetFullPath("lib/content"))], options.Cook.Roots);
         Assert.Equal(Path.GetFullPath("dxc/dxc.exe"), options.Cook.DxcPath);
         Assert.Equal([Path.GetFullPath("shaders")], options.Cook.Includes);
+        Assert.Equal([Path.GetFullPath("smoke.effect")], EditorOptions.Parse(["--effect", "smoke.effect"]).EffectPaths);
         // Without roots, the daemon cooks the sample's content and the engine's.
         Assert.Equal(["game", "engine"], EditorOptions.Parse([]).Cook.Roots.Select(r => r.Name));
     }
