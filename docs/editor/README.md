@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
+| [Prefabs](prefabs.md) | The design of prefabs: `.prefab` assets, instances and overrides in the scene format, expansion, the editor's prefab documents, and spawning. |
 | [Capture](capture.md) | Screenshots and GIFs of the host, the sidecar, and the automation socket that `editorctl` drives. |
 
 ## Overview
