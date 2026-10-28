@@ -53,7 +53,7 @@ public sealed record BlockOperation(SceneDocument Document, ulong Id, IReadOnlyL
 /// instance's entity writes in its block, and the edits that take the expansion to make: destroying a tree, duplicating,
 /// creating an instance, unpacking one, and making a prefab.
 /// </summary>
-public static class PrefabEdits
+public static partial class PrefabEdits
 {
     /// <summary>
     /// The operation that the document applies for one on a flat entity. On a plain entity it is the same, with any
@@ -63,7 +63,7 @@ public static class PrefabEdits
     /// </summary>
     public static Operation Route(SceneDocument document, Operation op)
     {
-        if (op is BlockOperation or PrefabSetOperation || op.Entity == 0)
+        if (op is BlockOperation or PrefabSetOperation or PrefabOperation || op.Entity == 0)
         {
             return op;
         }

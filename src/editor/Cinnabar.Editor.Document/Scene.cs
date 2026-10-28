@@ -12,6 +12,15 @@ public sealed class Scene
     public List<SceneEntity> Entities { get; } = [];
 
     public SceneEntity? Find(ulong id) => Entities.Find(e => e.Id == id);
+
+    /// <summary>A copy that shares nothing that can change with this one.</summary>
+    public Scene Clone()
+    {
+        var copy = new Scene();
+        copy.HeaderComments.AddRange(HeaderComments);
+        copy.Entities.AddRange(Entities.Select(e => e.Clone()));
+        return copy;
+    }
 }
 
 public sealed class SceneEntity(ulong id)

@@ -18,6 +18,34 @@ public sealed class PrefabDocument(string path, string guid, Scene scene, string
     /// <summary>The text that the file has, or null for a prefab that has no file yet, as one that Make Prefab made.</summary>
     public string? SavedText { get; private set; } = savedText;
 
+    /// <summary>
+    /// The file's scene when the file no longer has the text that the document was read from or saved with, as after
+    /// an edit in another editor or a pull, and null when it has, or it cannot be read or parsed.
+    /// </summary>
+    public Scene? Changed()
+    {
+        try
+        {
+            var text = File.ReadAllText(Path);
+            if (SceneFile.Parse(text).Scene is not { } scene || SceneFile.Write(scene) == SavedText)
+            {
+                return null;
+            }
+            return scene;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The scene that <see cref="Changed"/> read is the file's: the document takes it, clean.</summary>
+    internal void Reloaded(Scene scene)
+    {
+        Scene = scene;
+        SavedText = SceneFile.Write(scene);
+    }
+
     public string Title => System.IO.Path.GetFileName(Path);
 
     public bool IsDirty => SavedText != SceneFile.Write(Scene);
@@ -108,6 +136,42 @@ public sealed class PrefabSet(Func<string, PrefabDocument?> open)
         return true;
     }
 
+    /// <summary>
+    /// Reads again the prefabs that are clean and whose files changed, and returns them. A dirty prefab whose file changed
+    /// keeps the editor's version, and comes back in <paramref name="kept"/>.
+    /// </summary>
+    public IReadOnlyList<PrefabDocument> ReloadChanged(List<PrefabDocument> kept)
+    {
+        var reloaded = new List<PrefabDocument>();
+        foreach (var document in _documents.Values.Where(d => d.SavedText != null))
+        {
+            if (document.Changed() is not { } scene)
+            {
+                continue;
+            }
+            if (document.IsDirty)
+            {
+                kept.Add(document);
+                continue;
+            }
+            document.Reloaded(scene);
+            reloaded.Add(document);
+        }
+        if (reloaded.Count > 0)
+        {
+            Changed?.Invoke();
+        }
+        return reloaded;
+    }
+
+    /// <summary>Gives a prefab's document another scene, as an edit of the prefab, its undo, or a reload does.</summary>
+    public void SetScene(string guid, Scene scene)
+    {
+        var document = Find(guid) ?? throw new InvalidOperationException($"no prefab {guid} is open");
+        document.Scene = scene;
+        Changed?.Invoke();
+    }
+
     /// <summary>Forgets the prefabs that are not dirty, so the next expansion reads their files again.</summary>
     public void Reload()
     {
@@ -117,6 +181,31 @@ public sealed class PrefabSet(Func<string, PrefabDocument?> open)
         }
         Changed?.Invoke();
     }
+}
+
+/// <summary>
+/// An edit of a prefab in the scene's set, as Apply makes, on the scene's undo stack: it gives the prefab's document
+/// a snapshot of its scene, and its inverse the one before. The scenes are never changed after, so the snapshots stay
+/// as they are. Its wire form is the difference that it makes to the scene's expansion: every instance follows the
+/// prefab. Steps on one prefab replace each other.
+/// </summary>
+public sealed record PrefabOperation(SceneDocument Document, string Guid, Scene Before, Scene After) : Operation(0)
+{
+    IReadOnlyList<Link.Protocol.Operation> _wires = [];
+
+    public override Operation Apply(Scene scene)
+    {
+        var before = Document.Expanded.Flat.Entities.ToList();
+        Document.Prefabs.SetScene(Guid, After);
+        _wires = PrefabExpansion.Diff(before, Document.Expanded.Flat.Entities);
+        return new PrefabOperation(Document, Guid, After, Before);
+    }
+
+    public override Link.Protocol.Operation? ToWire() => null;
+
+    public override IReadOnlyList<Link.Protocol.Operation> ToWires() => _wires;
+
+    public override bool IsReplacedBy(Operation later) => later is PrefabOperation p && p.Guid == Guid;
 }
 
 /// <summary>

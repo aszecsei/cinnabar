@@ -41,11 +41,19 @@ public sealed class SceneDocument
     public PrefabSet Prefabs { get; }
 
     /// <summary>
+    /// The GUID of the prefab when the document is a prefab opened as the document, which has one root and cannot
+    /// contain itself, and "" for a scene (see docs/editor/prefabs.md#editing-a-prefab).
+    /// </summary>
+    public string PrefabGuid { get; init; } = "";
+
+    public bool IsPrefab => PrefabGuid != "";
+
+    /// <summary>
     /// The scene with its instances expanded into plain entities, as the host loads it, and where each instance's
     /// entity comes from (see docs/editor/prefabs.md#the-editors-documents). The panels, the gizmo and picking read
     /// it, and an operation names its entities.
     /// </summary>
-    public Expansion Expanded => _expanded ??= PrefabExpansion.Expand(Scene, Prefabs.SceneOf);
+    public Expansion Expanded => _expanded ??= PrefabExpansion.Expand(Scene, Prefabs.SceneOf, PrefabGuid);
 
     /// <summary>The expansion is out of date, as after an edit or a change of a prefab, and is made again when next read.</summary>
     public void Invalidate() => _expanded = null;
@@ -75,7 +83,7 @@ public sealed class SceneDocument
     public event Action? Changed;
 
     /// <summary>Reads and parses a scene file. The document is null when the file cannot be read or has an error.</summary>
-    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, Func<string, PrefabDocument?>? openPrefab = null)
+    public static (SceneDocument? Document, IReadOnlyList<SceneProblem> Problems) Open(string path, Func<string, PrefabDocument?>? openPrefab = null, string prefabGuid = "")
     {
         var full = System.IO.Path.GetFullPath(path);
         string text;
@@ -88,12 +96,12 @@ public sealed class SceneDocument
             return (null, [new SceneProblem(0, e.Message, true)]);
         }
         var (scene, problems) = SceneFile.Parse(text);
-        return (scene == null ? null : new SceneDocument(full, scene, openPrefab), problems);
+        return (scene == null ? null : new SceneDocument(full, scene, openPrefab) { PrefabGuid = prefabGuid }, problems);
     }
 
     /// <summary>A document with the scene of an autosave for the file at path, with changes that the file lacks.</summary>
-    public static SceneDocument Restored(string path, Scene scene, Func<string, PrefabDocument?>? openPrefab = null) =>
-        new(System.IO.Path.GetFullPath(path), scene, openPrefab) { SavedPosition = -1 };
+    public static SceneDocument Restored(string path, Scene scene, Func<string, PrefabDocument?>? openPrefab = null, string prefabGuid = "") =>
+        new(System.IO.Path.GetFullPath(path), scene, openPrefab) { SavedPosition = -1, PrefabGuid = prefabGuid };
 
     /// <summary>Applies operations as one undo entry.</summary>
     public void Apply(string label, params Operation[] operations)
@@ -143,8 +151,15 @@ public sealed class SceneDocument
             foreach (var given in ops)
             {
                 var op = PrefabEdits.Route(this, given);
+                var cycles = op is BlockOperation or PrefabOperation or PrefabSetOperation ? Cycles() : 0;
                 var inverse = op.Apply(Scene);
                 Invalidate();
+                if (Refusal(cycles) is { } refusal)
+                {
+                    inverse.Apply(Scene);
+                    Invalidate();
+                    throw new InvalidOperationException(refusal);
+                }
                 applied.Add(op);
                 if (Replaced(op) is var at and >= 0)
                 {
@@ -167,6 +182,24 @@ public sealed class SceneDocument
         }
     }
 
+    // How many of the expansion's problems are prefabs that contain themselves.
+    int Cycles() => Expanded.Problems.Count(p => p.IsError && p.Message.Contains("contains itself"));
+
+    // Why the document refuses what an operation just did: a prefab document with no root or several, or a prefab
+    // that now contains itself (see docs/editor/prefabs.md#recursion). Null when it takes it.
+    string? Refusal(int cyclesBefore)
+    {
+        if (IsPrefab && PrefabExpansion.RootOf(Scene).Roots != 1)
+        {
+            return "a prefab has one root. Add the entity under the root instead.";
+        }
+        if (Cycles() > cyclesBefore)
+        {
+            return "a prefab cannot contain itself, directly or through another prefab";
+        }
+        return null;
+    }
+
     // The pending operation that a new one replaces. A drag step of several fields, or of several entities, sets each
     // field in turn, so the search goes back over field sets, which do not depend on each other, and stops at anything
     // else.
@@ -178,7 +211,7 @@ public sealed class SceneDocument
             {
                 return k;
             }
-            if (_pending[k] is not (SetField or SetBehaviourField or BlockOperation { Key: not "" }))
+            if (_pending[k] is not (SetField or SetBehaviourField or BlockOperation { Key: not "" } or PrefabOperation))
             {
                 return -1;
             }
