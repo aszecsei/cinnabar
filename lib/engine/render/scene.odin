@@ -113,7 +113,8 @@ Frame_Constants :: struct {
 	// The frame's Surface_Records in the upload ring, at this offset of its buffer.
 	surfaces:                 u32,
 	surfaces_offset:          u32,
-	padding:                  u32,
+	// The particle ribbons' vertices (see docs/rendering/particles.md#ribbons).
+	ribbon_vertices:          u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -194,6 +195,9 @@ ITEM_BILLBOARD :: 16
 // one, which draws up to there (see docs/rendering/gpu-scene.md#impostors).
 ITEM_IMPOSTOR :: 32
 ITEM_HAS_IMPOSTOR :: 64
+// A particle ribbon's item, whose draw the GPU writes (see docs/rendering/particles.md#ribbons): cull_draws.hlsl skips
+// it, and ribbon_build.hlsl writes its draw in the camera's view.
+ITEM_RIBBON :: 128
 // The vertices of an impostor's quad.
 IMPOSTOR_VERTICES :: 6
 
@@ -336,6 +340,10 @@ Scene_Frame :: struct {
 	// The patch surfaces' records, and their upload.
 	surfaces:        []Surface_Record,
 	surface_upload:  gpu.Upload,
+	// The particle ribbons, with their items, and their vertices once the ribbons' build writes them (see
+	// docs/rendering/particles.md#ribbons).
+	ribbons:         []Ribbon_Entry,
+	ribbon_vertices: Buffer,
 	// Each group's first bin and the bin after its last.
 	groups:          [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
@@ -482,7 +490,9 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 			add_surface(r, &table, &items, &surfaces, renderers[i], slot, records[slot].rows, camera_offset, lod)
 		}
 	}
-	// A slot whose entity has no Mesh_Renderer or Surface_Renderer any more is free again.
+	// The particle ribbons: a slot each, at their systems' anchors, and an item each, whose draw the GPU writes.
+	ribbons := add_ribbon_items(f, w, &table, &items, records, hidden)
+	// A slot whose entity has no Mesh_Renderer, Surface_Renderer or ribbon any more is free again.
 	for slot in 0 ..< s.high {
 		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
 			delete_key(&s.slots, s.slot_entities[slot])
@@ -513,7 +523,11 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		if item.flags & ITEM_SURFACE != 0 {
 			surfaces[item.mesh].item = u32(i)
 		}
+		if item.flags & ITEM_RIBBON != 0 {
+			ribbons[item.mesh].item = u32(i)
+		}
 	}
+	sf.ribbons = ribbons
 
 	platform := r.platform
 	ok := true
@@ -686,6 +700,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		materials_offset         = sf.table_upload.offset,
 		surfaces                 = gpu.read_index(sf.surface_upload.buffer),
 		surfaces_offset          = sf.surface_upload.offset,
+		ribbon_vertices          = gpu.read_index(r.particles.ribbon_vertices),
 		lights                   = gpu.read_index(lf.upload.buffer),
 		lights_offset            = lf.upload.offset,
 		directional_count        = u32(lf.directional_count),
@@ -829,6 +844,9 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	indirect_buffer(g, p, sf.counts)
 	read(g, p, sf.draws)
 	read(g, p, sf.instances)
+	if sf.ribbon_vertices != 0 {
+		read(g, p, sf.ribbon_vertices)
+	}
 }
 
 @(private)
@@ -844,7 +862,7 @@ is_hidden :: proc(hidden: []u32, e: ecs.Entity) -> bool {
 }
 
 // scene_slot gives an entity's slot, and a free one the first time.
-@(private = "file")
+@(private)
 scene_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity) -> (slot: u32, ok: bool) {
 	if found, has := s.slots[e]; has {
 		return found, true
@@ -895,8 +913,8 @@ add_items :: proc(
 		if !ok {
 			continue
 		}
-		// A material that draws patches draws no mesh: the default material stands in.
-		if r.materials.pipelines[use.pipeline].patches {
+		// A material that draws patches or ribbons draws no mesh: the default material stands in.
+		if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
 			use = use_material(r, table, {}) or_continue
 		}
 		// The view model casts no shadows: its pose is not its place in the world.

@@ -27,11 +27,16 @@ emitter smoke
 
 emitter sparks
 	module collide 0.4 0.2
+
+emitter trail
+	render = ribbon
+	capacity = 300
+	material = $00112233445566778899aabbccddeeff
 `
 	emitters, problems := effect_parse(text, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
-	testing.expect_value(t, len(emitters), 2)
-	if len(emitters) != 2 {
+	testing.expect_value(t, len(emitters), 3)
+	if len(emitters) != 3 {
 		return
 	}
 	smoke := emitters[0]
@@ -64,6 +69,10 @@ emitter sparks
 	testing.expect_value(t, sparks.curves[.Color][10], [4]f32{1, 1, 1, 1})
 	testing.expect_value(t, sparks.curves[.Size][10].x, 0.1)
 	testing.expect_value(t, sparks.modules[0].values.xy, [2]f32{0.4, 0.2})
+	testing.expect_value(t, sparks.emitter.render, format.Effect_Render.Sprite)
+	trail := emitters[2].emitter
+	testing.expect_value(t, trail.render, format.Effect_Render.Ribbon)
+	testing.expect_value(t, trail.material, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
 }
 
 @(test)
@@ -83,6 +92,9 @@ effect_mistakes_are_problems_at_their_lines :: proc(t: ^testing.T) {
 		{"effect 1\nemitter a\n\tcolour = 1\n", 3},
 		{"effect 1\nemitter a\n\ttexture = abc\n", 3},
 		{"effect 1\n\tcapacity = 1\nemitter a\n", 2},
+		{"effect 1\nemitter a\n\trender = mesh\n", 3},
+		// A ribbon emitter holds at most MAX_RIBBON_CAPACITY particles, which its emitter's line names.
+		{"effect 1\n\nemitter a\n\trender = ribbon\n\tcapacity = 2000\n", 3},
 	}
 	for c in cases {
 		_, problems := effect_parse(c.text, context.temp_allocator)

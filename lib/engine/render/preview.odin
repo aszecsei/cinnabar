@@ -168,6 +168,8 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	}
 	mesh, mesh_ready := resident_mesh(&r.residency, desc.mesh)
 	pipeline, block, material_ok := preview_use(r, &table, desc)
+	// A ribbon material draws ribbons, which a preview has none of, so its preview is the background.
+	material_ok &&= !pipeline.ribbon
 	// A patches material draws one patch in the mesh's place (see docs/rendering/surfaces.md#surfaces).
 	patches := material_ok && pipeline.patches
 	if (mesh_ready || patches) && material_ok {

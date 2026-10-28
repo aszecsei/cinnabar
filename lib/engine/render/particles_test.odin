@@ -238,3 +238,79 @@ an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
 		null.begin_frame({64, 32})
 	}
 }
+
+@(test)
+ribbons_build_and_take_their_draws :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator             = virtual.arena_allocator(&arena),
+		heap_allocator              = runtime.heap_allocator(),
+		jobs_run                    = jobs.run,
+		jobs_wait                   = jobs.wait,
+		gpu_frame_target            = null.frame_target,
+		gpu_submit                  = null.submit,
+		gpu_upload                  = null.upload,
+		gpu_create_texture          = null.create_texture,
+		gpu_destroy_texture         = null.destroy_texture,
+		gpu_create_buffer           = null.create_buffer,
+		gpu_destroy_buffer          = null.destroy_buffer,
+		gpu_create_compute_pipeline = null.create_compute_pipeline,
+		gpu_destroy_pipeline        = null.destroy_pipeline,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	p := &r.particles
+	p.ribbon.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test ribbon build"})
+	p.pool = platform.gpu_create_buffer({size = 1024 * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
+	p.ribbon_vertices = platform.gpu_create_buffer({size = 2048 * RIBBON_VERTEX_SIZE, usage = {.Storage}, label = "ribbon vertices"}, nil)
+	defer particles_destroy(p, &platform)
+	scene_buffers := []gpu.Buffer {
+		platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil),
+		platform.gpu_create_buffer({size = 256, usage = {.Storage}, label = "counts"}, nil),
+		platform.gpu_create_buffer({size = 1024, usage = {.Storage}, label = "draws"}, nil),
+	}
+	defer for b in scene_buffers {
+		platform.gpu_destroy_buffer(b)
+	}
+
+	for stepped in ([]bool{false, true}) {
+		cache: Texture_Cache
+		defer cache_destroy(&cache, &platform)
+		g := begin(&platform, &cache)
+		f := new(Frame, platform.frame_allocator)
+		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		sf := new(Scene_Frame, platform.frame_allocator)
+		f.scene_frame = sf
+		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
+		sf.items[0] = {flags = ITEM_RIBBON}
+		sf.ribbons = make([]Ribbon_Entry, 1, platform.frame_allocator)
+		// A ribbon draws only once its system stepped, with its emitter's record.
+		sf.ribbons[0] = {emitter = 0, item = 0, first_vertex = 0, record = 0, stepped = stepped}
+		sf.cull_constants, _ = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		sf.arguments, sf.counts, sf.draws = import_buffer(&g, scene_buffers[0]), import_buffer(&g, scene_buffers[1]), import_buffer(&g, scene_buffers[2])
+		pf := new(Particle_Frame, platform.frame_allocator)
+		pf.constants, _ = platform.gpu_upload(size_of(Particle_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		pf.pool = import_buffer(&g, p.pool)
+		f.particles = pf
+		pass := add_compute_pass(&g, "update", proc(_: ^Pass_Context) {}, f)
+		write(&g, pass, pf.pool)
+		write(&g, pass, sf.counts)
+		add_ribbon_pass(f)
+		pass = add_compute_pass(&g, "draw", proc(_: ^Pass_Context) {}, f)
+		indirect_buffer(&g, pass, sf.arguments)
+		read(&g, pass, sf.counts)
+		read(&g, pass, sf.draws)
+		keep_pass(&g, pass)
+		testing.expect_value(t, len(g.passes), stepped ? 3 : 2)
+		testing.expectf(t, execute(&g), "the frame with a ribbon stepped %v did not execute", stepped)
+		null.begin_frame({64, 32})
+	}
+}

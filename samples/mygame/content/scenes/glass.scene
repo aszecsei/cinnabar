@@ -1,8 +1,8 @@
 # The transparency sample, which F7 in mygame switches to: tinted glass boxes that pass through each other and through
 # an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
-# around a gold one, an additive hologram behind them, and a Particle_System whose smoke rises beside the glass and
-# drifts through it while its sparks bounce on the floor (see docs/rendering/particles.md#particles). The editor writes
-# this file; see docs/editor.md#scenes.
+# around a gold one, an additive hologram behind them, a Particle_System whose smoke rises beside the glass and drifts
+# through it while its sparks bounce on the floor, and a spinner that draws a ribbon trail (see
+# docs/rendering/particles.md#particles). The editor writes this file; see docs/editor.md#scenes.
 scene 2
 
 entity 0c5c7fd0a6a3a450
@@ -104,6 +104,29 @@ component 1 Transform
 component 33 Mesh_Renderer
 	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
 	materials.0 = $13431ffa75644abe8786c1fd50e45d8c
+
+entity 7a1b2c3d4e5f6071
+name = "Trail Spinner"
+component 1 Transform
+	position = [2516582400023488102, 25165824, 8388608]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 1001 Spin
+	speed = 2
+
+entity 7a1b2c3d4e5f6072
+name = "Trail"
+parent = @7a1b2c3d4e5f6071
+component 1 Transform
+	position = [2516582400033554432, 25165824, 8388608]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 2 Local_Transform
+	offset = [0.6, 0, 0]
+component 52 Particle_System
+	effect = $7081b2b36569d3b18a6169a5aed7a19d
+	paused = false
+	rate_scale = 1
 
 entity 8d116ece1738f7d9
 name = "Sorted Pillar"

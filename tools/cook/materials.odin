@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 7"
+MATERIAL_COOK_VERSION :: "materials 8"
 
 
 Shading_Input :: struct {
@@ -75,6 +75,8 @@ Material_Decl :: struct {
 	// The material draws its meshes as billboards (geometry = billboard or billboard_axis, see
 	// docs/rendering/gpu-scene.md#billboards).
 	billboard:    Billboard,
+	// The material draws particle ribbons (geometry = ribbon, see docs/rendering/particles.md#ribbons).
+	ribbon:       bool,
 	params:       [dynamic]Param_Decl,
 	switches:     [dynamic]Switch_Decl,
 	// The HLSL after the `---` line, and the line of the file that it starts at, or the graph.
@@ -482,7 +484,7 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 		hotspots     = make([dynamic][4]u32, context.temp_allocator),
 		ok           = true,
 	}
-	cutoff_line, transparency_line := 0, 0
+	cutoff_line, transparency_line, geometry_line := 0, 0, 0
 	lines, body, body_line, has_body := decl_lines(string(a.source), stop_at_body = true)
 	if len(lines) == 0 || lines[0].text != "material 1" {
 		report_error(problems, a.path, 1, 0, "a material starts with `material 1`")
@@ -641,17 +643,20 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 			}
 			transparency_line = l.number
 		case "geometry":
+			geometry_line = l.number
+			decl.patches, decl.billboard, decl.ribbon = false, .None, false
 			switch value {
 			case "mesh":
-				decl.patches, decl.billboard = false, .None
 			case "patches":
-				decl.patches, decl.billboard = true, .None
+				decl.patches = true
 			case "billboard":
-				decl.patches, decl.billboard = false, .Camera
+				decl.billboard = .Camera
 			case "billboard_axis":
-				decl.patches, decl.billboard = false, .Axis
+				decl.billboard = .Axis
+			case "ribbon":
+				decl.ribbon = true
 			case:
-				report_error(problems, a.path, l.number, 0, "geometry is mesh, patches, billboard or billboard_axis")
+				report_error(problems, a.path, l.number, 0, "geometry is mesh, patches, billboard, billboard_axis or ribbon")
 				decl.ok = false
 			}
 		case "displacement_bound":
@@ -686,6 +691,10 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 	// The settings can come in any order, so the blend is known only now.
 	if cutoff_line != 0 && format.material_transparent(decl.blend) {
 		report_error(problems, a.path, cutoff_line, 0, "cutoff is for masked materials; a transparent one blends by its opacity")
+		decl.ok = false
+	}
+	if decl.ribbon && !format.material_transparent(decl.blend) {
+		report_error(problems, a.path, geometry_line, 0, "a ribbon material's blend is transparent or additive")
 		decl.ok = false
 	}
 	if transparency_line != 0 && decl.blend != .Transparent {
@@ -1011,6 +1020,7 @@ generate_source :: proc(
 	fmt.sbprintfln(&b, "#define MATERIAL_DISPLACES %d", int(displaces))
 	fmt.sbprintfln(&b, "#define MATERIAL_PATCHES %d", int(decl.patches))
 	fmt.sbprintfln(&b, "#define MATERIAL_BILLBOARD %d", int(decl.billboard))
+	fmt.sbprintfln(&b, "#define MATERIAL_RIBBON %d", int(decl.ribbon))
 	fmt.sbprintfln(&b, "#define MATERIAL_MASKED %d", int(decl.blend == .Masked))
 	fmt.sbprintfln(&b, "#define MATERIAL_TRANSPARENT %d", int(format.material_transparent(decl.blend)))
 	fmt.sbprintfln(&b, "#define MATERIAL_ADDITIVE %d", int(decl.blend == .Additive))
@@ -1295,6 +1305,9 @@ cook_material :: proc(
 		flags += {.Billboard}
 	case .Axis:
 		flags += {.Billboard, .Billboard_Axis}
+	}
+	if decl.ribbon {
+		flags += {.Ribbon}
 	}
 	contents := format.Material_Contents {
 		guid             = guid,

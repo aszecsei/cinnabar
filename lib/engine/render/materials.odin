@@ -20,6 +20,9 @@ DEFAULT_MATERIAL :: #load("../content/materials/default.material.meta", string)
 // DEFAULT_SURFACE_MATERIAL is the engine's default surface material (default_surface.material), which a Surface_Renderer
 // without a material, or with one that draws meshes or cannot draw, draws with (see docs/rendering/surfaces.md#surfaces).
 DEFAULT_SURFACE_MATERIAL :: #load("../content/materials/default_surface.material.meta", string)
+// DEFAULT_RIBBON_MATERIAL is the engine's default ribbon material (default_ribbon.material), which a particle ribbon
+// without a material, or with one that does not draw ribbons, draws with (see docs/rendering/particles.md#ribbons).
+DEFAULT_RIBBON_MATERIAL :: #load("../content/materials/default_ribbon.material.meta", string)
 // The placeholders that a bin draws with while its material's pipelines compile, one for each blend mode, without
 // parameters, so they read nothing of the draws' blocks (see docs/rendering/materials.md#runtime).
 PLACEHOLDER_MATERIAL :: #load("../content/materials/placeholder.material.meta", string)
@@ -45,6 +48,7 @@ Materials :: struct {
 	pipeline_count: int,
 	default_guid:   format.Guid,
 	default_surface_guid: format.Guid,
+	default_ribbon_guid:  format.Guid,
 	substitutes:    [Substitute]format.Guid,
 	// White, black and a flat normal, by Material_Texture_Default.
 	defaults:       [format.Material_Texture_Default]gpu.Texture,
@@ -83,6 +87,9 @@ Material_Pipeline :: struct {
 	patches:      bool,
 	// The material draws its meshes as billboards, which face the camera (see docs/rendering/gpu-scene.md#billboards).
 	billboard:    bool,
+	// The material draws particle ribbons, with the ribbon vertex path, not meshes (see
+	// docs/rendering/particles.md#ribbons).
+	ribbon:       bool,
 	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
 	// material, which have no moments (see docs/rendering/transparency.md#transparency).
@@ -137,6 +144,7 @@ Material_Use :: struct {
 materials_init :: proc(m: ^Materials, platform: ^core.Platform_API) {
 	m.default_guid, _ = format.meta_guid(DEFAULT_MATERIAL)
 	m.default_surface_guid, _ = format.meta_guid(DEFAULT_SURFACE_MATERIAL)
+	m.default_ribbon_guid, _ = format.meta_guid(DEFAULT_RIBBON_MATERIAL)
 	m.substitutes[.Opaque], _ = format.meta_guid(PLACEHOLDER_MATERIAL)
 	m.substitutes[.Transparent], _ = format.meta_guid(PLACEHOLDER_TRANSPARENT_MATERIAL)
 	m.substitutes[.Additive], _ = format.meta_guid(PLACEHOLDER_ADDITIVE_MATERIAL)
@@ -218,9 +226,12 @@ bin_draws :: proc(r: ^Renderer, bin_pipelines: []int) -> []int {
 }
 
 // substitute_kind is the substitute that a material's bins draw with while it compiles. A transparent material of
-// patches has none.
+// patches has none, and a ribbon material has none, since the substitutes draw meshes.
 @(private)
 substitute_kind :: proc(p: ^Material_Pipeline) -> (kind: Substitute, ok: bool) {
+	if p.ribbon {
+		return .Transparent, false
+	}
 	if p.patches {
 		return .Patches, material_group(p) == .Opaque
 	}
@@ -524,6 +535,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	p.displacement_bound = .Displaces in blob.flags ? blob.displacement_bound : 0
 	p.patches = .Patches in blob.flags
 	p.billboard = .Billboard in blob.flags
+	p.ribbon = .Ribbon in blob.flags
 }
 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.

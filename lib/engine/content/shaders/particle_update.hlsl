@@ -2,7 +2,8 @@
 // thread for each particle of its range. A living particle ages, dies at its lifetime, or moves with the emitter's
 // modules and collides with last frame's depth. A dead one takes one of the frame's new particles from the emitter's
 // counter, while any are left, and starts in the emitter's shape. Each living particle then appends its sprite, with its
-// color, size and emission from the emitter's curves at its age.
+// color, size and emission from the emitter's curves at its age. A ribbon's emitter instead spawns over its oldest
+// particles in its range's order, and appends no sprites: ribbon_build.hlsl draws them.
 #include "particles.hlsli"
 #include "sprites.hlsli"
 
@@ -147,12 +148,27 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	Particle p = pool.Load<Particle>(address);
 	float dt = e.delta;
 	bool alive = e.reset == 0 && p.lifetime > 0;
+	bool ribbon = (e.flags & EMITTER_RIBBON) != 0;
+	// A ribbon's new particles take the frame's next places of the range, after head, over the oldest ones.
+	uint ring = (id.x + e.capacity - e.head) % e.capacity;
+	if (ribbon && ring < e.spawn) {
+		p = spawn(e, id.x, ring);
+		pool.Store<Particle>(address, p);
+		return;
+	}
 	if (alive) {
 		p.age += dt;
 		alive = p.age < p.lifetime;
 		if (alive) {
 			step(p, e, dt);
 		}
+	}
+	if (ribbon) {
+		if (!alive && (e.reset != 0 || p.lifetime > 0)) {
+			p.lifetime = 0;
+		}
+		pool.Store<Particle>(address, p);
+		return;
 	}
 	if (!alive) {
 		uint ticket = 0xffffffff;

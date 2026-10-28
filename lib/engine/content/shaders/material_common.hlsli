@@ -100,7 +100,8 @@ struct Frame_Constants {
 	// The frame's Surface_Records, in the upload ring at this offset of its buffer (see material_patch.hlsli).
 	uint surfaces;
 	uint surfaces_offset;
-	uint padding;
+	// The particle ribbons' vertices (see material_ribbon.hlsli).
+	uint ribbon_vertices;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

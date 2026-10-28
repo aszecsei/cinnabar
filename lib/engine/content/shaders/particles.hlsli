@@ -19,6 +19,8 @@ static const uint CURVE_SIZE = 1;
 static const uint CURVE_EMISSION = 2;
 // Matches format.EFFECT_CURVE_SAMPLES.
 static const uint CURVE_SAMPLES = 64;
+// Matches EMITTER_RIBBON in lib/engine/render/particles.odin.
+static const uint EMITTER_RIBBON = 1;
 
 // Matches PARTICLE_SIZE in lib/engine/render/particles.odin: a particle of the pool, relative to its system's anchor.
 // A lifetime of 0 is a dead particle.
@@ -62,6 +64,9 @@ struct Emitter_Record {
 	uint curves;
 	float delta;
 	float time;
+	// A ribbon's emitter spawns in its range's order, from head, so its particles stay in the order that they spawned.
+	uint head;
+	uint flags;
 };
 
 // Matches format.Effect_Module.
