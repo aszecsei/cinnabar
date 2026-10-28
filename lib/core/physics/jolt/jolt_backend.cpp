@@ -1170,7 +1170,7 @@ cn_backend_info info()
 #ifdef JPH_CROSS_PLATFORM_DETERMINISTIC
     features |= CN_FEATURE_DETERMINISTIC;
 #endif
-    return { CN_PHYSICS_API_VERSION, features, "jolt", JOLT_VERSION };
+    return { CN_PHYSICS_API_VERSION, features, cn_physics_layout(), 0, "jolt", JOLT_VERSION };
 }
 
 uint32_t or_default(uint32_t value, uint32_t fallback) { return value != 0 ? value : fallback; }

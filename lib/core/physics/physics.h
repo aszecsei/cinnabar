@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 6
+#define CN_PHYSICS_API_VERSION 7
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -39,6 +39,8 @@ enum cn_feature {
 typedef struct cn_backend_info {
     uint32_t api_version;
     uint32_t features;
+    // cn_physics_layout(), which the host compares with its own.
+    uint32_t layout, _pad;
     const char* name;
     const char* version;
 } cn_backend_info;
@@ -274,6 +276,53 @@ typedef struct cn_physics_host {
     void (*log)(int32_t level, const char* message);
 } cn_physics_host;
 
+// cn_physics_layout is an FNV-1a hash of the sizes of every type that crosses the boundary, in physics.odin's order,
+// for Backend_Info.layout (see docs/physics/backends.md#loading).
+static inline uint32_t cn_physics_layout(void)
+{
+    const uint32_t sizes[] = {
+        (uint32_t)sizeof(cn_command_header),
+        (uint32_t)sizeof(cn_set_world),
+        (uint32_t)sizeof(cn_create_shape),
+        (uint32_t)sizeof(cn_release_shape),
+        (uint32_t)sizeof(cn_create_body),
+        (uint32_t)sizeof(cn_destroy_body),
+        (uint32_t)sizeof(cn_set_pose),
+        (uint32_t)sizeof(cn_move_kinematic),
+        (uint32_t)sizeof(cn_set_velocity),
+        (uint32_t)sizeof(cn_add_vector),
+        (uint32_t)sizeof(cn_add_force_at),
+        (uint32_t)sizeof(cn_body_command),
+        (uint32_t)sizeof(cn_set_enabled),
+        (uint32_t)sizeof(cn_create_compound),
+        (uint32_t)sizeof(cn_create_joint),
+        (uint32_t)sizeof(cn_destroy_joint),
+        (uint32_t)sizeof(cn_set_joint),
+        (uint32_t)sizeof(cn_world_desc),
+        (uint32_t)sizeof(cn_backend_info),
+        (uint32_t)sizeof(cn_body_state),
+        (uint32_t)sizeof(cn_step_results),
+        (uint32_t)sizeof(cn_contact_event),
+        (uint32_t)sizeof(cn_joint_break),
+        (uint32_t)sizeof(cn_ray),
+        (uint32_t)sizeof(cn_query_filter),
+        (uint32_t)sizeof(cn_ray_hit),
+        (uint32_t)sizeof(cn_shape_desc),
+        (uint32_t)sizeof(cn_shape_cast),
+        (uint32_t)sizeof(cn_overlap_query),
+        (uint32_t)sizeof(cn_overlap_hit),
+        (uint32_t)sizeof(cn_physics_api),
+        (uint32_t)sizeof(cn_physics_host),
+    };
+    uint32_t h = 0x811c9dc5u;
+    for (size_t i = 0; i < sizeof(sizes) / sizeof(sizes[0]); i++) {
+        for (int b = 0; b < 4; b++) {
+            h = (h ^ ((sizes[i] >> (8 * b)) & 0xffu)) * 0x01000193u;
+        }
+    }
+    return h;
+}
+
 #ifdef __cplusplus
 }
 
@@ -289,7 +338,7 @@ static_assert(sizeof(cn_set_velocity) == 32);
 static_assert(sizeof(cn_add_vector) == 24);
 static_assert(sizeof(cn_add_force_at) == 48);
 static_assert(sizeof(cn_world_desc) == 24);
-static_assert(sizeof(cn_backend_info) == 24);
+static_assert(sizeof(cn_backend_info) == 32);
 static_assert(sizeof(cn_body_state) == 88);
 static_assert(sizeof(cn_step_results) == 40);
 static_assert(sizeof(cn_create_joint) == 192);

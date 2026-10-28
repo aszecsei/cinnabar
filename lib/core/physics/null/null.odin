@@ -37,7 +37,8 @@ state: struct {
 	worlds: [MAX_WORLDS]Null_World,
 }
 
-load :: proc(host: ^physics.Host) -> ^physics.Physics_API {
+// load gives the null backend's table. Every loader takes a backend's name; this one has no other.
+load :: proc(host: ^physics.Host, name := "") -> ^physics.Physics_API {
 	state.host = host
 	return &api
 }
@@ -70,7 +71,14 @@ report :: proc(format: string, args: ..any) {
 
 @(private)
 info :: proc "c" () -> physics.Backend_Info {
-	return {api_version = physics.API_VERSION, features = {}, name = "null", version = "1"}
+	// It takes every command, and simulates none of them.
+	return {
+		api_version = physics.API_VERSION,
+		features = {.Rigid_Bodies, .Joints, .Queries, .Sensors},
+		layout = physics.layout_signature(),
+		name = "null",
+		version = "1",
+	}
 }
 
 @(private)

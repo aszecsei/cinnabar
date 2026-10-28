@@ -25,6 +25,9 @@ MESH_TEXEL_DENSITY_KEY :: "mesh.texel_density"
 // The physics layers' names, and the pairs of them that do not collide (see docs/physics/design.md#layers).
 PHYSICS_LAYERS_KEY :: "physics.layers"
 PHYSICS_IGNORE_KEY :: "physics.ignore"
+// The physics backend, which the host reads before the game starts (see docs/physics/backends.md#choosing); the game
+// only knows the key.
+PHYSICS_BACKEND_KEY :: "physics.backend"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -168,6 +171,12 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		}
 		if key == PHYSICS_IGNORE_KEY {
 			append(&ignores, Ignore{line, value})
+			continue
+		}
+		if key == PHYSICS_BACKEND_KEY {
+			if value == "" {
+				problem(problems, line, "%s takes a backend's name, such as jolt or none", key)
+			}
 			continue
 		}
 		if key == MESH_TEXEL_DENSITY_KEY {

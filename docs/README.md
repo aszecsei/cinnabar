@@ -58,6 +58,7 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 | Expose a native type or function to scripts | [Scripting: API](scripting/api.md#the-entity-and-component-view) |
 | Add an asset kind | [Content: Identity and cooking](content/identity-and-cooking.md) and [Blobs and loading](content/blobs-and-loading.md) |
 | Add an editor panel or command | [Editor: Shell and panels](editor/shell-and-panels.md) |
+| Write a physics backend | [Physics: Backends](physics/backends.md) |
 | Add a message to the editor or cook link | [Editor: Editor link](editor/link.md) and [Content: Cook daemon](content/daemon-and-operations.md#cook-link) |
 | Port to another platform or GPU API | [Core: Platform](core/platform.md#platform-and-backend-abstraction) and [GPU: Interface](gpu/interface.md#hardware-floor) |
 | Understand a crash after a code reload | [Hot reload: Rules](overview/hot-reload.md#rules) |

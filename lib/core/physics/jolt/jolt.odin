@@ -2,19 +2,16 @@
 // with vendor/jolt. This file links it. See docs/physics/design.md#where-jolt-lives.
 package physics_jolt
 
+import "core:log"
+
 import physics "cinnabar:core/physics"
+import physics_null "cinnabar:core/physics/null"
 
-// PHYSICS_SHARED links physics_jolt.dll, which the development host loads. Otherwise the backend links statically.
-// The game DLL must never link it statically: a second copy of Jolt would not know the host's worlds.
-PHYSICS_SHARED :: #config(PHYSICS_SHARED, false)
-
-when PHYSICS_SHARED {
-	foreign import lib "../../../../build/obj/jolt/shared/out/physics_jolt.lib"
-} else {
-	foreign import lib {
-		"../../../../build/obj/jolt/static/out/physics_jolt.lib",
-		"../../../../build/obj/jolt/static/out/Jolt.lib",
-	}
+// The development host loads physics_jolt.dll as a plugin (see lib/core/physics/plugin); release builds and tests link
+// the backend statically, through this package.
+foreign import lib {
+	"../../../../build/obj/jolt/static/out/physics_jolt.lib",
+	"../../../../build/obj/jolt/static/out/Jolt.lib",
 }
 
 @(default_calling_convention = "c")
@@ -24,8 +21,15 @@ foreign lib {
 	cinnabar_physics_api :: proc(host: ^physics.Host) -> ^physics.Physics_API ---
 }
 
-// load returns the backend's table, or nil if it does not have this API_VERSION.
-load :: proc(host: ^physics.Host) -> ^physics.Physics_API {
-	api := cinnabar_physics_api(host)
-	return api if api != nil && api.info().api_version == physics.API_VERSION else nil
+// load gives the backend's table for a build that links Jolt: none is the null backend, as a project without physics
+// asks for, and another name is not in this build, which links only Jolt, so it warns and gives Jolt.
+load :: proc(host: ^physics.Host, name := "") -> ^physics.Physics_API {
+	switch name {
+	case "none":
+		return physics_null.load(host)
+	case "", "jolt":
+	case:
+		log.warnf("physics: this build links the Jolt backend, so physics.backend = %s is not used", name)
+	}
+	return cinnabar_physics_api(host)
 }

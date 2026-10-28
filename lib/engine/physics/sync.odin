@@ -55,7 +55,7 @@ begin_frame :: proc(s: ^State) {
 // sync makes the backend's world match the components without stepping it, as the editor's edit mode does, so that
 // queries see the scene as it is edited. It returns false if the world is missing.
 sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
-	if s.world.generation == 0 {
+	if s.world.generation == 0 || !has_feature(s, .Rigid_Bodies, "no body is made") {
 		return false
 	}
 	// Before the sync's own commands, which may destroy the bodies that the effects name.
@@ -318,6 +318,9 @@ create_body :: proc(
 	rb := ecs.get(w, e, Rigid_Body)
 	body := rb^ if rb != nil else Rigid_Body{motion = .Static}
 	material := own^ if own != nil else parts[0].collider
+	if material.sensor && !has_feature(s, .Sensors, "sensor colliders make no body") {
+		return
+	}
 
 	dynamic_body := body.motion == .Dynamic
 	children := make([dynamic]core_physics.Shape, allocator_of(s))

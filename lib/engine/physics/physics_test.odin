@@ -812,3 +812,23 @@ mesh_colliders :: proc(t: ^testing.T) {
 	hit, ok := raycast(&f.physics, &f.world, ecs.position_from_meters({8, 10, 8}), {0, -1, 0}, 20)
 	testing.expect(t, ok && hit.entity == g, "a ray from above hits the scaled mesh")
 }
+
+// A backend without Joints: a joint component is ignored, with a warning, and the box falls.
+@(test)
+features_gate_components :: proc(t: ^testing.T) {
+	f := setup(t, null = true)
+	defer teardown(t, f)
+	f.platform.physics.info = proc "c" () -> core_physics.Backend_Info {
+		return {api_version = core_physics.API_VERSION, features = {.Rigid_Bodies}, layout = core_physics.layout_signature(), name = "test"}
+	}
+	destroy(&f.physics)
+	testing.expect(t, init(&f.physics, &f.platform, assets = &f.assets))
+	register(&f.physics, &f.world)
+	b := box(f, {0, 5, 0})
+	point_joint(f, b, {0, 1, 0})
+	context.logger = log.nil_logger()
+	ticks(f, 2)
+	testing.expect(t, ecs.has(&f.world, b, Physics_Body))
+	testing.expect(t, !ecs.has(&f.world, b, Physics_Joint), "the joint is ignored")
+	testing.expect(t, .Joints in f.physics.warned, "and warned about")
+}

@@ -33,10 +33,13 @@ Ray :: struct {
 }
 
 // Queries run at any time outside the physics tick, from any number of jobs at once, and see the world as the last
-// tick or sync left it (see docs/physics/design.md#queries).
+// tick or sync left it (see docs/physics/design.md#queries). A backend without Queries misses every one.
 
 // raycast gives the closest hit along a ray. direction need not be a unit vector.
 raycast :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction: [3]f32, max_distance: f32, filter := FILTER_ALL) -> (hit: Hit, ok: bool) {
+	if .Queries not_in s.features {
+		return
+	}
 	ray := to_ray(s, {origin, direction, max_distance})
 	f := to_filter(w, filter)
 	result: core_physics.Ray_Hit
@@ -49,6 +52,9 @@ raycast :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction:
 // raycast_all gives every hit along a ray, by distance: the first len(out) of them go to out, and the count is all
 // of them, so a caller can ask again with more room.
 raycast_all :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direction: [3]f32, max_distance: f32, out: []Hit, filter := FILTER_ALL) -> int {
+	if .Queries not_in s.features {
+		return 0
+	}
 	ray := to_ray(s, {origin, direction, max_distance})
 	f := to_filter(w, filter)
 	results := make([]core_physics.Ray_Hit, len(out), allocator_of(s))
@@ -63,6 +69,12 @@ raycast_all :: proc(s: ^State, w: ^ecs.World, origin: ecs.World_Position, direct
 // that casts many rays a tick, such as sight lines, uses it.
 raycast_batch :: proc(s: ^State, w: ^ecs.World, rays: []Ray, out: []Hit, filter := FILTER_ALL) {
 	assert(len(out) >= len(rays))
+	if .Queries not_in s.features {
+		for &h in out[:len(rays)] {
+			h = {}
+		}
+		return
+	}
 	f := to_filter(w, filter)
 	sent := make([]core_physics.Ray, len(rays), allocator_of(s))
 	for r, i in rays {
@@ -91,6 +103,9 @@ shape_cast :: proc(
 	hit: Hit,
 	ok: bool,
 ) {
+	if .Queries not_in s.features {
+		return
+	}
 	sweep := core_physics.Shape_Cast {
 		origin    = ecs.position_sub_f64(origin, s.anchor),
 		rotation  = to_rotation(rotation),
@@ -109,6 +124,9 @@ shape_cast :: proc(
 // overlap gives the entities whose bodies overlap a shape at a pose, in the order of their bodies' handles: the first
 // len(out) of them go to out, and the count is all of them.
 overlap :: proc(s: ^State, w: ^ecs.World, shape: Collider, origin: ecs.World_Position, rotation: quaternion128, out: []ecs.Entity, filter := FILTER_ALL) -> int {
+	if .Queries not_in s.features {
+		return 0
+	}
 	query := core_physics.Overlap_Query {
 		origin   = ecs.position_sub_f64(origin, s.anchor),
 		rotation = to_rotation(rotation),

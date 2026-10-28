@@ -182,6 +182,9 @@ Joint_Break :: struct {
 // only its motor or whether it is enabled does.
 @(private)
 sync_joints :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+	if !has_feature(s, .Joints, "joints are ignored") {
+		return
+	}
 	check_joints(s, w, list, commands)
 	sync_kind(s, w, list, commands, Fixed_Joint, .Fixed)
 	sync_kind(s, w, list, commands, Point_Joint, .Point)

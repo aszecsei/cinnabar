@@ -1,12 +1,13 @@
 # Physics
 
-Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary, the Jolt backend, scripts in fixed ticks, rigid bodies in the world, queries, sensors and events, constraints, and mesh colliders are built (phases 1 to 6); the rest of the design and its phases are in [Design](design.md).
+Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary, the Jolt backend, scripts in fixed ticks, rigid bodies in the world, queries, sensors and events, constraints, mesh colliders, and plugins are built (every phase); the rest of the design and its phases are in [Design](design.md).
 
 ## Documents
 
 | Document | What it covers |
 |---|---|
 | [Design](design.md) | Where Jolt lives, the command-list boundary, positions and precision, the components, the physics tick, layers, shapes, constraints, queries, events, scripts, the editor, determinism, 2D physics, plugins, and the phases. |
+| [Backends](backends.md) | How a backend plugs in: loading as a plugin or linked, choosing with `physics.backend`, the contract of `Physics_API` and `Host`, features, and the conformance suite. |
 
 ## Overview
 
@@ -17,6 +18,7 @@ Rigid bodies, constraints, collision queries and sensors: the boundary between t
 | `lib/core/physics/conformance` | Shared | The tests that every simulating backend passes. |
 | `lib/core/physics/jolt` | Host | The Jolt backend, built as `physics_jolt.dll` in development and statically in release. |
 | `lib/core/physics/null` | Host | A backend that simulates nothing, for tests and for games without physics. |
+| `lib/core/physics/plugin` | Host | The development host's loader of a backend as a plugin. |
 | `lib/engine/physics` | Game | Components, the sync between the world and the backend, the physics tick, queries, events and script bindings. |
 
 The data flow in a fixed tick: the `Fixed` systems run; the physics tick compares the world's components with what the backend has, records command lists, submits them and steps; and the sync writes the bodies that moved back to their `Transform`s and keeps the tick's contact events for native systems and scripts.

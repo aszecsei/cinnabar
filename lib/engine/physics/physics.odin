@@ -4,6 +4,7 @@
 package physics
 
 import "base:runtime"
+import "core:log"
 
 import "cinnabar:core"
 import core_physics "cinnabar:core/physics"
@@ -180,6 +181,10 @@ State :: struct {
 	layers:   Layers,
 	// Set_World goes to the backend before the next submit.
 	settings_dirty: bool,
+	// What the backend does (see docs/physics/backends.md#features). A component that needs a feature it lacks is
+	// ignored, and warned about once.
+	features: core_physics.Features,
+	warned:   core_physics.Features,
 	// The contacts of the last tick, and of every tick since begin_frame (see Contact).
 	tick_contacts:  [dynamic]Contact,
 	frame_contacts: [dynamic]Contact,
@@ -220,6 +225,8 @@ init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_D
 		pending        = core_physics.command_list(allocator),
 	}
 	s.layers = default_layers()
+	info := platform.physics.info()
+	s.features = info.features
 	s.world = platform.physics.world_create(&desc)
 	return s.world.generation != 0
 }
@@ -330,6 +337,19 @@ layer_index :: proc(l: Layers, name: string) -> (int, bool) {
 set_layers :: proc(s: ^State, layers: Layers) {
 	s.layers = layers
 	s.settings_dirty = true
+}
+
+// has_feature says whether the backend does a feature, and warns once when it does not.
+@(private)
+has_feature :: proc(s: ^State, feature: core_physics.Feature, what: string) -> bool {
+	if feature in s.features {
+		return true
+	}
+	if feature not_in s.warned {
+		s.warned += {feature}
+		log.warnf("physics: the %s backend does not do %v, so %s", s.platform.physics.info().name, feature, what)
+	}
+	return false
 }
 
 @(private)

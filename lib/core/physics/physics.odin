@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 6
+API_VERSION :: 7
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -51,10 +51,13 @@ Feature :: enum u8 {
 
 Features :: bit_set[Feature;u32]
 
-// Backend_Info describes a backend. The strings are the backend's, and live as long as it is loaded.
+// Backend_Info describes a backend. The strings are the backend's, and live as long as it is loaded. layout is the
+// backend's layout_signature, which the host compares with its own.
 Backend_Info :: struct {
 	api_version: u32,
 	features:    Features,
+	layout:      u32,
+	_:           u32,
 	name:        cstring,
 	version:     cstring,
 }
@@ -595,6 +598,54 @@ Format :: struct {
 	kind:           Command_Kind,
 }
 
+// layout_signature is an FNV-1a hash of the sizes of every type that crosses the boundary, in this order, which
+// physics.h's cn_physics_layout computes the same way. A backend in C cannot compute format_hash, which hashes Odin's
+// type info, so the host compares this with the backend's Backend_Info.layout when it loads one (see
+// docs/physics/backends.md#loading). It catches a backend built against another layout of the same API_VERSION.
+layout_signature :: proc "contextless" () -> u32 {
+	sizes := [?]u32 {
+		u32(size_of(Command_Header)),
+		u32(size_of(Set_World)),
+		u32(size_of(Create_Shape)),
+		u32(size_of(Release_Shape)),
+		u32(size_of(Create_Body)),
+		u32(size_of(Destroy_Body)),
+		u32(size_of(Set_Pose)),
+		u32(size_of(Move_Kinematic)),
+		u32(size_of(Set_Velocity)),
+		u32(size_of(Add_Vector)),
+		u32(size_of(Add_Force_At)),
+		u32(size_of(Body_Command)),
+		u32(size_of(Set_Enabled)),
+		u32(size_of(Create_Compound)),
+		u32(size_of(Create_Joint)),
+		u32(size_of(Destroy_Joint)),
+		u32(size_of(Set_Joint)),
+		u32(size_of(World_Desc)),
+		u32(size_of(Backend_Info)),
+		u32(size_of(Body_State)),
+		u32(size_of(Step_Results)),
+		u32(size_of(Contact_Event)),
+		u32(size_of(Joint_Break)),
+		u32(size_of(Ray)),
+		u32(size_of(Query_Filter)),
+		u32(size_of(Ray_Hit)),
+		u32(size_of(Shape_Desc)),
+		u32(size_of(Shape_Cast)),
+		u32(size_of(Overlap_Query)),
+		u32(size_of(Overlap_Hit)),
+		u32(size_of(Physics_API)),
+		u32(size_of(Host)),
+	}
+	h: u32 = 0x811c9dc5
+	for s in sizes {
+		for i in 0 ..< 4 {
+			h = (h ~ ((s >> (8 * u32(i))) & 0xff)) * 0x01000193
+		}
+	}
+	return h
+}
+
 // format_hash identifies the boundary's layouts. The game's abi_hash includes it.
 format_hash :: proc() -> u64 {
 	return layout.hash(Format)
@@ -804,7 +855,7 @@ Host :: struct {
 #assert(size_of(Add_Vector) == 24)
 #assert(size_of(Add_Force_At) == 48)
 #assert(size_of(World_Desc) == 24)
-#assert(size_of(Backend_Info) == 24)
+#assert(size_of(Backend_Info) == 32)
 #assert(size_of(Body_State) == 88)
 #assert(size_of(Step_Results) == 40)
 #assert(size_of(Create_Joint) == 192)

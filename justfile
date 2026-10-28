@@ -27,16 +27,18 @@ dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 # FFX_SDK_VERSION in lib/core/gpu/d3d12/ffx.odin.
 fidelityfx_version := "2.3.0"
 fidelityfx_dir := "vendor/fidelityfx/" + fidelityfx_version
-# The physics backend (see docs/physics/design.md#where-jolt-lives): jolt, or null for a game without physics.
+# The physics backend that release builds and tests link (see docs/physics/backends.md#loading): jolt, or null for a
+# game without physics. The development host and game DLL take the plugin loader instead, which loads the project's
+# physics.backend, physics_<name>.dll beside the host.
 physics_backend := "jolt"
 collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/" + physics_backend
+dev_collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/plugin"
 # Luau's experimental direct field access for engine userdata (see docs/scripting/embedding.md#direct-field-access). Off unless
 # CINNABAR_DIRECT_ACCESS=true.
 direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
 luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
 # The development host and game DLL share luau.dll (see docs/scripting/embedding.md#embedding). Everything else links Luau statically.
-# They also load physics_jolt.dll, so that Jolt is host code (see docs/physics/design.md#where-jolt-lives).
-dev_defines := "-define:LUAU_SHARED=true -define:PHYSICS_SHARED=true " + luau_features
+dev_defines := "-define:LUAU_SHARED=true " + luau_features
 # lib/core/luau/luau.odin and the cooker link their libraries from build/obj, so obj_dir must stay "build/obj".
 luau_dir := obj_dir + "/luau"
 # lib/core/physics/jolt/jolt.odin links its libraries from build/obj/jolt.
@@ -64,7 +66,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -206,7 +208,7 @@ build: host game-dll script-types scripts scenes shaders textures models meshes 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt
     mkdir -p "{{dev_dir}}"
-    odin build src/host {{collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
+    odin build src/host {{dev_collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
 
 # Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
 [script]
@@ -299,7 +301,7 @@ shaders config="dev": install-dxc cook
 # Build the game DLL. A running host picks it up and hot-reloads it.
 game-dll: luau jolt
     mkdir -p "{{dev_dir}}" "{{obj_dir}}/pdb"
-    odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
+    odin build "samples/{{game}}" {{dev_collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{dev_dir}}/{{game}}.dll" \
         -pdb-name:"{{obj_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
         -debug
@@ -415,7 +417,7 @@ fmt:
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau jolt compressonator meshoptimizer link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/null lib/core/physics/jolt lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
+    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

@@ -27,8 +27,10 @@ Game_Module :: struct {
 main :: proc() {
 	context.logger = log.create_console_logger()
 
-	// host [game.dll] [--content <dir>] [--project <file>] [--shared <name>] [--adapter <luid>] [--link <port>]
-	// [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is mygame.dll beside the host by default.
+	// host [game.dll] [--content <dir>] [--project <file>] [--physics <name>] [--shared <name>] [--adapter <luid>]
+	// [--link <port>] [--emit-script-types <file>] [--emit-link-schema <file>]. The DLL is mygame.dll beside the host by
+	// default. --physics names the physics backend, physics_<name>.dll beside the host or none, in place of the
+	// project's physics.backend (see docs/physics/backends.md#choosing).
 	// --content is the game's loose cache and --project its settings file, which are content and project.settings
 	// beside the host by default (see docs/overview/building-and-running.md#build-layout). --shared renders into shared
 	// textures for the editor or tools/viewer. --adapter names the GPU by its LUID in hex, so that the editor can open
@@ -41,7 +43,7 @@ main :: proc() {
 		return
 	}
 	source_path, _ := filepath.join({exe_dir, DEFAULT_GAME_NAME}, context.temp_allocator)
-	content_dir, project_path := "", ""
+	content_dir, project_path, physics_backend := "", "", ""
 	shared_target := ""
 	adapter: u64
 	link_port := -1
@@ -53,6 +55,9 @@ main :: proc() {
 			i += 1
 		case os.args[i] == "--project" && i + 1 < len(os.args):
 			project_path = os.args[i + 1]
+			i += 1
+		case os.args[i] == "--physics" && i + 1 < len(os.args):
+			physics_backend = os.args[i + 1]
 			i += 1
 		case os.args[i] == "--shared" && i + 1 < len(os.args):
 			shared_target = os.args[i + 1]
@@ -94,7 +99,14 @@ main :: proc() {
 	// Before core.init, so the job system's threads take the link's logger with the rest of the context. Not inside
 	// an if: a change to the context lasts only to the end of its scope.
 	context.logger = link_logger(&editor) if link_port >= 0 else context.logger
-	if !core.init("cinnabar host", shared_target = shared_target, adapter = adapter, content_dir = content_dir, project_path = project_path) {
+	if !core.init(
+		"cinnabar host",
+		shared_target = shared_target,
+		adapter = adapter,
+		content_dir = content_dir,
+		project_path = project_path,
+		physics_backend_name = physics_backend,
+	) {
 		return
 	}
 	defer core.shutdown()
