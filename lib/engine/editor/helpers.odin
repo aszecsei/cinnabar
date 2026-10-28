@@ -3,6 +3,8 @@ package editor
 import "core:math"
 import "core:math/linalg"
 
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/physics"
@@ -50,7 +52,7 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 			continue
 		}
 		if pose, ok := ecs.presented(w, entity); ok {
-			draw_entity_helpers(w, d, entity, pose, selected)
+			draw_entity_helpers(e, w, d, entity, pose, selected)
 		}
 	}
 }
@@ -77,7 +79,7 @@ light_color :: proc(color: [3]f32, selected: bool) -> [4]f32 {
 }
 
 @(private = "file")
-draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, pose: ecs.Transform, selected: bool) {
+draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, pose: ecs.Transform, selected: bool) {
 	right := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
 	up := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0})
 	forward := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 0, 1})
@@ -138,7 +140,7 @@ draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, p
 		}
 	}
 	if c := ecs.get(w, entity, physics.Collider); c != nil {
-		draw_collider(d, c^, pose, selected)
+		draw_collider(e, d, c^, pose, selected)
 	}
 	if j, _, ok := physics.joint_of(w, entity); ok {
 		draw_joint(w, d, j^, pose, selected)
@@ -259,7 +261,7 @@ icons_shown :: proc(e: ^Editor) -> bool {
 // draw_collider draws a collider's shape as the simulation has it, at its offset and rotation in the entity (see
 // docs/physics/design.md#the-editor).
 @(private = "file")
-draw_collider :: proc(d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, selected: bool) {
+draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, selected: bool) {
 	color := UNSELECTED
 	if selected {
 		color = c.sensor ? SENSOR_COLOR : COLLIDER_COLOR
@@ -286,6 +288,20 @@ draw_collider :: proc(d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, 
 		if kind == .Capsule {
 			debug.sphere(d, top, radius, color)
 			debug.sphere(d, bottom, radius, color)
+		}
+	case .Mesh, .Convex_Hull:
+		// The mesh's bounds, if it is loaded: its triangles would be too many lines.
+		if e.assets == nil {
+			return
+		}
+		h, loaded := asset.find(e.assets, c.mesh)
+		if !loaded {
+			return
+		}
+		data, _ := asset.data(e.assets, h)
+		if blob, ok := format.mesh_view(data); ok {
+			center := ecs.position_offset(at, linalg.quaternion128_mul_vector3(rotation, blob.bounds.center * size))
+			debug.box(d, center, (blob.bounds.max - blob.bounds.min) * 0.5 * size, rotation, color)
 		}
 	}
 }

@@ -111,3 +111,8 @@ joint_breaks :: proc(t: ^testing.T) {
 motor :: proc(t: ^testing.T) {
 	with_backend(t, conformance.motor)
 }
+
+@(test)
+meshes :: proc(t: ^testing.T) {
+	with_backend(t, conformance.meshes, quiet = true)
+}

@@ -51,6 +51,7 @@ api := physics.Physics_API {
 	step              = step,
 	results           = results,
 	body_state        = body_state,
+	create_mesh_shape = create_mesh_shape,
 	raycast           = raycast,
 	raycast_all       = raycast_all,
 	raycast_batch     = raycast_batch,
@@ -313,6 +314,38 @@ body_state :: proc "c" (handle: physics.World, bodies: [^]physics.Body, count: u
 			}
 		}
 	}
+}
+
+@(private)
+create_mesh_shape :: proc "c" (
+	handle: physics.World,
+	shape: physics.Shape,
+	kind: physics.Shape_Kind,
+	vertices: [^][3]f32,
+	vertex_count: u32,
+	triangles: [^][3]u32,
+	triangle_count: u32,
+	density: f32,
+) -> b32 {
+	context = runtime.default_context()
+	w := find_world(handle)
+	if w == nil || shape.generation == 0 || int(shape.index) >= len(w.shapes) || vertex_count == 0 {
+		return false
+	}
+	if kind == .Mesh {
+		if triangle_count == 0 {
+			return false
+		}
+		for t in triangles[:triangle_count] {
+			if t.x >= vertex_count || t.y >= vertex_count || t.z >= vertex_count {
+				return false
+			}
+		}
+	} else if kind != .Convex_Hull {
+		return false
+	}
+	w.shapes[shape.index] = shape.generation
+	return true
 }
 
 @(private)

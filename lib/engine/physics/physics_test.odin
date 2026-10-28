@@ -2,9 +2,12 @@ package physics
 
 import "base:runtime"
 import "core:c"
+import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:math/linalg"
 import "core:mem/virtual"
+import "core:os"
 import "core:sync"
 import "core:testing"
 
@@ -16,6 +19,8 @@ import physics_host "cinnabar:core/physics/host"
 import physics_jolt "cinnabar:core/physics/jolt"
 import physics_null "cinnabar:core/physics/null"
 import script_host "cinnabar:core/script"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/script"
 
@@ -30,6 +35,9 @@ Fixture :: struct {
 	host:     core_physics.Host,
 	world:    ecs.World,
 	physics:  State,
+	// A loose cache of mesh blobs that write_mesh writes.
+	cache:    string,
+	assets:   asset.Assets,
 	// With scripts: the runtime, the entity that Test.box gives, and what Test.report reported.
 	scripts:  bool,
 	runtime:  script.Runtime,
@@ -65,6 +73,9 @@ setup :: proc(t: ^testing.T, null := false, quiet := false, scripts := false) ->
 			virtual.release(ptr, uint(size))
 		},
 		physics = api^,
+		asset_allocator = runtime.heap_allocator(),
+		file_read = core.file_read,
+		file_modified = core.file_modified,
 		time_seconds = proc() -> f64 {return 0},
 		script_open = script_host.open,
 		script_close = script_host.close,
@@ -75,7 +86,11 @@ setup :: proc(t: ^testing.T, null := false, quiet := false, scripts := false) ->
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
 	register_components(&f.world.registry)
-	testing.expect(t, init(&f.physics, &f.platform))
+	cache, err := os.make_directory_temp("", "physics_test_*", context.allocator)
+	testing.expect(t, err == nil)
+	f.cache = cache
+	asset.init(&f.assets, &f.platform, asset.loose_cache(f.cache))
+	testing.expect(t, init(&f.physics, &f.platform, assets = &f.assets))
 	register(&f.physics, &f.world)
 	if scripts {
 		f.scripts = true
@@ -110,6 +125,9 @@ teardown :: proc(t: ^testing.T, f: ^Fixture) {
 	}
 	destroy(&f.physics)
 	testing.expect_value(t, f.platform.physics.world_destroy_all(), 0)
+	asset.destroy(&f.assets)
+	os.remove_all(f.cache)
+	delete(f.cache)
 	ecs.destroy(&f.world)
 	virtual.arena_destroy(&f.frame)
 	free(f)
@@ -727,4 +745,70 @@ Test.box():add(Breaker)
 	testing.expect(t, ecs.get(&f.world, f.box, Physics_Joint).broken)
 	testing.expectf(t, len(f.reports) == 1 && f.reports[0] == 1, "reports %v", f.reports[:])
 	testing.expectf(t, height(f, f.box) < 4.5, "the box falls: %v", height(f, f.box))
+}
+
+// write_mesh writes a mesh blob of a 1 m box's collision data, centered on its origin, into the fixture's cache.
+@(private = "file")
+write_mesh :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid) {
+	corners: [8][3]f32
+	for &c, i in corners {
+		c = {f32(i & 1) - 0.5, f32((i >> 1) & 1) - 0.5, f32((i >> 2) & 1) - 0.5}
+	}
+	faces := [6][4]u32{{0, 1, 3, 2}, {4, 5, 7, 6}, {0, 1, 5, 4}, {2, 3, 7, 6}, {0, 2, 6, 4}, {1, 3, 7, 5}}
+	triangles := make([dynamic][3]u32, context.temp_allocator)
+	for q in faces {
+		for tri in ([2][3]u32{{q[0], q[1], q[2]}, {q[0], q[2], q[3]}}) {
+			a, b, c := corners[tri.x], corners[tri.y], corners[tri.z]
+			// Wind each triangle so its front faces out.
+			if linalg.dot(linalg.cross(b - a, c - a), (a + b + c) / 3) < 0 {
+				append(&triangles, [3]u32{tri.x, tri.z, tri.y})
+			} else {
+				append(&triangles, tri)
+			}
+		}
+	}
+	owners := make([]u16, len(triangles), context.temp_allocator)
+	data := format.mesh_write({guid = guid, collision_positions = corners[:], collision_triangles = triangles[:], collision_submeshes = owners}, context.temp_allocator)
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer))
+	testing.expect(t, os.write_entire_file(path, data) == nil)
+}
+
+@(private = "file")
+mesh_collider :: proc(f: ^Fixture, e: ecs.Entity, shape: Shape, mesh: format.Guid) {
+	c := DEFAULT_COLLIDER
+	c.shape, c.mesh = shape, mesh
+	ecs.add(&f.world, e, c)
+}
+
+// A ground of a mesh's triangles, scaled 20 by 1 by 20, holds a box whose collider is the same mesh's hull, and a
+// dynamic box whose collider asks for the triangles, which takes their hull. A collider whose mesh is missing makes no
+// body.
+@(test)
+mesh_colliders :: proc(t: ^testing.T) {
+	f := setup(t, quiet = true)
+	defer teardown(t, f)
+	BOX_MESH :: format.Guid{1 = 1, 15 = 7}
+	MISSING :: format.Guid{1 = 2, 15 = 7}
+	write_mesh(t, f, BOX_MESH)
+	context.logger = log.nil_logger()
+
+	g := spawn_at(f, {0, -0.5, 0})
+	ecs.get(&f.world, g, ecs.Transform).scale = {20, 1, 20}
+	mesh_collider(f, g, .Mesh, BOX_MESH)
+	hull := spawn_at(f, {0, 3, 0})
+	ecs.add(&f.world, hull, DEFAULT_RIGID_BODY)
+	mesh_collider(f, hull, .Convex_Mesh, BOX_MESH)
+	moving := spawn_at(f, {3, 3, 0})
+	ecs.add(&f.world, moving, DEFAULT_RIGID_BODY)
+	mesh_collider(f, moving, .Mesh, BOX_MESH)
+	lost := spawn_at(f, {6, 3, 0})
+	mesh_collider(f, lost, .Mesh, MISSING)
+	ticks(f, 180)
+	testing.expect(t, ecs.get(&f.world, g, Physics_Body).body.generation != 0)
+	testing.expectf(t, abs(height(f, hull) - 0.5) < 0.03, "the hull rests on the mesh: %v", height(f, hull))
+	testing.expectf(t, abs(height(f, moving) - 0.5) < 0.03, "so does the dynamic mesh, as its hull: %v", height(f, moving))
+	testing.expect_value(t, ecs.get(&f.world, lost, Physics_Body).body, core_physics.Body{})
+	hit, ok := raycast(&f.physics, &f.world, ecs.position_from_meters({8, 10, 8}), {0, -1, 0}, 20)
+	testing.expect(t, ok && hit.entity == g, "a ray from above hits the scaled mesh")
 }

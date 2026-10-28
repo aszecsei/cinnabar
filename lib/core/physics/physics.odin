@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 5
+API_VERSION :: 6
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -93,6 +93,10 @@ Shape_Kind :: enum u8 {
 	Capsule,
 	// A cylinder along y: size.x is the radius, size.y the half height.
 	Cylinder,
+	// Triangles, from create_mesh_shape. Only a static or kinematic body can take one: it has no mass.
+	Mesh,
+	// The convex hull of points, from create_mesh_shape.
+	Convex_Hull,
 }
 
 Body_Flag :: enum u16 {
@@ -746,6 +750,11 @@ Physics_API :: struct {
 	results:           proc "c" (world: World, out: ^Step_Results),
 	// The state of chosen bodies. A stale handle gives a zeroed state.
 	body_state:        proc "c" (world: World, bodies: [^]Body, count: u32, out: [^]Body_State),
+	// create_mesh_shape makes a Mesh shape of triangles over vertices, or a Convex_Hull of the vertices alone, under
+	// an engine handle that later commands use as a Create_Shape's: mesh data does not fit in a command. Front faces
+	// are those whose (b - a) x (c - a) points out. It runs between steps, as submit does, and returns false for a
+	// shape that the backend cannot make, which it logs.
+	create_mesh_shape: proc "c" (world: World, shape: Shape, kind: Shape_Kind, vertices: [^][3]f32, vertex_count: u32, triangles: [^][3]u32, triangle_count: u32, density: f32) -> b32,
 	// The closest hit along the ray. filter may be nil, which is FILTER_ALL.
 	raycast:           proc "c" (world: World, ray: ^Ray, filter: ^Query_Filter, hit: ^Ray_Hit) -> b32,
 	// Every hit along the ray, by distance: the first capacity of them go to out, and the count is all of them.
@@ -809,6 +818,6 @@ Host :: struct {
 #assert(size_of(Ray) == 40)
 #assert(size_of(Query_Filter) == 80)
 #assert(size_of(Ray_Hit) == 64)
-#assert(size_of(Physics_API) == 15 * size_of(rawptr))
+#assert(size_of(Physics_API) == 16 * size_of(rawptr))
 #assert(size_of(Host) == 7 * size_of(rawptr))
 #assert(size_of(jobs.Counter) == 16)

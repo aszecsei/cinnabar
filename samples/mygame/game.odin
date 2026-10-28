@@ -412,7 +412,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if !ecs.init(&s.world, platform) {
 		log.panic("mygame: cannot create the world")
 	}
-	if !physics.init(&s.physics, platform, anchor = PHYSICS_ANCHOR) {
+	if !physics.init(&s.physics, platform, anchor = PHYSICS_ANCHOR, assets = &s.assets) {
 		log.panic("mygame: cannot create the physics world")
 	}
 	register_world(s)

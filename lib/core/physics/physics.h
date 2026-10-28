@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 5
+#define CN_PHYSICS_API_VERSION 6
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -48,7 +48,7 @@ typedef struct cn_world_desc {
 } cn_world_desc;
 
 enum cn_motion { CN_MOTION_STATIC, CN_MOTION_KINEMATIC, CN_MOTION_DYNAMIC };
-enum cn_shape_kind { CN_SHAPE_BOX, CN_SHAPE_SPHERE, CN_SHAPE_CAPSULE, CN_SHAPE_CYLINDER };
+enum cn_shape_kind { CN_SHAPE_BOX, CN_SHAPE_SPHERE, CN_SHAPE_CAPSULE, CN_SHAPE_CYLINDER, CN_SHAPE_MESH, CN_SHAPE_CONVEX_HULL };
 
 enum cn_body_flag {
     CN_BODY_SENSOR = 1u << 0,
@@ -247,6 +247,8 @@ typedef struct cn_physics_api {
     uint32_t (*step)(cn_world world, float dt, int32_t substeps);
     void (*results)(cn_world world, cn_step_results* out);
     void (*body_state)(cn_world world, const cn_body* bodies, uint32_t count, cn_body_state* out);
+    uint32_t (*create_mesh_shape)(cn_world world, cn_shape shape, uint8_t kind, const float (*vertices)[3], uint32_t vertex_count,
+        const uint32_t (*triangles)[3], uint32_t triangle_count, float density);
     uint32_t (*raycast)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* hit);
     uint32_t (*raycast_all)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* out, uint32_t capacity);
     void (*raycast_batch)(cn_world world, const cn_ray* rays, uint32_t count, const cn_query_filter* filter, cn_ray_hit* out);
@@ -301,7 +303,7 @@ static_assert(sizeof(cn_overlap_hit) == 16);
 static_assert(sizeof(cn_ray) == 40);
 static_assert(sizeof(cn_query_filter) == 80);
 static_assert(sizeof(cn_ray_hit) == 64);
-static_assert(sizeof(cn_physics_api) == 15 * sizeof(void*));
+static_assert(sizeof(cn_physics_api) == 16 * sizeof(void*));
 static_assert(sizeof(cn_physics_host) == 7 * sizeof(void*));
 static_assert(sizeof(cn_counter) == 16);
 #endif

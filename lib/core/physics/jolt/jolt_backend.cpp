@@ -30,6 +30,8 @@
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
@@ -639,6 +641,10 @@ bool run_create_body(World_Impl& w, const cn_create_body& c)
     }
     if (c.motion > CN_MOTION_DYNAMIC) {
         report(CN_LOG_ERROR, "physics: Create_Body: unknown motion %u", c.motion);
+        return false;
+    }
+    if (c.motion == CN_MOTION_DYNAMIC && shape->MustBeStatic()) {
+        report(CN_LOG_ERROR, "physics: Create_Body: a triangle mesh has no mass, so a dynamic body cannot take it");
         return false;
     }
 
@@ -1378,6 +1384,55 @@ bool fill_hit(World_Impl& w, const BodyID& id, const SubShapeID& sub_shape, RVec
     return true;
 }
 
+uint32_t create_mesh_shape(cn_world handle, cn_shape shape, uint8_t kind, const float (*vertices)[3], uint32_t vertex_count,
+    const uint32_t (*triangles)[3], uint32_t triangle_count, float density)
+{
+    World_Impl* w = find_world(handle);
+    if (w == nullptr || shape.generation == 0 || shape.index >= w->shapes.size() || vertex_count == 0) {
+        report(CN_LOG_ERROR, "physics: create_mesh_shape: no world, a bad handle, or no vertices");
+        return 0;
+    }
+    Shape::ShapeResult result;
+    if (kind == CN_SHAPE_MESH) {
+        VertexList points;
+        points.reserve(vertex_count);
+        for (uint32_t i = 0; i < vertex_count; i++) {
+            points.push_back(Float3(vertices[i][0], vertices[i][1], vertices[i][2]));
+        }
+        IndexedTriangleList list;
+        list.reserve(triangle_count);
+        for (uint32_t i = 0; i < triangle_count; i++) {
+            const uint32_t* t = triangles[i];
+            if (t[0] >= vertex_count || t[1] >= vertex_count || t[2] >= vertex_count) {
+                report(CN_LOG_ERROR, "physics: create_mesh_shape: triangle %u names a vertex past %u", i, vertex_count);
+                return 0;
+            }
+            list.push_back(IndexedTriangle(t[0], t[1], t[2]));
+        }
+        result = MeshShapeSettings(std::move(points), std::move(list)).Create();
+    } else if (kind == CN_SHAPE_CONVEX_HULL) {
+        Array<Vec3> points;
+        points.reserve(vertex_count);
+        for (uint32_t i = 0; i < vertex_count; i++) {
+            points.push_back(Vec3(vertices[i][0], vertices[i][1], vertices[i][2]));
+        }
+        ConvexHullShapeSettings settings(points, CONVEX_RADIUS);
+        settings.mDensity = density;
+        result = settings.Create();
+    } else {
+        report(CN_LOG_ERROR, "physics: create_mesh_shape: kind %u is not a mesh or a hull", kind);
+        return 0;
+    }
+    if (result.HasError()) {
+        report(CN_LOG_ERROR, "physics: create_mesh_shape: %s", result.GetError().c_str());
+        return 0;
+    }
+    Shape_Slot& slot = w->shapes[shape.index];
+    slot.generation = shape.generation;
+    slot.shape = result.Get();
+    return 1;
+}
+
 uint32_t raycast(cn_world handle, const cn_ray* ray, const cn_query_filter* in_filter, cn_ray_hit* hit)
 {
     *hit = {};
@@ -1521,6 +1576,7 @@ const cn_physics_api api = {
     step,
     results,
     body_state,
+    create_mesh_shape,
     raycast,
     raycast_all,
     raycast_batch,

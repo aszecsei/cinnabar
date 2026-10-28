@@ -476,3 +476,41 @@ motor :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	v := state(api, w, BOX).angular_velocity
 	testing.expectf(t, abs(abs(v.y) - 2) < 0.05 && abs(v.x) < 1e-3 && abs(v.z) < 1e-3, "it turns at 2 rad/s about y: %v", v)
 }
+
+// meshes: a box rests on a ground of two triangles, which a ray from above hits; a dynamic box whose shape is the hull
+// of its corners falls and rests on it too; and a dynamic body on a triangle mesh is refused.
+meshes :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := api.world_create(&physics.World_Desc{max_bodies = 64, max_shapes = 64})
+	defer api.world_destroy(w)
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_set_world(&list, GRAVITY, all_layers())
+	testing.expect(t, physics.submit(api, w, list))
+	// A 20 m square at y = 0, its front faces up.
+	quad := [4][3]f32{{-10, 0, -10}, {10, 0, -10}, {10, 0, 10}, {-10, 0, 10}}
+	triangles := [2][3]u32{{0, 2, 1}, {0, 3, 2}}
+	testing.expect(t, bool(api.create_mesh_shape(w, GROUND_SHAPE, .Mesh, &quad[0], 4, &triangles[0], 2, 1000)))
+	corners: [8][3]f32
+	for &c, i in corners {
+		c = {f32(i & 1) - 0.5, f32((i >> 1) & 1) - 0.5, f32((i >> 2) & 1) - 0.5}
+	}
+	testing.expect(t, bool(api.create_mesh_shape(w, BOX_SHAPE, .Convex_Hull, &corners[0], 8, nil, 0, 1000)))
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(GROUND, GROUND_SHAPE, .Static, {}, user = 1))
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {0, 3, 0}))
+	testing.expect(t, physics.submit(api, w, list))
+
+	down := physics.Ray{origin = {3, 10, 3}, direction = {0, -1, 0}, max_distance = 20}
+	hit: physics.Ray_Hit
+	testing.expect(t, bool(api.raycast(w, &down, nil, &hit)), "a ray from above hits the mesh's front faces")
+	testing.expect_value(t, hit.body, GROUND)
+	testing.expectf(t, hit.normal.y > 0.99, "facing up: %v", hit.normal)
+
+	for _ in 0 ..< 180 {
+		api.step(w, STEP, 1)
+	}
+	testing.expectf(t, abs(state(api, w, BOX).position.y - 0.5) < 0.03, "the hull rests on the mesh: %v", state(api, w, BOX).position)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc({2, 1}, GROUND_SHAPE, .Dynamic, {0, 5, 0}))
+	testing.expect(t, !physics.submit(api, w, list), "a dynamic body on a triangle mesh is refused")
+}

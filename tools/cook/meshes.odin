@@ -55,6 +55,12 @@ MODEL_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Simplify the meshlets into a hierarchy of levels of detail, which the mesh shader path draws by distance. Without it, the meshlets are the mesh's own triangles only.",
 	},
+	{
+		key = "collision",
+		values = {"true", "false"},
+		default = "true",
+		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
+	},
 }
 
 // Vertex is a mesh's vertex while it cooks: every attribute in f32, in the engine's axes.
@@ -328,6 +334,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 	scale := f32(strconv.parse_f64(model_setting(a, "scale")) or_else 1)
 	generate := model_setting(a, "tangents") == "generate"
 	lod := model_setting(a, "cluster_lod") == "true"
+	collision := model_setting(a, "collision") == "true"
 	flags: format.Mesh_Flags
 
 	// The primitives are grouped by material, and each group is a submesh, in the order of their first use.
@@ -366,6 +373,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 		flags             = flags,
 		generate_tangents = generate,
 		lod               = lod,
+		collision         = collision,
 		name              = m.name,
 		source_path       = a.name,
 	}
@@ -383,6 +391,8 @@ Cook_Mesh :: struct {
 	generate_tangents: bool,
 	// Build the meshlets' hierarchy of levels of detail, or only level 0.
 	lod:               bool,
+	// Write the collision data (see collision_of).
+	collision:         bool,
 	name:              string,
 	source_path:       string,
 }
@@ -498,7 +508,40 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		name              = m.name,
 		source_path       = m.source_path,
 	}
+	if m.collision {
+		contents.collision_positions, contents.collision_triangles, contents.collision_submeshes = collision_of(vertices, indices, submeshes)
+	}
 	return format.mesh_write(contents, context.temp_allocator)
+}
+
+// collision_of is a mesh's collision data: its positions welded by position alone, which joins the triangles that the
+// render mesh splits at its seams for normals and UVs, so a collider has no internal edges there; its triangles over
+// them, without the ones that welding made degenerate; and each triangle's submesh.
+@(private)
+collision_of :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.Submesh_Entry) -> (positions: [][3]f32, triangles: [][3]u32, owners: []u16) {
+	if len(vertices) == 0 || len(indices) == 0 {
+		return
+	}
+	all := make([][3]f32, len(vertices), context.temp_allocator)
+	for v, i in vertices {
+		all[i] = v.position
+	}
+	remap := make([]c.uint, len(all), context.temp_allocator)
+	count := int(meshopt_generateVertexRemap(&remap[0], nil, c.size_t(len(all)), &all[0], c.size_t(len(all)), 12))
+	positions = make([][3]f32, count, context.temp_allocator)
+	meshopt_remapVertexBuffer(&positions[0], &all[0], c.size_t(len(all)), 12, &remap[0])
+	kept := make([dynamic][3]u32, 0, len(indices) / 3, context.temp_allocator)
+	kept_owners := make([dynamic]u16, 0, len(indices) / 3, context.temp_allocator)
+	for s, owner in submeshes {
+		for i := s.first_index; i + 2 < s.first_index + s.index_count; i += 3 {
+			t := [3]u32{u32(remap[indices[i]]), u32(remap[indices[i + 1]]), u32(remap[indices[i + 2]])}
+			if t.x != t.y && t.y != t.z && t.x != t.z {
+				append(&kept, t)
+				append(&kept_owners, u16(owner))
+			}
+		}
+	}
+	return positions, kept[:], kept_owners[:]
 }
 
 // read_primitive appends a primitive's triangles as corners. glTF is right-handed with +z the asset's front, and the

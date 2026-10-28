@@ -1,6 +1,7 @@
 package cook
 
 import "core:fmt"
+import "core:math/linalg"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -179,5 +180,45 @@ the_mesh_template_is_a_box :: proc(t: ^testing.T) {
 			0.4,
 		)
 		testing.expect_value(t, f.mapping, format.mesh_world_mapping(normal, 1))
+	}
+}
+
+// A mesh's collision data welds by position: the box's 24 vertices, split at every sharp edge, are its 8 corners, its
+// 12 triangles face out, and each says its submesh. collision = false leaves it out.
+@(test)
+meshes_cook_welded_collision_data :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/room.mesh", MESH_TEMPLATE}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	testing.expect(t, cook(options, {.Mesh}).ok)
+	guid := tree_guid(t, tree, "room.mesh")
+	data := tree_blob(t, tree, guid)
+	blob, ok := format.mesh_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	testing.expect_value(t, blob.vertex_count, 24)
+	positions := format.mesh_collision_positions(data, blob)
+	triangles := format.mesh_collision_triangles(data, blob)
+	testing.expect_value(t, len(positions), 8)
+	testing.expect_value(t, len(triangles), 12)
+	testing.expect_value(t, len(format.mesh_collision_submeshes(data, blob)), 12)
+	for tri in triangles {
+		a, b, c := positions[tri.x], positions[tri.y], positions[tri.z]
+		normal := linalg.cross(b - a, c - a)
+		outward := (a + b + c) / 3 - [3]f32{0.5, 0.5, 0.5}
+		testing.expectf(t, linalg.dot(normal, outward) > 0, "triangle %v faces out", tri)
+	}
+
+	meta := fmt.tprintf("%s/content/room.mesh.meta", tree.dir)
+	text, _ := os.read_entire_file(meta, context.temp_allocator)
+	testing.expect(t, os.write_entire_file(meta, transmute([]byte)fmt.tprintf("%scollision = false\n", string(text))) == nil)
+	testing.expect(t, cook(options, {.Mesh}).ok)
+	data = tree_blob(t, tree, guid)
+	blob, ok = format.mesh_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, len(format.mesh_collision_triangles(data, blob)), 0)
 	}
 }

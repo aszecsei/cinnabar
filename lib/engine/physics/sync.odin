@@ -6,6 +6,8 @@ import "core:math"
 import "core:math/linalg"
 
 import core_physics "cinnabar:core/physics"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // A pose that differs from the one last sent by less than this was not moved by anyone else: propagation recomputes
@@ -73,6 +75,10 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	commands = ecs.commands(allocator_of(s))
 	sync_joints(s, w, &list, &commands)
 	ok := core_physics.submit(api(s), s.world, list)
+	for shape in s.released_shapes {
+		pool_free(&s.shapes, core_physics.Handle(shape))
+	}
+	clear(&s.released_shapes)
 	ecs.apply(w, {commands})
 	if !ok {
 		log.warn("physics: the backend rejected some commands")
@@ -188,7 +194,7 @@ add_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, c
 		pb := Physics_Body{}
 		create_body(s, w, list, e, pose, &pb, parts.by_body[e][:])
 		if pb.body.generation == 0 {
-			log.warnf("physics: entity %v has a Rigid_Body and no Collider, so it has no body", e)
+			log.warnf("physics: entity %v has no collider that makes a shape, so it has no body", e)
 		}
 		ecs.command_add(commands, w, e, pb)
 		if pb.motion != .Static && !ecs.has(w, e, ecs.Previous_Transform) {
@@ -232,7 +238,7 @@ update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List
 				continue
 			}
 			body_parts := parts.by_body[e][:]
-			if source_hash(w, e, body_parts) != pb.source {
+			if source_hash(s, w, e, body_parts) != pb.source {
 				if pool_valid(&s.bodies, core_physics.Handle(pb.body)) {
 					destroy_body(s, list, pb.body)
 				}
@@ -304,7 +310,7 @@ create_body :: proc(
 	parts: []Part,
 ) {
 	velocity, spin := pb.linear_velocity, pb.angular_velocity
-	pb^ = {source = source_hash(w, e, parts), position = pose.position, rotation = pose.rotation}
+	pb^ = {source = source_hash(s, w, e, parts), position = pose.position, rotation = pose.rotation}
 	own := ecs.get(w, e, Collider)
 	if own == nil && len(parts) == 0 {
 		return
@@ -313,28 +319,37 @@ create_body :: proc(
 	body := rb^ if rb != nil else Rigid_Body{motion = .Static}
 	material := own^ if own != nil else parts[0].collider
 
+	dynamic_body := body.motion == .Dynamic
+	children := make([dynamic]core_physics.Shape, allocator_of(s))
+	if own != nil {
+		if child, ok := child_shape(s, list, e, own^, own.offset * pose.scale, own.rotation, pose.scale, dynamic_body); ok {
+			append(&children, child)
+		}
+	}
+	for part in parts {
+		if len(children) == core_physics.MAX_COMPOUND_CHILDREN {
+			log.warnf("physics: entity %v has more than %d colliders; the rest are left out", e, core_physics.MAX_COMPOUND_CHILDREN)
+			break
+		}
+		c := part.collider
+		offset := pose.scale * (part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
+		if child, ok := child_shape(s, list, part.entity, c, offset, part.rotation * c.rotation, pose.scale * part.scale, dynamic_body); ok {
+			append(&children, child)
+		}
+	}
+	if len(children) == 0 {
+		// Every collider's mesh is missing; the warnings said why.
+		return
+	}
 	shape: core_physics.Shape
-	if own != nil && len(parts) == 0 {
-		shape = child_shape(s, list, own^, own.offset * pose.scale, own.rotation, pose.scale)
+	if len(children) == 1 {
+		shape = children[0]
 	} else {
-		children := make([dynamic]core_physics.Shape, allocator_of(s))
-		if own != nil {
-			append(&children, child_shape(s, list, own^, own.offset * pose.scale, own.rotation, pose.scale))
-		}
-		for part in parts {
-			if len(children) == core_physics.MAX_COMPOUND_CHILDREN {
-				log.warnf("physics: entity %v has more than %d colliders; the rest are left out", e, core_physics.MAX_COMPOUND_CHILDREN)
-				break
-			}
-			c := part.collider
-			offset := pose.scale * (part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
-			append(&children, child_shape(s, list, c, offset, part.rotation * c.rotation, pose.scale * part.scale))
-		}
 		shape = core_physics.Shape(pool_alloc(&s.shapes))
 		core_physics.cmd_create_compound(list, shape, children[:])
 		for child in children {
 			core_physics.cmd_release_shape(list, child)
-			pool_free(&s.shapes, core_physics.Handle(child))
+			append(&s.released_shapes, child)
 		}
 	}
 
@@ -367,7 +382,7 @@ create_body :: proc(
 	}
 	core_physics.cmd_create_body(list, desc)
 	core_physics.cmd_release_shape(list, shape)
-	pool_free(&s.shapes, core_physics.Handle(shape))
+	append(&s.released_shapes, shape)
 
 	for int(handle.index) >= len(s.records) {
 		append(&s.records, Body_Record{})
@@ -381,20 +396,78 @@ create_body :: proc(
 	pb.motion = body.motion
 }
 
-// child_shape sends a collider's shape at an offset and a rotation in its body, with its dimensions scaled.
+// child_shape makes a collider's shape at an offset and a rotation in its body, with its dimensions scaled: a primitive
+// through a command, and a mesh at once, from its collision data with the offset, the rotation and the scale applied
+// to its vertices. A dynamic body takes a mesh's convex hull. It returns false, with a warning, when the mesh is
+// missing.
 @(private)
 child_shape :: proc(
 	s: ^State,
 	list: ^core_physics.Command_List,
+	e: ecs.Entity,
 	c: Collider,
 	offset: [3]f32,
 	rotation: quaternion128,
 	scale: [3]f32,
-) -> core_physics.Shape {
+	dynamic_body: bool,
+) -> (
+	core_physics.Shape,
+	bool,
+) {
+	if c.shape != .Mesh && c.shape != .Convex_Mesh {
+		shape := core_physics.Shape(pool_alloc(&s.shapes))
+		kind, size := collider_size(c, scale)
+		core_physics.cmd_create_shape(list, shape, kind, size, c.density, offset, to_rotation(rotation))
+		return shape, true
+	}
+	data, blob, ok := mesh_data(s, c.mesh)
+	if !ok {
+		log.warnf("physics: entity %v's collider has no mesh %v loaded", e, c.mesh)
+		return {}, false
+	}
+	positions := format.mesh_collision_positions(data, blob)
+	triangles := format.mesh_collision_triangles(data, blob)
+	if len(positions) == 0 || len(triangles) == 0 {
+		log.warnf("physics: mesh %v has no collision data: its collision import setting is false", c.mesh)
+		return {}, false
+	}
+	kind := core_physics.Shape_Kind.Mesh if c.shape == .Mesh else .Convex_Hull
+	if kind == .Mesh && dynamic_body {
+		log.warnf("physics: entity %v is dynamic, so its mesh collider is the mesh's convex hull", e)
+		kind = .Convex_Hull
+	}
+	placed := make([][3]f32, len(positions), allocator_of(s))
+	for p, i in positions {
+		placed[i] = offset + linalg.quaternion_mul_vector3(rotation, p * scale)
+	}
 	shape := core_physics.Shape(pool_alloc(&s.shapes))
-	kind, size := collider_size(c, scale)
-	core_physics.cmd_create_shape(list, shape, kind, size, c.density, offset, to_rotation(rotation))
-	return shape
+	if !api(s).create_mesh_shape(s.world, shape, kind, raw_data(placed), u32(len(placed)), raw_data(triangles), u32(len(triangles)), c.density) {
+		pool_free(&s.shapes, core_physics.Handle(shape))
+		return {}, false
+	}
+	return shape, true
+}
+
+// mesh_data is a mesh asset's blob, which it loads if it is not loaded.
+@(private)
+mesh_data :: proc(s: ^State, guid: format.Guid) -> (data: []byte, blob: ^format.Mesh_Blob, ok: bool) {
+	if s.assets == nil || guid == {} {
+		return
+	}
+	h := asset.load(s.assets, guid) or_return
+	data = asset.data(s.assets, h) or_return
+	blob = format.mesh_view(data) or_return
+	return data, blob, true
+}
+
+// mesh_version is how many times hot reload swapped a collider's mesh, so that a body made from it is made again.
+@(private)
+mesh_version :: proc(s: ^State, c: ^Collider) -> u32 {
+	if s.assets == nil || (c.shape != .Mesh && c.shape != .Convex_Mesh) {
+		return 0
+	}
+	h, loaded := asset.find(s.assets, c.mesh)
+	return asset.version(s.assets, h) if loaded else 0
 }
 
 @(private)
@@ -404,8 +477,8 @@ destroy_body :: proc(s: ^State, list: ^core_physics.Command_List, body: core_phy
 	s.records[body.index] = {}
 }
 
-// collider_size gives the backend's shape for a collider at a scale: a box's half extents, a sphere's radius in x, and
-// a capsule's or a cylinder's radius in x and the half height of its cylinder in y. Scale is applied to the
+// collider_size gives the backend's shape for a collider at a scale: a box's half extents, a sphere's radius in x, a
+// capsule's or a cylinder's radius in x and the half height of its cylinder in y, and a mesh's scale. Scale is applied to the
 // dimensions, so no shape needs a scaled wrapper: a sphere takes the largest axis, and a capsule or cylinder the
 // largest of x and z for its radius. The editor draws colliders with it.
 collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Kind, [3]f32) {
@@ -421,14 +494,18 @@ collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Ki
 		return .Capsule, {radius, half, 0}
 	case .Cylinder:
 		return .Cylinder, {max(c.radius * max(scale.x, scale.z), 1e-3), max(c.height * scale.y * 0.5, 1e-3), 0}
+	case .Mesh:
+		return .Mesh, scale
+	case .Convex_Mesh:
+		return .Convex_Hull, scale
 	}
 	return .Box, 1
 }
 
 // source_hash is what a body is made from: the Rigid_Body, the Collider, the entity's scale, and each part's
-// Collider and pose in the body.
+// Collider and pose in the body, with the version of each mesh that a collider names.
 @(private)
-source_hash :: proc(w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
+source_hash :: proc(s: ^State, w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
 	bytes :: proc(p: ^$T) -> []byte {
 		return ([^]byte)(p)[:size_of(T)]
 	}
@@ -440,6 +517,8 @@ source_hash :: proc(w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
 	}
 	if c := ecs.get(w, e, Collider); c != nil {
 		h = hash.fnv64a(bytes(c), h)
+		version := mesh_version(s, c)
+		h = hash.fnv64a(bytes(&version), h)
 	} else {
 		h = hash.fnv64a({1}, h)
 	}
@@ -449,6 +528,8 @@ source_hash :: proc(w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
 	}
 	for &part in parts {
 		h = hash.fnv64a(bytes(&part.collider), h)
+		version := mesh_version(s, &part.collider)
+		h = hash.fnv64a(bytes(&version), h)
 		h = hash.fnv64a(bytes(&part.offset), h)
 		h = hash.fnv64a(bytes(&part.rotation), h)
 		h = hash.fnv64a(bytes(&part.scale), h)

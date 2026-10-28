@@ -7,6 +7,8 @@ import "base:runtime"
 
 import "cinnabar:core"
 import core_physics "cinnabar:core/physics"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // The physics components' stable IDs, 64 to 79 (see docs/physics/design.md#components).
@@ -48,10 +50,17 @@ Shape :: enum u8 {
 	Capsule,
 	// Along the entity's y.
 	Cylinder,
+	// The triangles of the mesh asset's collision data. A dynamic body takes their convex hull instead, since a mesh
+	// has no mass.
+	Mesh,
+	// The convex hull of the mesh asset's collision data.
+	Convex_Mesh,
 }
 
-// Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, or a capsule
-// or cylinder of radius and height, its whole height along y. offset and rotation place it in the entity. A Collider
+// Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, a capsule or
+// cylinder of radius and height, its whole height along y, or a mesh asset's collision triangles or their hull, which
+// the cooker writes unless the mesh's collision import setting is false (see docs/physics/design.md#shapes). offset and
+// rotation place it in the entity. A Collider
 // on a descendant of a Rigid_Body, with no Rigid_Body between them, is a part of that body's shape, and the body
 // takes its friction, restitution, layer and sensor from its own Collider, or its first part's.
 Collider :: struct {
@@ -59,6 +68,7 @@ Collider :: struct {
 	size:        [3]f32 `editor:"range=0,1000"`,
 	radius:      f32 `editor:"range=0,1000"`,
 	height:      f32 `editor:"range=0,1000"`,
+	mesh:        format.Guid `asset:"mesh"`,
 	offset:      [3]f32,
 	rotation:    quaternion128,
 	friction:    f32 `editor:"range=0,2"`,
@@ -151,6 +161,8 @@ Body_Record :: struct {
 // again after a reload.
 State :: struct {
 	platform: ^core.Platform_API,
+	// Where mesh colliders' meshes load from, or nil for a world without them.
+	assets:   ^asset.Assets,
 	world:    core_physics.World,
 	// Positions cross the boundary as f64 offsets from here (see docs/physics/design.md#positions-and-precision).
 	anchor:   ecs.World_Position,
@@ -161,6 +173,9 @@ State :: struct {
 	// The joints that broke in the last tick.
 	breaks:   [dynamic]Joint_Break,
 	shapes:   Pool,
+	// Shape handles that this sync released, which go back to the pool after its commands are submitted: a mesh
+	// shape is made at once, and must not take a handle that a command still in the list releases.
+	released_shapes: [dynamic]core_physics.Shape,
 	gravity:  [3]f32,
 	layers:   Layers,
 	// Set_World goes to the backend before the next submit.
@@ -184,12 +199,14 @@ State :: struct {
 DEFAULT_GRAVITY :: [3]f32{0, -9.81, 0}
 
 // init creates the physics world. Call register after it, and destroy in the game's shutdown.
-init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_Desc = {}, anchor := ecs.World_Position{}) -> bool {
+init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_Desc = {}, anchor := ecs.World_Position{}, assets: ^asset.Assets = nil) -> bool {
 	desc := desc
 	allocator := platform.heap_allocator
 	s^ = {
 		platform       = platform,
+		assets         = assets,
 		anchor         = anchor,
+		released_shapes = make([dynamic]core_physics.Shape, allocator),
 		gravity        = DEFAULT_GRAVITY,
 		settings_dirty = true,
 		bodies         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
@@ -236,6 +253,7 @@ destroy :: proc(s: ^State) {
 	pool_destroy(&s.shapes)
 	pool_destroy(&s.joints)
 	delete(s.records)
+	delete(s.released_shapes)
 	delete(s.joint_records)
 	delete(s.breaks)
 	delete(s.tick_contacts)

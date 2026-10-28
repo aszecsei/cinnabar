@@ -154,6 +154,13 @@ Mesh_Blob :: struct {
 	// The mesh's name in its model, and the model's path, prefixed with its root's name.
 	name:              Slice,
 	source_path:       Slice,
+	// The collision data that physics builds a mesh collider from (see docs/physics/design.md#shapes), empty when the
+	// import setting collision is false: positions welded by position alone, so triangles that the render mesh splits
+	// at a seam share their edge, [3]f32 each; triangles of three u32 indices into them, without degenerate ones, front
+	// faces wound as the render mesh's; and each triangle's submesh, u16 each.
+	collision_positions: Slice,
+	collision_triangles: Slice,
+	collision_submeshes: Slice,
 }
 
 mesh_layout :: proc() -> u64 {
@@ -178,6 +185,9 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		blob.meshlet_triangles,
 		blob.name,
 		blob.source_path,
+		blob.collision_positions,
+		blob.collision_triangles,
+		blob.collision_submeshes,
 	}
 	for s in slices {
 		if u64(s.offset) + u64(s.size) > u64(len(data)) {
@@ -191,8 +201,16 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	     blob.indices.size != blob.index_count * index_size,
 	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
 	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
-	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0:
+	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0,
+	     blob.collision_positions.size % 12 != 0 || blob.collision_triangles.size % 12 != 0,
+	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2:
 		return nil, false
+	}
+	collision_vertices := blob.collision_positions.size / 12
+	for t in mesh_collision_triangles(data, blob) {
+		if t.x >= collision_vertices || t.y >= collision_vertices || t.z >= collision_vertices {
+			return nil, false
+		}
 	}
 	meshlet_count := blob.meshlets.size / size_of(Meshlet)
 	for s in mesh_submeshes(data, blob) {
@@ -208,6 +226,23 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 mesh_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_Submesh {
 	bytes := blob_bytes(data, blob.submeshes)
 	return ([^]Mesh_Submesh)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Submesh)]
+}
+
+// mesh_collision_positions, mesh_collision_triangles and mesh_collision_submeshes are a mesh's collision data. A mesh
+// cooked without it has none.
+mesh_collision_positions :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> [][3]f32 {
+	bytes := blob_bytes(data, blob.collision_positions)
+	return ([^][3]f32)(raw_data(bytes))[:len(bytes) / 12]
+}
+
+mesh_collision_triangles :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> [][3]u32 {
+	bytes := blob_bytes(data, blob.collision_triangles)
+	return ([^][3]u32)(raw_data(bytes))[:len(bytes) / 12]
+}
+
+mesh_collision_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []u16 {
+	bytes := blob_bytes(data, blob.collision_submeshes)
+	return ([^]u16)(raw_data(bytes))[:len(bytes) / 2]
 }
 
 mesh_meshlets :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet {
@@ -240,6 +275,9 @@ Mesh_Contents :: struct {
 	meshlet_triangles: []byte,
 	name:              string,
 	source_path:       string,
+	collision_positions: [][3]f32,
+	collision_triangles: [][3]u32,
+	collision_submeshes: []u16,
 }
 
 // mesh_write builds a mesh blob.
@@ -257,6 +295,9 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 	meshlets := stream(&buffer, mem.slice_to_bytes(contents.meshlets))
 	meshlet_vertices := stream(&buffer, contents.meshlet_vertices)
 	meshlet_triangles := stream(&buffer, contents.meshlet_triangles)
+	collision_positions := stream(&buffer, mem.slice_to_bytes(contents.collision_positions))
+	collision_triangles := stream(&buffer, mem.slice_to_bytes(contents.collision_triangles))
+	collision_submeshes := stream(&buffer, mem.slice_to_bytes(contents.collision_submeshes))
 	name := append_bytes(&buffer, transmute([]byte)contents.name)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	for s, i in contents.submeshes {
@@ -285,6 +326,9 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		meshlet_triangles = meshlet_triangles,
 		name = name,
 		source_path = source_path,
+		collision_positions = collision_positions,
+		collision_triangles = collision_triangles,
+		collision_submeshes = collision_submeshes,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

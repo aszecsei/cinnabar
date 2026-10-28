@@ -1,6 +1,7 @@
 # The room scene, which F7 in mygame cycles to: a room built by hand as a mesh file, meshes/room.mesh, with white
 # walls, a checker floor, a red pillar and a green partition, lit by a quad light under the ceiling (see
-# docs/content/kinds/meshes.md#mesh-files). The camera stands inside, near the front wall. Positions are raw
+# docs/content/kinds/meshes.md#mesh-files). The room's mesh is its collider too, and three boxes fall onto its floor when
+# the world runs (see docs/physics/design.md#shapes). The camera stands inside, near the front wall. Positions are raw
 # World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
@@ -52,3 +53,45 @@ component 33 Mesh_Renderer
 	materials.2 = $cbeb3ff7d07840a7a816ea35868ee5b0
 	materials.3 = $0633d94a72554cf9947b0f8c9911055c
 	cast_shadows = true
+component 65 Collider
+	shape = Mesh
+	mesh = $3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d
+
+entity f1a2b3c4d5e6f721
+name = "Falling Box 1"
+component 1 Transform
+	position = [2516582399989933670, 25165824, -16777216]
+	rotation = [0, 0, 0, 1]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 64 Rigid_Body
+component 65 Collider
+
+entity f1a2b3c4d5e6f722
+name = "Falling Box 2"
+component 1 Transform
+	position = [2516582400006710886, 36909875, -10066330]
+	rotation = [0, 0.1494381, 0, 0.9887711]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 64 Rigid_Body
+component 65 Collider
+
+entity f1a2b3c4d5e6f723
+name = "Falling Box 3"
+component 1 Transform
+	position = [2516582400000000000, 48653926, -13421773]
+	rotation = [0, 0.2955202, 0, 0.9553365]
+	scale = [0.3, 0.3, 0.3]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 64 Rigid_Body
+component 65 Collider

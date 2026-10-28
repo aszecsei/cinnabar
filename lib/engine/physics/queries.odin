@@ -75,7 +75,7 @@ raycast_batch :: proc(s: ^State, w: ^ecs.World, rays: []Ray, out: []Hit, filter 
 	}
 }
 
-// shape_cast sweeps a shape, sized as a Collider is at scale 1, from origin along direction for distance meters, and
+// shape_cast sweeps a primitive shape, sized as a Collider is at scale 1, from origin along direction for distance meters, and
 // gives the first hit: the contact point, the normal of the surface it hit, and the distance swept. The Collider's
 // offset and rotation are not used; rotation is the shape's.
 shape_cast :: proc(
