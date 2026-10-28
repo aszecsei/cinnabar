@@ -1,0 +1,23 @@
+material 1
+# A foliage card that turns only about its +y to face the camera (see docs/rendering/gpu-scene.md#billboards): a tree's
+# outline, a trunk under a pointed crown, cut out of a card by its opacity, lit.
+shading = lit
+blend = masked
+cutoff = 0.5
+geometry = billboard_axis
+cast_shadows = true
+param crown color = [0.16, 0.42, 0.14, 1]
+param trunk color = [0.36, 0.24, 0.14, 1]
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	// u across, and the height up the card from its bottom.
+	float x = abs(inputs.uv0.x * 2 - 1);
+	float height = 1 - inputs.uv0.y;
+	bool trunk = height < 0.25 && x < 0.08;
+	bool crown = height >= 0.2 && x < (1 - height) * 1.15;
+	s.base_color = trunk ? params.trunk.rgb : params.crown.rgb * (0.7 + 0.5 * height);
+	s.roughness = 0.8;
+	s.opacity = trunk || crown ? 1 : 0;
+	return s;
+}

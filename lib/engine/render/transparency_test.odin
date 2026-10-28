@@ -138,6 +138,7 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		sf.items = make([]Cull_Item, len(sorting), platform.frame_allocator)
 		sf.bin_pipelines, sf.groups = sort_bins(sorting, sf.items, platform.frame_allocator)
 		sf.bin_draws = sf.bin_pipelines
+		sf.bin_impostors = bin_impostors(sf.items, len(sf.bin_pipelines), platform.frame_allocator)
 		sf.bin_offsets = {0, 1, 2}
 		sf.bin_counts = {1, 1, 1}
 		sf.view_count = 2

@@ -31,6 +31,12 @@ struct Frame_Constants {
 	// Where the view looks from, relative to the camera, which a meshlet's normal cone is tested from: a point when w is
 	// 1, or the direction that it looks along when w is 0.
 	float4 cull_eye;
+	// The camera's right and up in the world, in every view's copy, and last frame's camera's, which billboards face
+	// (see billboard_rows), so a shadow view draws a billboard as the camera sees it.
+	float4 camera_right;
+	float4 camera_up;
+	float4 previous_camera_right;
+	float4 previous_camera_up;
 	// Bindless indices: the GPU scene's instances, this frame's draw records, the mesh records and the material table.
 	uint instances;
 	uint draws;
@@ -183,7 +189,9 @@ struct Draw_Record {
 	uint2 padding;
 };
 
-// Matches Mesh_Record in lib/engine/render/scene.odin.
+// Matches Mesh_Record in lib/engine/render/scene.odin. impostor is the impostor's atlas, impostor_size a frame's side
+// in texels, and impostor_sphere the sphere in the mesh's space that the atlas's frames see (see
+// material_impostor.hlsli).
 static const uint MESH_INDEX32 = 1;
 static const uint MESH_UV1 = 2;
 static const uint MESH_COLOR = 4;
@@ -196,6 +204,10 @@ struct Mesh_Record {
 	uint meshlets;
 	uint meshlet_vertices;
 	uint meshlet_triangles;
+	uint impostor;
+	uint impostor_size;
+	uint2 padding;
+	float4 impostor_sphere;
 };
 
 // Matches Instance_Record in lib/engine/render/scene.odin: the pose relative to the render origin as the rows of a

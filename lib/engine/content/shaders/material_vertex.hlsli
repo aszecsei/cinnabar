@@ -51,6 +51,36 @@ float3 transform_direction(float4 rows[3], float3 d) {
 	return float3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
 }
 
+// axis_scales are how much an instance's rows scale each of the mesh's axes: the lengths of their columns.
+float3 axis_scales(float4 rows[3]) {
+	return sqrt(rows[0].xyz * rows[0].xyz + rows[1].xyz * rows[1].xyz + rows[2].xyz * rows[2].xyz);
+}
+
+// billboard_rows turns an instance's rows to face a camera at eye, in the rows' space, whose right and up are given (see
+// docs/rendering/gpu-scene.md#billboards). The mesh's +x goes along the camera's right, its +y along the camera's
+// up, and its +z away from the camera, each with its own scale, so a quad in the mesh's x and y planes fronting -z
+// faces the camera. An axis billboard (MATERIAL_BILLBOARD 2) keeps its +y, and turns about it to face the camera.
+void billboard_rows(inout float4 rows[3], float3 eye, float3 right, float3 up) {
+	float3 origin = float3(rows[0].w, rows[1].w, rows[2].w);
+	float3 scales = axis_scales(rows);
+	float3 forward = cross(right, up);
+#if MATERIAL_BILLBOARD == 2
+	float3 axis = normalize(float3(rows[0].y, rows[1].y, rows[2].y));
+	float3 toward = origin - eye;
+	toward -= axis * dot(toward, axis);
+	// Seen straight along its axis, it faces the camera's up, which is across the axis then.
+	if (dot(toward, toward) < 1e-12) {
+		toward = up - axis * dot(up, axis);
+	}
+	forward = normalize(toward);
+	up = axis;
+	right = cross(up, forward);
+#endif
+	for (uint k = 0; k < 3; k++) {
+		rows[k] = float4(right[k] * scales.x, up[k] * scales.y, forward[k] * scales.z, origin[k]);
+	}
+}
+
 Draw_Record load_draw() {
 	return cn_buffer(frame.draws).Load<Draw_Record>(CN_DRAW_ID * sizeof(Draw_Record));
 }
@@ -75,9 +105,14 @@ uint draw_index(Draw_Record d, Mesh_Record m, uint vertex_id) {
 
 // finish_vertex places a vertex of the mesh's space by its instance's pose, and moves it by the material's displacement
 // when it has one (see docs/rendering/materials.md#vertex-displacement): what the vertex paths and the patch path all
-// draw. The displacement is read at this frame's time for this frame's pose and at last frame's for the previous, so
-// an offset that moves gives a velocity.
+// draw. A billboard's pose faces the camera first, this frame's and last frame's each its own camera. The
+// displacement is read at this frame's time for this frame's pose and at last frame's for the previous, so an offset
+// that moves gives a velocity.
 Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 local, float3 normal, float3 tangent, float bitangent_sign, float2 uv0, float2 uv1, float4 color) {
+#if MATERIAL_BILLBOARD
+	billboard_rows(instance.rows, frame.camera_offset.xyz, frame.camera_right.xyz, frame.camera_up.xyz);
+	billboard_rows(instance.previous_rows, frame.previous_camera_offset.xyz, frame.previous_camera_right.xyz, frame.previous_camera_up.xyz);
+#endif
 	Material_Vertex v;
 	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
 	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;

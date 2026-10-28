@@ -59,11 +59,14 @@ Material_Ref :: struct {
 }
 
 // Material_Pipeline is the pipelines of one material and switch combination, one for each pass, made from the
-// material's blob, and updated when the blob changes.
+// material's blob, and updated when the blob changes. The impostor passes are pipelines too, which an impostors' bin
+// draws with in place of the opaque passes (see docs/rendering/gpu-scene.md#impostors).
 Material_Pipeline :: struct {
 	material:     format.Guid,
 	switches:     u32,
 	pipelines:    [format.Material_Pass]gpu.Pipeline,
+	// The blob has each impostor pass, so a submesh of a mesh with an impostor draws it past its coarsest level.
+	impostor_path: bool,
 	// With Mesh_Shaders, the mesh shader path's pipelines of the opaque passes, which the world's opaque draws draw
 	// with when mesh_path (see docs/rendering/gpu-scene.md#mesh-shader-path). The previews draw with pipelines.
 	meshes:       [format.Material_Pass]gpu.Pipeline,
@@ -78,6 +81,8 @@ Material_Pipeline :: struct {
 	displacement_bound: f32,
 	// The material draws the patches of Surface_Renderers, with the patch vertex path, not meshes.
 	patches:      bool,
+	// The material draws its meshes as billboards, which face the camera (see docs/rendering/gpu-scene.md#billboards).
+	billboard:    bool,
 	// A transparent or additive material's transparent pass, blended over the scene: its back faces, for a two-sided
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
 	// material, which have no moments (see docs/rendering/transparency.md#transparency).
@@ -454,6 +459,16 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			cull = cull,
 			label = label,
 		},
+		.Impostor_Forward = {},
+		.Impostor_Prepass = {},
+		.Impostor_Depth = {},
+	}
+	// An impostor's quad faces its view, and its pixels write their own depths, which the shadow maps' bias does not
+	// move, so the impostor's depth pass moves them itself.
+	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
+		impostor := descs[pass]
+		impostor.cull = .None
+		descs[format.material_impostor_pass(pass)] = impostor
 	}
 	for &desc, pass in descs {
 		desc.vertex = format.material_code(data, blob, switches, pass, .Vertex)
@@ -475,6 +490,10 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	// A vertex pipeline cannot become a mesh pipeline, so the two are apart.
 	mesh_descs: [format.Material_Pass]gpu.Graphics_Pipeline_Desc
 	p.mesh_path = r.caps.mesh_shaders && !format.material_transparent(blob.blend)
+	p.impostor_path = !format.material_transparent(blob.blend)
+	for pass in ([]format.Material_Pass{.Impostor_Forward, .Impostor_Prepass, .Impostor_Depth}) {
+		p.impostor_path &&= descs[pass].vertex != nil && descs[pass].pixel != nil
+	}
 	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
 		desc := &mesh_descs[pass]
 		desc^ = descs[pass]
@@ -504,6 +523,7 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	p.blend, p.sorted = blob.blend, sorted
 	p.displacement_bound = .Displaces in blob.flags ? blob.displacement_bound : 0
 	p.patches = .Patches in blob.flags
+	p.billboard = .Billboard in blob.flags
 }
 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.

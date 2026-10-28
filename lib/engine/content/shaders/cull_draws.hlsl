@@ -2,7 +2,9 @@
 // (see docs/rendering/gpu-scene.md#gpu-scene). Each visible one goes into its bin of that view: an indirect draw whose draw ID is
 // its own index, and the draw record at that index, which the material's vertex shader reads. An item on the mesh
 // shader path writes a mesh draw instead, of an amplification group for each MESHLETS_PER_GROUP of its meshlets, which
-// cull them (see material_mesh.hlsli). A dispatch row is a view.
+// cull them (see material_mesh.hlsli). An item with an impostor draws as its mesh up to where the impostor takes over,
+// and its impostor's item past it, by the camera's level of detail in every view (see
+// docs/rendering/gpu-scene.md#impostors). A dispatch row is a view.
 #include "cinnabar.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
@@ -29,6 +31,12 @@ struct Cull_Constants {
 	uint patch_counts;
 	uint patches_read;
 	uint patch_counts_read;
+	// The camera's offset from the render origin, and its level of detail (see Frame_Constants.lod_scale), which pick
+	// between a mesh and its impostor.
+	float4 camera;
+	float lod_scale;
+	float lod_near;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -48,12 +56,18 @@ struct Cull_View {
 
 // Matches Cull_Item in lib/engine/render/scene.odin: one submesh of one instance, its bin, and its bounding sphere in
 // the mesh's space. first and count are its indices, or on the mesh shader path its meshlets. bound is how far the
-// material's displacement may move a vertex, in meters, which grows the sphere after the instance's scale.
+// material's displacement may move a vertex, in meters, which grows the sphere after the instance's scale. An item
+// with ITEM_IMPOSTOR or ITEM_HAS_IMPOSTOR has its mesh's sphere in lod_sphere, and its impostor's error.
 static const uint ITEM_CASTS_SHADOWS = 1;
 static const uint ITEM_VIEW_MODEL = 2;
 static const uint ITEM_MESH_PATH = 4;
 // A patch surface's item, whose draws cull_patches.hlsl writes.
 static const uint ITEM_SURFACE = 8;
+// A billboard's item, which turns about its instance's position (see billboard_rows in material_vertex.hlsli).
+static const uint ITEM_BILLBOARD = 16;
+// An impostor's item, which draws past where it takes over, and a mesh's item with an impostor, which draws up to it.
+static const uint ITEM_IMPOSTOR = 32;
+static const uint ITEM_HAS_IMPOSTOR = 64;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -65,7 +79,9 @@ struct Item {
 	uint submesh;
 	float4 sphere;
 	float bound;
-	uint3 padding;
+	float impostor_error;
+	uint2 padding;
+	float4 lod_sphere;
 };
 
 // Matches ID_ENTITY_BITS in lib/engine/render/renderer.odin.
@@ -104,7 +120,22 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	// The largest scale of an axis, a column's length, scales the radius.
 	float3 scales = instance.rows[0].xyz * instance.rows[0].xyz + instance.rows[1].xyz * instance.rows[1].xyz + instance.rows[2].xyz * instance.rows[2].xyz;
 	float scale = sqrt(max(scales.x, max(scales.y, scales.z)));
+	// Each view draws a mesh or its impostor as the camera does, so a shadow is the shape that the camera sees.
+	if ((item.flags & (ITEM_IMPOSTOR | ITEM_HAS_IMPOSTOR)) != 0) {
+		float4 mesh_center = float4(item.lod_sphere.xyz, 1);
+		float3 to_mesh = float3(dot(instance.rows[0], mesh_center), dot(instance.rows[1], mesh_center), dot(instance.rows[2], mesh_center)) - cull.camera.xyz;
+		float distance = max(length(to_mesh) - item.lod_sphere.w * scale, cull.lod_near);
+		bool far = item.impostor_error * scale / distance * cull.lod_scale <= 1;
+		if (far != ((item.flags & ITEM_IMPOSTOR) != 0)) {
+			return;
+		}
+	}
 	float radius = item.sphere.w * scale + item.bound;
+	// A billboard's sphere turns about the instance's position, so the sphere about that position that holds it.
+	if ((item.flags & ITEM_BILLBOARD) != 0) {
+		p = float3(instance.rows[0].w, instance.rows[1].w, instance.rows[2].w) - view.offset.xyz;
+		radius = (length(item.sphere.xyz) + item.sphere.w) * scale + item.bound;
+	}
 	for (uint i = 0; i < 6; i++) {
 		if (dot(view.planes[i].xyz, p) + view.planes[i].w < -radius) {
 			return;

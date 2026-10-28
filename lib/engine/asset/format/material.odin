@@ -40,6 +40,10 @@ Material_Flag :: enum u32 {
 	Displaces,
 	// The material draws the patches of Surface_Renderers, not meshes (see docs/rendering/surfaces.md#surfaces).
 	Patches,
+	// The material draws its meshes as billboards, which face the camera, or with Billboard_Axis turn about their +y
+	// only (see docs/rendering/gpu-scene.md#billboards).
+	Billboard,
+	Billboard_Axis,
 }
 
 Material_Flags :: bit_set[Material_Flag;u32]
@@ -57,6 +61,25 @@ Material_Pass :: enum u32 {
 	Transparent,
 	// A transparent or additive material's entity IDs and depth wherever it shows, for the editor.
 	Transparent_Ids,
+	// The impostor path's forward pass, prepass and depth pass: one quad that draws a mesh's impostor with the
+	// material, past the mesh's coarsest level of detail (see docs/rendering/gpu-scene.md#impostors). An opaque or
+	// masked material of meshes has them.
+	Impostor_Forward,
+	Impostor_Prepass,
+	Impostor_Depth,
+}
+
+// material_impostor_pass is the impostor path's pass that stands in for an opaque pass.
+material_impostor_pass :: proc "contextless" (pass: Material_Pass) -> Material_Pass {
+	#partial switch pass {
+	case .Forward:
+		return .Impostor_Forward
+	case .Prepass:
+		return .Impostor_Prepass
+	case .Depth:
+		return .Impostor_Depth
+	}
+	return pass
 }
 
 // material_transparent is whether a blend draws after the opaque surfaces, without a prepass, shadows or a forward pass.

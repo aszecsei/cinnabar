@@ -1,0 +1,18 @@
+material 1
+# A sprite that faces the camera (see docs/rendering/gpu-scene.md#billboards), as a particle's would: a lit disc cut
+# out of a card by its opacity, on the billboard path.
+shading = lit
+blend = masked
+cutoff = 0.5
+geometry = billboard
+cast_shadows = true
+param color color = [1, 0.55, 0.15, 1]
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	float2 p = inputs.uv0 * 2 - 1;
+	s.base_color = params.color.rgb * (0.75 + 0.25 * (1 - p.y));
+	s.roughness = 0.6;
+	s.opacity = 1.5 - 1.5 * dot(p, p);
+	return s;
+}

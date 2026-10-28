@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 6"
+MATERIAL_COOK_VERSION :: "materials 7"
 
 
 Shading_Input :: struct {
@@ -72,6 +72,9 @@ Material_Decl :: struct {
 	displacement_bound: f32,
 	// The material draws the patches of Surface_Renderers (geometry = patches, see docs/rendering/surfaces.md#surfaces).
 	patches:      bool,
+	// The material draws its meshes as billboards (geometry = billboard or billboard_axis, see
+	// docs/rendering/gpu-scene.md#billboards).
+	billboard:    Billboard,
 	params:       [dynamic]Param_Decl,
 	switches:     [dynamic]Switch_Decl,
 	// The HLSL after the `---` line, and the line of the file that it starts at, or the graph.
@@ -84,6 +87,13 @@ Material_Decl :: struct {
 	tool_texture: format.Guid,
 	hotspots:     [dynamic][4]u32,
 	ok:           bool,
+}
+
+// Billboard is how a material's meshes face the camera: not at all, wholly, or turning about their +y.
+Billboard :: enum u8 {
+	None,
+	Camera,
+	Axis,
 }
 
 Override :: struct {
@@ -633,11 +643,15 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 		case "geometry":
 			switch value {
 			case "mesh":
-				decl.patches = false
+				decl.patches, decl.billboard = false, .None
 			case "patches":
-				decl.patches = true
+				decl.patches, decl.billboard = true, .None
+			case "billboard":
+				decl.patches, decl.billboard = false, .Camera
+			case "billboard_axis":
+				decl.patches, decl.billboard = false, .Axis
 			case:
-				report_error(problems, a.path, l.number, 0, "geometry is mesh or patches")
+				report_error(problems, a.path, l.number, 0, "geometry is mesh, patches, billboard or billboard_axis")
 				decl.ok = false
 			}
 		case "displacement_bound":
@@ -996,6 +1010,7 @@ generate_source :: proc(
 	fmt.sbprintfln(&b, "#define MATERIAL_TWO_SIDED %d", int(decl.two_sided))
 	fmt.sbprintfln(&b, "#define MATERIAL_DISPLACES %d", int(displaces))
 	fmt.sbprintfln(&b, "#define MATERIAL_PATCHES %d", int(decl.patches))
+	fmt.sbprintfln(&b, "#define MATERIAL_BILLBOARD %d", int(decl.billboard))
 	fmt.sbprintfln(&b, "#define MATERIAL_MASKED %d", int(decl.blend == .Masked))
 	fmt.sbprintfln(&b, "#define MATERIAL_TRANSPARENT %d", int(format.material_transparent(decl.blend)))
 	fmt.sbprintfln(&b, "#define MATERIAL_ADDITIVE %d", int(decl.blend == .Additive))
@@ -1070,8 +1085,9 @@ Material_Entry :: struct {
 }
 
 // material_entries are the entry points that each variant compiles, the main pass's first. A masked material's
-// depth pass discards in a pixel shader; an opaque one's has none. The opaque passes have the mesh shader path's
-// entries too, an amplification and a mesh shader each (see docs/rendering/materials.md#permutations). A transparent or
+// depth pass discards in a pixel shader; an opaque one's has none. The opaque passes of a material of meshes have the
+// mesh shader path's entries too, an amplification and a mesh shader each, and the impostor path's, which a
+// billboard has neither of (see docs/rendering/materials.md#permutations). A transparent or
 // additive material has no prepass, forward or depth pass, but the transparent passes; a Transparent one has moments
 // too, which a sorted one draws only in the overdraw debug view.
 @(private = "file")
@@ -1105,8 +1121,8 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	if decl.blend == .Masked {
 		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
 	}
-	// A patches material has no meshlets to draw.
-	if !decl.patches {
+	// A patches material has no meshlets to draw, and a billboard draws its own quads.
+	if !decl.patches && decl.billboard == .None {
 		append(
 			&entries,
 			Material_Entry{.Forward, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
@@ -1115,6 +1131,12 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 			Material_Entry{.Prepass, {.Mesh, "ms_" + SHADER_MODEL, "ms_prepass"}},
 			Material_Entry{.Depth, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
 			Material_Entry{.Depth, {.Mesh, "ms_" + SHADER_MODEL, "ms_depth"}},
+			Material_Entry{.Impostor_Forward, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_forward"}},
+			Material_Entry{.Impostor_Forward, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_forward"}},
+			Material_Entry{.Impostor_Prepass, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_prepass"}},
+			Material_Entry{.Impostor_Prepass, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_prepass"}},
+			Material_Entry{.Impostor_Depth, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_depth"}},
+			Material_Entry{.Impostor_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_depth"}},
 		)
 	}
 	return entries[:]
@@ -1266,6 +1288,13 @@ cook_material :: proc(
 	}
 	if decl.patches {
 		flags += {.Patches}
+	}
+	switch decl.billboard {
+	case .None:
+	case .Camera:
+		flags += {.Billboard}
+	case .Axis:
+		flags += {.Billboard, .Billboard_Axis}
 	}
 	contents := format.Material_Contents {
 		guid             = guid,

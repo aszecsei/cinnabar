@@ -10,7 +10,7 @@ Read them in this order the first time.
 |---|---|
 | [Frame](frame.md) | The passes, the `Renderer`, hooks, settings and views. |
 | [Quality](quality.md) | What the frame may cost: each feature's technique and level, the hardware's defaults and limits, and the saved choice. |
-| [GPU scene](gpu-scene.md) | Instance records, the render origin, slots, culling and the acceleration structure. |
+| [GPU scene](gpu-scene.md) | Instance records, the render origin, slots, culling, the acceleration structure, and the mesh shader path, billboards and impostors. |
 | [Layers and output](layers-and-output.md) | The world, view model, UI and debug layers, the output pass and HDR output. |
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
 | [Transparency](transparency.md) | Moment-based and sorted transparency. |
@@ -36,7 +36,7 @@ Read them in this order the first time.
 | `renderer.odin` | `Renderer`, `Frame_Desc`, `Frame`, the hooks, the frame's targets and `draw_frame` ([Frame](frame.md#frame)) |
 | `settings.odin` | The settings components on volumes and `resolve_settings` ([Settings](frame.md#settings)) |
 | `quality.odin` | `Quality`, its presets, `Caps`, `default_quality`, `clamp_quality` and `apply_quality` ([Quality](quality.md#quality)) |
-| `scene.odin` | `Gpu_Scene`: every instance's record at a stable slot, the render origin, culling into bins ([GPU scene](gpu-scene.md#gpu-scene)) |
+| `scene.odin` | `Gpu_Scene`: every instance's record at a stable slot, the render origin, culling into bins, billboards' and impostors' items ([GPU scene](gpu-scene.md#gpu-scene)) |
 | `surfaces.odin` | `Surface_Record`, the patch surfaces' items, their selection and culling passes ([Surfaces](surfaces.md#surfaces)) |
 | `components.odin` | The render components' stable IDs: `Camera`, `Mesh_Renderer`, the lights, `View_Model` ([Components](assets.md#components)) |
 | `materials.odin` | `Material_Table`, pipelines by material, bins, the default material, the substitutes for pipelines that compile ([Runtime](materials.md#runtime)) |
