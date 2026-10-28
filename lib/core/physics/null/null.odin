@@ -51,6 +51,10 @@ api := physics.Physics_API {
 	results           = results,
 	body_state        = body_state,
 	raycast           = raycast,
+	raycast_all       = raycast_all,
+	raycast_batch     = raycast_batch,
+	shape_cast        = shape_cast,
+	overlap           = overlap,
 	run_job           = nil,
 	world_destroy_all = world_destroy_all,
 	shutdown          = shutdown,
@@ -286,6 +290,29 @@ body_state :: proc "c" (handle: physics.World, bodies: [^]physics.Body, count: u
 			}
 		}
 	}
+}
+
+@(private)
+raycast_all :: proc "c" (handle: physics.World, ray: ^physics.Ray, filter: ^physics.Query_Filter, out: [^]physics.Ray_Hit, capacity: u32) -> u32 {
+	return 0
+}
+
+@(private)
+raycast_batch :: proc "c" (handle: physics.World, rays: [^]physics.Ray, count: u32, filter: ^physics.Query_Filter, out: [^]physics.Ray_Hit) {
+	for i in 0 ..< count {
+		out[i] = {}
+	}
+}
+
+@(private)
+shape_cast :: proc "c" (handle: physics.World, sweep: ^physics.Shape_Cast, filter: ^physics.Query_Filter, hit: ^physics.Ray_Hit) -> b32 {
+	hit^ = {}
+	return false
+}
+
+@(private)
+overlap :: proc "c" (handle: physics.World, query: ^physics.Overlap_Query, filter: ^physics.Query_Filter, out: [^]physics.Overlap_Hit, capacity: u32) -> u32 {
+	return 0
 }
 
 @(private)

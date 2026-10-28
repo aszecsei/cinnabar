@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 3
+#define CN_PHYSICS_API_VERSION 4
 #define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
@@ -53,6 +53,8 @@ enum cn_body_flag {
     CN_BODY_SENSOR = 1u << 0,
     CN_BODY_CCD = 1u << 1,
     CN_BODY_START_ASLEEP = 1u << 2,
+    CN_BODY_REPORT_CONTACTS = 1u << 3,
+    CN_BODY_DETECT_STATIC = 1u << 4,
 };
 
 enum cn_command_kind {
@@ -145,9 +147,23 @@ typedef struct cn_body_state {
     uint32_t flags, _pad;
 } cn_body_state;
 
+enum cn_contact_kind { CN_CONTACT_BEGIN, CN_CONTACT_END };
+
+typedef struct cn_contact_event {
+    uint8_t kind, sensor, _pad0[6];
+    cn_body a, b;
+    uint64_t a_user, b_user;
+    double point[3];
+    float normal[3];
+    float relative_velocity[3];
+    float impulse;
+    uint32_t _pad1;
+} cn_contact_event;
+
 typedef struct cn_step_results {
     const cn_body_state* moved;
-    uint32_t moved_count, _pad;
+    uint32_t moved_count, contact_count;
+    const cn_contact_event* contacts;
 } cn_step_results;
 
 typedef struct cn_ray { double origin[3]; float direction[3]; float max_distance; } cn_ray;
@@ -158,6 +174,24 @@ typedef struct cn_query_filter {
     uint32_t layers, flags, ignore_count, _pad;
     cn_body ignore[CN_PHYSICS_MAX_QUERY_IGNORE];
 } cn_query_filter;
+
+typedef struct cn_shape_desc { uint8_t kind, _pad[3]; float size[3]; } cn_shape_desc;
+
+typedef struct cn_shape_cast {
+    double origin[3];
+    float rotation[4];
+    float direction[3];
+    float distance;
+    cn_shape_desc shape;
+} cn_shape_cast;
+
+typedef struct cn_overlap_query {
+    double origin[3];
+    float rotation[4];
+    cn_shape_desc shape;
+} cn_overlap_query;
+
+typedef struct cn_overlap_hit { cn_body body; uint64_t user; } cn_overlap_hit;
 
 typedef struct cn_ray_hit {
     cn_body body;
@@ -177,6 +211,10 @@ typedef struct cn_physics_api {
     void (*results)(cn_world world, cn_step_results* out);
     void (*body_state)(cn_world world, const cn_body* bodies, uint32_t count, cn_body_state* out);
     uint32_t (*raycast)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* hit);
+    uint32_t (*raycast_all)(cn_world world, const cn_ray* ray, const cn_query_filter* filter, cn_ray_hit* out, uint32_t capacity);
+    void (*raycast_batch)(cn_world world, const cn_ray* rays, uint32_t count, const cn_query_filter* filter, cn_ray_hit* out);
+    uint32_t (*shape_cast)(cn_world world, const cn_shape_cast* cast, const cn_query_filter* filter, cn_ray_hit* hit);
+    uint32_t (*overlap)(cn_world world, const cn_overlap_query* query, const cn_query_filter* filter, cn_overlap_hit* out, uint32_t capacity);
     void (*run_job)(void* data);
     int32_t (*world_destroy_all)(void);
     void (*shutdown)(void);
@@ -214,11 +252,16 @@ static_assert(sizeof(cn_add_force_at) == 48);
 static_assert(sizeof(cn_world_desc) == 24);
 static_assert(sizeof(cn_backend_info) == 24);
 static_assert(sizeof(cn_body_state) == 88);
-static_assert(sizeof(cn_step_results) == 16);
+static_assert(sizeof(cn_step_results) == 24);
+static_assert(sizeof(cn_contact_event) == 96);
+static_assert(sizeof(cn_shape_desc) == 16);
+static_assert(sizeof(cn_shape_cast) == 72);
+static_assert(sizeof(cn_overlap_query) == 56);
+static_assert(sizeof(cn_overlap_hit) == 16);
 static_assert(sizeof(cn_ray) == 40);
 static_assert(sizeof(cn_query_filter) == 80);
 static_assert(sizeof(cn_ray_hit) == 64);
-static_assert(sizeof(cn_physics_api) == 11 * sizeof(void*));
+static_assert(sizeof(cn_physics_api) == 15 * sizeof(void*));
 static_assert(sizeof(cn_physics_host) == 7 * sizeof(void*));
 static_assert(sizeof(cn_counter) == 16);
 #endif

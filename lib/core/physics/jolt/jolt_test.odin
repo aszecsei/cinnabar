@@ -81,3 +81,18 @@ destroy_all :: proc(t: ^testing.T) {
 offset_and_enabled :: proc(t: ^testing.T) {
 	with_backend(t, conformance.offset_and_enabled)
 }
+
+@(test)
+contacts :: proc(t: ^testing.T) {
+	with_backend(t, conformance.contacts)
+}
+
+@(test)
+sensor :: proc(t: ^testing.T) {
+	with_backend(t, conformance.sensor)
+}
+
+@(test)
+queries :: proc(t: ^testing.T) {
+	with_backend(t, conformance.queries)
+}

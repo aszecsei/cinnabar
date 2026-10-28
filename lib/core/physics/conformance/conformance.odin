@@ -228,3 +228,122 @@ offset_and_enabled :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	}
 	testing.expect(t, state(api, w, FALLING).position.y < 5, "an enabled body falls again")
 }
+
+@(private)
+step_contacts :: proc(api: ^physics.Physics_API, w: physics.World, steps: int, out: ^[dynamic]physics.Contact_Event) {
+	for _ in 0 ..< steps {
+		api.step(w, STEP, 1)
+		results: physics.Step_Results
+		api.results(w, &results)
+		append(out, ..results.contacts[:results.contact_count])
+	}
+}
+
+// contacts: a box that reports contacts begins one contact with the ground when it lands, with the normal from the
+// ground to the box and an impulse, and ends it when it is destroyed. A body that does not report has none.
+contacts :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	QUIET :: physics.Body{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	desc := physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {0, 3, 0}, user = 42)
+	desc.flags = {.Report_Contacts}
+	physics.cmd_create_body(&list, desc)
+	physics.cmd_create_body(&list, physics.body_desc(QUIET, BOX_SHAPE, .Dynamic, {5, 3, 0}))
+	testing.expect(t, physics.submit(api, w, list))
+	events := make([dynamic]physics.Contact_Event, context.temp_allocator)
+	step_contacts(api, w, 180, &events)
+	testing.expect_value(t, len(events), 1)
+	if len(events) == 1 {
+		e := events[0]
+		testing.expect_value(t, e.kind, physics.Contact_Kind.Begin)
+		testing.expect_value(t, e.a, GROUND)
+		testing.expect_value(t, e.b, BOX)
+		testing.expect_value(t, e.b_user, 42)
+		testing.expect(t, !e.sensor)
+		testing.expectf(t, e.normal.y > 0.99, "the normal points from the ground to the box: %v", e.normal)
+		testing.expectf(t, e.relative_velocity.y < -1, "the box was falling onto the ground: %v", e.relative_velocity)
+		testing.expectf(t, e.impulse > 0, "an impulse: %v", e.impulse)
+		testing.expectf(t, abs(e.point.y) < 0.05, "at the ground's top: %v", e.point)
+	}
+	clear(&events)
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_destroy_body(&list, BOX)
+	testing.expect(t, physics.submit(api, w, list))
+	step_contacts(api, w, 1, &events)
+	testing.expect_value(t, len(events), 1)
+	if len(events) == 1 {
+		testing.expect_value(t, events[0].kind, physics.Contact_Kind.End)
+		testing.expect_value(t, events[0].b, BOX)
+	}
+}
+
+// sensor: a box falls through a sensor, which reports the pair's begin and its end, and does not stop it.
+sensor :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	SENSOR :: physics.Body{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	trigger := physics.body_desc(SENSOR, BOX_SHAPE, .Static, {0, 3, 0}, user = 7)
+	trigger.flags = {.Sensor}
+	physics.cmd_create_body(&list, trigger)
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Dynamic, {0, 6, 0}, user = 42))
+	testing.expect(t, physics.submit(api, w, list))
+	events := make([dynamic]physics.Contact_Event, context.temp_allocator)
+	step_contacts(api, w, 120, &events)
+	testing.expect_value(t, len(events), 2)
+	if len(events) == 2 {
+		testing.expect_value(t, events[0].kind, physics.Contact_Kind.Begin)
+		testing.expect_value(t, events[1].kind, physics.Contact_Kind.End)
+		for e in events {
+			testing.expect(t, e.sensor)
+			testing.expect_value(t, e.a, BOX)
+			testing.expect_value(t, e.b, SENSOR)
+		}
+	}
+	testing.expectf(t, abs(state(api, w, BOX).position.y - 0.5) < 0.03, "the box fell through to the ground")
+}
+
+// queries: every hit along a ray by distance, a swept sphere, an overlap, and a batch of rays.
+queries :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	HIGH :: physics.Body{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(BOX, BOX_SHAPE, .Static, {0, 2, 0}, user = 42))
+	physics.cmd_create_body(&list, physics.body_desc(HIGH, BOX_SHAPE, .Static, {0, 5, 0}, user = 43))
+	testing.expect(t, physics.submit(api, w, list))
+
+	down := physics.Ray{origin = {0, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	hits: [2]physics.Ray_Hit
+	testing.expect_value(t, api.raycast_all(w, &down, nil, &hits[0], 2), 3)
+	testing.expect_value(t, hits[0].body, HIGH)
+	testing.expect_value(t, hits[1].body, BOX)
+	testing.expect(t, hits[0].distance < hits[1].distance)
+
+	sweep := physics.Shape_Cast {
+		origin    = {0, 10, 0},
+		rotation  = {0, 0, 0, 1},
+		direction = {0, -1, 0},
+		distance  = 20,
+		shape     = {kind = .Sphere, size = {0.5, 0, 0}},
+	}
+	hit: physics.Ray_Hit
+	testing.expect(t, bool(api.shape_cast(w, &sweep, nil, &hit)))
+	testing.expect_value(t, hit.body, HIGH)
+	testing.expectf(t, abs(hit.distance - 4) < 1e-3, "the sphere stops on the box's top: %v", hit.distance)
+	testing.expectf(t, abs(hit.position.y - 5.5) < 1e-3, "at its top: %v", hit.position)
+	testing.expectf(t, hit.normal.y > 0.99, "facing up: %v", hit.normal)
+
+	query := physics.Overlap_Query{origin = {0, 2, 0.8}, rotation = {0, 0, 0, 1}, shape = {kind = .Sphere, size = {0.5, 0, 0}}}
+	found: [4]physics.Overlap_Hit
+	testing.expect_value(t, api.overlap(w, &query, nil, &found[0], 4), 1)
+	testing.expect_value(t, found[0].body, BOX)
+	testing.expect_value(t, found[0].user, 42)
+
+	rays := [2]physics.Ray{down, {origin = {100, 10, 100}, direction = {0, -1, 0}, max_distance = 20}}
+	batch: [2]physics.Ray_Hit
+	api.raycast_batch(w, &rays[0], 2, nil, &batch[0])
+	testing.expect_value(t, batch[0].body, HIGH)
+	testing.expect_value(t, batch[1].body, physics.Body{})
+}

@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 3
+API_VERSION :: 4
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -99,6 +99,10 @@ Body_Flag :: enum u16 {
 	// Continuous collision detection, for fast bodies.
 	Ccd,
 	Start_Asleep,
+	// Contacts with the body begin and end in the step's results. A sensor's always do.
+	Report_Contacts,
+	// A sensor that is static or kinematic detects static and kinematic bodies too, not only dynamic ones.
+	Detect_Static,
 }
 
 Body_Flags :: bit_set[Body_Flag;u16]
@@ -470,6 +474,11 @@ Format :: struct {
 	ray:            Ray,
 	filter:         Query_Filter,
 	hit:            Ray_Hit,
+	contact:        Contact_Event,
+	shape_desc:     Shape_Desc,
+	shape_cast:     Shape_Cast,
+	overlap:        Overlap_Query,
+	overlap_hit:    Overlap_Hit,
 	api:            Physics_API,
 	host:           Host,
 	kind:           Command_Kind,
@@ -505,9 +514,34 @@ Body_State :: struct {
 // Step_Results points into the backend's memory, valid until the next submit or step. moved is sorted by body
 // handle, so its order is the same on every run.
 Step_Results :: struct {
-	moved:       [^]Body_State,
-	moved_count: u32,
-	_:           u32,
+	moved:         [^]Body_State,
+	moved_count:   u32,
+	contact_count: u32,
+	// The contacts that began and ended since the last step, sorted by a, then b, then kind.
+	contacts:      [^]Contact_Event,
+}
+
+Contact_Kind :: enum u8 {
+	// The two bodies began to touch: the first of their shapes' contacts.
+	Begin,
+	// They stopped touching, or one of them was destroyed or left the simulation.
+	End,
+}
+
+// Contact_Event is a body pair that began or stopped touching (see docs/physics/design.md#events). a's handle index is
+// below b's. A Begin has the first contact's point, its normal from a towards b, b's velocity relative to a's there,
+// and an estimate of the impulse, which is 0 with a sensor.
+Contact_Event :: struct {
+	kind:              Contact_Kind,
+	sensor:            bool,
+	_:                 [6]u8,
+	a, b:              Body,
+	a_user, b_user:    u64,
+	point:             Position,
+	normal:            [3]f32,
+	relative_velocity: [3]f32,
+	impulse:           f32,
+	_:                 u32,
 }
 
 Ray :: struct {
@@ -536,6 +570,33 @@ Query_Filter :: struct {
 
 // A filter that hits every layer, and no sensors.
 FILTER_ALL :: Query_Filter{layers = max(u32)}
+
+// Shape_Desc is a query's shape, with the sizes of Create_Shape.
+Shape_Desc :: struct {
+	kind: Shape_Kind,
+	_:    [3]u8,
+	size: [3]f32,
+}
+
+// Shape_Cast sweeps a shape from origin along direction, a unit vector, for distance meters.
+Shape_Cast :: struct {
+	origin:    Position,
+	rotation:  Rotation,
+	direction: [3]f32,
+	distance:  f32,
+	shape:     Shape_Desc,
+}
+
+Overlap_Query :: struct {
+	origin:   Position,
+	rotation: Rotation,
+	shape:    Shape_Desc,
+}
+
+Overlap_Hit :: struct {
+	body: Body,
+	user: u64,
+}
 
 Ray_Hit :: struct {
 	body:      Body,
@@ -569,6 +630,14 @@ Physics_API :: struct {
 	body_state:        proc "c" (world: World, bodies: [^]Body, count: u32, out: [^]Body_State),
 	// The closest hit along the ray. filter may be nil, which is FILTER_ALL.
 	raycast:           proc "c" (world: World, ray: ^Ray, filter: ^Query_Filter, hit: ^Ray_Hit) -> b32,
+	// Every hit along the ray, by distance: the first capacity of them go to out, and the count is all of them.
+	raycast_all:       proc "c" (world: World, ray: ^Ray, filter: ^Query_Filter, out: [^]Ray_Hit, capacity: u32) -> u32,
+	// The closest hit of each ray, in order; a miss is a zeroed hit.
+	raycast_batch:     proc "c" (world: World, rays: [^]Ray, count: u32, filter: ^Query_Filter, out: [^]Ray_Hit),
+	// The first hit of a swept shape: the contact point, the normal of the surface it hit, and the distance swept.
+	shape_cast:        proc "c" (world: World, sweep: ^Shape_Cast, filter: ^Query_Filter, hit: ^Ray_Hit) -> b32,
+	// The bodies that overlap a shape, by handle: the first capacity of them go to out, and the count is all of them.
+	overlap:           proc "c" (world: World, query: ^Overlap_Query, filter: ^Query_Filter, out: [^]Overlap_Hit, capacity: u32) -> u32,
 	// The backend runs its jobs through Host.jobs_run, which calls this with each job's data.
 	run_job:           proc "c" (data: rawptr),
 	// Destroys every world, for a soft restart, and returns how many there were.
@@ -610,10 +679,15 @@ Host :: struct {
 #assert(size_of(World_Desc) == 24)
 #assert(size_of(Backend_Info) == 24)
 #assert(size_of(Body_State) == 88)
-#assert(size_of(Step_Results) == 16)
+#assert(size_of(Step_Results) == 24)
+#assert(size_of(Contact_Event) == 96)
+#assert(size_of(Shape_Desc) == 16)
+#assert(size_of(Shape_Cast) == 72)
+#assert(size_of(Overlap_Query) == 56)
+#assert(size_of(Overlap_Hit) == 16)
 #assert(size_of(Ray) == 40)
 #assert(size_of(Query_Filter) == 80)
 #assert(size_of(Ray_Hit) == 64)
-#assert(size_of(Physics_API) == 11 * size_of(rawptr))
+#assert(size_of(Physics_API) == 15 * size_of(rawptr))
 #assert(size_of(Host) == 7 * size_of(rawptr))
 #assert(size_of(jobs.Counter) == 16)
