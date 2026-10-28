@@ -9,5 +9,4 @@ Shaders are `.hlsl` files in the content roots. `just shaders` runs `cook shader
 - **Problems:** the cooker parses DXC's messages into problems with their file, line and column. A message in an include belongs to the include's file, and to no asset, as other files' problems do. A shader that fails keeps its old blob, so the running game keeps drawing with the last good version.
 - **The cache key** covers the cooker version, the DXC version, the configuration, the source path, the source, the `.meta` file, and the source of every file that it includes, directly or not.
 - **One process at a time:** Windows children inherit every inheritable handle, so a DXC started on one thread can hold the pipes of one that another thread started, which then waits forever. The cooker runs its child processes one at a time.
-- **Engine shaders** are in the engine's content root, `lib/engine/content/shaders/`, with committed `.meta` files and fixed GUIDs: the editor tools' overlay and pick shaders first, and the renderer's later.
-- A port adds SPIR-V from DXC or a metallib from `metal-shaderconverter` as more entries in the same blob.
+- **Engine shaders** are in the engine's content root, `lib/engine/content/shaders/`, with committed `.meta` files and fixed GUIDs: the editor tools' overlay and pick shaders, and the renderer's.

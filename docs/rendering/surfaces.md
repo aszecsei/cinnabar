@@ -2,7 +2,7 @@
 
 Patch surfaces: a world-space rectangle that the GPU draws as grid patches, fine near the camera and coarse far from it, with holes, shaped by its material's displacement. Water and terrain are both one of these. Read [GPU scene](gpu-scene.md) and [Materials: Vertex displacement](materials.md#vertex-displacement) first.
 
-**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [In the frame](#in-the-frame) · [Limits](#limits) · [Future work](#future-work)
+**In this document:** [Surfaces](#surfaces) · [Selection](#selection) · [Patches](#patches) · [Holes](#holes) · [Materials for patches](#materials-for-patches) · [In the frame](#in-the-frame) · [Limits](#limits)
 
 ## Surfaces
 
@@ -68,11 +68,3 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 - Hole edges are the finest cells' edges, and an 8-bit height map terraces at 1/255 of its scale.
 - Selection is by the camera, so a shadow map far from it draws coarse patches there, as the meshlets do.
 - A node at the queues' limit draws coarse; `range0`'s cap keeps a surface within it in the common case.
-
-## Future work
-
-- **Mesh shader patches**, with a triangle's vertices shared and holes culled per triangle, when the patch vertex work shows in the profile.
-- **An in-editor hole brush** that paints the mask, when painting holes outside the editor is in the way.
-- **16-bit height maps**, when terracing shows.
-- **Collision** from the height map, as a physics height field, when a game walks on terrain.
-- **Patches in the acceleration structure**, from the displaced patches, when traced shadows of terrain matter.

@@ -8,4 +8,3 @@ The fog is a froxel volume: screen tiles of `FOG_TILE` (16) pixels, in the [qual
 - **The forward pass** reads the volume at each pixel's position, trilinearly: `color × transmittance + scattered`, before the exposure. The view model's pixels take their place from the camera's projection, as the clusters do.
 - **The background:** where nothing drew, the scene holds the `Environment`'s background, which the forward pass did not fog. A last pass (`fog_background.hlsl`) dims it by the whole volume and adds the volume's light, pre-exposed. The volume ends at the clusters' far end (`CLUSTER_FAR`, 500 m), so fog beyond it adds nothing.
 - A game's own draws in `world_draw` are not fogged unless their shaders read the volume.
-- *Later:* the transparent template reads the volume, local fog volumes, the sky's light in the fog, and the injection on the compute queue.

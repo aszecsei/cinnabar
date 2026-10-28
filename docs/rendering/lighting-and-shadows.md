@@ -2,11 +2,11 @@
 
 Why the renderer is clustered forward with a prepass, the prepass's outputs, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Future work](README.md#future-work)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows)
 
 ## Clustered forward
 
-Forward shading with a prepass is the default and only path at first.
+The renderer has one shading path: forward shading with a prepass.
 
 - **Many shading models cost nothing.** Each material's pixel shader runs its own shading model. A deferred path would have to pack every model's inputs into one G-buffer and branch on a model ID.
 - **Transparent surfaces** use the same light loop as opaque ones.
@@ -20,15 +20,13 @@ Forward shading with a prepass is the default and only path at first.
 - **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
 - The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
 - The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
-- *Later:* opaque materials with no vertex offset and no mask share one prepass pipeline for depth, and one with normals for each normal source, so most draws use a few pipelines. That needs bins by pass, not only by material.
-- *Later:* **occlusion culling** is two-phase: draw what was visible last frame, build a depth pyramid, then test everything else against it and draw what passes.
 
 ### Lights and clusters
 
 - **Light components:** `Directional_Light`, `Point_Light` and `Spot_Light`, and the [area lights](#area-lights) `Quad_Light`, `Disk_Light` and `Line_Light` (see [Components](assets.md#components)). Each frame, `extract_lights` writes them relative to the camera into the upload ring (`Light_Record`), the directional ones first, at most `MAX_LIGHTS` (1024), of which `MAX_DIRECTIONAL_LIGHTS` (4). The editor's hidden entities light nothing.
 - **A light's falloff:** its color times its intensity. A punctual light falls off with the square of the distance, windowed to 0 at its range: `saturate(1 - (d / range)^4)^2 / d^2`. A spot light's cone also falls off from 1 at its inner angle to 0 at its outer angle, squared.
 - **Clusters:** a compute pass (`cluster_lights.hlsl`) assigns the punctual and area lights to clusters: tiles of `CLUSTER_TILE` (64) pixels, in `CLUSTER_SLICES` (32) depth slices, exponential from the near plane to `CLUSTER_FAR` (500 m); the last slice reaches on to infinity. A thread for each cluster tests each light's sphere against the cluster's box in view space, so a spot light counts as its whole sphere. It takes room for its lights in one index list with an atomic add, and writes its offset and count. The list has room for `CLUSTER_AVERAGE_LIGHTS` (32) lights per cluster on average; a cluster that finds it full gets fewer. The clusters' buffers live in the `Renderer` and grow with the frame's size.
-- **The forward pass** finds its pixel's cluster from its position and its depth (`cluster_of`), and calls the shading model's `shade_direct` for each directional light, then for each light of its cluster, with the light's shadow (`material_lighting.hlsli`). It calls `shade_area` for an area light. Until the cluster pipeline exists, the forward pass leaves the punctual and area lights out.
+- **The forward pass** finds its pixel's cluster from its position and its depth (`cluster_of`), and calls the shading model's `shade_direct` for each directional light, then for each light of its cluster, with the light's shadow (`material_lighting.hlsli`). It calls `shade_area` for an area light. Without the cluster pipeline, the forward pass leaves the punctual and area lights out.
 - The directional lights are not clustered. Every pixel loops over them.
 
 ### Area lights
@@ -60,19 +58,4 @@ Forward shading with a prepass is the default and only path at first.
 - **Spot and point lights:** a perspective view with reversed depth from `SHADOW_NEAR` (5 cm), as wide as the spot light's cone or 90° for each cube face, culled at the light's range. An area light's shadows are a point light's from its middle, so they are hard.
 - **The depth pass:** the shadow maps are one render pass with a piece for each view, each with its own viewport of the atlas. Each draws its view's bins with each material's depth pipeline, so masked materials cast the right shadows. The pipelines have a depth bias and a slope bias against acne, `SHADOW_DEPTH_BIAS` and `SHADOW_SLOPE_BIAS`.
 - **Sampling:** the forward pass moves the point half a texel of the view toward the light, against the map's depth precision, and along its normal by half a texel times the sine of the light's angle to the normal, against the taps' spread where the light grazes the surface. A normal offset moves the edge across the surface by the offset over the tangent of that angle, so the sine keeps a crease's seam within half a texel, and the casters' slope bias covers the rest. It projects the moved point and takes the level's bilinear comparisons with a comparison sampler (`Frame_Constants.shadow_filter`): one, the hardware's 2x2; four a half texel apart, which filter a 3x3 neighbourhood; or nine a texel apart, which filter 4x4. The taps stay inside the view's rectangle. A directional light picks the first cascade that reaches the pixel's depth; beyond the last, it casts no shadow. A point light picks the face of the direction from the light.
-- *Later:* the forward pass traces in the pixel shader with `RayQuery` for transparent surfaces, which have no prepass depth. Soft shadows from traced lights and area lights, with a denoiser. Cached shadow maps for static lights and casters.
 - The ray-tracing pipeline path stays the sample's alternative (see [GPU](../gpu/ray-tracing.md#ray-tracing)). Every ray-traced path has the shadow map fallback: a device without `Ray_Query`, and the lights after the mask's four, take shadow maps.
-
-## Future work
-
-- **Shared prepass pipelines.** Opaque materials with no vertex offset and no mask share one prepass pipeline for depth, and one with normals for each normal source, so most draws use a few pipelines. That needs bins by pass, not only by material. Do this when the pipeline count or the prepass's state changes show in the profile.
-- **Shared permutations across materials.** The renderer shares one pipeline among the identical permutations of a material and of materials, which needs the blob to give each variant's hash, and an update in place to move a changed material to its new pipeline without a frame of nothing.
-- **Soft shadows and a denoiser.** Traced shadows from area lights and from lights with a radius, with a spatiotemporal denoiser on the mask. The history textures that the denoiser needs are the render graph's `history_texture`, as temporal AA uses. Area lights then shadow as their shape, not as a point at their middle.
-- **Transparent surfaces trace in the pixel shader.** The forward template traces with `RayQuery` for transparent surfaces, which have no prepass depth and so no mask. Until then, a light with a channel of the mask does not shadow them.
-- **Cached shadow maps.** For static lights and casters, keep the shadow map between frames and draw only what moved. Needs changed-slot updates above, so that static content is known to stay still, and a rebase moves the cache by the exact offset.
-- **Read-only depth.** A `Depth_Read` texture use in the render graph and the `Depth_Stencil_Read` layout in `lib/core/gpu`, so a pass can test against depth while another reads it as a texture. The one item of the GPU additions that the renderer still lacks.
-- **Specular occlusion and bent normals.** GTAO's horizons give a bent normal and a cone that occludes specular by the roughness, at little extra cost. Reference: Jimenez et al. 2016.
-- **World-space global illumination.** A probe grid traced with ray queries, behind the same `Indirect` as the screen-space cascades, for the light that the screen does not see: from behind the camera and from hidden surfaces. Its inputs are the acceleration structure and history, and `shade_indirect` reads it unchanged. Reference: Sannikov's radiance cascades extend to world space.
-- **Sky and atmosphere.** Lookup tables baked when the sun moves; the sky draws in the forward pass where depth is 0, and the fog, the GI and the histogram read it. It needs the sky pre-exposed so the histogram can count it.
-- **Fog.** The transparent template reads the volume, local fog volumes, the sky's light in the fog, and the injection on the compute queue.
-- **Reflection captures and split screen.** More views: each has its own clusters, history and scene color, and every view uses the same GPU scene ([Views](frame.md#views)).

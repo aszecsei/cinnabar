@@ -2,7 +2,7 @@
 
 Rigid bodies, joints, collision queries and sensors, simulated by [Jolt Physics](https://github.com/jrouwe/JoltPhysics) behind a boundary that another backend can fill. This document covers where Jolt lives, the boundary between the engine and a backend, the components, the physics tick that keeps the world and the simulation in step, shapes, joints, queries, events, scripts, the editor's part and determinism. [Backends](backends.md) is the contract that a backend implements. Read [Hot reload](../overview/hot-reload.md#rules), [World: ECS](../world/ecs.md), [Positions and transforms](../world/positions-and-transforms.md) and [Time](../world/time.md) first; the boundary follows the one in [GPU: Command buffers](../gpu/command-buffers.md#command-buffers).
 
-**In this document:** [Design](#design) · [Where Jolt lives](#where-jolt-lives) · [The boundary](#the-boundary) · [Positions and precision](#positions-and-precision) · [Components](#components) · [Scripts in fixed ticks](#scripts-in-fixed-ticks) · [The physics tick](#the-physics-tick) · [Layers](#layers) · [Shapes](#shapes) · [Constraints](#constraints) · [Queries](#queries) · [Events](#events) · [Scripts](#scripts) · [The editor](#the-editor) · [Determinism](#determinism) · [Plugins](#plugins) · [Future work](#future-work)
+**In this document:** [Design](#design) · [Where Jolt lives](#where-jolt-lives) · [The boundary](#the-boundary) · [Positions and precision](#positions-and-precision) · [Components](#components) · [Scripts in fixed ticks](#scripts-in-fixed-ticks) · [The physics tick](#the-physics-tick) · [Layers](#layers) · [Shapes](#shapes) · [Constraints](#constraints) · [Queries](#queries) · [Events](#events) · [Scripts](#scripts) · [The editor](#the-editor) · [Determinism](#determinism) · [Plugins](#plugins)
 
 ## Design
 
@@ -87,7 +87,7 @@ flowchart LR
 - Each physics world has an anchor, a `World_Position` that the game gives `physics.init` and keeps in the physics `State`. Every position that crosses the boundary is an `[3]f64` offset from it, in meters. Rotations are `f32` quaternions, and velocities, forces and directions are `[3]f32`.
 - `ecs.position_sub_f64` and `ecs.position_offset_f64` are the `f64` forms of the position operations, with the same rounding: the difference is converted once, and the offset rounds to the nearest unit.
 - **Why `f64` and not an `f32` origin per island:** Jolt forms and splits islands inside a step, on its threads, with no hook to give each its own origin, and it has no origin shift. Its double-precision mode does what the origins would have: positions are `f64`, and the narrow phase and the solver work in `f32` about a base offset near each contact, at 5 to 10% of the speed.
-- **Range.** Within 2^29 m (about 500 000 km) of the anchor, an `f64` offset is exact to the fixed-point unit; beyond it, it rounds to 2^-14 m (60 µm) at 2^38 m. The broad phase is `f32`, though: its resolution is a meter at 10 000 km and 16 km at the sample's 1.5e11 m, which costs narrow-phase work. The sample therefore anchors its world at its scenes, where its stack of boxes rests as it does at the origin. A game whose action spans more than a few thousand kilometers needs several worlds ([Future work](#future-work)).
+- **Range.** Within 2^29 m (about 500 000 km) of the anchor, an `f64` offset is exact to the fixed-point unit; beyond it, it rounds to 2^-14 m (60 µm) at 2^38 m. The broad phase is `f32`, though: its resolution is a meter at 10 000 km and 16 km at the sample's 1.5e11 m, which costs narrow-phase work. The sample therefore anchors its world at its scenes, where its stack of boxes rests as it does at the origin. A physics world covers action within a few thousand kilometers of its anchor.
 
 ## Components
 
@@ -142,9 +142,9 @@ for ecs.next_tick(&ticks) {
 7. `submit`, then the shape handles that the sync released go back to the pool, then `step`.
 8. **Write-back.** Each moved dynamic body writes its `Transform`, or a child's `Local_Transform`, which the tick's last propagation turns into its `Transform`; every moved body writes its velocities and whether it sleeps into `Physics_Body`. The broken joints are marked, and the contacts kept ([Events](#events)).
 
-- A sleeping body is not in the results, so the write-back costs what moves. The comparisons of step 5 visit every body each tick, a few hundred kilobytes of reads for ten thousand bodies; the world's [change tracking](../world/README.md#future-work) would visit only what changed.
+- A sleeping body is not in the results, so the write-back costs what moves. The comparisons of step 5 visit every body each tick, a few hundred kilobytes of reads for ten thousand bodies.
 - `Previous_Transform` interpolation needs nothing new: physics writes `Transform` in the tick, and presentation blends the last two ([Time](../world/time.md#fixed-and-variable-rate)).
-- The propagation before the physics tick lets it see the tick's poses of kinematic and static children. It costs a propagation per tick; *later*, only the subtrees of such children.
+- The propagation before the physics tick lets it see the tick's poses of kinematic and static children. It costs a propagation of the whole world per tick.
 
 ## Layers
 
@@ -223,32 +223,3 @@ for ecs.next_tick(&ticks) {
 ## Plugins
 
 A backend is a library that exports `cinnabar_physics_api`, and a project chooses it with `physics.backend` in its settings, or `--physics` on the host's command line: `jolt`, the default, `none` for the null backend, or another backend's name. The development host loads `physics_<name>.dll` beside it; a release build links its backend, chosen by the justfile's `physics_backend`. The host checks a backend's `API_VERSION` and its layout signature, a hash of every boundary type's size that `physics.h` computes too, since a backend in C cannot compute `format_hash`; a backend that does not load or does not match is an error, and the game runs on the null backend. The engine ignores a component whose feature the backend lacks, with one warning for each. [Backends](backends.md) has all of it.
-
-## Future work
-
-Each item with the condition that makes it worth doing.
-
-- **A character controller.** Jolt's `CharacterVirtual`, as a `Character` component with a `move(velocity)` command and its ground state in a runtime component, for walking, stairs and slopes. The first thing a game with a player will ask for; it needs `Characters` in `Features`.
-- **2D physics,** as a boundary of its own rather than one with a dimension, as Godot's two physics servers and Unity's two physics modules are. `lib/core/physics2d` would define `Physics2D_API`, with the same shape as the 3D one; Box2D v3 is C, has a task interface that maps onto the host's jobs as Jolt's does, and is deterministic, so a `physics_box2d` backend is the first. Its components, `Rigid_Body_2D`, `Collider_2D` and the 2D joints, would take the IDs 80 to 95, on the same entities and `Transform`s, using x and y, with `on_collision_enter_2d` and the rest, as Unity names them. Box2D is `f32`, so its world has an anchor too. The handle pools, command recording, layers, contacts and the loader move into a shared package then, not before. When a game is 2D.
-- **Vehicles.** Jolt's `VehicleConstraint`, with wheeled, tracked and motorcycle controllers, as a `Vehicle` component on a body and `Wheel` components on child entities whose poses the sync writes. Jolt takes the vehicle's up and forward axes, so the engine's left-handed axes pass straight through. When a game has something to drive.
-- **Buoyancy.** `Body::GetSubmergedVolume` and `ApplyBuoyancyImpulse` against a water surface's plane, as a `Buoyancy` component that a system updates each tick from the water's height at the body. Waves need the surface's displacement on the CPU, as [Surfaces](../rendering/surfaces.md) would for any gameplay on water. When there is water to float on.
-- **Soft bodies and cloth.** Jolt's soft bodies, from a cooked mesh with its constraints, and cloth as a soft body whose pinned vertices follow a skinned mesh. Both need a renderer path for meshes whose vertices change every frame, and cloth needs skinning. With animation.
-- **Hair.** Jolt's strand hair (5.6) runs on the GPU through Jolt's own compute abstraction. Using it means implementing that over [the GPU interface](../gpu/interface.md), which gives a backend GPU access through `Host` and widens the boundary. Weigh it against hair in the renderer's own compute passes, colliding with physics shapes uploaded to the GPU. When a game needs hair.
-- **Ragdolls.** Joints between bodies that follow a skeleton, and blending back to animation. With animation.
-- **Axis locks.** `Rigid_Body.lock_position` and `lock_rotation` per axis, through Jolt's allowed degrees of freedom, for a top-down or side-on game. When a game asks.
-- **A point query**, the entities whose shapes contain a point, and **mesh shapes in queries.** When a game asks.
-- **Contacts as a query.** `Physics.contacts(entity)`, the current pairs, in place of a `stay` event. When a game asks for `OnCollisionStay`.
-- **Methods on component references,** so that `rb:add_force(v)` is `Physics.add_force(entity, v)`, and scripts can read a joint's nested fields. With the script runtime's next change to component references.
-- **The backend's debug view.** A `debug_lines` procedure for the backend's own shapes, contacts and sleep, behind a viewport toggle in play mode, for when the components and the simulation disagree.
-- **The editor:** a collider's layer by name in the properties panel, and a handle at a joint's `offset` that drags its frame. When content uses layers or joints enough to want them.
-- **Shared shapes.** One primitive shape for every collider with the same description and scale, through a table by the description's hash, and one mesh shape for every body of a mesh. When many bodies share shapes, or a large level mesh is made more than once.
-- **Cooked native shapes.** Jolt's own binary form of a mesh shape, cooked beside the collision data and keyed by the backend's name and version, so large level meshes load without building their trees. Building one from the welded data takes milliseconds per hundred thousand triangles; when a level's load time shows it.
-- **A parallel sync and batch.** The sync's comparisons and the write-back over chunks in jobs, and a large ray batch on the backend's jobs. When the physics tick or a sight-line system shows in the profile.
-- **Profiler zones from the backend,** through `Host`, so the step's jobs show in the editor's profiler.
-- **A fiber-aware barrier.** The stock `JobSystemWithBarrier` sleeps on a semaphore when its waiter has no job to run, which holds a worker; a barrier over a `jobs.Counter` frees it. When the physics tick shows idle worker time.
-- **A narrower propagation** before the physics tick, of only the subtrees of kinematic and static children. When propagation shows in the profile.
-- **Several physics worlds with handover.** One world per region, each anchored near its action, with bodies moved between them as they cross. For worlds whose action spans more than a few thousand kilometers ([Positions and precision](#positions-and-precision)).
-- **Saving and restoring state.** Jolt's `StateRecorder`, behind `Save_State` in `Features`, for rollback networking and replays. With networking.
-- **Physics materials as assets.** A `.physmat` kind for friction, restitution and an impact sound, chosen per triangle by the collision data's submeshes. When collider fields repeated across content become a chore.
-- **Terrain collision** from a surface's height map, with the terrain ([Surfaces](../rendering/surfaces.md#future-work)).
-- **Change tracking** in the world would let the sync visit only what changed ([World](../world/README.md#future-work)).

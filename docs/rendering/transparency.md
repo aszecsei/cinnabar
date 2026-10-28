@@ -15,7 +15,7 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 2. **The transparent pass** draws the same items again. Each surface shades with the forward template, then reconstructs the transmittance T in front of it from the moments (`transmittance_at`). The moments are biased toward an even spread by `MOMENT_BIAS` (5·10⁻⁷), and a surface takes `MOMENT_OVERESTIMATION` (0.25) of its own optical depth. The pass adds `(color · α · T, α · T)` into an `RGBA16_Float` target (`ACCUMULATED_FORMAT`).
 3. **The composite** (`transparency_composite.hlsl`) is a compute pass. It writes `scene · e^−b0 + (1 − e^−b0) · accumulated.rgb / accumulated.a` into the scene, where b0 is not about 0.
 
-- **The moments are 32-bit.** With 16 bits, four power moments need the paper's quantization to stay stable. The formats and the bias are constants, so 16-bit moments with the quantization can come later.
+- **The moments are 32-bit.** With 16 bits, four power moments need the paper's quantization to stay stable.
 - **Without the composite's pipeline**, the moment-based items draw nothing.
 
 **Sorted draws:**
@@ -27,7 +27,7 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 **One shader** (`material_transparent.hlsli`): `ps_transparent` gives `(color · α · T, α · T)` for both paths. T is 1 unless `Material_Push.transmittance` is set. Only the pipeline's target and blend differ, so the path is chosen at runtime and needs no permutations of its own. Its color is `forward_color`, the forward template's.
 
 **Lighting.** Transparent surfaces have the light clusters, the shadow maps, the fog volume and the GI. They have no prepass, so they do not read the ambient occlusion or the shadow mask:
-- A light with a channel of the mask does not shadow them. *Later,* they trace in the pixel shader (see [Shadows](lighting-and-shadows.md#shadows)).
+- A light with a channel of the mask does not shadow them (see [Shadows](lighting-and-shadows.md#shadows)).
 - The GI is read at the pixel, which is the light at the opaque surface behind them.
 - The fog dims their color and adds its light in front of them, as for an opaque surface. An additive surface adds no fog light, since the fog's light is already in the scene behind it.
 
@@ -43,10 +43,3 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 - Transparent surfaces have no velocities, so temporal AA moves their pixels with the camera, and a moving transparent surface leaves a short trail.
 - They cast no shadows, and the cooker turns `cast_shadows` off for them.
 - The material previews draw a moment-based material as a sorted one, since they have one mesh.
-- *Later:* weighted blended transparency for particles, where its approximation does not show.
-
-## Future work
-
-- **Weighted blended transparency** for particles and effects, where its approximation is not visible and moments cost too much. Do this with particles. Reference: McGuire and Bavoil 2013.
-- **16-bit moments** with the paper's quantization, once the 32-bit cost shows. The formats and the bias are constants.
-- **Material previews of moment-based materials** draw as sorted, since they have one mesh.

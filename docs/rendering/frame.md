@@ -5,7 +5,7 @@ How a frame is assembled: the passes and their order, the `Renderer` and `Frame_
 ```mermaid
 flowchart TB
     EXTRACT["Extraction<br/>instances, lights, views"]
-    CULL["Culling<br/>frustum + occlusion, per-pipeline bins"]
+    CULL["Culling<br/>frustum, per-pipeline bins"]
     PRE["Prepass<br/>depth, normals, velocity, IDs"]
     VMPRE["View model prepass<br/>stencil bit"]
     SHADOW["Shadows<br/>shadow maps, ray-traced masks"]
@@ -13,7 +13,7 @@ flowchart TB
     AO["Ambient occlusion"]
     GI["Global illumination"]
     FOG["Fog volume"]
-    FWD["Forward<br/>opaque, sky"]
+    FWD["Forward<br/>opaque"]
     VMFWD["View model forward"]
     TRANS["Transparent"]
     POST["HDR post<br/>temporal AA, bloom, exposure"]
@@ -50,7 +50,7 @@ flowchart TB
 
 - The hooks are procedures in the game DLL, so they are never stored in `Game_State`.
 - **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals or velocities, no shadows from the renderer, no clusters' lights, no ambient occlusion, no global illumination and no fog unless their shaders read them. They are in the lit scene that the global illumination's rays read, but not in the depth that the rays test, so their light reaches only the surfaces that the rays find behind them. They place vertices with `render.jittered_view_projection(f)`, so they cover the same pixels as the renderer's draws, and scale their colors by the exposure in `Frame.exposure`, because the scene is pre-exposed (see [Post-processing](post-processing.md#post-processing)). The sample's draws do both. Temporal AA moves their pixels with the camera, since they have no velocities, so a moving draw of a game's own leaves a short trail that the history's clipping limits.
-- **Missing shaders:** a pass whose pipeline does not exist yet, because its shader is not cooked, records nothing, so the frame still validates.
+- **Missing shaders:** a pass whose pipeline does not exist, because its shader is not cooked, records nothing, so the frame still validates.
 
 ## Settings
 
@@ -76,5 +76,5 @@ The settings that make the scene's look are settings components on [volumes](../
 ## Views
 
 - A `render.View` is a camera: its pose, its projection, its viewport, and its layers. The editor's camera and the game's camera both give one (see [Editor](../editor/viewport.md#viewport)).
-- A frame has one main view, and in the editor the [material previews](materials.md#material-previews). More views come later: split screen, reflection captures. Each view has its own clusters, history and scene color. Every view uses the same [GPU scene](gpu-scene.md#gpu-scene), because its poses have no camera rotation (see [World](../world/render-extraction.md#render-extraction)).
+- A frame has one main view, and in the editor the [material previews](materials.md#material-previews). Every view uses the same [GPU scene](gpu-scene.md#gpu-scene), because its poses have no camera rotation (see [World](../world/render-extraction.md#render-extraction)).
 - A view's constants hold its offset from the render origin as an `f32` vector, with its rotation and projection.

@@ -75,7 +75,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 - **Layers:** the world, the view model, the UI and debug drawing each have their own target and their own rules, and one output pass combines them.
 - **Shading models:** a new lighting model is one HLSL file and one declaration. Materials pick a shading model, and every pass that draws them works without changes.
 - **Materials from graphs:** a node graph in the editor makes a material. A material instance changes its parameters and needs no new shaders.
-- **Room to grow:** volumetric fog, global illumination, bloom, exposure, tone mapping, ambient occlusion and ray-traced shadows each have a fixed place in the frame and the inputs they need.
+- **Fixed places in the frame:** volumetric fog, global illumination, bloom, exposure, tone mapping, ambient occlusion and ray-traced shadows each have their place in the frame and the inputs they need.
 
 ## Decisions
 
@@ -90,23 +90,14 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 | Instance positions | Relative to a render origin that snaps to a 1024 m grid, in a persistent GPU scene | See [GPU scene](gpu-scene.md#gpu-scene). |
 | Anti-aliasing | Temporal by default, FXAA or SMAA 1x, or AMD's FSR where the device runs it, as the quality chooses; no MSAA | Fog, GI and ambient occlusion all need temporal accumulation, so the frame has the history and velocities anyway. FXAA and SMAA are for a game that does not want temporal AA's blur in motion. FSR runs through the GPU interface, which loads its library at run time, so temporal AA stays the fallback on every device. See [Anti-aliasing](anti-aliasing.md#anti-aliasing). |
 
-## Open questions
-
-- **A visibility buffer.** The GPU-driven mesh shader path could write triangle IDs and shade in compute, bin by material, which removes the forward pass's quad overdraw on small triangles. `Material_Inputs` and `cn_sample` keep that path open. Decide after phase 5, with measurements. Reference: Burns and Hunt 2013.
-
-## Future work
-
-- **Thumbnails** for materials, meshes and textures from the preview view, rendered at a fixed size and read back, as a cook output ([Content pipeline](../history.md#content-pipeline), phase 4).
-
 ## References
 
 Each entry names the section that follows it.
 
 - Intel, [XeGTAO](https://github.com/GameTechDev/XeGTAO): the reference implementation that [Ambient occlusion](ambient-occlusion.md#ambient-occlusion) follows for its depth levels, slice search, Hilbert-curve noise and edge-aware denoiser.
-- Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo, [*Practical Real-Time Strategies for Accurate Indirect Occlusion*](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf), SIGGRAPH 2016: GTAO, and the specular occlusion and bent normals in Future work.
+- Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo, [*Practical Real-Time Strategies for Accurate Indirect Occlusion*](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf), SIGGRAPH 2016: GTAO in [Ambient occlusion](ambient-occlusion.md#ambient-occlusion).
 - Alexander Sannikov, [*Radiance Cascades: A Novel High-Resolution Formal Solution for Multiresolution Global Illumination*](https://github.com/Raikiri/RadianceCascadesPaper): the cascades, intervals and merge of [Global illumination](global-illumination.md#global-illumination), in their screen-space form.
 - Cedrick Münstermann, Stefan Krumpen, Reinhard Klein, Christoph Peters, [*Moment-Based Order-Independent Transparency*](https://momentsingraphics.de/I3D2018.html), I3D 2018: the four power moments of [Transparency](transparency.md#transparency).
-- Morgan McGuire, Louis Bavoil, [*Weighted Blended Order-Independent Transparency*](https://jcgt.org/published/0002/02/09/), JCGT 2013: the particle path in Future work.
 - Eric Heitz, Jonathan Dupuy, Stephen Hill, David Neubelt, [*Real-Time Polygonal-Light Shading with Linearly Transformed Cosines*](https://eheitzresearch.wordpress.com/415-2/), SIGGRAPH 2016, and Eric Heitz, Stephen Hill, [*Real-Time Line- and Disk-Light Shading with Linearly Transformed Cosines*](https://blog.selfshadow.com/publications/s2017-shading-course/), SIGGRAPH 2017 course: [Area lights](lighting-and-shadows.md#area-lights), including the horizon-clipped sphere table.
 - Ola Olsson, Markus Billeter, Ulf Assarsson, [*Clustered Deferred and Forward Shading*](https://efficientshading.com/2012/01/01/clustered-deferred-and-forward-shading/), HPG 2012: [Lights and clusters](lighting-and-shadows.md#lights-and-clusters).
 - Nathan Reed, [*Depth Precision Visualized*](https://developer.nvidia.com/content/depth-precision-visualized), 2015: the reversed infinite Z in [Decisions](#decisions).
@@ -123,8 +114,7 @@ Each entry names the section that follows it.
 - Martin Roberts, [*The Unreasonable Effectiveness of Quasirandom Sequences*](https://extremelearning.com.au/unreasonable-effectiveness-of-quasirandom-sequences/), 2018: the R2 sequence of [Ambient occlusion](ambient-occlusion.md#ambient-occlusion)'s noise. The jitter is the Halton (2, 3) sequence.
 - Zina Cigolle, Sam Donow, Daniel Evangelakos, Michael Mara, Morgan McGuire, Quirin Meyer, [*A Survey of Efficient Representations for Independent Unit Vectors*](https://jcgt.org/published/0003/02/01/), JCGT 2014: the octahedral normals of the [Prepass](lighting-and-shadows.md#prepass) and the GI's direction folding.
 - Microsoft, [*Common Techniques to Improve Shadow Depth Maps*](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/common-techniques-to-improve-shadow-depth-maps) and [*Cascaded Shadow Maps*](https://learn.microsoft.com/en-us/windows/win32/dxtecharts/cascaded-shadow-maps): the cascades, texel snapping, bias and sampling of [Shadows](lighting-and-shadows.md#shadows).
-- Ulrich Haar, Sebastian Aaltonen, [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/), SIGGRAPH 2015: the GPU scene, bins as indirect draws, and the two-phase occlusion culling in Future work.
-- Christopher Burns, Warren Hunt, [*The Visibility Buffer: A Cache-Friendly Approach to Deferred Shading*](https://jcgt.org/published/0002/02/04/), JCGT 2013: [Open questions](#open-questions).
+- Ulrich Haar, Sebastian Aaltonen, [*GPU-Driven Rendering Pipelines*](https://advances.realtimerendering.com/s2015/), SIGGRAPH 2015: the [GPU scene](gpu-scene.md#gpu-scene) and its bins as indirect draws.
 - Khronos, [glTF Sample Assets](https://github.com/KhronosGroup/glTF-Sample-Assets): the DamagedHelmet that [Content pipeline](../content/kinds/meshes.md#meshes) measures, and the preview meshes' format.
 - Sébastien Lagarde, Charles de Rousiers, [*Moving Frostbite to Physically Based Rendering*](https://seblagarde.wordpress.com/2015/07/14/siggraph-2014-moving-frostbite-to-physically-based-rendering/), SIGGRAPH 2014: the windowed inverse-square falloff of [Lights and clusters](lighting-and-shadows.md#lights-and-clusters), pre-exposure, and the histogram exposure with EV100 of [Post-processing](post-processing.md#post-processing).
 - Microsoft, [*Using DirectX with high dynamic range displays and advanced color*](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/high-dynamic-range): HDR10, scRGB, PQ and the SDR white level in [HDR output](layers-and-output.md#hdr-output).

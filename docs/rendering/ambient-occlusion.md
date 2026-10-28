@@ -12,7 +12,6 @@ The ambient occlusion is ground-truth ambient occlusion (GTAO, after Jimenez et 
 - **No history.** An occlusion history of its own would have to be found again after each move, and every way of finding it failed somewhere: the nearest texel turned it into blocks, a bilinear one smeared along correlated noise, and a depth test rejected it on surfaces seen edge-on in chevrons. Temporal AA already finds the history of the lit scene.
 - **The forward pass** scales the indirect light, diffuse and specular, by the occlusion. Direct light is not occluded.
 - With [global illumination](global-illumination.md#global-illumination), which finds the larger occluders, the ambient occlusion still scales its light, for the contact shadows that the probes are too coarse for.
-- *Later:* specular occlusion from the roughness, and bent normals.
 
 ## Techniques
 

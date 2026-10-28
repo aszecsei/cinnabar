@@ -36,7 +36,7 @@ set(ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 set(ENABLE_OBJECT_STREAM OFF CACHE BOOL "" FORCE)
 set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
-# Hair's GPU compute is not used (see docs/physics/design.md#future-work).
+# The backend uses none of Jolt's GPU compute, which only its hair needs.
 foreach(compute JPH_USE_DX12 JPH_USE_VK JPH_USE_MTL JPH_USE_CPU_COMPUTE)
     set(${compute} OFF CACHE BOOL "" FORCE)
 endforeach()

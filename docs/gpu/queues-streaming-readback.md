@@ -10,12 +10,11 @@ The graphics and compute queues and how a frame orders them, the copy queue that
 - A compute-queue command buffer has no render passes. Its barriers use only `COMPUTE_QUEUE_SYNCS` and `COMPUTE_QUEUE_ACCESSES`, and its textures only the `Shader_Resource` and `Unordered_Access` layouts. Validation checks this.
 - Work on both queues is frame-scoped: a frame's compute work starts after the previous frame's end, and the frame ends after its compute work. The upload ring and deferred destruction therefore cover both queues.
 - **D3D12:** a direct and a compute queue, each with a fence. `end_frame` runs the submissions in order. Each queue's lists wait in a batch until another queue waits for them or the frame ends, and then run in one `ExecuteCommandLists` call after the batch's fence waits. A wait applies before the whole batch, which can only delay earlier lists. Each wait records the fence value at the time it is declared, so batching cannot make a wait cycle.
-- **Vulkan and Metal:** queue submissions with timeline semaphores, and a Metal compute command queue with `MTLEvent`s.
 - The backend has a copy queue for [streaming](#streaming). It is not a submission target: command buffers run on the graphics and compute queues, and those queues also run `cmd_copy_buffer`.
 
 ## Streaming
 
-Streaming copies data into resources on the copy queue, beside the frame's work. The asset runtime will stream its GPU data this way.
+Streaming copies data into resources on the copy queue, beside the frame's work. The renderer's residency table streams assets' GPU data this way (see [Rendering](../rendering/assets.md#gpu-residency)).
 
 - `gpu_stream_buffer(buffer, offset, data)` and `gpu_stream_texture(texture, data)` copy the data before they return and return a `Transfer`. Use the resource once `gpu_transfer_done(transfer)` is true.
 - A streamed texture has the `Streamed` usage with `Sampled` and no other usage, and is streamed once with its whole mip chain: each mip tightly packed, mip 0 first (`mip_chain_size`). Copy queues cannot change texture layouts, so the texture is created in the common layout. When its copy is complete, the backend moves it to the sampled layout at the start of the next frame, and only then reports the transfer done.

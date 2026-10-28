@@ -1,6 +1,6 @@
 # History
 
-The implementation phases of each part, in the order they were built. A phase marked done is in the code; the rest is in each layer's Future work sections. This is history, kept so that the phase numbers that older notes mention still mean something.
+The implementation phases of each part, in the order they were built. This is history, kept so that the phase numbers that older notes mention still mean something.
 
 ## GPU
 All phases are done. They are kept as the order in which the interface grew, which is also a sensible order for a new backend to pass the tests in.
@@ -14,10 +14,10 @@ All phases are done. They are kept as the order in which the interface grew, whi
 | 4 | Indirect commands with draw ID and count buffers. Async compute queue. GPU culling sample. |
 | 5 | Mesh shaders, with the vertex fallback. |
 | 6 | Acceleration structures and inline ray tracing. Then ray tracing pipelines. |
-| 7 | Editor shared texture. Async copy queue for asset streaming. Cooker-built shaders and pipelines (cooked pipelines wait for the asset runtime). |
+| 7 | Editor shared texture. Async copy queue for asset streaming. Cooker-built shaders. |
 
 ## Rendering
-The order in which the renderer was built. Every phase is done; what remains is in [Future work](rendering/README.md#future-work).
+The order in which the renderer was built.
 
 | Phase | Result |
 |---|---|
@@ -48,28 +48,26 @@ The order in which the renderer was built. Every phase is done; what remains is 
 | 24 | *Done.* Patch surfaces (see [Rendering](rendering/surfaces.md#surfaces)): `Surface_Renderer`, a quadtree of grid patches that `select_patches.hlsl` picks by their distance from the camera after Strugar's continuous LOD and `cull_patches.hlsl` writes into the item's reserved bin, the patch vertex path of `geometry = patches` materials with the morph that joins the levels and holes from a mask texture cooked with `filter = box`, previews of such materials as one patch, and the sample's lake with an island, which F7 cycles to. |
 
 ## Scripting
-Phases 1 to 7 are done. Phase 8 is in [Future work](scripting/README.md#future-work).
+The order in which scripting was built.
 
 1. **VM:** build Luau with the justfile, `lib/core/luau`, `script_open` with the host allocator and trampolines, and the binding registry. A test script survives a code reload with a suspended coroutine.
-2. **Script assets:** GUIDs and `.meta` files, the `Loose_Cache` source, `cook scripts`, and `require`. The host polls the cache until the cook daemon exists.
+2. **Script assets:** GUIDs and `.meta` files, the `Loose_Cache` source, `cook scripts`, and `require`. The host polled the cache, because the cook daemon did not exist then.
 3. **World view:** `Entity`, component references, `vector`, `Quaternion`, `WorldPosition`, `Time`, `Input`, `Debug`, and platform input in `core`.
 4. **Behaviours:** the `Behaviours` component, the lifecycle, enabled state with `Disabled` and `Inactive`, events, the scheduler, the despawn log, and field schemas in the cooker.
 5. **Tooling:** `--emit-script-types`, type checking in the cooker, `luau-lsp` configuration.
 6. **Script hot reload:** module patching, behaviour classes and `on_reload`, main script restarts.
 7. **Native code generation and direct field access.**
-8. **Later:** editor inspector for fields, bundles.
 
 ## Content pipeline
-The order in which the daemon was built. Phases 1 to 4 are done; phase 5 is in [Future work](content/README.md#future-work).
+The order in which the daemon was built.
 
 1. **Daemon:** one scan for every kind, scripts that fail without stopping the others, the watcher, the cache's generation and `asset.poll` that reads it, the lock, and `just watch`. No editor.
 2. **Cook link:** problems by file and line, the index and its changes, `lib/engine/wire`, `cook_link` and its schema, and the editor's side (see [Editor](#editor)).
 3. **Asset operations:** the operations, the importers' settings tables, orphans, and the editor's commands, menus, dragging and settings editors.
 4. **GPU assets:** shaders, textures and meshes as assets, cooked in parallel, sub-assets, and the GPU residency table (see [Rendering](#rendering), phase 0).
-5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Editor
-The order in which the editor was built. Phases 1 to 15 are done; what comes next is in [Future work](editor/README.md#future-work).
+The order in which the editor was built.
 
 1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
 2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
@@ -88,7 +86,7 @@ The order in which the editor was built. Phases 1 to 15 are done; what comes nex
 15. **Prefabs** (see [Editor](editor/prefabs.md)), in four steps: the scene format's version 2, `scene_path_id`, `scene_expand`, the `Prefab` kind and `cook scenes` cooking both kinds flat, with the shared fixture; instances in the editor, with `PrefabExpansion`, `Expanded`, `BlockOperation` and its wire form from the expansion's difference, the content browser's drop, the outliner's and the properties panel's marks, Duplicate, Unpack and Make Prefab; prefab editing, with `PrefabOperation`, Apply and Revert, a prefab as the document, reload from disk and Make Variant; and spawning, with `Field.asset`, the `Asset` value, `scene.spawn_prefab` and `World.spawn(prefab)`.
 
 ## Physics
-The order in which physics was built. Every phase is done; what remains is in [Future work](physics/design.md#future-work).
+The order in which physics was built.
 
 1. **The boundary and the backend:** `lib/core/physics` and `physics.h`, the command format, `Host`, Jolt 5.6.0 with `just jolt` as `physics_jolt.dll` and static libraries, Jolt's jobs on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite.
 2. **Scripts in fixed ticks:** the tick loop (`ecs.begin_ticks`, `next_tick`, `run_tick_systems`, with `run_fixed` on them), `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, input edges for ticks, `fixed_update` in the profiler, and the sample's frame driving its ticks.

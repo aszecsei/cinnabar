@@ -2,7 +2,7 @@
 
 Volumes give settings a place in the world: the post-processing at the camera, the fog, a game's own settings. The renderer's settings and post effects are built on them.
 
-Some settings change with where a point is: the post-processing and the fog at the camera, and later the wind at a tree. A volume gives them a place. `lib/engine/volume` has no other engine package below `ecs`, so any feature can use it.
+Some settings change with where a point is: the post-processing and the fog at the camera. A volume gives them a place. `lib/engine/volume` has no other engine package below `ecs`, so any feature can use it.
 
 - **`Volume`** (stable ID 42) gives its entity a shape: `Global`, everywhere, or a `Box` or a `Sphere` at its presented pose. A box's extents are half its size along the entity's axes, times its scale. A sphere's radius is `extents.x` times the largest of its scale. An extent of 0 is `DEFAULT_EXTENT` (5 m).
 - **Weight:** inside the shape, the volume has its weight (0 means 1). Outside it, the weight falls off to 0 over the blend distance. To turn a volume off, deactivate its entity.

@@ -2,7 +2,7 @@
 
 The daemon keeps the cache current while sources change, owns every `.meta` file, does the editor's asset operations, and serves the cook link.
 
-**In this document:** [Cook daemon](#cook-daemon) · [Future work](README.md#future-work)
+**In this document:** [Cook daemon](#cook-daemon)
 
 ## Cook daemon
 
@@ -14,7 +14,7 @@ Without `--dxc`, every shader fails with a problem that says so.
 
 - **Development only:** the daemon cooks the `dev` configuration. Release content comes from the batch commands.
 - **The same pass:** a daemon pass is the batch commands' pass for every kind (see [Cooking](identity-and-cooking.md#cooking)): one scan of the roots, then each asset whose key changed. A key covers what its asset depends on, so a pass cooks the changed assets and their dependents, and nothing else. Every pass parses every scene, also one that is up to date, so its warnings and the scripts that it names are known at every pass. A pass over the sample's content takes about 10 ms.
-- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names), problems, for a sub-asset its parent, for a texture its cooked size, and for a material or an instance its tool texture and hotspots (see [Materials](kinds/materials.md#materials)), and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one. *Scanning only the changed paths, and a saved index, come when a full scan becomes slow.*
+- **Index:** after each pass, the daemon builds an index of the content: every asset with its GUID, root, path, kind, status (current or failed), import settings, behaviour class, dependencies (a script's requires, and the scripts that a scene names), problems, for a sub-asset its parent, for a texture its cooked size, and for a material or an instance its tool texture and hotspots (see [Materials](kinds/materials.md#materials)), and every folder. A problem belongs to the asset whose source or `.meta` file it is in, and the others belong to no asset. The daemon compares the index with the last pass's, and keeps the new one.
 - **Removed assets:** when an asset leaves the index, the daemon deletes its blob, so a game that starts later does not load it. A running game keeps the modules that it has loaded. An asset that only shares its GUID with a copy keeps its blob.
 - **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
@@ -37,8 +37,8 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 - **Import settings:** the daemon checks new settings with the asset's importer, writes the `.meta` file through a temporary file, and cooks the asset again, because the settings are part of its key. The `.meta` file keeps its comments. A setting that the importer does not know stays as the file has it, but the editor cannot add one. **Re-import** cooks assets again with the same settings, also when their keys say that they are up to date.
 - **Saving a scene** is the editor's. Save As writes the scene's text where the user picks, and a new scene in a root gets its `.meta` file at the daemon's next pass, as any new file does.
 - **No undo:** asset operations change the project, not the scene, so they are not on the editor's undo stack. The Recycle Bin recovers a deleted asset.
-- **Moved modules:** a `require` names a path, so moving or renaming a script breaks the requires of the scripts that require it. The next pass reports each broken require as a problem of the script that has it, with its line. *Later, the daemon offers to rewrite the requires when it moves a module.*
-- **Moves outside the editor:** a source that Explorer or git moves without its `.meta` file gets a new GUID, and the `.meta` file that stays behind is an orphan. The scan reports each orphan as a warning. *Later, it pairs an orphan with a new source that has the same contents.*
+- **Moved modules:** a `require` names a path, so moving or renaming a script breaks the requires of the scripts that require it. The next pass reports each broken require as a problem of the script that has it, with its line.
+- **Moves outside the editor:** a source that Explorer or git moves without its `.meta` file gets a new GUID, and the `.meta` file that stays behind is an orphan. The scan reports each orphan as a warning.
 - **Directory handles:** the scan reads each directory with `os.read_all_directory_by_path`. Odin's `os.walker` leaves the last directory that it reads open, which would stop the daemon from renaming or deleting that folder.
 
 ### Cook link
@@ -61,9 +61,3 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 | Previews | `Cook_Preview`, a request answered with a `Preview_Result` of the same request ID |
 | Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made |
 
-## Future work
-
-- **A saved index and partial scans.** Each pass scans every root and parses every scene, which takes about 10 ms for the sample. A saved index, and a scan of only the paths the watcher reported, keep the pass short as content grows. Do this when a pass takes longer than the watcher's 100 ms debounce.
-- **Rewriting requires on move.** Moving a script breaks the requires that name its path. The daemon knows every require from its index, so it can offer to rewrite them, as IDEs do for imports.
-- **Pairing orphans.** A source moved outside the editor leaves its `.meta` file behind and gets a new GUID. Pairing an orphan with a new source of the same contents (by hash) would restore the GUID, and every reference with it.
-- **Thumbnails as a cook output.** The content browser shows icons by kind. The game can render a material, mesh or texture preview at a fixed size and read it back (see [Rendering](../rendering/materials.md#material-previews)), and the daemon would store it beside the blob and send it with the index.

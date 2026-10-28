@@ -2,7 +2,7 @@
 
 The editor owns the scene: edits are operations with inverses, the host's world mirrors the document, and the scene file is text with stable IDs. This document covers the document model, the modes, and the scene format and loader.
 
-**In this document:** [Document model](#document-model) · [Scenes](#scenes) · [Future work](README.md#future-work)
+**In this document:** [Document model](#document-model) · [Scenes](#scenes)
 
 ## Document model
 
@@ -84,8 +84,3 @@ behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
 - `Previous_Transform` starts equal to `Transform`, so nothing interpolates from where the old world was. Behaviours wake in the next script phase.
 - The `Name`, `Parent`, `Inactive` and `Scene_Entity` components come from the entity's keys, so a component block for one of them is ignored.
 - A component that cooked scenes use gets an explicit ID (see [World](../world/ecs.md#component-registry)). The sample game's components are 1001 and up.
-
-## Future work
-
-- **glTF hierarchies as prefabs.** A model's import makes no prefab of its node hierarchy yet (see [Prefabs: Future work](prefabs.md#future-work)).
-- **Large worlds and several scenes.** One scene file per world does not scale, and positions reach ±2^38 m. Streaming splits a world into scenes that load and unload separately ([Architecture](../overview/README.md#future-work)), and the editor then edits several open scenes, each with its own document, undo stack and dirty state, in one outliner. Do this with level streaming.

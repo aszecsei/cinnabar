@@ -41,7 +41,6 @@ To test a fallback path on hardware that has the capability, set `CINNABAR_DISAB
 
 - **D3D12** fills it from `DXGI_ADAPTER_DESC1` when it creates the device. The memory is `DedicatedVideoMemory`. How much of it the process may use now is `gpu.Stats.video_memory_budget`, which only the host reads.
 - **The null backend** gives an adapter named `null` with no memory of its own.
-- A port fills it from its API's equivalent, such as `VkPhysicalDeviceProperties` and the device-local heaps, or `MTLDevice.recommendedMaxWorkingSetSize`.
 
 ## Packages
 
@@ -81,7 +80,6 @@ The resource heap has five ranges, in order: buffer reads, buffer writes, textur
 
 - Every buffer but a `Readback` buffer has a read view (see [Readback](queues-streaming-readback.md#readback)). Buffers with the `Storage` usage also have a write view.
 - Textures with the `Sampled` usage have a read view. Textures with the `Storage` usage have a write view.
-- Porting: DXC compiles `ResourceDescriptorHeap` to SPIR-V with descriptor indexing. `metal-shaderconverter` compiles DXIL to a metallib and implements the root signature as a top-level argument buffer.
 
 ### Vertex pulling
 

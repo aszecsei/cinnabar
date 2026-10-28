@@ -2,7 +2,7 @@
 
 The frame profiler in `lib/core/profile`: CPU zones on every thread, GPU spans from the backend's timestamps, a ring of recent frames, and the costs of each stats interval that the editor shows.
 
-**In this document:** [Profiler](#profiler) · [Zones](#zones) · [Fibers and jobs](#fibers-and-jobs) · [GPU timestamps](#gpu-timestamps) · [Frames and costs](#frames-and-costs) · [Captures](#captures) · [Builds](#builds) · [Future work](#future-work)
+**In this document:** [Profiler](#profiler) · [Zones](#zones) · [Fibers and jobs](#fibers-and-jobs) · [GPU timestamps](#gpu-timestamps) · [Frames and costs](#frames-and-costs) · [Captures](#captures) · [Builds](#builds)
 
 ## Profiler
 
@@ -79,9 +79,3 @@ A capture is one frame's zones, with the zones of the frames before and after it
 `-define:PROFILE=false` removes the profiler. The front-end compiles to nothing, the recorder records nothing, and `Fiber_Zones` is empty. `Platform_API.profile` has the same fields in every build, so a game's `Game_State` does not depend on the define. `just release` builds without it, and `just test` runs the profiler's and the job system's tests both ways.
 
 A zone costs a clock read and a ring write at each end, roughly 100 ns in an optimized build and more in the `-debug` development builds.
-
-## Future work
-
-- **GPU times on the copy queue.** The streaming copies on the copy queue are not timed: that needs `CopyQueueTimestampQueriesSupported` and a heap of the copy queue's own.
-- **Allocation zones.** The script memory categories already count bytes per module; a zone's allocations would show where the garbage comes from.
-- **Long captures.** A capture is one frame. A recording of many frames, saved to a file and opened in the editor later, would show stutters that a single frame misses.

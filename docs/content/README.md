@@ -35,13 +35,12 @@ flowchart LR
     COOK --> GEN --> LOAD
 ```
 
-Content reaches a game in three ways:
+Content reaches a game in two ways:
 
 | Way | When | How the game learns of new blobs |
 |---|---|---|
 | **Batch cook** (`just scripts`, `just textures`, `just build` and so on) | A build, or a release cook | The cache's generation counter changes; `asset.poll` swaps the new blobs |
 | **Cook daemon** (`just watch`, or started by the editor) | Development, while sources change | The same counter, after each pass |
-| **Bundles** (`*.cbb`) | Release, *later* | None: a release build reads what it ships with |
 
 The code is in three places:
 
@@ -59,15 +58,11 @@ The code is in three places:
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
-| `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, the `Source` union of `Loose_Cache` and `Bundle` |
+| `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, the `Source` union, whose one arm is `Loose_Cache` |
 | `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `material.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.
-
-## Future work
-
-Each document keeps the future work of its topic: [Identity and cooking](identity-and-cooking.md#future-work) for the importers, [Cook daemon](daemon-and-operations.md#future-work) for the daemon and its operations, and [Blobs and loading](blobs-and-loading.md#future-work) for bundles and shipping.
 
 ## References
 
@@ -78,7 +73,7 @@ Each document keeps the future work of its topic: [Identity and cooking](identit
 - Khronos, [glTF 2.0 specification](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html): the coordinate system, the primitive rules and the flat-normal fallback that [Meshes](kinds/meshes.md#meshes) follows.
 - Unity, [Asset Metadata](https://docs.unity3d.com/Manual/AssetMetadata.html): the GUID-in-a-`.meta`-sidecar model that [Identity](identity-and-cooking.md#identity) takes, including the rule that a sidecar moves with its asset.
 - Morten Mikkelsen, [MikkTSpace](http://www.mikktspace.com/): the tangent space that normal map bakers and the generated tangents agree on.
-- NVIDIA, [NVIDIA Texture Tools](https://github.com/castano/nvidia-texture-tools): the Kaiser-windowed mip filter and the alpha-coverage scaling that [Textures](kinds/textures.md#textures) uses and plans.
+- NVIDIA, [NVIDIA Texture Tools](https://github.com/castano/nvidia-texture-tools): the Kaiser-windowed mip filter that [Textures](kinds/textures.md#textures) uses.
 - Microsoft, [Texture Block Compression in Direct3D 11](https://learn.microsoft.com/en-us/windows/win32/direct3d11/texture-block-compression-in-direct3d-11): the BC4 to BC7 and BC6H formats, including BC6H's half-float endpoint interpolation.
 - NVIDIA, [Introduction to Turing Mesh Shaders](https://developer.nvidia.com/blog/introduction-turing-mesh-shaders/): the 64-vertex, 124-triangle meshlet sizes that the cooker builds.
 - Brian Karis, Rune Stubbe and Graham Wihlidal, [Nanite: A Deep Dive](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf) (SIGGRAPH 2021): the hierarchy of simplified meshlet groups, and the rule that picks one cut of it, in [Meshlets](kinds/meshes.md#meshlets).

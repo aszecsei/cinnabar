@@ -2,7 +2,7 @@
 
 In development, the engine and game code are a DLL that `host.exe` reloads when it changes. This document gives the rules that game-side code must follow, the reload sequence, and what survives each kind of restart. Read [Architecture](architecture.md#hot-reload) first for where the boundary sits. Every later document assumes these rules, and most of their stranger-looking decisions (handles instead of pointers, registrations rebuilt in `on_reload`, host trampolines for Luau) come from here.
 
-**In this document:** [Why the rules exist](#why-the-rules-exist) · [Rules](#rules) · [What survives](#what-survives) · [Reload sequence](#reload-sequence) · [Checking a design against the rules](#checking-a-design-against-the-rules) · [Future work](#future-work)
+**In this document:** [Why the rules exist](#why-the-rules-exist) · [Rules](#rules) · [What survives](#what-survives) · [Reload sequence](#reload-sequence) · [Checking a design against the rules](#checking-a-design-against-the-rules)
 
 ## Why the rules exist
 
@@ -69,10 +69,3 @@ When adding a feature that keeps state, ask these in order. The answers are the 
 4. **Does it hold a GPU resource?** Hold the handle, and give the resource the right scope: `Game` for anything the game creates for itself, `Asset` for resident asset data, `Permanent` only in `core`.
 5. **Is it in a shared package?** Then its layout is compiled into both sides. Changing a `gpu` packet or `Platform_API` is caught by the ABI hash; changing `Game_State` by the layout hash. Changing a `link` message changes the protocol version. Nothing else is checked, so keep shared packages small.
 6. **Does a job or a callback run it?** A job must finish within the frame, and a Luau callback must be a host trampoline (see [Scripting](../scripting/embedding.md#host-trampolines)).
-
-## Future work
-
-- **A pointer audit in debug builds.** Rule 3 is enforced by review, and rule 4 turns a violation into stale code rather than a crash. A debug walk of `Game_State`'s type info after `on_reload`, which flags any pointer value inside the old DLL's address range, would catch violations at the moment they are made. The layout hash already walks the same type info.
-- **Unloading old DLLs.** Builds accumulate as `mygame_N.dll` for the life of the host. Unloading the previous image after a reload that provably has no pointers into it (the audit above) would bound memory in long editor sessions. Low priority: a build is a few megabytes.
-- **Reload-safe host code.** Host-side changes need a restart, and the editor restarts the host for the user. Moving more code to the game side is the lever: for example, the editor link's message handling that needs no game state could move to the DLL, but the host would then need the link's schema from the DLL at run time.
-- **Shared-package layout checks.** Only `gpu` packets and `Game_State` are hashed. A shared package whose layout silently changes, such as `format`, is caught only by the blob header's layout hash at load. A hash of every shared package's exported types, compared at reload, would make this uniform.

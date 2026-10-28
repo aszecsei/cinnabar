@@ -14,7 +14,7 @@ cinnabar is a game engine written in [Odin](https://odin-lang.org), with:
 
 ## Getting started
 
-Windows and D3D12 are the first targets. You need Odin, the .NET 10 SDK, CMake with Visual Studio 2022's build tools, Git, and [just](https://github.com/casey/just).
+cinnabar runs on Windows with D3D12. You need Odin, the .NET 10 SDK, CMake with Visual Studio 2022's build tools, Git, and [just](https://github.com/casey/just).
 
 ```sh
 just setup      # fetch the submodules, the D3D12 Agility SDK and DXC

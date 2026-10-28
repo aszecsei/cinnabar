@@ -2,7 +2,7 @@
 
 Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the resource monitor, the profiler and the content browser.
 
-**In this document:** [Shell](#shell) · [Panels](#panels) · [Future work](README.md#future-work)
+**In this document:** [Shell](#shell) · [Panels](#panels)
 
 ## Shell
 
@@ -19,13 +19,12 @@ Docking, the ribbon, commands and game commands, and each panel: the outliner, p
 The editor has its own ribbon control. The Avalonia ribbon libraries are small and not maintained much, and a ribbon that reads the command registry is not much work.
 
 - **The ribbon is data.** A layout gives tabs, groups in each tab, and items in each group. Every item names a command ID. The ribbon has no logic of its own.
-- **Item kinds:** large button, a stack of up to three small buttons, split button, dropdown, and combo box. A toggle command shows as a toggle in any of them, with a check in menus. A combo box needs a choice command, which has a list of options. A gallery comes later.
+- **Item kinds:** large button, a stack of up to three small buttons, split button, dropdown, and combo box. A toggle command shows as a toggle in any of them, with a check in menus. A combo box needs a choice command, which has a list of options.
 - **Validation:** `RibbonLayout.Validate` finds unknown commands, unknown categories, repeated tabs and items of the wrong shape. The shell reports them in the console, and a test checks the default ribbon.
-- **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs, with its name over the first tab of each run. The editor's tabs have no categories yet, so no band shows.
+- **Tab categories:** a tab can belong to a category with a name and a color, such as Art, Design or Audio. The category shows as a colored band over its tabs, with its name over the first tab of each run. The editor's tabs have no categories, so no band shows.
 - **Contextual tabs** have a condition, such as "a terrain entity is selected", and show only when it is true. A condition is a named context, such as `host.running`, that the editor sets. The Mesh tab shows in `mode.mesh`, while mesh mode is on (see [Mesh editing](mesh-editing.md#mesh-mode)): Selection (the element kinds, Select All, Select Through, Select Linked, Grow, Shrink), Edit (the mesh tools, Bevel's segments, the normal angle, Edit Pivot, Center Pivot, Pivot to Grid), Create (the primitive and its parameters, Cut, Draw, Apply Points), Texture (the texture tools, Transform Texture, the dev material and the texel density), Options (the grid, Snap, Local Axes, Keep Planar) and Mode (Object Mode).
 - **Game commands** that the DLL describes can name a tab and a group. They appear in the ribbon, and they come and go with a code reload.
 - Double-clicking a tab, or Ctrl+F1, collapses the ribbon to its tabs, and clicking a tab opens it again. When the window is too narrow, the ribbon scrolls.
-- *Later:* groups that shrink as the window narrows, key tips, and a quick access toolbar.
 
 ### Commands
 
@@ -109,7 +108,7 @@ The profiler panel shows where a frame's time goes, from the host's profiler ([C
 ### Content browser
 
 - **The index is the daemon's.** `AssetIndex` in `Cinnabar.Editor.Content` mirrors the daemon's `Asset_Snapshot` and `Asset_Delta` events, as `WorldModel` mirrors the game's world. The editor never scans the content roots itself.
-- **Layout:** the roots and their folders on the left, as a virtualized list of the visible rows like the outliner's, the selected folder's assets in the middle, with the folder's path over them, and the details of the asset that was selected first on the right. Several assets can be selected. The panel docks at the bottom, where it is wide and short, so the details are a column. Roots start expanded. Each asset shows an icon for its kind, its name, its behaviour's class, and a mark when it failed or has errors or warnings. Over the assets, the daemon's state or its last cook: what it cooked, in how long, and how many assets failed. Problems that belong to no asset, such as a broken definition file, show over the panel. *Thumbnails come later, as a cook output.*
+- **Layout:** the roots and their folders on the left, as a virtualized list of the visible rows like the outliner's, the selected folder's assets in the middle, with the folder's path over them, and the details of the asset that was selected first on the right. Several assets can be selected. The panel docks at the bottom, where it is wide and short, so the details are a column. Roots start expanded. Each asset shows an icon for its kind, its name, its behaviour's class, and a mark when it failed or has errors or warnings. Over the assets, the daemon's state or its last cook: what it cooked, in how long, and how many assets failed. Problems that belong to no asset, such as a broken definition file, show over the panel.
 - **Sub-assets:** a file with sub-assets, such as a glTF model, has an arrow that expands it in place to show them, each with its own icon, name and status (see [Content pipeline](../content/identity-and-cooking.md#identity)). A sub-asset selects, drags onto an asset field and shows its details like any asset. The operations act on its file, so Rename, Duplicate and Delete are offered on the file only.
 - **Search** shows the assets of every folder whose name or behaviour class has every word of the query. A `kind:` word, such as `kind:script`, filters by kind.
 - **Details:** the selected asset's path, GUID, status, behaviour, import settings, the assets that it depends on and those that use it, as links that select them, and its problems. Clicking a problem opens its file in the script editor at its line. Each import setting that the asset's importer takes has an editor: a check box for a setting of true or false, and a list of its values otherwise, with the setting's description as its tooltip. A change goes to the daemon.
@@ -123,10 +122,4 @@ The profiler panel shows where a frame's time goes, from the host's profiler ([C
 - **The open scene follows its file:** when a move or a rename takes the open scene's file, the document takes the new path, and so does its autosave.
 - **Saving scenes:** the editor writes a scene's text, the one content file that it writes. A new scene in a root gets its `.meta` file at the daemon's next pass.
 - **Without the daemon:** while the cook link is down, the content browser keeps its last index, dimmed.
-- **Panel ID:** the panel is `contentBrowser`. A saved layout from before phase 10 names it `assetBrowser`, and the editor reads that as the new ID.
-
-## Future work
-
-- **Ribbon:** groups that shrink as the window narrows, key tips, a quick access toolbar, and galleries. Each follows the Microsoft Fluent ribbon guidelines that the ribbon's current item kinds take from. Do these as the ribbon fills.
-- **Thumbnails** for materials, meshes and textures in the content browser, rendered by the game's preview path at a fixed size and stored by the daemon as a cook output (see [Rendering](../rendering/materials.md#material-previews) and [Content pipeline](../content/README.md#future-work)).
-- **Tests against a real host with the null backend.** The link tests run the real host when it is built. A null-backend host would let the document model, the modes and the pick path run under `dotnet test` without a GPU, on any machine. Do this when the editor's tests move to CI.
+- **Panel ID:** the panel is `contentBrowser`. A saved layout from an older editor names it `assetBrowser`, and the editor reads that as the new ID.

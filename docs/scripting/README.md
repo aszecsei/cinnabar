@@ -50,10 +50,6 @@ Scripting is split across the boundary. The host owns the VM and everything Luau
 
 `lib/engine` and games import `lib/core/luau` for types and calls. They never store a Luau function pointer of their own.
 
-## Future work
-
-Each document keeps the future work of its topic: [API](api.md#future-work) for what scripts can see and do, and [Tooling and hot reload](tooling-and-hot-reload.md#future-work) for typed behaviour classes, native code generation and the editor's tooling.
-
 ## References
 
 - Luau, [luau.org](https://luau.org) and [github.com/luau-lang/luau](https://github.com/luau-lang/luau): the VM, compiler and analyzer that [Embedding](embedding.md#embedding) builds, and the [sandboxing guide](https://luau.org/sandbox) that the `luaL_sandbox` calls follow.
