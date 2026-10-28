@@ -91,6 +91,8 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 	r.platform = &platform
 	r.materials.defaults[.White] = platform.gpu_create_texture({size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"}, {255, 255, 255, 255})
 	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	fake_sprite_pipelines(r)
+	defer sprites_destroy(&r.sprites, &platform)
 	// A moment-based material, a sorted two-sided one, and an additive one.
 	blobs := [][]byte{transparent_blob(.Transparent, {}), transparent_blob(.Transparent, {.Sorted, .Two_Sided}), transparent_blob(.Additive, {})}
 	for data, i in blobs {
@@ -158,6 +160,9 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		color(&g, p, f.ids, .Clear)
 		depth(&g, p, f.depth, .Clear)
 
+		// Sprites draw among the moment-based surfaces.
+		begin_sprites(f, {{size = 1, color = {1, 1, 1, 0.5}}})
+		testing.expect(t, f.sprites != nil)
 		add_transparency_passes(f)
 		add_transparent_id_pass(f, keep_ids = true)
 		testing.expect_value(t, f.moments_zeroth != 0, true)

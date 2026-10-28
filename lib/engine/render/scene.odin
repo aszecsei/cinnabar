@@ -836,7 +836,8 @@ max_abs :: proc(v: [3]f32) -> f32 {
 	return max(abs(v.x), abs(v.y), abs(v.z))
 }
 
-@(private)
+// is_hidden is whether Frame_Desc.hidden hides an entity, so a game leaves out what it draws for one, as the renderer
+// does.
 is_hidden :: proc(hidden: []u32, e: ecs.Entity) -> bool {
 	index := ecs.entity_index(e)
 	return int(index / 32) < len(hidden) && hidden[index / 32] & (1 << (index % 32)) != 0

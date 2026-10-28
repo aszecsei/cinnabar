@@ -13,7 +13,7 @@ Read them in this order the first time.
 | [GPU scene](gpu-scene.md) | Instance records, the render origin, slots, culling, the acceleration structure, and the mesh shader path, billboards and impostors. |
 | [Layers and output](layers-and-output.md) | The world, view model, UI and debug layers, the output pass and HDR output. |
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
-| [Transparency](transparency.md) | Moment-based and sorted transparency. |
+| [Transparency](transparency.md) | Moment-based and sorted transparency, and compute sprites. |
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
 | [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
@@ -45,6 +45,7 @@ Read them in this order the first time.
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |
 | `shadows.odin` | Shadow assignment, the atlas, cascades, the ray-traced mask ([Shadows](lighting-and-shadows.md#shadows)) |
 | `transparency.odin` | Moment-based and sorted transparency ([Transparency](transparency.md#transparency)) |
+| `sprites.odin` | Compute sprites: `Sprite`, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
 | `ambient_occlusion.odin` | GTAO, HBAO or SSAO on the compute queue ([Ambient occlusion](ambient-occlusion.md#ambient-occlusion)) |
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
@@ -55,7 +56,7 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 
@@ -98,6 +99,7 @@ Each entry names the section that follows it.
 - Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo, [*Practical Real-Time Strategies for Accurate Indirect Occlusion*](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf), SIGGRAPH 2016: GTAO in [Ambient occlusion](ambient-occlusion.md#ambient-occlusion).
 - Alexander Sannikov, [*Radiance Cascades: A Novel High-Resolution Formal Solution for Multiresolution Global Illumination*](https://github.com/Raikiri/RadianceCascadesPaper): the cascades, intervals and merge of [Global illumination](global-illumination.md#global-illumination), in their screen-space form.
 - Cedrick Münstermann, Stefan Krumpen, Reinhard Klein, Christoph Peters, [*Moment-Based Order-Independent Transparency*](https://momentsingraphics.de/I3D2018.html), I3D 2018: the four power moments of [Transparency](transparency.md#transparency).
+- Johan Köhler, [*Practical Order Independent Transparency*](https://research.activision.com/content/dam/atvi/activision/atvi-touchui/research/tech-reports/docs/PracticalOIT.pdf), Treyarch: compute sprites, their tiles and their particle lightmap, which [Sprites](transparency.md#sprites) rasterizes into the moments.
 - Eric Heitz, Jonathan Dupuy, Stephen Hill, David Neubelt, [*Real-Time Polygonal-Light Shading with Linearly Transformed Cosines*](https://eheitzresearch.wordpress.com/415-2/), SIGGRAPH 2016, and Eric Heitz, Stephen Hill, [*Real-Time Line- and Disk-Light Shading with Linearly Transformed Cosines*](https://blog.selfshadow.com/publications/s2017-shading-course/), SIGGRAPH 2017 course: [Area lights](lighting-and-shadows.md#area-lights), including the horizon-clipped sphere table.
 - Ola Olsson, Markus Billeter, Ulf Assarsson, [*Clustered Deferred and Forward Shading*](https://efficientshading.com/2012/01/01/clustered-deferred-and-forward-shading/), HPG 2012: [Lights and clusters](lighting-and-shadows.md#lights-and-clusters).
 - Nathan Reed, [*Depth Precision Visualized*](https://developer.nvidia.com/content/depth-precision-visualized), 2015: the reversed infinite Z in [Decisions](#decisions).

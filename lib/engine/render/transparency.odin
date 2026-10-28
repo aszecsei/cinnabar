@@ -6,8 +6,9 @@ import "cinnabar:core/gpu"
 // test their depth and write none. A Transparent material draws with moment-based order-independent transparency by
 // default: a pass adds up each pixel's optical depth and its moments, a second shades each surface dimmed by the
 // transmittance in front of it that the moments give and adds them up, and a compute pass composites the sum over the
-// scene. A sorted material, and an additive one, draws back to front over the scene, an item at a time. The editor gets
-// the IDs and the depth of the surfaces wherever they show, after post-processing.
+// scene. Compute sprites add to both sums at each pixel (see sprites.odin), so they draw among those surfaces. A sorted
+// material, and an additive one, draws back to front over the scene, an item at a time. The editor gets the IDs and the
+// depth of the surfaces wherever they show, after post-processing.
 
 TRANSPARENCY_COMPOSITE_SHADER :: #load("../content/shaders/transparency_composite.hlsl.meta", string)
 
@@ -65,17 +66,19 @@ has_transparency :: proc(f: ^Frame) -> bool {
 }
 
 // add_transparency_passes adds the transparent surfaces' passes after the world pass: moment-based transparency's
-// moments, its transparent pass and its composite, then the sorted draws over the result. Without the composite's
-// pipeline, moment-based transparency draws nothing. In the overdraw debug view, the moments pass counts every
-// transparent layer, the sorted ones too, and nothing else draws.
+// moments, its transparent pass and its composite, with the sprites' passes after the first two, then the sorted draws
+// over the result. Without the composite's pipeline, moment-based transparency and the sprites draw nothing. In the
+// overdraw debug view, the moments pass counts every transparent layer, the sorted ones and the sprites too, and nothing
+// else draws.
 @(private)
 add_transparency_passes :: proc(f: ^Frame) {
 	r := f.renderer
 	g := f.graph
 	overdraw := f.debug_view == .Transparent_Overdraw
-	moments := has_group(f, .Moments) && pipeline_ready(r.platform, &r.transparency_composite)
+	sprites := f.sprites != nil
+	moments := (has_group(f, .Moments) || sprites) && pipeline_ready(r.platform, &r.transparency_composite)
 	if overdraw {
-		moments = has_transparency(f)
+		moments = has_transparency(f) || sprites
 	}
 	if moments {
 		f.moments_zeroth = create_texture(g, {size = f.size, format = MOMENTS_ZEROTH_FORMAT, label = "moments zeroth"})
@@ -93,6 +96,10 @@ add_transparency_passes :: proc(f: ^Frame) {
 		color(g, p, f.moments, .Clear)
 		depth(g, p, f.depth, .Load)
 		declare_scene_draws(f, p)
+		if sprites {
+			add_sprite_bin_passes(f)
+			add_sprite_moments_pass(f)
+		}
 	}
 	if overdraw {
 		return
@@ -111,6 +118,9 @@ add_transparency_passes :: proc(f: ^Frame) {
 		declare_lighting(f, p, opaque = false)
 		read(g, p, f.moments_zeroth)
 		read(g, p, f.moments)
+		if sprites {
+			add_sprite_shade_passes(f, cf.accumulated)
+		}
 		p = add_compute_pass(g, "transparency composite", run_composite, cf)
 		read(g, p, f.moments_zeroth)
 		read(g, p, cf.accumulated)
