@@ -30,8 +30,6 @@ import "cinnabar:engine/volume"
 // The shaders are assets, which the cooker compiles (see docs/content/kinds/shaders.md#shaders). The game finds them by the
 // GUIDs in their .meta files.
 TRIANGLE_SHADER :: #load("content/shaders/triangle.hlsl.meta", string)
-OBJECTS_SHADER :: #load("content/shaders/objects.hlsl.meta", string)
-CULL_SHADER :: #load("content/shaders/cull.hlsl.meta", string)
 POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
 LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
@@ -59,8 +57,6 @@ BILLBOARDS_SCENE_META :: #load("content/scenes/billboards.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
-// Matches numthreads in content/shaders/cull.hlsl.
-CULL_GROUP_SIZE :: 64
 // Matches numthreads in content/shaders/shadows.hlsl.
 SHADOW_GROUP_SIZE :: 8
 
@@ -78,19 +74,6 @@ Shadow_Mode :: enum u8 {
 // most this many.
 MAX_TRIANGLES :: 2
 
-// The GPU culls a grid of small objects every frame and draws the visible ones with one indirect draw. With mesh
-// shaders, amplification shaders cull and mesh shaders draw. Without them, a compute pass on the compute queue culls
-// and an indexed indirect draw draws: the vertex fallback. CINNABAR_DISABLE_FEATURES=Mesh_Shaders forces it.
-OBJECT_COLUMNS :: 64
-OBJECT_ROWS :: 36
-OBJECT_COUNT :: OBJECT_COLUMNS * OBJECT_ROWS
-// Matches OBJECTS_PER_GROUP in content/shaders/objects.hlsl.
-OBJECTS_PER_GROUP :: 32
-#assert(OBJECT_COUNT % OBJECTS_PER_GROUP == 0)
-
-// The scene pass is split in two: one piece draws the large triangles, the other the culled objects.
-SCENE_PIECES :: 2
-
 CHECKER_SIZE :: 64
 CHECKER_CELL :: 8
 
@@ -100,7 +83,7 @@ RINGS_SIZE :: 256
 RINGS_MIPS :: 9
 STREAM_FRAME :: 60
 
-// Matches Vertex in content/shaders/triangle.hlsl and shaders/objects.hlsl.
+// Matches Vertex in content/shaders/triangle.hlsl.
 Vertex :: struct {
 	position: [2]f32,
 	uv:       [2]f32,
@@ -162,25 +145,6 @@ Lens :: struct {
 DEFAULT_LENS :: Lens {
 	chromatic_aberration = {value = 24},
 	vignette = {value = 1.6},
-}
-
-// Matches Push in content/shaders/objects.hlsl.
-Object_Constants :: struct {
-	vertices:     u32,
-	visible:      u32,
-	texture:      u32,
-	sampler:      u32,
-	grid:         [2]u32,
-	object_count: u32,
-}
-
-// Matches Push in content/shaders/cull.hlsl.
-Cull_Constants :: struct {
-	arguments:    u32,
-	count:        u32,
-	visible:      u32,
-	object_count: u32,
-	grid:         [2]u32,
 }
 
 // Matches Push in content/shaders/post.hlsl.
@@ -261,16 +225,8 @@ Game_State :: struct {
 	elapsed:            time.Duration,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
-	// True when the device has mesh shaders and the objects take the mesh path.
-	mesh_path:          bool,
 	vertices:           gpu.Buffer,
 	indices:            gpu.Buffer,
-	// The cull pass writes these on the compute queue each frame, and the scene pass reads them.
-	arguments:          gpu.Buffer,
-	draw_count:         gpu.Buffer,
-	visible:            gpu.Buffer,
-	// The mesh path's one Draw_Mesh_Indirect_Args record.
-	mesh_draw:          gpu.Buffer,
 	shadow_mode:        Shadow_Mode,
 	// The triangle, built once, and the two large triangles as its instances, built every frame.
 	blas:               gpu.Accel_Struct,
@@ -301,10 +257,6 @@ Game_State :: struct {
 
 Pipelines :: struct {
 	scene:     render.Shader_Pipeline,
-	objects:   render.Shader_Pipeline,
-	// Not created without mesh shaders.
-	mesh:      render.Shader_Pipeline,
-	cull:      render.Shader_Pipeline,
 	// A compute pipeline when shadow_mode is Inline, a ray tracing pipeline when it is Pipeline, and not created
 	// otherwise.
 	shadows:   render.Shader_Pipeline,
@@ -322,10 +274,6 @@ Frame :: struct {
 	pass_constants: gpu.Upload,
 	vertices:       render.Buffer,
 	indices:        render.Buffer,
-	arguments:      render.Buffer,
-	draw_count:     render.Buffer,
-	visible:        render.Buffer,
-	mesh_draw:      render.Buffer,
 	blas:           render.Accel,
 	tlas:           render.Accel,
 	// The accel instances, and the triangle instances that the scene pass draws.
@@ -359,20 +307,6 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	indices := [4]u16{0, 1, 2, 0}
 	s.vertices = platform.gpu_create_buffer({size = size_of(vertices), label = "triangle vertices"}, gpu_bytes(&vertices))
 	s.indices = platform.gpu_create_buffer({size = size_of(indices), usage = {.Index}, label = "triangle indices"}, gpu_bytes(&indices))
-	s.arguments = platform.gpu_create_buffer(
-		{size = OBJECT_COUNT * size_of(gpu.Draw_Indexed_Indirect_Args), usage = {.Storage, .Indirect}, label = "object draws"},
-		nil,
-	)
-	s.draw_count = platform.gpu_create_buffer({size = size_of(u32), usage = {.Storage, .Indirect}, label = "object draw count"}, nil)
-	s.visible = platform.gpu_create_buffer({size = OBJECT_COUNT * size_of(u32), usage = {.Storage}, label = "visible objects"}, nil)
-
-	s.mesh_path = .Mesh_Shaders in platform.gpu_features()
-	if s.mesh_path {
-		mesh_draw := gpu.Draw_Mesh_Indirect_Args {
-			groups = {OBJECT_COUNT / OBJECTS_PER_GROUP, 1, 1},
-		}
-		s.mesh_draw = platform.gpu_create_buffer({size = size_of(mesh_draw), usage = {.Indirect}, label = "mesh draw"}, gpu_bytes(&mesh_draw))
-	}
 
 	checker: [CHECKER_SIZE * CHECKER_SIZE][4]u8
 	for &texel, i in checker {
@@ -412,9 +346,6 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	}
 	s.pipelines = {
 		scene     = render.shader_pipeline(TRIANGLE_SHADER),
-		objects   = render.shader_pipeline(OBJECTS_SHADER),
-		mesh      = render.shader_pipeline(OBJECTS_SHADER),
-		cull      = render.shader_pipeline(CULL_SHADER),
 		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
 		post      = render.shader_pipeline(POST_SHADER),
 		lens      = render.shader_pipeline(LENS_SHADER),
@@ -443,7 +374,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if main_scene, ok := format.meta_guid(MAIN_SCENE_META); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, main_scene)
 	}
-	log.infof("mygame: init, objects on the %s path, shadows %v", s.mesh_path ? "mesh" : "vertex", s.shadow_mode)
+	log.infof("mygame: init, shadows %v", s.shadow_mode)
 }
 
 // register_components registers every component type. init and on_reload call it on the world's registry, and
@@ -703,7 +634,7 @@ stream_rings :: proc(s: ^Game_State) {
 }
 
 // render_frame draws the frame with the built-in renderer, which draws the Mesh_Renderers, and adds the sample's own
-// work through its hooks: the objects' culling on the compute queue, the triangles and the objects in the world pass,
+// work through its hooks: the triangles in the world pass,
 // the ray-traced shadows and the post pass after it, the HUD panel in the UI layer, and the editor's tools in the
 // debug layer. The render graph places the barriers between the passes and the waits between the queues.
 render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
@@ -743,7 +674,6 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 			before_world = before_world,
 			world_uses   = world_uses,
 			world_draw   = draw_scene,
-			world_pieces = SCENE_PIECES,
 			after_world  = after_world,
 			ui           = draw_ui_layer,
 			debug        = editing ? draw_editor_tools : nil,
@@ -791,8 +721,7 @@ smoke_sprites :: proc(s: ^Game_State, hidden: []u32) -> []render.Sprite {
 	return sprites[:]
 }
 
-// before_world imports the sample's resources, and culls the objects on the compute queue. The mesh path culls in its
-// amplification shaders, so only the vertex fallback has the compute passes.
+// before_world imports the sample's resources.
 before_world :: proc(f: ^render.Frame) {
 	frame := (^Frame)(f.data)
 	frame.size = f.size
@@ -806,20 +735,6 @@ before_world :: proc(f: ^render.Frame) {
 	frame.checker = render.import_texture(g, s.rings_ready ? s.rings : s.checker, .Sampled)
 	frame.vertices = render.import_buffer(g, s.vertices)
 	frame.indices = render.import_buffer(g, s.indices)
-	frame.arguments = render.import_buffer(g, s.arguments)
-	frame.draw_count = render.import_buffer(g, s.draw_count)
-	frame.visible = render.import_buffer(g, s.visible)
-	if s.mesh_path {
-		frame.mesh_draw = render.import_buffer(g, s.mesh_draw)
-		return
-	}
-	p := render.add_compute_pass(g, "reset draw count", reset_count, frame, queue = .Compute)
-	render.copy_dest(g, p, frame.draw_count)
-
-	p = render.add_compute_pass(g, "cull", cull_objects, frame, queue = .Compute)
-	render.write(g, p, frame.draw_count)
-	render.write(g, p, frame.arguments)
-	render.write(g, p, frame.visible)
 }
 
 // world_uses declares what draw_scene reads in the world pass.
@@ -829,13 +744,6 @@ world_uses :: proc(f: ^render.Frame, p: render.Pass) {
 	render.read(g, p, frame.checker)
 	render.read(g, p, frame.vertices)
 	render.index_buffer(g, p, frame.indices)
-	if frame.state.mesh_path {
-		render.indirect_buffer(g, p, frame.mesh_draw)
-	} else {
-		render.indirect_buffer(g, p, frame.arguments)
-		render.indirect_buffer(g, p, frame.draw_count)
-		render.read(g, p, frame.visible)
-	}
 }
 
 // after_world traces the triangles' shadows, and multiplies them into a new scene color, before temporal AA.
@@ -997,78 +905,25 @@ trace_shadows :: proc(ctx: ^render.Pass_Context) {
 	}
 }
 
-// reset_count zeroes the draw count with a copy from the upload ring.
-reset_count :: proc(ctx: ^render.Pass_Context) {
-	frame := (^Frame)(ctx.data)
-	zero, ok := frame.state.platform.gpu_upload(size_of(u32), size_of(u32))
-	if !ok {
-		return
-	}
-	(^u32)(raw_data(zero.data))^ = 0
-	gpu.cmd_copy_buffer(ctx.cb, zero.buffer, zero.offset, render.gpu_buffer(ctx.graph, frame.draw_count), 0, size_of(u32))
-}
-
-cull_objects :: proc(ctx: ^render.Pass_Context) {
-	frame := (^Frame)(ctx.data)
-	g, cb := ctx.graph, ctx.cb
-	constants := Cull_Constants {
-		arguments    = gpu.write_index(render.gpu_buffer(g, frame.arguments)),
-		count        = gpu.write_index(render.gpu_buffer(g, frame.draw_count)),
-		visible      = gpu.write_index(render.gpu_buffer(g, frame.visible)),
-		object_count = OBJECT_COUNT,
-		grid         = {OBJECT_COLUMNS, OBJECT_ROWS},
-	}
-	gpu.cmd_set_pipeline(cb, frame.state.pipelines.cull.pipeline)
-	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
-	gpu.cmd_push_constants(cb, &constants)
-	gpu.cmd_dispatch(cb, {(OBJECT_COUNT + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, 1, 1})
-}
-
-// draw_scene draws the large triangles in piece 0, and the objects in piece 1. Each piece starts with nothing bound.
+// draw_scene draws the large triangles.
 draw_scene :: proc(f: ^render.Frame, ctx: ^render.Pass_Context) {
 	frame := (^Frame)(f.data)
-	g, cb := ctx.graph, ctx.cb
-	vertices := gpu.read_index(render.gpu_buffer(g, frame.vertices))
-	checker := gpu.read_index(render.gpu_texture(g, frame.checker))
-	switch ctx.piece {
-	case 0:
-		if frame.triangle_count == 0 {
-			return
-		}
-		constants := Scene_Constants {
-			vertices        = vertices,
-			texture         = checker,
-			sampler         = gpu.sampler_index(frame.state.nearest),
-			instances       = gpu.read_index(frame.triangles.buffer),
-			instance_offset = frame.triangles.offset,
-		}
-		gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene.pipeline)
-		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
-		gpu.cmd_push_constants(cb, &constants)
-		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
-		gpu.cmd_draw_indexed(cb, 3, instance_count = u32(frame.triangle_count))
-	case 1:
-		constants := Object_Constants {
-			vertices     = vertices,
-			texture      = checker,
-			sampler      = gpu.sampler_index(frame.state.nearest),
-			grid         = {OBJECT_COLUMNS, OBJECT_ROWS},
-			object_count = OBJECT_COUNT,
-		}
-		if frame.state.mesh_path {
-			gpu.cmd_set_pipeline(cb, frame.state.pipelines.mesh.pipeline)
-			gpu.cmd_set_pass_constants(cb, frame.pass_constants)
-			gpu.cmd_push_constants(cb, &constants)
-			gpu.cmd_draw_mesh_indirect(cb, render.gpu_buffer(g, frame.mesh_draw), 0, 1)
-			return
-		}
-		constants.visible = gpu.read_index(render.gpu_buffer(g, frame.visible))
-		gpu.cmd_set_pipeline(cb, frame.state.pipelines.objects.pipeline)
-		gpu.cmd_set_pass_constants(cb, frame.pass_constants)
-		gpu.cmd_push_constants(cb, &constants)
-		gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
-		gpu.cmd_draw_indexed_indirect(cb, render.gpu_buffer(g, frame.arguments), 0, OBJECT_COUNT, render.gpu_buffer(g, frame.draw_count))
+	if frame.triangle_count == 0 {
+		return
 	}
+	g, cb := ctx.graph, ctx.cb
+	constants := Scene_Constants {
+		vertices        = gpu.read_index(render.gpu_buffer(g, frame.vertices)),
+		texture         = gpu.read_index(render.gpu_texture(g, frame.checker)),
+		sampler         = gpu.sampler_index(frame.state.nearest),
+		instances       = gpu.read_index(frame.triangles.buffer),
+		instance_offset = frame.triangles.offset,
+	}
+	gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene.pipeline)
+	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
+	gpu.cmd_push_constants(cb, &constants)
+	gpu.cmd_set_index_buffer(cb, render.gpu_buffer(g, frame.indices), .U16)
+	gpu.cmd_draw_indexed(cb, 3, instance_count = u32(frame.triangle_count))
 }
 
 run_post :: proc(ctx: ^render.Pass_Context) {
@@ -1103,10 +958,6 @@ shutdown :: proc(state: rawptr) {
 	s.platform.gpu_destroy_accel(s.blas)
 	s.platform.gpu_destroy_texture(s.rings)
 	s.platform.gpu_destroy_texture(s.checker)
-	s.platform.gpu_destroy_buffer(s.mesh_draw)
-	s.platform.gpu_destroy_buffer(s.visible)
-	s.platform.gpu_destroy_buffer(s.draw_count)
-	s.platform.gpu_destroy_buffer(s.arguments)
 	s.platform.gpu_destroy_buffer(s.indices)
 	s.platform.gpu_destroy_buffer(s.vertices)
 	log.info("mygame: shutdown")
@@ -1176,11 +1027,6 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 sync_pipelines :: proc(s: ^Game_State, force := false) {
 	p, platform, assets := &s.pipelines, s.platform, &s.assets
 	render.sync_graphics_pipeline(&p.scene, platform, assets, {.Vertex, .Pixel}, SCENE_PIPELINE, force)
-	render.sync_graphics_pipeline(&p.objects, platform, assets, {.Vertex, .Pixel}, OBJECTS_PIPELINE, force)
-	if s.mesh_path {
-		render.sync_graphics_pipeline(&p.mesh, platform, assets, {.Amplification, .Mesh, .Pixel}, OBJECTS_MESH_PIPELINE, force)
-	}
-	render.sync_compute_pipeline(&p.cull, platform, assets, CULL_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
 	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
 	render.sync_graphics_pipeline(&p.ui, platform, assets, {.Vertex, .Pixel}, UI_PIPELINE, force)
@@ -1201,28 +1047,6 @@ SCENE_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 	depth_compare = .Greater,
 	depth_write   = true,
 	label         = "scene",
-}
-
-OBJECTS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors        = render.WORLD_COLORS,
-	depth_format  = render.DEPTH_FORMAT,
-	stencil       = render.WORLD_STENCIL,
-	depth_compare = .Greater,
-	depth_write   = true,
-	label         = "objects",
-}
-
-OBJECTS_MESH_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors        = render.WORLD_COLORS,
-	depth_format  = render.DEPTH_FORMAT,
-	stencil       = render.WORLD_STENCIL,
-	depth_compare = .Greater,
-	depth_write   = true,
-	label         = "objects (mesh)",
-}
-
-CULL_PIPELINE :: gpu.Compute_Pipeline_Desc {
-	label   = "cull",
 }
 
 SHADOWS_PIPELINE :: gpu.Compute_Pipeline_Desc {
@@ -1253,9 +1077,6 @@ UI_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 
 destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
 	render.destroy_shader_pipeline(&pipelines.scene, platform)
-	render.destroy_shader_pipeline(&pipelines.objects, platform)
-	render.destroy_shader_pipeline(&pipelines.mesh, platform)
-	render.destroy_shader_pipeline(&pipelines.cull, platform)
 	render.destroy_shader_pipeline(&pipelines.shadows, platform)
 	render.destroy_shader_pipeline(&pipelines.post, platform)
 	render.destroy_shader_pipeline(&pipelines.lens, platform)
