@@ -6,9 +6,8 @@ using Cinnabar.Editor.Tools;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The finish of the mesh editing design (see docs/editor/mesh-editing.md#phases): Keep Planar, Select Linked, Grow
-/// and Shrink, and Edit Pivot, which moves an entity's Transform and every vertex of its mesh by the inverse, so the
-/// geometry stays where it is.
+/// Keep Planar, Select Linked, Grow and Shrink, and Edit Pivot (see docs/editor/mesh-editing.md#mesh-mode), which
+/// moves an entity's Transform and every vertex of its mesh by the inverse, so the geometry stays where it is.
 /// </summary>
 public sealed partial class EditorShell
 {
