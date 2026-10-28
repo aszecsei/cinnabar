@@ -343,3 +343,55 @@ parts_change_the_body :: proc(t: ^testing.T) {
 	ticks(f, 3)
 	testing.expect_value(t, ecs.get(&f.world, b, Physics_Body).body, after)
 }
+
+// Two layers that ignore each other do not collide: a box on one falls through a ground on the other.
+@(test)
+ignored_layers_pass_through :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	layers := default_layers()
+	testing.expect(t, add_layer(&layers, "Ghost"))
+	ignore(&layers, 0, 1)
+	set_layers(&f.physics, layers)
+	ground(f)
+	ghost := box(f, {0, 2, 0})
+	ecs.get(&f.world, ghost, Collider).layer = 1
+	solid := box(f, {3, 2, 0})
+	ticks(f, 120)
+	testing.expectf(t, height(f, ghost) < -1, "the ghost fell through: y = %v", height(f, ghost))
+	testing.expectf(t, abs(height(f, solid) - 0.5) < 0.03, "the other box rests: y = %v", height(f, solid))
+}
+
+// The sample's stack, 1.5e11 m from the origin in a world anchored there: four small boxes fall onto a static box and
+// come to rest on it, one on another, as they would at the origin.
+@(test)
+a_stack_rests_far_from_the_origin :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ANCHOR :: ecs.World_Position{raw = {2516582400000000000, 0, 0}}
+	far := ANCHOR
+	destroy(&f.physics)
+	testing.expect(t, init(&f.physics, &f.platform, anchor = ANCHOR))
+	register(&f.physics, &f.world)
+	place :: proc(f: ^Fixture, at: ecs.World_Position, meters: [3]f32, scale: f32) -> ecs.Entity {
+		e := ecs.spawn(&f.world)
+		ecs.add(&f.world, e, ecs.Transform{position = ecs.position_offset(at, meters), rotation = 1, scale = scale})
+		ecs.add(&f.world, e, DEFAULT_COLLIDER)
+		return e
+	}
+	ecs.get(&f.world, place(f, far, {0, -0.5, 0}, 1), ecs.Transform).scale = {4, 1, 4}
+	place(f, far, {0.4, 0.3, -0.25}, 0.6)
+	boxes: [4]ecs.Entity
+	for &b, i in boxes {
+		b = place(f, far, {0.4, 0.8 + 0.25 * f32(i), -0.25}, 0.15)
+		ecs.add(&f.world, b, DEFAULT_RIGID_BODY)
+	}
+	ticks(f, 300)
+	for b, i in boxes {
+		pb := ecs.get(&f.world, b, Physics_Body)
+		y := ecs.position_sub(ecs.get(&f.world, b, ecs.Transform).position, far).y
+		want := 0.6 + 0.075 + 0.15 * f32(i)
+		testing.expectf(t, abs(y - want) < 0.03, "box %d rests on the one below: y = %v, not %v", i, y, want)
+		testing.expectf(t, pb.asleep, "box %d is asleep", i)
+	}
+}

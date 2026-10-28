@@ -44,6 +44,9 @@ PROJECT_CHECK_INTERVAL :: 0.5
 // Content refers to content by GUID. The game reads the GUIDs of its main script and its scene from their .meta files.
 HELLO_META :: #load("content/scripts/hello.luau.meta", string)
 MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
+// The sample's scenes are 1.5e11 m from the origin, to test large worlds, so the physics world is anchored there: its
+// broad phase is f32, which would have a resolution of 16 km so far out (see docs/physics/design.md#positions-and-precision).
+PHYSICS_ANCHOR :: ecs.World_Position{raw = {2516582400000000000, 0, 0}}
 // The transparency scene, which F7 switches to and back (see docs/rendering/transparency.md#transparency).
 GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
 // The patch surfaces scene, a lake with an island (see docs/rendering/surfaces.md#surfaces).
@@ -409,7 +412,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if !ecs.init(&s.world, platform) {
 		log.panic("mygame: cannot create the world")
 	}
-	if !physics.init(&s.physics, platform) {
+	if !physics.init(&s.physics, platform, anchor = PHYSICS_ANCHOR) {
 		log.panic("mygame: cannot create the physics world")
 	}
 	register_world(s)
@@ -1064,6 +1067,7 @@ update_output :: proc(s: ^Game_State) {
 			changed = true
 			s.output_override = nil
 			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
+			physics.set_layers(&s.physics, project.physics_layers(s.project.settings))
 		}
 	}
 	if .F8 in s.platform.input().pressed {

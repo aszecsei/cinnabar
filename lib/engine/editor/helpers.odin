@@ -5,6 +5,7 @@ import "core:math/linalg"
 
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 import "cinnabar:engine/volume"
 
@@ -18,6 +19,11 @@ UNSELECTED :: [4]f32{0.6, 0.6, 0.6, 0.5}
 VOLUME_COLOR :: [4]f32{0.3, 0.8, 1, 1}
 @(private = "file")
 CAMERA_COLOR :: [4]f32{1, 1, 1, 1}
+// A collider's shape, and a sensor's.
+@(private = "file")
+COLLIDER_COLOR :: [4]f32{0.4, 1, 0.4, 1}
+@(private = "file")
+SENSOR_COLOR :: [4]f32{1, 0.8, 0.3, 1}
 // A directional light's arrow, an area light's normal, and a camera's frustum, in meters.
 @(private = "file")
 ARROW_LENGTH :: 2
@@ -131,6 +137,9 @@ draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, p
 			debug.circle(d, b, up, forward, l.radius, color)
 		}
 	}
+	if c := ecs.get(w, entity, physics.Collider); c != nil {
+		draw_collider(d, c^, pose, selected)
+	}
 	if v := ecs.get(w, entity, volume.Volume); v != nil {
 		color := selected ? VOLUME_COLOR : UNSELECTED
 		blend := color
@@ -242,4 +251,38 @@ icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.al
 @(private)
 icons_shown :: proc(e: ^Editor) -> bool {
 	return editing(e) && e.viewport.settings.show_icons
+}
+
+// draw_collider draws a collider's shape as the simulation has it, at its offset and rotation in the entity (see
+// docs/physics/design.md#the-editor).
+@(private = "file")
+draw_collider :: proc(d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, selected: bool) {
+	color := UNSELECTED
+	if selected {
+		color = c.sensor ? SENSOR_COLOR : COLLIDER_COLOR
+	}
+	rotation := pose.rotation * c.rotation
+	at := ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, c.offset * pose.scale))
+	right := linalg.quaternion128_mul_vector3(rotation, [3]f32{1, 0, 0})
+	up := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 1, 0})
+	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
+	kind, size := physics.collider_size(c, pose.scale)
+	switch kind {
+	case .Box:
+		debug.box(d, at, size, rotation, color)
+	case .Sphere:
+		debug.sphere(d, at, size.x, color)
+	case .Capsule, .Cylinder:
+		radius, half := size.x, size.y
+		top, bottom := ecs.position_offset(at, up * half), ecs.position_offset(at, -up * half)
+		debug.circle(d, top, right, forward, radius, color)
+		debug.circle(d, bottom, right, forward, radius, color)
+		for side in ([4][3]f32{right, -right, forward, -forward}) {
+			debug.line(d, ecs.position_offset(top, side * radius), ecs.position_offset(bottom, side * radius), color)
+		}
+		if kind == .Capsule {
+			debug.sphere(d, top, radius, color)
+			debug.sphere(d, bottom, radius, color)
+		}
+	}
 }

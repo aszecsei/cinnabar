@@ -38,7 +38,7 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	list := core_physics.command_list(allocator_of(s))
 	commands := ecs.commands(allocator_of(s))
 	if s.settings_dirty {
-		core_physics.cmd_set_world(&list, s.gravity, s.collides)
+		core_physics.cmd_set_world(&list, s.gravity, s.layers.collides)
 		s.settings_dirty = false
 	}
 	parts := collect_parts(s, w)
@@ -352,7 +352,7 @@ child_shape :: proc(
 	scale: [3]f32,
 ) -> core_physics.Shape {
 	shape := core_physics.Shape(pool_alloc(&s.shapes))
-	kind, size := shape_size(c, scale)
+	kind, size := collider_size(c, scale)
 	core_physics.cmd_create_shape(list, shape, kind, size, c.density, offset, to_rotation(rotation))
 	return shape
 }
@@ -364,11 +364,11 @@ destroy_body :: proc(s: ^State, list: ^core_physics.Command_List, body: core_phy
 	s.records[body.index] = {}
 }
 
-// shape_size gives the backend's shape for a collider at a scale. Scale is applied to the dimensions, so no shape
-// needs a scaled wrapper: a sphere takes the largest axis, and a capsule or cylinder the largest of x and z for its
-// radius.
-@(private)
-shape_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Kind, [3]f32) {
+// collider_size gives the backend's shape for a collider at a scale: a box's half extents, a sphere's radius in x, and
+// a capsule's or a cylinder's radius in x and the half height of its cylinder in y. Scale is applied to the
+// dimensions, so no shape needs a scaled wrapper: a sphere takes the largest axis, and a capsule or cylinder the
+// largest of x and z for its radius. The editor draws colliders with it.
+collider_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Kind, [3]f32) {
 	scale := linalg.abs(pose_scale)
 	switch c.shape {
 	case .Box:

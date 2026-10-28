@@ -152,7 +152,7 @@ State :: struct {
 	records:  [dynamic]Body_Record,
 	shapes:   Pool,
 	gravity:  [3]f32,
-	collides: [core_physics.MAX_LAYERS]u32,
+	layers:   Layers,
 	// Set_World goes to the backend before the next submit.
 	settings_dirty: bool,
 	queries:  struct {
@@ -178,9 +178,7 @@ init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_D
 		shapes         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
 		records        = make([dynamic]Body_Record, allocator),
 	}
-	for &mask in s.collides {
-		mask = max(u32)
-	}
+	s.layers = default_layers()
 	s.world = platform.physics.world_create(&desc)
 	return s.world.generation != 0
 }
@@ -217,9 +215,68 @@ set_gravity :: proc(s: ^State, gravity: [3]f32) {
 	s.settings_dirty = true
 }
 
-// set_layers sets which object layers collide: layer a and b collide when each is in the other's mask.
-set_layers :: proc(s: ^State, collides: [core_physics.MAX_LAYERS]u32) {
-	s.collides = collides
+MAX_LAYERS :: core_physics.MAX_LAYERS
+MAX_LAYER_NAME :: 31
+
+// Layers are the object layers that the project's settings name (see docs/physics/design.md#layers): physics.layers
+// gives their names in order, and physics.ignore the pairs that do not collide. A Collider's layer is an index into
+// them. It is plain data, so a code reload keeps it.
+Layers :: struct {
+	count:    int,
+	names:    [MAX_LAYERS][MAX_LAYER_NAME]u8,
+	lengths:  [MAX_LAYERS]u8,
+	// Each layer's mask of the layers it collides with. Every pair collides unless physics.ignore names it.
+	collides: [MAX_LAYERS]u32,
+}
+
+// default_layers is one layer, Default, and every layer colliding with every other, as a project without
+// physics.layers has.
+default_layers :: proc() -> (l: Layers) {
+	add_layer(&l, "Default")
+	return
+}
+
+// add_layer appends a layer that collides with everything. It returns false when the name is empty, too long, taken,
+// or there are MAX_LAYERS already.
+add_layer :: proc(l: ^Layers, name: string) -> bool {
+	if name == "" || len(name) > MAX_LAYER_NAME || l.count == MAX_LAYERS {
+		return false
+	}
+	if _, found := layer_index(l^, name); found {
+		return false
+	}
+	copy(l.names[l.count][:], name)
+	l.lengths[l.count] = u8(len(name))
+	l.count += 1
+	for &mask in l.collides {
+		mask = max(u32)
+	}
+	return true
+}
+
+// ignore makes two layers not collide.
+ignore :: proc(l: ^Layers, a, b: int) {
+	l.collides[a] &~= 1 << u32(b)
+	l.collides[b] &~= 1 << u32(a)
+}
+
+layer_name :: proc(l: ^Layers, index: int) -> string {
+	return string(l.names[index][:l.lengths[index]])
+}
+
+layer_index :: proc(l: Layers, name: string) -> (int, bool) {
+	l := l
+	for i in 0 ..< l.count {
+		if layer_name(&l, i) == name {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// set_layers takes the project's layers from the next tick.
+set_layers :: proc(s: ^State, layers: Layers) {
+	s.layers = layers
 	s.settings_dirty = true
 }
 

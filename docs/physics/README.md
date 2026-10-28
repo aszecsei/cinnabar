@@ -1,6 +1,6 @@
 # Physics
 
-Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary and the Jolt backend are built (phase 1); the rest of the design and its phases are in [Design](design.md).
+Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary, the Jolt backend, scripts in fixed ticks and rigid bodies in the world are built (phases 1 to 3); the rest of the design and its phases are in [Design](design.md).
 
 ## Documents
 
