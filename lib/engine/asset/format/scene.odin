@@ -6,24 +6,77 @@ import "core:mem"
 import "cinnabar:core/layout"
 
 SCENE_EXTENSION :: ".scene"
+// A prefab is a scene file with one root, which other scenes instantiate (see docs/editor/prefabs.md).
+PREFAB_EXTENSION :: ".prefab"
+
+// The stable IDs of Transform and Local_Transform, as lib/engine/ecs registers them. An instance's pose is the scene's,
+// so expansion drops these two from a prefab's root.
+SCENE_TRANSFORM_ID :: 1
+SCENE_LOCAL_TRANSFORM_ID :: 2
 
 // Scene is a scene as its file describes it (see docs/editor/document-and-scenes.md#scenes). The cooker parses it from text, the asset
-// runtime reads it from a blob, and the editor sends it over the link. The scene loader in lib/engine applies it.
+// runtime reads it from a blob, and the editor sends it over the link. The scene loader in lib/engine applies it. A
+// parsed file can have instances of prefabs and their override blocks, which scene_expand turns into plain entities;
+// a blob and the editor's Load_Scene are flat.
 Scene :: struct {
 	entities: []Scene_Entity,
 }
 
 Scene_Entity :: struct {
 	// The scene ID: random, nonzero and unique in the scene.
-	id:         u64,
-	name:       string,
+	id:                 u64,
+	name:               string,
 	// The parent's scene ID, or 0.
-	parent:     u64,
-	active:     bool,
+	parent:             u64,
+	active:             bool,
 	// Sorted by ID.
-	components: []Scene_Component,
+	components:         []Scene_Component,
 	// In the order that they are attached.
-	behaviours: []Scene_Behaviour,
+	behaviours:         []Scene_Behaviour,
+	// Which of name, parent and active the file writes, for an override, which changes only those.
+	keys:               Scene_Keys,
+	// An instance block: the prefab that it instantiates, whose root it stands for.
+	prefab:             Guid,
+	// An override block: the IDs of its path, from the instance's. id is scene_path_id_of the path.
+	path:               []u64,
+	// An override block: the entity and its descendants are taken out of the instance.
+	removed:            bool,
+	// An instance or override block: the components by stable ID and the behaviours by script that it takes away.
+	removed_components: []u64,
+	removed_behaviours: []Guid,
+}
+
+Scene_Key :: enum u8 {
+	Name,
+	Parent,
+	Active,
+}
+
+Scene_Keys :: bit_set[Scene_Key; u8]
+
+// scene_path_id is the scene ID of the entity id inside the instance with ID instance: FNV-1a over the two IDs'
+// 16 bytes, little-endian, or 1 if that is 0. The editor computes the same in ScenePath.Id.
+scene_path_id :: proc "contextless" (instance, id: u64) -> u64 {
+	bytes: [16]u8
+	for i in 0 ..< 8 {
+		bytes[i] = u8(instance >> (8 * u64(i)))
+		bytes[8 + i] = u8(id >> (8 * u64(i)))
+	}
+	h := hash.fnv64a(bytes[:])
+	return h == 0 ? 1 : h
+}
+
+// scene_path_id_of is the scene ID of a path, such as <instance>#<inner instance>#<entity>, folded from the end, as
+// expansion places a flat prefab: the inner path's ID is the entity's ID in the prefab.
+scene_path_id_of :: proc "contextless" (path: []u64) -> u64 {
+	if len(path) == 0 {
+		return 0
+	}
+	id := path[len(path) - 1]
+	for i := len(path) - 2; i >= 0; i -= 1 {
+		id = scene_path_id(path[i], id)
+	}
+	return id
 }
 
 Scene_Component :: struct {
@@ -135,8 +188,8 @@ scene_layout :: proc() -> u64 {
 	)
 }
 
-// scene_write builds a scene blob.
-scene_write :: proc(scene: Scene, guid: Guid, key: u64, allocator := context.allocator) -> []byte {
+// scene_write builds a scene blob of a flat scene, under the kind Scene or Prefab.
+scene_write :: proc(scene: Scene, guid: Guid, key: u64, kind := Asset_Kind.Scene, allocator := context.allocator) -> []byte {
 	buffer := make([dynamic]byte, size_of(Scene_Blob), allocator)
 	entities := reserve_bytes(&buffer, len(scene.entities) * size_of(Scene_Entity_Record), align_of(Scene_Entity_Record))
 	for e, i in scene.entities {
@@ -168,7 +221,7 @@ scene_write :: proc(scene: Scene, guid: Guid, key: u64, allocator := context.all
 		put_record(&buffer, entities, i, &record)
 	}
 	blob := Scene_Blob {
-		header = {magic = BLOB_MAGIC, kind = .Scene, layout = scene_layout(), key = key, guid = guid},
+		header = {magic = BLOB_MAGIC, kind = kind, layout = scene_layout(), key = key, guid = guid},
 		entities = entities,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
@@ -201,10 +254,10 @@ put_record :: proc(buffer: ^[dynamic]byte, records: Slice, i: int, record: ^$T) 
 	mem.copy(&buffer[records.offset + u32(i * size_of(T))], record, size_of(T))
 }
 
-// scene_read checks a scene blob and gives its scene. Strings point into the blob, and the slices are in allocator.
+// scene_read checks a scene or prefab blob and gives its scene. Strings point into the blob, and the slices are in allocator.
 scene_read :: proc(data: []byte, allocator := context.allocator) -> (scene: Scene, ok: bool) {
 	header := blob_header(data) or_return
-	if header.kind != .Scene || header.layout != scene_layout() || len(data) < size_of(Scene_Blob) {
+	if (header.kind != .Scene && header.kind != .Prefab) || header.layout != scene_layout() || len(data) < size_of(Scene_Blob) {
 		return
 	}
 	blob := (^Scene_Blob)(raw_data(data))

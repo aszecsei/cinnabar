@@ -128,6 +128,7 @@ sealed class FieldEditor : IFieldEditor
             BehaviourFieldKind.String => EditKind.Text,
             BehaviourFieldKind.Vector => EditKind.Vector3,
             BehaviourFieldKind.Entity or BehaviourFieldKind.Nil => EditKind.Entity,
+            BehaviourFieldKind.Asset => EditKind.Asset,
             _ => null,
         };
         return kind is { } k ? new FieldEditor(shell, [sceneId], label, k, Set) : null;
@@ -247,6 +248,7 @@ sealed class FieldEditor : IFieldEditor
         BehaviourFieldKind.Vector => SceneEdits.Floats(field.Vector[0], field.Vector[1], field.Vector[2]),
         BehaviourFieldKind.Entity => SceneValue.EntityRef(sceneIdOf(field.Entity)),
         BehaviourFieldKind.Nil => SceneValue.EntityRef(0),
+        BehaviourFieldKind.Asset => SceneValue.AssetRef(FieldValues.AssetGuid(field.Asset)),
         _ => null,
     };
 

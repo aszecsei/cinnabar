@@ -510,6 +510,7 @@ find_camera :: proc(s: ^Game_State) {
 
 // register_scripts defines the game's script bindings and exposes its components. init and on_reload call it.
 register_scripts :: proc(r: ^script.Runtime) {
+	scene.register_scripts(r)
 	script.expose(r, Spin)
 	script.expose(r, Triangle)
 	// The Render bindings read the Game_State's script_quality only when a script calls them, which the runtime of

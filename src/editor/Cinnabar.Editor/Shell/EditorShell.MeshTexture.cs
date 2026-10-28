@@ -413,7 +413,7 @@ public sealed partial class EditorShell
             ops.Add(new MeshOperation(meshGuid, mesh, after, Meshes));
         }
         var slot = after.Materials.IndexOf(material);
-        if (slot >= 0 && Scene?.Scene.Find(entity) is { } document)
+        if (slot >= 0 && Scene?.Expanded.Flat.Find(entity) is { } document)
         {
             var renderer = document.Components.Find(c => c.Id == SceneEdits.MeshRendererId);
             var field = $"materials.{slot}";

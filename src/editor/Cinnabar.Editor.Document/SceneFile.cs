@@ -11,13 +11,16 @@ public sealed record SceneProblem(int Line, string Message, bool IsError)
 
 /// <summary>
 /// Reads and writes scene files (see docs/editor/document-and-scenes.md#scenes). The cooker reads the same format with
-/// <c>asset_format.scene_parse</c>, and the two must agree. Writing sorts entities by scene ID and components by ID,
-/// so an edit changes only the lines of the entity that it touches.
+/// <c>asset_format.scene_parse</c>, and the two must agree. Writing sorts entities by scene ID, with an instance's
+/// override blocks after it by path (see docs/editor/prefabs.md#instances-in-a-scene), and components by ID, so an edit
+/// changes only the lines of the entity that it touches. A prefab is a scene file with one root. The reader takes
+/// version 1 too, which has no instances.
 /// </summary>
 public static class SceneFile
 {
-    public const int Version = 1;
+    public const int Version = 2;
     public const string Extension = ".scene";
+    public const string PrefabExtension = ".prefab";
 
     /// <summary>Parses a file. The scene is null when a problem is an error.</summary>
     public static (Scene? Scene, IReadOnlyList<SceneProblem> Problems) Parse(string text)
@@ -35,24 +38,43 @@ public static class SceneFile
             sb.Append(comment).Append('\n');
         }
         sb.Append(CultureInfo.InvariantCulture, $"scene {Version}\n");
-        foreach (var e in scene.Entities.OrderBy(e => e.Id))
+        foreach (var e in scene.Entities.OrderBy(e => e.Path ?? [e.Id], PathOrder.Instance))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"\nentity {e.Id:x16}\n");
-            if (e.Name.Length > 0)
+            sb.Append("\nentity ").Append(e.Path != null ? ScenePath.Format(e.Path) : e.Id.ToString("x16", CultureInfo.InvariantCulture)).Append('\n');
+            // A plain entity writes what differs from an entity's defaults, and a prefab's entity what it overrides.
+            var plain = e.Path == null && e.Prefab == "";
+            if (plain ? e.Name.Length > 0 : e.Keys.HasFlag(SceneKeys.Name))
             {
                 sb.Append("name = ").Append(Quote(e.Name)).Append('\n');
             }
-            if (e.Parent != 0)
+            if (e.Path == null ? e.Parent != 0 : e.Keys.HasFlag(SceneKeys.Parent))
             {
-                sb.Append("parent = ").Append(FormatValue(SceneValue.EntityRef(e.Parent))).Append('\n');
+                var parent = e.ParentPath is { } path && ScenePath.Id(path) == e.Parent ? SceneValue.EntityRef(path) : SceneValue.EntityRef(e.Parent);
+                sb.Append("parent = ").Append(FormatValue(parent)).Append('\n');
             }
-            if (!e.Active)
+            if (e.Prefab != "")
             {
-                sb.Append("active = false\n");
+                sb.Append("prefab = $").Append(e.Prefab).Append('\n');
+            }
+            if (plain ? !e.Active : e.Keys.HasFlag(SceneKeys.Active))
+            {
+                sb.Append(e.Active ? "active = true\n" : "active = false\n");
+            }
+            if (e.Removed)
+            {
+                sb.Append("removed = true\n");
             }
             foreach (var (key, value) in e.UnknownKeys)
             {
                 sb.Append(key).Append(" = ").Append(value).Append('\n');
+            }
+            foreach (var id in e.RemovedComponents)
+            {
+                sb.Append(CultureInfo.InvariantCulture, $"remove component {id}\n");
+            }
+            foreach (var script in e.RemovedBehaviours)
+            {
+                sb.Append("remove behaviour $").Append(script).Append('\n');
             }
             foreach (var c in e.Components.OrderBy(c => c.Id))
             {
@@ -66,6 +88,24 @@ public static class SceneFile
             }
         }
         return sb.ToString();
+    }
+
+    // Paths in order of their IDs, a path before the longer ones that it starts.
+    sealed class PathOrder : IComparer<IReadOnlyList<ulong>>
+    {
+        public static readonly PathOrder Instance = new();
+
+        public int Compare(IReadOnlyList<ulong>? a, IReadOnlyList<ulong>? b)
+        {
+            for (var i = 0; i < Math.Min(a!.Count, b!.Count); i++)
+            {
+                if (a[i] != b[i])
+                {
+                    return a[i].CompareTo(b[i]);
+                }
+            }
+            return a.Count.CompareTo(b.Count);
+        }
     }
 
     static void WriteFields(StringBuilder sb, List<SceneField> fields)
@@ -84,6 +124,7 @@ public static class SceneFile
         SceneValueKind.String => Quote(value.Text),
         SceneValueKind.Name => value.Text,
         SceneValueKind.Asset => value.Asset == "" ? "$0" : $"${value.Asset}",
+        _ when value.Path != null => "@" + ScenePath.Format(value.Path),
         _ => value.Entity == 0 ? "@0" : $"@{value.Entity:x16}",
     };
 
@@ -147,7 +188,7 @@ public static class SceneFile
                 if (!header)
                 {
                     header = true;
-                    if (trimmed != $"scene {Version}")
+                    if (trimmed != "scene 1" && trimmed != $"scene {Version}")
                     {
                         Error($"a scene file starts with `scene {Version}`");
                         return;
@@ -169,6 +210,9 @@ public static class SceneFile
                     case "behaviour" when !indented:
                         BeginBehaviour(argument);
                         break;
+                    case "remove" when !indented:
+                        ParseRemove(argument);
+                        break;
                     default:
                         ParseLine(trimmed, indented);
                         break;
@@ -179,6 +223,7 @@ public static class SceneFile
                 _line = 1;
                 Error($"a scene file starts with `scene {Version}`");
             }
+            FinishEntity();
             foreach (var group in Scene.Entities.GroupBy(e => e.Id).Where(g => g.Count() > 1))
             {
                 _line = 0;
@@ -192,14 +237,80 @@ public static class SceneFile
 
         void BeginEntity(string argument)
         {
-            if (argument.Length != 16 || !ulong.TryParse(argument, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var id) || id == 0)
+            FinishEntity();
+            if (ParsePath(argument) is not { } path)
             {
-                Error($"an entity needs a nonzero scene ID of 16 hex digits, not \"{argument}\"");
-                id = 0;
+                Error($"an entity needs a nonzero scene ID of 16 hex digits, or a path of them joined by #, not \"{argument}\"");
+                path = [0];
             }
-            _entity = new SceneEntity(id);
+            _entity = path.Count > 1 ? new SceneEntity(path) : new SceneEntity(path[0]);
             _block = null;
             Scene.Entities.Add(_entity);
+        }
+
+        // Only the block of a prefab's entity can take away what the prefab gives it.
+        void FinishEntity()
+        {
+            if (_entity is { Path: null, Prefab: "" } && (_entity.RemovedComponents.Count > 0 || _entity.RemovedBehaviours.Count > 0))
+            {
+                Error($"entity {_entity.Id:x16}: only an instance or an override block removes a component or a behaviour");
+            }
+        }
+
+        // A scene ID, or a path of up to ScenePath.MaxLength of them joined by #, each 16 hex digits and nonzero.
+        static List<ulong>? ParsePath(string text)
+        {
+            var parts = text.Split('#');
+            if (parts.Length > ScenePath.MaxLength)
+            {
+                return null;
+            }
+            var path = new List<ulong>(parts.Length);
+            foreach (var part in parts)
+            {
+                if (part.Length != 16 || !ulong.TryParse(part, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var id) || id == 0)
+                {
+                    return null;
+                }
+                path.Add(id);
+            }
+            return path;
+        }
+
+        // `remove component <id>` and `remove behaviour $<guid>`.
+        void ParseRemove(string argument)
+        {
+            if (_entity == null)
+            {
+                Error("a remove needs an entity line before it");
+                return;
+            }
+            _block = null;
+            var space = argument.IndexOf(' ');
+            var what = space < 0 ? argument : argument[..space];
+            var target = space < 0 ? "" : argument[(space + 1)..].Trim();
+            switch (what)
+            {
+                case "component":
+                    if (!ulong.TryParse(target, NumberStyles.None, CultureInfo.InvariantCulture, out var id) || id == 0)
+                    {
+                        Error($"remove component takes the component's stable ID in decimal, not \"{target}\"");
+                        return;
+                    }
+                    _entity.RemovedComponents.Add(id);
+                    break;
+                case "behaviour":
+                    if (target.Length != 33 || target[0] != '$' || !target.Skip(1).All(Uri.IsHexDigit))
+                    {
+                        Error($"remove behaviour takes the script's GUID, such as $9d2e41c0b7a35f6e81c4d2a90b3e7f15, not \"{target}\"");
+                        return;
+                    }
+                    _entity.RemovedBehaviours.Add(target[1..].ToLowerInvariant());
+                    break;
+                default:
+                    Error($"remove takes component <id> or behaviour $<guid>, not \"{argument}\"");
+                    break;
+            }
         }
 
         void BeginComponent(string argument)
@@ -284,21 +395,45 @@ public static class SceneFile
             {
                 case "name" when value.Kind == SceneValueKind.String:
                     _entity.Name = value.Text;
+                    _entity.Keys |= SceneKeys.Name;
                     break;
                 case "name":
                     Error("name takes a quoted string");
                     break;
                 case "parent" when value.Kind == SceneValueKind.Entity:
                     _entity.Parent = value.Entity;
+                    _entity.ParentPath = value.Path;
+                    _entity.Keys |= SceneKeys.Parent;
                     break;
                 case "parent":
                     Error("parent takes a scene ID, such as @1b04c7e95a2f3d88");
                     break;
                 case "active" when value.Kind == SceneValueKind.Bool:
                     _entity.Active = value.Bool;
+                    _entity.Keys |= SceneKeys.Active;
                     break;
                 case "active":
                     Error("active takes true or false");
+                    break;
+                case "prefab" when value.Kind != SceneValueKind.Asset || value.Asset == "":
+                    Error("prefab takes the prefab's GUID, such as $9db8150cc7215ffc2708d20d77cf60bf");
+                    break;
+                case "prefab":
+                    if (_entity.Path != null)
+                    {
+                        Error("an override block cannot change which prefab an entity instantiates");
+                    }
+                    _entity.Prefab = value.Asset;
+                    break;
+                case "removed" when value.Kind != SceneValueKind.Bool:
+                    Error("removed takes true or false");
+                    break;
+                case "removed":
+                    if (_entity.Path == null)
+                    {
+                        Error("only an override block, whose ID is a path, takes removed");
+                    }
+                    _entity.Removed = value.Bool;
                     break;
                 default:
                     Warning($"the entity key {key} is unknown, so the editor keeps it as it is");
@@ -324,6 +459,13 @@ public static class SceneFile
             {
                 case '"':
                     return ParseString(text);
+                case '@' when text.Contains('#'):
+                    if (ParsePath(text[1..]) is not { } path)
+                    {
+                        Error($"a path is scene IDs of 16 hex digits joined by # after @, not \"{text}\"");
+                        return null;
+                    }
+                    return SceneValue.EntityRef(path);
                 case '@':
                     if (text.Length is < 2 or > 17 || !ulong.TryParse(text.AsSpan(1), NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out var id))
                     {

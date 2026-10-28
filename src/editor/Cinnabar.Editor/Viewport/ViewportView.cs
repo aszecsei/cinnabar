@@ -235,8 +235,21 @@ public sealed class ViewportView : Grid
         _shell.IsEditing && ContentBrowserView.Dropped(e) is { } guid && _shell.IsMaterial(guid) && _control.FramePoint(e.GetPosition(this)) is { } pixel
             ? (guid, pixel) : null;
 
+    // The prefab that a drag carries, with the frame pixel under it, or null when it carries none.
+    (string Guid, Vec2 Pixel)? DraggedPrefab(DragEventArgs e) =>
+        _shell.IsEditing && !_shell.InMeshMode && ContentBrowserView.Dropped(e) is { } guid && _shell.IsPrefab(guid) && _control.FramePoint(e.GetPosition(this)) is { } pixel
+            ? (guid, pixel) : null;
+
     void OnDragOver(DragEventArgs e)
     {
+        if (DraggedPrefab(e) is var (prefab, at))
+        {
+            e.DragEffects = DragDropEffects.Copy;
+            e.Handled = true;
+            _dragPixel = ((int)Math.Floor(at.X), (int)Math.Floor(at.Y));
+            PickUnderDrag(prefab, isPrefab: true);
+            return;
+        }
         if (DraggedMaterial(e) is not var (guid, pixel))
         {
             e.DragEffects = DragDropEffects.None;
@@ -255,8 +268,9 @@ public sealed class ViewportView : Grid
         PickUnderDrag(guid);
     }
 
-    // Picks the pixel under the drag, one pick at a time, and shows the material where each answer finds.
-    void PickUnderDrag(string guid)
+    // Picks the pixel under the drag, one pick at a time, and shows the material, or the prefab's instance, where each
+    // answer finds.
+    void PickUnderDrag(string guid, bool isPrefab = false)
     {
         if (_dragPicking || _dragPixel is not { } pixel || pixel == _pickedPixel)
         {
@@ -271,13 +285,32 @@ public sealed class ViewportView : Grid
                 return;
             }
             _dragPicking = false;
-            _shell.PreviewMaterial(_shell.MaterialTargetOf(result), guid);
-            PickUnderDrag(guid);
+            if (isPrefab)
+            {
+                _shell.PreviewPrefab(guid, _shell.DropPoint(new Vec2(pixel.X + 0.5, pixel.Y + 0.5), result));
+            }
+            else
+            {
+                _shell.PreviewMaterial(_shell.MaterialTargetOf(result), guid);
+            }
+            PickUnderDrag(guid, isPrefab);
         });
     }
 
     void OnDrop(DragEventArgs e)
     {
+        if (DraggedPrefab(e) is var (prefab, at))
+        {
+            e.Handled = true;
+            EndPicks();
+            // The instance stays where the drag last showed it, or where the drop is if no pick has answered.
+            if (!_shell.CommitPrefab())
+            {
+                _shell.PreviewPrefab(prefab, _shell.DropPoint(at, null));
+                _shell.CommitPrefab();
+            }
+            return;
+        }
         var dragged = DraggedMaterial(e);
         EndPicks();
         if (dragged is not var (guid, pixel))
@@ -309,6 +342,7 @@ public sealed class ViewportView : Grid
     {
         EndPicks();
         _shell.CancelMaterial();
+        _shell.CancelPrefab();
     }
 
     void EndPicks()

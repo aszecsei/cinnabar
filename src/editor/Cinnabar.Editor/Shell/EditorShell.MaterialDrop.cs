@@ -36,7 +36,7 @@ public sealed partial class EditorShell
         foreach (var hit in result.Hits)
         {
             if (hit.SceneId != 0 && Pickable(hit.Entity)
-                && Scene.Scene.Find(hit.SceneId) is { } entity && entity.Components.Any(c => c.Id == SceneEdits.MeshRendererId))
+                && Scene.Expanded.Flat.Find(hit.SceneId) is { } entity && entity.Components.Any(c => c.Id == SceneEdits.MeshRendererId))
             {
                 return new MaterialTarget(hit.SceneId, result.Submesh);
             }

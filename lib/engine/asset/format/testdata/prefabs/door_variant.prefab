@@ -1,0 +1,14 @@
+# A variant of the door: its root is an instance of door.prefab, with a red frame light.
+scene 2
+
+entity 3000000000000001
+name = "Red Door"
+prefab = $22222222222222222222222222222222
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity 3000000000000001#2000000000000002
+component 35 Point_Light
+	color = [1, 0, 0]

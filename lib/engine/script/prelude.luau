@@ -30,6 +30,12 @@ function Field.entity()
 	return field("entity", nil)
 end
 
+-- An asset reference, such as a prefab for World.spawn. kind names the kind of asset that it takes, as the content
+-- browser's kind: search does, such as "prefab", and the properties panel's picker offers those.
+function Field.asset(kind: string?)
+	return table.freeze({ __field = "asset", default = nil, kind = kind or "" })
+end
+
 -- The names that every instance has, so a behaviour cannot declare them.
 local RESERVED = { entity = true, transform = true, enabled = true }
 

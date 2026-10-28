@@ -115,6 +115,9 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	defer unlock_cache(&lock)
 	pass := cook(options, {kind})
 	log.infof("cook: %d %s cooked, %d up to date", pass.cooked[kind], kind_plural(kind), pass.current[kind])
+	if kind == .Scene {
+		log.infof("cook: %d %s cooked, %d up to date", pass.cooked[.Prefab], kind_plural(.Prefab), pass.current[.Prefab])
+	}
 	return pass.ok
 }
 
@@ -143,6 +146,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "material instances"
 	case .Material_Function:
 		return "material functions"
+	case .Prefab:
+		return "prefabs"
 	}
 	return "assets"
 }

@@ -2,7 +2,7 @@
 # an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
 # around a gold one, and an additive hologram behind them (see docs/rendering.md#transparency). The editor writes this
 # file; see docs/editor.md#scenes.
-scene 1
+scene 2
 
 entity 0c5c7fd0a6a3a450
 name = "Sun"

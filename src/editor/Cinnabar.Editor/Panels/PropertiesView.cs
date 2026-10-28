@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using CommunityToolkit.Mvvm.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
@@ -36,6 +37,8 @@ public sealed class PropertiesView : ScrollViewer
     readonly Dictionary<(string Owner, string Field), FieldEditor> _editors = [];
     // Each reset button, with whether its field is set in the document, which edits change without a rebuild.
     readonly List<(Control Button, Func<bool> IsSet)> _resets = [];
+    // Each field name of an instance's entity, with whether its block overrides the field, which shows it in bold.
+    readonly List<(TextBlock Name, Func<bool> IsOverridden)> _bold = [];
     // The override check box of each volume setting, which the host's values tick.
     readonly Dictionary<(string Owner, string Field), OverrideRow> _overrides = [];
     // Groups that the user collapsed, by title, which stay collapsed across selections.
@@ -123,7 +126,26 @@ public sealed class PropertiesView : ScrollViewer
         {
             button.IsVisible = isSet();
         }
+        foreach (var (name, overridden) in _bold)
+        {
+            name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
+        }
     }
+
+    // Whether the scene sets a component's field: for a plain entity, its block has it; for an instance's entity, its
+    // block overrides it, since the prefab's value is the default that Reset returns to. It reads the document each
+    // time, since the expansion's entities are new after every edit.
+    Func<bool> ComponentSet(ulong entity, ulong component, Link.Protocol.FieldInfo f) => () =>
+        (_shell.InstanceOf(entity) != null ? _shell.OverridesOf(entity) : _shell.Scene?.Expanded.Flat.Find(entity))
+            ?.Components.Find(c => c.Id == component) is { } c && InDocument(c, f);
+
+    Func<bool> BehaviourSet(ulong entity, string script, string field) => () =>
+        (_shell.InstanceOf(entity) != null ? _shell.OverridesOf(entity) : _shell.Scene?.Expanded.Flat.Find(entity))
+            ?.Behaviours.Find(b => b.Script == script)?.Fields.Any(x => x.Name == field) == true;
+
+    // An overridden field of an instance's entity. The pose of an instance's root is the scene's, not an override.
+    Func<bool>? Overridden(ulong entity, ulong? component, Func<bool> isSet) =>
+        _shell.InstanceOf(entity) is { } info && !(info.IsInstanceRoot && component is SceneEdits.TransformId or SceneEdits.LocalTransformId) ? isSet : null;
 
     void Rebuild()
     {
@@ -131,6 +153,7 @@ public sealed class PropertiesView : ScrollViewer
         _views.Clear();
         _editors.Clear();
         _resets.Clear();
+        _bold.Clear();
         _overrides.Clear();
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
@@ -148,6 +171,8 @@ public sealed class PropertiesView : ScrollViewer
         }
         var document = _shell.SelectedSceneEntity;
         _content.Children.Add(Header(node, document));
+        // An instance's entity as its prefab gives it, which tells the components that the scene added.
+        var prefabBase = document == null ? null : _shell.PrefabBase(document.Id);
         var tags = new List<(string Title, Action? Remove)>();
         foreach (var id in node.Components.Where(id => !Derived.Contains(id)))
         {
@@ -167,12 +192,16 @@ public sealed class PropertiesView : ScrollViewer
             var fields = type.Fields.Select(f =>
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null;
-                return FieldRow.Of(owner, f, editor,
-                    editor != null ? () => InDocument(inDocument!, f) : null,
-                    () => editor?.Reset());
+                var isSet = editor != null ? ComponentSet(document!.Id, id, f) : null;
+                return FieldRow.Of(owner, f, editor, isSet, () => editor?.Reset()) with
+                {
+                    Overridden = isSet == null ? null : Overridden(document!.Id, id, isSet),
+                    Apply = () => _shell.ApplyField(document!.Id, id, null, f.Name),
+                };
             });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
-            _content.Children.Add(Group(title, fields,
+            var added = prefabBase != null && prefabBase.Components.All(c => c.Id != id);
+            _content.Children.Add(Group(title, fields, badge: added ? "Added" : null,
                 remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
         }
         var attached = new HashSet<string>();
@@ -188,10 +217,19 @@ public sealed class PropertiesView : ScrollViewer
                 _content.Children.Add(Unattached(document, script, inDocument, title));
                 continue;
             }
-            var fields = behaviour.Fields.Select(f => new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), false,
-                inDocument != null ? FieldEditor.ForBehaviour(_shell, document!.Id, script, f) : null,
-                inDocument != null ? () => inDocument.Fields.Any(x => x.Name == f.Name) : null,
-                () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetBehaviourField(document!.Id, script, f.Name, null))));
+            var fields = behaviour.Fields.Select(f =>
+            {
+                var isSet = inDocument != null ? BehaviourSet(document!.Id, script, f.Name) : null;
+                return new FieldRow(owner, f.Name, FieldValues.DisplayKindOf(f.Kind), false,
+                    inDocument != null ? FieldEditor.ForBehaviour(_shell, document!.Id, script, f) : null,
+                    isSet,
+                    () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetBehaviourField(document!.Id, script, f.Name, null)))
+                {
+                    Overridden = isSet == null ? null : Overridden(document!.Id, null, isSet),
+                    Apply = () => _shell.ApplyField(document!.Id, 0, script, f.Name),
+                    AssetKind = f.AssetKind,
+                };
+            });
             _content.Children.Add(Group(title, fields, badge: "Script", disabled: !behaviour.Enabled,
                 remove: inDocument != null ? () => _shell.Edit($"Remove {title}", new RemoveBehaviour(document!.Id, script)) : null));
         }
@@ -209,6 +247,10 @@ public sealed class PropertiesView : ScrollViewer
         if (tags.Count > 0)
         {
             _content.Children.Add(Tags(tags));
+        }
+        if (document != null && prefabBase != null)
+        {
+            _content.Children.Add(Removed(document.Id, prefabBase));
         }
         if (document != null)
         {
@@ -288,7 +330,9 @@ public sealed class PropertiesView : ScrollViewer
             ? "-"
             : $"{string.Join(",", document.Components.Select(c => c.Id))}|{string.Join(",", document.Behaviours.Select(b => b.Script))}";
         var scripts = behaviours.Select(b => Convert.ToHexStringLower(b.Script)).Concat(document?.Behaviours.Select(b => b.Script) ?? []);
-        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|" +
+        // An instance's header shows whether its prefab has unsaved changes.
+        var prefab = _shell.InstanceOf(node.SceneId) is { } instance ? _shell.PrefabOfInstance(instance.Instance)?.IsDirty.ToString() : "";
+        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|{prefab}|" +
             $"{_shell.ProblemsOf(node.SceneId).Count}|{string.Join(",", scripts.Where(ScriptMissing))}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
@@ -324,7 +368,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, ids!, id, f) : null;
                 return FieldRow.Of(owner, f, editor,
-                    editor != null ? () => inDocument!.Any(c => InDocument(c!, f)) : null,
+                    editor != null ? () => ids!.Any(e => ComponentSet(e, id, f)()) : null,
                     () => editor?.Reset());
             });
             _content.Children.Add(Group(title, fields, remove: remove));
@@ -508,6 +552,44 @@ public sealed class PropertiesView : ScrollViewer
                 Children = { new TextBlock { Text = "Parent", Classes = { "field-name" } }, parent.Control },
             });
         }
+        if (_shell.InstanceOf(node.SceneId) is { } instance && _shell.Scene?.Scene.Find(instance.Instance)?.Prefab is { Length: > 0 } outer)
+        {
+            // The prefab that the entity comes from: its own if it is an instance's root, and its instance's otherwise.
+            var prefab = instance.Prefab != "" ? instance.Prefab : outer;
+            var icon = Ribbon.CommandViews.Icon("prefab", 12);
+            icon?.Classes.Add("prefab");
+            var link = new TextBlock { Text = _shell.PrefabName(prefab), Classes = { "link" }, Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center };
+            ToolTip.SetTip(link, "Show the prefab in the content browser");
+            link.PointerPressed += (_, e) =>
+            {
+                _shell.RevealAsset(prefab);
+                e.Handled = true;
+            };
+            var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+            if (icon != null)
+            {
+                line.Children.Add(icon);
+            }
+            line.Children.Add(new TextBlock { Text = instance.Prefab != "" ? "Instance of" : "In an instance of", Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center });
+            line.Children.Add(link);
+            if (_shell.PrefabOfInstance(instance.Instance) is { IsDirty: true } changed)
+            {
+                var mark = new TextBlock { Text = "•", Classes = { "prefab" }, VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(mark, $"{changed.Title} has changes that the next save writes");
+                line.Children.Add(mark);
+            }
+            Button Action(string text, string command, string tip)
+            {
+                var button = new Button { Content = text, Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(button, tip);
+                button.Click += (_, _) => _shell.Commands.Get(command).Execute();
+                return button;
+            }
+            line.Children.Add(Action("Open", EditorCommands.OpenPrefab, "Open the prefab in the scene's place"));
+            line.Children.Add(Action("Apply All", EditorCommands.ApplyAllPrefab, "Apply every override of this instance to its prefab"));
+            line.Children.Add(Action("Revert All", EditorCommands.RevertAllPrefab, "Drop every override of this instance"));
+            header.Children.Add(line);
+        }
         var problems = _shell.ProblemsOf(node.SceneId);
         if (problems.Count > 0)
         {
@@ -534,6 +616,12 @@ public sealed class PropertiesView : ScrollViewer
 
     sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum, FieldEditor? Editor, Func<bool>? IsSet, Action Reset)
     {
+        /// <summary>For an instance's entity, whether its block overrides the field, which shows it in bold.</summary>
+        public Func<bool>? Overridden { get; init; }
+
+        /// <summary>For an instance's entity, applies the field's override to its prefab.</summary>
+        public Action? Apply { get; init; }
+
         /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
         public string AssetKind { get; init; } = "";
 
@@ -578,6 +666,17 @@ public sealed class PropertiesView : ScrollViewer
             }
             var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(_shell.Assets, field.AssetKind, _shell.RevealAsset), field.Axes, field.Range);
             Control label = name;
+            if (field.Overridden is { } overridden)
+            {
+                name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
+                _bold.Add((name, overridden));
+                // An override's menu carries it to the prefab, or drops it.
+                var apply = new MenuItem { Header = "Apply to Prefab", Command = new RelayCommand(() => field.Apply?.Invoke()) };
+                var revert = new MenuItem { Header = "Revert", Command = new RelayCommand(field.Reset) };
+                var menu = new ContextMenu { Items = { apply, revert } };
+                menu.Opening += (_, _) => apply.IsEnabled = revert.IsEnabled = overridden();
+                name.ContextMenu = menu;
+            }
             if (field.HasOverride)
             {
                 label = OverrideLabel(field, name, view);
@@ -590,7 +689,7 @@ public sealed class PropertiesView : ScrollViewer
             if (field.IsSet != null)
             {
                 var reset = new Button { Content = "↺", Classes = { "field-button" }, IsVisible = field.IsSet(), VerticalAlignment = VerticalAlignment.Center };
-                ToolTip.SetTip(reset, "Reset to the default");
+                ToolTip.SetTip(reset, field.Overridden != null ? "Revert to the prefab's value" : "Reset to the default");
                 reset.Click += (_, _) => field.Reset();
                 Grid.SetRow(reset, row);
                 Grid.SetColumn(reset, 2);
@@ -818,6 +917,44 @@ public sealed class PropertiesView : ScrollViewer
     };
 
     // Components without fields to show, such as tags, as a row of chips under the groups.
+    // The prefab's components and behaviours that an instance's entity removes, each with Revert, which brings it back
+    // with the prefab's values.
+    Control Removed(ulong entity, SceneEntity prefabBase)
+    {
+        var panel = new WrapPanel { Classes = { "tags" } };
+        var overrides = _shell.OverridesOf(entity);
+        void Chip(string title, Action revert)
+        {
+            var button = new Button { Content = "Revert", Classes = { "field-button" } };
+            ToolTip.SetTip(button, $"Bring back the prefab's {title}");
+            button.Click += (_, _) => revert();
+            var chip = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 4,
+                Children = { new TextBlock { Text = $"{title} removed", Classes = { "dim" }, VerticalAlignment = VerticalAlignment.Center }, button },
+            };
+            panel.Children.Add(new Border { Classes = { "badge", "tag" }, Child = chip });
+        }
+        foreach (var id in overrides?.RemovedComponents ?? [])
+        {
+            if (prefabBase.Components.Find(c => c.Id == id) is { } component)
+            {
+                var title = FieldValues.Humanize(component.Name);
+                Chip(title, () => _shell.Edit($"Revert {title}", new AddComponent(entity, component)));
+            }
+        }
+        foreach (var script in overrides?.RemovedBehaviours ?? [])
+        {
+            if (prefabBase.Behaviours.Find(b => b.Script == script) is { } behaviour)
+            {
+                var title = _shell.Assets.Find(script) is { Behaviour.Length: > 0 } asset ? FieldValues.Humanize(asset.Behaviour) : script;
+                Chip(title, () => _shell.Edit($"Revert {title}", new AddBehaviour(entity, behaviour, int.MaxValue)));
+            }
+        }
+        return panel;
+    }
+
     static Control Tags(IEnumerable<(string Title, Action? Remove)> tags)
     {
         var panel = new WrapPanel { Classes = { "tags" } };

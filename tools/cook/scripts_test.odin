@@ -301,6 +301,7 @@ local Door = Behaviour.define("Door", {
 	label = Field.string("front"),
 	offset = Field.vector(vector.create(1, 2, 3)),
 	target = Field.entity(),
+	turret = Field.asset("prefab"),
 })
 function Door:start() World.spawn() end
 return Door`},
@@ -322,9 +323,9 @@ return Door`},
 	testing.expect_value(t, blob.flags, format.Script_Flags{.Behaviour})
 	testing.expect_value(t, format.blob_string(data, blob.class_name), "Door")
 	fields := format.script_fields(data, blob)
-	testing.expect_value(t, len(fields), 5)
-	if len(fields) == 5 {
-		// Sorted by name: label, offset, open, speed, target.
+	testing.expect_value(t, len(fields), 6)
+	if len(fields) == 6 {
+		// Sorted by name: label, offset, open, speed, target, turret.
 		testing.expect_value(t, format.blob_string(data, fields[0].name), "label")
 		testing.expect_value(t, format.blob_string(data, fields[0].text), "front")
 		testing.expect_value(t, fields[1].vector, [3]f32{1, 2, 3})
@@ -332,6 +333,9 @@ return Door`},
 		testing.expect_value(t, fields[2].number, 1)
 		testing.expect_value(t, fields[3].number, 4)
 		testing.expect_value(t, fields[4].kind, format.Script_Field_Kind.Entity)
+		// An asset field keeps the kind of asset that it takes.
+		testing.expect_value(t, fields[5].kind, format.Script_Field_Kind.Asset)
+		testing.expect_value(t, format.blob_string(data, fields[5].text), "prefab")
 	}
 	main := tree_blob(t, tree, tree_guid(t, tree, "main.luau"))
 	main_blob, _ := format.script_view(main)
@@ -343,7 +347,7 @@ return Door`},
 	data = tree_blob(t, tree, tree_guid(t, tree, "door.luau"))
 	blob, _ = format.script_view(data)
 	fields = format.script_fields(data, blob)
-	testing.expect(t, len(fields) == 5 && fields[3].number == 9)
+	testing.expect(t, len(fields) == 6 && fields[3].number == 9)
 }
 
 @(test)

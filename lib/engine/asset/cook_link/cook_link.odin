@@ -110,6 +110,7 @@ Asset_Kind :: enum u8 {
 	Material,
 	Material_Instance,
 	Material_Function,
+	Prefab,
 }
 
 Asset_Status :: enum u8 {
@@ -234,6 +235,8 @@ Asset_Template :: enum u8 {
 	Material_Function,
 	// A mesh file of a 1 m box with world-aligned mappings.
 	Mesh,
+	// A prefab with one root, named for the file, at the origin.
+	Prefab,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

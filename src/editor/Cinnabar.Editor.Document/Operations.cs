@@ -16,6 +16,12 @@ public abstract record Operation(ulong Entity)
     public abstract Wire.Operation? ToWire();
 
     /// <summary>
+    /// What the host gets for the operation, after it applies: its <see cref="ToWire"/>, or for an edit of an instance,
+    /// the difference that it made to the expansion.
+    /// </summary>
+    public virtual IReadOnlyList<Wire.Operation> ToWires() => ToWire() is { } wire ? [wire] : [];
+
+    /// <summary>
     /// True when <paramref name="later"/> replaces this operation, as each step of a drag replaces the step before:
     /// a transaction then keeps the later one, and this one's inverse.
     /// </summary>
@@ -103,8 +109,11 @@ public sealed record Rename(ulong Id, string Name) : Operation(Id)
     public override bool IsReplacedBy(Operation later) => later is Rename r && r.Id == Id;
 }
 
-/// <summary>Gives an entity a parent, or none with 0. It changes no transform: <see cref="SceneEdits.Reparent"/> does.</summary>
-public sealed record SetParent(ulong Id, ulong Parent) : Operation(Id)
+/// <summary>
+/// Gives an entity a parent, or none with 0. It changes no transform: <see cref="SceneEdits.Reparent"/> does. A parent
+/// inside an instance has its path, which the file writes.
+/// </summary>
+public sealed record SetParent(ulong Id, ulong Parent, IReadOnlyList<ulong>? ParentPath = null) : Operation(Id)
 {
     public override Operation Apply(Scene scene)
     {
@@ -123,9 +132,10 @@ public sealed record SetParent(ulong Id, ulong Parent) : Operation(Id)
                 }
             }
         }
-        var old = entity.Parent;
+        var (old, oldPath) = (entity.Parent, entity.ParentPath);
         entity.Parent = Parent;
-        return this with { Parent = old };
+        entity.ParentPath = ParentPath;
+        return this with { Parent = old, ParentPath = oldPath };
     }
 
     public override Wire.Operation ToWire() => Wire(Link.Protocol.OperationKind.SetParent, Entity, parent: Parent);

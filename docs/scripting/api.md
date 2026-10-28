@@ -13,13 +13,13 @@ What scripts see: the value types, entities and component references, the engine
 | `vector` | Built-in `vector`, 3 × `f32` | No | Unity's `Vector3`. Matches `[3]f32` exactly. |
 | `Entity` | Tagged light userdata, payload = the 64-bit handle | No | Equality is by value, so entities work as table keys. |
 | Component type | Tagged light userdata, payload = the component ID | No | The globals `Transform`, `Health` and so on |
-| Asset reference | Tagged light userdata, payload = the generational asset handle | No | *Not yet: with asset fields in phase 4.* |
+| `Asset` | Tagged light userdata, payload = one more than the index of its GUID in the runtime's table of the assets that scripts refer to | No | From a behaviour's `Field.asset`. Two references to one asset are the same value, so they compare equal and work as table keys. `asset.guid` is its 32 hex digits. At most 4096 assets at once. |
 | `WorldPosition` | Tagged userdata, 24 bytes | Yes | `a - b` gives a `vector`, and `p + v`, `v + p` and `p - v` give a `WorldPosition`. See [World](../world/positions-and-transforms.md#where-positions-go). |
 | `Quaternion` | Tagged userdata, 16 bytes | Yes | `q * q`, `q * v` |
 | Component reference | Tagged userdata: entity handle and component ID | Yes | The result of `entity:get(Health)` |
 | Behaviour instance | Table with the class as its metatable | Yes | The result of `entity:get(Door)` |
 
-- All light userdata share one metatable in Luau. Its metamethods dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`. `typeof` gives `Entity`, `ComponentType`, `WorldPosition`, `Quaternion` and `ComponentRef`.
+- All light userdata share one metatable in Luau. Its metamethods dispatch on the light userdata tag. Full userdata get one metatable per tag with `lua_setuserdatametatable`. `typeof` gives `Entity`, `ComponentType`, `Asset`, `WorldPosition`, `Quaternion` and `ComponentRef`.
 - Userdata tags and light userdata tags are engine constants. They never depend on registration order.
 - Luau sets each metatable only once, so `init` makes them, and a code reload keeps them. Their metamethods are dispatcher closures, so they reach the new DLL's bindings.
 - `WorldPosition` and `Quaternion` values are immutable, so scripts can share them, as `Quaternion.identity` and `WorldPosition.origin` are shared.
@@ -43,7 +43,7 @@ In a sandbox, `luau_load` resolves a chain such as `Time.delta` once, and keeps 
 
 Scripts change the world structure **immediately**, except for despawns. The script phase is serial, and no job reads the world while it runs.
 
-- `World.spawn(position?, rotation?)` creates an entity with a `Transform` at once and returns its handle. With prefabs, `World.spawn(prefab, position?, rotation?)` will create the prefab's components, and its behaviours will get `awake` before `spawn` returns, as in Unity's `Instantiate`.
+- `World.spawn(position?, rotation?)` creates an entity with a `Transform` at once and returns its handle. `World.spawn(prefab, position?, rotation?)`, with an `Asset` of a cooked prefab first, creates an instance of it with its root at the pose and returns the root, and every behaviour in it gets `awake` and `on_enable` before `spawn` returns, in the prefab's entity order, as in Unity's `Instantiate` ([Editor: Prefabs](../editor/prefabs.md#spawning-at-run-time)). The game registers it with `scene.register_scripts` in its `Register_Proc`; without that, it raises an error.
 - `entity:add(T, values?)` and `entity:remove(T)` take effect at once. `values` is a table of field values, and `add` returns the component.
 - `entity:destroy()` is deferred to the end of the script phase, as in Unity's `Destroy`. It goes into the script command buffer, which phase 6 of the frame applies.
 - `World.query(T, ...)` returns an array of the matching entities, collected before the loop starts. Structural changes inside the loop are therefore safe. A query from a script scans every archetype, so performance-critical work belongs in a native system.
@@ -137,8 +137,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 
 ## Future work
 
-- **Asset references.** `Field.asset(kind)` in behaviours, an asset reference light userdata ([Values](#values)), and asset fields of components exposed to scripts, which `expose` skips today ([Rendering](../rendering/assets.md#asset-fields)). The handle is a generational asset handle, so it needs no allocation. Why: the `Door` example's `open_sound` cannot be written yet, and `Resources.Load` has no replacement. When: with the first asset kind scripts need to reference, such as audio or prefabs.
-- **Prefabs in `World.spawn`.** `World.spawn(prefab, position?, rotation?)` creates the prefab's components and runs `awake` before it returns ([Structural changes](#structural-changes)). Waits for prefabs ([World](../world/README.md#future-work)).
+- **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
 - **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). Waits for physics.
 - **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
 - **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.

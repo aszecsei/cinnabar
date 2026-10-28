@@ -28,6 +28,15 @@ static class EditorCommands
     public const string NewMaterial = "content.newMaterial";
     public const string NewMaterialFunction = "content.newMaterialFunction";
     public const string NewMesh = "content.newMesh";
+    public const string NewPrefab = "content.newPrefab";
+    public const string MakePrefab = "prefab.make";
+    public const string UnpackPrefab = "prefab.unpack";
+    public const string UnpackPrefabCompletely = "prefab.unpackCompletely";
+    public const string SelectPrefabAsset = "prefab.selectAsset";
+    public const string OpenPrefab = "prefab.open";
+    public const string ApplyAllPrefab = "prefab.applyAll";
+    public const string RevertAllPrefab = "prefab.revertAll";
+    public const string MakeVariant = "prefab.makeVariant";
     public const string EditMesh = "mesh.edit";
     public const string ObjectMode = "mesh.objectMode";
     public const string MeshVertices = "mesh.vertices";
@@ -244,6 +253,55 @@ static class EditorCommands
             Icon = "copy",
             Shortcut = "Ctrl+D",
             CanExecuteWhen = () => shell.SelectedSceneEntities.Count > 0,
+        });
+        commands.Register(new Command(MakePrefab, "Make Prefab", shell.RequestMakePrefab)
+        {
+            Description = "Make a prefab of the selected entity and its children in the content browser's folder, and put an instance of it in their place.",
+            Icon = "prefab",
+            Shortcut = "Ctrl+Shift+M",
+            CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) == null,
+        });
+        commands.Register(new Command(UnpackPrefab, "Unpack", () => shell.UnpackSelected(completely: false))
+        {
+            Description = "Make the selected instances' entities the scene's own, keeping the prefabs inside them as instances.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) is { IsInstanceRoot: true }),
+        });
+        commands.Register(new Command(UnpackPrefabCompletely, "Unpack Completely", () => shell.UnpackSelected(completely: true))
+        {
+            Description = "Make the selected instances' entities the scene's own, through every prefab inside them.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) is { IsInstanceRoot: true }),
+        });
+        commands.Register(new Command(OpenPrefab, "Open Prefab", shell.OpenSelectedPrefab)
+        {
+            Description = "Open the selected instance's prefab in the scene's place, to edit it as a scene.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedPrefab != null,
+        });
+        commands.Register(new Command(ApplyAllPrefab, "Apply All", () => shell.ApplyAllSelected())
+        {
+            Description = "Apply every override of the selected instances to their prefabs, so every instance has them.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) != null),
+        });
+        commands.Register(new Command(RevertAllPrefab, "Revert All", () => shell.RevertAllSelected())
+        {
+            Description = "Drop every override of the selected instances, and the entities added to them, so they are their prefabs again.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) != null),
+        });
+        commands.Register(new Command(MakeVariant, "Make Variant", shell.RequestMakeVariant)
+        {
+            Description = "Make a new prefab of the selected instance with its overrides, which varies its prefab, and make the instance one of it.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Select(e => shell.InstanceOf(e.Id)?.Instance).OfType<ulong>().Distinct().Count() == 1,
+        });
+        commands.Register(new Command(SelectPrefabAsset, "Select Prefab Asset", shell.SelectPrefabAsset)
+        {
+            Description = "Show the prefab of the selected entity's instance in the content browser.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntity is { } e && shell.InstanceOf(e.Id) != null,
         });
         commands.Register(new Command(DeleteEntity, "Delete", shell.DeleteSelected)
         {
@@ -651,6 +709,7 @@ static class EditorCommands
         NewAssetCommand(NewMaterial, Link.Cook.AssetTemplate.Material, "New Material", "material", "Add a material graph, lit, to the content browser's folder.");
         NewAssetCommand(NewMaterialFunction, Link.Cook.AssetTemplate.MaterialFunction, "New Material Function", "material-function", "Add a material function, a graph that materials call as a node, to the content browser's folder.");
         NewAssetCommand(NewMesh, Link.Cook.AssetTemplate.Mesh, "New Mesh", "mesh", "Add a mesh file, a 1 m box to build level geometry from, to the content browser's folder.");
+        NewAssetCommand(NewPrefab, Link.Cook.AssetTemplate.Prefab, "New Prefab", "prefab", "Add a prefab, an entity that scenes place as instances, to the content browser's folder.");
         NewAssetCommand(NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
         {

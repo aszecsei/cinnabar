@@ -69,7 +69,7 @@ The order in which the daemon was built. Phases 1 to 4 are done; phase 5 is in [
 5. **Later:** rewriting requires, pairing orphans, a saved index, and thumbnails as a cook output.
 
 ## Editor
-The order in which the editor was built. Phases 1 to 14 are done; phase 15 is in [Future work](editor/README.md#future-work).
+The order in which the editor was built. Phases 1 to 15 are done; what comes next is in [Future work](editor/README.md#future-work).
 
 1. **Viewport:** an Avalonia window that shows the host's live frames: the editor's D3D11 device, the copy into keyed-mutex textures, the host's `--adapter`, and the host in its Job Object.
 2. **Shell:** the projects, the docking layout, the ribbon and the command registry.
@@ -85,4 +85,4 @@ The order in which the editor was built. Phases 1 to 14 are done; phase 15 is in
 12. **Rendering parity:** field tags as lists, colors with a picker, sliders for ranged numbers and two-number fields; volume settings with override check boxes; the viewport's debug views, feature toggles and exposure (see [Rendering](#rendering)).
 13. **Capture:** screenshots with a JSON sidecar and the renderer's debug views, the host's history ring and the GIF encoder, the frame target's readback in the backend, the automation socket, and `editorctl` with `just screenshot` and `just gif` (see [Editor](editor/capture.md#capture)).
 14. **Mesh editing** (see [Editor](editor/mesh-editing.md)), in six steps: the `.mesh` asset, its parsers, `mesh_bake` and the cooker's importer; the live path, `live_meshes`, `build_simple_meshlets`, the residency override and `MeshOperation` on the scene's stack; the mode, with `MeshPick`, `Mesh_Overlay`, the gizmo on the sub-selection, the grid, Block and the dev materials; the mesh tools, the primitives, Draw and the loop cut; the texture tools, the Face panel, the texel density, tool textures and hotspots in the index, and Transform Texture; and Keep Planar, Select Linked, Grow and Shrink, Edit Pivot and Clean's report.
-15. **Later:** prefabs, which are their own design.
+15. **Prefabs** (see [Editor](editor/prefabs.md)), in four steps: the scene format's version 2, `scene_path_id`, `scene_expand`, the `Prefab` kind and `cook scenes` cooking both kinds flat, with the shared fixture; instances in the editor, with `PrefabExpansion`, `Expanded`, `BlockOperation` and its wire form from the expansion's difference, the content browser's drop, the outliner's and the properties panel's marks, Duplicate, Unpack and Make Prefab; prefab editing, with `PrefabOperation`, Apply and Revert, a prefab as the document, reload from disk and Make Variant; and spawning, with `Field.asset`, the `Asset` value, `scene.spawn_prefab` and `World.spawn(prefab)`.

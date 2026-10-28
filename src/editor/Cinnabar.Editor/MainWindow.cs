@@ -66,6 +66,8 @@ public sealed class MainWindow : Window
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
         shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.MakePrefabRequested += name => _ = AskMakePrefab(name);
+        shell.MakeVariantRequested += name => _ = AskMakeVariant(name);
         shell.RenameRequested += item => _ = AskRename(item);
         shell.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
@@ -199,6 +201,26 @@ public sealed class MainWindow : Window
         }
     }
 
+    async Task AskMakePrefab(string suggested)
+    {
+        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var name = await Dialogs.AskName(this, "Make Prefab", $"Name the prefab, which the next save writes in {place}.", suggested, "Make");
+        if (name != null)
+        {
+            _shell.MakePrefab(name);
+        }
+    }
+
+    async Task AskMakeVariant(string suggested)
+    {
+        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var name = await Dialogs.AskName(this, "Make Variant", $"Name the variant, which the next save writes in {place}.", suggested, "Make");
+        if (name != null)
+        {
+            _shell.MakeVariant(name);
+        }
+    }
+
     async Task AskNewAsset(Link.Cook.AssetTemplate? template)
     {
         if (_shell.ContentFolder is not { } folder)
@@ -213,6 +235,7 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Material => ("New Material", "material"),
             Link.Cook.AssetTemplate.MaterialFunction => ("New Material Function", "material function"),
             Link.Cook.AssetTemplate.Mesh => ("New Mesh", "mesh, a 1 m box,"),
+            Link.Cook.AssetTemplate.Prefab => ("New Prefab", "prefab"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";
@@ -318,7 +341,7 @@ public sealed class MainWindow : Window
         {
             Title = "Open Scene",
             AllowMultiple = false,
-            FileTypeFilter = [new FilePickerFileType("Scenes") { Patterns = [$"*{Document.SceneFile.Extension}"] }],
+            FileTypeFilter = [new FilePickerFileType("Scenes and prefabs") { Patterns = [$"*{Document.SceneFile.Extension}", $"*{Document.SceneFile.PrefabExtension}"] }],
             SuggestedStartLocation = _shell.Scene is { } open
                 ? await StorageProvider.TryGetFolderFromPathAsync(System.IO.Path.GetDirectoryName(open.Path)!)
                 : null,
@@ -342,7 +365,8 @@ public sealed class MainWindow : Window
         var scene = _shell.Scene;
         var dirty = scene is { IsDirty: true } ? " •" : "";
         Title = scene == null ? "cinnabar editor" : $"{scene.Title}{dirty} - cinnabar editor";
-        _sceneStatus.Text = scene == null ? "No scene" : scene.Title + dirty;
+        // A prefab open as the document says so, since its rules differ from a scene's.
+        _sceneStatus.Text = scene == null ? "No scene" : scene.IsPrefab ? $"Prefab  ·  {scene.Title}{dirty}" : scene.Title + dirty;
         ToolTip.SetTip(_sceneStatus, scene?.Path);
     }
 

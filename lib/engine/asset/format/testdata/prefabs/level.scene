@@ -1,0 +1,73 @@
+# A level with an instance of the door with an override of every kind, entities added to it and one under a removed
+# entity, an instance of the variant, an instance of a prefab that is missing, and an override whose entity is gone.
+# expected.scene is what it expands to. The blocks are in the order that the editor writes them.
+scene 2
+
+entity 5000000000000001
+name = "Front Door"
+prefab = $22222222222222222222222222222222
+remove component 10
+component 1 Transform
+	position = [16777216, 0, -754974720]
+	rotation = [0, 0.7071068, 0, 0.7071068]
+	scale = [1, 1, 1]
+behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
+	trigger = @6000000000000001
+
+entity 5000000000000001#2000000000000002
+name = "Dim Frame"
+component 35 Point_Light
+	intensity = 0.25
+component 40 Audio_Source
+	volume = 0.5
+
+entity 5000000000000001#2000000000000003
+parent = @5000000000000001
+active = false
+remove behaviour $aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+entity 5000000000000001#2000000000000004
+removed = true
+
+entity 5000000000000001#2000000000000005#1000000000000002
+component 35 Point_Light
+	intensity = 2.0
+
+entity 5000000000000001#2000000000000009
+name = "Gone"
+
+entity 6000000000000001
+name = "Trigger"
+component 1 Transform
+	position = [16777216, 0, -738197504]
+behaviour bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+	frame = @5000000000000001#2000000000000002
+
+entity 6000000000000002
+name = "Sticker"
+parent = @5000000000000001#2000000000000002
+component 2 Local_Transform
+	offset = [0.1, 1.2, 0.02]
+
+entity 6000000000000003
+name = "Under Hinge"
+parent = @5000000000000001#2000000000000004
+
+entity 7000000000000001
+name = "Back Door"
+prefab = $33333333333333333333333333333333
+component 1 Transform
+	position = [-16777216, 0, 754974720]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity 7000000000000001#3000000000000001#2000000000000003
+name = "Brass Handle"
+
+entity 8000000000000001
+name = "Statue"
+prefab = $44444444444444444444444444444444
+component 1 Transform
+	position = [0, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]

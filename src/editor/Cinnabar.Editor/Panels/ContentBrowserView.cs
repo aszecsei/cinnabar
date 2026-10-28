@@ -334,6 +334,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Material => "material",
         AssetKind.MaterialInstance => "material instance",
         AssetKind.MaterialFunction => "material function",
+        AssetKind.Prefab => "prefab",
         _ => "script",
     };
 
@@ -582,6 +583,7 @@ public sealed class ContentBrowserView : DockPanel
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
                     ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
+                    ("New Prefab", AssetTemplate.Prefab),
                     ("New Folder", null),
                 })
             {

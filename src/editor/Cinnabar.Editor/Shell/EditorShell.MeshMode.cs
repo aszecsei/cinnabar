@@ -224,7 +224,13 @@ public sealed partial class EditorShell
         PickPixel(pixel, result =>
         {
             var hits = result.Hits.Where(h => Pickable(h.Entity)).ToList();
-            if (hits.Count == 0 || Scene?.Scene.Find(hits[0].SceneId) is not { } entity || MeshFileOf(entity) == null)
+            // A double click inside an instance first selects the entity under the mouse, which a click does not.
+            if (hits.Count > 0 && InstanceOf(hits[0].SceneId) is { IsInstanceRoot: false } && !Selection.Contains(hits[0].Entity))
+            {
+                Selection.Set([hits[0].Entity]);
+                return;
+            }
+            if (hits.Count == 0 || Scene?.Expanded.Flat.Find(hits[0].SceneId) is not { } entity || MeshFileOf(entity) == null)
             {
                 return;
             }
@@ -310,7 +316,7 @@ public sealed partial class EditorShell
 
     // The placement of an edited mesh relative to the camera, from its entity's pose in the document.
     MeshPlacement? PlacementOf(string guid) =>
-        Scene != null && _editedMeshes.TryGetValue(guid, out var id) && Scene.Scene.Find(id) is { } entity && SceneEdits.WorldPose(Scene.Scene, entity) is { } pose
+        Scene != null && _editedMeshes.TryGetValue(guid, out var id) && Scene.Expanded.Flat.Find(id) is { } entity && SceneEdits.WorldPose(Scene.Expanded.Flat, entity) is { } pose
             ? MeshPlacement.Of(pose, Camera.Position) : null;
 
     /// <summary>The element under a pixel in the current kind, or null: the editor's own pick, synchronous.</summary>
@@ -448,7 +454,7 @@ public sealed partial class EditorShell
     // camera's nearest world axis.
     (long[] Origin, int Axis) GridPlane()
     {
-        long[] origin = MeshGizmoPose()?.Pivot ?? (SelectedSceneEntity is { } entity && Scene != null && SceneEdits.WorldPose(Scene.Scene, entity) is { } pose ? pose.Position : Camera.Pivot);
+        long[] origin = MeshGizmoPose()?.Pivot ?? (SelectedSceneEntity is { } entity && Scene != null && SceneEdits.WorldPose(Scene.Expanded.Flat, entity) is { } pose ? pose.Position : Camera.Pivot);
         return (SnapRaw(origin), MeshGrid.NearestAxis(Camera.Forward));
     }
 
@@ -674,7 +680,7 @@ public sealed partial class EditorShell
         for (var n = 1; ; n++)
         {
             var name = n == 1 ? stem : $"{stem}_{n}";
-            if (Scene!.Scene.Entities.All(e => e.Name != name) && Meshes.Documents.All(d => Path.GetFileNameWithoutExtension(d.Path) != name))
+            if (Scene!.Expanded.Flat.Entities.All(e => e.Name != name) && Meshes.Documents.All(d => Path.GetFileNameWithoutExtension(d.Path) != name))
             {
                 return name;
             }

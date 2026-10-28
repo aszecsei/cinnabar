@@ -2,7 +2,7 @@
 # walls, a checker floor, a red pillar and a green partition, lit by a quad light under the ceiling (see
 # docs/content/kinds/meshes.md#mesh-files). The camera stands inside, near the front wall. Positions are raw
 # World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
-scene 1
+scene 2
 
 entity 1ce040845e87f2d5
 name = "Camera"

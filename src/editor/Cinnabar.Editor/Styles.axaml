@@ -285,6 +285,13 @@
         <Setter Property="CornerRadius" Value="3" />
         <Setter Property="Padding" Value="8,4" />
     </Style>
+    <!-- An instance's root in the outliner and the properties header, as Unity marks a prefab's. -->
+    <Style Selector="PathIcon.prefab">
+        <Setter Property="Foreground" Value="#EC6A5E" />
+    </Style>
+    <Style Selector="TextBlock.prefab">
+        <Setter Property="Foreground" Value="#EC6A5E" />
+    </Style>
     <Style Selector="TextBlock.warning">
         <Setter Property="Foreground" Value="#E8B04A" />
     </Style>

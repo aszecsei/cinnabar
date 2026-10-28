@@ -377,13 +377,15 @@ behaviour_values :: proc(scripts: ^script.Runtime, entity: ecs.Entity, allocator
 		fields := make([]link.Behaviour_Field, len(s.fields), allocator)
 		for f, j in s.fields {
 			fields[j] = {
-				name    = f.name,
-				kind    = link.Behaviour_Field_Kind(f.kind),
-				number  = f.number,
-				boolean = f.boolean,
-				text    = f.text,
-				vector  = f.vector,
-				entity  = u64(f.entity),
+				name       = f.name,
+				kind       = link.Behaviour_Field_Kind(f.kind),
+				number     = f.number,
+				boolean    = f.boolean,
+				text       = f.text,
+				vector     = f.vector,
+				entity     = u64(f.entity),
+				asset      = ([16]u8)(f.asset),
+				asset_kind = f.asset_kind,
 			}
 		}
 		values[i] = {class = s.class, script = ([16]u8)(s.script), enabled = s.enabled, fields = fields}
@@ -402,5 +404,6 @@ find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 }
 
 #assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))
+#assert(int(script.Behaviour_Field_Kind.Asset) == int(link.Behaviour_Field_Kind.Asset))
 #assert(int(format.Scene_Value_Kind.Entity) == int(link.Scene_Value_Kind.Entity))
 #assert(int(format.Scene_Value_Kind.Asset) == int(link.Scene_Value_Kind.Asset))

@@ -54,7 +54,7 @@ public sealed partial class EditorShell
     /// </summary>
     public bool OpenScene(string path)
     {
-        var (document, problems) = SceneDocument.Open(path);
+        var (document, problems) = SceneDocument.Open(path, OpenPrefab, PrefabGuidOf(path));
         Report(path, problems);
         if (document == null)
         {
@@ -86,7 +86,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"scene: cannot restore {autosave}");
             return false;
         }
-        Attach(SceneDocument.Restored(Scene.Path, scene));
+        Attach(SceneDocument.Restored(Scene.Path, scene, OpenPrefab, Scene.PrefabGuid));
         Console.Add(LogLevel.Info, $"scene: restored the unsaved changes of {Scene.Path} from {autosave}");
         return true;
     }
@@ -216,11 +216,11 @@ public sealed partial class EditorShell
     /// <summary>The primary selected entity as the document has it, or null for none, or for one that the game spawned.</summary>
     /// In play mode the host's world is not the document's, so there is none.
     public SceneEntity? SelectedSceneEntity =>
-        IsEditing && World.Find(Selection.Entity) is { SceneId: not 0 } node ? Scene?.Scene.Find(node.SceneId) : null;
+        IsEditing && World.Find(Selection.Entity) is { SceneId: not 0 } node ? Scene?.Expanded.Flat.Find(node.SceneId) : null;
 
     /// <summary>The selected entities that the document has, in the order they were selected.</summary>
     public IReadOnlyList<SceneEntity> SelectedSceneEntities =>
-        Scene == null || !IsEditing ? [] : [.. Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Scene.Find(id)).OfType<SceneEntity>()];
+        Scene == null || !IsEditing ? [] : [.. Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Select(id => Scene.Expanded.Flat.Find(id)).OfType<SceneEntity>()];
 
     /// <summary>Selects an entity by scene ID, now, or when the host reports it.</summary>
     public void SelectScene(ulong sceneId) => SelectScenes([sceneId]);
@@ -245,8 +245,8 @@ public sealed partial class EditorShell
         {
             return;
         }
-        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Scene, selected)?.Position : null;
-        var create = SceneEdits.NewEntity(Scene.Scene, at ?? [0, 0, 0]);
+        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
+        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
         if (Edit("Create Entity", create))
         {
             SelectScene(create.Created.Id);
@@ -263,8 +263,8 @@ public sealed partial class EditorShell
         {
             return;
         }
-        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Scene, selected)?.Position : null;
-        var create = SceneEdits.NewEntity(Scene.Scene, at ?? [0, 0, 0]);
+        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
+        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
         create.Created.Name = "Volume";
         create.Created.Components.Add(new SceneComponent(SceneEdits.VolumeId, "Volume", [new SceneField("shape", SceneValue.Name("Global"))]));
         if (Edit("Create Volume", create))
@@ -285,7 +285,7 @@ public sealed partial class EditorShell
         var copies = new List<ulong>();
         foreach (var entity in roots)
         {
-            var (duplicate, copy) = SceneEdits.Duplicate(Scene.Scene, entity.Id);
+            var (duplicate, copy) = PrefabEdits.Duplicate(Scene, entity.Id);
             ops.AddRange(duplicate);
             copies.Add(copy);
         }
@@ -309,7 +309,7 @@ public sealed partial class EditorShell
             return;
         }
         Edit(roots.Count == 1 ? $"Delete {Label(roots[0])}" : $"Delete {roots.Count} Entities",
-            [.. roots.SelectMany(e => SceneEdits.DestroyTree(Scene.Scene, e.Id))]);
+            [.. roots.SelectMany(e => PrefabEdits.DestroyTree(Scene, e.Id))]);
     }
 
     // The selected entities without those under another selected entity, which an edit of that one includes.
@@ -326,7 +326,7 @@ public sealed partial class EditorShell
                 {
                     return false;
                 }
-                parent = Scene!.Scene.Find(parent)?.Parent ?? 0;
+                parent = Scene!.Expanded.Flat.Find(parent)?.Parent ?? 0;
             }
             return true;
         })];
@@ -335,13 +335,13 @@ public sealed partial class EditorShell
     /// <summary>Moves an entity under another, or to the root with 0, keeping where it is in the world.</summary>
     public bool Reparent(ulong sceneId, ulong parent)
     {
-        if (Scene?.Scene.Find(sceneId) is not { } entity || entity.Parent == parent || sceneId == parent)
+        if (Scene?.Expanded.Flat.Find(sceneId) is not { } entity || entity.Parent == parent || sceneId == parent)
         {
             return false;
         }
         try
         {
-            return Edit(parent == 0 ? $"Unparent {Label(entity)}" : $"Parent {Label(entity)}", SceneEdits.Reparent(Scene.Scene, sceneId, parent));
+            return Edit(parent == 0 ? $"Unparent {Label(entity)}" : $"Parent {Label(entity)}", SceneEdits.Reparent(Scene.Expanded.Flat, sceneId, parent));
         }
         catch (InvalidOperationException e)
         {
@@ -365,6 +365,7 @@ public sealed partial class EditorShell
         document.Changed += OnDocumentChanged;
         _problems.Clear();
         ProblemsChanged?.Invoke();
+        ReportExpansion();
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
         LoadSceneView();
@@ -375,7 +376,8 @@ public sealed partial class EditorShell
     void SendOperations(IReadOnlyList<Operation> operations)
     {
         // A mesh operation has nothing here: the mesh set's change sends the live mesh.
-        var wire = operations.Select(o => o.ToWire()).OfType<Link.Protocol.Operation>().ToArray();
+        // An edit of an instance has the difference that it made to the expansion.
+        var wire = operations.SelectMany(o => o.ToWires()).ToArray();
         if (wire.Length > 0)
         {
             Host.Send(new ApplyOperations(wire));
@@ -403,7 +405,7 @@ public sealed partial class EditorShell
     {
         if (Scene != null && Host.Linked)
         {
-            Host.Send(SceneSnapshot.ToMessage(Scene.Scene));
+            Host.Send(SceneSnapshot.ToMessage(Scene.Expanded.Flat));
         }
     }
 

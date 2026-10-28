@@ -3,6 +3,7 @@ package script
 import "core:c"
 import "core:fmt"
 import "core:log"
+import "core:strings"
 
 import "cinnabar:core/luau"
 import "cinnabar:core/profile"
@@ -352,9 +353,12 @@ field_problem :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key: st
 		ok = actual == .VECTOR
 	case "entity":
 		ok = actual == .NIL || to_entity(L, value) != 0
+	case "asset":
+		ok = actual == .NIL || to_asset(r, L, value) != {}
 	}
 	if !ok {
-		return fmt.aprintf("%s.%s takes a %s", class_name(r, L, class), key, kind, allocator = frame(r))
+		article := strings.index_byte("aeiou", kind[0] if len(kind) > 0 else 'x') >= 0 ? "an" : "a"
+		return fmt.aprintf("%s.%s takes %s %s", class_name(r, L, class), key, article, kind, allocator = frame(r))
 	}
 	return ""
 }
@@ -564,30 +568,7 @@ attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid, fields: []B
 	status := luau.cpcall(r.L, proc "c" (L: ^luau.State) -> c.int {
 		d := (^Data)(luau.touserdata(L, 1))
 		context = d.r.bindings.ctx
-		push_module(d.r, L, d.guid)
-		class := luau.gettop(L)
-		if !is_class(L, class) {
-			raise(L, fmt.aprintf("%s does not return a Behaviour class", guid_text(d.r, d.guid), allocator = frame(d.r)))
-		}
-		values: c.int
-		if len(d.fields) > 0 {
-			luau.rawgetfield(L, class, "__fields")
-			schema := luau.gettop(L)
-			luau.newtable(L)
-			values = luau.gettop(L)
-			for f in d.fields {
-				push_behaviour_field(L, f)
-				if problem := field_problem(d.r, L, class, schema, f.name, -1); problem != "" {
-					log.warnf("script: Entity(%s): %s, so the value is not set", entity_text(d.r, d.e), problem)
-					luau.pop(L, 1)
-					continue
-				}
-				luau.pushodinstring(L, f.name)
-				luau.insert(L, -2)
-				luau.rawset(L, values)
-			}
-		}
-		attach(d.r, L, d.e, class, values, immediate = false)
+		attach_fields(d.r, L, d.e, d.guid, d.fields, immediate = false)
 		return 0
 	}, &data)
 	if status != .OK {
@@ -598,8 +579,75 @@ attach_script :: proc(r: ^Runtime, e: ecs.Entity, guid: format.Guid, fields: []B
 	return true
 }
 
+// Pending_Behaviour is a behaviour that a spawn attaches to one of the entities that it made.
+Pending_Behaviour :: struct {
+	entity: ecs.Entity,
+	script: format.Guid,
+	fields: []Behaviour_Field,
+}
+
+// Prefab_Spawner adds a prefab's entities to the world with a pose for its root, and gives the root and the
+// behaviours to attach, in the prefab's entity order, without attaching them. ok is false, with a message, when the
+// prefab cannot be spawned.
+Prefab_Spawner :: #type proc(r: ^Runtime, guid: format.Guid, pose: ecs.Transform) -> (root: ecs.Entity, behaviours: []Pending_Behaviour, message: string, ok: bool)
+
+// set_prefab_spawner gives World.spawn(prefab) what it calls. lib/engine/scene's register_scripts calls it, in the
+// game's Register_Proc, so a reload sets it again.
+set_prefab_spawner :: proc(r: ^Runtime, spawner: Prefab_Spawner) {
+	r.prefab_spawner = spawner
+}
+
+// spawn_prefab_now spawns a prefab from a script and pushes its root. Its behaviours attach at once, so awake and
+// on_enable run before it returns, as entity:add does.
 @(private)
-push_behaviour_field :: proc(L: ^luau.State, f: Behaviour_Field) {
+spawn_prefab_now :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid, pose: ecs.Transform) {
+	if r.prefab_spawner == nil {
+		raise(L, "World.spawn(prefab) needs the scene loader, which the game registers with scene.register_scripts")
+	}
+	root, behaviours, message, ok := r.prefab_spawner(r, guid, pose)
+	if !ok {
+		raise(L, message)
+	}
+	for b in behaviours {
+		attach_fields(r, L, b.entity, b.script, b.fields, immediate = true)
+	}
+	push_entity(L, root)
+}
+
+// attach_fields attaches the behaviour of a script asset to an entity with field values, on the thread L. A field
+// that the class does not declare, or a value of the wrong type, is skipped with a warning.
+@(private)
+attach_fields :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, guid: format.Guid, fields: []Behaviour_Field, immediate: bool) {
+	top := luau.gettop(L)
+	defer luau.settop(L, top)
+	push_module(r, L, guid)
+	class := luau.gettop(L)
+	if !is_class(L, class) {
+		raise(L, fmt.aprintf("%s does not return a Behaviour class", guid_text(r, guid), allocator = frame(r)))
+	}
+	values: c.int
+	if len(fields) > 0 {
+		luau.rawgetfield(L, class, "__fields")
+		schema := luau.gettop(L)
+		luau.newtable(L)
+		values = luau.gettop(L)
+		for f in fields {
+			push_behaviour_field(r, L, f)
+			if problem := field_problem(r, L, class, schema, f.name, -1); problem != "" {
+				log.warnf("script: Entity(%s): %s, so the value is not set", entity_text(r, e), problem)
+				luau.pop(L, 1)
+				continue
+			}
+			luau.pushodinstring(L, f.name)
+			luau.insert(L, -2)
+			luau.rawset(L, values)
+		}
+	}
+	attach(r, L, e, class, values, immediate)
+}
+
+@(private)
+push_behaviour_field :: proc(r: ^Runtime, L: ^luau.State, f: Behaviour_Field) {
 	switch f.kind {
 	case .Nil:
 		luau.pushnil(L)
@@ -613,5 +661,7 @@ push_behaviour_field :: proc(L: ^luau.State, f: Behaviour_Field) {
 		luau.pushvector(L, f.vector.x, f.vector.y, f.vector.z)
 	case .Entity:
 		push_entity(L, f.entity)
+	case .Asset:
+		push_asset(r, L, f.asset)
 	}
 }

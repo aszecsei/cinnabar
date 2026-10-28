@@ -446,7 +446,7 @@ public sealed partial class EditorShell
             return false;
         }
         var guids = MeshSelection.Guids.Where(g => FindMeshData(g) != null && PlacementOf(g) != null).ToList();
-        if (guids.Count == 0 || Scene.Scene.Find(_editedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(Scene.Scene, source) is not { } pose)
+        if (guids.Count == 0 || Scene.Expanded.Flat.Find(_editedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(Scene.Expanded.Flat, source) is not { } pose)
         {
             return false;
         }
@@ -502,7 +502,7 @@ public sealed partial class EditorShell
         var guid = Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
         var directory = Path.Combine(Path.GetDirectoryName(Scene!.Path)!, $"{Path.GetFileNameWithoutExtension(Scene.Path)}_meshes");
         var document = new MeshDocument(Path.Combine(directory, name + MeshFile.Extension), guid, data, saved: false);
-        var create = SceneEdits.NewEntity(Scene.Scene, pose.Position);
+        var create = SceneEdits.NewEntity(Scene.Expanded.Flat, pose.Position);
         create.Created.Name = name;
         create.Created.Components[0] = new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(pose));
         var fields = new List<SceneField> { new("mesh", SceneValue.AssetRef(guid)) };
