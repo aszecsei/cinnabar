@@ -58,6 +58,13 @@ Runtime :: struct {
 	category:         c.int,
 	// While set, no script code runs for the world's changes (see set_quiet).
 	quiet:            bool,
+	// The GUIDs that scripts hold references to, by the payload of their light userdata. They stay across reloads,
+	// since the VM's values keep their payloads.
+	asset_refs:       [MAX_ASSET_REFS]format.Guid,
+	asset_ref_count:  int,
+	// A registration, which reload clears: what World.spawn(prefab) calls, which lib/engine/scene sets, since the
+	// scene loader is above this package (see set_prefab_spawner).
+	prefab_spawner:   Prefab_Spawner,
 	waiters:          [MAX_WAITERS]Waiter,
 	waiter_used:      int,
 	waiter_seq:       u64,
@@ -151,6 +158,7 @@ reload :: proc(r: ^Runtime, platform: ^core.Platform_API, register: Register_Pro
 	script_host.clear(&r.bindings)
 	r.light_methods = {}
 	r.userdata_methods = {}
+	r.prefab_spawner = nil
 	r.exposed_count = 0
 	r.field_count = 0
 	r.defined_count = 0
@@ -346,6 +354,7 @@ create_metatables :: proc(r: ^Runtime) {
 	luau.pop(L, 2)
 	luau.setlightuserdataname(L, c.int(Light_Tag.Entity), "Entity")
 	luau.setlightuserdataname(L, c.int(Light_Tag.Component_Type), "ComponentType")
+	luau.setlightuserdataname(L, c.int(Light_Tag.Asset), "Asset")
 
 	for tag in Userdata_Tag {
 		if tag == .None {

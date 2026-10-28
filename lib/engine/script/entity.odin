@@ -4,6 +4,7 @@ import "core:c"
 import "core:fmt"
 
 import "cinnabar:core/luau"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // register_world defines Entity's methods and the World library. See docs/scripting/api.md#the-entity-and-component-view.
@@ -96,6 +97,13 @@ light_index :: proc(L: ^luau.State) -> c.int {
 			return 1
 		}
 		raise(L, fmt.aprintf("ComponentType has no field %s", key, allocator = frame(r)))
+	case .Asset:
+		if key == "guid" {
+			buffer: [32]u8
+			luau.pushodinstring(L, format.guid_format(to_asset(r, L, 1), &buffer))
+			return 1
+		}
+		raise(L, fmt.aprintf("Asset has no field %s", key, allocator = frame(r)))
 	case .None, .Instance_Key:
 	}
 	raise(L, "this value has no fields")
@@ -126,6 +134,9 @@ light_tostring :: proc(L: ^luau.State) -> c.int {
 		luau.pushodinstring(L, fmt.aprintf("Entity(%s)", entity_text(r, to_entity(L, 1)), allocator = frame(r)))
 	case .Component_Type:
 		luau.pushodinstring(L, fmt.aprintf("ComponentType(%s)", component_name(r, check_component_type(L, 1)), allocator = frame(r)))
+	case .Asset:
+		buffer: [32]u8
+		luau.pushodinstring(L, fmt.aprintf("Asset(%s)", format.guid_format(to_asset(r, L, 1), &buffer), allocator = frame(r)))
 	case .None, .Instance_Key:
 		luau.pushstring(L, "lightuserdata")
 	}
@@ -302,16 +313,24 @@ entity_set_parent :: proc(L: ^luau.State) -> c.int {
 	return 0
 }
 
-// world_spawn creates an entity with a Transform at once, like Unity's Instantiate without a prefab.
+// world_spawn creates an entity with a Transform at once, like Unity's Instantiate without a prefab. With a prefab
+// first, it spawns an instance of it, as Unity's Instantiate with one: every behaviour in it wakes, in the prefab's
+// entity order, before it returns the root (see docs/editor/prefabs.md#spawning-at-run-time).
 @(private = "file")
 world_spawn :: proc(L: ^luau.State) -> c.int {
-	_, w := world_of(L)
+	r, w := world_of(L)
+	prefab := to_asset(r, L, 1)
+	first: c.int = prefab != {} ? 2 : 1
 	pose := ecs.TRANSFORM_IDENTITY
-	if !luau.isnoneornil(L, 1) {
-		pose.position = check_position(L, 1)
+	if !luau.isnoneornil(L, first) {
+		pose.position = check_position(L, first)
 	}
-	if !luau.isnoneornil(L, 2) {
-		pose.rotation = check_quaternion(L, 2)
+	if !luau.isnoneornil(L, first + 1) {
+		pose.rotation = check_quaternion(L, first + 1)
+	}
+	if prefab != {} {
+		spawn_prefab_now(r, L, prefab, pose)
+		return 1
 	}
 	e := ecs.spawn(w)
 	ecs.add(w, e, pose)

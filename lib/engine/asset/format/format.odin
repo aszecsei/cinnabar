@@ -220,10 +220,13 @@ Script_Field_Kind :: enum u32 {
 	String,
 	Vector,
 	Entity,
+	// An asset reference. text holds the kind of asset that it takes, as the cook link names kinds in lowercase, such
+	// as "prefab", or "" for any.
+	Asset,
 }
 
 // Script_Field is a field of a behaviour, from Behaviour.define. number holds the default of a Number, and 1 or 0
-// for a Boolean. text holds a String's default.
+// for a Boolean. text holds a String's default, and an Asset's kind of asset.
 Script_Field :: struct {
 	name:   Slice,
 	kind:   Script_Field_Kind,

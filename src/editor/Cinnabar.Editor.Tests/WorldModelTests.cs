@@ -252,4 +252,17 @@ public class WorldModelTests
     [Fact]
     public void AnUnnamedEnumValueShowsItsNumber() =>
         Assert.Equal("3", FieldValues.Format(Field(FieldKind.Enum, 0, FieldKind.U8, new EnumValue("Idle", 0)), [3]));
+
+    [Fact]
+    public void AnAssetBehaviourFieldShowsItsAssetAndReadsAsAReference()
+    {
+        var guid = Convert.FromHexString("9db8150cc7215ffc2708d20d77cf60bf");
+        var field = new BehaviourField("turret", BehaviourFieldKind.Asset, 0, false, "", [0, 0, 0], 0, guid, "prefab");
+
+        Assert.Equal(DisplayKind.Asset, FieldValues.DisplayKindOf(field.Kind));
+        Assert.Equal("9db8150cc7215ffc2708d20d77cf60bf", FieldValues.Display(field).Text);
+        Assert.Equal(Document.SceneValue.AssetRef("9db8150cc7215ffc2708d20d77cf60bf"), Panels.FieldEditor.Read(field, id => id));
+        // An empty asset field reads as none.
+        Assert.Equal(Document.SceneValue.AssetRef(""), Panels.FieldEditor.Read(field with { Asset = new byte[16] }, id => id));
+    }
 }

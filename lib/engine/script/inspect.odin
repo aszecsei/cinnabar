@@ -16,17 +16,22 @@ Behaviour_Field_Kind :: enum u8 {
 	String,
 	Vector,
 	Entity,
+	// An asset reference, which is the zero GUID while the field holds none.
+	Asset,
 }
 
 // Behaviour_Field is a declared field's value. Only the member for its kind is set.
 Behaviour_Field :: struct {
-	name:    string,
-	kind:    Behaviour_Field_Kind,
-	number:  f64,
-	boolean: bool,
-	text:    string,
-	vector:  [3]f32,
-	entity:  ecs.Entity,
+	name:       string,
+	kind:       Behaviour_Field_Kind,
+	number:     f64,
+	boolean:    bool,
+	text:       string,
+	vector:     [3]f32,
+	entity:     ecs.Entity,
+	asset:      format.Guid,
+	// For an Asset field, the kind of asset that it takes, from Field.asset, or "" for any.
+	asset_kind: string,
 }
 
 Behaviour_Snapshot :: struct {
@@ -72,8 +77,18 @@ inspect :: proc(r: ^Runtime, e: ecs.Entity, allocator: runtime.Allocator) -> []B
 				field := Behaviour_Field {
 					name = strings.clone(luau.toodinstring(L, -1), allocator),
 				}
+				// An asset field says so while it is nil, so the editor offers its picker.
 				luau.pushvalue(L, -1)
-				read_field(L, instance, &field, allocator)
+				luau.rawget(L, schema)
+				if luau.rawgetfield(L, -1, "__field") == .STRING && luau.toodinstring(L, -1) == "asset" {
+					field.kind = .Asset
+					luau.rawgetfield(L, -2, "kind")
+					field.asset_kind = strings.clone(luau.toodinstring(L, -1), allocator)
+					luau.pop(L, 1)
+				}
+				luau.pop(L, 2)
+				luau.pushvalue(L, -1)
+				read_field(r, L, instance, &field, allocator)
 				append(&fields, field)
 			}
 		}
@@ -102,7 +117,7 @@ script_of :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
 
 // read_field pops a key and reads the instance's value for it, without metamethods.
 @(private = "file")
-read_field :: proc(L: ^luau.State, instance: i32, field: ^Behaviour_Field, allocator: runtime.Allocator) {
+read_field :: proc(r: ^Runtime, L: ^luau.State, instance: i32, field: ^Behaviour_Field, allocator: runtime.Allocator) {
 	luau.rawget(L, instance)
 	defer luau.pop(L, 1)
 	#partial switch luau.type(L, -1) {
@@ -123,6 +138,9 @@ read_field :: proc(L: ^luau.State, instance: i32, field: ^Behaviour_Field, alloc
 		if entity := to_entity(L, -1); entity != 0 {
 			field.kind = .Entity
 			field.entity = entity
+		} else if guid := to_asset(r, L, -1); guid != {} {
+			field.kind = .Asset
+			field.asset = guid
 		}
 	}
 }

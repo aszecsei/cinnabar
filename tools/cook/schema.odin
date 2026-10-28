@@ -168,6 +168,11 @@ read_schema :: proc(vm: ^Schema_VM, index: int) -> (class_name: string, fields: 
 			entry.vector = luau.tovector(co, -1)^
 		case "entity":
 			entry.kind = .Entity
+		case "asset":
+			entry.kind = .Asset
+			luau.rawgetfield(co, -3, "kind")
+			entry.text = strings.clone(luau.toodinstring(co, -1), context.temp_allocator)
+			luau.pop(co, 1)
 		}
 		append(&entries, entry)
 		luau.pop(co, 3)

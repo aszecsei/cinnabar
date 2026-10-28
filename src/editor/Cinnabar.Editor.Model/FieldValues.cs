@@ -57,6 +57,7 @@ public static class FieldValues
         BehaviourFieldKind.Boolean => DisplayKind.Bool,
         BehaviourFieldKind.Vector => DisplayKind.Axes,
         BehaviourFieldKind.Entity => DisplayKind.Entity,
+        BehaviourFieldKind.Asset => DisplayKind.Asset,
         _ => DisplayKind.Text,
     };
 
@@ -117,6 +118,7 @@ public static class FieldValues
         BehaviourFieldKind.String => Text($"\"{field.Text}\""),
         BehaviourFieldKind.Vector => Axes([field.Vector[0], field.Vector[1], field.Vector[2]], "", null),
         BehaviourFieldKind.Entity => Entity(field.Entity),
+        BehaviourFieldKind.Asset => new FieldDisplay(DisplayKind.Asset, AssetGuid(field.Asset), [], false, 0, null),
         _ => Text("nil"),
     };
 

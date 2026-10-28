@@ -301,17 +301,22 @@ Behaviour_Field_Kind :: enum u8 {
 	String,
 	Vector,
 	Entity,
+	// An asset reference, from Field.asset, which is the zero GUID while the field holds none.
+	Asset,
 }
 
 // A behaviour field's value. Only the member for its kind is set.
 Behaviour_Field :: struct {
-	name:    string,
-	kind:    Behaviour_Field_Kind,
-	number:  f64,
-	boolean: bool,
-	text:    string,
-	vector:  [3]f32,
-	entity:  u64,
+	name:       string,
+	kind:       Behaviour_Field_Kind,
+	number:     f64,
+	boolean:    bool,
+	text:       string,
+	vector:     [3]f32,
+	entity:     u64,
+	asset:      [16]u8,
+	// For an Asset field, the kind of asset that it takes, as the cook link names kinds, or "" for any.
+	asset_kind: string,
 }
 
 // Edit (see docs/editor/document-and-scenes.md#document-model).

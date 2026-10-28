@@ -227,6 +227,7 @@ public sealed class PropertiesView : ScrollViewer
                 {
                     Overridden = isSet == null ? null : Overridden(document!.Id, null, isSet),
                     Apply = () => _shell.ApplyField(document!.Id, 0, script, f.Name),
+                    AssetKind = f.AssetKind,
                 };
             });
             _content.Children.Add(Group(title, fields, badge: "Script", disabled: !behaviour.Enabled,

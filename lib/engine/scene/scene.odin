@@ -77,10 +77,29 @@ load :: proc(w: ^ecs.World, scripts: ^script.Runtime, s: format.Scene, handles: 
 // entities, for the new entities and the ones that their fields refer to, and gets the new ones. An entity whose
 // scene ID handles already has is skipped.
 add_entities :: proc(w: ^ecs.World, scripts: ^script.Runtime, entities: []format.Scene_Entity, handles: ^map[u64]ecs.Entity, problems: ^[dynamic]Problem = nil) -> int {
+	count, _ := add_entities_to(w, scripts, entities, handles, problems)
+	return count
+}
+
+// add_entities_to adds entities as add_entities does, and gives the entity of each, or 0 for one that it skipped.
+// Without scene_ids they get no Scene_Entity, as a game's entities have none. With pending, the behaviours are not
+// attached but collected there, for a caller that attaches them itself.
+@(private = "file")
+add_entities_to :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	entities: []format.Scene_Entity,
+	handles: ^map[u64]ecs.Entity,
+	problems: ^[dynamic]Problem = nil,
+	scene_ids := true,
+	pending: ^[dynamic]script.Pending_Behaviour = nil,
+) -> (
+	count: int,
+	spawned: []ecs.Entity,
+) {
 	l := loader(w, handles, problems)
 	// Every entity exists before any field is set, so a field can refer to an entity later in the scene.
-	spawned := make([]ecs.Entity, len(entities), w.platform.frame_allocator)
-	count := 0
+	spawned = make([]ecs.Entity, len(entities), w.platform.frame_allocator)
 	for e, i in entities {
 		l.entity = e.id
 		if e.id == 0 || e.id in handles {
@@ -91,7 +110,9 @@ add_entities :: proc(w: ^ecs.World, scripts: ^script.Runtime, entities: []format
 		spawned[i] = entity
 		count += 1
 		handles[e.id] = entity
-		ecs.add(w, entity, Scene_Entity{e.id})
+		if scene_ids {
+			ecs.add(w, entity, Scene_Entity{e.id})
+		}
 		if e.name != "" {
 			ecs.add(w, entity, ecs.make_name(e.name))
 		}
@@ -122,8 +143,8 @@ add_entities :: proc(w: ^ecs.World, scripts: ^script.Runtime, entities: []format
 			settle(w, entity)
 		}
 	}
-	if scripts == nil {
-		return count
+	if scripts == nil && pending == nil {
+		return
 	}
 	for e, i in entities {
 		if spawned[i] == 0 {
@@ -131,10 +152,91 @@ add_entities :: proc(w: ^ecs.World, scripts: ^script.Runtime, entities: []format
 		}
 		l.entity = e.id
 		for b in e.behaviours {
-			script.attach_script(scripts, spawned[i], b.script, behaviour_fields(&l, b.fields))
+			if pending != nil {
+				append(pending, script.Pending_Behaviour{spawned[i], b.script, behaviour_fields(&l, b.fields)})
+			} else {
+				script.attach_script(scripts, spawned[i], b.script, behaviour_fields(&l, b.fields))
+			}
 		}
 	}
-	return count
+	return
+}
+
+// spawn_prefab adds an instance of a cooked prefab to the world, with its root at a pose, and gives the root (see
+// docs/editor/prefabs.md#spawning-at-run-time). It loads the prefab's blob, which stays loaded, so a second spawn reads
+// memory. The entities get no Scene_Entity, as a game's entities have none, so the editor does not edit them, and the
+// prefab's references inside it resolve to its own new entities. The children keep their Local_Transform, and
+// propagation places them. The behaviours wake in the next script phase; from a script, World.spawn wakes them before
+// it returns. Call it between frames or in a serial phase.
+spawn_prefab :: proc(w: ^ecs.World, scripts: ^script.Runtime, assets: ^asset.Assets, guid: format.Guid, pose: ecs.Transform) -> (root: ecs.Entity, ok: bool) {
+	root, _, ok = spawn_prefab_entities(w, scripts, assets, guid, pose, nil)
+	return
+}
+
+// spawn_prefab_entities spawns as spawn_prefab does, and with pending, collects the behaviours there instead of
+// attaching them. message says why it could not.
+@(private = "file")
+spawn_prefab_entities :: proc(
+	w: ^ecs.World,
+	scripts: ^script.Runtime,
+	assets: ^asset.Assets,
+	guid: format.Guid,
+	pose: ecs.Transform,
+	pending: ^[dynamic]script.Pending_Behaviour,
+) -> (
+	root: ecs.Entity,
+	message: string,
+	ok: bool,
+) {
+	buffer: [32]u8
+	name := format.guid_format(guid, &buffer)
+	if assets == nil {
+		return 0, "there are no assets to spawn a prefab from", false
+	}
+	h, loaded := asset.load(assets, guid)
+	data, has_data := asset.data(assets, h)
+	header, has_header := format.blob_header(data)
+	if !loaded || !has_data || !has_header || header.kind != .Prefab {
+		message = fmt.aprintf("the prefab %s is missing, or is not a cooked prefab of this build", name, allocator = w.platform.frame_allocator)
+		log.errorf("scene: %s", message)
+		return 0, message, false
+	}
+	s, read := format.scene_read(data, w.platform.frame_allocator)
+	if !read {
+		message = fmt.aprintf("the prefab %s is not a prefab blob of this build. Cook the content.", name, allocator = w.platform.frame_allocator)
+		log.errorf("scene: %s", message)
+		return 0, message, false
+	}
+	// The prefab's own map, so its IDs never meet the scene's.
+	handles := make(map[u64]ecs.Entity, len(s.entities), w.platform.frame_allocator)
+	problems := make([dynamic]Problem, w.platform.frame_allocator)
+	_, spawned := add_entities_to(w, scripts, s.entities, &handles, &problems, scene_ids = false, pending = pending)
+	for p in problems {
+		log.warnf("scene: prefab %s: entity %016x: %s", name, p.entity, p.message)
+	}
+	for e, i in s.entities {
+		if e.parent == 0 && spawned[i] != 0 {
+			root = spawned[i]
+			break
+		}
+	}
+	if root == 0 {
+		message = fmt.aprintf("the prefab %s has no root", name, allocator = w.platform.frame_allocator)
+		return 0, message, false
+	}
+	ecs.add(w, root, pose)
+	settle(w, root)
+	return root, "", true
+}
+
+// register_scripts gives the script runtime what World.spawn(prefab) calls. Call it in the game's Register_Proc, so
+// a reload sets it again.
+register_scripts :: proc(r: ^script.Runtime) {
+	script.set_prefab_spawner(r, proc(r: ^script.Runtime, guid: format.Guid, pose: ecs.Transform) -> (root: ecs.Entity, behaviours: []script.Pending_Behaviour, message: string, ok: bool) {
+		pending := make([dynamic]script.Pending_Behaviour, r.world.platform.frame_allocator)
+		root, message, ok = spawn_prefab_entities(r.world, r, r.assets, guid, pose, &pending)
+		return root, pending[:], message, ok
+	})
 }
 
 // add_component adds or replaces a component of the entity with scene ID id, with the scene's values. It returns
@@ -512,8 +614,7 @@ behaviour_fields :: proc(l: ^Loader, fields: []format.Scene_Field) -> []script.B
 			field.entity = resolve(l, v.entity)
 			field.kind = .Entity if field.entity != 0 else .Nil
 		case v.kind == .Asset:
-			warn(l, "a behaviour's field %s is an asset, which behaviours do not take yet", f.name)
-			continue
+			field.kind, field.asset = .Asset, v.asset
 		case:
 			warn(l, "a behaviour's field %s has %d numbers, which no field kind takes", f.name, v.count)
 			continue

@@ -50,8 +50,13 @@ end
 declare extern type FieldSpec with
 end
 
+-- A reference to an asset by its GUID, from a behaviour's Field.asset. Two references to one asset are equal.
+declare extern type Asset with
+	guid: string
+end
+
 declare World: {
-	spawn: (position: WorldPosition?, rotation: Quaternion?) -> Entity,
+	spawn: ((position: WorldPosition?, rotation: Quaternion?) -> Entity) & ((prefab: Asset, position: WorldPosition?, rotation: Quaternion?) -> Entity),
 	query: (...ComponentType) -> { Entity },
 }
 
@@ -110,6 +115,7 @@ declare Field: {
 	string: (default: string?) -> FieldSpec,
 	vector: (default: vector?) -> FieldSpec,
 	entity: () -> FieldSpec,
+	asset: (kind: string?) -> FieldSpec,
 }
 
 -- A class is a table, so its methods can be defined on it. Its instances are untyped for now.

@@ -3,8 +3,11 @@ package script
 import "base:intrinsics"
 import "core:c"
 
+import "core:fmt"
+
 import "cinnabar:core/luau"
 import script_host "cinnabar:core/script"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // The tags of the engine's light userdata. They are engine constants, never registration order, because values in
@@ -18,7 +21,13 @@ Light_Tag :: enum c.int {
 	// The key under which an instance table holds its native handle. Scripts cannot make light userdata, so they
 	// cannot reach it.
 	Instance_Key,
+	// An asset reference. The payload is one more than the index of its GUID in the runtime's asset_refs, so two
+	// references to one asset are the same value and compare equal.
+	Asset,
 }
+
+// The most assets that scripts can refer to at once. A GUID keeps its place for the runtime's life.
+MAX_ASSET_REFS :: 4096
 
 // The tags of the engine's full userdata. Each has its own metatable.
 Userdata_Tag :: enum c.int {
@@ -107,6 +116,36 @@ check_entity :: proc(L: ^luau.State, idx: c.int) -> ecs.Entity {
 		luau.L_typeerrorL(L, idx, "Entity")
 	}
 	return e
+}
+
+// push_asset pushes a reference to an asset, or nil for the zero GUID.
+push_asset :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) {
+	if guid == {} {
+		luau.pushnil(L)
+		return
+	}
+	index := -1
+	for g, i in r.asset_refs[:r.asset_ref_count] {
+		if g == guid {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		if r.asset_ref_count == MAX_ASSET_REFS {
+			raise(L, fmt.aprintf("scripts refer to more than %d assets", MAX_ASSET_REFS, allocator = frame(r)))
+		}
+		index = r.asset_ref_count
+		r.asset_refs[index] = guid
+		r.asset_ref_count += 1
+	}
+	luau.pushlightuserdatatagged(L, rawptr(uintptr(index + 1)), c.int(Light_Tag.Asset))
+}
+
+// to_asset is the GUID of the asset reference at idx, or the zero GUID if the value is not one.
+to_asset :: proc(r: ^Runtime, L: ^luau.State, idx: c.int) -> format.Guid {
+	index := int(uintptr(luau.tolightuserdatatagged(L, idx, c.int(Light_Tag.Asset))))
+	return index > 0 && index <= r.asset_ref_count ? r.asset_refs[index - 1] : {}
 }
 
 push_component_type :: proc(L: ^luau.State, id: ecs.Component_Id) {
