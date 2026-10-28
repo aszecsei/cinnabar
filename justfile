@@ -185,7 +185,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models materials
+build: host game-dll script-types scripts scenes shaders textures models meshes materials
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau
@@ -255,6 +255,11 @@ materials config="dev": install-dxc cook
 # its own GUID in its model's .meta file. A model without a .meta file gets one: commit it, with the GUIDs it gains.
 models config="dev": cook
     "./{{tools_dir}}/cook.exe" models --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's mesh files and the engine's into the loose cache of the configuration: each .mesh file is a mesh with
+# its own GUID (see docs/content/kinds/meshes.md#mesh-files). A mesh without a .meta file gets one: commit it.
+meshes config="dev": cook
+    "./{{tools_dir}}/cook.exe" meshes --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's shaders and the engine's into the loose cache of the configuration: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
@@ -340,7 +345,7 @@ edit: build editor
 
 # Build the statically linked release executable into build/release, with its content and project settings beside it,
 # so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (materials "release")
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed

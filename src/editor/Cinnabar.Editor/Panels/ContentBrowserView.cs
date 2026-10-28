@@ -159,6 +159,8 @@ public sealed class ContentBrowserView : DockPanel
         };
         if (command != null && _selection.Count > 0)
         {
+            // The command acts on the shell's selection, which is this one as of now.
+            Publish();
             _shell.Commands.Get(command).Execute();
             e.Handled = true;
         }
@@ -288,6 +290,9 @@ public sealed class ContentBrowserView : DockPanel
         _selection = [.. _selection.Where(g => assets.Any(a => a.Guid == g))];
         _syncing = true;
         _assets.ItemsSource = assets;
+        // The list keeps what it had selected across a new list where it can, which may be an asset that is no
+        // longer selected here, so its selection is rebuilt from this one, not added to.
+        _assets.SelectedItems?.Clear();
         foreach (var asset in assets.Where(a => _selection.Contains(a.Guid)))
         {
             _assets.SelectedItems?.Add(asset);
@@ -576,7 +581,8 @@ public sealed class ContentBrowserView : DockPanel
             foreach (var (label, template) in new (string, AssetTemplate?)[]
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
-                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Folder", null),
+                    ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
+                    ("New Folder", null),
                 })
             {
                 menu.Items.Add(new MenuItem

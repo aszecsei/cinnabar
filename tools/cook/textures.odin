@@ -104,6 +104,8 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		key := texture_key(options, a^)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.meta.guid, &buffer))
+		// The index carries the size of the blob that the cache ends up with, cooked now or kept.
+		defer a.size = texture_blob_size(output)
 		if cooked_key(output, .Texture, format.texture_layout()) == key && !pass.force[a.meta.guid] {
 			pass.current[.Texture] += 1
 			continue
@@ -117,6 +119,21 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		pass.cooked[.Texture] += 1
 	}
 	return ok
+}
+
+// texture_blob_size is the size of a cooked texture blob, from its header, or zero for a file that is not one.
+texture_blob_size :: proc(path: string) -> (size: [2]u32) {
+	f, open_err := os.open(path)
+	if open_err != nil {
+		return
+	}
+	defer os.close(f)
+	blob: format.Texture_Blob
+	n, read_err := os.read(f, ([^]byte)(&blob)[:size_of(blob)])
+	if read_err != nil || n < size_of(blob) || blob.header.magic != format.BLOB_MAGIC || blob.header.kind != .Texture || blob.header.layout != format.texture_layout() {
+		return
+	}
+	return blob.size
 }
 
 // texture_key covers what the blob depends on: the cooker, Compressonator, the configuration, the path, the source and

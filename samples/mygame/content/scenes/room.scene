@@ -1,0 +1,54 @@
+# The room scene, which F7 in mygame cycles to: a room built by hand as a mesh file, meshes/room.mesh, with white
+# walls, a checker floor, a red pillar and a green partition, lit by a quad light under the ceiling (see
+# docs/content/kinds/meshes.md#mesh-files). The camera stands inside, near the front wall. Positions are raw
+# World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 1
+
+entity 1ce040845e87f2d5
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 26843546, -50331648]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+	near = 0.01
+
+entity 5e0c1d2b3a4f678b
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.02, 0.02, 0.035]
+
+entity 8924777c300a5121
+name = "Ceiling Light"
+component 1 Transform
+	position = [2516582400000000000, 48653107, 0]
+	rotation = [0.7071068, 0, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 39 Quad_Light
+	color = [1, 0.92, 0.8]
+	intensity = 6
+	width = 1.5
+	height = 1
+	range = 14
+	cast_shadows = true
+	two_sided = false
+
+entity a4c1e8d2f6b35079
+name = "Room"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	materials.1 = $f7eadea8bd278c0ae71b61b681352a82
+	materials.2 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	materials.3 = $0633d94a72554cf9947b0f8c9911055c
+	cast_shadows = true

@@ -71,6 +71,8 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 		kind = .Material
 	case .Material_Function:
 		kind = .Material_Function
+	case .Mesh:
+		kind = .Mesh
 	}
 	name := strings.trim_suffix(strings.trim_space(op.name), extension_of(kind))
 	if !valid_name(name) {
@@ -367,7 +369,7 @@ reimport :: proc(index: ^Index, op: cook_link.Reimport, force: ^map[format.Guid]
 }
 
 // template_text is the source of a new asset. A behaviour's class is named for its file, such as Door_Bell for
-// door_bell.luau.
+// door_bell.luau, and a mesh is a 1 m box.
 template_text :: proc(template: cook_link.Asset_Template, name: string) -> string {
 	switch template {
 	case .Script:
@@ -382,6 +384,8 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 		return "scene 1\n"
 	case .Material:
 		return "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\n"
+	case .Mesh:
+		return MESH_TEMPLATE
 	case .Material_Function:
 		return "material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n"
 	}

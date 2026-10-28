@@ -14,6 +14,7 @@ Read them in this order the first time.
 | [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos and viewport settings. |
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
+| [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
 | [Capture](capture.md) | Screenshots and GIFs of the host, the sidecar, and the automation socket that `editorctl` drives. |
 
 ## Overview
@@ -51,6 +52,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `helpers.odin`, `icons.odin` | The shapes of lights, volumes and cameras as debug lines, and their clickable icons |
 | `commands.odin` | Game commands: registered by the game, shown in the ribbon, run through `poll` |
 | `preview.odin` | Material previews for the material editor (see [Rendering](../rendering/materials.md#material-previews)) |
+| `live.odin`, `mesh_overlay.odin` | Live meshes baked and made resident in place of their blobs, and mesh mode's overlay (see [Mesh editing](mesh-editing.md#live-meshes)) |
 | `link/link.odin` | The editor link's messages, shared with the host |
 
 Everything in the game's `Editor` is a handle, an ID or a copy, so a code reload keeps it; the commands are registrations, made again in `on_reload` ([Game commands](shell-and-panels.md#game-commands)).

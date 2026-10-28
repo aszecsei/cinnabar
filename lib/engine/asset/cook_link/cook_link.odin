@@ -143,6 +143,18 @@ Asset :: struct {
 	// For a material, the combinations of static switches that it and its instances use, which each compile its
 	// shaders. 0 for other kinds.
 	permutations: u32,
+	// For a texture, its cooked size in texels, or zero before it has cooked. For a material or an instance, the
+	// texture that the editor's texture tools measure by (see docs/editor/mesh-editing.md#texture-tools), by GUID or
+	// "", and the hotspot rectangles of the material's source, in that texture's texels.
+	size:         [2]u32,
+	tool_texture: string,
+	hotspots:     []Hotspot,
+}
+
+// A hotspot rectangle of a material's tool texture, in texels: a complete tileable piece that the Hotspot tool maps a
+// face onto.
+Hotspot :: struct {
+	x0, y0, x1, y1: u32,
 }
 
 Setting :: struct {
@@ -220,6 +232,8 @@ Asset_Template :: enum u8 {
 	Material,
 	// A material function with one input and one output, linked.
 	Material_Function,
+	// A mesh file of a 1 m box with world-aligned mappings.
+	Mesh,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

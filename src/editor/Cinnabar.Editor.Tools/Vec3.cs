@@ -72,4 +72,28 @@ public static class Rotations
     }
 
     public static Vec3 Rotate(this Quat q, Vec3 v) => Vec3.From(q.Rotate(v.ToArray()));
+
+    /// <summary>The rotation that takes the world's axes to an orthonormal, right-handed frame.</summary>
+    public static Quat FromAxes(Vec3 x, Vec3 y, Vec3 z)
+    {
+        // Shepperd's method: the largest diagonal term picks the component to divide by.
+        var trace = x.X + y.Y + z.Z;
+        if (trace > 0)
+        {
+            var s = Math.Sqrt(trace + 1) * 2;
+            return new Quat((y.Z - z.Y) / s, (z.X - x.Z) / s, (x.Y - y.X) / s, s / 4).Normalized();
+        }
+        if (x.X > y.Y && x.X > z.Z)
+        {
+            var s = Math.Sqrt(1 + x.X - y.Y - z.Z) * 2;
+            return new Quat(s / 4, (x.Y + y.X) / s, (z.X + x.Z) / s, (y.Z - z.Y) / s).Normalized();
+        }
+        if (y.Y > z.Z)
+        {
+            var s = Math.Sqrt(1 + y.Y - x.X - z.Z) * 2;
+            return new Quat((x.Y + y.X) / s, s / 4, (y.Z + z.Y) / s, (z.X - x.Z) / s).Normalized();
+        }
+        var t = Math.Sqrt(1 + z.Z - x.X - y.Y) * 2;
+        return new Quat((z.X + x.Z) / t, (y.Z + z.Y) / t, t / 4, (x.Y - y.X) / t).Normalized();
+    }
 }

@@ -27,6 +27,7 @@ static class DefaultRibbon
                         new LargeButton(EditorCommands.CreateEntity),
                         new SmallStack([EditorCommands.CreateVolume, EditorCommands.DuplicateEntity, EditorCommands.DeleteEntity]),
                         new SmallStack([EditorCommands.HideSelected, EditorCommands.ShowAll, EditorCommands.LockSelected]),
+                        new SmallStack([EditorCommands.EditMesh, EditorCommands.MeshBlock]),
                     ]),
                     new RibbonGroup("Tools",
                     [
@@ -91,6 +92,59 @@ static class DefaultRibbon
                     new RibbonGroup("Capture", [new LargeButton(EditorCommands.Screenshot), new SmallStack([EditorCommands.CaptureGif])]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
                 ]),
+                // The contextual Mesh tab, while mesh mode is on (see docs/editor/mesh-editing.md#mesh-mode).
+                new RibbonTab("mesh", "Mesh",
+                [
+                    new RibbonGroup("Selection",
+                    [
+                        new SmallStack([EditorCommands.MeshVertices, EditorCommands.MeshEdges, EditorCommands.MeshFaces]),
+                        new SmallStack([EditorCommands.SelectAll, EditorCommands.MeshSelectThrough, EditorCommands.MeshSelectLinked]),
+                        new SmallStack([EditorCommands.MeshGrow, EditorCommands.MeshShrink]),
+                    ]),
+                    new RibbonGroup("Edit",
+                    [
+                        new SmallStack([EditorCommands.MeshExtrude, EditorCommands.MeshPushPull, EditorCommands.MeshOffset]),
+                        new SmallStack([EditorCommands.MeshInset, EditorCommands.MeshOutset, EditorCommands.MeshDuplicate]),
+                        new SmallStack([EditorCommands.MeshCollapse, EditorCommands.MeshMergeFaces, EditorCommands.MeshInvert]),
+                        new SmallStack([EditorCommands.DeleteEntity, EditorCommands.MeshDetach, EditorCommands.MeshExtract]),
+                        new SmallStack([EditorCommands.MeshBevel, EditorCommands.MeshClean, EditorCommands.MeshRecalculateNormals]),
+                        new SmallStack([EditorCommands.MeshEditPivot, EditorCommands.MeshCenterPivot, EditorCommands.MeshPivotToGrid]),
+                        new ComboBox(EditorCommands.MeshBevelSegments),
+                        new ComboBox(EditorCommands.MeshNormalAngle),
+                    ]),
+                    new RibbonGroup("Create",
+                    [
+                        new LargeButton(EditorCommands.MeshCreate),
+                        new ComboBox(EditorCommands.MeshPrimitive),
+                        new SmallStack([EditorCommands.MeshCut, EditorCommands.MeshDraw, EditorCommands.MeshApplyPoints]),
+                        new ComboBox(EditorCommands.MeshSides),
+                        new ComboBox(EditorCommands.MeshSegments),
+                        new ComboBox(EditorCommands.MeshRings),
+                        new ComboBox(EditorCommands.MeshSteps),
+                        new ComboBox(EditorCommands.MeshArc),
+                        new ComboBox(EditorCommands.MeshThickness),
+                        new ComboBox(EditorCommands.MeshTubeRadius),
+                    ]),
+                    new RibbonGroup("Texture",
+                    [
+                        new SmallStack([EditorCommands.TextureShiftLeft, EditorCommands.TextureShiftRight, EditorCommands.TextureShiftUp]),
+                        new SmallStack([EditorCommands.TextureShiftDown, EditorCommands.TextureRotateLeft, EditorCommands.TextureRotateRight]),
+                        new SmallStack([EditorCommands.TextureScaleUp, EditorCommands.TextureScaleDown, EditorCommands.TextureResetScale]),
+                        new SmallStack([EditorCommands.TextureAlignWorld, EditorCommands.TextureAlignFace, EditorCommands.TextureAlignEdge]),
+                        new SmallStack([EditorCommands.TextureAlignToFace, EditorCommands.TextureFit, EditorCommands.TextureFlipU]),
+                        new SmallStack([EditorCommands.TextureJustifyLeft, EditorCommands.TextureJustifyRight, EditorCommands.TextureJustifyCenter]),
+                        new SmallStack([EditorCommands.TextureHotspot, EditorCommands.TextureHotspotNext, EditorCommands.TextureHotspotRandom]),
+                        new SmallStack([EditorCommands.MeshTransformTexture]),
+                        new ComboBox(EditorCommands.MeshDevMaterial),
+                        new ComboBox(EditorCommands.MeshTexelDensity),
+                    ]),
+                    new RibbonGroup("Options",
+                    [
+                        new SmallStack([EditorCommands.MeshGridToggle, EditorCommands.MeshGridFiner, EditorCommands.MeshGridCoarser]),
+                        new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace, EditorCommands.MeshKeepPlanar]),
+                    ]),
+                    new RibbonGroup("Mode", [new LargeButton(EditorCommands.ObjectMode)]),
+                ]) { Context = EditorShell.MeshContext },
             ]);
     }
 }

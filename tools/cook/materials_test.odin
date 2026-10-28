@@ -3,9 +3,11 @@ package cook
 import "core:fmt"
 import "core:mem"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:testing"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 @(private = "file")
@@ -347,4 +349,76 @@ transparency_settings_belong_to_their_blends :: proc(t: ^testing.T) {
 	expect_error(t, &errors, "cut.material:4: cutoff is for masked materials; a transparent one blends by its opacity")
 	expect_error(t, &errors, "opaque.material:3: transparency is for transparent materials")
 	expect_error(t, &errors, "odd.material:4: transparency is moments or sorted")
+}
+
+@(private = "file")
+DEV :: `material 1
+shading = lit
+param tint color = [1, 1, 1, 1]
+param grid texture = $11112222333344445555666677778888
+hotspot 0 0 256 256
+hotspot 256 0 512 128
+node 1 output
+	base_color = @3.rgba
+node 2 parameter
+	name = "grid"
+node 3 texture_sample
+	texture = @2.value
+`
+
+@(test)
+tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
+	rock := ROCK
+	lined := strings.concatenate({rock[:strings.index(rock, "---")], "tool_texture = $22223333444455556666777788889999\n", rock[strings.index(rock, "---"):]}, context.temp_allocator)
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/grid.png.meta", "guid = 11112222333344445555666677778888\n"},
+			// A graph's tool texture is the first texture sample's, through its parameter.
+			{"content/dev.material", DEV},
+			{"content/dev.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+			// An instance that overrides the sampled parameter measures by its own texture, and a tool_texture line names one.
+			{"content/swap.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\ngrid = $22223333444455556666777788889999\n"},
+			{"content/named.material_instance", "material_instance 1\nparent = $00112233445566778899aabbccddeeff\ntool_texture = $33334444555566667777888899990000\n"},
+			// An HLSL material without a line measures by its first texture parameter, which rock's leaves at white.
+			{"content/rock.material", ROCK},
+			{"content/lined.material", lined},
+			{"content/bad.material", "material 1\nshading = lit\nhotspot 10 10 5 5\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"},
+		},
+	)
+	defer remove_tree(tree)
+	write_test_image(t, tree, "grid.png", 16, 8)
+	options := material_options(t, tree)
+	pass := cook(options, {.Texture, .Material}, log_problems = false)
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	entry :: proc(index: ^Index, path: string) -> (a: cook_link.Asset) {
+		for _, candidate in index.assets {
+			if candidate.path == path {
+				return candidate
+			}
+		}
+		return
+	}
+	dev := entry(&index, "dev.material")
+	testing.expect_value(t, dev.tool_texture, "11112222333344445555666677778888")
+	testing.expect(t, len(dev.hotspots) == 2 && dev.hotspots[0] == cook_link.Hotspot{0, 0, 256, 256} && dev.hotspots[1] == cook_link.Hotspot{256, 0, 512, 128})
+	swap := entry(&index, "swap.material_instance")
+	testing.expect_value(t, swap.tool_texture, "22223333444455556666777788889999")
+	testing.expect(t, slice.equal(swap.hotspots, dev.hotspots))
+	testing.expect_value(t, entry(&index, "named.material_instance").tool_texture, "33334444555566667777888899990000")
+	testing.expect_value(t, entry(&index, "rock.material").tool_texture, "")
+	testing.expect_value(t, entry(&index, "lined.material").tool_texture, "22223333444455556666777788889999")
+	testing.expect_value(t, entry(&index, "grid.png").size, [2]u32{16, 8})
+	bad := entry(&index, "bad.material")
+	testing.expect_value(t, bad.status, cook_link.Asset_Status.Failed)
+	testing.expect(t, bad.errors >= 1)
+	// A pass that changes nothing keeps the entries equal, so the editor hears no delta.
+	again: Index
+	index_build(&again, cook(options, {.Texture, .Material}, log_problems = false), options.roots[:])
+	defer index_destroy(&again)
+	testing.expect(t, !index_changed(index_diff(&index, &again)))
 }

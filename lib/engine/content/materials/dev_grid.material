@@ -1,0 +1,29 @@
+material 1
+# The engine's dev material (see docs/editor/mesh-editing.md#dev-materials): the dev grid texture under a tint, lit and
+# rough, so a level blocks out in measured, colored surfaces before art exists. Its instances are the tints.
+shading = lit
+tool_texture = $9c4e2a7b1d3f4a5c8e6b0d2f4a6c8e01
+param tint color = [1, 1, 1, 1]
+param roughness float = 0.85
+param grid texture = $9c4e2a7b1d3f4a5c8e6b0d2f4a6c8e01
+
+node 1 output
+	position = [360, -40]
+	base_color = @4.out
+	roughness = @5.value
+node 2 parameter
+	position = [-240, -160]
+	name = "tint"
+node 3 texture_sample
+	position = [-240, -40]
+	texture = @6.value
+node 4 multiply
+	position = [60, -100]
+	a = @2.value
+	b = @3.rgba
+node 5 parameter
+	position = [60, 60]
+	name = "roughness"
+node 6 parameter
+	position = [-480, -10]
+	name = "grid"

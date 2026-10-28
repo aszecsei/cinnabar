@@ -60,7 +60,17 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			status    = a.failed ? .Failed : .Current,
 			behaviour = clone(a.behaviour, allocator),
 			permutations = u32(a.permutations),
+			size      = a.size,
 		}
+		if a.tool_texture != {} {
+			buffer: [32]u8
+			entry.tool_texture = clone(format.guid_format(a.tool_texture, &buffer), allocator)
+		}
+		hotspots := make([]cook_link.Hotspot, len(a.hotspots), allocator)
+		for h, j in a.hotspots {
+			hotspots[j] = {h[0], h[1], h[2], h[3]}
+		}
+		entry.hotspots = hotspots
 		for p in index.problems[guids[i]] {
 			if p.error {
 				entry.errors += 1
@@ -214,10 +224,10 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations {
+	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
 		return false
 	}
-	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies)
+	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies) && slice.equal(a.hotspots, b.hotspots)
 }
 
 @(private = "file")

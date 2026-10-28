@@ -231,9 +231,9 @@ public sealed class MaterialTests : IDisposable
         shell.Assets.Apply(new ShadingModels(Shading));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(MaterialGuid, AssetKind.Material, "game", "checker.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1),
-            new Asset(FunctionGuid, AssetKind.MaterialFunction, "game", "rim.material_function", AssetStatus.Current, 0, 0, "", [], [], "", "", 0),
-            new Asset("22", AssetKind.Material, "game", "glow.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1),
+            new Asset(MaterialGuid, AssetKind.Material, "game", "checker.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", []),
+            new Asset(FunctionGuid, AssetKind.MaterialFunction, "game", "rim.material_function", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
+            new Asset("22", AssetKind.Material, "game", "glow.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", []),
         ], []));
         return shell;
     }

@@ -66,6 +66,7 @@ public sealed partial class EditorShell : IDisposable
         Host = new HostSession(options);
         Cook = new CookSession(options.Cook, Assets);
         WireCook();
+        WireMeshes();
         Autosave = new Autosave(options.AutosaveDirectory);
         Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport, () => new ViewportView(this)));
         RestoreLayout();
@@ -87,9 +88,10 @@ public sealed partial class EditorShell : IDisposable
         {
             if (kind == ReloadKind.SoftRestart)
             {
-                // The new game state starts in Edit, with the game's own scene.
+                // The new game state starts in Edit, with the game's own scene, and knows no live meshes.
                 ResetMode();
                 SendScene();
+                SendLiveMeshes();
             }
         };
         Host.GameMessage += OnGameMessage;
@@ -110,9 +112,12 @@ public sealed partial class EditorShell : IDisposable
             CancelGizmo();
             SendGizmo();
         };
-        // A snapshot means a new stream from the game, which knows no watches and no selection yet.
+        // A snapshot means a new stream from the game, which knows no watches and no selection yet. A new
+        // connection's game knows no live meshes either, and an old one keeps them, so sending them again is safe.
         World.Reset += () =>
         {
+            SendLiveMeshes();
+            ResendMeshOverlay();
             foreach (var entity in Selection.Entities)
             {
                 Host.Send(new WatchEntity(entity));
@@ -161,6 +166,7 @@ public sealed partial class EditorShell : IDisposable
     {
         yield return new PanelTool("outliner", "Outliner", "outliner", EditorLayout.LeftDock, () => new OutlinerView(this));
         yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
+        yield return new PanelTool("faceEditor", "Face", "mesh", EditorLayout.RightDock, () => new FaceEditorView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));

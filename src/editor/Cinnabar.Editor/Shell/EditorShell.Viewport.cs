@@ -91,12 +91,28 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Selects what is drawn at a pixel of the frame. A click on nothing clears the selection, unless it adds.</summary>
-    public void PickAt(Vec2 pixel, SelectMode mode) => Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, mode);
+    /// <summary>
+    /// Selects what is drawn at a pixel of the frame. A click on nothing clears the selection, unless it adds. In mesh
+    /// mode, the editor picks the element itself, at once.
+    /// </summary>
+    public void PickAt(Vec2 pixel, SelectMode mode)
+    {
+        if (InMeshMode)
+        {
+            PickMeshAt(pixel, mode);
+            return;
+        }
+        Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, mode);
+    }
 
     /// <summary>Selects what is drawn in a rectangle of the frame, between two corners.</summary>
     public void PickBox(Vec2 a, Vec2 b, SelectMode mode)
     {
+        if (InMeshMode)
+        {
+            PickMeshBox(a, b, mode);
+            return;
+        }
         var (x0, y0) = ((int)Math.Floor(Math.Min(a.X, b.X)), (int)Math.Floor(Math.Min(a.Y, b.Y)));
         var (x1, y1) = ((int)Math.Ceiling(Math.Max(a.X, b.X)), (int)Math.Ceiling(Math.Max(a.Y, b.Y)));
         Pick(x0, y0, Math.Max(x1 - x0, 1), Math.Max(y1 - y0, 1), mode);
@@ -145,10 +161,17 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>The gizmo's pivot and axes: the primary entity's world pose in the document, or null for no gizmo.</summary>
+    /// <summary>
+    /// The gizmo's pivot and axes: the primary entity's world pose in the document, or in mesh mode the sub-selection's
+    /// centroid, or null for no gizmo.
+    /// </summary>
     public (long[] Pivot, Quat Axes)? GizmoPose()
     {
-        if (Gizmo.KindOf(Tool) == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
+        if (InMeshMode)
+        {
+            return MeshGizmoPose();
+        }
+        if (ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
             || SceneEdits.WorldPose(Scene.Scene, primary) is not { } pose)
         {
             return null;
@@ -169,7 +192,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var (width, height) = FrameSize;
-            part = Gizmo.HitTest(Gizmo.KindOf(Tool), Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+            part = Gizmo.HitTest(ActiveGizmoKind, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         }
         if (part != HotPart)
         {
@@ -178,13 +201,20 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Starts a drag if the press is on a gizmo part, and reports whether it is.</summary>
-    public bool PressGizmo(Vec2 pixel)
+    /// <summary>
+    /// Starts a drag if the press is on a gizmo part, and reports whether it is. <paramref name="extrude"/> is Shift,
+    /// which in mesh mode extrudes the selection first and drags the distance.
+    /// </summary>
+    public bool PressGizmo(Vec2 pixel, bool extrude = false)
     {
         HoverGizmo(pixel);
         if (HotPart == GizmoPart.None || GizmoPose() is not var (pivot, axes) || Scene == null)
         {
             return false;
+        }
+        if (InMeshMode)
+        {
+            return PressMeshGizmo(pixel, extrude);
         }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
         _poseEdit = new PoseEdit(Scene.Scene, ids);
@@ -206,6 +236,11 @@ public sealed partial class EditorShell
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
     public void DragGizmo(Vec2 pixel, bool invertSnap)
     {
+        if (_meshDrag != null || _textureDrag != null || _pivotDrag != null || _pending != null)
+        {
+            DragMeshGizmo(pixel, invertSnap);
+            return;
+        }
         if (_drag == null || _poseEdit == null)
         {
             return;
@@ -233,8 +268,17 @@ public sealed partial class EditorShell
         }
         _drag = null;
         _poseEdit = null;
+        _meshDrag = null;
+        _textureDrag = null;
+        _pivotDrag = null;
+        var pending = _pending != null;
+        _pending = null;
         CommitEdit();
         SendGizmo();
+        if (pending)
+        {
+            OnMeshModeChanged();
+        }
     }
 
     /// <summary>Ends a drag and puts the selection back where it was.</summary>
@@ -246,8 +290,18 @@ public sealed partial class EditorShell
         }
         _drag = null;
         _poseEdit = null;
+        _meshDrag = null;
+        _textureDrag = null;
+        _pivotDrag = null;
+        var pending = _pending != null;
+        _pending = null;
         CancelEdit();
         SendGizmo();
+        if (pending)
+        {
+            MeshSelection = MeshSelection.Pruned(FindMeshData);
+            OnMeshModeChanged();
+        }
     }
 
     /// <summary>Moves the camera so the selected entities fill the view.</summary>
@@ -333,7 +387,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var size = Gizmo.Size(Camera, Camera.RelativeTo(pivot), FrameSize.Height);
-            state = new GizmoState(Gizmo.KindOf(Tool), pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _drag != null);
+            state = new GizmoState(ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _drag != null);
         }
         var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
         if (key != _sentGizmo && Host.Linked)
@@ -352,6 +406,7 @@ public sealed partial class EditorShell
         SendSelection();
         ResendHidden();
         SendViewportSettings();
+        ResendMeshOverlay();
     }
 
     void OnPickResult(PickResult result)

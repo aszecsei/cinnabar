@@ -58,7 +58,7 @@ MODEL_SETTINGS := []Setting_Info {
 }
 
 // Vertex is a mesh's vertex while it cooks: every attribute in f32, in the engine's axes.
-@(private = "file")
+@(private)
 Vertex :: struct {
 	position: [3]f32,
 	normal:   [3]f32,
@@ -353,6 +353,49 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 		report_error(problems, a.path, 0, 0, "mesh %s has no triangles", m.name)
 		return
 	}
+	names := make([]string, len(materials), context.temp_allocator)
+	for material, s in materials {
+		if material != nil && material.name != nil {
+			names[s] = string(material.name)
+		}
+	}
+	cook := Cook_Mesh {
+		corners           = corners[:],
+		ranges            = ranges,
+		names             = names,
+		flags             = flags,
+		generate_tangents = generate,
+		lod               = lod,
+		name              = m.name,
+		source_path       = a.name,
+	}
+	return finish_mesh(cook, guid, key), true
+}
+
+// Cook_Mesh is a mesh's triangles as corners, three per triangle in submesh order, with each submesh's range of them
+// and its material slot's name: what an importer gives finish_mesh, which welds, orders and clusters them.
+Cook_Mesh :: struct {
+	corners:           []Vertex,
+	ranges:            [][2]int,
+	names:             []string,
+	flags:             format.Mesh_Flags,
+	// Make MikkTSpace tangents in place of the corners' own.
+	generate_tangents: bool,
+	// Build the meshlets' hierarchy of levels of detail, or only level 0.
+	lod:               bool,
+	name:              string,
+	source_path:       string,
+}
+
+// finish_mesh is the half of a mesh's cook that every importer shares: it welds identical corners into vertices,
+// orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, and writes
+// the blob.
+finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
+	corners := m.corners
+	ranges := m.ranges
+	flags := m.flags
+	generate := m.generate_tangents
+	lod := m.lod
 	stride := c.size_t(size_of(Vertex))
 	if generate {
 		tangents := make([][4]f32, len(corners), context.temp_allocator)
@@ -389,16 +432,12 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
 	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
-	submeshes := make([]format.Submesh_Entry, len(materials), context.temp_allocator)
+	submeshes := make([]format.Submesh_Entry, len(ranges), context.temp_allocator)
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
 		build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_vertices, &meshlet_triangles)
-		name := ""
-		if materials[s] != nil && materials[s].name != nil {
-			name = string(materials[s].name)
-		}
 		submeshes[s] = {
-			name          = name,
+			name          = m.names[s],
 			first_index   = u32(r.x),
 			index_count   = u32(r.y - r.x),
 			first_meshlet = u32(first_meshlet),
@@ -457,9 +496,9 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
 		meshlet_triangles = mem.slice_to_bytes(meshlet_triangles[:]),
 		name              = m.name,
-		source_path       = a.name,
+		source_path       = m.source_path,
 	}
-	return format.mesh_write(contents, context.temp_allocator), true
+	return format.mesh_write(contents, context.temp_allocator)
 }
 
 // read_primitive appends a primitive's triangles as corners. glTF is right-handed with +z the asset's front, and the
@@ -708,32 +747,7 @@ bounds_of :: proc(vertices: []Vertex, indices: []c.uint) -> (b: format.Mesh_Boun
 	return
 }
 
-// octahedral folds a unit vector onto the square [-1, 1]².
-octahedral :: proc(n: [3]f32) -> [2]f32 {
-	sum := abs(n.x) + abs(n.y) + abs(n.z)
-	if sum == 0 {
-		return {0, 0}
-	}
-	p := n.xy / sum
-	if n.z < 0 {
-		sign := [2]f32{p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1}
-		p = (1 - [2]f32{abs(p.y), abs(p.x)}) * sign
-	}
-	return p
-}
-
-encode_normal :: proc(n: [3]f32) -> [2]i16 {
-	p := octahedral(n)
-	return {i16(math.round(clamp(p.x, -1, 1) * 32767)), i16(math.round(clamp(p.y, -1, 1) * 32767))}
-}
-
-// encode_tangent stores the tangent in unorm16 pairs, with the bitangent's sign in the lowest bit of the second.
-encode_tangent :: proc(t: [4]f32) -> [2]u16 {
-	p := octahedral(t.xyz) * 0.5 + 0.5
-	x := u16(math.round(clamp(p.x, 0, 1) * 65535))
-	y := u16(math.round(clamp(p.y, 0, 1) * 65535)) & ~u16(1)
-	if t.w < 0 {
-		y |= 1
-	}
-	return {x, y}
-}
+// The attribute encoders are the format's, so the game's live meshes encode as the cooker does.
+octahedral :: format.mesh_octahedral
+encode_normal :: format.mesh_encode_normal
+encode_tangent :: format.mesh_encode_tangent

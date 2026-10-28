@@ -84,6 +84,10 @@ Message :: union {
 	Profile_Recording,
 	Capture_Request,
 	Capture_Result,
+	Live_Mesh,
+	Live_Mesh_Vertices,
+	Release_Live_Mesh,
+	Mesh_Overlay,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -990,4 +994,99 @@ Capture_Result :: struct {
 	frames:      u32,
 	duration_ms: f32,
 	output:      Output_Mode,
+}
+
+// Live meshes (see docs/editor/mesh-editing.md#live-meshes). The editor edits a mesh file as a structured mesh, and the
+// game draws it from memory in place of the mesh's cooked blob while the editor holds it, so a drag shows at frame
+// rate. The structure is the file's, as a Load_Scene is a scene's, so the game bakes it with the parser's result type.
+
+// A material slot of a live mesh that names a material.
+Live_Material :: struct {
+	slot: u32,
+	guid: [16]u8,
+}
+
+// A face's texture mapping, as the file's map line has it.
+Live_Mapping :: struct {
+	u_axis:   [3]f32,
+	v_axis:   [3]f32,
+	// Meters per texture repeat.
+	scale:    [2]f32,
+	// In repeats.
+	shift:    [2]f32,
+	// Degrees.
+	rotation: f32,
+}
+
+// A polygon of three or more vertex indices, clockwise seen from its front.
+Live_Face :: struct {
+	slot:    u32,
+	corners: []u32,
+	mapping: Live_Mapping,
+}
+
+// A sharp edge between two vertices.
+Live_Edge :: struct {
+	a, b: u32,
+}
+
+// Editor to game: the whole structured mesh of the mesh asset guid. The game bakes it and makes it resident in place
+// of the asset, until a Release_Live_Mesh. positions are x, y, z per vertex, in meters in the mesh's space.
+Live_Mesh :: struct {
+	guid:      [16]u8,
+	materials: []Live_Material,
+	positions: []f32,
+	faces:     []Live_Face,
+	sharp:     []Live_Edge,
+}
+
+// Editor to game: a drag's step: the positions only, for a mesh that a Live_Mesh gave, with the same count. The game
+// bakes it again and streams it again.
+Live_Mesh_Vertices :: struct {
+	guid:      [16]u8,
+	positions: []f32,
+}
+
+// Editor to game: the editor has let go of the mesh. The game clears the override and draws the asset's blob.
+Release_Live_Mesh :: struct {
+	guid: [16]u8,
+}
+
+// Mesh mode's overlay (see docs/editor/mesh-editing.md#overlay-and-picking). The editor does the picking itself, and
+// tells the game what to draw over each live mesh: its edges and vertices, with the selected and the hovered elements
+// highlighted, the selected faces filled, and the grid.
+
+Mesh_Element :: enum u8 {
+	Vertices,
+	Edges,
+	Faces,
+}
+
+// One edited mesh: the live mesh guid, drawn at entity's pose, with its selected elements by index, edges by their
+// vertices, and the hovered one of each kind, -1 or none for none.
+Mesh_Overlay_Mesh :: struct {
+	guid:              [16]u8,
+	entity:            u64,
+	selected_vertices: []u32,
+	selected_edges:    []Live_Edge,
+	selected_faces:    []u32,
+	hovered_vertex:    i32,
+	hovered_edge:      Live_Edge,
+	has_hovered_edge:  bool,
+	hovered_face:      i32,
+	// The points of a Cut or a Draw so far, x, y, z each, in the mesh's space.
+	marks:             []f32,
+}
+
+// Editor to game: what mesh mode shows this frame, or with active false, nothing. The grid is on the plane through
+// grid_origin, a World_Position, facing the world axis grid_axis (0 for x, 1 for y, 2 for z), with lines grid_size
+// apart.
+Mesh_Overlay :: struct {
+	active:      bool,
+	element:     Mesh_Element,
+	meshes:      []Mesh_Overlay_Mesh,
+	grid:        bool,
+	grid_size:   f32,
+	grid_origin: [3]i64,
+	grid_axis:   u8,
 }

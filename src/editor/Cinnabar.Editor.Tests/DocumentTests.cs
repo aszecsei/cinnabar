@@ -38,7 +38,7 @@ public sealed class DocumentTests : IDisposable
         Assert.True(scene != null, string.Join("\n", problems));
         var document = new SceneDocument(Path.Combine(_directory, "door.scene"), scene);
         var sent = new List<Wire.Operation>();
-        document.Applied += ops => sent.AddRange(ops.Select(o => o.ToWire()));
+        document.Applied += ops => sent.AddRange(ops.Select(o => o.ToWire()).OfType<Wire.Operation>());
         return (document, sent);
     }
 

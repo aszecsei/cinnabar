@@ -14,6 +14,7 @@ import "cinnabar:engine/asset"
 import "cinnabar:engine/ecs"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
 
@@ -54,6 +55,12 @@ Editor :: struct {
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
 	previews:     [MAX_PREVIEWS]Preview,
 	next_preview: int,
+	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin), and the renderer's
+	// residency that draws them, in Game_State, or nil without a renderer.
+	live_meshes:  map[format.Guid]Live_Mesh,
+	residency:    ^render.Residency,
+	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
+	mesh_overlay: link.Mesh_Overlay,
 }
 
 @(private)
@@ -77,11 +84,14 @@ Watched :: struct {
 }
 
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
-// editor; without them (nil), the tools stay off.
-init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets) {
+// editor; without them (nil), the tools stay off. The live meshes draw through residency, the renderer's, which must
+// outlive the editor too; without it (nil), they are kept and baked but not drawn.
+init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil) {
 	e^ = {
 		platform    = platform,
 		assets      = assets,
+		residency   = residency,
+		live_meshes = make(map[format.Guid]Live_Mesh, platform.heap_allocator),
 		known       = make([dynamic]Known, platform.heap_allocator),
 		watched     = make([dynamic]Watched, platform.heap_allocator),
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
@@ -104,6 +114,8 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 }
 
 destroy :: proc(e: ^Editor) {
+	release_live_meshes(e)
+	delete(e.live_meshes)
 	delete(e.known)
 	delete(e.watched)
 	delete(e.by_scene_id)
@@ -130,6 +142,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		clear(&e.watched)
 		reset_viewport(e)
 		close_previews(e)
+		release_live_meshes(e)
 		e.mode, e.free_camera, e.steps = .Edit, false, 0
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
 		if scripts != nil {
@@ -184,7 +197,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				e.steps += 1
 			}
 		case:
-			if !handle_preview_message(e, message) && !handle_viewport_message(e, message) {
+			if !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)
 			}
 		}

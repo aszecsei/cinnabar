@@ -88,6 +88,12 @@ Resident_Entry :: struct {
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
 	failed_at:     u64,
+	// A live mesh: the editor's unsaved mesh, streamed from memory in place of the asset's blob (see set_live).
+	live:          bool,
+	// The newest live blob that arrived while one streamed, in the heap, which streams next.
+	live_next:     []byte,
+	// The asset's blob must stream again, whatever its version: a live mesh was let go.
+	stale:         bool,
 }
 
 @(private)
@@ -112,6 +118,7 @@ residency_destroy :: proc(r: ^Residency) {
 	for &e in r.entries[:r.count] {
 		destroy_resources(r, e.kind, &e.current)
 		destroy_resources(r, e.kind, &e.pending)
+		free_live_next(r, &e)
 	}
 	r.count = 0
 }
@@ -133,11 +140,17 @@ residency_update :: proc(r: ^Residency) {
 				}
 				e.current, e.version, e.ready = e.pending, e.pending_version, true
 				e.pending, e.streaming = {}, false
+				// The newest live step waited for this one.
+				if e.live_next != nil {
+					stream_live(r, &e, e.live_next)
+					free_live_next(r, &e)
+				}
 			}
 			continue
 		}
-		// A failed version keeps its number, so only a newer blob tries again.
-		if e.handle != {} && asset.version(r.assets, e.handle) != e.version {
+		// A failed version keeps its number, so only a newer blob tries again. A live mesh draws from memory, whatever
+		// the asset's blob does.
+		if !e.live && e.handle != {} && (e.stale || asset.version(r.assets, e.handle) != e.version) {
 			start_streaming(r, &e)
 		}
 	}
@@ -158,31 +171,96 @@ resident_texture :: proc(r: ^Residency, guid: format.Guid) -> (texture: ^Residen
 }
 
 // entry finds an asset's entry, or makes one and starts streaming. An asset that cannot load is tried again after
-// RESIDENT_RETRY_FRAMES, and logged once.
+// RESIDENT_RETRY_FRAMES, and logged once. A live mesh never loads its asset.
 @(private = "file")
 entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: ^Resident_Entry, ok: bool) {
+	e = find_entry(r, guid, kind) or_return
+	if !e.live && e.handle == {} && !e.streaming && (e.failed_at == 0 || r.frame - e.failed_at >= RESIDENT_RETRY_FRAMES) {
+		start_streaming(r, e)
+	}
+	return e, true
+}
+
+// find_entry finds an asset's entry, or makes an empty one.
+@(private = "file")
+find_entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: ^Resident_Entry, ok: bool) {
 	if guid == {} {
 		return
 	}
 	for &existing in r.entries[:r.count] {
 		if existing.guid == guid && existing.kind == kind {
-			e = &existing
-			break
+			return &existing, true
 		}
 	}
-	if e == nil {
-		if r.count == MAX_RESIDENT {
-			log.errorf("render: more than %d resident assets", MAX_RESIDENT)
-			return
-		}
-		e = &r.entries[r.count]
-		r.count += 1
-		e^ = {guid = guid, kind = kind}
+	if r.count == MAX_RESIDENT {
+		log.errorf("render: more than %d resident assets", MAX_RESIDENT)
+		return
 	}
-	if e.handle == {} && !e.streaming && (e.failed_at == 0 || r.frame - e.failed_at >= RESIDENT_RETRY_FRAMES) {
-		start_streaming(r, e)
-	}
+	e = &r.entries[r.count]
+	r.count += 1
+	e^ = {guid = guid, kind = kind}
 	return e, true
+}
+
+// set_live makes a mesh blob in memory resident under a GUID, in place of the asset's blob, until clear_live (see
+// docs/rendering/assets.md#gpu-residency): the editor's live meshes. The blob streams as an asset's does, and swaps in when
+// its transfers are done, so the version before draws until then. A blob that arrives while one streams waits for it,
+// and the newest wins, so a drag never queues behind itself. The blob is copied, so it may go after the call.
+set_live :: proc(r: ^Residency, guid: format.Guid, blob: []byte) -> bool {
+	e := find_entry(r, guid, .Mesh) or_return
+	e.live, e.failed_at = true, 0
+	if e.streaming {
+		free_live_next(r, e)
+		next, err := mem.alloc_bytes(len(blob), format.BLOB_ALIGN, r.platform.heap_allocator)
+		if err != nil {
+			return false
+		}
+		copy(next, blob)
+		e.live_next = next
+		return true
+	}
+	return stream_live(r, e, blob)
+}
+
+// clear_live ends a GUID's live mesh. The asset's blob streams again at the next chance, or loads when it is cooked.
+clear_live :: proc(r: ^Residency, guid: format.Guid) {
+	e, found := find_entry(r, guid, .Mesh)
+	if !found || !e.live {
+		return
+	}
+	e.live, e.stale = false, true
+	free_live_next(r, e)
+}
+
+// is_live is whether a GUID draws a live mesh.
+is_live :: proc(r: ^Residency, guid: format.Guid) -> bool {
+	for &e in r.entries[:r.count] {
+		if e.guid == guid && e.kind == .Mesh {
+			return e.live
+		}
+	}
+	return false
+}
+
+@(private = "file")
+stream_live :: proc(r: ^Residency, e: ^Resident_Entry, blob: []byte) -> bool {
+	e.pending, e.transfer_count = {}, 0
+	if !stream_mesh(r, e, blob) {
+		destroy_resources(r, e.kind, &e.pending)
+		buffer: [32]u8
+		log.errorf("render: the live mesh %s is not a blob that can be made resident", format.guid_format(e.guid, &buffer))
+		return false
+	}
+	e.pending_version, e.streaming = e.version, true
+	return true
+}
+
+@(private = "file")
+free_live_next :: proc(r: ^Residency, e: ^Resident_Entry) {
+	if e.live_next != nil {
+		mem.free_bytes(e.live_next, r.platform.heap_allocator)
+		e.live_next = nil
+	}
 }
 
 // start_streaming creates new resources from the asset's blob and streams its data into them.
@@ -198,7 +276,7 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	}
 	data, _ := asset.data(r.assets, e.handle)
 	version := asset.version(r.assets, e.handle)
-	e.pending, e.transfer_count = {}, 0
+	e.pending, e.transfer_count, e.stale = {}, 0, false
 	ok: bool
 	#partial switch e.kind {
 	case .Mesh:

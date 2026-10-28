@@ -47,6 +47,8 @@ MAIN_SCENE_META :: #load("content/scenes/main.scene.meta", string)
 GLASS_SCENE_META :: #load("content/scenes/glass.scene.meta", string)
 // The patch surfaces scene, a lake with an island (see docs/rendering/surfaces.md#surfaces).
 SURFACES_SCENE_META :: #load("content/scenes/surfaces.scene.meta", string)
+// The room scene, a room built as a .mesh file (see docs/content/kinds/meshes.md#mesh-files).
+ROOM_SCENE_META :: #load("content/scenes/room.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -238,7 +240,7 @@ Game_State :: struct {
 	next_project_check: f64,
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
-	// F7 cycles the main scene, the glass scene and the surfaces scene.
+	// F7 cycles the main scene, the glass scene, the surfaces scene and the room scene.
 	scene_index:        u8,
 	elapsed:            time.Duration,
 	next_report:        time.Duration,
@@ -327,7 +329,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
-	editor.init(&s.editor, platform, &s.assets)
+	editor.init(&s.editor, platform, &s.assets, &s.renderer.residency)
 	register_editor_commands(s)
 
 	vertices := [3]Vertex {
@@ -1053,15 +1055,15 @@ update_output :: proc(s: ^Game_State) {
 	}
 }
 
-// switch_scene loads the next scene, the glass scene, the surfaces scene, then the main scene again, when F7 is
-// pressed. A linked editor owns the scene, so the key does nothing then.
+// switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, then the main scene again,
+// when F7 is pressed. A linked editor owns the scene, so the key does nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	metas := [3]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META}
-	names := [3]string{"main", "glass", "surfaces"}
-	s.scene_index = (s.scene_index + 1) % 3
+	metas := [4]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META}
+	names := [4]string{"main", "glass", "surfaces", "room"}
+	s.scene_index = (s.scene_index + 1) % 4
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
 		log.infof("mygame: the %s scene (F7 cycles them)", names[s.scene_index])

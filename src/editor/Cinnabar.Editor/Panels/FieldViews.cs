@@ -623,9 +623,12 @@ sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string>
         || string.Equals(asset.Kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase)
         || (Kind == "material" && asset.Kind == Link.Cook.AssetKind.MaterialInstance);
 
-    /// <summary>The assets that the field takes, by name.</summary>
+    /// <summary>GUIDs of assets that the picker offers first, before the rest by name: the Face panel's dev materials.</summary>
+    public IReadOnlySet<string> First { get; init; } = new HashSet<string>();
+
+    /// <summary>The assets that the field takes, the preferred ones first, then by name.</summary>
     public IEnumerable<Link.Cook.Asset> Choices =>
-        Index.Assets.Values.Where(Takes).OrderBy(Content.AssetIndex.DisplayName, StringComparer.OrdinalIgnoreCase);
+        Index.Assets.Values.Where(Takes).OrderBy(a => First.Contains(a.Guid) ? 0 : 1).ThenBy(Content.AssetIndex.DisplayName, StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
