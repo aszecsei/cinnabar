@@ -12,8 +12,17 @@ EFFECT_CURVE_SAMPLES :: 64
 MAX_EFFECT_MODULES :: 8
 // An effect has at most this many emitters.
 MAX_EFFECT_EMITTERS :: 8
-// An emitter holds at most this many particles at once.
+// An emitter holds at most this many particles at once, and a ribbon emitter this many, which one group of the ribbons'
+// build pass takes.
 MAX_EMITTER_CAPACITY :: 65536
+MAX_RIBBON_CAPACITY :: 1024
+
+// Effect_Render is what an emitter's particles draw as: each a sprite, or together a ribbon through them in the order
+// that they spawned, with a material of geometry = ribbon (see docs/rendering/particles.md#ribbons).
+Effect_Render :: enum u32 {
+	Sprite,
+	Ribbon,
+}
 
 // Effect_Shape is where an emitter's particles start, in the emitter's space, and which way they leave: from a point
 // or a sphere, outward in every direction; from a box, along +y; from a cone's base, within its angle of +y.
@@ -67,6 +76,9 @@ Effect_Emitter :: struct {
 	shape:         Effect_Shape,
 	// A sphere's radius in x; a box's half extents; a cone's base radius in x and its angle from +y in y, in radians.
 	shape_size:    [3]f32,
+	render:        Effect_Render,
+	// A ribbon's material, or the engine's default ribbon material when zero.
+	material:      Guid,
 	texture:       Guid,
 	// The texture's frames, columns by rows, which play at flipbook_rate frames a second; 1 by 1 is no flipbook.
 	flipbook:      [2]u32,
@@ -117,6 +129,9 @@ effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
 			return nil, false
 		}
 		if e.curves + len(Effect_Curve) > rows || e.capacity == 0 || e.capacity > MAX_EMITTER_CAPACITY {
+			return nil, false
+		}
+		if e.render == .Ribbon && e.capacity > MAX_RIBBON_CAPACITY {
 			return nil, false
 		}
 	}

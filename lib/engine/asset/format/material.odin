@@ -44,6 +44,8 @@ Material_Flag :: enum u32 {
 	// only (see docs/rendering/gpu-scene.md#billboards).
 	Billboard,
 	Billboard_Axis,
+	// The material draws particle ribbons, not meshes (see docs/rendering/particles.md#ribbons).
+	Ribbon,
 }
 
 Material_Flags :: bit_set[Material_Flag;u32]

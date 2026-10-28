@@ -12,7 +12,7 @@ import format "cinnabar:engine/asset/format"
 // Effects are .effect text files: emitters of particles, each with settings, modules and curves, which the renderer's
 // simulation runs (see docs/content/kinds/effects.md#effects). The cooker parses one, bakes its curves to
 // format.EFFECT_CURVE_SAMPLES samples and writes an Effect blob.
-EFFECT_COOK_VERSION :: "effects 1"
+EFFECT_COOK_VERSION :: "effects 2"
 
 // EFFECT_TEMPLATE is a new effect's text: one emitter of soft puffs that rise and fade.
 EFFECT_TEMPLATE :: `effect 1
@@ -110,8 +110,10 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 		return true
 	}
 	for e in emitters {
-		if e.emitter.texture != {} {
-			append(&a.dependencies, e.emitter.texture)
+		for dependency in ([]format.Guid{e.emitter.texture, e.emitter.material}) {
+			if dependency != {} {
+				append(&a.dependencies, dependency)
+			}
 		}
 	}
 	blob := format.effect_write({guid = guid, key = key, emitters = emitters, source_path = a.name}, context.temp_allocator)
@@ -135,6 +137,13 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 	keys: [format.Effect_Curve][dynamic]Curve_Key
 	header := false
 	current := -1
+	// The line of the current emitter, which a problem of the emitter as a whole names.
+	emitter_line := 0
+	check_emitter :: proc(found: ^[dynamic]Effect_Problem, e: format.Effect_Emitter, line: int) {
+		if e.render == .Ribbon && e.capacity > format.MAX_RIBBON_CAPACITY {
+			append(found, Effect_Problem{line, fmt.aprintf("a ribbon emitter holds at most %d particles", format.MAX_RIBBON_CAPACITY)})
+		}
+	}
 	finish :: proc(e: ^format.Effect_Emitter_Contents, modules: ^[dynamic]format.Effect_Module, keys: ^[format.Effect_Curve][dynamic]Curve_Key) {
 		e.modules = modules[:]
 		for curve in format.Effect_Curve {
@@ -169,12 +178,14 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 			}
 			if current >= 0 {
 				finish(&result[current], &modules, &keys)
+				check_emitter(&found, result[current].emitter, emitter_line)
 			}
 			if len(result) == format.MAX_EFFECT_EMITTERS {
 				problem(&found, line, "an effect has at most %d emitters", format.MAX_EFFECT_EMITTERS)
 			}
 			append(&result, format.Effect_Emitter_Contents{emitter = DEFAULT_EMITTER, name = fields[1]})
 			current = len(result) - 1
+			emitter_line = line
 			modules = make([dynamic]format.Effect_Module)
 			keys = {}
 			continue
@@ -228,6 +239,7 @@ effect_parse :: proc(text: string, allocator := context.allocator) -> (emitters:
 		problem(&found, 1, "an effect has an emitter at least")
 	} else {
 		finish(&result[current], &modules, &keys)
+		check_emitter(&found, result[current].emitter, emitter_line)
 	}
 	return result[:], found[:]
 }
@@ -353,15 +365,28 @@ parse_setting :: proc(e: ^format.Effect_Emitter, key: string, values: []string) 
 			return ""
 		}
 		return fmt.tprintf("unknown shape %q: point, sphere, box or cone", values[0])
-	case "texture":
+	case "texture", "material":
 		if len(values) != 1 || !strings.has_prefix(values[0], "$") {
-			return "texture is $<guid>"
+			return fmt.tprintf("%s is $<guid>", key)
 		}
 		guid, ok := format.guid_parse(values[0][1:])
 		if !ok {
-			return fmt.tprintf("texture: %q is not a GUID", values[0])
+			return fmt.tprintf("%s: %q is not a GUID", key, values[0])
 		}
-		e.texture = guid
+		if key == "texture" {
+			e.texture = guid
+		} else {
+			e.material = guid
+		}
+	case "render":
+		switch len(values) == 1 ? values[0] : "" {
+		case "sprite":
+			e.render = .Sprite
+		case "ribbon":
+			e.render = .Ribbon
+		case:
+			return "render is sprite or ribbon"
+		}
 	case "flipbook":
 		if len(values) != 3 {
 			return "flipbook is columns, rows and frames a second"

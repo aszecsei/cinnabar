@@ -174,6 +174,9 @@ Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record insta
 #if MATERIAL_PATCHES
 // A patches material's vertices are a surface's patches, not a mesh's (see docs/rendering/surfaces.md#surfaces).
 #include "material_patch.hlsli"
+#elif MATERIAL_RIBBON
+// A ribbon material's vertices are a particle ribbon's (see docs/rendering/particles.md#ribbons).
+#include "material_ribbon.hlsli"
 #else
 // load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID.
 Material_Vertex load_vertex(uint vertex_id) {

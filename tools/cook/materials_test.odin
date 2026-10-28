@@ -151,7 +151,7 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 	bad := "material 1\nshading = lit\ngeometry = cloth\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ground.material", tree.dir), transmute([]byte)bad) == nil)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "ground.material:3: geometry is mesh, patches, billboard or billboard_axis")
+	expect_error(t, &errors, "ground.material:3: geometry is mesh, patches, billboard, billboard_axis or ribbon")
 }
 
 @(test)
@@ -421,6 +421,42 @@ tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 	index_build(&again, cook(options, {.Texture, .Material}, log_problems = false), options.roots[:])
 	defer index_destroy(&again)
 	testing.expect(t, !index_changed(index_diff(&index, &again)))
+}
+
+// A ribbon material draws particle ribbons with its transparent passes only, and an opaque one is an error.
+@(test)
+ribbon_materials_draw_ribbons :: proc(t: ^testing.T) {
+	evaluate := "---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.color.rgb;\n\ts.opacity = inputs.color.a;\n\treturn s;\n}\n"
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/trail.material", fmt.tprintf("material 1\nshading = lit\nblend = transparent\ngeometry = ribbon\n%s", evaluate)},
+			{"content/trail.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+		},
+	)
+	defer remove_tree(tree)
+	options := material_options(t, tree)
+	pass := cook(options, {.Material})
+	testing.expectf(t, pass.ok, "problems: %v", pass.problems.list)
+	data := tree_blob(t, tree, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
+	blob, ok := format.material_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect(t, .Ribbon in blob.flags)
+		// The transparent pass, the IDs' and the moments, each a vertex and a pixel stage.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 6)
+		testing.expect(t, format.material_code(data, blob, 0, .Moments, .Vertex) != nil)
+	}
+
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	opaque := fmt.tprintf("material 1\nshading = lit\ngeometry = ribbon\n%s", evaluate)
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/trail.material", tree.dir), transmute([]byte)opaque) == nil)
+	testing.expect(t, !cook(options, {.Material}).ok)
+	expect_error(t, &errors, "trail.material:3: a ribbon material's blend is transparent or additive")
 }
 
 // A billboard draws its meshes with vertex pulling only: the opaque passes' stages, without the mesh shader path's or

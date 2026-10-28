@@ -1,0 +1,16 @@
+material 1
+# The engine's default ribbon material (see docs/rendering/particles.md#ribbons): the ribbon's color from its emitter's
+# color curve, lit, and fading toward its edges, which a ribbon emitter without a material draws with.
+shading = lit
+blend = transparent
+two_sided = true
+geometry = ribbon
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	s.base_color = inputs.color.rgb;
+	s.roughness = 0.8;
+	float edge = 1 - abs(inputs.uv0.y * 2 - 1);
+	s.opacity = inputs.color.a * saturate(edge * 2);
+	return s;
+}

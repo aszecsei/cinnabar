@@ -1,0 +1,12 @@
+effect 1
+# A ribbon that trails behind what carries it (see docs/rendering/particles.md#ribbons): the glass scene's spinner,
+# whose trail draws among the moment-based glass with the engine's default ribbon material.
+
+emitter trail
+	render = ribbon
+	capacity = 128
+	rate = 60
+	lifetime = 1.2 1.2
+	speed = 0
+	curve color = 0:1,0.6,0.2,1 1:0.6,0.1,0.5,0
+	curve size = 0:0.08 1:0.01
