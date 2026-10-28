@@ -13,7 +13,8 @@ void cs_main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID) {
 	uint tile = sprite_tile(group.xy, push.tile_columns);
 	float b0 = 0;
 	float4 moments = 0;
-	for (uint w = 0; w < push.words; w++) {
+	uint words = used_words();
+	for (uint w = 0; w < words; w++) {
 		// Every thread of the group is in the tile, so the loop is uniform.
 		uint bits = WaveReadLaneFirst(bins.Load((tile * push.words + w) * 4));
 		while (bits != 0) {

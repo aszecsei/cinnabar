@@ -1,9 +1,12 @@
 // Compute sprites (see docs/rendering/transparency.md#sprites): camera-facing quads that compute passes rasterize into
-// moment-based transparency, by screen tiles, in place of drawing them. sprite_tiles.hlsl finds each tile's farthest
-// opaque depth, sprite_bin.hlsl places each sprite on the screen and marks the tiles that it covers in front of that,
-// sprite_light.hlsl lights an 8x8 grid of points on each, and sprite_moments.hlsl and sprite_shade.hlsl visit, at each
-// pixel, the sprites of its tile: the first adds their optical depth and moments to the moments pass's, and the second
-// adds their light, dimmed by what is in front of them, to the transparent pass's.
+// moment-based transparency, by screen tiles, in place of drawing them. The frame's sprites are records in one buffer,
+// the CPU's first, then those that GPU passes append with append_sprite, with a counter of them all, and
+// sprite_arguments.hlsl turns the count into the dispatches of the passes that run a thread or a group for each sprite.
+// sprite_tiles.hlsl finds each tile's farthest opaque depth, sprite_bin.hlsl places each sprite on the screen and marks
+// the tiles that it covers in front of that, sprite_light.hlsl lights an 8x8 grid of points on each, and
+// sprite_moments.hlsl and sprite_shade.hlsl visit, at each pixel, the sprites of its tile: the first adds their optical
+// depth and moments to the moments pass's, and the second adds their light, dimmed by what is in front of them, to the
+// transparent pass's.
 #ifndef SPRITES_HLSLI
 #define SPRITES_HLSLI
 
@@ -14,6 +17,8 @@ static const uint SPRITE_TILE = 32;
 static const uint SPRITE_LIGHT_TEXELS = 8;
 static const uint SPRITE_LIGHT_COLUMNS = 128;
 static const uint SPRITE_NO_TEXTURE = 0xffffffff;
+// Matches MAX_SPRITES in lib/engine/render/sprites.odin: the records buffer's size, in sprites.
+static const uint MAX_SPRITES = 65536;
 
 // Matches Sprite_Record in lib/engine/render/sprites.odin: a sprite, with its position relative to the camera and its
 // texture's bindless index, or SPRITE_NO_TEXTURE.
@@ -45,8 +50,24 @@ struct Screen_Sprite {
 	uint2 padding;
 };
 
-Sprite_Record load_sprite(uint records, uint offset, uint index) {
-	return cn_buffer(records).Load<Sprite_Record>(offset + index * sizeof(Sprite_Record));
+Sprite_Record load_sprite(uint records, uint index) {
+	return cn_buffer(records).Load<Sprite_Record>(index * sizeof(Sprite_Record));
+}
+
+// sprite_count is how many sprites the frame draws: those written, up to the frame's capacity, which sized its
+// buffers.
+uint sprite_count(uint count, uint capacity) {
+	return min(cn_buffer(count).Load(0), capacity);
+}
+
+// append_sprite adds a sprite to the frame's records from a GPU pass, after the CPU's and the other passes'. A sprite past
+// MAX_SPRITES is dropped, and one past the frame's capacity, which the passes reserved, is left out.
+void append_sprite(uint records, uint count, Sprite_Record s) {
+	uint index;
+	cn_rw_buffer(count).InterlockedAdd(0, 1, index);
+	if (index < MAX_SPRITES) {
+		cn_rw_buffer(records).Store<Sprite_Record>(index * sizeof(Sprite_Record), s);
+	}
 }
 
 // sprite_quad is where a pixel center is on a sprite: along the sprite's right and up, in [-1, 1] on the sprite.

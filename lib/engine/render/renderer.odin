@@ -450,7 +450,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || f.sprites != nil || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
