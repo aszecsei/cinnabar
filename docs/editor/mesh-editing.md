@@ -6,8 +6,6 @@ Level geometry built in the editor, as Hammer builds it, but as polygon meshes i
 
 ## Design
 
-Four decisions shape everything below.
-
 1. **A level mesh is an asset, not scene data.** Each editable mesh is a text file in a content root with a GUID, cooked to the same `Mesh` blob that glTF meshes cook to, and placed by an ordinary entity with a `Mesh_Renderer`. Nothing downstream changes: residency, culling, meshlets, materials, picking by entity and submesh, previews and the future collision all see a mesh. The scene format does not change. The cost is that a mesh and the scene that places it are two files, which [Undo and saving](#undo-and-saving) keeps consistent.
 2. **The editor owns the mesh and does every operation.** The rule of the [document model](document-and-scenes.md#document-model) holds: the host can lose its world at any time, so the editor's C# holds the mesh, applies the tools to it, and keeps the undo history. The host only bakes and draws what it is sent. Every tool is therefore testable under `dotnet test` without a host, which is where the geometry's edge cases belong.
 3. **The host draws unsaved meshes from memory.** Saving a file and waiting for the cook daemon takes a few hundred milliseconds ([Cook daemon](../content/daemon-and-operations.md#cook-daemon)), which is fine for the cooked result and useless for a drag. The live path sends the mesh over the link, and the game bakes it and makes it resident in place of the cooked blob until the editor lets go of it.

@@ -137,7 +137,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 
 ## Future work
 
-- **Asset fields of components in scripts.** `Field.asset(kind)` and the `Asset` value are built ([Values](#values)); a component's asset fields, which `expose` skips today ([Rendering](../rendering/assets.md#asset-fields)), could read and write the same value. Why: a script that swaps a mesh or a material cannot yet. When: with the first script that needs it.
+- **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
 - **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). Waits for physics.
 - **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
 - **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.
