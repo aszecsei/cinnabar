@@ -20,6 +20,7 @@ import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/editor"
 import "cinnabar:engine/editor/link"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
@@ -267,6 +268,8 @@ Game_State :: struct {
 	rings_ready:        bool,
 	nearest:            gpu.Sampler,
 	world:              ecs.World,
+	// The physics world, which the fixed ticks step (see docs/physics/design.md#the-physics-tick).
+	physics:            physics.State,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:             ecs.Entity,
 	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
@@ -406,6 +409,9 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if !ecs.init(&s.world, platform) {
 		log.panic("mygame: cannot create the world")
 	}
+	if !physics.init(&s.physics, platform) {
+		log.panic("mygame: cannot create the physics world")
+	}
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
@@ -433,6 +439,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	script.register_components(r)
 	scene.register_components(r)
 	volume.register_components(r)
+	physics.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
@@ -494,6 +501,7 @@ run_lens :: proc(ctx: ^render.Pass_Context) {
 register_world :: proc(s: ^Game_State) {
 	w := &s.world
 	register_components(&w.registry)
+	physics.register(&s.physics, w)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
@@ -557,12 +565,14 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if run {
 		s.elapsed += step
 		input := s.platform.input()
-		// Each fixed tick runs the Fixed systems, then the scripts' fixed step and the tick's events (see
+		// Each fixed tick runs the Fixed systems, the scripts' fixed step, the physics tick and the tick's events (see
 		// docs/physics/design.md#scripts-in-fixed-ticks).
 		ticks := ecs.begin_ticks(&s.world, step)
 		for ecs.next_tick(&ticks) {
 			ecs.run_tick_systems(&ticks, s)
 			script.fixed_update(&s.scripts, &ticks, input)
+			ecs.update_transforms(&s.world)
+			physics.tick(&s.physics, &s.world)
 			script.fixed_events(&s.scripts)
 			ecs.update_transforms(&s.world)
 		}
@@ -572,6 +582,8 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		ecs.run_stage(&s.world, .Late, step, s)
 	} else {
 		ecs.update_transforms(&s.world)
+		// The physics world follows the edits without stepping, so queries see the scene as it is.
+		physics.sync(&s.physics, &s.world)
 		script.settle(&s.scripts)
 	}
 
@@ -1024,6 +1036,7 @@ shutdown :: proc(state: rawptr) {
 	script.destroy(&s.scripts)
 	render.renderer_destroy(&s.renderer)
 	asset.destroy(&s.assets)
+	physics.destroy(&s.physics)
 	ecs.destroy(&s.world)
 	destroy_pipelines(s.platform, &s.pipelines)
 	s.platform.gpu_destroy_sampler(s.nearest)
@@ -1086,6 +1099,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s := (^Game_State)(state)
 	s.platform = platform
 	ecs.reload(&s.world, platform)
+	physics.reload(&s.physics, platform)
 	register_world(s)
 	render.renderer_reload(&s.renderer, platform, &s.world)
 	register_post_effects(s)

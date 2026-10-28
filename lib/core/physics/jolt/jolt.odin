@@ -2,7 +2,7 @@
 // with vendor/jolt. This file links it. See docs/physics/design.md#where-jolt-lives.
 package physics_jolt
 
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 
 // PHYSICS_SHARED links physics_jolt.dll, which the development host loads. Otherwise the backend links statically.
 // The game DLL must never link it statically: a second copy of Jolt would not know the host's worlds.

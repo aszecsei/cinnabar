@@ -5,7 +5,7 @@ import "core:sync"
 import "core:testing"
 
 import "cinnabar:core/jobs"
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 import "cinnabar:core/physics/conformance"
 import physics_host "cinnabar:core/physics/host"
 
@@ -75,4 +75,9 @@ destroy_all :: proc(t: ^testing.T) {
 		testing.expect(t, c != a, "a new world in the same slot has a new generation")
 		api.world_destroy(c)
 	}, quiet = true)
+}
+
+@(test)
+offset_and_enabled :: proc(t: ^testing.T) {
+	with_backend(t, conformance.offset_and_enabled)
 }

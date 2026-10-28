@@ -72,8 +72,8 @@ flowchart LR
 | `Set_Pose` | Teleport: position and rotation, with or without waking |
 | `Move_Kinematic` | A kinematic body's target pose for this step; Jolt gives it the velocity that reaches it |
 | `Set_Velocity`, `Add_Force`, `Add_Torque`, `Add_Impulse`, `Add_Angular_Impulse`, `Add_Force_At` | Gameplay's effects on a dynamic body |
-| `Set_Body` | Changed properties of an existing body: its shape, layer, motion type, material, mass, damping |
 | `Activate`, `Deactivate` | Sleep control |
+| `Set_Enabled` | Takes a body out of the simulation, or puts it back, for an entity that becomes inactive or active |
 | `Create_Joint`, `Destroy_Joint`, `Set_Joint` | A constraint between two bodies, or a body and the world, and its limits, motor and enabled state ([Constraints](#constraints)) |
 | `Set_World` | Gravity and the layer tables ([Layers](#layers)) |
 
@@ -117,8 +117,8 @@ New engine component IDs take the range 64 to 79 for 3D physics; 80 to 95 is kep
 
 - **A `Collider` without a `Rigid_Body` is a static body**, as in Unity. A `Rigid_Body` without a `Collider` on itself or a child is an error that the sync logs once, and it has no body.
 - **Compound bodies.** A `Collider` on a descendant of an entity with a `Rigid_Body`, with no `Rigid_Body` between them, is a part of that body's compound shape, at its pose relative to the body. A body with one collider on itself uses that shape directly.
-- **Runtime components are not saved and not edited.** The scene writer and the properties panel skip `Physics_Body` and `Physics_Joint`; the editor's play mode shows them read-only. Their first 8 bytes are the handle, so `ecs.watch` logs it when one is removed, and the sync destroys the body or joint without scanning ([The physics tick](#the-physics-tick)).
-- **Scale.** The entity's `Transform` scale scales its collider's shape, through Jolt's `ScaledShape`. A change of scale rebuilds the shape. Non-uniform scale of a rotated child collider in a compound is approximated as Jolt approximates it.
+- **Runtime components are not saved and not edited.** `Physics_Body` and `Physics_Joint` hold what the sync made; their fields are read-only or hidden in the properties panel, and the editor's play mode shows them. A body record in the engine's pool keeps each body's entity, which is how the sync finds a body whose entity or components are gone ([The physics tick](#the-physics-tick)).
+- **Scale.** The entity's `Transform` scale scales its collider's dimensions: a box's size on each axis, a sphere's radius by the largest axis, and a capsule's or a cylinder's radius by the larger of x and z and its height by y. A primitive therefore needs no scaled wrapper; a mesh collider will use Jolt's `ScaledShape`. A change of scale makes the body again.
 
 ## Scripts in fixed ticks
 
@@ -157,10 +157,10 @@ The physics tick is the `physics.tick` line of the loop above. A fixed tick is t
 3. Run the scripts' `fixed_update`, and apply their changes.
 4. Propagate transforms, so the sync sees this tick's poses of kinematic and static children.
 5. **The physics tick** (`physics.tick`), one job:
-   1. **Destroyed bodies and joints:** drain the world's log of removed `Physics_Body` and `Physics_Joint` components, and record `Destroy_Body` and `Destroy_Joint`.
+   1. **Destroyed bodies and joints:** check each live body in the engine's pool: one whose entity is gone, whose `Physics_Body` names another body, or whose `Rigid_Body` and `Collider` were removed is destroyed, and one whose entity became inactive leaves the simulation with `Set_Enabled`. The world's removal log has one reader, the script runtime, so the pool is checked instead; it costs a lookup per body per tick.
    2. **Sync in,** as parallel jobs over the chunks, each recording into its own command list:
       - an entity with `Rigid_Body` or `Collider` and no `Physics_Body` gets a body, and a `command_add` for its `Physics_Body`;
-      - an entity whose authoring fields' hash changed gets `Set_Body`, or a new shape;
+      - an entity whose authoring fields' hash changed gets its body made again, keeping its velocity; an edit in the editor or a change of scale is rare enough that this is simpler than changing a body in place;
       - a `Static` or `Kinematic` body whose `Transform` differs from the pose last sent gets `Set_Pose` or `Move_Kinematic`;
       - a `Dynamic` body whose `Transform` differs from the pose that physics last wrote was moved by someone else, a script or the editor, and gets `Set_Pose`: a write of `Transform` teleports a body, as in Unity.
    3. **Gameplay's commands:** the physics command buffers that were recorded since the last tick ([Scripts](#scripts)): the script phase's of the last frame, the `Fixed` systems' in system order and then job order, and this tick's `fixed_update`'s.
@@ -174,7 +174,7 @@ Step 4 is a second propagation each tick. It costs what one propagation costs; *
 
 - A sleeping body is not in `results`, so the sync's cost follows what moves. The comparisons of step 4.2 visit every body each tick; with ten thousand bodies that is a few hundred kilobytes of reads. The world's [change tracking](../world/README.md#future-work) would make it visit only what changed.
 - `Previous_Transform` interpolation needs nothing new: physics writes `Transform` in the tick, and presentation blends the last two ([Time](../world/time.md#fixed-and-variable-rate)).
-- **Scene loads.** The scene loader replaces the world; the removals it logs destroy the bodies. A loader that clears storage without logging calls `physics.reset`, which destroys every body and joint of the physics world in one call.
+- **Scene loads.** The scene loader replaces the world, and the check of the pool destroys the bodies whose entities are gone. A body's entity is matched by its `Physics_Body`'s handle, so a new entity in an old one's slot does not keep the old body.
 - **Activity.** Queries exclude `Inactive` entities, so the sync's queries skip them. An entity that becomes inactive has its body removed from the simulation (`Deactivate` and out of the broad phase, keeping the body), and gets it back when it becomes active.
 
 ## Layers
@@ -189,7 +189,7 @@ Step 4 is a second propagation each tick. It costs what one propagation costs; *
 - **Primitives** (box, sphere, capsule, cylinder) are described in the command, and the engine shares one `Shape` among every collider with the same description and scale, through a table keyed by the description's hash.
 - **Meshes and convex hulls** come from a mesh asset. In the first phase that has them, the engine reads the `Mesh` blob's level-0 triangles and sends them in `Create_Shape`; the backend builds its own structure, which for a large level mesh takes milliseconds at load. The cooker then writes a **collision sub-asset** beside the mesh blob: welded triangles with a material index each, and the convex hull's points, both backend-neutral, as [Mesh editing](../editor/mesh-editing.md#future-work) asks. `.mesh` level geometry and glTF meshes both get it, chosen by a `.meta` option (`collision = mesh`, `convex`, or `none`).
 - **Height fields** come from a surface's height map ([Rendering: Surfaces](../rendering/surfaces.md)), in the phase that adds terrain collision.
-- A shape that the asset runtime reloads is created again, and the bodies that use it get `Set_Body`.
+- A shape that the asset runtime reloads is created again, and the bodies that use it are made again.
 
 ## Constraints
 

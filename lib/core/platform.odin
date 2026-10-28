@@ -13,7 +13,7 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 import physics_host "cinnabar:core/physics/host"
 import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"

@@ -37,6 +37,26 @@ position_offset :: proc(p: World_Position, delta: [3]f32) -> World_Position {
 	return result
 }
 
+// position_sub_f64 gives a - b in meters as f64, for physics (see docs/physics/design.md#positions-and-precision).
+// It is exact while the difference is below 2^29 m, and rounds to the f64's step beyond.
+position_sub_f64 :: proc "contextless" (a, b: World_Position) -> [3]f64 {
+	d := a.raw - b.raw
+	return {f64(d.x), f64(d.y), f64(d.z)} * (1 / f64(POSITION_SCALE))
+}
+
+// position_offset_f64 adds a delta in meters as f64, rounded to the nearest unit.
+position_offset_f64 :: proc(p: World_Position, delta: [3]f64) -> World_Position {
+	result := p
+	for i in 0 ..< 3 {
+		step := math.round(delta[i] * f64(POSITION_SCALE))
+		// This also rejects NaN.
+		assert(abs(step) < f64(POSITION_LIMIT), "ecs: position delta out of range")
+		result.raw[i] += i64(step)
+		assert(abs(result.raw[i]) <= POSITION_LIMIT, "ecs: position out of range")
+	}
+	return result
+}
+
 // position_lerp interpolates from a to b. It is exact at t = 0 and t = 1.
 position_lerp :: proc(a, b: World_Position, t: f32) -> World_Position {
 	if t == 1 {

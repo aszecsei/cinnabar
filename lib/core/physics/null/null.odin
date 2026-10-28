@@ -7,7 +7,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 
 MAX_WORLDS :: 16
 
@@ -237,6 +237,8 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return find_body(w, physics.payload(command, physics.Add_Force_At).body) != nil
 	case .Activate, .Deactivate:
 		return find_body(w, physics.payload(command, physics.Body_Command).body) != nil
+	case .Set_Enabled:
+		return find_body(w, physics.payload(command, physics.Set_Enabled).body) != nil
 	}
 	return false
 }

@@ -7,7 +7,7 @@ import "core:log"
 import "core:mem"
 
 import "cinnabar:core/jobs"
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 
 // The host is one per process, so its state is too. The game never imports this package.
 @(private)

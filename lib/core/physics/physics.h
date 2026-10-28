@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 1
+#define CN_PHYSICS_API_VERSION 2
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
 
@@ -70,6 +70,7 @@ enum cn_command_kind {
     CN_CMD_ADD_ANGULAR_IMPULSE,
     CN_CMD_ACTIVATE,
     CN_CMD_DEACTIVATE,
+    CN_CMD_SET_ENABLED,
 };
 
 typedef struct cn_command_header { uint16_t kind, size; uint32_t _pad; } cn_command_header;
@@ -82,10 +83,11 @@ typedef struct cn_set_world {
 
 typedef struct cn_create_shape {
     cn_shape shape;
-    uint8_t kind, _pad0[3];
+    uint8_t kind, _pad[3];
     float size[3];
     float density;
-    uint32_t _pad1;
+    float offset[3];
+    float rotation[4];
 } cn_create_shape;
 
 typedef struct cn_release_shape { cn_shape shape; } cn_release_shape;
@@ -125,6 +127,7 @@ typedef struct cn_set_velocity { cn_body body; float linear[3], angular[3]; } cn
 typedef struct cn_add_vector { cn_body body; float vector[3]; uint32_t _pad; } cn_add_vector;
 typedef struct cn_add_force_at { cn_body body; float force[3]; uint32_t _pad; double point[3]; } cn_add_force_at;
 typedef struct cn_body_command { cn_body body; } cn_body_command;
+typedef struct cn_set_enabled { cn_body body; uint32_t enabled, _pad; } cn_set_enabled;
 
 enum cn_body_state_flag { CN_BODY_STATE_ASLEEP = 1u << 0 };
 
@@ -195,7 +198,8 @@ typedef struct cn_physics_host {
 
 static_assert(sizeof(cn_command_header) == 8);
 static_assert(sizeof(cn_set_world) == 144);
-static_assert(sizeof(cn_create_shape) == 32);
+static_assert(sizeof(cn_create_shape) == 56);
+static_assert(sizeof(cn_set_enabled) == 16);
 static_assert(sizeof(cn_create_body) == 120);
 static_assert(sizeof(cn_set_pose) == 56);
 static_assert(sizeof(cn_move_kinematic) == 56);

@@ -1,11 +1,11 @@
-// Package physics is the boundary between the engine and a physics backend: handles, descriptions, the command format,
+// Package physics_boundary is the boundary between the engine and a physics backend: handles, descriptions, the command format,
 // queries, and the two tables of procedures, Physics_API (what a backend provides) and Host (what the host gives it).
 // It is plain data and is compiled into the host, the game DLL and every backend. See docs/physics/design.md#the-boundary.
 //
 // A backend may be written in C or C++, so everything here has a C layout: procedures use the C calling convention,
 // and take pointers and counts, never Odin slices or strings. lib/core/physics/physics.h is the same layout in C,
 // and both sides assert the sizes below, so a change here must change it too.
-package physics
+package physics_boundary
 
 import "base:runtime"
 import "core:log"
@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 1
+API_VERSION :: 2
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -128,6 +128,7 @@ Command_Kind :: enum u16 {
 	Add_Angular_Impulse,
 	Activate,
 	Deactivate,
+	Set_Enabled,
 }
 
 // size includes the header and the padding after the payload. Payloads start 8-byte aligned.
@@ -145,14 +146,16 @@ Set_World :: struct {
 }
 
 // A shape is reference-counted by the backend: each body that uses it holds a reference, and so does the handle
-// until Release_Shape. density, in kg/m³, gives a dynamic body's mass when the body's own mass is zero.
+// until Release_Shape. density, in kg/m³, gives a dynamic body's mass when the body's own mass is zero. offset and
+// rotation place the shape in its body.
 Create_Shape :: struct {
-	shape:   Shape,
-	kind:    Shape_Kind,
-	_:       [3]u8,
-	size:    [3]f32,
-	density: f32,
-	_:       u32,
+	shape:    Shape,
+	kind:     Shape_Kind,
+	_:        [3]u8,
+	size:     [3]f32,
+	density:  f32,
+	offset:   [3]f32,
+	rotation: Rotation,
 }
 
 Release_Shape :: struct {
@@ -246,6 +249,14 @@ Body_Command :: struct {
 	body: Body,
 }
 
+// A body that is not enabled is out of the simulation: nothing hits it and it moves only by Set_Pose. Its entity is
+// inactive (see docs/physics/design.md#the-physics-tick).
+Set_Enabled :: struct {
+	body:    Body,
+	enabled: b32,
+	_:       u32,
+}
+
 // Command_List is a stream of commands in chunks from its allocator, normally frame memory. It has no destroy
 // procedure: its memory is freed with the allocator's memory. A backend reads each chunk as bytes (see submit).
 Command_List :: struct {
@@ -301,8 +312,16 @@ cmd_set_world :: proc(list: ^Command_List, gravity: [3]f32, collides: [MAX_LAYER
 	push(list, .Set_World, Set_World{gravity = gravity, collides = collides})
 }
 
-cmd_create_shape :: proc(list: ^Command_List, shape: Shape, kind: Shape_Kind, size: [3]f32, density: f32 = 1000) {
-	push(list, .Create_Shape, Create_Shape{shape = shape, kind = kind, size = size, density = density})
+cmd_create_shape :: proc(
+	list: ^Command_List,
+	shape: Shape,
+	kind: Shape_Kind,
+	size: [3]f32,
+	density: f32 = 1000,
+	offset: [3]f32 = 0,
+	rotation: Rotation = {0, 0, 0, 1},
+) {
+	push(list, .Create_Shape, Create_Shape{shape = shape, kind = kind, size = size, density = density, offset = offset, rotation = rotation})
 }
 
 cmd_release_shape :: proc(list: ^Command_List, shape: Shape) {
@@ -355,6 +374,10 @@ cmd_activate :: proc(list: ^Command_List, body: Body) {
 
 cmd_deactivate :: proc(list: ^Command_List, body: Body) {
 	push(list, .Deactivate, Body_Command{body})
+}
+
+cmd_set_enabled :: proc(list: ^Command_List, body: Body, enabled: bool) {
+	push(list, .Set_Enabled, Set_Enabled{body = body, enabled = b32(enabled)})
 }
 
 // Command is a command read from a chunk. data is the payload and its padding.
@@ -410,6 +433,7 @@ Format :: struct {
 	add_vector:     Add_Vector,
 	add_force_at:   Add_Force_At,
 	body_command:   Body_Command,
+	set_enabled:    Set_Enabled,
 	world_desc:     World_Desc,
 	info:           Backend_Info,
 	results:        Step_Results,
@@ -545,7 +569,8 @@ Host :: struct {
 // physics.h asserts the same sizes.
 #assert(size_of(Command_Header) == 8)
 #assert(size_of(Set_World) == 144)
-#assert(size_of(Create_Shape) == 32)
+#assert(size_of(Create_Shape) == 56)
+#assert(size_of(Set_Enabled) == 16)
 #assert(size_of(Create_Body) == 120)
 #assert(size_of(Set_Pose) == 56)
 #assert(size_of(Move_Kinematic) == 56)

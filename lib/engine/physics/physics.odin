@@ -1,0 +1,230 @@
+// Package physics keeps a physics backend's world in step with the ECS: the components that say what should exist,
+// the bodies that the backend simulates, and the sync between them in each fixed tick. The backend is behind
+// Platform_API.physics. See docs/physics/design.md.
+package physics
+
+import "base:runtime"
+
+import "cinnabar:core"
+import core_physics "cinnabar:core/physics"
+import "cinnabar:engine/ecs"
+
+// The physics components' stable IDs, 64 to 79 (see docs/physics/design.md#components).
+RIGID_BODY_ID :: ecs.Component_Id(64)
+COLLIDER_ID :: ecs.Component_Id(65)
+PHYSICS_BODY_ID :: ecs.Component_Id(66)
+
+Motion :: core_physics.Motion
+
+// Rigid_Body makes its entity a body that the simulation moves, or that moves by its Transform: a dynamic body falls
+// and is pushed, a kinematic one follows its Transform and pushes, and a static one never moves. Its shape is the
+// entity's Collider. An entity with a Collider and no Rigid_Body is a static body.
+Rigid_Body :: struct {
+	motion:          Motion,
+	// In kg. 0 takes the mass from the collider's density.
+	mass:            f32 `editor:"range=0,10000"`,
+	linear_damping:  f32 `editor:"range=0,1"`,
+	angular_damping: f32 `editor:"range=0,1"`,
+	gravity_factor:  f32 `editor:"range=-10,10"`,
+	// Continuous collision detection, for a fast body that would pass through thin ones.
+	ccd:             bool,
+	start_asleep:    bool,
+}
+
+DEFAULT_RIGID_BODY :: Rigid_Body {
+	motion          = .Dynamic,
+	linear_damping  = 0.05,
+	angular_damping = 0.05,
+	gravity_factor  = 1,
+}
+
+Shape :: enum u8 {
+	Box,
+	Sphere,
+	// Along the entity's y.
+	Capsule,
+	// Along the entity's y.
+	Cylinder,
+}
+
+// Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, or a capsule
+// or cylinder of radius and height, its whole height along y. offset and rotation place it in the entity.
+Collider :: struct {
+	shape:       Shape,
+	size:        [3]f32 `editor:"range=0,1000"`,
+	radius:      f32 `editor:"range=0,1000"`,
+	height:      f32 `editor:"range=0,1000"`,
+	offset:      [3]f32,
+	rotation:    quaternion128,
+	friction:    f32 `editor:"range=0,2"`,
+	restitution: f32 `editor:"range=0,1"`,
+	// In kg/m³, which gives a dynamic body's mass when its Rigid_Body's is 0.
+	density:     f32 `editor:"range=1,20000"`,
+	// A sensor detects bodies and does not touch them (see docs/physics/design.md#events).
+	sensor:      bool,
+	// The object layer, an index into the project's physics.layers (see docs/physics/design.md#layers).
+	layer:       u8 `editor:"range=0,31"`,
+}
+
+DEFAULT_COLLIDER :: Collider {
+	shape    = .Box,
+	size     = 1,
+	radius   = 0.5,
+	height   = 2,
+	rotation = 1,
+	friction = 0.5,
+	density  = 1000,
+}
+
+// Physics_Body is the backend's body of its entity, which the sync adds and keeps. Its first 8 bytes are the handle.
+// A nil body means that the entity has a Rigid_Body and no Collider.
+Physics_Body :: struct {
+	body:             core_physics.Body `editor:"read"`,
+	// The pose last sent to the backend or written from it, so that a move by a script or the editor shows.
+	position:         ecs.World_Position `editor:"-"`,
+	rotation:         quaternion128 `editor:"-"`,
+	// A hash of the Rigid_Body, the Collider and the scale that the body was made from.
+	source:           u64 `editor:"-"`,
+	motion:           Motion `editor:"read"`,
+	linear_velocity:  [3]f32 `editor:"read"`,
+	angular_velocity: [3]f32 `editor:"read"`,
+	asleep:           bool `editor:"read"`,
+}
+
+register_components :: proc(r: ^ecs.Registry) {
+	ecs.register_component(r, Rigid_Body, RIGID_BODY_ID, DEFAULT_RIGID_BODY)
+	ecs.register_component(r, Collider, COLLIDER_ID, DEFAULT_COLLIDER)
+	ecs.register_component(r, Physics_Body, PHYSICS_BODY_ID)
+}
+
+// Pool hands out the engine's handles: an index and a generation, which goes up each time the index is freed, so a
+// stale handle never matches. Its memory is the host's heap.
+Pool :: struct {
+	generations: [dynamic]u32,
+	free:        [dynamic]u32,
+}
+
+pool_alloc :: proc(p: ^Pool) -> core_physics.Handle {
+	if n := len(p.free); n > 0 {
+		index := pop(&p.free)
+		return {index, p.generations[index]}
+	}
+	append(&p.generations, 1)
+	return {u32(len(p.generations) - 1), 1}
+}
+
+pool_free :: proc(p: ^Pool, h: core_physics.Handle) {
+	g := &p.generations[h.index]
+	g^ += 1
+	if g^ == 0 {
+		g^ = 1
+	}
+	append(&p.free, h.index)
+}
+
+pool_valid :: proc(p: ^Pool, h: core_physics.Handle) -> bool {
+	return h.generation != 0 && int(h.index) < len(p.generations) && p.generations[h.index] == h.generation
+}
+
+pool_destroy :: proc(p: ^Pool) {
+	delete(p.generations)
+	delete(p.free)
+	p^ = {}
+}
+
+// Body_Record is what the engine knows of a live body: its entity, and whether the body is out of the simulation
+// because its entity is inactive.
+Body_Record :: struct {
+	entity:   ecs.Entity,
+	disabled: bool,
+}
+
+// State is the engine's side of one physics world, in Game_State. The queries are registrations: register makes them
+// again after a reload.
+State :: struct {
+	platform: ^core.Platform_API,
+	world:    core_physics.World,
+	// Positions cross the boundary as f64 offsets from here (see docs/physics/design.md#positions-and-precision).
+	anchor:   ecs.World_Position,
+	bodies:   Pool,
+	records:  [dynamic]Body_Record,
+	shapes:   Pool,
+	gravity:  [3]f32,
+	collides: [core_physics.MAX_LAYERS]u32,
+	// Set_World goes to the backend before the next submit.
+	settings_dirty: bool,
+	queries:  struct {
+		new_colliders: ecs.Query,
+		new_bodies:    ecs.Query,
+		bodies:        ecs.Query,
+	},
+}
+
+DEFAULT_GRAVITY :: [3]f32{0, -9.81, 0}
+
+// init creates the physics world. Call register after it, and destroy in the game's shutdown.
+init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_Desc = {}, anchor := ecs.World_Position{}) -> bool {
+	desc := desc
+	allocator := platform.heap_allocator
+	s^ = {
+		platform       = platform,
+		anchor         = anchor,
+		gravity        = DEFAULT_GRAVITY,
+		settings_dirty = true,
+		bodies         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
+		shapes         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
+		records        = make([dynamic]Body_Record, allocator),
+	}
+	for &mask in s.collides {
+		mask = max(u32)
+	}
+	s.world = platform.physics.world_create(&desc)
+	return s.world.generation != 0
+}
+
+// register makes the sync's queries. Call it after init and in on_reload, with the world's components registered.
+register :: proc(s: ^State, w: ^ecs.World) {
+	s.queries.new_colliders = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.read(w, Collider), ecs.without(w, Physics_Body)})
+	s.queries.new_bodies = ecs.query(
+		w,
+		{ecs.read(w, ecs.Transform), ecs.read(w, Rigid_Body), ecs.without(w, Collider), ecs.without(w, Physics_Body)},
+	)
+	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body)})
+}
+
+// reload takes the new Platform_API after a code reload. The world and its bodies stay.
+reload :: proc(s: ^State, platform: ^core.Platform_API) {
+	s.platform = platform
+}
+
+destroy :: proc(s: ^State) {
+	if s.platform != nil && s.world.generation != 0 {
+		s.platform.physics.world_destroy(s.world)
+	}
+	pool_destroy(&s.bodies)
+	pool_destroy(&s.shapes)
+	delete(s.records)
+	s^ = {}
+}
+
+// set_gravity changes the world's gravity from the next tick.
+set_gravity :: proc(s: ^State, gravity: [3]f32) {
+	s.gravity = gravity
+	s.settings_dirty = true
+}
+
+// set_layers sets which object layers collide: layer a and b collide when each is in the other's mask.
+set_layers :: proc(s: ^State, collides: [core_physics.MAX_LAYERS]u32) {
+	s.collides = collides
+	s.settings_dirty = true
+}
+
+@(private)
+api :: proc(s: ^State) -> ^core_physics.Physics_API {
+	return &s.platform.physics
+}
+
+@(private)
+allocator_of :: proc(s: ^State) -> runtime.Allocator {
+	return s.platform.frame_allocator
+}

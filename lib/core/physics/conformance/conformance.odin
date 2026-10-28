@@ -6,7 +6,7 @@ import "core:math"
 import "core:mem"
 import "core:testing"
 
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 
 STEP :: f32(1) / 60
 GRAVITY :: [3]f32{0, -9.81, 0}
@@ -186,4 +186,45 @@ deterministic :: proc(t: ^testing.T, api: ^physics.Physics_API) {
 	a := run(t, api)
 	b := run(t, api)
 	testing.expect(t, mem.compare_ptrs(&a, &b, size_of(a)) == 0, "two runs of the same commands give the same poses")
+}
+
+// offset_and_enabled: a shape's offset moves it in its body, and a disabled body neither falls nor is hit until it is
+// enabled again.
+offset_and_enabled :: proc(t: ^testing.T, api: ^physics.Physics_API) {
+	w := world(t, api)
+	defer api.world_destroy(w)
+	OFFSET_SHAPE :: physics.Shape{2, 1}
+	list := physics.command_list(context.temp_allocator)
+	physics.cmd_create_shape(&list, OFFSET_SHAPE, .Box, {0.5, 0.5, 0.5}, offset = {3, 0, 0})
+	physics.cmd_create_body(&list, physics.body_desc(BOX, OFFSET_SHAPE, .Static, {0, 2, 0}, user = 42))
+	physics.cmd_release_shape(&list, OFFSET_SHAPE)
+	testing.expect(t, physics.submit(api, w, list))
+	hit: physics.Ray_Hit
+	at_offset := physics.Ray{origin = {3, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	testing.expect(t, bool(api.raycast(w, &at_offset, nil, &hit)))
+	testing.expect_value(t, hit.body, BOX)
+	at_origin := physics.Ray{origin = {0, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	testing.expect(t, bool(api.raycast(w, &at_origin, nil, &hit)))
+	testing.expect_value(t, hit.body, GROUND)
+
+	FALLING :: physics.Body{2, 1}
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_create_body(&list, physics.body_desc(FALLING, BOX_SHAPE, .Dynamic, {-3, 5, 0}))
+	physics.cmd_set_enabled(&list, FALLING, false)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 30 {
+		api.step(w, STEP, 1)
+	}
+	testing.expect_value(t, state(api, w, FALLING).position.y, 5)
+	above := physics.Ray{origin = {-3, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	testing.expect(t, bool(api.raycast(w, &above, nil, &hit)))
+	testing.expect_value(t, hit.body, GROUND)
+
+	list = physics.command_list(context.temp_allocator)
+	physics.cmd_set_enabled(&list, FALLING, true)
+	testing.expect(t, physics.submit(api, w, list))
+	for _ in 0 ..< 30 {
+		api.step(w, STEP, 1)
+	}
+	testing.expect(t, state(api, w, FALLING).position.y < 5, "an enabled body falls again")
 }

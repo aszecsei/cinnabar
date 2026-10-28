@@ -1,4 +1,4 @@
-package physics
+package physics_boundary
 
 import "core:testing"
 

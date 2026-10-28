@@ -7,7 +7,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 import "cinnabar:core/luau"
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 

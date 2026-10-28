@@ -17,6 +17,7 @@
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
@@ -370,6 +371,15 @@ bool run_create_shape(World_Impl& w, const cn_create_shape& c)
         report(CN_LOG_ERROR, "physics: Create_Shape: %s", result.GetError().c_str());
         return false;
     }
+    Vec3 offset = to_vec3(c.offset);
+    Quat rotation = to_quat(c.rotation);
+    if (offset != Vec3::sZero() || !rotation.IsClose(Quat::sIdentity())) {
+        result = RotatedTranslatedShapeSettings(offset, rotation, result.Get()).Create();
+        if (result.HasError()) {
+            report(CN_LOG_ERROR, "physics: Create_Shape: %s", result.GetError().c_str());
+            return false;
+        }
+    }
     Shape_Slot& slot = w.shapes[c.shape.index];
     slot.generation = c.shape.generation;
     slot.shape = result.Get();
@@ -438,7 +448,9 @@ bool run_destroy_body(World_Impl& w, cn_body body)
         return false;
     }
     BodyInterface& bodies = w.system.GetBodyInterface();
-    bodies.RemoveBody(id);
+    if (bodies.IsAdded(id)) {
+        bodies.RemoveBody(id);
+    }
     bodies.DestroyBody(id);
     w.handles[id.GetIndex()] = {};
     w.bodies[body.index] = {};
@@ -451,7 +463,7 @@ const char* command_name(uint16_t kind)
 {
     static const char* names[] = { "Set_World", "Create_Shape", "Release_Shape", "Create_Body", "Destroy_Body",
         "Set_Pose", "Move_Kinematic", "Set_Velocity", "Add_Force", "Add_Force_At", "Add_Torque", "Add_Impulse",
-        "Add_Angular_Impulse", "Activate", "Deactivate" };
+        "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled" };
     return kind < sizeof(names) / sizeof(names[0]) ? names[kind] : "unknown";
 }
 
@@ -540,6 +552,20 @@ bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data)
             bodies.ActivateBody(id);
         } else {
             bodies.DeactivateBody(id);
+        }
+        return true;
+    }
+    case CN_CMD_SET_ENABLED: {
+        const auto& c = read<cn_set_enabled>(data);
+        if (!find_body(w, c.body, id)) {
+            return false;
+        }
+        bool added = bodies.IsAdded(id);
+        if (c.enabled && !added) {
+            bool dynamic = bodies.GetMotionType(id) != EMotionType::Static;
+            bodies.AddBody(id, dynamic ? EActivation::Activate : EActivation::DontActivate);
+        } else if (!c.enabled && added) {
+            bodies.RemoveBody(id);
         }
         return true;
     }
@@ -640,7 +666,9 @@ void destroy(World_Entry& entry)
     BodyInterface& bodies = w->system.GetBodyInterface();
     for (Body_Slot& slot : w->bodies) {
         if (!slot.id.IsInvalid()) {
-            bodies.RemoveBody(slot.id);
+            if (bodies.IsAdded(slot.id)) {
+                bodies.RemoveBody(slot.id);
+            }
             bodies.DestroyBody(slot.id);
         }
     }

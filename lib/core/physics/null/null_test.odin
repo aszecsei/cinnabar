@@ -4,7 +4,7 @@ import "core:log"
 import "core:sync"
 import "core:testing"
 
-import "cinnabar:core/physics"
+import physics "cinnabar:core/physics"
 import physics_host "cinnabar:core/physics/host"
 
 // The backend's state is one per process, and the test runner runs tests on several threads.
