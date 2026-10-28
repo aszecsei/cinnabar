@@ -49,5 +49,5 @@ emitter smoke
 
 - **Problems** have their line: an unknown setting, module or curve, a value out of range, keys out of order. An effect with a problem keeps its old blob, so the running game keeps the last good version.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID.
-- **The editor** opens an effect in the script editor, and **New Effect** makes one from a template of soft puffs.
+- **The editor** opens an effect in a preview beside the viewport, which plays it over a ground (see [Previews](../../rendering/particles.md#previews)), with a button that opens its text in the script editor. Each save shows in the preview once the daemon cooks it. **New Effect** makes one from a template of soft puffs.
 - **Hot reload:** a new blob restarts every system that places the effect (see [Systems](../../rendering/particles.md#systems)).

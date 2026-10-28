@@ -11,31 +11,39 @@ using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
 namespace Cinnabar.Editor.Materials;
 
 /// <summary>
-/// The material's preview (see docs/rendering/materials.md#material-previews): the game's frames of the material on a mesh, which
-/// the editor copies as it does the viewport's. Dragging turns the camera about the mesh, the wheel moves it nearer or
-/// farther, and the buttons pick the mesh.
+/// A preview (see docs/rendering/materials.md#material-previews): the game's frames of a material on a mesh, or of an effect,
+/// which the editor copies as it does the viewport's. Dragging turns the camera about the middle, the wheel moves it
+/// nearer or farther, and for a material the buttons pick the mesh.
 /// </summary>
 sealed class PreviewPane : Grid
 {
-    readonly MaterialEditor _editor;
+    readonly IPreviewOwner _editor;
     readonly List<(ToggleButton Button, PreviewMesh Mesh)> _meshes = [];
     readonly TextBlock _waiting = new() { Classes = { "empty" }, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12) };
     Point _last;
     bool _dragging;
 
-    public PreviewPane(EditorShell shell, MaterialEditor editor)
+    public PreviewPane(EditorShell shell, IPreviewOwner editor)
     {
         _editor = editor;
         Background = new SolidColorBrush(Color.Parse("#141416"));
         ClipToBounds = true;
         if (editor.Preview is not { } session)
         {
-            _waiting.Text = $"Every one of the {EditorShell.MaxPreviews} previews is in use. Close another material to see this one.";
+            _waiting.Text = $"Every one of the {EditorShell.MaxPreviews} previews is in use. Close another material or effect to see this one.";
             Children.Add(_waiting);
             return;
         }
         Children.Add(_waiting);
         Children.Add(new ViewportControl { Session = session });
+        var timer = new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(250), Avalonia.Threading.DispatcherPriority.Background, (_, _) => ShowWaiting(shell, session));
+        AttachedToVisualTree += (_, _) => timer.Start();
+        DetachedFromVisualTree += (_, _) => timer.Stop();
+        ShowWaiting(shell, session);
+        if (!editor.PicksMesh)
+        {
+            return;
+        }
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 2, Margin = new Thickness(6), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Bottom };
         foreach (var mesh in Enum.GetValues<PreviewMesh>().Where(m => m != PreviewMesh.Asset))
         {
@@ -58,16 +66,12 @@ sealed class PreviewPane : Grid
             Margin = new Thickness(6),
         });
         ShowMesh();
-        var timer = new Avalonia.Threading.DispatcherTimer(TimeSpan.FromMilliseconds(250), Avalonia.Threading.DispatcherPriority.Background, (_, _) => ShowWaiting(shell, session));
-        AttachedToVisualTree += (_, _) => timer.Start();
-        DetachedFromVisualTree += (_, _) => timer.Stop();
-        ShowWaiting(shell, session);
     }
 
     void ShowWaiting(EditorShell shell, ViewportSession session)
     {
         _waiting.IsVisible = !session.HasPicture;
-        _waiting.Text = shell.Host.Linked ? "The preview draws once the material cooks." : "The preview needs the host.";
+        _waiting.Text = shell.Host.Linked ? _editor.Waiting : "The preview needs the host.";
     }
 
     void ShowMesh()

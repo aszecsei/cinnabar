@@ -143,6 +143,8 @@ Frame_Desc :: struct {
 	// The time that the particles step this frame, in seconds: the game's simulation time, which is 0 while the editor
 	// is in Edit or paused (see docs/rendering/particles.md#time).
 	delta:             f32,
+	// The Particle_Systems that step by the host's time while delta is 0: those that the editor plays, its selection.
+	playing:           []ecs.Entity,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -430,8 +432,8 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, settings.ambient)
 	add_scene_passes(f, settings.ambient)
-	begin_sprites(f, desc.sprites)
-	begin_particles(f, w, desc.delta, desc.hidden)
+	begin_sprites(f, desc.sprites, &r.sprites.main)
+	begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
 	lines := debug.frame_lines(&r.debug)
 	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
 

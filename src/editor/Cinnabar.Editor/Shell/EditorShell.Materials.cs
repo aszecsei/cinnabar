@@ -20,7 +20,7 @@ public sealed partial class EditorShell
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<MaterialEditor> _discarding = [];
-    // The command line's materials, which open once the index has them.
+    // The command line's materials and effects, which open once the index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -30,7 +30,14 @@ public sealed partial class EditorShell
             if (Assets.FindByPath(path) is { } asset)
             {
                 _pendingMaterials.Remove(path);
-                OpenMaterial(asset);
+                if (asset.Kind == AssetKind.Effect)
+                {
+                    OpenEffect(asset);
+                }
+                else
+                {
+                    OpenMaterial(asset);
+                }
             }
         }
     }
@@ -104,10 +111,10 @@ public sealed partial class EditorShell
         int? previewId = null;
         if (document.Kind == MaterialFileKind.Material)
         {
-            previewId = Enumerable.Range(0, MaxPreviews).Cast<int?>().FirstOrDefault(id => !_materials.Any(m => m.PreviewId == id));
+            previewId = FreePreviewId();
             if (previewId == null)
             {
-                Console.Add(LogLevel.Warning, $"material: {MaxPreviews} material editors have previews, so {document.Title} has none");
+                Console.Add(LogLevel.Warning, $"material: {MaxPreviews} previews are open, so {document.Title} has none");
             }
         }
         var editor = new MaterialEditor(this, document, previewId);
@@ -147,6 +154,11 @@ public sealed partial class EditorShell
 
     void OnDocumentClosed(Dock.Model.Core.IDockable document)
     {
+        if (document is EffectPreviewDocument { Preview: var preview })
+        {
+            OnEffectClosed(preview);
+            return;
+        }
         if (document is not MaterialEditorDocument { Editor: var editor } || !_materials.Remove(editor))
         {
             return;
@@ -196,6 +208,10 @@ public sealed partial class EditorShell
         {
             editor.SendPreview();
         }
+        foreach (var effect in _effects)
+        {
+            effect.SendPreview();
+        }
     }
 
     void DisconnectPreviews()
@@ -204,6 +220,10 @@ public sealed partial class EditorShell
         {
             editor.Preview?.Disconnect();
         }
+        foreach (var effect in _effects)
+        {
+            effect.Preview?.Disconnect();
+        }
     }
 
     void OnPreviewTarget(PreviewTarget target)
@@ -211,6 +231,10 @@ public sealed partial class EditorShell
         if (_materials.Find(m => m.PreviewId == (int)target.Id) is { Preview: { } session })
         {
             session.Connect(target.Prefix, target.Generation);
+        }
+        else if (_effects.Find(e => e.PreviewId == (int)target.Id) is { Preview: { } effect })
+        {
+            effect.Connect(target.Prefix, target.Generation);
         }
     }
 }

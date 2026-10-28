@@ -35,7 +35,8 @@ struct Particle {
 
 // Matches Emitter_Record in lib/engine/render/particles.odin: an emitter of a system this frame. row0 to row2 are the
 // system's pose relative to its anchor; anchor and previous_anchor are the anchor relative to this frame's and last
-// frame's camera. modules and curves are the first of its modules and curve rows in the frame's.
+// frame's camera. modules and curves are the first of its modules and curve rows in the frame's. delta is the time
+// that the system steps this frame, and time its age, which the noise moves with.
 struct Emitter_Record {
 	uint first;
 	uint capacity;
@@ -59,7 +60,8 @@ struct Emitter_Record {
 	float softness;
 	uint modules;
 	uint curves;
-	uint padding;
+	float delta;
+	float time;
 };
 
 // Matches format.Effect_Module.
@@ -86,8 +88,6 @@ struct Particle_Constants {
 	uint history;
 	uint has_history;
 	uint2 history_size;
-	float delta;
-	float time;
 	float near;
 	uint3 padding;
 };

@@ -88,9 +88,14 @@ Particles :: struct {
 	free:                     [MAX_PARTICLE_RANGES]Particle_Range,
 	free_count:               int,
 	slots:                    [MAX_PARTICLE_SYSTEMS]Particle_Slot,
+	// The effect previews' systems, by preview, and their cameras last frame (see docs/rendering/particles.md#previews).
+	previews:                 [gpu.MAX_PREVIEW_TARGETS]Particle_Slot,
+	preview_cameras:          [gpu.MAX_PREVIEW_TARGETS]Particle_Camera,
 	frame:                    u64,
-	// The simulation's time, for the noise, in seconds.
-	time:                     f32,
+	// The host's time at the last frame, and the time since then, which the systems that play in the editor and the
+	// previews step by, in seconds.
+	last_wall:                f64,
+	wall_delta:               f32,
 	// Last frame's camera, whose depth the history holds.
 	previous_position:        ecs.World_Position,
 	previous_view_projection: matrix[4, 4]f32,
@@ -99,9 +104,17 @@ Particles :: struct {
 	full_logged:              bool,
 }
 
+// Particle_Camera is a view's camera last frame, relative to its anchor's space, for a preview's collisions.
+@(private)
+Particle_Camera :: struct {
+	position:        [3]f32,
+	view_projection: matrix[4, 4]f32,
+	valid:           bool,
+}
+
 // Emitter_Record matches Emitter_Record in particles.hlsli: one emitter of a system this frame. rows is the system's
 // pose relative to its anchor, and anchor and previous_anchor the anchor relative to this frame's and last frame's
-// camera.
+// camera. delta is the time that the system steps, and time its age, which the noise moves with.
 @(private)
 Emitter_Record :: struct {
 	first:           u32,
@@ -124,7 +137,8 @@ Emitter_Record :: struct {
 	softness:        f32,
 	modules:         u32,
 	curves:          u32,
-	padding:         u32,
+	delta:           f32,
+	time:            f32,
 }
 
 // Particle_Constants matches Particle_Constants in particles.hlsli, the update pass's pass constants.
@@ -144,8 +158,6 @@ Particle_Constants :: struct {
 	history:                  u32,
 	has_history:              u32,
 	history_size:             [2]u32,
-	delta:                    f32,
-	time:                     f32,
 	near:                     f32,
 	padding:                  [3]u32,
 }
@@ -160,7 +172,7 @@ History_Push :: struct {
 	size:    [2]u32,
 }
 
-#assert(size_of(Emitter_Record) == 168 && size_of(Particle_Constants) <= 256)
+#assert(size_of(Emitter_Record) == 172 && size_of(Particle_Constants) <= 256)
 
 // Particle_Frame is what one frame's particle passes need, in frame memory.
 @(private)
@@ -175,8 +187,20 @@ Particle_Frame :: struct {
 	pool:      Buffer,
 	counters:  Buffer,
 	history:   History,
+	// The history's label, one for each view that keeps one.
+	history_label: string,
 	// Whether last frame drew from a camera, which the history's depth is from.
 	has_previous: bool,
+}
+
+// Particle_Step is what a view's systems write this frame, in frame memory: their emitters' records, modules and curve
+// rows, and the sprites that they may append.
+@(private = "file")
+Particle_Step :: struct {
+	emitters: [dynamic]Emitter_Record,
+	modules:  [dynamic]format.Effect_Module,
+	curves:   [dynamic]format.Effect_Curve_Row,
+	capacity: int,
 }
 
 particles_init :: proc(p: ^Particles, w: ^ecs.World) {
@@ -208,35 +232,32 @@ sync_particle_pipelines :: proc(r: ^Renderer, force: bool) {
 }
 
 // begin_particles steps the systems' state on the CPU, after begin_sprites: what each emitter spawns this frame, from
-// its rate, its bursts and delta, and its records for the update pass. A system's first frame, or its effect's new
-// version, gives its emitters new ranges of the pool. The ranges of a system that is gone return to the pool.
-// Without the particles' pipelines or the sprites', no system steps. delta is the frame's simulation time, in seconds.
+// its rate, its bursts and its time, and its records for the update pass. A system's first frame, or its effect's new
+// version, gives its emitters new ranges of the pool. The ranges of a system that is gone return to the pool. Without
+// the particles' pipelines or the sprites', no system steps. delta is the frame's simulation time, in seconds; a system
+// in playing steps by the host's time instead while delta is 0, as the editor plays its selected systems.
 @(private)
-begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32) {
+begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32, playing: []ecs.Entity) {
 	r := f.renderer
 	p := &r.particles
 	platform := r.platform
+	if platform.time_seconds != nil {
+		now := platform.time_seconds()
+		p.wall_delta = p.last_wall > 0 ? f32(clamp(now - p.last_wall, 0, MAX_PARTICLE_DELTA)) : 0
+		p.last_wall = now
+	}
 	// The history that the update reads is last frame's, from last frame's camera, which only a frame after another has.
 	has_previous := p.has_previous
 	defer {
 		p.previous_position, p.previous_view_projection, p.has_previous = f.view.position, f.view_projection, true
 	}
-	if f.sprites == nil || r.residency.assets == nil || !pipeline_ready(platform, &p.update) || !pipeline_ready(platform, &p.history) {
+	if !particles_ready(f) {
 		return
-	}
-	if p.pool == {} {
-		p.pool = platform.gpu_create_buffer({size = MAX_PARTICLES * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
-		p.counters = platform.gpu_create_buffer({size = MAX_PARTICLE_SYSTEMS * format.MAX_EFFECT_EMITTERS * 4, usage = {.Storage}, label = "particle counters"}, nil)
-		p.free[0], p.free_count = {0, MAX_PARTICLES}, 1
 	}
 	dt := clamp(delta, 0, MAX_PARTICLE_DELTA)
 	p.frame += 1
-	p.time = math.mod(p.time + dt, 3600)
 	assets := r.residency.assets
-	emitters := make([dynamic]Emitter_Record, platform.frame_allocator)
-	modules := make([dynamic]format.Effect_Module, platform.frame_allocator)
-	curves := make([dynamic]format.Effect_Curve_Row, platform.frame_allocator)
-	capacity := 0
+	step := new_particle_step(platform)
 
 	it := ecs.query_iter(w, p.systems.query)
 	for view in ecs.query_next(&it) {
@@ -248,83 +269,30 @@ begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32) {
 			}
 			slot.seen = p.frame
 			pose, visible := light_pose(w, view, i, hidden, e)
-			if system.effect != slot.effect {
-				free_slot_ranges(p, slot)
-				slot.effect, slot.started = system.effect, false
-				slot.handle, _ = asset.load(assets, system.effect)
-			}
-			data, loaded := asset.data(assets, slot.handle)
-			if !loaded || asset.guid(assets, slot.handle) != system.effect {
+			data, version, loaded := slot_effect(p, slot, assets, system.effect, nil, 0)
+			if !loaded {
 				continue
 			}
-			blob, ok := format.effect_view(data)
-			if !ok {
-				continue
-			}
-			effect_emitters := format.effect_emitters(data, blob)
-			if version := asset.version(assets, slot.handle); !slot.started || version != slot.version {
-				start_slot(p, slot, effect_emitters, version)
+			if !slot.started || version != slot.version {
 				anchor := pose
 				if !visible {
 					anchor, _ = ecs.presented(w, e)
 				}
+				start_slot(p, slot, data, version)
 				slot.anchor = anchor.position
 			}
 			// A hidden system keeps its particles where they are, and draws none.
 			if !visible {
 				continue
 			}
-			scale := system.rate_scale > 0 ? system.rate_scale : 1
-			effect_curves := format.effect_curves(data, blob)
-			for em, k in effect_emitters[:min(len(effect_emitters), format.MAX_EFFECT_EMITTERS)] {
-				spawn := 0
-				if !system.paused {
-					slot.carry[k] += em.rate * scale * dt
-					spawn = int(slot.carry[k])
-					slot.carry[k] -= f32(spawn)
-					if em.burst > 0 && slot.next_burst[k] >= 0 && slot.age >= slot.next_burst[k] && dt > 0 {
-						spawn += int(f32(em.burst) * scale)
-						slot.next_burst[k] = em.burst_interval > 0 ? slot.next_burst[k] + em.burst_interval : -1
-					}
-				}
-				rng := slot.ranges[k]
-				if rng.count == 0 {
-					continue
-				}
-				texture := u32(SPRITE_NO_TEXTURE)
-				if t, ready := resident_texture(&r.residency, em.texture); ready {
-					texture = gpu.read_index(t.texture)
-				}
-				em_modules := format.effect_modules(data, em)
-				record := Emitter_Record {
-					first           = rng.first,
-					capacity        = rng.count,
-					spawn           = u32(min(spawn, int(rng.count))),
-					reset           = u32(slot.reset),
-					rows            = pose_rows(pose, slot.anchor),
-					anchor          = ecs.position_sub(slot.anchor, f.view.position),
-					seed            = u32(p.frame) * 2654435761 ~ u32(len(emitters)) * 40503,
-					previous_anchor = ecs.position_sub(slot.anchor, p.previous_position),
-					module_count    = u32(len(em_modules)),
-					lifetime        = em.lifetime,
-					speed           = em.speed,
-					spin            = em.spin,
-					shape           = u32(em.shape),
-					shape_size      = em.shape_size,
-					texture         = texture,
-					flipbook        = em.flipbook,
-					flipbook_rate   = em.flipbook_rate,
-					softness        = em.softness,
-					modules         = u32(len(modules)),
-					curves          = u32(len(curves)),
-				}
-				append(&modules, ..em_modules)
-				append(&curves, ..effect_curves[em.curves:][:len(format.Effect_Curve)])
-				append(&emitters, record)
-				capacity += int(rng.count)
+			system_dt := dt
+			if dt == 0 && slice_has(playing, e) {
+				system_dt = p.wall_delta
 			}
-			slot.reset = false
-			slot.age += dt
+			scale := system.rate_scale > 0 ? system.rate_scale : 1
+			anchor := ecs.position_sub(slot.anchor, f.view.position)
+			previous_anchor := ecs.position_sub(slot.anchor, p.previous_position)
+			step_slot(r, step, slot, data, pose_rows(pose, slot.anchor), anchor, previous_anchor, system_dt, scale, system.paused)
 		}
 	}
 	// The systems that are gone, inactive or without the component return their ranges.
@@ -334,28 +302,172 @@ begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32) {
 			slot = {}
 		}
 	}
-	if len(emitters) == 0 {
+	finish_particles(f, step, p.previous_view_projection, has_previous, "particle history")
+}
+
+// particles_ready is whether the frame can step particles: the particles' pipelines and the sprites' are compiled. The
+// pool is made the first time.
+@(private = "file")
+particles_ready :: proc(f: ^Frame) -> bool {
+	r := f.renderer
+	p := &r.particles
+	platform := r.platform
+	if f.sprites == nil || r.residency.assets == nil || !pipeline_ready(platform, &p.update) || !pipeline_ready(platform, &p.history) {
+		return false
+	}
+	if p.pool == {} {
+		p.pool = platform.gpu_create_buffer({size = MAX_PARTICLES * PARTICLE_SIZE, usage = {.Storage}, label = "particles"}, nil)
+		p.counters = platform.gpu_create_buffer({size = MAX_PARTICLE_SYSTEMS * format.MAX_EFFECT_EMITTERS * 4, usage = {.Storage}, label = "particle counters"}, nil)
+		p.free[0], p.free_count = {0, MAX_PARTICLES}, 1
+	}
+	return true
+}
+
+@(private = "file")
+new_particle_step :: proc(platform: ^core.Platform_API) -> ^Particle_Step {
+	step := new(Particle_Step, platform.frame_allocator)
+	step.emitters = make([dynamic]Emitter_Record, platform.frame_allocator)
+	step.modules = make([dynamic]format.Effect_Module, platform.frame_allocator)
+	step.curves = make([dynamic]format.Effect_Curve_Row, platform.frame_allocator)
+	return step
+}
+
+@(private = "file")
+slice_has :: proc(entities: []ecs.Entity, e: ecs.Entity) -> bool {
+	for x in entities {
+		if x == e {
+			return true
+		}
+	}
+	return false
+}
+
+// slot_effect gives a system's effect blob and its version: unsaved, the data that a preview gives with its version,
+// or the cooked asset, which the first call loads. A new effect frees the system's ranges, so it starts again.
+@(private = "file")
+slot_effect :: proc(p: ^Particles, slot: ^Particle_Slot, assets: ^asset.Assets, effect: format.Guid, unsaved: []byte, unsaved_version: u32) -> (data: []byte, version: u32, ok: bool) {
+	if effect != slot.effect {
+		free_slot_ranges(p, slot)
+		slot.effect, slot.started, slot.handle = effect, false, {}
+		if unsaved == nil {
+			slot.handle, _ = asset.load(assets, effect)
+		}
+	}
+	if unsaved != nil {
+		data, version = unsaved, unsaved_version
+	} else {
+		loaded: bool
+		data, loaded = asset.data(assets, slot.handle)
+		if !loaded || asset.guid(assets, slot.handle) != effect {
+			return
+		}
+		version = asset.version(assets, slot.handle)
+	}
+	_, ok = format.effect_view(data)
+	return
+}
+
+// step_slot steps a started system by dt and appends its emitters' records: what each spawns from its rate, its
+// carried fraction and its bursts, and the records of its ranges.
+@(private = "file")
+step_slot :: proc(
+	r: ^Renderer,
+	step: ^Particle_Step,
+	slot: ^Particle_Slot,
+	data: []byte,
+	rows: [3][4]f32,
+	anchor, previous_anchor: [3]f32,
+	dt, scale: f32,
+	paused: bool,
+) {
+	p := &r.particles
+	blob, _ := format.effect_view(data)
+	effect_emitters := format.effect_emitters(data, blob)
+	effect_curves := format.effect_curves(data, blob)
+	for em, k in effect_emitters[:min(len(effect_emitters), format.MAX_EFFECT_EMITTERS)] {
+		spawn := 0
+		if !paused {
+			slot.carry[k] += em.rate * scale * dt
+			spawn = int(slot.carry[k])
+			slot.carry[k] -= f32(spawn)
+			if em.burst > 0 && slot.next_burst[k] >= 0 && slot.age >= slot.next_burst[k] && dt > 0 {
+				spawn += int(f32(em.burst) * scale)
+				slot.next_burst[k] = em.burst_interval > 0 ? slot.next_burst[k] + em.burst_interval : -1
+			}
+		}
+		rng := slot.ranges[k]
+		if rng.count == 0 {
+			continue
+		}
+		texture := u32(SPRITE_NO_TEXTURE)
+		if t, ready := resident_texture(&r.residency, em.texture); ready {
+			texture = gpu.read_index(t.texture)
+		}
+		em_modules := format.effect_modules(data, em)
+		append(&step.emitters, Emitter_Record {
+			first           = rng.first,
+			capacity        = rng.count,
+			spawn           = u32(min(spawn, int(rng.count))),
+			reset           = u32(slot.reset),
+			rows            = rows,
+			anchor          = anchor,
+			seed            = u32(p.frame) * 2654435761 ~ u32(len(step.emitters)) * 40503 ~ rng.first,
+			previous_anchor = previous_anchor,
+			module_count    = u32(len(em_modules)),
+			lifetime        = em.lifetime,
+			speed           = em.speed,
+			spin            = em.spin,
+			shape           = u32(em.shape),
+			shape_size      = em.shape_size,
+			texture         = texture,
+			flipbook        = em.flipbook,
+			flipbook_rate   = em.flipbook_rate,
+			softness        = em.softness,
+			modules         = u32(len(step.modules)),
+			curves          = u32(len(step.curves)),
+			delta           = dt,
+			time            = slot.age,
+		})
+		append(&step.modules, ..em_modules)
+		append(&step.curves, ..effect_curves[em.curves:][:len(format.Effect_Curve)])
+		step.capacity += int(rng.count)
+	}
+	slot.reset = false
+	slot.age = math.mod(slot.age + dt, 3600)
+}
+
+// finish_particles reserves the view's sprites and uploads its step's records, for its update pass. Without emitters
+// to step, Frame.particles stays nil.
+@(private = "file")
+finish_particles :: proc(f: ^Frame, step: ^Particle_Step, previous_view_projection: matrix[4, 4]f32, has_previous: bool, history_label: string) {
+	if len(step.emitters) == 0 {
 		return
 	}
-	target, reserved := reserve_sprites(f, capacity)
+	platform := f.renderer.platform
+	target, reserved := reserve_sprites(f, step.capacity)
 	if !reserved {
 		return
 	}
 	pf := new(Particle_Frame, platform.frame_allocator)
 	pf.target = target
-	pf.count = len(emitters)
+	pf.count = len(step.emitters)
 	pf.has_previous = has_previous
+	pf.history_label = history_label
+	// An upload is never empty, so a view without modules uploads one that no emitter reads.
+	if len(step.modules) == 0 {
+		append(&step.modules, format.Effect_Module{})
+	}
 	ok: bool
-	if pf.emitters, ok = upload_bytes(platform, ([^]byte)(raw_data(emitters))[:len(emitters) * size_of(Emitter_Record)]); !ok {
+	if pf.emitters, ok = upload_bytes(platform, ([^]byte)(raw_data(step.emitters))[:len(step.emitters) * size_of(Emitter_Record)]); !ok {
 		return
 	}
-	if pf.modules, ok = upload_bytes(platform, ([^]byte)(raw_data(modules))[:max(len(modules), 1) * size_of(format.Effect_Module)]); !ok {
+	if pf.modules, ok = upload_bytes(platform, ([^]byte)(raw_data(step.modules))[:len(step.modules) * size_of(format.Effect_Module)]); !ok {
 		return
 	}
-	if pf.curves, ok = upload_bytes(platform, ([^]byte)(raw_data(curves))[:len(curves) * size_of(format.Effect_Curve_Row)]); !ok {
+	if pf.curves, ok = upload_bytes(platform, ([^]byte)(raw_data(step.curves))[:len(step.curves) * size_of(format.Effect_Curve_Row)]); !ok {
 		return
 	}
-	if pf.zeros, ok = platform.gpu_upload(len(emitters) * 4, 4); !ok {
+	if pf.zeros, ok = platform.gpu_upload(len(step.emitters) * 4, 4); !ok {
 		return
 	}
 	for &b in pf.zeros.data {
@@ -365,12 +477,42 @@ begin_particles :: proc(f: ^Frame, w: ^ecs.World, delta: f32, hidden: []u32) {
 		return
 	}
 	(^Particle_Constants)(raw_data(pf.constants.data))^ = {
-		previous_view_projection = p.previous_view_projection,
-		delta                    = dt,
-		time                     = p.time,
+		previous_view_projection = previous_view_projection,
 		near                     = f.view.near,
 	}
 	f.particles = pf
+}
+
+// begin_preview_particles steps an effect preview's system, after the preview's frame began its sprites: the effect at
+// the preview's origin, by the host's time, so it always plays. camera is the preview's camera relative to the origin.
+// A new effect, or a new version of its blob, starts it again.
+@(private)
+begin_preview_particles :: proc(f: ^Frame, desc: ^Preview_Desc, camera: [3]f32) {
+	r := f.renderer
+	p := &r.particles
+	if desc.id < 0 || desc.id >= len(p.previews) || !particles_ready(f) {
+		return
+	}
+	slot := &p.previews[desc.id]
+	previous := &p.preview_cameras[desc.id]
+	has_previous := previous.valid
+	defer {
+		previous^ = {position = camera, view_projection = f.view_projection, valid = true}
+	}
+	data, version, loaded := slot_effect(p, slot, r.residency.assets, desc.material, desc.data, desc.version)
+	if !loaded {
+		return
+	}
+	slot.used = true
+	if !slot.started || version != slot.version {
+		start_slot(p, slot, data, version)
+		has_previous = false
+	}
+	identity := [3][4]f32{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}
+	step := new_particle_step(r.platform)
+	previous_position := has_previous ? previous.position : camera
+	step_slot(r, step, slot, data, identity, -camera, -previous_position, p.wall_delta, 1, false)
+	finish_particles(f, step, previous.view_projection, has_previous, "particle history (preview)")
 }
 
 // particle_slot is a system's slot, or a new one the first time that it is seen, or nil when every slot is in use.
@@ -394,7 +536,9 @@ particle_slot :: proc(p: ^Particles, e: ecs.Entity) -> ^Particle_Slot {
 // start_slot starts a system's effect: a new range of the pool for each emitter, whose particles start dead, and its
 // bursts at once. An emitter that the pool has no room for draws nothing, which is logged once.
 @(private = "file")
-start_slot :: proc(p: ^Particles, slot: ^Particle_Slot, emitters: []format.Effect_Emitter, version: u32) {
+start_slot :: proc(p: ^Particles, slot: ^Particle_Slot, data: []byte, version: u32) {
+	blob, _ := format.effect_view(data)
+	emitters := format.effect_emitters(data, blob)
 	free_slot_ranges(p, slot)
 	slot.started, slot.version, slot.reset, slot.age = true, version, true, 0
 	for em, k in emitters[:min(len(emitters), format.MAX_EFFECT_EMITTERS)] {
@@ -480,7 +624,7 @@ add_particle_passes :: proc(f: ^Frame) {
 	p := &f.renderer.particles
 	pf.pool = import_buffer(g, p.pool)
 	pf.counters = import_buffer(g, p.counters)
-	pf.history = history_texture(g, {size = f.size, format = PARTICLE_HISTORY_FORMAT, label = "particle history"})
+	pf.history = history_texture(g, {size = f.size, format = PARTICLE_HISTORY_FORMAT, label = pf.history_label})
 	pass := add_compute_pass(g, "particle counters", proc(ctx: ^Pass_Context) {
 		pf := (^Frame)(ctx.data).particles
 		gpu.cmd_copy_buffer(ctx.cb, pf.zeros.buffer, pf.zeros.offset, gpu_buffer(ctx.graph, pf.counters), 0, u32(pf.count * 4))

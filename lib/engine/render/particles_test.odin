@@ -1,7 +1,10 @@
 package render
 
 import "base:runtime"
+import "core:log"
+import "core:mem"
 import "core:mem/virtual"
+import "core:os"
 import "core:sync"
 import "core:testing"
 
@@ -9,6 +12,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
+import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 
 @(test)
@@ -97,7 +101,7 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
 		sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 		f.exposure = import_buffer(&g, exposure)
-		begin_sprites(f, nil)
+		begin_sprites(f, nil, &r.sprites.main)
 		testing.expect(t, f.sprites != nil)
 
 		// An emitter of 100 particles, as begin_particles writes it.
@@ -133,6 +137,104 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 		color(&g, pass, import_texture(&g, null.frame_target(), .Color), .Discard)
 		// The null backend checks every pipeline and barrier, the history's included.
 		testing.expectf(t, execute(&g), "frame %d did not execute", frame)
+		null.begin_frame({64, 32})
+	}
+}
+
+@(test)
+an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator             = virtual.arena_allocator(&arena),
+		heap_allocator              = runtime.heap_allocator(),
+		asset_allocator             = runtime.heap_allocator(),
+		file_read                   = core.file_read,
+		file_modified               = core.file_modified,
+		jobs_run                    = jobs.run,
+		jobs_wait                   = jobs.wait,
+		gpu_frame_target            = null.frame_target,
+		gpu_submit                  = null.submit,
+		gpu_upload                  = null.upload,
+		gpu_create_texture          = null.create_texture,
+		gpu_destroy_texture         = null.destroy_texture,
+		gpu_create_buffer           = null.create_buffer,
+		gpu_destroy_buffer          = null.destroy_buffer,
+		gpu_create_sampler          = null.create_sampler,
+		gpu_destroy_sampler         = null.destroy_sampler,
+		gpu_create_compute_pipeline = null.create_compute_pipeline,
+		gpu_destroy_pipeline        = null.destroy_pipeline,
+	}
+	// An empty cache: the preview's ground never becomes resident, so the effect plays over the background.
+	dir, err := os.make_directory_temp("", "preview_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	residency_init(&r.residency, &platform, &assets)
+	defer residency_destroy(&r.residency)
+	materials_init(&r.materials, &platform)
+	defer materials_destroy(&r.materials, &platform)
+	previews_init(&r.previews, r)
+	defer previews_destroy(&r.previews, r)
+	r.post.unit_exposure = platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "unit exposure"}, nil)
+	defer platform.gpu_destroy_buffer(r.post.unit_exposure)
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	defer destroy_shader_pipeline(&r.transparency_composite, &platform)
+	fake_sprite_pipelines(r)
+	defer sprites_destroy(&r.sprites, &platform)
+	p := &r.particles
+	p.update.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle update"})
+	p.history.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test particle history"})
+	defer particles_destroy(p, &platform)
+	target := platform.gpu_create_texture({size = {32, 32}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "preview target"}, nil)
+	defer platform.gpu_destroy_texture(target)
+
+	// The editor's unsaved effect: one emitter of 64 particles.
+	effect := format.guid_parse("00112233445566778899aabbccddeeff") or_else {}
+	data := format.effect_write({guid = effect, emitters = {{emitter = {capacity = 64, rate = 100, lifetime = {1, 1}, flipbook = {1, 1}}, name = "puffs"}}}, context.temp_allocator)
+	blob, _ := mem.alloc_bytes(len(data), format.BLOB_ALIGN, context.temp_allocator)
+	copy(blob, data)
+
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+	for frame in 0 ..< 2 {
+		g := begin(&platform, &cache)
+		f := new(Frame, platform.frame_allocator)
+		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f.lut = create_texture(&g, {size = {16, 16}, format = .RGBA16_Float, label = "lut"})
+		pass := add_render_pass(&g, "lut", proc(_: ^Pass_Context) {}, f)
+		color(&g, pass, f.lut, .Clear)
+		desc := Preview_Desc {
+			target   = target,
+			size     = {32, 32},
+			id       = 1,
+			material = effect,
+			effect   = true,
+			data     = blob,
+			version  = 1,
+			rotation = 1,
+			distance = 4,
+		}
+		{
+			// The ground's mesh and material are not cooked, which residency logs.
+			context.logger = log.nil_logger()
+			add_preview_passes(f, &desc)
+		}
+		// The effect's emitter took its range of the pool, and the preview's frame reserved its sprites.
+		testing.expect(t, p.previews[1].started && p.previews[1].ranges[0].count == 64)
+		testing.expect_value(t, p.preview_cameras[1].valid, true)
+		testing.expectf(t, execute(&g), "preview frame %d did not execute", frame)
 		null.begin_frame({64, 32})
 	}
 }

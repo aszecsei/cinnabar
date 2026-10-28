@@ -87,13 +87,13 @@ sprite_frames_match_their_sprites :: proc(t: ^testing.T) {
 			frame_sprites := c.cpu ? sprites : nil
 
 			// Until every sprite pipeline compiles, the frame has no sprites, and a GPU pass can reserve none.
-			begin_sprites(f, frame_sprites)
+			begin_sprites(f, frame_sprites, &r.sprites.main)
 			testing.expect(t, f.sprites == nil)
 			_, reserved := reserve_sprites(f, 10)
 			testing.expect(t, !reserved)
 			r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
 			fake_sprite_pipelines(r)
-			begin_sprites(f, frame_sprites)
+			begin_sprites(f, frame_sprites, &r.sprites.main)
 			testing.expect(t, f.sprites != nil)
 			testing.expect_value(t, has_sprites(f), c.cpu)
 			sp := f.sprites
@@ -135,7 +135,7 @@ sprite_frames_match_their_sprites :: proc(t: ^testing.T) {
 			testing.expect_value(t, sp.tiles, [2]u32{2, 1})
 			rows := (capacity + SPRITE_LIGHT_COLUMNS - 1) / SPRITE_LIGHT_COLUMNS
 			testing.expect(t, sp.light_size.x == SPRITE_LIGHT_COLUMNS * SPRITE_LIGHT_TEXELS && sp.light_size.y >= rows * SPRITE_LIGHT_TEXELS)
-			testing.expect(t, r.sprites.screen_capacity >= int(capacity) && r.sprites.bin_capacity >= 2 * int(sp.words))
+			testing.expect(t, r.sprites.main.screen_capacity >= int(capacity) && r.sprites.main.bin_capacity >= 2 * int(sp.words))
 			p = add_render_pass(&g, "output", proc(_: ^Pass_Context) {}, f)
 			read(&g, p, f.scene)
 			if view == .Transparent_Overdraw {

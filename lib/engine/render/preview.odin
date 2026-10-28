@@ -23,6 +23,11 @@ Preview_Shape :: enum {
 	Plane,
 }
 
+// An effect preview's ground, a side in meters, and the height above it that its camera orbits (see
+// docs/rendering/particles.md#previews).
+EFFECT_PREVIEW_GROUND :: 6
+EFFECT_PREVIEW_HEIGHT :: 0.75
+
 // The preview's camera, its light and its background.
 PREVIEW_FOV :: math.PI / 4
 PREVIEW_NEAR :: 0.01
@@ -36,9 +41,10 @@ Preview_Desc :: struct {
 	size:     [2]u32,
 	// Which preview this is, below gpu.MAX_PREVIEW_TARGETS: it keeps the pipelines of its unsaved material.
 	id:       int,
-	// The material or instance. With data, its blob instead of the cooked one, as the editor's unsaved graph cooks it,
-	// and a version that changes with the data.
+	// The material or instance, or with effect the effect. With data, its blob instead of the cooked one, as the editor's
+	// unsaved graph cooks it, and a version that changes with the data.
 	material: format.Guid,
+	effect:   bool,
 	data:     []byte,
 	version:  u32,
 	mesh:     format.Guid,
@@ -78,6 +84,8 @@ Preview_Frame :: struct {
 	instance_at: u32,
 	draws_at:    u32,
 	args_at:     u32,
+	// The camera, relative to the preview's origin.
+	camera:      [3]f32,
 }
 
 // preview_mesh is the GUID of one of the engine's preview meshes.
@@ -136,6 +144,10 @@ preview_use :: proc(r: ^Renderer, table: ^Material_Table, desc: ^Preview_Desc) -
 // pass, and the output pass into its target. Without its mesh or its material, it clears the target to the background.
 @(private)
 add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
+	if desc.effect {
+		add_effect_preview_passes(f, desc)
+		return
+	}
 	r := f.renderer
 	g := f.graph
 	platform := r.platform
@@ -214,11 +226,124 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	color(g, p, pf.target, .Discard)
 }
 
+// add_effect_preview_passes adds an effect preview's passes (see docs/rendering/particles.md#previews): a ground of the
+// default material under the effect, drawn as a material preview draws its mesh, then the effect's particles and
+// sprites with the moments and their composite, on a frame of the preview's own, then the output pass into its
+// target. The preview's sprites have buffers of their own, since the frame's are in use, and its particles a history.
+@(private = "file")
+add_effect_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
+	r := f.renderer
+	g := f.graph
+	platform := r.platform
+	ground := new(Preview_Desc, platform.frame_allocator)
+	ground^ = desc^
+	ground.material, ground.data, ground.mesh = r.materials.default_guid, nil, preview_mesh(.Plane)
+	pf := new(Preview_Frame, platform.frame_allocator)
+	pf.renderer, pf.desc, pf.frame = r, ground, f
+	size := desc.size
+	view := View {
+		rotation     = desc.rotation,
+		vertical_fov = PREVIEW_FOV,
+		near         = PREVIEW_NEAR,
+	}
+	view_projection := view_projection(view, f32(size.x) / f32(max(size.y, 1)))
+	table := Material_Table {
+		uses  = make(map[format.Guid]Material_Use, platform.frame_allocator),
+		bytes = make([dynamic]byte, platform.frame_allocator),
+	}
+	// The effect plays before its ground is ready, over the background.
+	mesh, mesh_ready := resident_mesh(&r.residency, ground.mesh)
+	pipeline, block, material_ok := preview_use(r, &table, ground)
+	if mesh_ready && material_ok {
+		pf.pipeline = pipeline
+		pf.draw_count = mesh.submesh_count
+	}
+	write_preview_records(f, pf, mesh if pf.draw_count > 0 else nil, block, &table, view_projection, [3]f32{0, EFFECT_PREVIEW_HEIGHT, 0}, EFFECT_PREVIEW_GROUND)
+	if desc.complete != nil {
+		// An effect plays, so its preview draws again in every frame that it can.
+		desc.complete^ = false
+	}
+	pf.target = import_texture(g, desc.target, .Color)
+	pf.scene = create_texture(g, {size = size, format = SCENE_FORMAT, label = "preview scene"})
+	if pf.constants.data == nil {
+		p := add_render_pass(g, "preview background", proc(_: ^Pass_Context) {}, pf)
+		color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
+		p = add_render_pass(g, "preview output", draw_preview_output, pf)
+		read(g, p, pf.scene)
+		read(g, p, f.lut)
+		color(g, p, pf.target, .Discard)
+		return
+	}
+
+	// The preview's own frame, with the preview's constants as its camera's, and no lights but the preview's one.
+	pf.depth = create_texture(g, {size = size, format = DEPTH_FORMAT, label = "preview depth"})
+	sub := new(Frame, platform.frame_allocator)
+	sub^ = {
+		renderer        = r,
+		graph           = g,
+		view            = view,
+		size            = size,
+		output_size     = size,
+		scene_size      = size,
+		view_projection = view_projection,
+		scene           = pf.scene,
+		depth           = pf.depth,
+		normals         = create_texture(g, {size = size, format = NORMAL_FORMAT, label = "preview normals"}),
+		exposure        = import_buffer(g, r.post.unit_exposure),
+		lut             = f.lut,
+	}
+	sub.lights = new(Light_Frame, platform.frame_allocator)
+	sub.shadows = new(Shadow_Frame, platform.frame_allocator)
+	sf := new(Scene_Frame, platform.frame_allocator)
+	sf.view_constants = make([]gpu.Upload, 2, platform.frame_allocator)
+	sf.view_constants[VIEW_CAMERA], sf.view_constants[VIEW_VIEW_MODEL] = pf.constants, pf.constants
+	sub.scene_frame = sf
+	begin_sprites(sub, nil, &r.sprites.preview)
+	begin_preview_particles(sub, desc, pf.camera)
+	add_particle_passes(sub)
+
+	velocity := create_texture(g, {size = size, format = VELOCITY_FORMAT, label = "preview velocity"})
+	ids := create_texture(g, {size = size, format = ID_FORMAT, label = "preview ids"})
+	pf.instances = import_buffer(g, r.previews.instances)
+	pf.draws = import_buffer(g, r.previews.draws)
+	pf.arguments = import_buffer(g, r.previews.arguments)
+	p := add_compute_pass(g, "update preview", update_preview, pf)
+	copy_dest(g, p, pf.instances)
+	copy_dest(g, p, pf.draws)
+	copy_dest(g, p, pf.arguments)
+	p = add_render_pass(g, "preview prepass", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Prepass)}, pf)
+	color(g, p, sub.normals, .Clear)
+	color(g, p, velocity, .Clear, store = .Discard)
+	depth(g, p, pf.depth, .Clear)
+	declare_preview_draws(g, p, pf)
+	add_particle_history_pass(sub)
+	p = add_render_pass(g, "preview", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Forward)}, pf)
+	color(g, p, pf.scene, .Clear, PREVIEW_BACKGROUND)
+	color(g, p, ids, .Clear, store = .Discard)
+	depth(g, p, pf.depth, .Load)
+	declare_preview_draws(g, p, pf)
+	add_transparency_passes(sub)
+	p = add_render_pass(g, "preview output", draw_preview_output, pf)
+	read(g, p, pf.scene)
+	read(g, p, f.lut)
+	color(g, p, pf.target, .Discard)
+}
+
 // write_preview_records uploads the preview's records: its instance, relative to its camera, a draw for each submesh,
 // the mesh's record, the material table, its light, and its Frame_Constants. Without a mesh, the preview is a
 // patches material's one patch, with a surface record in the mesh record's place.
+// An effect's preview orbits a point over the preview's origin, with its ground there, scale meters a side.
 @(private = "file")
-write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mesh, block: u32, table: ^Material_Table, view_projection: matrix[4, 4]f32) {
+write_preview_records :: proc(
+	f: ^Frame,
+	pf: ^Preview_Frame,
+	mesh: ^Resident_Mesh,
+	block: u32,
+	table: ^Material_Table,
+	view_projection: matrix[4, 4]f32,
+	orbit: Maybe([3]f32) = nil,
+	scale: f32 = 1,
+) {
 	r := f.renderer
 	platform := r.platform
 	desc := pf.desc
@@ -227,9 +352,14 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	if mesh != nil {
 		center = mesh.bounds.center
 	}
+	if o, ok := orbit.?; ok {
+		center = o
+	}
 	camera := linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0, 0, -desc.distance})
+	pf.camera = center + camera
+	origin := orbit != nil ? pf.camera : camera
 	offset := -center - camera
-	rows := [3][4]f32{{1, 0, 0, offset.x}, {0, 1, 0, offset.y}, {0, 0, 1, offset.z}}
+	rows := [3][4]f32{{scale, 0, 0, offset.x}, {0, scale, 0, offset.y}, {0, 0, scale, offset.z}}
 	instance := Instance_Record {
 		rows          = rows,
 		previous_rows = rows,
@@ -238,7 +368,9 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	arguments := make([]gpu.Draw_Indirect_Args, pf.draw_count, platform.frame_allocator)
 	record: Mesh_Record
 	surface: Surface_Record
-	if mesh == nil {
+	if pf.draw_count == 0 {
+		// An effect's preview without its ground draws nothing of its own.
+	} else if mesh == nil {
 		draws[0] = {instance = 0, mesh = 0, first = 0, material = block, count = SURFACE_PATCH_VERTICES}
 		arguments[0] = {draw_id = 0, vertex_count = SURFACE_PATCH_VERTICES, instance_count = 1}
 		surface = preview_surface(r, pf.pipeline.displacement_bound)
@@ -294,8 +426,8 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 		view_projection          = view_projection,
 		previous_view_projection = view_projection,
 		cluster_view_projection  = view_projection,
-		// The preview's world has its origin at the mesh's middle.
-		origin_offset            = {camera.x, camera.y, camera.z, 0},
+		// The preview's world has its origin at the mesh's middle, or an effect's at the effect.
+		origin_offset            = {origin.x, origin.y, origin.z, 0},
 		sky_color                = {DEFAULT_AMBIENT.sky.r, DEFAULT_AMBIENT.sky.g, DEFAULT_AMBIENT.sky.b, 0},
 		ground_color             = {DEFAULT_AMBIENT.ground.r, DEFAULT_AMBIENT.ground.g, DEFAULT_AMBIENT.ground.b, 0},
 		instances                = gpu.read_index(r.previews.instances),
@@ -340,6 +472,9 @@ update_preview :: proc(ctx: ^Pass_Context) {
 	g := ctx.graph
 	u := pf.records
 	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.instance_at, gpu_buffer(g, pf.instances), 0, size_of(Instance_Record))
+	if pf.draw_count == 0 {
+		return
+	}
 	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.draws_at, gpu_buffer(g, pf.draws), 0, pf.draw_count * size_of(Draw_Record))
 	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.args_at, gpu_buffer(g, pf.arguments), 0, pf.draw_count * size_of(gpu.Draw_Indirect_Args))
 }

@@ -19,7 +19,7 @@ public sealed record GraphProblem(int? Node, string Text, bool Error);
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.
 /// </summary>
-public sealed class MaterialEditor : IDisposable
+public sealed class MaterialEditor : IPreviewOwner, IDisposable
 {
     // The preview cooks this long after the last change, so typing or a drag cooks once.
     static readonly TimeSpan CookDelay = TimeSpan.FromMilliseconds(250);
@@ -66,6 +66,10 @@ public sealed class MaterialEditor : IDisposable
     public ViewportSession? Preview { get; }
 
     public PreviewMesh Mesh { get; private set; } = PreviewMesh.Sphere;
+
+    public bool PicksMesh => true;
+
+    public string Waiting => "The preview draws once the material cooks.";
     public float Yaw { get; private set; } = StartYaw;
     public float Pitch { get; private set; } = StartPitch;
     public float Distance { get; private set; } = StartDistance;

@@ -66,7 +66,7 @@ Particle spawn(Emitter_Record e, uint index, uint ticket) {
 	p.spin = lerp(e.spin.x, e.spin.y, random(state));
 	p.rotation = random(state) * TAU;
 	p.seed = state;
-	p.age = random(state) * constants.delta;
+	p.age = random(state) * e.delta;
 	p.position += p.velocity * p.age;
 	p.padding = 0;
 	return p;
@@ -118,7 +118,7 @@ void step(inout Particle p, Emitter_Record e, float dt) {
 			break;
 		case MODULE_NOISE: {
 			// Each component leaves out its own axis, so the field has no divergence: it swirls without gathering.
-			float3 q = p.position * m.values.y + constants.time * 0.3 + float(p.seed & 255) * 0.01;
+			float3 q = p.position * m.values.y + e.time * 0.3 + float(p.seed & 255) * 0.01;
 			float3 field = float3(sin(q.y) + cos(q.z), sin(q.z) + cos(q.x), sin(q.x) + cos(q.y));
 			p.velocity += field * m.values.x * dt;
 			break;
@@ -145,7 +145,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	RWByteAddressBuffer pool = cn_rw_buffer(constants.pool);
 	uint address = (e.first + id.x) * sizeof(Particle);
 	Particle p = pool.Load<Particle>(address);
-	float dt = constants.delta;
+	float dt = e.delta;
 	bool alive = e.reset == 0 && p.lifetime > 0;
 	if (alive) {
 		p.age += dt;

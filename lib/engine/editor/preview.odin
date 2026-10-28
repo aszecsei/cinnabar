@@ -10,7 +10,8 @@ import "cinnabar:engine/render"
 
 // Material previews (see docs/rendering/materials.md#material-previews): the editor's material editor shows a material on a mesh,
 // which the game draws into a shared target of its own with the renderer. A preview draws when what it shows changes,
-// or every frame while its material reads the time, and a frame draws at most one preview, in turn.
+// or every frame while its material reads the time, and a frame draws at most one preview, in turn. The same previews
+// show effects (see docs/rendering/particles.md#previews), which play, so they draw in every frame that they can.
 
 MAX_PREVIEWS :: gpu.MAX_PREVIEW_TARGETS
 
@@ -123,6 +124,7 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		p.dirty, p.complete = false, false
 		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
 		descs[0] = preview_desc(p, id, target)
+		descs[0].effect = is_effect(e, p)
 		return descs
 	}
 	return nil
@@ -150,9 +152,28 @@ refresh_preview :: proc(e: ^Editor, p: ^Preview) {
 	}
 }
 
-// reads_time is whether the preview's material reads the frame's time, so that it changes every frame.
+// is_effect is whether a preview shows an effect, by its blob's kind. The first look loads the cooked blob, which the
+// renderer would load anyway.
+@(private = "file")
+is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
+	data := p.data
+	if data == nil {
+		h, loaded := asset.load(e.assets, p.material)
+		if !loaded {
+			return false
+		}
+		data, _ = asset.data(e.assets, h)
+	}
+	header, ok := format.blob_header(data)
+	return ok && header.kind == .Effect
+}
+
+// reads_time is whether the preview changes every frame: an effect, or a material that reads the frame's time.
 @(private = "file")
 reads_time :: proc(e: ^Editor, p: ^Preview) -> bool {
+	if is_effect(e, p) {
+		return true
+	}
 	data := p.data
 	if data == nil {
 		h, loaded := asset.find(e.assets, p.material)

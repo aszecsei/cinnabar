@@ -161,7 +161,7 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		depth(&g, p, f.depth, .Clear)
 
 		// Sprites draw among the moment-based surfaces.
-		begin_sprites(f, {{size = 1, color = {1, 1, 1, 0.5}}})
+		begin_sprites(f, {{size = 1, color = {1, 1, 1, 0.5}}}, &r.sprites.main)
 		testing.expect(t, f.sprites != nil)
 		add_transparency_passes(f)
 		add_transparent_id_pass(f, keep_ids = true)

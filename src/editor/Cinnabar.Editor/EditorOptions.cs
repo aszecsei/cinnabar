@@ -5,8 +5,9 @@ namespace Cinnabar.Editor;
 /// <summary>
 /// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon cooks shaders only with <c>--dxc</c>.
-/// Each <c>--material</c> opens in the material editor once the cook daemon's index has it.
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
+/// cooks shaders only with <c>--dxc</c>. Each <c>--material</c> opens in the material editor, and each <c>--effect</c> in an
+/// effect preview, once the cook daemon's index has it.
 /// Paths on the command line are relative to the working directory. The defaults are the repository's build layout
 /// (see docs/overview/building-and-running.md#build-layout), relative to the repository root, which the editor finds above its own
 /// executable, so an editor started from an IDE finds them too. The host and the cook daemon run in their executables'
@@ -17,6 +18,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
 {
     /// <summary>Materials and material functions to open in the material editor, by their files' full paths.</summary>
     public IReadOnlyList<string> MaterialPaths { get; init; } = [];
+
+    /// <summary>Effects to open in effect previews, by their files' full paths.</summary>
+    public IReadOnlyList<string> EffectPaths { get; init; } = [];
 
     /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
     public string ProjectPath { get; init; } = InRepository("samples", "mygame", "project.settings");
@@ -74,6 +78,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<(string Name, string Dir)> roots = [];
         List<string> includes = [];
         List<string> materials = [];
+        List<string> effects = [];
         string? project = null;
         for (var i = 0; i < args.Count; i++)
         {
@@ -109,6 +114,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--material" when i + 1 < args.Count:
                     materials.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--effect" when i + 1 < args.Count:
+                    effects.Add(Path.GetFullPath(args[++i]));
+                    break;
                 case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
                     var root = args[++i];
                     var equals = root.IndexOf('=');
@@ -126,7 +134,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials };
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects };
         return project != null ? options with { ProjectPath = project } : options;
     }
 }
