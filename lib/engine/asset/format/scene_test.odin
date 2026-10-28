@@ -68,7 +68,7 @@ scene_blobs_round_trip :: proc(t: ^testing.T) {
 	scene, _, ok := scene_parse(DOOR, context.temp_allocator)
 	testing.expect(t, ok)
 	guid := guid_parse(TEST_GUID) or_else {}
-	blob := aligned(scene_write(scene, guid, 42, context.temp_allocator))
+	blob := aligned(scene_write(scene, guid, 42, allocator = context.temp_allocator))
 	header, header_ok := blob_header(blob)
 	testing.expect(t, header_ok && header.kind == .Scene && header.key == 42 && header.guid == guid)
 
@@ -99,7 +99,7 @@ asset_values_are_guids :: proc(t: ^testing.T) {
 	testing.expect_value(t, fields[1].value, Scene_Value{kind = .Asset})
 
 	// The GUID survives the blob.
-	data := aligned(scene_write(scene, {}, 0, context.temp_allocator))
+	data := aligned(scene_write(scene, {}, 0, allocator = context.temp_allocator))
 	read, read_ok := scene_read(data, context.temp_allocator)
 	testing.expect(t, read_ok)
 	testing.expect_value(t, read.entities[0].components[0].fields[0].value.asset, fields[0].value.asset)
@@ -111,7 +111,7 @@ scene_errors_name_their_line :: proc(t: ^testing.T) {
 		text, fragment: string,
 		line:           int,
 	} {
-		{"entity 0000000000000001\n", "starts with `scene 1`", 1},
+		{"entity 0000000000000001\n", "starts with `scene 2`", 1},
 		{"scene 1\nentity 12\n", "16 hex digits", 2},
 		{"scene 1\ncomponent 1 Transform\n", "needs an entity", 2},
 		{"scene 1\nentity 0000000000000001\n\tx = 1\n", "no component or behaviour is open", 3},

@@ -48,20 +48,20 @@ The mesh files that the scene's entities place are documents of their own beside
 A scene is a source asset with a GUID and a `.meta` file, like every other asset (see [Content pipeline](../content/identity-and-cooking.md#identity)). The cooker parses scenes with `asset_format.scene_parse`, and the editor with `SceneFile` in `Cinnabar.Editor.Document`. The two must agree.
 
 - **Scene IDs:** each entity in a scene has a 64-bit random ID, nonzero and unique in its scene. Operations, the link and the scene file use scene IDs. The host maps them to entity handles, which change on every load. The loader gives each entity a `Scene_Entity` component with its scene ID, and `Entity_Info` carries it to the editor.
-- **Text source:** a scene file is text, so it diffs and merges. It starts with `scene 1`, the format's version. It has one block per entity, sorted by scene ID, so an edit changes only the lines of the entity it touches. Fields are written by name. A line that starts with `#` is a comment, and the editor keeps only the comments before `scene 1`.
-- **Entity keys:** an entity block has `name`, `parent` (a scene ID) and `active = false` for a disabled entity, then its `component` and `behaviour` blocks with their fields indented. An entity key that the editor does not know is a warning, and the editor writes it back unchanged.
+- **Text source:** a scene file is text, so it diffs and merges. It starts with `scene 2`, the format's version, and both readers take `scene 1` too, which has no prefab instances. It has one block per entity, sorted by scene ID, so an edit changes only the lines of the entity it touches. Fields are written by name. A line that starts with `#` is a comment, and the editor keeps only the comments before `scene 2`.
+- **Entity keys:** an entity block has `name`, `parent` (a scene ID) and `active = false` for a disabled entity, then its `component` and `behaviour` blocks with their fields indented. An instance of a prefab adds `prefab`, and its override blocks `removed` and `remove` lines ([Prefabs](prefabs.md#instances-in-a-scene)). An entity key that the editor does not know is a warning, and the editor writes it back unchanged.
 - **Values:** `true` and `false`; a number, or an array of up to four numbers such as `[0, 0.7071068, 0, 0.7071068]`; a quoted string with `\"`, `\\`, `\n` and `\t`; a scene ID after `@`, such as `@1b04c7e95a2f3d88`, or `@0` for none; an asset's GUID after `$`, such as `$9db8150cc7215ffc2708d20d77cf60bf`, or `$0` for none; and a bare word, such as an enum value's name. A number written as an integer is kept exactly. The writer gives every float a point or an exponent, so it reads back as a float.
 - **Components by stable ID:** a component block gives the [stable ID](../world/ecs.md#ecs) and the type's name. The loader uses the ID. The name is for people and for error messages.
 - **Positions** are raw `i64` values (see [World](../world/positions-and-transforms.md#where-positions-go)), so a scene round-trips exactly. The editor shows meters.
 - **Unknown data round-trips.** A component ID or a field that the current DLL does not know is kept, written back unchanged, and reported as a warning. A broken build therefore never deletes scene data.
 - **Behaviours** are written by script GUID, with their field values by name.
 - **Names:** the engine's `Name` component holds up to 63 bytes in the component itself, because component storage holds no pointers. A longer name is cut at a character boundary. The outliner and the properties panel show names, and `Entity_Info` carries them.
-- **Prefab paths:** an entity in a prefab instance is identified by a path: the instance's scene ID, then `#` and the entity's scene ID in the prefab, such as `5f3a9c01e2b47d10#a90b3e7f15c4d2e8`. A prefab in a prefab adds a level for each nesting. The prefab's asset GUID is not in the path, because every instance of a prefab has the same one. The path stays the same when the prefab changes, so overrides in the scene still find their entities.
+- **Prefab paths:** an entity in a prefab instance is identified by a path: the instance's scene ID, then `#` and the entity's scene ID in the prefab, such as `5f3a9c01e2b47d10#a90b3e7f15c4d2e8`. A prefab in a prefab adds a level for each nesting. The prefab's asset GUID is not in the path, because every instance of a prefab has the same one. The path stays the same when the prefab changes, so overrides in the scene still find their entities. A reference to such an entity is `@` and the path, and its scene ID once the instance is expanded is the path's hash, `scene_path_id` ([Prefabs](prefabs.md#expansion)).
 
 A sketch of the format:
 
 ```
-scene 1
+scene 2
 
 entity 5f3a9c01e2b47d10
 name = "Door"

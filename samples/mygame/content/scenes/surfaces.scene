@@ -1,7 +1,7 @@
 # The patch surfaces sample, which F7 in mygame cycles to: a lake with an island, as a water surface with a hole over
 # a terrain surface raised by a height map, 256 m across, under the sun (see docs/rendering/surfaces.md#surfaces). The
 # camera stands over the shore. The editor writes this file; see docs/editor.md#scenes.
-scene 1
+scene 2
 
 entity 0c5c7fd0a6a3a451
 name = "Sun"

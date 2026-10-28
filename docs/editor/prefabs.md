@@ -2,6 +2,8 @@
 
 A prefab is a scene asset that other scenes instantiate: an entity tree authored once, placed many times, with each instance keeping only what differs from the prefab. This document is the design: the asset, the scene format's instance and override blocks, how an instance becomes plain entities everywhere it is used, how the editor edits instances and prefabs, and how a script spawns one. Read [Document and scenes](document-and-scenes.md), [Content: Scenes](../content/kinds/scenes.md) and [Mesh editing](mesh-editing.md#design) first: the mesh design's split between the editor's document and the host's world is the one taken here.
 
+*This is a design for work in progress. Phase 1 is built: the format, the expansion in Odin, and the cooker, with the scene format's version 2 in `SceneFile` too. The sections below say where what is built differs from the plan. Nothing else it names exists yet unless the text says so. The phases at the end are the order to build it in.*
+
 **In this document:** [Design](#design) · [Prefab assets](#prefab-assets) · [Recursion](#recursion) · [Instances in a scene](#instances-in-a-scene) · [Expansion](#expansion) · [Cooking](#cooking) · [The editor's documents](#the-editors-documents) · [Editing an instance](#editing-an-instance) · [Editing a prefab](#editing-a-prefab) · [Panels and the viewport](#panels-and-the-viewport) · [Spawning at run time](#spawning-at-run-time) · [Tests](#tests) · [Phases](#phases) · [Future work](#future-work)
 
 ## Design
@@ -60,7 +62,9 @@ The scene format gains four things, and its version becomes `scene 2`; a reader 
 - **An added entity** is an ordinary entity block whose `parent` is a path, such as `parent = @5f3a9c01e2b47d10#a90b3e7f15c4d2e8`. It has a plain scene ID and no override block; it belongs to the scene.
 - **References** to an instance's entities are `@` and a path, from anywhere in the scene, and the loader resolves them through the path's ID ([Expansion](#expansion)).
 - **Sorting:** blocks are sorted by the ID of their first path element, then by path, so an instance's override blocks follow it and an edit changes only the lines of the entity it touches. The writer leaves out an override block that no longer differs.
-- **A prefab in a prefab** writes its overrides the same way in the prefab's file, with paths of one level. The scene's override of an entity two levels down is a path of three IDs, `<instance>#<inner instance>#<entity>`. The prefab's GUID is not in the path, so swapping a prefab for one with the same entity IDs, as a variant has, keeps the overrides.
+- **A prefab in a prefab** writes its overrides the same way in the prefab's file, with paths of one level. The scene's override of an entity two levels down is a path of three IDs, `<instance>#<inner instance>#<entity>`. The prefab's GUID is not in the path, so swapping a prefab for one with the same entity IDs keeps the overrides. A variant's entities are a level down, under its root instance, so an instance of a variant names the original's entities as `<instance>#<variant's root>#<entity>`; Make Variant moves the instance's overrides into the variant, so the scene keeps only the pose.
+
+*Built in `scene_text.odin` and `SceneFile`. A removal is a line of its own, `remove component <id>` or `remove behaviour $<guid>`. An instance or override block writes exactly the keys that it sets, so `name = ""` and `active = true` are overrides, and the editor keeps which ones in `SceneEntity.Keys`; a plain entity writes a name that is not empty, a parent that is not 0 and `active = false`, as before. The writer's order in a block is `name`, `parent`, `prefab`, `active`, `removed`, unknown keys, the removals, then the components and behaviours. A removal or `removed` on a plain entity and `prefab` on an override block are errors. The editor keeps a reference or a parent written as a path, so it writes it back as a path.*
 
 A sketch of a scene with one instance of a door prefab, whose frame's light is dimmed and whose handle is removed, with a sticker added to the frame:
 
@@ -103,6 +107,8 @@ Expansion turns a scene with instances into the flat scene that the world loads.
 
 A prefab that is missing, or that fails to parse, expands to the instance's root alone with its overrides, and the warning names the prefab. The scene still loads, with the instance's pose and name, so a missing asset does not empty a level.
 
+*Built as `format.scene_expand` in `scene_expand.odin`, with a `Prefab_Resolver` callback and `self`, the GUID of a prefab being expanded, which starts the chain so a prefab that contains itself is a cycle. A path's ID folds from the end, `scene_path_id(a, id(b#c))`, which is what placing a flat prefab gives, since the flat prefab's entity already has the inner path's ID. The root's `Transform` and `Local_Transform` are dropped by their stable IDs, 1 and 2. An override's fields replace the prefab's in place, and new ones follow them. `removed = true` drops every descendant in the flat result, the scene's added entities under it too. A prefab with no root or several expands as a missing one does. A nested prefab's warnings are its own cook's, so a scene reports those of its own blocks and of the prefabs it places, and errors from any depth, each naming the scene's instance that reaches it.*
+
 The algorithm is a few hundred lines in each language. The Odin side is a pure procedure over `format.Scene` with a resolver callback, in the shared `format` package, so the cooker and the game DLL compile the same code and neither needs the ECS. The C# side works on `Scene` and gives the flat entities as `SceneEntity` values, so the rest of the document model and the link's snapshot encoding take them unchanged.
 
 ## Cooking
@@ -115,6 +121,8 @@ The algorithm is a few hundred lines in each language. The Odin side is a pure p
 - **Dependencies:** the prefabs a scene or a prefab instantiates go in its `dependencies`, with the scripts it names, so the index shows where a prefab is used, Delete warns about its users, and the editor can find every open scene's prefabs.
 - **Checks:** a prefab with no root or several, a cycle ([Recursion](#recursion)), a depth beyond the limit, and an instance that names a GUID that is not a prefab are errors; the asset keeps its old blob. A reference to an entity the prefab lacks, an override block whose entity is gone, and a missing prefab are warnings, as a missing script is, and the scene cooks with them so a broken reference never loses a level.
 - **The template:** `Create_Asset` gains the `prefab` template, a one-root scene, and the cook link's `Asset` carries nothing new: a prefab has a kind, a path and dependencies like any asset.
+
+*Built in `tools/cook/scenes.odin`. `Asset_Kind.Prefab` is in `format`, the cook link and the editor, which changes the cook protocol's version, and `cook scenes` logs the prefabs' counts beside the scenes'. A scene's key hashes each prefab it reaches by GUID, with its source or a mark that it is missing, so a prefab that appears cooks its users again. The dependencies are the prefabs a file instantiates itself, not the ones inside them. The references and the scripts are checked on the flat scene. The content browser has New Prefab, with an icon of its own; dragging and opening a prefab wait for phases 2 and 3.*
 
 ## The editor's documents
 
@@ -175,7 +183,7 @@ A game spawns an instance from a script, or from native code at a serial point, 
 
 ## Tests
 
-- **One fixture, two expansions.** `lib/engine/asset/format/testdata/prefabs/` holds a scene, the prefabs it uses at two levels of nesting, with overrides of every kind, an added entity, a removed one, a variant, a missing prefab and a dangling override, and the expected flat scene as a `.scene` file. The Odin test expands and compares with the expected file, and the C# test reads the same files and does the same, so the two implementations agree on every ID, reference and order. A test for `scene_path_id` in each language pins the hash with known values.
+- **One fixture, two expansions.** `lib/engine/asset/format/testdata/prefabs/` holds a scene, the prefabs it uses at two levels of nesting, with overrides of every kind, an added entity, a removed one, a variant, a missing prefab and a dangling override, and the expected flat scene as a `.scene` file. The Odin test expands and compares with the expected file, and the C# test reads the same files and does the same, so the two implementations agree on every ID, reference and order. A test for `scene_path_id` in each language pins the hash with known values. *Built for Odin, with the prefabs' GUIDs in `.meta` files beside them; the C# tests parse every file of the fixture and write the editor's files back unchanged until `PrefabExpansion` comes in phase 2. The depth limit is tested in `format`, not the cooker.*
 - **Cooker:** a prefab with two roots, a direct cycle and one through a third prefab, a depth beyond the limit, a scene whose prefab is missing, the cache key changing with a nested prefab's source, and the dependencies in the index.
 - **Document:** round trip of the version 2 file, an override through each operation and its inverse, the wire form of each operation on an instance's entity, `CreateInstance` and Duplicate, Make Prefab with references remapped, Unpack, Apply and Revert, each refused edit of [Recursion](#recursion), the diff of a re-expansion after each kind of prefab change, and dirty state and save order.
 - **Runtime:** `spawn_prefab` with references inside the prefab, a nested prefab, `awake` before `World.spawn` returns, and a soft restart keeping the spawned entities.
@@ -183,7 +191,7 @@ A game spawns an instance from a script, or from native code at a serial point, 
 
 ## Phases
 
-1. **Format and cooker:** the version 2 keys in `scene_text.odin` and `SceneFile`, `scene_path_id`, `scene_expand`, the `Prefab` kind and extension, `cook scenes` cooking both kinds flat with the checks, the keys and the dependencies, the `prefab` template, and the fixture. A cooked scene with instances then loads in the game with no runtime change.
+1. **Format and cooker:** the version 2 keys in `scene_text.odin` and `SceneFile`, `scene_path_id`, `scene_expand`, the `Prefab` kind and extension, `cook scenes` cooking both kinds flat with the checks, the keys and the dependencies, the `prefab` template, and the fixture. A cooked scene with instances then loads in the game with no runtime change. *Built.*
 2. **Instances in the editor:** `PrefabSet` and `PrefabDocument`, `PrefabExpansion` and `Expanded`, wire forms against the expansion, `CreateInstance`, drag from the content browser, the outliner's and the properties panel's marks, overrides through every operation, Reset as revert, Duplicate, Unpack, and Make Prefab with the file written at save.
 3. **Prefab editing:** a prefab as the open document with its rules, `PrefabOperation`, Apply and Revert, the re-expansion diff, reload from disk, dirty state and save, Make Variant, and Play from a prefab.
 4. **Spawning:** the asset reference slice, `spawn_prefab`, `World.spawn(prefab, ...)`, and the Unity mapping's row.

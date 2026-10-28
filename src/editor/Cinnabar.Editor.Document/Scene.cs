@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Document;
 /// </summary>
 public sealed class Scene
 {
-    /// <summary>The comment lines before the file's <c>scene 1</c> line, with their <c>#</c>. Other comments are not kept.</summary>
+    /// <summary>The comment lines before the file's <c>scene 2</c> line, with their <c>#</c>. Other comments are not kept.</summary>
     public List<string> HeaderComments { get; } = [];
 
     public List<SceneEntity> Entities { get; } = [];
@@ -16,11 +16,35 @@ public sealed class Scene
 
 public sealed class SceneEntity(ulong id)
 {
-    /// <summary>The scene ID: random, nonzero and unique in the scene.</summary>
+    /// <summary>An override block of the entity on a path inside an instance (see docs/editor/prefabs.md#instances-in-a-scene).</summary>
+    public SceneEntity(IReadOnlyList<ulong> path) : this(ScenePath.Id(path)) => Path = path;
+
+    /// <summary>
+    /// The scene ID: random, nonzero and unique in the scene. An override block's is its path's, so that
+    /// <see cref="Scene.Find"/> finds it.
+    /// </summary>
     public ulong Id { get; } = id;
+    /// <summary>An override block's path: the instance's ID, any inner instances' and the entity's. Null for any other block.</summary>
+    public IReadOnlyList<ulong>? Path { get; }
+    /// <summary>An instance block: the GUID of the prefab whose root it stands for, as 32 lowercase hex digits, or "".</summary>
+    public string Prefab { get; set; } = "";
+    /// <summary>
+    /// Which of name, parent and active an instance or override block writes, since it changes only those of the
+    /// prefab's entity. A plain entity writes a name that is not empty, a parent that is not 0 and active when false.
+    /// An instance block always writes its parent, which is the scene's.
+    /// </summary>
+    public SceneKeys Keys { get; set; }
+    /// <summary>An override block: the entity and its descendants are taken out of the instance.</summary>
+    public bool Removed { get; set; }
+    /// <summary>An instance or override block: the stable IDs of the prefab's components that it takes away.</summary>
+    public List<ulong> RemovedComponents { get; } = [];
+    /// <summary>An instance or override block: the scripts of the prefab's behaviours that it takes away.</summary>
+    public List<string> RemovedBehaviours { get; } = [];
     public string Name { get; set; } = "";
     /// <summary>The parent's scene ID, or 0.</summary>
     public ulong Parent { get; set; }
+    /// <summary>The parent's path when it is inside an instance, which the file writes while its ID is <see cref="Parent"/>.</summary>
+    public IReadOnlyList<ulong>? ParentPath { get; set; }
     public bool Active { get; set; } = true;
     /// <summary>Kept sorted by ID.</summary>
     public List<SceneComponent> Components { get; } = [];
@@ -30,15 +54,25 @@ public sealed class SceneEntity(ulong id)
     public List<(string Key, string Text)> UnknownKeys { get; } = [];
 
     /// <summary>A copy that shares nothing that can change with this one.</summary>
-    public SceneEntity Clone() => Copy(Id);
+    public SceneEntity Clone() => Path != null ? CopyInto(new SceneEntity(Path)) : Copy(Id);
 
-    /// <summary>A copy with another scene ID.</summary>
-    public SceneEntity Copy(ulong id)
+    /// <summary>A copy with another scene ID, which is not an override block.</summary>
+    public SceneEntity Copy(ulong id) => CopyInto(new SceneEntity(id));
+
+    SceneEntity CopyInto(SceneEntity copy)
     {
-        var copy = new SceneEntity(id) { Name = Name, Parent = Parent, Active = Active };
+        copy.Name = Name;
+        copy.Parent = Parent;
+        copy.ParentPath = ParentPath;
+        copy.Active = Active;
+        copy.Prefab = Prefab;
+        copy.Keys = Keys;
+        copy.Removed = Removed;
         copy.Components.AddRange(Components.Select(c => c.Copy()));
         copy.Behaviours.AddRange(Behaviours.Select(b => b.Copy()));
         copy.UnknownKeys.AddRange(UnknownKeys);
+        copy.RemovedComponents.AddRange(RemovedComponents);
+        copy.RemovedBehaviours.AddRange(RemovedBehaviours);
         return copy;
     }
 
@@ -54,6 +88,57 @@ public sealed class SceneEntity(ulong id)
         } while (id == 0);
         return id;
     }
+}
+
+/// <summary>The entity keys that an instance or override block writes.</summary>
+[Flags]
+public enum SceneKeys
+{
+    None = 0,
+    Name = 1,
+    Parent = 2,
+    Active = 4,
+}
+
+/// <summary>
+/// The scene IDs of paths, <c>&lt;instance&gt;#&lt;entity&gt;</c>, which name the entities inside an instance. The cooker computes
+/// the same in <c>asset_format.scene_path_id</c>, and the two must agree.
+/// </summary>
+public static class ScenePath
+{
+    /// <summary>The most IDs in a path: an instance at each of eight levels of prefabs, and the entity.</summary>
+    public const int MaxLength = 9;
+
+    /// <summary>The scene ID of the entity <paramref name="id"/> inside an instance: FNV-1a over the two IDs' 16 bytes, little-endian, or 1 if that is 0.</summary>
+    public static ulong Id(ulong instance, ulong id)
+    {
+        var hash = 0xcbf29ce484222325UL;
+        foreach (var value in (ReadOnlySpan<ulong>)[instance, id])
+        {
+            for (var i = 0; i < 8; i++)
+            {
+                hash = (hash ^ (byte)(value >> (8 * i))) * 0x100000001b3UL;
+            }
+        }
+        return hash == 0 ? 1 : hash;
+    }
+
+    /// <summary>The scene ID of a path, folded from the end, as expansion places a flat prefab: the inner path's ID is the entity's in the prefab.</summary>
+    public static ulong Id(IReadOnlyList<ulong> path)
+    {
+        if (path.Count == 0)
+        {
+            return 0;
+        }
+        var id = path[^1];
+        for (var i = path.Count - 2; i >= 0; i--)
+        {
+            id = Id(path[i], id);
+        }
+        return id;
+    }
+
+    public static string Format(IReadOnlyList<ulong> path) => string.Join("#", path.Select(id => id.ToString("x16", System.Globalization.CultureInfo.InvariantCulture)));
 }
 
 /// <summary>A component by its stable ID. The name is for people and messages.</summary>
@@ -106,7 +191,10 @@ public sealed record SceneValue
     public IReadOnlyList<SceneNumber> Numbers { get; private init; } = [];
     /// <summary>The text of a String or a Name.</summary>
     public string Text { get; private init; } = "";
+    /// <summary>An entity's scene ID. For a reference written as a path, the path's ID.</summary>
     public ulong Entity { get; private init; }
+    /// <summary>A reference written as a path into an instance, kept so that the file writes it back. Null otherwise.</summary>
+    public IReadOnlyList<ulong>? Path { get; private init; }
     /// <summary>An asset's GUID as 32 lowercase hex digits, or "" for none.</summary>
     public string Asset { get; private init; } = "";
 
@@ -123,12 +211,16 @@ public sealed record SceneValue
 
     public static SceneValue EntityRef(ulong id) => new() { Kind = SceneValueKind.Entity, Entity = id };
 
+    /// <summary>A reference to the entity on a path into an instance, or with one ID, to a scene ID.</summary>
+    public static SceneValue EntityRef(IReadOnlyList<ulong> path) =>
+        path.Count == 1 ? EntityRef(path[0]) : new() { Kind = SceneValueKind.Entity, Entity = ScenePath.Id(path), Path = path };
+
     /// <summary>A reference to an asset by its GUID, or "" for none.</summary>
     public static SceneValue AssetRef(string guid) => new() { Kind = SceneValueKind.Asset, Asset = guid.ToLowerInvariant() };
 
     public bool Equals(SceneValue? other) =>
         other is not null && Kind == other.Kind && Bool == other.Bool && Text == other.Text && Entity == other.Entity && Asset == other.Asset
-        && Numbers.SequenceEqual(other.Numbers);
+        && Numbers.SequenceEqual(other.Numbers) && (Path ?? []).SequenceEqual(other.Path ?? []);
 
     public override int GetHashCode() => HashCode.Combine(Kind, Bool, Text, Entity, Asset, Numbers.Count);
 }

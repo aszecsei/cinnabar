@@ -135,7 +135,8 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	if .Script in kinds {
 		pass.ok = cook_scripts(options, pass.assets, &pass) && pass.ok
 	}
-	if .Scene in kinds {
+	// A scene's cook expands the prefabs that it instantiates, so one pass cooks both kinds.
+	if kinds & {.Scene, .Prefab} != {} {
 		pass.ok = cook_scenes(options, pass.assets, &pass) && pass.ok
 	}
 	if .Shader in kinds {

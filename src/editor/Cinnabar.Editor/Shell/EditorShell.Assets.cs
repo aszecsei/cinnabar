@@ -102,6 +102,7 @@ public sealed partial class EditorShell
             AssetTemplate.Material => "new_material",
             AssetTemplate.MaterialFunction => "new_function",
             AssetTemplate.Mesh => "new_mesh",
+            AssetTemplate.Prefab => "new_prefab",
             _ => "new_folder",
         };
         if (ContentFolder is not { } folder || Assets.FindRoot(folder.Root) is not { } root)
@@ -114,6 +115,7 @@ public sealed partial class EditorShell
             AssetTemplate.Material => Assets.ExtensionOf(AssetKind.Material),
             AssetTemplate.MaterialFunction => Assets.ExtensionOf(AssetKind.MaterialFunction),
             AssetTemplate.Mesh => Assets.ExtensionOf(AssetKind.Mesh),
+            AssetTemplate.Prefab => Assets.ExtensionOf(AssetKind.Prefab),
             null => "",
             _ => Assets.ExtensionOf(AssetKind.Script),
         };

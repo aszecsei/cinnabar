@@ -6,8 +6,12 @@ import "core:slice"
 import "core:strconv"
 import "core:strings"
 
-// The version on a scene file's first line, `scene 1`. A change that old loaders cannot read changes it.
-SCENE_TEXT_VERSION :: 1
+// The version on a scene file's first line, `scene 2`. A change that old loaders cannot read changes it. Version 2
+// adds prefab instances and their overrides, and a reader takes version 1 too.
+SCENE_TEXT_VERSION :: 2
+
+// The most IDs in a path: an instance at each of SCENE_EXPAND_DEPTH levels, and the entity.
+SCENE_PATH_MAX :: SCENE_EXPAND_DEPTH + 1
 
 // Scene_Problem is an error or a warning in a scene file, at a line from 1.
 Scene_Problem :: struct {
@@ -18,7 +22,8 @@ Scene_Problem :: struct {
 
 // scene_parse reads a scene file (see docs/editor/document-and-scenes.md#scenes). The scene and the messages are in allocator, and the
 // strings without escapes point into text. ok is false when any problem is an error. An entity key that the parser
-// does not know is a warning, so a file from a newer editor still cooks.
+// does not know is a warning, so a file from a newer editor still cooks. A path, in an entity line or an @ reference,
+// reads as its scene ID, scene_path_id_of the path (see docs/editor/prefabs.md#instances-in-a-scene).
 scene_parse :: proc(text: string, allocator := context.allocator) -> (scene: Scene, problems: []Scene_Problem, ok: bool) {
 	p := Parser {
 		allocator = allocator,
@@ -36,7 +41,7 @@ scene_parse :: proc(text: string, allocator := context.allocator) -> (scene: Sce
 		}
 		if !header {
 			header = true
-			if trimmed != fmt.tprintf("scene %d", SCENE_TEXT_VERSION) {
+			if trimmed != "scene 1" && trimmed != fmt.tprintf("scene %d", SCENE_TEXT_VERSION) {
 				problem(&p, true, "a scene file starts with `scene %d`", SCENE_TEXT_VERSION)
 				break
 			}
@@ -51,6 +56,8 @@ scene_parse :: proc(text: string, allocator := context.allocator) -> (scene: Sce
 			parse_component(&p, strings.trim_space(argument))
 		case !indented && word == "behaviour":
 			parse_behaviour(&p, strings.trim_space(argument))
+		case !indented && word == "remove":
+			parse_remove(&p, strings.trim_space(argument))
 		case:
 			parse_line(&p, trimmed, indented)
 		}
@@ -76,20 +83,22 @@ scene_parse :: proc(text: string, allocator := context.allocator) -> (scene: Sce
 
 @(private = "file")
 Parser :: struct {
-	allocator:  mem.Allocator,
-	line:       int,
-	problems:   [dynamic]Scene_Problem,
-	entities:   [dynamic]Scene_Entity,
+	allocator:          mem.Allocator,
+	line:               int,
+	problems:           [dynamic]Scene_Problem,
+	entities:           [dynamic]Scene_Entity,
 	// The entity that is open, and its blocks.
-	open:       bool,
-	entity:     Scene_Entity,
-	components: [dynamic]Scene_Component,
-	behaviours: [dynamic]Scene_Behaviour,
+	open:               bool,
+	entity:             Scene_Entity,
+	components:         [dynamic]Scene_Component,
+	behaviours:         [dynamic]Scene_Behaviour,
+	removed_components: [dynamic]u64,
+	removed_behaviours: [dynamic]Guid,
 	// The fields of the block that indented lines belong to, while in_block.
-	block:      [dynamic]Scene_Field,
-	in_block:   bool,
+	block:              [dynamic]Scene_Field,
+	in_block:           bool,
 	// Where the open block goes when it ends.
-	block_kind: enum {
+	block_kind:         enum {
 		Component,
 		Behaviour,
 	},
@@ -103,17 +112,69 @@ problem :: proc(p: ^Parser, error: bool, format: string, args: ..any) {
 @(private = "file")
 parse_entity :: proc(p: ^Parser, argument: string) {
 	finish_entity(p)
-	id, ok := parse_hex(argument)
-	if !ok || len(argument) != 16 || id == 0 {
-		problem(p, true, "an entity needs a nonzero scene ID of 16 hex digits, not %q", argument)
+	path, ok := parse_path(argument, p.allocator)
+	if !ok {
+		problem(p, true, "an entity needs a nonzero scene ID of 16 hex digits, or a path of them joined by #, not %q", argument)
 	}
 	p.open = true
 	p.entity = {
-		id     = id,
+		id     = scene_path_id_of(path),
 		active = true,
+		path   = len(path) > 1 ? path : nil,
 	}
 	p.components = make([dynamic]Scene_Component, p.allocator)
 	p.behaviours = make([dynamic]Scene_Behaviour, p.allocator)
+	p.removed_components = make([dynamic]u64, p.allocator)
+	p.removed_behaviours = make([dynamic]Guid, p.allocator)
+}
+
+// parse_path reads a scene ID, or a path of up to SCENE_PATH_MAX of them joined by #, each 16 hex digits and nonzero.
+@(private = "file")
+parse_path :: proc(text: string, allocator: mem.Allocator) -> (path: []u64, ok: bool) {
+	parts := strings.split(text, "#", context.temp_allocator)
+	if len(parts) > SCENE_PATH_MAX {
+		return
+	}
+	path = make([]u64, len(parts), allocator)
+	for part, i in parts {
+		id := parse_hex(part) or_return
+		if len(part) != 16 || id == 0 {
+			return
+		}
+		path[i] = id
+	}
+	return path, true
+}
+
+// parse_remove reads `remove component <id>` and `remove behaviour $<guid>`, which take away what the prefab's
+// entity has.
+@(private = "file")
+parse_remove :: proc(p: ^Parser, argument: string) {
+	if !p.open {
+		problem(p, true, "a remove needs an entity line before it")
+		return
+	}
+	finish_block(p)
+	what, _, target := strings.partition(argument, " ")
+	target = strings.trim_space(target)
+	switch what {
+	case "component":
+		id, ok := strconv.parse_u64_of_base(target, 10)
+		if !ok || id == 0 {
+			problem(p, true, "remove component takes the component's stable ID in decimal, not %q", target)
+			return
+		}
+		append(&p.removed_components, id)
+	case "behaviour":
+		script, ok := guid_parse(strings.trim_prefix(target, "$"))
+		if !ok || !strings.has_prefix(target, "$") {
+			problem(p, true, "remove behaviour takes the script's GUID, such as $9d2e41c0b7a35f6e81c4d2a90b3e7f15, not %q", target)
+			return
+		}
+		append(&p.removed_behaviours, script)
+	case:
+		problem(p, true, "remove takes component <id> or behaviour $<guid>, not %q", argument)
+	}
 }
 
 @(private = "file")
@@ -189,6 +250,13 @@ finish_entity :: proc(p: ^Parser) {
 	slice.sort_by(p.components[:], proc(a, b: Scene_Component) -> bool {return a.id < b.id})
 	p.entity.components = p.components[:]
 	p.entity.behaviours = p.behaviours[:]
+	p.entity.removed_components = p.removed_components[:]
+	p.entity.removed_behaviours = p.removed_behaviours[:]
+	// Only the block of a prefab's entity can take away what the prefab gives it.
+	plain := p.entity.prefab == {} && p.entity.path == nil
+	if plain && (len(p.entity.removed_components) > 0 || len(p.entity.removed_behaviours) > 0) {
+		problem(p, true, "entity %016x: only an instance or an override block removes a component or a behaviour", p.entity.id)
+	}
 	append(&p.entities, p.entity)
 	p.open = false
 }
@@ -230,16 +298,33 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 			problem(p, true, "name takes a quoted string")
 		}
 		p.entity.name = value.text
+		p.entity.keys += {.Name}
 	case "parent":
 		if value.kind != .Entity {
 			problem(p, true, "parent takes a scene ID, such as @1b04c7e95a2f3d88")
 		}
 		p.entity.parent = value.entity
+		p.entity.keys += {.Parent}
 	case "active":
 		if value.kind != .Bool {
 			problem(p, true, "active takes true or false")
 		}
 		p.entity.active = value.ints[0] != 0
+		p.entity.keys += {.Active}
+	case "prefab":
+		if value.kind != .Asset || value.asset == {} {
+			problem(p, true, "prefab takes the prefab's GUID, such as $9db8150cc7215ffc2708d20d77cf60bf")
+		} else if p.entity.path != nil {
+			problem(p, true, "an override block cannot change which prefab an entity instantiates")
+		}
+		p.entity.prefab = value.asset
+	case "removed":
+		if value.kind != .Bool {
+			problem(p, true, "removed takes true or false")
+		} else if p.entity.path == nil {
+			problem(p, true, "only an override block, whose ID is a path, takes removed")
+		}
+		p.entity.removed = value.ints[0] != 0
 	case:
 		problem(p, false, "the entity key %s is unknown, so it is ignored", key)
 	}
@@ -264,7 +349,7 @@ is_word_char :: proc(c: byte) -> bool {
 }
 
 // parse_value reads a value: true or false, a number, an array of up to four numbers, a quoted string, a scene ID
-// such as @1b04c7e95a2f3d88 (@0 for none), an asset's GUID such as $9db8150cc7215ffc2708d20d77cf60bf ($0 for none),
+// such as @1b04c7e95a2f3d88 (@0 for none) or a path such as @5f3a9c01e2b47d10#a90b3e7f15c4d2e8, an asset's GUID such as $9db8150cc7215ffc2708d20d77cf60bf ($0 for none),
 // or a bare word.
 @(private = "file")
 parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) {
@@ -276,6 +361,13 @@ parse_value :: proc(p: ^Parser, text: string) -> (value: Scene_Value, ok: bool) 
 		return {kind = .Bool, ints = {0 = text == "true" ? 1 : 0}}, true
 	case text[0] == '"':
 		return parse_string(p, text)
+	case text[0] == '@' && strings.index_byte(text, '#') >= 0:
+		path, path_ok := parse_path(text[1:], context.temp_allocator)
+		if !path_ok {
+			problem(p, true, "a path is scene IDs of 16 hex digits joined by # after @, not %q", text)
+			return
+		}
+		return {kind = .Entity, entity = scene_path_id_of(path)}, true
 	case text[0] == '@':
 		id, id_ok := parse_hex(text[1:])
 		if !id_ok {

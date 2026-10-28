@@ -172,6 +172,8 @@ Asset_Kind :: enum u32 {
 	Material_Instance,
 	// A graph that materials call as a node, which they compile in. It has no blob.
 	Material_Function,
+	// A scene with one root that scenes instantiate. Its blob is a flat Scene blob.
+	Prefab,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

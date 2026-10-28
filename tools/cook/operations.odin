@@ -3,8 +3,10 @@
 // does all of it. The daemon then makes a pass, so the index has the change before the editor hears the result.
 package cook
 
+import "core:crypto"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -73,6 +75,8 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 		kind = .Material_Function
 	case .Mesh:
 		kind = .Mesh
+	case .Prefab:
+		kind = .Prefab
 	}
 	name := strings.trim_suffix(strings.trim_space(op.name), extension_of(kind))
 	if !valid_name(name) {
@@ -369,7 +373,7 @@ reimport :: proc(index: ^Index, op: cook_link.Reimport, force: ^map[format.Guid]
 }
 
 // template_text is the source of a new asset. A behaviour's class is named for its file, such as Door_Bell for
-// door_bell.luau, and a mesh is a 1 m box.
+// door_bell.luau, a mesh is a 1 m box, and a prefab's root is named for its file at the origin.
 template_text :: proc(template: cook_link.Asset_Template, name: string) -> string {
 	switch template {
 	case .Script:
@@ -381,7 +385,19 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 			class,
 		)
 	case .Scene:
-		return "scene 1\n"
+		return fmt.tprintf("scene %d\n", format.SCENE_TEXT_VERSION)
+	case .Prefab:
+		id: u64
+		for id == 0 {
+			crypto.rand_bytes(mem.ptr_to_bytes(&id))
+		}
+		return fmt.tprintf(
+			"scene %d\n\nentity %016x\nname = \"%s\"\ncomponent %d Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n",
+			format.SCENE_TEXT_VERSION,
+			id,
+			name,
+			format.SCENE_TRANSFORM_ID,
+		)
 	case .Material:
 		return "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\n"
 	case .Mesh:

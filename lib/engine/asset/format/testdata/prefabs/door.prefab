@@ -1,0 +1,50 @@
+# A door with a frame, a handle, a hinge and a nested lamp whose bulb the door dims. The behaviour refers to the
+# handle, and to an entity that the prefab does not have, which expands to none.
+scene 2
+
+entity 2000000000000001
+name = "Door"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 10 Collider
+	size = [1, 2, 0.1]
+behaviour 9d2e41c0b7a35f6e81c4d2a90b3e7f15
+	open_angle = 90.0
+	handle = @2000000000000003
+	trigger = @0
+	bell = @20000000000000ff
+
+entity 2000000000000002
+name = "Frame"
+parent = @2000000000000001
+component 2 Local_Transform
+	position = [0, 0, 0]
+component 35 Point_Light
+	intensity = 1.0
+
+entity 2000000000000003
+name = "Handle"
+parent = @2000000000000002
+component 2 Local_Transform
+	position = [0.4, 1, 0]
+behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+	frame = @2000000000000002
+
+entity 2000000000000004
+name = "Hinge"
+parent = @2000000000000002
+component 2 Local_Transform
+	position = [-0.5, 1, 0]
+
+entity 2000000000000005
+name = "Porch Lamp"
+parent = @2000000000000001
+prefab = $11111111111111111111111111111111
+component 2 Local_Transform
+	position = [0, 2.5, 0]
+
+entity 2000000000000005#1000000000000002
+component 35 Point_Light
+	intensity = 0.5
