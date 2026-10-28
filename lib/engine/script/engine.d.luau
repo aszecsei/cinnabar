@@ -84,6 +84,8 @@ declare Time: {
 	frame: number,
 	fixed_delta: number,
 	alpha: number,
+	-- True in fixed_update and in what a fixed tick resumes, where delta is the tick's duration.
+	in_fixed: boolean,
 }
 
 declare Input: {
@@ -128,6 +130,8 @@ declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()
 declare function wait_until(predicate: () -> boolean): ()
 declare function wait_event(entity: Entity, name: string): ...any
+-- Waits for the end of the next fixed tick, after its physics step, as Unity's WaitForFixedUpdate does.
+declare function wait_fixed(): ()
 
 -- The render quality of the Render bindings, which a game defines with project.define_quality_bindings (see
 -- docs/scripting/api.md#render): the settings files' quality keys, with the enums' values as strings.

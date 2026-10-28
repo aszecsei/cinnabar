@@ -15,22 +15,44 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	r.frame += 1
 	r.input = input
 	r.commands = {}
-	L := r.L
+	// A frame that ran no fixed tick keeps its input edges for the next tick (see
+	// docs/world/time.md#fixed-and-variable-rate).
+	if !r.fixed_ran {
+		r.pending_pressed += input.pressed
+		r.pending_released += input.released
+	}
+	r.fixed_ran = false
+	world_time := time.duration_seconds(r.world.clock.time) if r.world != nil else 0
+	set_time(r, time.duration_seconds(dt), world_time, false)
+	set_input(r, input)
+}
 
+// set_time fills the Time table: the step's delta and world time, and whether a fixed step runs.
+@(private)
+set_time :: proc(r: ^Runtime, delta, world_time: f64, in_fixed: bool) {
+	L := r.L
 	luau.getref(L, r.time_table)
 	luau.setreadonly(L, -1, false)
-	set_number(L, "delta", time.duration_seconds(dt))
+	set_number(L, "delta", delta)
 	set_number(L, "real_time", r.platform.time_seconds())
 	set_number(L, "frame", f64(r.frame))
 	if r.world != nil {
 		clock := &r.world.clock
-		set_number(L, "time", time.duration_seconds(clock.time))
+		set_number(L, "time", world_time)
 		set_number(L, "fixed_delta", 1 / f64(clock.tick_rate))
 		set_number(L, "alpha", f64(clock.alpha))
 	}
+	luau.pushboolean(L, b32(in_fixed))
+	luau.rawsetfield(L, -2, "in_fixed")
 	luau.setreadonly(L, -1, true)
 	luau.pop(L, 1)
+}
 
+// set_input fills the Input table's values. The bindings read r.input.
+@(private)
+set_input :: proc(r: ^Runtime, input: core.Input) {
+	r.input = input
+	L := r.L
 	luau.getref(L, r.input_table)
 	luau.setreadonly(L, -1, false)
 	push_vector(L, {input.mouse_position.x, input.mouse_position.y, 0})

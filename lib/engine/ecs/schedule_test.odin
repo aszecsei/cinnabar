@@ -175,6 +175,41 @@ fixed_ticks_are_capped :: proc(t: ^testing.T) {
 	testing.expect_value(t, run_fixed(w, 0, nil), 0)
 }
 
+// The tick iterator runs the ticks that run_fixed runs, one at a time: the clock's tick is the running tick's number,
+// tick_time is the world time at its end, and only the first tick of a frame is first.
+@(test)
+ticks_run_one_at_a_time :: proc(t: ^testing.T) {
+	sync.guard(&scheduler_lock)
+	testing.expect(t, jobs.init())
+	defer jobs.shutdown()
+	f := setup(t)
+	defer teardown(f)
+	w := &f.world
+
+	r: Resources
+	register_system(w, {name = "count", stage = .Fixed, procedure = count_tick})
+	it := begin_ticks(w, 50 * time.Millisecond)
+	n := 0
+	for next_tick(&it) {
+		testing.expect_value(t, first_tick(&it), n == 0)
+		testing.expect_value(t, w.clock.tick, u64(n))
+		testing.expect_value(t, tick_time(w), tick_start(&w.clock, u64(n + 1)))
+		run_tick_systems(&it, &r)
+		testing.expect_value(t, r.ticks, n + 1)
+		n += 1
+	}
+	testing.expect_value(t, n, 3)
+	testing.expect_value(t, it.count, 3)
+	testing.expect_value(t, w.clock.tick, 3)
+	testing.expect_value(t, w.clock.alpha, 0)
+	testing.expect(t, !next_tick(&it), "a finished iterator stays finished")
+
+	// A frame shorter than a tick runs none, and leaves alpha at the fraction that passed.
+	it = begin_ticks(w, 8 * time.Millisecond)
+	testing.expect(t, !next_tick(&it))
+	testing.expect(t, w.clock.alpha > 0.47 && w.clock.alpha < 0.49)
+}
+
 @(test)
 after_cycles_are_rejected :: proc(t: ^testing.T) {
 	f := setup(t)

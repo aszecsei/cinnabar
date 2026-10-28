@@ -25,6 +25,8 @@ Wait_Kind :: enum u8 {
 	Until,
 	// wait_event: an event sent to an entity.
 	Event,
+	// wait_fixed: the end of the next fixed tick, which fixed_events resumes.
+	Fixed,
 }
 
 @(private)
@@ -272,6 +274,9 @@ register_waits :: proc(r: ^Runtime) {
 		luau.pushvalue(L, 1)
 		return set_wait(r, L, {kind = .Until, predicate = luau.ref(L, -1)})
 	})
+	define(r, "wait_fixed", proc(L: ^luau.State) -> c.int {
+		return set_wait(runtime_of(L), L, {kind = .Fixed})
+	})
 	define(r, "wait_event", proc(L: ^luau.State) -> c.int {
 		r := runtime_of(L)
 		e := check_entity(L, 1)
@@ -318,7 +323,7 @@ run_coroutines :: proc(r: ^Runtime) {
 			continue
 		}
 		switch w.wait.kind {
-		case .None, .Event:
+		case .None, .Event, .Fixed:
 		case .Frames:
 			if w.wait.frame <= r.frame {
 				append(&due, Due{i, w.seq, 0})

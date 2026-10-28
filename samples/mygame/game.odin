@@ -556,10 +556,19 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	script.set_quiet(&s.scripts, !run)
 	if run {
 		s.elapsed += step
-		ecs.run_fixed(&s.world, step, s)
+		input := s.platform.input()
+		// Each fixed tick runs the Fixed systems, then the scripts' fixed step and the tick's events (see
+		// docs/physics/design.md#scripts-in-fixed-ticks).
+		ticks := ecs.begin_ticks(&s.world, step)
+		for ecs.next_tick(&ticks) {
+			ecs.run_tick_systems(&ticks, s)
+			script.fixed_update(&s.scripts, &ticks, input)
+			script.fixed_events(&s.scripts)
+			ecs.update_transforms(&s.world)
+		}
 		ecs.run_stage(&s.world, .Update, step, s)
 		// The script phase, with its structural changes (phases 5 and 6).
-		script.run_phase(&s.scripts, step, s.platform.input())
+		script.run_phase(&s.scripts, step, input)
 		ecs.run_stage(&s.world, .Late, step, s)
 	} else {
 		ecs.update_transforms(&s.world)

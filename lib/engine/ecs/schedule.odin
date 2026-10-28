@@ -151,28 +151,84 @@ register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 	return true
 }
 
-// run_fixed advances the world time by dt and runs the fixed ticks that are due, at most MAX_TICKS_PER_FRAME.
-// Each tick copies Transform to Previous_Transform, runs the Fixed systems, applies their commands and propagates
-// transforms. It returns the number of ticks.
-run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> (ticks: int) {
-	profile.scope_text(&w.platform.profile, "ECS Fixed", .Frame)
-	c := &w.clock
-	c.time += dt
-	for tick_start(c, c.tick + 1) <= c.time {
-		if ticks == MAX_TICKS_PER_FRAME {
-			log.warnf("ecs: the simulation is behind, so it dropped %v", c.time - tick_start(c, c.tick))
-			c.time = tick_start(c, c.tick)
-			break
-		}
-		snapshot_previous(w)
-		run_systems(w, .Fixed, 1 / f32(c.tick_rate), user, ticks == 0)
-		propagate(w)
+// Ticks runs the fixed ticks that are due one at a time, so the frame code can run scripts and physics in each tick
+// after the Fixed systems (see docs/physics/design.md#scripts-in-fixed-ticks):
+//
+//	it := ecs.begin_ticks(&s.world, dt)
+//	for ecs.next_tick(&it) {
+//		ecs.run_tick_systems(&it, s)
+//		script.fixed_update(&s.scripts, &it, input)
+//		ecs.update_transforms(&s.world)
+//	}
+//
+// While a tick runs, the clock's tick is its number, and tick_time is the world time at its end.
+Ticks :: struct {
+	world:   ^World,
+	// The ticks of this frame that have finished.
+	count:   int,
+	running: bool,
+}
+
+// begin_ticks advances the world time by dt. next_tick then starts the ticks that are due, at most
+// MAX_TICKS_PER_FRAME.
+begin_ticks :: proc(w: ^World, dt: time.Duration) -> Ticks {
+	w.clock.time += dt
+	return {world = w}
+}
+
+// next_tick finishes the tick that is running, if any, and starts the next one that is due. When none is, it sets the
+// clock's alpha and returns false.
+next_tick :: proc(it: ^Ticks) -> bool {
+	c := &it.world.clock
+	if it.running {
 		c.tick += 1
-		ticks += 1
+		it.count += 1
+		it.running = false
+	}
+	if tick_start(c, c.tick + 1) <= c.time {
+		if it.count < MAX_TICKS_PER_FRAME {
+			it.running = true
+			return true
+		}
+		log.warnf("ecs: the simulation is behind, so it dropped %v", c.time - tick_start(c, c.tick))
+		c.time = tick_start(c, c.tick)
 	}
 	start := tick_start(c, c.tick)
 	c.alpha = f32(c.time - start) / f32(tick_start(c, c.tick + 1) - start)
-	return
+	return false
+}
+
+// first_tick is true in the first tick of a frame, which alone gets the frame's input edges.
+first_tick :: proc "contextless" (it: ^Ticks) -> bool {
+	return it.count == 0
+}
+
+// tick_time is the world time at the end of the tick that is running: the time of the state that it computes.
+tick_time :: proc "contextless" (w: ^World) -> time.Duration {
+	return tick_start(&w.clock, w.clock.tick + 1)
+}
+
+// run_tick_systems copies Transform to Previous_Transform, runs the Fixed systems and applies their commands, in the
+// tick that next_tick started. It does not propagate transforms: the frame code does, when the tick's other work is
+// done.
+run_tick_systems :: proc(it: ^Ticks, user: rawptr) {
+	assert(it.running, "ecs: run_tick_systems outside of a tick")
+	w := it.world
+	profile.scope_text(&w.platform.profile, "ECS Fixed", .Frame)
+	snapshot_previous(w)
+	run_systems(w, .Fixed, 1 / f32(w.clock.tick_rate), user, first_tick(it))
+}
+
+// run_fixed advances the world time by dt and runs the fixed ticks that are due, at most MAX_TICKS_PER_FRAME, for a
+// game whose ticks run only the Fixed systems. Each tick copies Transform to Previous_Transform, runs the Fixed
+// systems, applies their commands and propagates transforms. It returns the number of ticks.
+run_fixed :: proc(w: ^World, dt: time.Duration, user: rawptr) -> int {
+	it := begin_ticks(w, dt)
+	for next_tick(&it) {
+		run_tick_systems(&it, user)
+		propagate(w)
+	}
+	return it.count
 }
 
 // run_stage runs the Update or Late systems and applies their commands. After Late, it propagates transforms.

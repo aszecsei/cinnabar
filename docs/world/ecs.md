@@ -57,11 +57,18 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - The game drives the stages from its frame code:
 
   ```odin
-  ecs.run_fixed(&s.world, dt, s)          // phase 2: the ticks that are due
+  ticks := ecs.begin_ticks(&s.world, dt)  // phase 2: the ticks that are due
+  for ecs.next_tick(&ticks) {
+      ecs.run_tick_systems(&ticks, s)     // Previous_Transform, the Fixed systems, apply
+      // the scripts' fixed step (see docs/scripting/behaviours.md#fixed-step)
+      ecs.update_transforms(&s.world)
+  }
   ecs.run_stage(&s.world, .Update, dt, s) // phases 3 and 4
   // phase 5: scripts, then ecs.apply with their buffers (phase 6)
   ecs.run_stage(&s.world, .Late, dt, s)   // phase 7, then transform propagation
   ```
+
+  A game whose ticks run only the `Fixed` systems calls `ecs.run_fixed(&s.world, dt, s)` in place of the loop. While a tick runs, the clock's `tick` is its number, `ecs.tick_time` the world time at its end, and `ecs.first_tick` says whether it is the first of the frame.
 
 ### Command buffers
 

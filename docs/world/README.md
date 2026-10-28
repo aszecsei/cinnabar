@@ -25,7 +25,7 @@ The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that
 | `component.odin` | `Registry` and `register_component`: stable IDs, sizes, layout hashes, defaults |
 | `archetype.odin` | Archetypes and their 16 KiB chunks |
 | `query.odin` | `Query`: terms, the archetype cache, chunk iteration, `collect` |
-| `schedule.odin` | Systems, stages, `run_stage` and `run_fixed` |
+| `schedule.odin` | Systems, stages, `run_stage`, the tick loop (`begin_ticks`, `next_tick`, `run_tick_systems`) and `run_fixed` |
 | `commands.odin` | `Command_Buffer`: deferred structural changes |
 | `activity.odin` | `Disabled` and `Inactive`, `set_active`, `update_activity` |
 | `transform.odin` | `Transform`, `Local_Transform`, `Parent`, `Previous_Transform`, propagation, `presented` |

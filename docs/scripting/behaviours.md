@@ -55,13 +55,14 @@ return Door
 | `on_enable()` | `OnEnable` | Each time the instance becomes enabled and its entity becomes active in the hierarchy, starting just after `awake` |
 | `start()` | `Start` | Once, at the start of the first script phase in which the instance is enabled and active, before its first `update` |
 | `update(dt)` | `Update` | Every script phase while enabled and active, if the class defines it. Opt-in, see below. |
+| `fixed_update(dt)` | `FixedUpdate` | Every fixed tick while enabled and active, after the `Fixed` systems, if the class defines it. Opt-in, as `update` is. See [Fixed step](#fixed-step). |
 | `on_disable()` | `OnDisable` | Each time the instance stops being enabled or active, and before `on_destroy` if it was enabled and active |
 | `on_destroy()` | `OnDestroy` | In the script phase after the despawn is applied, if `awake` ran. The instance's table fields are intact, but the entity's components are gone. |
 | `on_reload()` | none | After a script hot reload patched the class (see [Script hot reload](tooling-and-hot-reload.md#script-hot-reload)) |
 | `on_<event>(...)` | `OnTriggerEnter` and similar | When the event is delivered (see [Events](#events)) |
 
 - **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and of its other callbacks and coroutines ([Profiling](../core/profiling.md#frames-and-costs)), and the API favors events and coroutines.
-- **No `fixed_update`.** *Later: `fixed_update(dt)` runs once per fixed tick, before physics steps, with contact events delivered in the same tick ([Physics: Scripts in fixed ticks](../physics/design.md#scripts-in-fixed-ticks)).* Scripts do not run in fixed ticks. Logic that must run every tick is a native `Fixed` system. A script influences the simulation by writing components, and the next tick reads them.
+- **`fixed_update` is opt-in too,** and a frame can run up to four ticks, so the profiler shows its cost per class as `fixed_update`. Use it for what must happen once per tick: moving something that is interpolated, or a force that must not depend on the frame rate. Logic that is heavy and runs every tick is a native `Fixed` system.
 - **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`.
 - **Callbacks** run on the main thread in a protected call, under the watchdog. An error logs the message with a traceback, and the other callbacks still run. A callback cannot wait: it is not a coroutine.
 
@@ -84,7 +85,7 @@ Unity has two switches, and so does cinnabar:
 ### Coroutines
 
 - `self:start_coroutine(fn, ...)` starts a Luau thread that the instance owns, as in Unity's `StartCoroutine`. It runs until its first wait before `start_coroutine` returns the thread, which `self:stop_coroutine(co)` stops. A destroyed or deactivated entity stops its coroutines. A coroutine that was stopped does not start again when the entity comes back, as in Unity.
-- Inside a coroutine: `wait(seconds)` (world time), `wait_realtime(seconds)`, `wait_frames(n)`, `wait_until(predicate)` (called each frame) and `wait_event(entity, name)`, which returns the event's arguments. A plain `coroutine.yield()` waits one frame. A wait outside of a coroutine that the engine runs raises an error.
+- Inside a coroutine: `wait(seconds)` (world time), `wait_realtime(seconds)`, `wait_frames(n)`, `wait_until(predicate)` (called each frame), `wait_event(entity, name)`, which returns the event's arguments, and `wait_fixed()`, Unity's `WaitForFixedUpdate`, which resumes at the end of the next fixed tick ([Fixed step](#fixed-step)). A plain `coroutine.yield()` waits one frame. A wait outside of a coroutine that the engine runs raises an error.
 - A script from `spawn_script` is a coroutine of the scheduler too, with no owner. `spawn_script` returns a `Main_Script`, which `script.stop` ends.
 - The scheduler is native and lives in `Game_State`, at most 4096 threads. Each frame it resumes the threads that are due, ordered by wake time and then by start order, so resume order is deterministic. Each entry holds a `lua_ref` to its thread.
 - An error in a coroutine logs the message with a traceback and stops only that coroutine.
@@ -111,3 +112,29 @@ The game runs the script phase with one call, `script.run_phase(r, dt, platform.
 9. Apply the scripts' structural changes, such as `destroy`, drain the log again, and run the collector's step.
 
 `begin_phase` and `end_phase` run steps 1 and 9 alone, for tests and tools.
+
+### Fixed step
+
+Scripts also run in each fixed tick, in two calls that the game's frame code makes in its tick loop (see [Physics: Scripts in fixed ticks](../physics/design.md#scripts-in-fixed-ticks)):
+
+```odin
+ticks := ecs.begin_ticks(&s.world, dt)
+for ecs.next_tick(&ticks) {
+	ecs.run_tick_systems(&ticks, s)
+	script.fixed_update(&s.scripts, &ticks, input)
+	script.fixed_events(&s.scripts)
+	ecs.update_transforms(&s.world)
+}
+```
+
+`script.fixed_update`, after the tick's `Fixed` systems:
+
+1. Set `Time` for the tick: `delta` is the tick's duration, `time` the world time at its end, and `in_fixed` is true.
+2. Set `Input` for the tick. The first tick of a frame gets the frame's edges, with those of earlier frames that ran no tick; the others get none, so `Input.was_pressed` in `fixed_update` sees each press exactly once ([Time](../world/time.md#fixed-and-variable-rate)).
+3. Drain the world's log, then `awake`, `on_enable` and `start` as in the script phase, so an instance's `start` comes before its first `fixed_update`.
+4. `fixed_update` for the classes that define it, in instance slot order.
+5. Deliver the events that it sent, and apply its structural changes.
+
+`script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. Physics contacts will be delivered here ([Physics: Events](../physics/design.md#events)).
+
+What stays per frame: `update`, the other waits, events that `Update` systems queue, and the collector's step. The editor's edit mode runs no ticks, so no `fixed_update`, and a paused step runs one.

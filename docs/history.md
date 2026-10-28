@@ -91,3 +91,4 @@ The order in which the editor was built. Phases 1 to 15 are done; what comes nex
 The seven phases, from the backend boundary and scripts in fixed ticks to plugins, are in [Physics: Phases](physics/design.md#phases).
 
 1. **The boundary and the backend:** `lib/core/physics` and `physics.h`, the command format, `Host`, Jolt 5.6.0 with `just jolt` as `physics_jolt.dll` and static libraries, Jolt's jobs on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite.
+2. **Scripts in fixed ticks:** the tick loop (`ecs.begin_ticks`, `next_tick`, `run_tick_systems`, with `run_fixed` on them), `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, input edges for ticks, `fixed_update` in the profiler, and the sample's frame driving its ticks.

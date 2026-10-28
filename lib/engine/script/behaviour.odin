@@ -41,6 +41,8 @@ Instance_Flag :: enum u8 {
 	Active,
 	// The class has update, so the script phase calls it.
 	Updates,
+	// The class has fixed_update, so each fixed tick calls it.
+	Fixed_Updates,
 	// Created by native code: awake waits for the next script phase.
 	Needs_Awake,
 }
@@ -297,6 +299,10 @@ attach :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, class_idx, values_idx
 	}
 	if luau.rawgetfield(L, class, "update") == .FUNCTION {
 		i.flags += {.Updates}
+	}
+	luau.pop(L, 1)
+	if luau.rawgetfield(L, class, "fixed_update") == .FUNCTION {
+		i.flags += {.Fixed_Updates}
 	}
 	luau.pop(L, 1)
 	luau.pushvalue(L, t)

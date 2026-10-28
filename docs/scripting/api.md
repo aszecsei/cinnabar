@@ -55,7 +55,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `World` | `spawn`, `query` |
 | `Quaternion` | `identity`, `new(x, y, z, w)`, `euler(degrees)`, `angle_axis(degrees, axis)`, `look_rotation(forward, up?)`, `slerp`, `angle`, `rotate_towards(from, to, max_degrees)`. Methods: `inverse`, `normalized`, `euler`, `approx`, `angle_to`, `rotate_towards`, `slerp`. Fields `x`, `y`, `z`, `w`. |
 | `WorldPosition` | `origin`, `from_meters(x, y, z)` (for authoring), `lerp`. Methods: `lerp`, `to_meters` (for display). |
-| `Time` | `delta` (the frame), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction) |
+| `Time` | `delta` (the frame, or the tick in the fixed step), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction), `in_fixed` (true in the fixed step) |
 | `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
 | `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
@@ -128,10 +128,11 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Debug.Log`, `Debug.DrawLine` | `Debug.log`, `Debug.draw_line` |
 | `Random` | `Random`, seeded per world |
 | `StartCoroutine`, `yield return new WaitForSeconds(t)` | `self:start_coroutine(fn)`, `wait(t)` |
+| `yield return new WaitForFixedUpdate()` | `wait_fixed()` |
 | `SendMessage` | `entity:send(name, ...)` |
 | `behaviour.enabled`, `OnEnable`, `OnDisable` | `self.enabled`, `on_enable`, `on_disable` |
 | `SetActive`, `activeSelf`, `activeInHierarchy` | `entity:set_active(b)`, `entity.active_self`, `entity.active_in_hierarchy` |
-| `FixedUpdate` | A native `Fixed` system; *later* `fixed_update` ([Physics](../physics/design.md#scripts-in-fixed-ticks)) |
+| `FixedUpdate` | `fixed_update(dt)`, or a native `Fixed` system for heavy work ([Fixed step](behaviours.md#fixed-step)) |
 | `GameObject.Find` | Not provided. Use fields or a `Name` index. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
 

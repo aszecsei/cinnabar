@@ -128,9 +128,10 @@ Behaviours gain `fixed_update(dt)`, Unity's `FixedUpdate`, which replaces the ru
 - **The game drives the ticks.** `ecs.run_fixed` becomes a loop in the frame code, so the order of systems, scripts and physics is in one place and no procedure is registered for it:
 
   ```odin
-  for ecs.next_tick(&s.world) {                     // phase 2: each tick that is due, at most 4
-      ecs.run_tick_systems(&s.world, s)             // Previous_Transform, the Fixed systems, apply
-      script.fixed_update(&s.scripts, platform.input())
+  ticks := ecs.begin_ticks(&s.world, dt)            // phase 2: each tick that is due, at most 4
+  for ecs.next_tick(&ticks) {
+      ecs.run_tick_systems(&ticks, s)               // Previous_Transform, the Fixed systems, apply
+      script.fixed_update(&s.scripts, &ticks, input)
       ecs.update_transforms(&s.world)
       physics.tick(&s.physics, &s.world)            // sync in, step, sync out
       script.fixed_events(&s.scripts, &s.physics)   // the tick's contact events, wait_fixed coroutines
@@ -290,7 +291,7 @@ The first phases link one backend. The boundary is already the plugin's; what th
 ## Phases
 
 1. *Built.* **The boundary and the backend:** `lib/core/physics`, the command format, `Host`, Jolt 5.6.0 as a submodule with `just jolt`, `physics_jolt.dll` and the static library, the allocator and the job system on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite's falling box, ray, stale handles and determinism, driven through the API with no world. The boundary has the commands and the closest ray that this phase needs; `Set_Body`, the joints' commands, the other queries, contact events and `debug_lines` come with the phases that use them, each a change of `API_VERSION`.
-2. **Scripts in fixed ticks,** which needs no physics and can come first: `ecs.next_tick` and `run_tick_systems` with `run_fixed` as their short form, `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, the definitions file and the Unity mapping's row, and the sample's frame driving its ticks.
+2. *Built.* **Scripts in fixed ticks,** which needs no physics and can come first: `ecs.next_tick` and `run_tick_systems` with `run_fixed` as their short form, `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, the definitions file and the Unity mapping's row, and the sample's frame driving its ticks. The loop is an iterator, `ecs.begin_ticks` with `ecs.next_tick`, since the clock needs the frame's time. Until physics, `fixed_events` takes only the runtime, and the sample propagates once per tick, after it; the profiler names the callback `fixed_update`.
 3. **Rigid bodies in the world:** the components and their IDs, `Physics_Body`, the handle pools, `position_sub_f64` and `position_offset_f64`, `physics.tick` in the tick loop, the sync in and out, primitive shapes with scale, compounds from child colliders, layers in the project's settings, edit-mode sync, and collider drawing. The sample game drops a stack of boxes.
 4. **Queries, sensors and events:** the native queries and their batch form, `Physics_Events`, events into scripts through `script.fixed_events`, the `Physics` library and `RigidBody`'s methods, and the Unity mapping. The sample's door opens on `on_trigger_enter`.
 5. **Constraints:** the joint components, `body_a` from the nearest body, the offset and the connected frame, the joints' sync and making a joint again on a change, motors, springs and limits, breaking and `on_joint_break`, and joint drawing. The sample hangs a chain.

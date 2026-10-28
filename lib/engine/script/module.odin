@@ -225,6 +225,8 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 	fields := luau.gettop(L)
 	updates := luau.rawgetfield(L, old, "update") == .FUNCTION
 	luau.pop(L, 1)
+	fixed_updates := luau.rawgetfield(L, old, "fixed_update") == .FUNCTION
+	luau.pop(L, 1)
 	for &i, index in r.instances[:r.instance_used] {
 		if .Live not_in i.flags {
 			continue
@@ -258,6 +260,11 @@ patch_module :: proc(r: ^Runtime, L: ^luau.State, old, new: c.int) {
 			i.flags += {.Updates}
 		} else {
 			i.flags -= {.Updates}
+		}
+		if fixed_updates {
+			i.flags += {.Fixed_Updates}
+		} else {
+			i.flags -= {.Fixed_Updates}
 		}
 		call_method(r, {u32(index), i.generation}, "on_reload")
 	}
