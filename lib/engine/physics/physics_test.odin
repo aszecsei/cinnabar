@@ -283,3 +283,63 @@ the_null_backend_moves_nothing :: proc(t: ^testing.T) {
 	testing.expect(t, ecs.has(&f.world, b, Physics_Body))
 	testing.expect_value(t, height(f, b), 5)
 }
+
+@(private = "file")
+part :: proc(f: ^Fixture, parent: ecs.Entity, offset: [3]f32, shape := Shape.Sphere) -> ecs.Entity {
+	e := ecs.spawn(&f.world)
+	ecs.add(&f.world, e, ecs.TRANSFORM_IDENTITY)
+	ecs.add(&f.world, e, ecs.Parent{parent})
+	ecs.add(&f.world, e, ecs.Local_Transform{offset = offset, rotation = 1, scale = 1})
+	c := DEFAULT_COLLIDER
+	c.shape = shape
+	ecs.add(&f.world, e, c)
+	return e
+}
+
+// A Rigid_Body whose colliders are on its children is one body with a compound shape: it falls and rests on the
+// parts, a ray at a part hits the body, and the parts have no body of their own.
+@(test)
+child_colliders_are_one_body :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ground(f)
+	b := spawn_at(f, {0, 5, 0})
+	ecs.add(&f.world, b, DEFAULT_RIGID_BODY)
+	left := part(f, b, {-1, 0, 0})
+	right := part(f, b, {1, 0, 0})
+	ticks(f, 240)
+	testing.expect(t, !ecs.has(&f.world, left, Physics_Body) && !ecs.has(&f.world, right, Physics_Body))
+	testing.expect(t, ecs.get(&f.world, b, Physics_Body).body.generation != 0)
+	testing.expectf(t, abs(height(f, b) - 0.5) < 0.03, "the body rests on its spheres: y = %v", height(f, b))
+	testing.expectf(t, abs(height(f, right) - height(f, b)) < 0.01, "level, so the parts follow it")
+	ray := core_physics.Ray{origin = {1, 10, 0}, direction = {0, -1, 0}, max_distance = 20}
+	hit: core_physics.Ray_Hit
+	testing.expect(t, bool(f.platform.physics.raycast(f.physics.world, &ray, nil, &hit)))
+	testing.expect_value(t, ecs.Entity(hit.user), b)
+}
+
+// Removing a part's Collider makes the body again, and a body that becomes a part gives up its own.
+@(test)
+parts_change_the_body :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	b := box(f, {0, 50, 0})
+	extra := part(f, b, {0, 1, 0})
+	loose := box(f, {5, 50, 0}, .Static)
+	ecs.remove(&f.world, loose, Rigid_Body)
+	ticks(f, 1)
+	before := ecs.get(&f.world, b, Physics_Body).body
+	testing.expect(t, ecs.has(&f.world, loose, Physics_Body))
+	loose_body := ecs.get(&f.world, loose, Physics_Body).body
+
+	ecs.remove(&f.world, extra, Collider)
+	ecs.add(&f.world, loose, ecs.Parent{b})
+	ecs.add(&f.world, loose, ecs.Local_Transform{offset = {2, 0, 0}, rotation = 1, scale = 1})
+	ticks(f, 1)
+	after := ecs.get(&f.world, b, Physics_Body).body
+	testing.expect(t, after != before, "the body was made again")
+	testing.expect(t, !ecs.has(&f.world, loose, Physics_Body), "the new part has no Physics_Body")
+	testing.expect(t, !pool_valid(&f.physics.bodies, core_physics.Handle(loose_body)), "and its old body is gone")
+	ticks(f, 3)
+	testing.expect_value(t, ecs.get(&f.world, b, Physics_Body).body, after)
+}

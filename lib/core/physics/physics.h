@@ -9,7 +9,8 @@
 extern "C" {
 #endif
 
-#define CN_PHYSICS_API_VERSION 2
+#define CN_PHYSICS_API_VERSION 3
+#define CN_PHYSICS_MAX_COMPOUND_CHILDREN 1024
 #define CN_PHYSICS_MAX_LAYERS 32
 #define CN_PHYSICS_MAX_QUERY_IGNORE 8
 
@@ -71,6 +72,7 @@ enum cn_command_kind {
     CN_CMD_ACTIVATE,
     CN_CMD_DEACTIVATE,
     CN_CMD_SET_ENABLED,
+    CN_CMD_CREATE_COMPOUND,
 };
 
 typedef struct cn_command_header { uint16_t kind, size; uint32_t _pad; } cn_command_header;
@@ -91,6 +93,8 @@ typedef struct cn_create_shape {
 } cn_create_shape;
 
 typedef struct cn_release_shape { cn_shape shape; } cn_release_shape;
+// count cn_shape handles follow.
+typedef struct cn_create_compound { cn_shape shape; uint32_t count, _pad; } cn_create_compound;
 
 typedef struct cn_create_body {
     cn_body body;
@@ -200,6 +204,7 @@ static_assert(sizeof(cn_command_header) == 8);
 static_assert(sizeof(cn_set_world) == 144);
 static_assert(sizeof(cn_create_shape) == 56);
 static_assert(sizeof(cn_set_enabled) == 16);
+static_assert(sizeof(cn_create_compound) == 16);
 static_assert(sizeof(cn_create_body) == 120);
 static_assert(sizeof(cn_set_pose) == 56);
 static_assert(sizeof(cn_move_kinematic) == 56);

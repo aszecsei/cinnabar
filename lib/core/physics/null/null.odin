@@ -239,6 +239,18 @@ run :: proc(w: ^Null_World, command: physics.Command) -> bool {
 		return find_body(w, physics.payload(command, physics.Body_Command).body) != nil
 	case .Set_Enabled:
 		return find_body(w, physics.payload(command, physics.Set_Enabled).body) != nil
+	case .Create_Compound:
+		c := physics.payload(command, physics.Create_Compound)
+		if c.shape.generation == 0 || int(c.shape.index) >= len(w.shapes) || c.count == 0 {
+			return false
+		}
+		for child in physics.compound_children(command) {
+			if child.generation == 0 || int(child.index) >= len(w.shapes) || w.shapes[child.index] != child.generation {
+				return false
+			}
+		}
+		w.shapes[c.shape.index] = c.shape.generation
+		return true
 	}
 	return false
 }

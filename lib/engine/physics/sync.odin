@@ -41,15 +41,79 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 		core_physics.cmd_set_world(&list, s.gravity, s.collides)
 		s.settings_dirty = false
 	}
+	parts := collect_parts(s, w)
 	check_bodies(s, w, &list, &commands)
-	add_bodies(s, w, &list, &commands)
-	update_bodies(s, w, &list, dt)
+	add_bodies(s, w, &list, &commands, &parts)
+	update_bodies(s, w, &list, &commands, &parts, dt)
 	ok := core_physics.submit(api(s), s.world, list)
 	ecs.apply(w, {commands})
 	if !ok {
 		log.warn("physics: the backend rejected some commands")
 	}
 	return true
+}
+
+// Part is a Collider of a body's compound shape, on a descendant of the body's entity: its pose in the body's
+// unscaled space, composed from the Local_Transforms between them, so it does not change while the body moves.
+@(private)
+Part :: struct {
+	entity:   ecs.Entity,
+	collider: Collider,
+	offset:   [3]f32,
+	rotation: quaternion128,
+	scale:    [3]f32,
+}
+
+@(private)
+Parts :: struct {
+	by_body: map[ecs.Entity][dynamic]Part,
+	// The body that each part belongs to.
+	owner:   map[ecs.Entity]ecs.Entity,
+}
+
+// collect_parts finds the parts of every body: each Collider without a Rigid_Body that has an ancestor with one, the
+// nearest. The world keeps no child lists, so this is a walk up from each such Collider, in query order.
+@(private)
+collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
+	allocator := allocator_of(s)
+	parts.by_body = make(map[ecs.Entity][dynamic]Part, allocator)
+	parts.owner = make(map[ecs.Entity]ecs.Entity, allocator)
+	it := ecs.query_iter(w, s.queries.parts)
+	for view in ecs.query_next(&it) {
+		colliders := ecs.column(view, 0, Collider)
+		for e, row in ecs.entities(view) {
+			part := Part{entity = e, collider = colliders[row], rotation = 1, scale = 1}
+			current := e
+			owner: ecs.Entity
+			for _ in 0 ..< ecs.MAX_HIERARCHY_DEPTH {
+				if local := ecs.get(w, current, ecs.Local_Transform); local != nil {
+					part.offset = local.offset + linalg.quaternion_mul_vector3(local.rotation, local.scale * part.offset)
+					part.rotation = local.rotation * part.rotation
+					part.scale = local.scale * part.scale
+				}
+				parent := ecs.get(w, current, ecs.Parent)
+				if parent == nil {
+					break
+				}
+				current = parent.entity
+				if ecs.has(w, current, Rigid_Body) {
+					owner = current
+					break
+				}
+			}
+			if owner == 0 {
+				continue
+			}
+			list, found := &parts.by_body[owner]
+			if !found {
+				parts.by_body[owner] = make([dynamic]Part, allocator)
+				list = &parts.by_body[owner]
+			}
+			append(list, part)
+			parts.owner[e] = owner
+		}
+	}
+	return
 }
 
 // check_bodies goes through the live bodies: a body whose entity is gone, or whose Physics_Body or authoring
@@ -81,47 +145,64 @@ check_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List,
 	}
 }
 
-// add_bodies makes the bodies of the entities that have a Collider and no Physics_Body yet, and gives an entity
-// with a Rigid_Body and no Collider a nil Physics_Body, so that it is warned about once.
+// add_bodies makes the bodies of the entities that have a Collider or a Rigid_Body and no Physics_Body yet, except the
+// parts of other bodies. A Rigid_Body with no Collider and no parts gets a nil Physics_Body, so that it is warned
+// about once.
 @(private)
-add_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands) {
+add_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts) {
+	add :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts, e: ecs.Entity, pose: ecs.Transform) {
+		pb := Physics_Body{}
+		create_body(s, w, list, e, pose, &pb, parts.by_body[e][:])
+		if pb.body.generation == 0 {
+			log.warnf("physics: entity %v has a Rigid_Body and no Collider, so it has no body", e)
+		}
+		ecs.command_add(commands, w, e, pb)
+		if pb.motion != .Static && !ecs.has(w, e, ecs.Previous_Transform) {
+			ecs.command_add(commands, w, e, ecs.Previous_Transform(pose))
+		}
+	}
 	it := ecs.query_iter(w, s.queries.new_colliders)
 	for view in ecs.query_next(&it) {
 		transforms := ecs.column(view, 0, ecs.Transform)
 		for e, row in ecs.entities(view) {
-			pb := Physics_Body{}
-			create_body(s, w, list, e, transforms[row], &pb)
-			ecs.command_add(commands, w, e, pb)
-			if pb.motion != .Static && !ecs.has(w, e, ecs.Previous_Transform) {
-				ecs.command_add(commands, w, e, ecs.Previous_Transform(transforms[row]))
+			if e not_in parts.owner {
+				add(s, w, list, commands, parts, e, transforms[row])
 			}
 		}
 	}
 	it = ecs.query_iter(w, s.queries.new_bodies)
 	for view in ecs.query_next(&it) {
-		for e in ecs.entities(view) {
-			log.warnf("physics: entity %v has a Rigid_Body and no Collider, so it has no body", e)
-			ecs.command_add(commands, w, e, Physics_Body{source = source_hash(w, e)})
+		transforms := ecs.column(view, 0, ecs.Transform)
+		for e, row in ecs.entities(view) {
+			add(s, w, list, commands, parts, e, transforms[row])
 		}
 	}
 }
 
-// update_bodies makes again the bodies whose components changed, and sends the poses that someone else moved: a
-// static body is set where it is, a kinematic one moves there in the tick, and a dynamic one is teleported, as in
-// Unity.
+// update_bodies makes again the bodies whose components or parts changed, and sends the poses that someone else
+// moved: a static body is set where it is, a kinematic one moves there in the tick, and a dynamic one is teleported,
+// as in Unity. An entity that became a part of another body gives up its own.
 @(private)
-update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, dt: f32) {
+update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, commands: ^ecs.Commands, parts: ^Parts, dt: f32) {
 	it := ecs.query_iter(w, s.queries.bodies)
 	for view in ecs.query_next(&it) {
 		transforms := ecs.column(view, 0, ecs.Transform)
 		bodies := ecs.column(view, 1, Physics_Body)
 		for e, row in ecs.entities(view) {
 			pb, pose := &bodies[row], transforms[row]
-			if source_hash(w, e) != pb.source {
+			if e in parts.owner {
 				if pool_valid(&s.bodies, core_physics.Handle(pb.body)) {
 					destroy_body(s, list, pb.body)
 				}
-				create_body(s, w, list, e, pose, pb)
+				ecs.command_remove(commands, w, e, Physics_Body)
+				continue
+			}
+			body_parts := parts.by_body[e][:]
+			if source_hash(w, e, body_parts) != pb.source {
+				if pool_valid(&s.bodies, core_physics.Handle(pb.body)) {
+					destroy_body(s, list, pb.body)
+				}
+				create_body(s, w, list, e, pose, pb, body_parts)
 				continue
 			}
 			if pb.body.generation == 0 || !moved(pb, pose) {
@@ -175,37 +256,67 @@ write_back :: proc(s: ^State, w: ^ecs.World, moved: []core_physics.Body_State) {
 	}
 }
 
-// create_body sends the commands that make e's body from its components, and fills pb with it. The shape's handle is
-// released at once: the body holds the shape.
+// create_body sends the commands that make e's body from its Collider and its parts, and fills pb with it. One
+// collider is the body's shape; several are the children of a compound. The shapes' handles are released at once:
+// the body holds its shape. Without a collider, the body is nil.
 @(private)
-create_body :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, e: ecs.Entity, pose: ecs.Transform, pb: ^Physics_Body) {
+create_body :: proc(
+	s: ^State,
+	w: ^ecs.World,
+	list: ^core_physics.Command_List,
+	e: ecs.Entity,
+	pose: ecs.Transform,
+	pb: ^Physics_Body,
+	parts: []Part,
+) {
 	velocity, spin := pb.linear_velocity, pb.angular_velocity
-	pb^ = {source = source_hash(w, e), position = pose.position, rotation = pose.rotation}
-	collider := ecs.get(w, e, Collider)
-	if collider == nil {
+	pb^ = {source = source_hash(w, e, parts), position = pose.position, rotation = pose.rotation}
+	own := ecs.get(w, e, Collider)
+	if own == nil && len(parts) == 0 {
 		return
 	}
 	rb := ecs.get(w, e, Rigid_Body)
 	body := rb^ if rb != nil else Rigid_Body{motion = .Static}
+	material := own^ if own != nil else parts[0].collider
 
-	shape := core_physics.Shape(pool_alloc(&s.shapes))
-	kind, size := shape_size(collider^, pose.scale)
-	offset := collider.offset * pose.scale
-	core_physics.cmd_create_shape(list, shape, kind, size, collider.density, offset, to_rotation(collider.rotation))
+	shape: core_physics.Shape
+	if own != nil && len(parts) == 0 {
+		shape = child_shape(s, list, own^, own.offset * pose.scale, own.rotation, pose.scale)
+	} else {
+		children := make([dynamic]core_physics.Shape, allocator_of(s))
+		if own != nil {
+			append(&children, child_shape(s, list, own^, own.offset * pose.scale, own.rotation, pose.scale))
+		}
+		for part in parts {
+			if len(children) == core_physics.MAX_COMPOUND_CHILDREN {
+				log.warnf("physics: entity %v has more than %d colliders; the rest are left out", e, core_physics.MAX_COMPOUND_CHILDREN)
+				break
+			}
+			c := part.collider
+			offset := pose.scale * (part.offset + linalg.quaternion_mul_vector3(part.rotation, part.scale * c.offset))
+			append(&children, child_shape(s, list, c, offset, part.rotation * c.rotation, pose.scale * part.scale))
+		}
+		shape = core_physics.Shape(pool_alloc(&s.shapes))
+		core_physics.cmd_create_compound(list, shape, children[:])
+		for child in children {
+			core_physics.cmd_release_shape(list, child)
+			pool_free(&s.shapes, core_physics.Handle(child))
+		}
+	}
 
 	handle := core_physics.Body(pool_alloc(&s.bodies))
-	desc := core_physics.body_desc(handle, shape, body.motion, ecs.position_sub_f64(pose.position, s.anchor), u64(e), collider.layer)
+	desc := core_physics.body_desc(handle, shape, body.motion, ecs.position_sub_f64(pose.position, s.anchor), u64(e), material.layer)
 	desc.rotation = to_rotation(pose.rotation)
 	desc.mass = body.mass
-	desc.friction = collider.friction
-	desc.restitution = collider.restitution
+	desc.friction = material.friction
+	desc.restitution = material.restitution
 	desc.linear_damping = body.linear_damping
 	desc.angular_damping = body.angular_damping
 	desc.gravity_factor = body.gravity_factor
 	if body.motion == .Dynamic {
 		desc.linear_velocity, desc.angular_velocity = velocity, spin
 	}
-	if collider.sensor {
+	if material.sensor {
 		desc.flags += {.Sensor}
 	}
 	if body.ccd {
@@ -228,6 +339,22 @@ create_body :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List, 
 	}
 	pb.body = handle
 	pb.motion = body.motion
+}
+
+// child_shape sends a collider's shape at an offset and a rotation in its body, with its dimensions scaled.
+@(private)
+child_shape :: proc(
+	s: ^State,
+	list: ^core_physics.Command_List,
+	c: Collider,
+	offset: [3]f32,
+	rotation: quaternion128,
+	scale: [3]f32,
+) -> core_physics.Shape {
+	shape := core_physics.Shape(pool_alloc(&s.shapes))
+	kind, size := shape_size(c, scale)
+	core_physics.cmd_create_shape(list, shape, kind, size, c.density, offset, to_rotation(rotation))
+	return shape
 }
 
 @(private)
@@ -258,23 +385,33 @@ shape_size :: proc(c: Collider, pose_scale: [3]f32) -> (core_physics.Shape_Kind,
 	return .Box, 1
 }
 
-// source_hash is what a body is made from: the Rigid_Body, the Collider and the entity's scale.
+// source_hash is what a body is made from: the Rigid_Body, the Collider, the entity's scale, and each part's
+// Collider and pose in the body.
 @(private)
-source_hash :: proc(w: ^ecs.World, e: ecs.Entity) -> u64 {
+source_hash :: proc(w: ^ecs.World, e: ecs.Entity, parts: []Part) -> u64 {
+	bytes :: proc(p: ^$T) -> []byte {
+		return ([^]byte)(p)[:size_of(T)]
+	}
 	h := hash.fnv64a({})
 	if rb := ecs.get(w, e, Rigid_Body); rb != nil {
-		h = hash.fnv64a(([^]byte)(rb)[:size_of(Rigid_Body)], h)
+		h = hash.fnv64a(bytes(rb), h)
 	} else {
 		h = hash.fnv64a({0}, h)
 	}
 	if c := ecs.get(w, e, Collider); c != nil {
-		h = hash.fnv64a(([^]byte)(c)[:size_of(Collider)], h)
+		h = hash.fnv64a(bytes(c), h)
 	} else {
 		h = hash.fnv64a({1}, h)
 	}
 	if pose := ecs.get(w, e, ecs.Transform); pose != nil {
 		scale := pose.scale
-		h = hash.fnv64a(([^]byte)(&scale)[:size_of(scale)], h)
+		h = hash.fnv64a(bytes(&scale), h)
+	}
+	for &part in parts {
+		h = hash.fnv64a(bytes(&part.collider), h)
+		h = hash.fnv64a(bytes(&part.offset), h)
+		h = hash.fnv64a(bytes(&part.rotation), h)
+		h = hash.fnv64a(bytes(&part.scale), h)
 	}
 	return h
 }

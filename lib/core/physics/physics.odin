@@ -15,7 +15,7 @@ import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
 
 // The version of Physics_API and the command format. The host refuses a backend whose info reports another one.
-API_VERSION :: 2
+API_VERSION :: 3
 
 // A handle with generation 0 is the nil handle. The engine allocates Body and Shape handles itself, before the
 // backend knows them, so a command can name a body that an earlier command in the same list creates.
@@ -129,6 +129,7 @@ Command_Kind :: enum u16 {
 	Activate,
 	Deactivate,
 	Set_Enabled,
+	Create_Compound,
 }
 
 // size includes the header and the padding after the payload. Payloads start 8-byte aligned.
@@ -161,6 +162,16 @@ Create_Shape :: struct {
 Release_Shape :: struct {
 	shape: Shape,
 }
+
+// A shape made of other shapes, each placed by its own offset and rotation. count Shape handles follow the payload.
+// The compound holds its children, so their handles can be released after it.
+Create_Compound :: struct {
+	shape: Shape,
+	count: u32,
+	_:     u32,
+}
+
+MAX_COMPOUND_CHILDREN :: 1024
 
 // user is the engine's value for the body, which is the entity; results and hits return it.
 Create_Body :: struct {
@@ -282,9 +293,10 @@ chunk_data :: proc(chunk: ^Chunk) -> []byte {
 	return ([^]byte)(chunk)[size_of(Chunk):COMMAND_CHUNK_SIZE]
 }
 
-push :: proc(list: ^Command_List, kind: Command_Kind, payload: $T) {
+push :: proc(list: ^Command_List, kind: Command_Kind, payload: $T, extra: []byte = nil) {
 	#assert(align_of(T) <= COMMAND_ALIGN)
-	size := mem.align_forward_int(size_of(Command_Header) + size_of(T), COMMAND_ALIGN)
+	size := mem.align_forward_int(size_of(Command_Header) + size_of(T) + len(extra), COMMAND_ALIGN)
+	assert(size <= COMMAND_CHUNK_SIZE - size_of(Chunk) && size <= int(max(u16)), "physics: command too large")
 	if list.last == nil || len(chunk_data(list.last)) - list.last.used < size {
 		ptr, err := mem.alloc(COMMAND_CHUNK_SIZE, COMMAND_ALIGN, list.allocator)
 		if err != nil {
@@ -305,6 +317,9 @@ push :: proc(list: ^Command_List, kind: Command_Kind, payload: $T) {
 	mem.zero(dst, size)
 	mem.copy(dst, &header, size_of(Command_Header))
 	mem.copy(&dst[size_of(Command_Header)], &payload, size_of(T))
+	if len(extra) > 0 {
+		mem.copy(&dst[size_of(Command_Header) + size_of(T)], raw_data(extra), len(extra))
+	}
 	list.last.used += size
 }
 
@@ -322,6 +337,19 @@ cmd_create_shape :: proc(
 	rotation: Rotation = {0, 0, 0, 1},
 ) {
 	push(list, .Create_Shape, Create_Shape{shape = shape, kind = kind, size = size, density = density, offset = offset, rotation = rotation})
+}
+
+cmd_create_compound :: proc(list: ^Command_List, shape: Shape, children: []Shape) {
+	assert(len(children) <= MAX_COMPOUND_CHILDREN, "physics: too many children in a compound")
+	push(list, .Create_Compound, Create_Compound{shape = shape, count = u32(len(children))}, ([^]byte)(raw_data(children))[:len(children) * size_of(Shape)])
+}
+
+// compound_children gives the child handles that follow a Create_Compound's payload.
+compound_children :: proc(command: Command) -> []Shape {
+	c := payload(command, Create_Compound)
+	data := command.data[size_of(Create_Compound):]
+	assert(len(data) >= int(c.count) * size_of(Shape))
+	return ([^]Shape)(raw_data(data))[:c.count]
 }
 
 cmd_release_shape :: proc(list: ^Command_List, shape: Shape) {
@@ -425,6 +453,7 @@ Format :: struct {
 	set_world:      Set_World,
 	create_shape:   Create_Shape,
 	release_shape:  Release_Shape,
+	compound:       Create_Compound,
 	create_body:    Create_Body,
 	destroy_body:   Destroy_Body,
 	set_pose:       Set_Pose,
@@ -571,6 +600,7 @@ Host :: struct {
 #assert(size_of(Set_World) == 144)
 #assert(size_of(Create_Shape) == 56)
 #assert(size_of(Set_Enabled) == 16)
+#assert(size_of(Create_Compound) == 16)
 #assert(size_of(Create_Body) == 120)
 #assert(size_of(Set_Pose) == 56)
 #assert(size_of(Move_Kinematic) == 56)

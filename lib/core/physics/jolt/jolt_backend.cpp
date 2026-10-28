@@ -19,6 +19,7 @@
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/RotatedTranslatedShape.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/RegisterTypes.h>
 
@@ -386,6 +387,32 @@ bool run_create_shape(World_Impl& w, const cn_create_shape& c)
     return true;
 }
 
+bool run_create_compound(World_Impl& w, const cn_create_compound& c, const cn_shape* children)
+{
+    if (c.shape.generation == 0 || c.shape.index >= w.shapes.size() || c.count == 0) {
+        report(CN_LOG_ERROR, "physics: Create_Compound: shape (%u, %u) with %u children", c.shape.index, c.shape.generation, c.count);
+        return false;
+    }
+    StaticCompoundShapeSettings settings;
+    for (uint32_t i = 0; i < c.count; i++) {
+        const Shape* child = find_shape(w, children[i]);
+        if (child == nullptr) {
+            report(CN_LOG_ERROR, "physics: Create_Compound: no child shape (%u, %u)", children[i].index, children[i].generation);
+            return false;
+        }
+        settings.AddShape(Vec3::sZero(), Quat::sIdentity(), child);
+    }
+    Shape::ShapeResult result = settings.Create();
+    if (result.HasError()) {
+        report(CN_LOG_ERROR, "physics: Create_Compound: %s", result.GetError().c_str());
+        return false;
+    }
+    Shape_Slot& slot = w.shapes[c.shape.index];
+    slot.generation = c.shape.generation;
+    slot.shape = result.Get();
+    return true;
+}
+
 bool run_create_body(World_Impl& w, const cn_create_body& c)
 {
     if (c.body.generation == 0 || c.body.index >= w.bodies.size()) {
@@ -463,12 +490,12 @@ const char* command_name(uint16_t kind)
 {
     static const char* names[] = { "Set_World", "Create_Shape", "Release_Shape", "Create_Body", "Destroy_Body",
         "Set_Pose", "Move_Kinematic", "Set_Velocity", "Add_Force", "Add_Force_At", "Add_Torque", "Add_Impulse",
-        "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled" };
+        "Add_Angular_Impulse", "Activate", "Deactivate", "Set_Enabled", "Create_Compound" };
     return kind < sizeof(names) / sizeof(names[0]) ? names[kind] : "unknown";
 }
 
-// run_command returns false for an invalid command, which submit logs.
-bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data)
+// run_command returns false for an invalid command, which submit logs. size is the payload's, with its padding.
+bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data, uint32_t size)
 {
     BodyInterface& bodies = w.system.GetBodyInterface();
     BodyID id;
@@ -491,6 +518,14 @@ bool run_command(World_Impl& w, uint16_t kind, const uint8_t* data)
     }
     case CN_CMD_CREATE_BODY:
         return run_create_body(w, read<cn_create_body>(data));
+    case CN_CMD_CREATE_COMPOUND: {
+        const auto& c = read<cn_create_compound>(data);
+        if (c.count > CN_PHYSICS_MAX_COMPOUND_CHILDREN || sizeof(c) + c.count * sizeof(cn_shape) > size) {
+            report(CN_LOG_ERROR, "physics: Create_Compound: %u children do not fit in the command", c.count);
+            return false;
+        }
+        return run_create_compound(w, c, reinterpret_cast<const cn_shape*>(data + sizeof(cn_create_compound)));
+    }
     case CN_CMD_DESTROY_BODY:
         return run_destroy_body(w, read<cn_destroy_body>(data).body);
     case CN_CMD_SET_POSE: {
@@ -713,7 +748,7 @@ uint32_t submit(cn_world handle, const void* data, uint32_t size)
             report(CN_LOG_ERROR, "physics: submit: a command at %u has size %u", offset, header.size);
             return 0;
         }
-        if (!run_command(*w, header.kind, bytes + offset + sizeof(header))) {
+        if (!run_command(*w, header.kind, bytes + offset + sizeof(header), header.size - uint32_t(sizeof(header)))) {
             report(CN_LOG_ERROR, "physics: submit: %s was invalid, and did nothing", command_name(header.kind));
             ok = false;
         }

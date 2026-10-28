@@ -48,7 +48,9 @@ Shape :: enum u8 {
 }
 
 // Collider is its entity's shape, scaled by its Transform: a box of size meters, a sphere of radius, or a capsule
-// or cylinder of radius and height, its whole height along y. offset and rotation place it in the entity.
+// or cylinder of radius and height, its whole height along y. offset and rotation place it in the entity. A Collider
+// on a descendant of a Rigid_Body, with no Rigid_Body between them, is a part of that body's shape, and the body
+// takes its friction, restitution, layer and sensor from its own Collider, or its first part's.
 Collider :: struct {
 	shape:       Shape,
 	size:        [3]f32 `editor:"range=0,1000"`,
@@ -157,6 +159,7 @@ State :: struct {
 		new_colliders: ecs.Query,
 		new_bodies:    ecs.Query,
 		bodies:        ecs.Query,
+		parts:         ecs.Query,
 	},
 }
 
@@ -190,6 +193,7 @@ register :: proc(s: ^State, w: ^ecs.World) {
 		{ecs.read(w, ecs.Transform), ecs.read(w, Rigid_Body), ecs.without(w, Collider), ecs.without(w, Physics_Body)},
 	)
 	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body)})
+	s.queries.parts = ecs.query(w, {ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)})
 }
 
 // reload takes the new Platform_API after a code reload. The world and its bodies stay.
