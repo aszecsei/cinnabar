@@ -8,11 +8,12 @@ import "core:fmt"
 import "core:hash"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks mesh files changes this, which invalidates every cooked mesh file.
-MESH_FILE_COOK_VERSION :: "mesh files 1"
+MESH_FILE_COOK_VERSION :: "mesh files 2"
 
 MESH_SETTINGS := []Setting_Info {
 	{
@@ -32,6 +33,17 @@ MESH_SETTINGS := []Setting_Info {
 		values = {"true", "false"},
 		default = "true",
 		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
+	},	{
+		key = "impostor",
+		values = {"true", "false"},
+		default = "false",
+		description = "Bake an octahedral impostor: views of the mesh from all around, which draw as one quad past its coarsest level of detail.",
+	},
+	{
+		key = "impostor_size",
+		values = {"32", "64", "128"},
+		default = "64",
+		description = "The side of each of the impostor's views in texels. The impostor takes over where a texel is too small to show.",
 	},
 }
 
@@ -129,6 +141,7 @@ baked_mesh :: proc(a: Asset_Source, bake: format.Mesh_Bake) -> Cook_Mesh {
 		generate_tangents = mesh_file_setting(a, "tangents") == "mikk",
 		lod = mesh_file_setting(a, "cluster_lod") == "true",
 		collision = mesh_file_setting(a, "collision") == "true",
+		impostor_size = mesh_file_setting(a, "impostor") == "true" ? (strconv.parse_int(mesh_file_setting(a, "impostor_size")) or_else 64) : 0,
 		name = filepath.stem(a.path),
 		source_path = a.name,
 	}

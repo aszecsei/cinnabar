@@ -42,11 +42,6 @@ struct Cluster_Payload {
 groupshared Cluster_Payload cluster_payload;
 groupshared uint cluster_count;
 
-// axis_scales are how much an instance's rows scale each of the mesh's axes: the lengths of their columns.
-float3 axis_scales(float4 rows[3]) {
-	return sqrt(rows[0].xyz * rows[0].xyz + rows[1].xyz * rows[1].xyz + rows[2].xyz * rows[2].xyz);
-}
-
 // projected_error is an error within a sphere of the mesh, seen from the camera at its nearest, over the threshold:
 // above 1 shows. The camera is at 0, since positions are relative to it.
 float projected_error(float4 rows[3], float scale, float4 sphere, float error) {

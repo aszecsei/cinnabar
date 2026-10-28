@@ -27,6 +27,10 @@ struct Cull_Constants {
 	uint patch_counts;
 	uint patches_read;
 	uint patch_counts_read;
+	float4 camera;
+	float lod_scale;
+	float lod_near;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 

@@ -26,6 +26,10 @@ struct Cull_Constants {
 	uint patch_counts;
 	uint patches_read;
 	uint patch_counts_read;
+	float4 camera;
+	float lod_scale;
+	float lod_near;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -59,7 +63,9 @@ struct Item {
 	uint submesh;
 	float4 sphere;
 	float bound;
-	uint3 padding;
+	float impostor_error;
+	uint2 padding;
+	float4 lod_sphere;
 };
 
 // Matches ID_ENTITY_BITS in lib/engine/render/renderer.odin.

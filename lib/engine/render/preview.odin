@@ -284,7 +284,13 @@ write_preview_records :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mes
 	}
 	pf.records = upload
 	buffer := gpu.read_index(upload.buffer)
+	right, up, _ := view_axes({rotation = desc.rotation})
 	constants := Frame_Constants {
+		// A billboard faces the orbiting camera.
+		camera_right             = {right.x, right.y, right.z, 0},
+		camera_up                = {up.x, up.y, up.z, 0},
+		previous_camera_right    = {right.x, right.y, right.z, 0},
+		previous_camera_up       = {up.x, up.y, up.z, 0},
 		view_projection          = view_projection,
 		previous_view_projection = view_projection,
 		cluster_view_projection  = view_projection,

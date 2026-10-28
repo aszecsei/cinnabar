@@ -55,6 +55,12 @@ Frame_Constants :: struct {
 	// the camera in w = 1, or the direction it looks along in w = 0.
 	planes:                   [6][4]f32,
 	cull_eye:                 [4]f32,
+	// The camera's right and up, and last frame's camera's, in every view's copy, which billboards face (see
+	// docs/rendering/gpu-scene.md#billboards).
+	camera_right:             [4]f32,
+	camera_up:                [4]f32,
+	previous_camera_right:    [4]f32,
+	previous_camera_up:       [4]f32,
 	instances:                u32,
 	draws:                    u32,
 	meshes:                   u32,
@@ -145,7 +151,9 @@ MESH_RECORD_INDEX32 :: 1
 MESH_RECORD_UV1 :: 2
 MESH_RECORD_COLOR :: 4
 
-// Mesh_Record matches Mesh_Record in material_common.hlsli: a resident mesh's buffers, as bindless indices.
+// Mesh_Record matches Mesh_Record in material_common.hlsli: a resident mesh's buffers, as bindless indices, and its
+// impostor's atlas, the side of its frames and the sphere that they see, for a mesh with one (see
+// docs/rendering/gpu-scene.md#impostors).
 Mesh_Record :: struct {
 	positions:         u32,
 	attributes:        u32,
@@ -155,6 +163,10 @@ Mesh_Record :: struct {
 	meshlets:          u32,
 	meshlet_vertices:  u32,
 	meshlet_triangles: u32,
+	impostor:          u32,
+	impostor_size:     u32,
+	padding:           [2]u32,
+	impostor_sphere:   [4]f32,
 }
 
 // Instance_Record matches Instance_Record in material_common.hlsli and cull_draws.hlsl: the pose relative to the
@@ -176,10 +188,20 @@ ITEM_MESH_PATH :: 4
 // A patch surface's item, whose draws the GPU adds (see docs/rendering/surfaces.md#surfaces): cull_draws.hlsl skips
 // it, and cull_patches.hlsl writes a draw for each of its visible patches.
 ITEM_SURFACE :: 8
+// A billboard's item, whose sphere turns about its instance's position (see docs/rendering/gpu-scene.md#billboards).
+ITEM_BILLBOARD :: 16
+// An impostor's item, which draws its mesh's impostor past where it takes over, and the item of a submesh that has
+// one, which draws up to there (see docs/rendering/gpu-scene.md#impostors).
+ITEM_IMPOSTOR :: 32
+ITEM_HAS_IMPOSTOR :: 64
+// The vertices of an impostor's quad.
+IMPOSTOR_VERTICES :: 6
 
 // Cull_Item matches Item in cull_draws.hlsl. first and count are the submesh's indices, or with ITEM_MESH_PATH its
 // meshlets. bound is how far the material's displacement may move a vertex, in meters, which culling adds to the
-// sphere's radius after the instance's scale (see docs/rendering/materials.md#vertex-displacement).
+// sphere's radius after the instance's scale (see docs/rendering/materials.md#vertex-displacement). An item with
+// ITEM_IMPOSTOR or ITEM_HAS_IMPOSTOR has its mesh's sphere in lod_sphere and its impostor's error, which pick between
+// them.
 Cull_Item :: struct {
 	instance: u32,
 	mesh:     u32,
@@ -192,7 +214,9 @@ Cull_Item :: struct {
 	submesh:  u32,
 	sphere:   [4]f32,
 	bound:    f32,
-	padding:  [3]u32,
+	impostor_error: f32,
+	padding:  [2]u32,
+	lod_sphere: [4]f32,
 }
 
 // A view that draws only the items that cast shadows, and the view that draws only the view model's items, which every
@@ -236,10 +260,16 @@ Cull_Constants :: struct {
 	patch_counts:       u32,
 	patches_read:       u32,
 	patch_counts_read:  u32,
+	// The camera's offset from the render origin, and its level of detail, which pick between a mesh and its impostor
+	// in every view.
+	camera:             [4]f32,
+	lod_scale:          f32,
+	lod_near:           f32,
+	padding:            [2]u32,
 }
 
-#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 64 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 32)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 576)
+#assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 640 && size_of(Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -257,6 +287,7 @@ Gpu_Scene :: struct {
 	frame:                    u64,
 	// Last frame's camera and projections, for the velocities.
 	previous_position:        ecs.World_Position,
+	previous_rotation:        quaternion128,
 	previous_view_projection: matrix[4, 4]f32,
 	previous_view_model:      matrix[4, 4]f32,
 	// Last frame's time, which a displacement's previous pose takes.
@@ -296,6 +327,8 @@ Scene_Frame :: struct {
 	bin_pipelines:   []int,
 	// The pipeline that each bin draws with this frame: its own, or a substitute while its own compiles.
 	bin_draws:       []int,
+	// The bins of impostors, which draw with their pipelines' impostor passes.
+	bin_impostors:   []bool,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
 	// The draws of one view: the items, with each surface's reserved patches.
@@ -472,6 +505,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
 	sf.bin_draws = bin_draws(r, sf.bin_pipelines)
+	sf.bin_impostors = bin_impostors(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.items = items[:]
 	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	// The surfaces' records name their items, now that the bins' order is the items'.
@@ -511,8 +545,8 @@ Sort_Item :: struct {
 }
 
 // sort_bins writes the items in their bins' order, each with its bin, and gives each bin's material pipeline and each
-// group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, then a bin for
-// each sorted item, the farthest first.
+// group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, with its
+// impostors' items in a bin after its own, then a bin for each sorted item, the farthest first.
 @(private)
 sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
 	slice.sort_by(sorting, proc(a, b: Sort_Item) -> bool {
@@ -522,14 +556,18 @@ sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context
 		if a.group == .Sorted {
 			return a.distance > b.distance
 		}
-		return a.item.bin < b.item.bin
+		if a.item.bin != b.item.bin {
+			return a.item.bin < b.item.bin
+		}
+		return a.item.flags & ITEM_IMPOSTOR < b.item.flags & ITEM_IMPOSTOR
 	})
 	bins := make([dynamic]int, allocator)
 	group_bins: [Bin_Group]int
 	for entry, i in sorting {
 		pipeline := int(entry.item.bin)
 		previous := sorting[max(i - 1, 0)]
-		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) {
+		impostor := entry.item.flags & ITEM_IMPOSTOR != previous.item.flags & ITEM_IMPOSTOR
+		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) || impostor {
 			append(&bins, pipeline)
 			group_bins[entry.group] += 1
 		}
@@ -542,6 +580,16 @@ sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context
 		first += count
 	}
 	return bins[:], groups
+}
+
+// bin_impostors gives whether each bin is of impostors, whose items sort_bins gives bins of their own.
+@(private)
+bin_impostors :: proc(items: []Cull_Item, bins: int, allocator := context.allocator) -> []bool {
+	impostors := make([]bool, bins, allocator)
+	for item in items {
+		impostors[item.bin] = item.flags & ITEM_IMPOSTOR != 0
+	}
+	return impostors
 }
 
 // squared_distance is the squared distance to a point in an instance's space, moved by its rows, from another point.
@@ -579,6 +627,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	now := frame_time(r)
 	defer {
 		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
+		s.previous_rotation = f.view.rotation
 		s.previous_view_model = view_model
 		s.previous_time = now
 	}
@@ -603,11 +652,15 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	previous_offset := camera_offset
 	previous_projection := f.view_projection
 	previous_view_model := view_model
+	previous_rotation := f.view.rotation
 	if s.has_previous {
 		previous_offset = ecs.position_sub(s.previous_position, s.origin)
 		previous_projection = s.previous_view_projection
 		previous_view_model = s.previous_view_model
+		previous_rotation = s.previous_rotation
 	}
+	right, up, _ := view_axes(f.view)
+	previous_right, previous_up, _ := view_axes({rotation = previous_rotation})
 	constants := Frame_Constants {
 		view_projection          = f.view_projection,
 		previous_view_projection = previous_projection,
@@ -618,6 +671,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		sky_color                = {ambient.sky.r, ambient.sky.g, ambient.sky.b, 0},
 		ground_color             = {ambient.ground.r, ambient.ground.g, ambient.ground.b, 0},
 		cascade_splits           = shadows.cascade_splits,
+		camera_right             = {right.x, right.y, right.z, 0},
+		camera_up                = {up.x, up.y, up.z, 0},
+		previous_camera_right    = {previous_right.x, previous_right.y, previous_right.z, 0},
+		previous_camera_up       = {previous_up.x, previous_up.y, previous_up.z, 0},
 		instances                = gpu.read_index(s.instances),
 		draws                    = gpu.read_index(s.draws),
 		meshes                   = gpu.read_index(sf.mesh_upload.buffer),
@@ -735,6 +792,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		patch_counts       = gpu.write_index(s.patch_counts),
 		patches_read       = gpu.read_index(s.patches),
 		patch_counts_read  = gpu.read_index(s.patch_counts),
+		camera             = constants.camera_offset,
+		lod_scale          = constants.lod_scale,
+		lod_near           = constants.lod_near,
 	}
 	sf.cull_constants, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
@@ -805,7 +865,8 @@ scene_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity) -> (slot: u32, ok: bool) {
 
 // add_items adds a draw item for each submesh of a Mesh_Renderer whose mesh is resident, with its material's block and
 // pipeline, and gives the mesh, or nil if it is not ready. An item's bin holds its pipeline until build_scene numbers
-// the bins.
+// the bins. A submesh of a mesh with an impostor, whose material has the impostor path, has a second item, its
+// impostor's, and culling draws one of the two (see docs/rendering/gpu-scene.md#impostors).
 @(private = "file")
 add_items :: proc(
 	r: ^Renderer,
@@ -849,22 +910,35 @@ add_items :: proc(
 			flags |= ITEM_MESH_PATH
 			first, count = submesh.first_meshlet, submesh.meshlet_count
 		}
+		if pipeline.billboard {
+			flags |= ITEM_BILLBOARD
+		}
 		b := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
-		append(
-			items,
-			Cull_Item {
-				instance = slot,
-				mesh = mesh_index,
-				first = first,
-				count = count,
-				material = use.block,
-				bin = u32(use.pipeline),
-				flags = flags,
-				submesh = u32(min(s, ID_MAX_SUBMESH)),
-				sphere = {b.center.x, b.center.y, b.center.z, b.radius},
-				bound = pipeline.displacement_bound,
-			},
-		)
+		item := Cull_Item {
+			instance = slot,
+			mesh     = mesh_index,
+			first    = first,
+			count    = count,
+			material = use.block,
+			bin      = u32(use.pipeline),
+			flags    = flags,
+			submesh  = u32(min(s, ID_MAX_SUBMESH)),
+			sphere   = {b.center.x, b.center.y, b.center.z, b.radius},
+			bound    = pipeline.displacement_bound,
+		}
+		// The view model is near the camera, where its impostor never draws.
+		if mesh.impostor != {} && pipeline.impostor_path && material_group(pipeline) == .Opaque && !view_model {
+			m := mesh.bounds
+			item.flags |= ITEM_HAS_IMPOSTOR
+			item.lod_sphere = {m.center.x, m.center.y, m.center.z, m.radius}
+			item.impostor_error = mesh.impostor_error
+			impostor := item
+			impostor.flags = flags & ~u32(ITEM_MESH_PATH) | ITEM_IMPOSTOR
+			impostor.first, impostor.count = 0, IMPOSTOR_VERTICES
+			impostor.sphere, impostor.bound = item.lod_sphere, 0
+			append(items, impostor)
+		}
+		append(items, item)
 	}
 	return mesh
 }
@@ -891,6 +965,9 @@ mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
 		meshlets = gpu.read_index(mesh.meshlets),
 		meshlet_vertices = gpu.read_index(mesh.meshlet_vertices),
 		meshlet_triangles = gpu.read_index(mesh.meshlet_triangles),
+		impostor = mesh.impostor != {} ? gpu.read_index(mesh.impostor) : 0,
+		impostor_size = mesh.impostor_size,
+		impostor_sphere = {mesh.bounds.center.x, mesh.bounds.center.y, mesh.bounds.center.z, mesh.bounds.radius},
 	}
 }
 
@@ -987,10 +1064,14 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 			pipelines = p.over
 		}
 		// The same test as add_items, of the bin's own material, so the bin's items are all on the path that it draws. A
-		// substitute without the path draws nothing there.
-		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque
+		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes.
+		impostors := sf.bin_impostors[bin]
+		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
+		}
+		if impostors {
+			pipelines[1] = p.pipelines[format.material_impostor_pass(pass)]
 		}
 		first := u32(view * sf.draws_per_view) + sf.bin_offsets[bin]
 		for pipeline in pipelines {

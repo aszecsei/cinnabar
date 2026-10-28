@@ -1,0 +1,317 @@
+# The billboards scene, which F7 in mygame cycles to (see docs/rendering/gpu-scene.md#billboards and #impostors): a
+# row of sprites that face the camera, foliage cards that turn about their +y, and a line of towers from 10 m to
+# 800 m away, whose impostor the farther ones draw as, under the sun. Positions are raw World_Position values in
+# units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 5c7e000000000001
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 33554432, -201326592]
+	rotation = [0.0436194, 0, 0, 0.9990482]
+	scale = [1, 1, 1]
+component 32 Camera
+
+entity 5c7e000000000002
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 167772160, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity 5c7e000000000003
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.32, 0.5, 0.78]
+
+entity 5c7e000000000004
+name = "Ground"
+component 1 Transform
+	position = [2516582400000000000, -8388608, 6710886400]
+	rotation = [0, 0, 0, 1]
+	scale = [200, 1, 900]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $8d4f6ba2be507c93ad4f6b8cae2f4051
+	cast_shadows = true
+
+entity 5c7e000000000005
+name = "Sprite 1"
+component 1 Transform
+	position = [2516582399949668352, 16777216, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.8, 0.8, 0.8]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $2b9d4f6a8c1e4a3b5d7f9a1c3e5b7d28
+	cast_shadows = true
+
+entity 5c7e000000000006
+name = "Sprite 2"
+component 1 Transform
+	position = [2516582399974834176, 23488102, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.8, 0.8, 0.8]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $2b9d4f6a8c1e4a3b5d7f9a1c3e5b7d28
+	cast_shadows = true
+
+entity 5c7e000000000007
+name = "Sprite 3"
+component 1 Transform
+	position = [2516582400000000000, 16777216, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.8, 0.8, 0.8]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $2b9d4f6a8c1e4a3b5d7f9a1c3e5b7d28
+	cast_shadows = true
+
+entity 5c7e000000000008
+name = "Sprite 4"
+component 1 Transform
+	position = [2516582400025165824, 23488102, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.8, 0.8, 0.8]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $2b9d4f6a8c1e4a3b5d7f9a1c3e5b7d28
+	cast_shadows = true
+
+entity 5c7e000000000009
+name = "Sprite 5"
+component 1 Transform
+	position = [2516582400050331648, 16777216, -67108864]
+	rotation = [0, 0, 0, 1]
+	scale = [0.8, 0.8, 0.8]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $2b9d4f6a8c1e4a3b5d7f9a1c3e5b7d28
+	cast_shadows = true
+
+entity 5c7e00000000000a
+name = "Tree 1"
+component 1 Transform
+	position = [2516582399916113920, 0, -33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e00000000000b
+name = "Tree 2"
+component 1 Transform
+	position = [2516582400134217728, 0, 25165824]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e00000000000c
+name = "Tree 3"
+component 1 Transform
+	position = [2516582399882559488, 0, 83886080]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e00000000000d
+name = "Tree 4"
+component 1 Transform
+	position = [2516582400100663296, 0, 142606336]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e00000000000e
+name = "Tree 5"
+component 1 Transform
+	position = [2516582399916113920, 0, 201326592]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e00000000000f
+name = "Tree 6"
+component 1 Transform
+	position = [2516582400134217728, 0, 260046848]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000010
+name = "Tree 7"
+component 1 Transform
+	position = [2516582399882559488, 0, 318767104]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000011
+name = "Tree 8"
+component 1 Transform
+	position = [2516582400100663296, 0, 377487360]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000012
+name = "Tree 9"
+component 1 Transform
+	position = [2516582399916113920, 0, 436207616]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000013
+name = "Tree 10"
+component 1 Transform
+	position = [2516582400134217728, 0, 494927872]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000014
+name = "Tree 11"
+component 1 Transform
+	position = [2516582399882559488, 0, 553648128]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000015
+name = "Tree 12"
+component 1 Transform
+	position = [2516582400100663296, 0, 612368384]
+	rotation = [0, 0, 0, 1]
+	scale = [3, 5, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $8f1b3d5a7c9e4b2d6f8a0c2e4b6d8f39
+	cast_shadows = true
+
+entity 5c7e000000000016
+name = "Tower 1"
+component 1 Transform
+	position = [2516582400025165824, 0, 167772160]
+	rotation = [0, 0.0000000, 0, 1.0000000]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e000000000017
+name = "Tower 2"
+component 1 Transform
+	position = [2516582399983222784, 0, 419430400]
+	rotation = [0, 0.1736482, 0, 0.9848078]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e000000000018
+name = "Tower 3"
+component 1 Transform
+	position = [2516582400025165824, 0, 838860800]
+	rotation = [0, 0.3420201, 0, 0.9396926]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e000000000019
+name = "Tower 4"
+component 1 Transform
+	position = [2516582399983222784, 0, 1677721600]
+	rotation = [0, 0.5000000, 0, 0.8660254]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e00000000001a
+name = "Tower 5"
+component 1 Transform
+	position = [2516582400025165824, 0, 3355443200]
+	rotation = [0, 0.6427876, 0, 0.7660444]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e00000000001b
+name = "Tower 6"
+component 1 Transform
+	position = [2516582399983222784, 0, 6710886400]
+	rotation = [0, 0.7660444, 0, 0.6427876]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e00000000001c
+name = "Tower 7"
+component 1 Transform
+	position = [2516582400025165824, 0, 13421772800]
+	rotation = [0, 0.8660254, 0, 0.5000000]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
+	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
+	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true

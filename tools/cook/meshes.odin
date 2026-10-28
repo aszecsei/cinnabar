@@ -22,7 +22,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 2"
+MODEL_COOK_VERSION :: "models 3"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -60,6 +60,17 @@ MODEL_SETTINGS := []Setting_Info {
 		values = {"true", "false"},
 		default = "true",
 		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
+	},	{
+		key = "impostor",
+		values = {"true", "false"},
+		default = "false",
+		description = "Bake an octahedral impostor: views of the mesh from all around, which draw as one quad past its coarsest level of detail.",
+	},
+	{
+		key = "impostor_size",
+		values = {"32", "64", "128"},
+		default = "64",
+		description = "The side of each of the impostor's views in texels. The impostor takes over where a texel is too small to show.",
 	},
 }
 
@@ -335,6 +346,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 	generate := model_setting(a, "tangents") == "generate"
 	lod := model_setting(a, "cluster_lod") == "true"
 	collision := model_setting(a, "collision") == "true"
+	impostor := model_setting(a, "impostor") == "true" ? (strconv.parse_int(model_setting(a, "impostor_size")) or_else 64) : 0
 	flags: format.Mesh_Flags
 
 	// The primitives are grouped by material, and each group is a submesh, in the order of their first use.
@@ -374,6 +386,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 		generate_tangents = generate,
 		lod               = lod,
 		collision         = collision,
+		impostor_size     = impostor,
 		name              = m.name,
 		source_path       = a.name,
 	}
@@ -393,13 +406,15 @@ Cook_Mesh :: struct {
 	lod:               bool,
 	// Write the collision data (see collision_of).
 	collision:         bool,
+	// Bake an impostor with frames of this many texels a side, or none for 0 (see bake_impostor).
+	impostor_size:     int,
 	name:              string,
 	source_path:       string,
 }
 
 // finish_mesh is the half of a mesh's cook that every importer shares: it welds identical corners into vertices,
-// orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, and writes
-// the blob.
+// orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, bakes the
+// impostor, and writes the blob.
 finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	corners := m.corners
 	ranges := m.ranges
@@ -456,6 +471,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		}
 	}
 
+	bounds := bounds_of(vertices, nil)
 	if vertex_count > 65535 {
 		flags += {.Index32}
 	}
@@ -497,7 +513,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		flags             = flags,
 		vertex_count      = u32(vertex_count),
 		index_count       = u32(len(indices)),
-		bounds            = bounds_of(vertices, nil),
+		bounds            = bounds,
 		submeshes         = submeshes,
 		positions         = positions,
 		attributes        = attributes,
@@ -510,6 +526,11 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	}
 	if m.collision {
 		contents.collision_positions, contents.collision_triangles, contents.collision_submeshes = collision_of(vertices, indices, submeshes)
+	}
+	if m.impostor_size > 0 {
+		contents.impostor = bake_impostor(vertices, indices, submeshes, bounds, m.impostor_size, context.temp_allocator)
+		contents.impostor_size = u32(m.impostor_size)
+		contents.impostor_error = impostor_error(meshlets[:], bounds, m.impostor_size)
 	}
 	return format.mesh_write(contents, context.temp_allocator)
 }

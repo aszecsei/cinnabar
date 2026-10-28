@@ -117,6 +117,32 @@ mesh_encode_tangent :: proc "contextless" (t: [4]f32) -> [2]u16 {
 	return {x, y}
 }
 
+// An impostor's atlas is IMPOSTOR_FRAMES by IMPOSTOR_FRAMES views of the mesh, each a square of the impostor's size
+// in texels (see docs/content/kinds/meshes.md#impostors).
+IMPOSTOR_FRAMES :: 8
+// The sizes of a frame that a mesh blob may have, around the import setting impostor_size's values.
+IMPOSTOR_MIN_SIZE :: 16
+IMPOSTOR_MAX_SIZE :: 256
+
+// Impostor_Texel is one texel of an impostor's view: what the mesh's nearest surface there gives a material, in the
+// mesh's space. Shaders read it as it is: matches Impostor_Texel in material_impostor.hlsli.
+Impostor_Texel :: struct {
+	// The first UV set.
+	uv:      [2]f16le,
+	// How far the surface is from the view's plane through the sphere's center, toward the view, over the radius.
+	depth:   f16le,
+	// The submesh's index plus 1 in the low byte, 0 where the view sees no surface, and IMPOSTOR_TEXEL_FLIP set where
+	// the bitangent's sign is -1.
+	flags:   u16le,
+	// Octahedral, in snorm16 pairs.
+	normal:  [2]i16le,
+	tangent: [2]i16le,
+}
+
+IMPOSTOR_TEXEL_FLIP :: 0x100
+
+#assert(size_of(Impostor_Texel) == 16)
+
 // mesh_attribute_stride is the size of one vertex's attributes for the flags: from 16 to 28 bytes.
 mesh_attribute_stride :: proc "contextless" (flags: Mesh_Flags) -> u32 {
 	stride := u32(size_of(Mesh_Attributes))
@@ -161,10 +187,16 @@ Mesh_Blob :: struct {
 	collision_positions: Slice,
 	collision_triangles: Slice,
 	collision_submeshes: Slice,
+	// The impostor's atlas, Impostor_Texel records, frame by frame in rows of IMPOSTOR_FRAMES, each frame row by row,
+	// empty when the import setting impostor is false. impostor_size is a frame's side in texels, and impostor_error
+	// how far the impostor may be from the mesh, in meters: the larger of its coarsest level's error and a texel.
+	impostor:            Slice,
+	impostor_size:       u32,
+	impostor_error:      f32,
 }
 
 mesh_layout :: proc() -> u64 {
-	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791
+	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521
 }
 
 // mesh_view checks a mesh blob: its header, its layout, its slices, and that its streams have the sizes that its
@@ -188,6 +220,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		blob.collision_positions,
 		blob.collision_triangles,
 		blob.collision_submeshes,
+		blob.impostor,
 	}
 	for s in slices {
 		if u64(s.offset) + u64(s.size) > u64(len(data)) {
@@ -203,7 +236,10 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
 	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0,
 	     blob.collision_positions.size % 12 != 0 || blob.collision_triangles.size % 12 != 0,
-	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2:
+	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2,
+	     blob.impostor.offset % align_of(Impostor_Texel) != 0,
+	     blob.impostor.size != 0 && (blob.impostor_size < IMPOSTOR_MIN_SIZE || blob.impostor_size > IMPOSTOR_MAX_SIZE),
+	     blob.impostor.size != impostor_texels(blob.impostor.size == 0 ? 0 : blob.impostor_size) * size_of(Impostor_Texel):
 		return nil, false
 	}
 	collision_vertices := blob.collision_positions.size / 12
@@ -245,6 +281,17 @@ mesh_collision_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) 
 	return ([^]u16)(raw_data(bytes))[:len(bytes) / 2]
 }
 
+// impostor_texels is how many texels an impostor's atlas has, for a frame's side.
+impostor_texels :: proc "contextless" (size: u32) -> u32 {
+	return IMPOSTOR_FRAMES * IMPOSTOR_FRAMES * size * size
+}
+
+// mesh_impostor is a mesh's impostor atlas, empty for a mesh cooked without one.
+mesh_impostor :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Impostor_Texel {
+	bytes := blob_bytes(data, blob.impostor)
+	return ([^]Impostor_Texel)(raw_data(bytes))[:len(bytes) / size_of(Impostor_Texel)]
+}
+
 mesh_meshlets :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet {
 	bytes := blob_bytes(data, blob.meshlets)
 	return ([^]Meshlet)(raw_data(bytes))[:len(bytes) / size_of(Meshlet)]
@@ -278,6 +325,9 @@ Mesh_Contents :: struct {
 	collision_positions: [][3]f32,
 	collision_triangles: [][3]u32,
 	collision_submeshes: []u16,
+	impostor:            []Impostor_Texel,
+	impostor_size:       u32,
+	impostor_error:      f32,
 }
 
 // mesh_write builds a mesh blob.
@@ -298,6 +348,7 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 	collision_positions := stream(&buffer, mem.slice_to_bytes(contents.collision_positions))
 	collision_triangles := stream(&buffer, mem.slice_to_bytes(contents.collision_triangles))
 	collision_submeshes := stream(&buffer, mem.slice_to_bytes(contents.collision_submeshes))
+	impostor := stream(&buffer, mem.slice_to_bytes(contents.impostor))
 	name := append_bytes(&buffer, transmute([]byte)contents.name)
 	source_path := append_bytes(&buffer, transmute([]byte)contents.source_path)
 	for s, i in contents.submeshes {
@@ -329,6 +380,9 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		collision_positions = collision_positions,
 		collision_triangles = collision_triangles,
 		collision_submeshes = collision_submeshes,
+		impostor = impostor,
+		impostor_size = len(contents.impostor) > 0 ? contents.impostor_size : 0,
+		impostor_error = contents.impostor_error,
 	}
 	mem.copy(raw_data(buffer), &blob, size_of(blob))
 	return buffer[:]

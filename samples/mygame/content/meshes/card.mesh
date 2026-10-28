@@ -1,0 +1,14 @@
+# A card for billboards (see docs/rendering/gpu-scene.md#billboards): a quad 1 m wide and high in the mesh's x and y,
+# its bottom edge's middle on the origin, fronting -z, with its UVs 0 to 1 across it and v down from its top. A
+# billboard material turns it to face the camera.
+mesh 1
+v -0.5 0 0
+v -0.5 1 0
+v 0.5 1 0
+v 0.5 0 0
+f 0 0 1 2 3
+map 1 0 0 0 -1 0 1 1 0.5 1 0
+e 0 1 sharp
+e 1 2 sharp
+e 2 3 sharp
+e 3 0 sharp

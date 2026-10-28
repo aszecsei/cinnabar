@@ -222,3 +222,56 @@ meshes_cook_welded_collision_data :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(format.mesh_collision_triangles(data, blob)), 0)
 	}
 }
+
+// impostor = true bakes the box's views: from -z, the corner frame's view, its middle is the box's -z face, a third
+// of the sphere's radius toward the view from its center, facing the view, and its corner sees nothing. The impostor
+// takes over where a texel is too small to show, since the box has no coarser level.
+@(test)
+impostors_bake_the_mesh_seen_from_each_frame :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/box.mesh", MESH_TEMPLATE}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	testing.expect(t, cook(options, {.Mesh}).ok)
+	guid := tree_guid(t, tree, "box.mesh")
+	data := tree_blob(t, tree, guid)
+	blob, ok := format.mesh_view(data)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, len(format.mesh_impostor(data, blob)), 0)
+	}
+
+	meta := fmt.tprintf("%s/content/box.mesh.meta", tree.dir)
+	text, _ := os.read_entire_file(meta, context.temp_allocator)
+	testing.expect(t, os.write_entire_file(meta, transmute([]byte)fmt.tprintf("%simpostor = true\nimpostor_size = 32\n", string(text))) == nil)
+	testing.expect(t, cook(options, {.Mesh}).ok)
+	data = tree_blob(t, tree, guid)
+	blob, ok = format.mesh_view(data)
+	testing.expect(t, ok)
+	if !ok {
+		return
+	}
+	size :: 32
+	texels := format.mesh_impostor(data, blob)
+	testing.expect_value(t, len(texels), format.IMPOSTOR_FRAMES * format.IMPOSTOR_FRAMES * size * size)
+	testing.expect_value(t, blob.impostor_size, size)
+	radius := blob.bounds.radius
+	testing.expectf(t, abs(blob.impostor_error - 2 * radius / size) < 1e-6, "the error %v is a texel", blob.impostor_error)
+	if len(texels) != format.IMPOSTOR_FRAMES * format.IMPOSTOR_FRAMES * size * size {
+		return
+	}
+	testing.expect(t, linalg.length(impostor_direction(0, 0) - [3]f32{0, 0, -1}) < 1e-6)
+	middle := texels[size / 2 * size + size / 2]
+	testing.expect_value(t, middle.flags & 0xff, 1)
+	testing.expectf(t, abs(f32(middle.depth) - 0.5 / radius) < 1e-2, "the face's depth %v", f32(middle.depth))
+	p := [2]f32{f32(middle.normal.x), f32(middle.normal.y)} / 32767
+	normal := [3]f32{p.x, p.y, 1 - abs(p.x) - abs(p.y)}
+	if normal.z < 0 {
+		normal.xy = (1 - [2]f32{abs(normal.y), abs(normal.x)}) * [2]f32{normal.x >= 0 ? 1 : -1, normal.y >= 0 ? 1 : -1}
+	}
+	testing.expectf(t, linalg.length(linalg.normalize(normal) - [3]f32{0, 0, -1}) < 1e-3, "the face's normal %v is -z", normal)
+	testing.expect_value(t, texels[0].flags & 0xff, 0)
+	// Every frame sees the box in its middle.
+	for frame in 0 ..< format.IMPOSTOR_FRAMES * format.IMPOSTOR_FRAMES {
+		testing.expect(t, texels[frame * size * size + size / 2 * size + size / 2].flags & 0xff == 1)
+	}
+}

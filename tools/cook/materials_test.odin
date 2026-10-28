@@ -94,9 +94,9 @@ displacing_materials_compile_every_pass_and_keep_their_bound :: proc(t: ^testing
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		// The same passes as any opaque material, the mesh shader path's included, which all place vertices with the
-		// displacement.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 11)
+		// The same passes as any opaque material, the mesh shader path's and the impostor path's included, which all
+		// but the impostor's place vertices with the displacement.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 17)
 		testing.expect(t, .Displaces in blob.flags)
 		testing.expect(t, .Reads_Time in blob.flags)
 		testing.expect_value(t, blob.displacement_bound, 0.5)
@@ -137,7 +137,7 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	if ok {
 		// The forward pass's and the prepass's two stages, and the depth pass's vertex stage, from the patch vertex
-		// path; no amplification or mesh stages.
+		// path; no amplification or mesh stages, and no impostor passes.
 		testing.expect_value(t, len(format.material_variants(data, blob)), 5)
 		testing.expect(t, .Patches in blob.flags)
 		testing.expect(t, .Displaces in blob.flags)
@@ -151,7 +151,7 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 	bad := "material 1\nshading = lit\ngeometry = cloth\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n"
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/content/ground.material", tree.dir), transmute([]byte)bad) == nil)
 	testing.expect(t, !cook(options, {.Material}).ok)
-	expect_error(t, &errors, "ground.material:3: geometry is mesh or patches")
+	expect_error(t, &errors, "ground.material:3: geometry is mesh, patches, billboard or billboard_axis")
 }
 
 @(test)
@@ -188,9 +188,9 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 	testing.expect(t, ok)
 	if ok {
 		// The material's own switches (none) and its instances' (use_albedo): two variants, each with the forward
-		// pass's and the prepass's two stages, an opaque depth pass's vertex stage, and the mesh shader path's
-		// amplification and mesh stages of each of the three.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 22)
+		// pass's and the prepass's two stages, an opaque depth pass's vertex stage, the mesh shader path's
+		// amplification and mesh stages of each of the three, and the impostor path's two stages of each.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 34)
 		testing.expect(t, format.material_code(data, blob, 1, .Forward, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Prepass, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) != nil)
@@ -286,7 +286,7 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 	data := tree_blob(t, tree, tree_guid(t, tree, "leaf.material"))
 	if blob, ok := format.material_view(data); ok {
 		// The shadow maps discard where the opacity is below the cutoff, so the depth pass has a pixel stage too.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 12)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 18)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
 }
@@ -421,4 +421,48 @@ tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 	index_build(&again, cook(options, {.Texture, .Material}, log_problems = false), options.roots[:])
 	defer index_destroy(&again)
 	testing.expect(t, !index_changed(index_diff(&index, &again)))
+}
+
+// A billboard draws its meshes with vertex pulling only: the opaque passes' stages, without the mesh shader path's or
+// the impostor path's. An axis billboard is a billboard too.
+@(test)
+billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
+	evaluate := "---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.uv0.xyx;\n\treturn s;\n}\n"
+	tree := make_tree(
+		t,
+		{
+			{"content/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"content/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/card.material", fmt.tprintf("material 1\nshading = lit\ngeometry = billboard\n%s", evaluate)},
+			{"content/card.material.meta", "guid = 00112233445566778899aabbccddeeff\n"},
+			{"content/tree.material", fmt.tprintf("material 1\nshading = lit\nblend = masked\ngeometry = billboard_axis\n%s", evaluate)},
+			{"content/tree.material.meta", "guid = 00112233445566778899aabbccddee00\n"},
+		},
+	)
+	defer remove_tree(tree)
+	options := material_options(t, tree)
+	pass := cook(options, {.Material})
+	for p in pass.problems.list {
+		if p.error {
+			testing.expectf(t, false, "%s:%d: %s", p.file, p.line, p.text)
+		}
+	}
+	testing.expect_value(t, pass.cooked[.Material], 2)
+	cases := []struct {
+		guid:     string,
+		flags:    format.Material_Flags,
+		variants: int,
+	}{{"00112233445566778899aabbccddeeff", {.Billboard}, 5}, {"00112233445566778899aabbccddee00", {.Billboard, .Billboard_Axis}, 6}}
+	for c in cases {
+		data := tree_blob(t, tree, format.guid_parse(c.guid) or_else {})
+		blob, ok := format.material_view(data)
+		testing.expect(t, ok)
+		if !ok {
+			continue
+		}
+		testing.expect_value(t, len(format.material_variants(data, blob)), c.variants)
+		testing.expect_value(t, blob.flags & {.Billboard, .Billboard_Axis}, c.flags)
+		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Mesh) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Impostor_Forward, .Vertex) == nil)
+	}
 }

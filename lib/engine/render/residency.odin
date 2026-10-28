@@ -25,6 +25,11 @@ Resident_Mesh :: struct {
 	meshlets:          gpu.Buffer,
 	meshlet_vertices:  gpu.Buffer,
 	meshlet_triangles: gpu.Buffer,
+	// The impostor's atlas, for a mesh cooked with one, the side of its frames in texels, and how far it may be from the
+	// mesh, in meters (see docs/rendering/gpu-scene.md#impostors).
+	impostor:          gpu.Buffer,
+	impostor_size:     u32,
+	impostor_error:    f32,
 	index_format:      gpu.Index_Format,
 	index_count:       u32,
 	vertex_count:      u32,
@@ -83,8 +88,8 @@ Resident_Entry :: struct {
 	pending:       Resident_Resources,
 	pending_version: u32,
 	streaming:     bool,
-	// A mesh's six streams, or a texture's one.
-	transfers:     [6]gpu.Transfer,
+	// A mesh's six streams and its impostor, or a texture's one.
+	transfers:     [7]gpu.Transfer,
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
 	failed_at:     u64,
@@ -328,6 +333,11 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.meshlets = stream_buffer(r, e, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
 	m.meshlet_vertices = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
 	m.meshlet_triangles = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
+	m.impostor, m.impostor_size, m.impostor_error = {}, 0, 0
+	if blob.impostor.size > 0 {
+		m.impostor = stream_buffer(r, e, format.blob_bytes(data, blob.impostor), {}, "mesh impostor") or_return
+		m.impostor_size, m.impostor_error = blob.impostor_size, blob.impostor_error
+	}
 	return true
 }
 
@@ -460,6 +470,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		r.platform.gpu_destroy_buffer(m.meshlets)
 		r.platform.gpu_destroy_buffer(m.meshlet_vertices)
 		r.platform.gpu_destroy_buffer(m.meshlet_triangles)
+		if m.impostor != {} {
+			r.platform.gpu_destroy_buffer(m.impostor)
+		}
 		if m.accel != {} {
 			r.platform.gpu_destroy_accel(m.accel)
 		}
