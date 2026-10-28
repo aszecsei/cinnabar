@@ -3,6 +3,7 @@ package physics
 import "base:runtime"
 import "core:c"
 import "core:log"
+import "core:math"
 import "core:mem/virtual"
 import "core:sync"
 import "core:testing"
@@ -633,4 +634,97 @@ systems_push_from_jobs :: proc(t: ^testing.T) {
 		v := ecs.get(w, b, Physics_Body).linear_velocity
 		testing.expectf(t, v.y > 1, "box %d went up in the tick: %v", i, v)
 	}
+}
+
+@(private = "file")
+distance_from :: proc(f: ^Fixture, e: ecs.Entity, meters: [3]f64) -> f64 {
+	d := ecs.position_to_meters(ecs.get(&f.world, e, ecs.Transform).position) - meters
+	return math.sqrt(d.x * d.x + d.y * d.y + d.z * d.z)
+}
+
+// point_joint puts a point joint to the world on e, at offset in e.
+@(private = "file")
+point_joint :: proc(f: ^Fixture, e: ecs.Entity, offset: [3]f32, body_b := ecs.Entity(0)) {
+	j := DEFAULT_JOINT
+	j.offset, j.body_b = offset, body_b
+	ecs.add(&f.world, e, Point_Joint{j})
+}
+
+// A box on a point joint to the world, 2 m from the pivot, swings down and keeps its distance; a joint on a child
+// entity of a box joins the box's body; and a chain of two hangs from the world, link to link.
+@(test)
+joints_hold_bodies :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	swing := box(f, {2, 5, 0})
+	point_joint(f, swing, {-2, 0, 0})
+	held := box(f, {10, 5, 0})
+	child := ecs.spawn(&f.world)
+	ecs.add(&f.world, child, ecs.TRANSFORM_IDENTITY)
+	ecs.add(&f.world, child, ecs.Parent{held})
+	ecs.add(&f.world, child, ecs.Local_Transform{offset = {0, 1, 0}, rotation = 1, scale = 1})
+	point_joint(f, child, 0)
+	top := box(f, {20, 4, 0})
+	point_joint(f, top, {0, 1, 0})
+	bottom := box(f, {20, 3, 0})
+	point_joint(f, bottom, {0, 0.5, 0}, top)
+	ticks(f, 60)
+	testing.expect(t, ecs.has(&f.world, swing, Physics_Joint))
+	testing.expectf(t, height(f, swing) < 4.5, "the box swung down: %v", height(f, swing))
+	testing.expectf(t, abs(distance_from(f, swing, {0, 5, 0}) - 2) < 0.05, "at 2 m from the pivot: %v", distance_from(f, swing, {0, 5, 0}))
+	testing.expectf(t, abs(height(f, held) - 5) < 0.05, "the child's joint holds its parent's body: %v", height(f, held))
+	testing.expectf(t, abs(height(f, top) - 4) < 0.05 && abs(height(f, bottom) - 3) < 0.05, "the chain hangs: %v, %v", height(f, top), height(f, bottom))
+}
+
+// A hinge's motor changes in place, keeping the joint, and removing a joint lets its box fall.
+@(test)
+joints_change :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	wheel := box(f, {0, 5, 0})
+	ecs.get(&f.world, wheel, Rigid_Body).gravity_factor = 0
+	hinge := Hinge_Joint{joint = DEFAULT_JOINT, motor = {mode = .Velocity, target = 2}}
+	// About y: the frame's x turned onto y.
+	hinge.joint.rotation = quaternion(w = 0.70710678, x = 0, y = 0, z = 0.70710678)
+	ecs.add(&f.world, wheel, hinge)
+	ticks(f, 30)
+	before := ecs.get(&f.world, wheel, Physics_Joint).joint
+	testing.expectf(t, abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 2) < 0.05, "it turns at 2: %v", ecs.get(&f.world, wheel, Physics_Body).angular_velocity)
+	ecs.get(&f.world, wheel, Hinge_Joint).motor.target = 4
+	ticks(f, 30)
+	testing.expect_value(t, ecs.get(&f.world, wheel, Physics_Joint).joint, before)
+	testing.expectf(t, abs(abs(ecs.get(&f.world, wheel, Physics_Body).angular_velocity.y) - 4) < 0.05, "and at 4: %v", ecs.get(&f.world, wheel, Physics_Body).angular_velocity)
+
+	hanging := box(f, {5, 5, 0})
+	point_joint(f, hanging, {0, 1, 0})
+	ticks(f, 10)
+	ecs.remove(&f.world, hanging, Point_Joint)
+	ticks(f, 30)
+	testing.expect(t, !ecs.has(&f.world, hanging, Physics_Joint))
+	testing.expectf(t, height(f, hanging) < 4.5, "it falls without its joint: %v", height(f, hanging))
+}
+
+// A joint that carries more than its break force breaks: its Physics_Joint says so, and its entity's behaviour gets
+// on_joint_break with the force.
+@(test)
+joints_break :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	f.box = box(f, {0, 5, 0})
+	j := DEFAULT_JOINT
+	j.offset = {0, 1, 0}
+	// The box weighs about 9800 N.
+	j.break_force = 1000
+	ecs.add(&f.world, f.box, Point_Joint{j})
+	context.user_ptr = f
+	_, ok := script.spawn_source(&f.runtime, "=breaker", `
+local Breaker = Behaviour.define("Breaker")
+function Breaker:on_joint_break(force, torque) Test.report(force > 1000 and 1 or 0) end
+Test.box():add(Breaker)
+`)
+	testing.expect(t, ok)
+	ticks(f, 30)
+	testing.expect(t, ecs.get(&f.world, f.box, Physics_Joint).broken)
+	testing.expectf(t, len(f.reports) == 1 && f.reports[0] == 1, "reports %v", f.reports[:])
+	testing.expectf(t, height(f, f.box) < 4.5, "the box falls: %v", height(f, f.box))
 }

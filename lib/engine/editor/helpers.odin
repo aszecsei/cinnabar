@@ -140,6 +140,9 @@ draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, p
 	if c := ecs.get(w, entity, physics.Collider); c != nil {
 		draw_collider(d, c^, pose, selected)
 	}
+	if j, _, ok := physics.joint_of(w, entity); ok {
+		draw_joint(w, d, j^, pose, selected)
+	}
 	if v := ecs.get(w, entity, volume.Volume); v != nil {
 		color := selected ? VOLUME_COLOR : UNSELECTED
 		blend := color
@@ -283,6 +286,31 @@ draw_collider :: proc(d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, 
 		if kind == .Capsule {
 			debug.sphere(d, top, radius, color)
 			debug.sphere(d, bottom, radius, color)
+		}
+	}
+}
+
+// The axes of a joint's frame, in meters.
+@(private = "file")
+JOINT_AXES :: 0.25
+
+// draw_joint draws a joint's frame as axes, its x the hinge's or the slider's axis, and a line to its other body's
+// entity (see docs/physics/design.md#the-editor).
+@(private = "file")
+draw_joint :: proc(w: ^ecs.World, d: ^debug.Draw, j: physics.Joint, pose: ecs.Transform, selected: bool) {
+	frame := ecs.Transform {
+		position = ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, j.offset * pose.scale)),
+		rotation = pose.rotation * j.rotation,
+		scale    = 1,
+	}
+	if !selected {
+		debug.sphere(d, frame.position, 0.03, UNSELECTED)
+		return
+	}
+	debug.axes(d, frame, JOINT_AXES)
+	if j.body_b != 0 && ecs.is_alive(w, j.body_b) {
+		if other, ok := ecs.presented(w, j.body_b); ok {
+			debug.line(d, frame.position, other.position, COLLIDER_COLOR)
 		}
 	}
 }

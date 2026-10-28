@@ -27,6 +27,7 @@ tick :: proc(s: ^State, w: ^ecs.World) {
 	results: core_physics.Step_Results
 	api(s).results(s.world, &results)
 	write_back(s, w, results.moved[:results.moved_count])
+	note_breaks(s, w, results.broken[:results.broken_count])
 	clear(&s.tick_contacts)
 	for e in results.contacts[:results.contact_count] {
 		c := Contact {
@@ -67,6 +68,10 @@ sync :: proc(s: ^State, w: ^ecs.World, dt: f32 = 1.0 / 60) -> bool {
 	check_bodies(s, w, &list, &commands)
 	add_bodies(s, w, &list, &commands, &parts)
 	update_bodies(s, w, &list, &commands, &parts, dt)
+	// The joints need the Physics_Body of a body that this sync made.
+	ecs.apply(w, {commands})
+	commands = ecs.commands(allocator_of(s))
+	sync_joints(s, w, &list, &commands)
 	ok := core_physics.submit(api(s), s.world, list)
 	ecs.apply(w, {commands})
 	if !ok {
@@ -104,26 +109,8 @@ collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 	for view in ecs.query_next(&it) {
 		colliders := ecs.column(view, 0, Collider)
 		for e, row in ecs.entities(view) {
-			part := Part{entity = e, collider = colliders[row], rotation = 1, scale = 1}
-			current := e
-			owner: ecs.Entity
-			for _ in 0 ..< ecs.MAX_HIERARCHY_DEPTH {
-				if local := ecs.get(w, current, ecs.Local_Transform); local != nil {
-					part.offset = local.offset + linalg.quaternion_mul_vector3(local.rotation, local.scale * part.offset)
-					part.rotation = local.rotation * part.rotation
-					part.scale = local.scale * part.scale
-				}
-				parent := ecs.get(w, current, ecs.Parent)
-				if parent == nil {
-					break
-				}
-				current = parent.entity
-				if ecs.has(w, current, Rigid_Body) {
-					owner = current
-					break
-				}
-			}
-			if owner == 0 {
+			owner, pose := walk_up(w, e, proc(w: ^ecs.World, e: ecs.Entity) -> bool {return ecs.has(w, e, Rigid_Body)})
+			if owner == 0 || owner == e {
 				continue
 			}
 			list, found := &parts.by_body[owner]
@@ -131,11 +118,36 @@ collect_parts :: proc(s: ^State, w: ^ecs.World) -> (parts: Parts) {
 				parts.by_body[owner] = make([dynamic]Part, allocator)
 				list = &parts.by_body[owner]
 			}
-			append(list, part)
+			append(list, Part{entity = e, collider = colliders[row], offset = pose.offset, rotation = pose.rotation, scale = pose.scale})
 			parts.owner[e] = owner
 		}
 	}
 	return
+}
+
+// walk_up finds the nearest of e and its ancestors that stop accepts, and e's pose in that entity's unscaled space,
+// composed from the Local_Transforms between them, so it does not change while they move together. It gives 0 when
+// none is found within the hierarchy's depth limit.
+@(private)
+walk_up :: proc(w: ^ecs.World, e: ecs.Entity, stop: proc(w: ^ecs.World, e: ecs.Entity) -> bool) -> (owner: ecs.Entity, pose: ecs.Local_Transform) {
+	pose = ecs.LOCAL_TRANSFORM_IDENTITY
+	current := e
+	for _ in 0 ..< ecs.MAX_HIERARCHY_DEPTH {
+		if stop(w, current) {
+			return current, pose
+		}
+		if local := ecs.get(w, current, ecs.Local_Transform); local != nil {
+			pose.offset = local.offset + linalg.quaternion_mul_vector3(local.rotation, local.scale * pose.offset)
+			pose.rotation = local.rotation * pose.rotation
+			pose.scale = local.scale * pose.scale
+		}
+		parent := ecs.get(w, current, ecs.Parent)
+		if parent == nil {
+			break
+		}
+		current = parent.entity
+	}
+	return 0, pose
 }
 
 // check_bodies goes through the live bodies: a body whose entity is gone, or whose Physics_Body or authoring

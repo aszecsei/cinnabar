@@ -96,6 +96,15 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		wake(effects(s), w, e)
 		return 0
 	}, "(entity: Entity) -> ()")
+	script.define(r, "Physics.set_motor", set_motor_binding, "(entity: Entity, mode: \"off\" | \"velocity\" | \"position\", target: number?, max: number?) -> ()")
+	script.define(r, "Physics.set_joint_enabled", proc(L: ^luau.State) -> c.int {
+		j, _, ok := joint_of(script.runtime_of(L).world, script.check_entity(L, 1))
+		if !ok {
+			script.raise(L, "the entity has no joint")
+		}
+		j.enabled = bool(luau.toboolean(L, 2))
+		return 0
+	}, "(entity: Entity, enabled: boolean) -> ()")
 	script.define(r, "Physics.is_sleeping", proc(L: ^luau.State) -> c.int {
 		_, w, e := body_args(L)
 		luau.pushboolean(L, b32(ecs.get(w, e, Physics_Body).asleep))
@@ -255,4 +264,32 @@ layers_binding :: proc(L: ^luau.State) -> c.int {
 	}
 	luau.pushnumber(L, f64(mask))
 	return 1
+}
+
+// Physics.set_motor(entity, mode, target, max) sets the motor of the entity's hinge or slider, which the next tick
+// sends without making the joint again.
+@(private = "file")
+set_motor_binding :: proc(L: ^luau.State) -> c.int {
+	w, e := script.runtime_of(L).world, script.check_entity(L, 1)
+	luau.L_checkstring(L, 2)
+	mode: Motor_Mode
+	switch luau.toodinstring(L, 2) {
+	case "off":
+		mode = .Off
+	case "velocity":
+		mode = .Velocity
+	case "position":
+		mode = .Position
+	case:
+		script.raise(L, "a motor's mode is off, velocity or position")
+	}
+	motor := Motor{mode, f32(luau.L_optnumber(L, 3, 0)), f32(luau.L_optnumber(L, 4, 0))}
+	if hinge := ecs.get(w, e, Hinge_Joint); hinge != nil {
+		hinge.motor = motor
+	} else if slider := ecs.get(w, e, Slider_Joint); slider != nil {
+		slider.motor = motor
+	} else {
+		script.raise(L, "only a hinge or a slider has a motor")
+	}
+	return 0
 }

@@ -102,6 +102,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Rigid_Body, RIGID_BODY_ID, DEFAULT_RIGID_BODY)
 	ecs.register_component(r, Collider, COLLIDER_ID, DEFAULT_COLLIDER)
 	ecs.register_component(r, Physics_Body, PHYSICS_BODY_ID)
+	register_joint_components(r)
 }
 
 // Pool hands out the engine's handles: an index and a generation, which goes up each time the index is freed, so a
@@ -155,6 +156,10 @@ State :: struct {
 	anchor:   ecs.World_Position,
 	bodies:   Pool,
 	records:  [dynamic]Body_Record,
+	joints:   Pool,
+	joint_records: [dynamic]Joint_Record,
+	// The joints that broke in the last tick.
+	breaks:   [dynamic]Joint_Break,
 	shapes:   Pool,
 	gravity:  [3]f32,
 	layers:   Layers,
@@ -172,6 +177,7 @@ State :: struct {
 		new_bodies:    ecs.Query,
 		bodies:        ecs.Query,
 		parts:         ecs.Query,
+		joints:        [Joint_Kind]ecs.Query,
 	},
 }
 
@@ -189,6 +195,9 @@ init :: proc(s: ^State, platform: ^core.Platform_API, desc: core_physics.World_D
 		bodies         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
 		shapes         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
 		records        = make([dynamic]Body_Record, allocator),
+		joints         = {generations = make([dynamic]u32, allocator), free = make([dynamic]u32, allocator)},
+		joint_records  = make([dynamic]Joint_Record, allocator),
+		breaks         = make([dynamic]Joint_Break, allocator),
 		tick_contacts  = make([dynamic]Contact, allocator),
 		frame_contacts = make([dynamic]Contact, allocator),
 		pending        = core_physics.command_list(allocator),
@@ -207,6 +216,9 @@ register :: proc(s: ^State, w: ^ecs.World) {
 	)
 	s.queries.bodies = ecs.query(w, {ecs.read(w, ecs.Transform), ecs.write(w, Physics_Body)})
 	s.queries.parts = ecs.query(w, {ecs.read(w, Collider), ecs.read(w, ecs.Parent), ecs.without(w, Rigid_Body)})
+	for id, kind in JOINT_IDS {
+		s.queries.joints[kind] = ecs.query(w, {{id = id, access = .Read}, ecs.optional(ecs.write(w, Physics_Joint))})
+	}
 	s.job_effects = ecs.register_job_buffer(w, {name = "physics effects", user = s, make = make_job_effects, flush = flush_job_effects})
 }
 
@@ -222,7 +234,10 @@ destroy :: proc(s: ^State) {
 	}
 	pool_destroy(&s.bodies)
 	pool_destroy(&s.shapes)
+	pool_destroy(&s.joints)
 	delete(s.records)
+	delete(s.joint_records)
+	delete(s.breaks)
 	delete(s.tick_contacts)
 	delete(s.frame_contacts)
 	s^ = {}

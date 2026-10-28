@@ -35,11 +35,17 @@ frame_contacts :: proc(s: ^State) -> []Contact {
 // send_events sends the last tick's contacts to the behaviours of the entities in them, as on_collision_enter,
 // on_collision_exit, on_trigger_enter and on_trigger_exit, each with the other entity. A collision's enter also has the
 // point, the normal from this entity towards the other, the other's velocity relative to this one, and the impulse.
-// Call it after tick and before script.fixed_events, which delivers them; it is frame code, where script.send is safe.
+// A joint that broke sends on_joint_break to its entity, with the force and the torque it carried. Call it after tick
+// and before script.fixed_events, which delivers them; it is frame code, where script.send is safe.
 send_events :: proc(s: ^State, w: ^ecs.World, r: ^script.Runtime) {
 	for c in s.tick_contacts {
 		send_one(w, r, c, c.a, c.b, 1)
 		send_one(w, r, c, c.b, c.a, -1)
+	}
+	for b in s.breaks {
+		if ecs.is_alive(w, b.entity) && ecs.has(w, b.entity, script.Behaviours) {
+			script.send(r, b.entity, "joint_break", f64(b.force), f64(b.torque))
+		}
 	}
 }
 
