@@ -20,6 +20,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook meshes --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
+       cook effects --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
        cook --emit-link-schema <file>`
 
@@ -55,6 +56,10 @@ main :: proc() {
 	case "textures":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Texture)
+		}
+	case "effects":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Effect)
 		}
 	case "shaders":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -148,6 +153,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "material functions"
 	case .Prefab:
 		return "prefabs"
+	case .Effect:
+		return "effects"
 	}
 	return "assets"
 }

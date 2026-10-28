@@ -29,6 +29,7 @@ static class EditorCommands
     public const string NewMaterialFunction = "content.newMaterialFunction";
     public const string NewMesh = "content.newMesh";
     public const string NewPrefab = "content.newPrefab";
+    public const string NewEffect = "content.newEffect";
     public const string MakePrefab = "prefab.make";
     public const string UnpackPrefab = "prefab.unpack";
     public const string UnpackPrefabCompletely = "prefab.unpackCompletely";
@@ -710,6 +711,7 @@ static class EditorCommands
         NewAssetCommand(NewMaterialFunction, Link.Cook.AssetTemplate.MaterialFunction, "New Material Function", "material-function", "Add a material function, a graph that materials call as a node, to the content browser's folder.");
         NewAssetCommand(NewMesh, Link.Cook.AssetTemplate.Mesh, "New Mesh", "mesh", "Add a mesh file, a 1 m box to build level geometry from, to the content browser's folder.");
         NewAssetCommand(NewPrefab, Link.Cook.AssetTemplate.Prefab, "New Prefab", "prefab", "Add a prefab, an entity that scenes place as instances, to the content browser's folder.");
+        NewAssetCommand(NewEffect, Link.Cook.AssetTemplate.Effect, "New Effect", "effect", "Add an effect, emitters of particles that a Particle_System places, to the content browser's folder.");
         NewAssetCommand(NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
         {

@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Textures](kinds/textures.md) | Textures and block compression. |
 | [Meshes](kinds/meshes.md) | glTF models, mesh sub-assets and mesh files. |
 | [Materials](kinds/materials.md) | Shading models, materials, instances, functions and graphs. |
+| [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 

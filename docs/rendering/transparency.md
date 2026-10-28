@@ -57,7 +57,7 @@ A frame draws at most `MAX_SPRITES` (65536) sprites, from the CPU and from the G
 
 **The records.** The frame's sprites are records in one buffer of `MAX_SPRITES`, in `Renderer.sprites`, with a counter beside it:
 - `begin_sprites` writes `Frame_Desc.sprites` into the upload ring each frame, relative to the camera, with their textures' bindless indices. A copy, the first sprite pass, puts them at the start of the buffer and their count in the counter.
-- A GPU pass, such as a particle simulation, appends its own after them. It calls `reserve_sprites(f, count)` before the world pass, from the `before_world` or `after_prepass` hooks or the renderer's own passes. That gives it a `Sprite_Target`, the records and the counter, which it declares as written. Its shader calls `append_sprite` (`sprites.hlsli`), which adds one to the counter and writes the record there.
+- A GPU pass, such as the particles' update (see [Particles](particles.md#simulation)), appends its own after them. It calls `reserve_sprites(f, count)` before the world pass, from the `before_world` or `after_prepass` hooks or the renderer's own passes. That gives it a `Sprite_Target`, the records and the counter, which it declares as written. Its shader calls `append_sprite` (`sprites.hlsli`), which adds one to the counter and writes the record there.
 - The frame's capacity is the CPU's sprites plus every reservation, up to `MAX_SPRITES`. It sizes the bins, the screen buffer and the light textures. Sprites that a pass appends past it are left out.
 - **Arguments** (`sprite_arguments.hlsl`): one thread turns the count, up to the capacity, into the arguments of the bin and light passes' indirect dispatches. The raster passes walk only the words of the tiles' bits that the count reaches.
 
@@ -77,4 +77,4 @@ The composite then draws the sprites with the moment-based surfaces. The moments
 - **Sprites draw only in the camera's view**, not the view model's. They cast no shadows and have no velocities or IDs, as other transparent surfaces have none. A light with a channel of the shadow mask has no shadow maps, so it does not shadow them.
 - **Only squares that face the camera** are sprites. Shapes that turn away from it draw as meshes, with billboard materials (see [Billboards](gpu-scene.md#billboards)) and moment-based transparency.
 
-The sample's `Smoke` component (`samples/mygame/game.odin`) gives a column of sprites that rise, spread and fade, with embers that glow at the bottom. The glass scene, which F7 cycles to, has one beside the moment-based glass, and its smoke drifts through the glass.
+The glass scene, which F7 cycles to, has a `Particle_System` beside the moment-based glass, whose smoke drifts through the glass (see [Particles](particles.md#particles)).

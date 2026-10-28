@@ -112,19 +112,10 @@ Triangle_Instance :: struct {
 SPIN_ID :: ecs.Component_Id(1001)
 TRIANGLE_ID :: ecs.Component_Id(1002)
 LENS_ID :: ecs.Component_Id(1003)
-SMOKE_ID :: ecs.Component_Id(1004)
 
 // Spin turns an entity about the view axis, in radians per second.
 Spin :: struct {
 	speed: f32,
-}
-
-// Smoke rises from an entity as compute sprites (see docs/rendering/transparency.md#sprites): puffs of it, each of
-// which rises height meters in lifetime seconds, spreading, turning and fading as it goes.
-Smoke :: struct {
-	puffs:    u32,
-	lifetime: f32,
-	height:   f32,
 }
 
 // Triangle marks one of the large triangles, with its HDR brightness.
@@ -223,6 +214,8 @@ Game_State :: struct {
 	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene and the billboards scene.
 	scene_index:        u8,
 	elapsed:            time.Duration,
+	// The time that the world stepped this frame, in seconds, which the particles step by.
+	frame_step:         f32,
 	next_report:        time.Duration,
 	pipelines:          Pipelines,
 	vertices:           gpu.Buffer,
@@ -389,7 +382,6 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
-	ecs.register_component(r, Smoke, SMOKE_ID)
 }
 
 // register_post_effects adds the sample's lens to the post-processing, before tone mapping, where a volume with a Lens
@@ -510,8 +502,10 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
 	script.set_quiet(&s.scripts, !run)
+	s.frame_step = 0
 	if run {
 		s.elapsed += step
+		s.frame_step = f32(time.duration_seconds(step))
 		input := s.platform.input()
 		// Each fixed tick runs the Fixed systems, the scripts' fixed step, the physics tick and the tick's events (see
 		// docs/physics/design.md#scripts-in-fixed-ticks).
@@ -667,8 +661,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		quality         = viewport_quality ? &quality : nil,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),
-		// The scene's smoke (see Smoke).
-		sprites         = smoke_sprites(s, hidden),
+		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
+		delta           = s.frame_step,
 		hooks           = {
 			data         = frame,
 			before_world = before_world,
@@ -682,43 +676,6 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	if render.draw_frame(&s.renderer, &s.world, desc) && frame.building_blas {
 		s.blas_built = true
 	}
-}
-
-// smoke_sprites is this frame's puffs of every Smoke, in frame memory, leaving out the entities that the editor hides.
-// Each puff's place is a function of the time, so a Smoke keeps no state: puffs start at times spread over the
-// lifetime and leave in directions spread by the golden angle, drift toward -z as they rise, and glow at the bottom.
-smoke_sprites :: proc(s: ^Game_State, hidden: []u32) -> []render.Sprite {
-	smokes := make([dynamic]ecs.Entity, s.platform.frame_allocator)
-	ecs.collect(&s.world, {SMOKE_ID}, &smokes)
-	sprites := make([dynamic]render.Sprite, s.platform.frame_allocator)
-	t := time.duration_seconds(s.elapsed)
-	for e in smokes {
-		if render.is_hidden(hidden, e) {
-			continue
-		}
-		smoke := ecs.get(&s.world, e, Smoke)
-		pose, ok := ecs.presented(&s.world, e)
-		if !ok || smoke.lifetime <= 0 {
-			continue
-		}
-		for i in 0 ..< int(smoke.puffs) {
-			age := f32(math.mod(t / f64(smoke.lifetime) + f64(i) * 0.618034, 1))
-			angle := f32(i) * 2.399963
-			spread := 0.05 + age * 0.5
-			offset := [3]f32{math.cos(angle) * spread, age * smoke.height, math.sin(angle) * spread - age * 1.2}
-			offset.x += math.sin(f32(t) * 0.7 + age * 4) * 0.25 * age
-			fade := min(age * 6, 1) * (1 - age)
-			append(&sprites, render.Sprite {
-				position = ecs.position_offset(pose.position, offset),
-				size     = 0.15 + age * 0.55,
-				rotation = angle + f32(t) * (i % 2 == 0 ? 0.3 : -0.3),
-				color    = {0.3, 0.3, 0.32, 0.6 * fade},
-				emission = [3]f32{4, 1.2, 0.2} * max(1 - age * 5, 0),
-				softness = 0.3,
-			})
-		}
-	}
-	return sprites[:]
 }
 
 // before_world imports the sample's resources.

@@ -1,8 +1,8 @@
 # The transparency sample, which F7 in mygame switches to: tinted glass boxes that pass through each other and through
 # an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
-# around a gold one, an additive hologram behind them, and smoke of compute sprites that rises beside the glass and
-# drifts through it (see docs/rendering/transparency.md#transparency). The editor writes this file; see
-# docs/editor.md#scenes.
+# around a gold one, an additive hologram behind them, and a Particle_System whose smoke rises beside the glass and
+# drifts through it while its sparks bounce on the floor (see docs/rendering/particles.md#particles). The editor writes
+# this file; see docs/editor.md#scenes.
 scene 2
 
 entity 0c5c7fd0a6a3a450
@@ -74,10 +74,10 @@ component 1 Transform
 	position = [2516582399989933670, 0, 21810381]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
-component 1004 Smoke
-	puffs = 256
-	lifetime = 6
-	height = 3
+component 52 Particle_System
+	effect = $0e553e622e01e9430bbb690ce5f6f838
+	paused = false
+	rate_scale = 1
 
 entity 6513270e269e0d37
 name = "Global Volume"

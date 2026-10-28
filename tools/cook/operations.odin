@@ -77,6 +77,8 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 		kind = .Mesh
 	case .Prefab:
 		kind = .Prefab
+	case .Effect:
+		kind = .Effect
 	}
 	name := strings.trim_suffix(strings.trim_space(op.name), extension_of(kind))
 	if !valid_name(name) {
@@ -402,6 +404,8 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 		return "material 1\nshading = lit\n\nnode 1 output\n\tposition = [0, 0]\n"
 	case .Mesh:
 		return MESH_TEMPLATE
+	case .Effect:
+		return EFFECT_TEMPLATE
 	case .Material_Function:
 		return "material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n"
 	}
