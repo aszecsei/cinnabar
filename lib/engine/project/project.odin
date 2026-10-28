@@ -12,6 +12,7 @@ import "core:strings"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 
 // The user file is the project file's name with .user before its extension: project.settings has
@@ -21,6 +22,12 @@ USER_SUFFIX :: ".user"
 // The editor's default mesh material and texel density, as the settings file names them.
 MESH_DEFAULT_MATERIAL_KEY :: "mesh.default_material"
 MESH_TEXEL_DENSITY_KEY :: "mesh.texel_density"
+// The physics layers' names, and the pairs of them that do not collide (see docs/physics/design.md#layers).
+PHYSICS_LAYERS_KEY :: "physics.layers"
+PHYSICS_IGNORE_KEY :: "physics.ignore"
+// The physics backend, which the host reads before the game starts (see docs/physics/backends.md#choosing); the game
+// only knows the key.
+PHYSICS_BACKEND_KEY :: "physics.backend"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -38,6 +45,13 @@ Settings :: struct {
 	// The texel density of the editor's texture tools, in texels per meter, or 0 for the editor's default (see
 	// docs/editor/mesh-editing.md#texture-tools). The editor reads it; the game only knows the key.
 	mesh_texel_density:    f32,
+	// The physics layers, or none for physics.default_layers.
+	physics_layers:        physics.Layers,
+}
+
+// physics_layers gives the layers that settings name, or the default ones.
+physics_layers :: proc(settings: Settings) -> physics.Layers {
+	return settings.physics_layers if settings.physics_layers.count > 0 else physics.default_layers()
 }
 
 // Quality_Key is a render quality key of the settings files, by its name in QUALITY_KEY_NAMES.
@@ -108,6 +122,12 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		problem(problems, line, "%s takes %s, not %q", key, strings.join(reflect.enum_field_names(T), ", ", context.temp_allocator), text)
 		return false
 	}
+	// physics.ignore names layers, which physics.layers may give after it, so its pairs are read at the end.
+	Ignore :: struct {
+		line:  int,
+		value: string,
+	}
+	ignores := make([dynamic]Ignore, context.temp_allocator)
 	rest := text
 	line := 0
 	for raw in strings.split_lines_iterator(&rest) {
@@ -131,6 +151,31 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				settings.mesh_default_material = guid
 			} else {
 				problem(problems, line, "%s takes a material's GUID of 32 hex digits, not %q", key, value)
+			}
+			continue
+		}
+		if key == PHYSICS_LAYERS_KEY {
+			layers: physics.Layers
+			ok := true
+			for part in strings.split(value, ",", context.temp_allocator) {
+				name := strings.trim_space(part)
+				if !physics.add_layer(&layers, name) {
+					problem(problems, line, "%s: %q is empty, longer than %d, given twice, or past %d layers", key, name, physics.MAX_LAYER_NAME, physics.MAX_LAYERS)
+					ok = false
+				}
+			}
+			if ok {
+				settings.physics_layers = layers
+			}
+			continue
+		}
+		if key == PHYSICS_IGNORE_KEY {
+			append(&ignores, Ignore{line, value})
+			continue
+		}
+		if key == PHYSICS_BACKEND_KEY {
+			if value == "" {
+				problem(problems, line, "%s takes a backend's name, such as jolt or none", key)
 			}
 			continue
 		}
@@ -199,6 +244,24 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		}
 		if !found {
 			problem(problems, line, "there is no setting %q", key)
+		}
+	}
+	for ig in ignores {
+		layers := physics_layers(settings^)
+		ok := true
+		for pair in strings.split(ig.value, ",", context.temp_allocator) {
+			a, _, b := strings.partition(pair, ":")
+			ia, found_a := physics.layer_index(layers, strings.trim_space(a))
+			ib, found_b := physics.layer_index(layers, strings.trim_space(b))
+			if !found_a || !found_b {
+				problem(problems, ig.line, "%s takes pairs of layers that physics.layers names, as A:B, not %q", PHYSICS_IGNORE_KEY, strings.trim_space(pair))
+				ok = false
+				continue
+			}
+			physics.ignore(&layers, ia, ib)
+		}
+		if ok {
+			settings.physics_layers = layers
 		}
 	}
 }

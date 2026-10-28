@@ -84,6 +84,8 @@ declare Time: {
 	frame: number,
 	fixed_delta: number,
 	alpha: number,
+	-- True in fixed_update and in what a fixed tick resumes, where delta is the tick's duration.
+	in_fixed: boolean,
 }
 
 declare Input: {
@@ -123,11 +125,22 @@ declare Behaviour: {
 	define: (name: string, fields: { [string]: FieldSpec }?) -> { [any]: any },
 }
 
+-- A physics query's hit (see docs/physics/design.md#scripts): the entity whose body it hit, the point, the surface's
+-- normal there, and the distance along the ray or the sweep.
+type RaycastHit = {
+	entity: Entity,
+	position: WorldPosition,
+	normal: vector,
+	distance: number,
+}
+
 declare function wait(seconds: number?): ()
 declare function wait_realtime(seconds: number): ()
 declare function wait_frames(frames: number?): ()
 declare function wait_until(predicate: () -> boolean): ()
 declare function wait_event(entity: Entity, name: string): ...any
+-- Waits for the end of the next fixed tick, after its physics step, as Unity's WaitForFixedUpdate does.
+declare function wait_fixed(): ()
 
 -- The render quality of the Render bindings, which a game defines with project.define_quality_bindings (see
 -- docs/scripting/api.md#render): the settings files' quality keys, with the enums' values as strings.

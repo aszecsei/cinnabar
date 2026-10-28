@@ -27,7 +27,12 @@ dxc := "vendor/dxc/" + dxc_version + "/dxc.exe"
 # FFX_SDK_VERSION in lib/core/gpu/d3d12/ffx.odin.
 fidelityfx_version := "2.3.0"
 fidelityfx_dir := "vendor/fidelityfx/" + fidelityfx_version
-collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend
+# The physics backend that release builds and tests link (see docs/physics/backends.md#loading): jolt, or null for a
+# game without physics. The development host and game DLL take the plugin loader instead, which loads the project's
+# physics.backend, physics_<name>.dll beside the host.
+physics_backend := "jolt"
+collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/" + physics_backend
+dev_collections := "-collection:cinnabar=lib -collection:gpu_backend=lib/core/gpu/" + gpu_backend + " -collection:physics_backend=lib/core/physics/plugin"
 # Luau's experimental direct field access for engine userdata (see docs/scripting/embedding.md#direct-field-access). Off unless
 # CINNABAR_DIRECT_ACCESS=true.
 direct_access := env("CINNABAR_DIRECT_ACCESS", "false")
@@ -36,6 +41,8 @@ luau_features := "-define:LUAU_DIRECT_ACCESS=" + direct_access
 dev_defines := "-define:LUAU_SHARED=true " + luau_features
 # lib/core/luau/luau.odin and the cooker link their libraries from build/obj, so obj_dir must stay "build/obj".
 luau_dir := obj_dir + "/luau"
+# lib/core/physics/jolt/jolt.odin links its libraries from build/obj/jolt.
+jolt_dir := obj_dir + "/jolt"
 cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
@@ -59,7 +66,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
 
 # =================================
 # Help
@@ -143,7 +150,7 @@ setup: install
     echo "✓ Project ready"
 
 # Update all vendored submodules
-update: update-luau update-compressonator update-meshoptimizer
+update: update-luau update-compressonator update-meshoptimizer update-jolt
 
 # Update Luau to a release tag (default: latest)
 [script]
@@ -155,6 +162,17 @@ update-luau tag="":
     git -C vendor/luau checkout --quiet "$tag"
     git add vendor/luau
     echo "✓ Luau at $tag"
+
+# Update Jolt to a release tag (default: latest)
+[script]
+update-jolt tag="":
+    set -euo pipefail
+    git -C vendor/jolt fetch --tags --quiet
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/jolt tag --list 'v*' --sort=-v:refname | head -n 1)
+    git -C vendor/jolt -c advice.detachedHead=false checkout --quiet "$tag"
+    git add vendor/jolt
+    echo "✓ Jolt at $tag"
 
 # Update meshoptimizer to a release tag (default: latest)
 [script]
@@ -188,9 +206,9 @@ alias b := build
 build: host game-dll script-types scripts scenes shaders textures models meshes materials
 
 # Build the development host
-host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau
+host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt
     mkdir -p "{{dev_dir}}"
-    odin build src/host {{collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
+    odin build src/host {{dev_collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
 
 # Build Luau: luau.dll for development, and static libraries for release builds, tests and the cooker
 [script]
@@ -206,6 +224,20 @@ luau:
     # A running host keeps luau.dll locked. Luau is host code, so a changed luau.dll needs a host restart anyway.
     mkdir -p "{{dev_dir}}"
     cmp -s "{{luau_dir}}/shared/out/luau.dll" "{{dev_dir}}/luau.dll" || cp "{{luau_dir}}/shared/out/luau.dll" "{{dev_dir}}/"
+
+# Build Jolt and its backend: physics_jolt.dll for development, and static libraries for release builds and tests
+[script]
+jolt:
+    set -euo pipefail
+    for kind in static shared; do
+        dir="{{jolt_dir}}/$kind"
+        shared=$([ "$kind" = shared ] && echo ON || echo OFF)
+        [ -f "$dir/CMakeCache.txt" ] || cmake -S lib/core/physics/jolt -B "$dir" -G "{{cmake_generator}}" -A x64 -DCINNABAR_JOLT_SHARED=$shared > /dev/null
+        cmake --build "$dir" --config Release --target physics_jolt -- -m -nologo -v:quiet
+    done
+    # A running host keeps physics_jolt.dll locked. The backend is host code, so a change needs a host restart anyway.
+    mkdir -p "{{dev_dir}}"
+    cmp -s "{{jolt_dir}}/shared/out/physics_jolt.dll" "{{dev_dir}}/physics_jolt.dll" || cp "{{jolt_dir}}/shared/out/physics_jolt.dll" "{{dev_dir}}/"
 
 # Build Compressonator's block compression core for the cooker
 compressonator: install-compressonator
@@ -267,9 +299,9 @@ shaders config="dev": install-dxc cook
     "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: luau
+game-dll: luau jolt
     mkdir -p "{{dev_dir}}" "{{obj_dir}}/pdb"
-    odin build "samples/{{game}}" {{collections}} {{dev_defines}} -build-mode:dll \
+    odin build "samples/{{game}}" {{dev_collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{dev_dir}}/{{game}}.dll" \
         -pdb-name:"{{obj_dir}}/pdb/{{game}}_$(date +%s%N).pdb" \
         -debug
@@ -345,7 +377,7 @@ edit: build editor
 
 # Build the statically linked release executable into build/release, with its content and project settings beside it,
 # so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release")
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
@@ -384,8 +416,8 @@ fmt:
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau compressonator meshoptimizer link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
+test: luau jolt compressonator meshoptimizer link-schema install-dxc
+    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

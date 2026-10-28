@@ -30,7 +30,7 @@ Details: [Core](../core/README.md).
 One frame runs these phases in order:
 
 1. Poll platform events and input.
-2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs), applies their structural changes and propagates transforms.
+2. Run the fixed ticks that are due (zero or more). Each tick runs the `Fixed` systems (parallel jobs) and applies their structural changes, runs the scripts' fixed step (serial: `fixed_update`, then the tick's events and `wait_fixed` coroutines), and propagates transforms.
 3. Run the `Update` systems (parallel jobs).
 4. Apply queued structural changes to the world.
 5. Run the script phase (serial): behaviour lifecycle callbacks, events, opt-in `update` calls and due coroutines.
@@ -113,6 +113,8 @@ A project's settings are a text file beside the game, such as `samples/mygame/pr
 |---|---|---|---|
 | `output` | `Auto`, `Sdr`, `Hdr10`, `Scrgb` | `Auto` | The window's output mode (see [Rendering](../rendering/layers-and-output.md#hdr-output)): `Auto` is HDR10 on a display in HDR, and SDR otherwise. `CINNABAR_OUTPUT` replaces it. The sample's F8 cycles it until the files change. |
 | `quality.*` | See [Rendering: Saved quality](../rendering/quality.md#saved-quality) | The device's `default_quality` | The render quality: a preset, and keys that replace its features. The game saves the player's choice to the user's file (`project.save_quality`, or `Render.save_quality` from a script), keeping the file's other lines. |
+| `physics.layers`, `physics.ignore` | Layer names, and `A:B` pairs, each separated by commas | One layer, `Default`, and every pair colliding | The physics layers that a `Collider`'s `layer` indexes, and the pairs that do not collide (see [Physics: Layers](../physics/design.md#layers)). |
+| `physics.backend` | `jolt`, `none`, or another backend's name | `jolt` | The physics backend, which the host loads before the game starts; `--physics` on its command line replaces it (see [Physics: Backends](../physics/backends.md#choosing)). |
 
 ## Content pipeline
 

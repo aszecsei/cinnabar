@@ -49,6 +49,11 @@ Runtime :: struct {
 	input_table:      c.int,
 	input:            core.Input,
 	frame:            u64,
+	// The input edges of frames that ran no fixed tick, which the next tick gets, and whether a fixed step ran since
+	// the last script phase (see fixed.odin).
+	pending_pressed:  core.Keys,
+	pending_released: core.Keys,
+	fixed_ran:        bool,
 	// The script phase's structural changes, in frame memory. See end_phase.
 	commands:         ecs.Commands,
 	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.

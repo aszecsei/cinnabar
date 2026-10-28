@@ -55,12 +55,13 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `World` | `spawn`, `query` |
 | `Quaternion` | `identity`, `new(x, y, z, w)`, `euler(degrees)`, `angle_axis(degrees, axis)`, `look_rotation(forward, up?)`, `slerp`, `angle`, `rotate_towards(from, to, max_degrees)`. Methods: `inverse`, `normalized`, `euler`, `approx`, `angle_to`, `rotate_towards`, `slerp`. Fields `x`, `y`, `z`, `w`. |
 | `WorldPosition` | `origin`, `from_meters(x, y, z)` (for authoring), `lerp`. Methods: `lerp`, `to_meters` (for display). |
-| `Time` | `delta` (the frame), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction) |
+| `Time` | `delta` (the frame, or the tick in the fixed step), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction), `in_fixed` (true in the fixed step) |
 | `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
 | `Debug` | `log`, `warn`, `error`. *`draw_line` waits for a debug renderer.* |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
+| `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
 - `==` on quaternions is approximate, as in Unity's `==`. `==` on positions is exact.
@@ -128,17 +129,22 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Debug.Log`, `Debug.DrawLine` | `Debug.log`, `Debug.draw_line` |
 | `Random` | `Random`, seeded per world |
 | `StartCoroutine`, `yield return new WaitForSeconds(t)` | `self:start_coroutine(fn)`, `wait(t)` |
+| `yield return new WaitForFixedUpdate()` | `wait_fixed()` |
 | `SendMessage` | `entity:send(name, ...)` |
 | `behaviour.enabled`, `OnEnable`, `OnDisable` | `self.enabled`, `on_enable`, `on_disable` |
 | `SetActive`, `activeSelf`, `activeInHierarchy` | `entity:set_active(b)`, `entity.active_self`, `entity.active_in_hierarchy` |
-| `FixedUpdate` | A native `Fixed` system |
+| `FixedUpdate` | `fixed_update(dt)`, or a native `Fixed` system for heavy work ([Fixed step](behaviours.md#fixed-step)) |
+| `Rigidbody`, `Collider` | `RigidBody`, `Collider` |
+| `rb.AddForce(f)`, `rb.velocity` | `Physics.add_force(entity, f)`, `Physics.velocity(entity)` |
+| `Physics.Raycast`, `SphereCast`, `OverlapSphere` | `Physics.raycast`, `Physics.sphere_cast`, `Physics.overlap_sphere` |
+| `OnCollisionEnter`, `OnCollisionExit`, `OnTriggerEnter`, `OnTriggerExit` | `on_collision_enter(other, point, normal, velocity, impulse)`, `on_collision_exit(other)`, `on_trigger_enter(other)`, `on_trigger_exit(other)`; no `stay` (see [Physics: Events](../physics/design.md#events)) |
+| `HingeJoint`, `OnJointBreak` | `Hinge_Joint` and the other joints, `on_joint_break(force, torque)` |
 | `GameObject.Find` | Not provided. Use fields or a `Name` index. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
 
 ## Future work
 
 - **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
-- **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). Waits for physics.
 - **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
 - **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.
 - **A `Name` index.** `GameObject.Find` stays absent; a maintained index on `Name` would give `World.find(name)` without a scan ([World](../world/README.md#future-work)).

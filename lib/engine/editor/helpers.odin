@@ -3,8 +3,11 @@ package editor
 import "core:math"
 import "core:math/linalg"
 
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 import "cinnabar:engine/volume"
 
@@ -18,6 +21,11 @@ UNSELECTED :: [4]f32{0.6, 0.6, 0.6, 0.5}
 VOLUME_COLOR :: [4]f32{0.3, 0.8, 1, 1}
 @(private = "file")
 CAMERA_COLOR :: [4]f32{1, 1, 1, 1}
+// A collider's shape, and a sensor's.
+@(private = "file")
+COLLIDER_COLOR :: [4]f32{0.4, 1, 0.4, 1}
+@(private = "file")
+SENSOR_COLOR :: [4]f32{1, 0.8, 0.3, 1}
 // A directional light's arrow, an area light's normal, and a camera's frustum, in meters.
 @(private = "file")
 ARROW_LENGTH :: 2
@@ -44,7 +52,7 @@ draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
 			continue
 		}
 		if pose, ok := ecs.presented(w, entity); ok {
-			draw_entity_helpers(w, d, entity, pose, selected)
+			draw_entity_helpers(e, w, d, entity, pose, selected)
 		}
 	}
 }
@@ -71,7 +79,7 @@ light_color :: proc(color: [3]f32, selected: bool) -> [4]f32 {
 }
 
 @(private = "file")
-draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, pose: ecs.Transform, selected: bool) {
+draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, pose: ecs.Transform, selected: bool) {
 	right := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
 	up := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 1, 0})
 	forward := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{0, 0, 1})
@@ -130,6 +138,12 @@ draw_entity_helpers :: proc(w: ^ecs.World, d: ^debug.Draw, entity: ecs.Entity, p
 			debug.circle(d, a, up, forward, l.radius, color)
 			debug.circle(d, b, up, forward, l.radius, color)
 		}
+	}
+	if c := ecs.get(w, entity, physics.Collider); c != nil {
+		draw_collider(e, d, c^, pose, selected)
+	}
+	if j, _, ok := physics.joint_of(w, entity); ok {
+		draw_joint(w, d, j^, pose, selected)
 	}
 	if v := ecs.get(w, entity, volume.Volume); v != nil {
 		color := selected ? VOLUME_COLOR : UNSELECTED
@@ -242,4 +256,77 @@ icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.al
 @(private)
 icons_shown :: proc(e: ^Editor) -> bool {
 	return editing(e) && e.viewport.settings.show_icons
+}
+
+// draw_collider draws a collider's shape as the simulation has it, at its offset and rotation in the entity (see
+// docs/physics/design.md#the-editor).
+@(private = "file")
+draw_collider :: proc(e: ^Editor, d: ^debug.Draw, c: physics.Collider, pose: ecs.Transform, selected: bool) {
+	color := UNSELECTED
+	if selected {
+		color = c.sensor ? SENSOR_COLOR : COLLIDER_COLOR
+	}
+	rotation := pose.rotation * c.rotation
+	at := ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, c.offset * pose.scale))
+	right := linalg.quaternion128_mul_vector3(rotation, [3]f32{1, 0, 0})
+	up := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 1, 0})
+	forward := linalg.quaternion128_mul_vector3(rotation, [3]f32{0, 0, 1})
+	kind, size := physics.collider_size(c, pose.scale)
+	switch kind {
+	case .Box:
+		debug.box(d, at, size, rotation, color)
+	case .Sphere:
+		debug.sphere(d, at, size.x, color)
+	case .Capsule, .Cylinder:
+		radius, half := size.x, size.y
+		top, bottom := ecs.position_offset(at, up * half), ecs.position_offset(at, -up * half)
+		debug.circle(d, top, right, forward, radius, color)
+		debug.circle(d, bottom, right, forward, radius, color)
+		for side in ([4][3]f32{right, -right, forward, -forward}) {
+			debug.line(d, ecs.position_offset(top, side * radius), ecs.position_offset(bottom, side * radius), color)
+		}
+		if kind == .Capsule {
+			debug.sphere(d, top, radius, color)
+			debug.sphere(d, bottom, radius, color)
+		}
+	case .Mesh, .Convex_Hull:
+		// The mesh's bounds, if it is loaded: its triangles would be too many lines.
+		if e.assets == nil {
+			return
+		}
+		h, loaded := asset.find(e.assets, c.mesh)
+		if !loaded {
+			return
+		}
+		data, _ := asset.data(e.assets, h)
+		if blob, ok := format.mesh_view(data); ok {
+			center := ecs.position_offset(at, linalg.quaternion128_mul_vector3(rotation, blob.bounds.center * size))
+			debug.box(d, center, (blob.bounds.max - blob.bounds.min) * 0.5 * size, rotation, color)
+		}
+	}
+}
+
+// The axes of a joint's frame, in meters.
+@(private = "file")
+JOINT_AXES :: 0.25
+
+// draw_joint draws a joint's frame as axes, its x the hinge's or the slider's axis, and a line to its other body's
+// entity (see docs/physics/design.md#the-editor).
+@(private = "file")
+draw_joint :: proc(w: ^ecs.World, d: ^debug.Draw, j: physics.Joint, pose: ecs.Transform, selected: bool) {
+	frame := ecs.Transform {
+		position = ecs.position_offset(pose.position, linalg.quaternion128_mul_vector3(pose.rotation, j.offset * pose.scale)),
+		rotation = pose.rotation * j.rotation,
+		scale    = 1,
+	}
+	if !selected {
+		debug.sphere(d, frame.position, 0.03, UNSELECTED)
+		return
+	}
+	debug.axes(d, frame, JOINT_AXES)
+	if j.body_b != 0 && ecs.is_alive(w, j.body_b) {
+		if other, ok := ecs.presented(w, j.body_b); ok {
+			debug.line(d, frame.position, other.position, COLLIDER_COLOR)
+		}
+	}
 }

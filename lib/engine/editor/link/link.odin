@@ -736,6 +736,7 @@ Profile_Callback :: enum u16 {
 	On_Reload,
 	Event,
 	Coroutine,
+	Fixed_Update,
 }
 
 // Profile_Cost is a cost per frame over a stats interval: per profiled frame for systems and scripts, per frame with

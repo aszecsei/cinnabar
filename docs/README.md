@@ -14,8 +14,9 @@ Read the layers in this order the first time. Each one assumes the ones before i
 | 4 | [GPU](gpu/README.md) | `lib/core/gpu` | The backend-agnostic GPU interface: the hardware floor, bindless binding, command buffers, the render graph, queues, streaming, mesh shaders, ray tracing and presentation. |
 | 5 | [Rendering](rendering/README.md) | `lib/engine/render` | The built-in renderer: the frame, the GPU scene, layers, lighting, transparency, materials, ambient occlusion, global illumination, fog and post-processing. |
 | 6 | [Scripting](scripting/README.md) | `lib/core/script`, `lib/engine/script` | Luau embedding across the reload boundary, the API scripts see, behaviours, and the tooling. |
-| 7 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
-| 8 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
+| 7 | [Physics](physics/README.md) | `lib/core/physics`, `lib/engine/physics` | Physics on Jolt: the boundary a backend implements, plugins, the components, the physics tick, joints, queries and events. |
+| 8 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
+| 9 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
 
 [History](history.md) keeps the implementation phases of each layer, in the order they were built.
 
@@ -57,6 +58,7 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 | Expose a native type or function to scripts | [Scripting: API](scripting/api.md#the-entity-and-component-view) |
 | Add an asset kind | [Content: Identity and cooking](content/identity-and-cooking.md) and [Blobs and loading](content/blobs-and-loading.md) |
 | Add an editor panel or command | [Editor: Shell and panels](editor/shell-and-panels.md) |
+| Write a physics backend | [Physics: Backends](physics/backends.md) |
 | Add a message to the editor or cook link | [Editor: Editor link](editor/link.md) and [Content: Cook daemon](content/daemon-and-operations.md#cook-link) |
 | Port to another platform or GPU API | [Core: Platform](core/platform.md#platform-and-backend-abstraction) and [GPU: Interface](gpu/interface.md#hardware-floor) |
 | Understand a crash after a code reload | [Hot reload: Rules](overview/hot-reload.md#rules) |

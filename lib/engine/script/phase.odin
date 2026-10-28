@@ -22,21 +22,7 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	profile.scope_text(p, "Script phase", .Frame)
 	begin_phase(r, dt, input)
 	drain_log(r)
-	profile.begin(p, profile.name(p, "Awake", .Frame))
-	for &i, index in r.instances[:r.instance_used] {
-		if .Live in i.flags && .Needs_Awake in i.flags {
-			wake(r, {u32(index), i.generation})
-		}
-	}
-	profile.end(p)
-	profile.begin(p, profile.name(p, "Start", .Frame))
-	for &i, index in r.instances[:r.instance_used] {
-		if effective(&i) && .Started not_in i.flags {
-			i.flags += {.Started}
-			call_method(r, {u32(index), i.generation}, "start")
-		}
-	}
-	profile.end(p)
+	wake_and_start(r)
 	deliver_events(r)
 	profile.begin(p, profile.name(p, "Update", .Frame))
 	for &i, index in r.instances[:r.instance_used] {
@@ -52,6 +38,28 @@ run_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	// Events that update and the coroutines sent are delivered in the same phase.
 	deliver_events(r)
 	end_phase(r)
+}
+
+// wake_and_start runs awake and on_enable for the instances that native code attached, and start for the instances
+// that are enabled and active and have not started. The script phase and the fixed step both begin with it.
+@(private)
+wake_and_start :: proc(r: ^Runtime) {
+	p := &r.platform.profile
+	profile.begin(p, profile.name(p, "Awake", .Frame))
+	for &i, index in r.instances[:r.instance_used] {
+		if .Live in i.flags && .Needs_Awake in i.flags {
+			wake(r, {u32(index), i.generation})
+		}
+	}
+	profile.end(p)
+	profile.begin(p, profile.name(p, "Start", .Frame))
+	for &i, index in r.instances[:r.instance_used] {
+		if effective(&i) && .Started not_in i.flags {
+			i.flags += {.Started}
+			call_method(r, {u32(index), i.generation}, "start")
+		}
+	}
+	profile.end(p)
 }
 
 // set_quiet stops or starts the callbacks that the world's changes run, as the editor's edit mode does (see
@@ -103,6 +111,7 @@ Event_Arg :: union {
 	string,
 	[3]f32,
 	ecs.Entity,
+	ecs.World_Position,
 }
 
 // send queues an event for an entity's behaviours, like a script's entity:send. Call it from the frame code, not
@@ -124,6 +133,8 @@ send :: proc(r: ^Runtime, e: ecs.Entity, name: string, args: ..Event_Arg) {
 			push_vector(L, v)
 		case ecs.Entity:
 			push_entity(L, v)
+		case ecs.World_Position:
+			push_position(L, v)
 		}
 	}
 	queue_event(r, L, base + 1, luau.gettop(L) - base)

@@ -7,6 +7,7 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 
 @(test)
@@ -172,4 +173,28 @@ a_saved_quality_is_the_user_files :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(saved_files["project.user.settings"].text, "output = Sdr\n"))
 	testing.expect_value(t, w.settings.output, gpu.Output_Request.Sdr)
 	testing.expect_value(t, saved_files["project.settings"].text, "quality.preset = Ultra\n")
+}
+
+// physics.layers names the layers in order, and physics.ignore the pairs that do not collide, wherever it is in the
+// file. A name it does not know, and a bad layers line, are problems that keep what was there.
+@(test)
+physics_layers_and_ignored_pairs :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("physics.ignore = Debris:Player, Debris:Debris\nphysics.layers = Default, Player, Debris\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	l := physics_layers(s)
+	testing.expect_value(t, l.count, 3)
+	testing.expect_value(t, physics.layer_name(&l, 2), "Debris")
+	testing.expect_value(t, l.collides[2] & (1 << 1), 0)
+	testing.expect_value(t, l.collides[1] & (1 << 2), 0)
+	testing.expect_value(t, l.collides[2] & (1 << 2), 0)
+	testing.expect(t, l.collides[0] == max(u32) && l.collides[1] & 1 != 0)
+
+	parse("physics.ignore = Debris:Ghost\nphysics.layers = Default, Default\n", &s, &problems)
+	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(t, physics_layers(s).count, 3)
+
+	none: Settings
+	testing.expect_value(t, physics_layers(none).count, 1)
 }

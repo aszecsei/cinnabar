@@ -27,6 +27,12 @@ MESH_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Simplify the meshlets into a hierarchy of levels of detail, which the mesh shader path draws by distance. Without it, the meshlets are the mesh's own triangles only.",
 	},
+	{
+		key = "collision",
+		values = {"true", "false"},
+		default = "true",
+		description = "Write the welded triangles that a mesh collider is built from. Turn it off for a mesh that nothing collides with, to save its size.",
+	},
 }
 
 // cook_mesh_files cooks the mesh files among the assets whose keys changed. It parses every one, also one that is up
@@ -122,6 +128,7 @@ baked_mesh :: proc(a: Asset_Source, bake: format.Mesh_Bake) -> Cook_Mesh {
 		names = names,
 		generate_tangents = mesh_file_setting(a, "tangents") == "mikk",
 		lod = mesh_file_setting(a, "cluster_lod") == "true",
+		collision = mesh_file_setting(a, "collision") == "true",
 		name = filepath.stem(a.path),
 		source_path = a.name,
 	}

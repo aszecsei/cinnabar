@@ -13,6 +13,9 @@ import "core:time"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
+import physics "cinnabar:core/physics"
+import physics_host "cinnabar:core/physics/host"
+import physics_null "cinnabar:core/physics/null"
 import "cinnabar:core/profile"
 import script_host "cinnabar:core/script"
 
@@ -25,6 +28,9 @@ OUTPUT_VARIABLE :: "CINNABAR_OUTPUT"
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
+// And the physics backend's loader the same way: a backend that the build links, or the plugin loader, which loads the
+// project's choice (see docs/physics/backends.md#loading).
+import physics_backend "physics_backend:."
 
 PERMANENT_RESERVE :: 4 * mem.Gigabyte
 FRAME_RESERVE :: 256 * mem.Megabyte
@@ -50,6 +56,8 @@ Platform :: struct {
 	frame_peak:  uint,
 	// Input from the editor, for the next frame.
 	input_queue: [dynamic]Input_Event,
+	// What the physics backend calls. The backend keeps its address.
+	physics_host: physics.Host,
 	api:         Platform_API,
 }
 
@@ -58,8 +66,18 @@ platform: Platform
 
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
 // hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use. content_dir and
-// project_path are where the game's files are; empty, they are beside the executable (see game_paths).
-init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target := "", adapter: u64 = 0, content_dir := "", project_path := "") -> bool {
+// project_path are where the game's files are; empty, they are beside the executable (see game_paths). physics is the
+// physics backend's name; empty, it is the project's physics.backend, or jolt.
+init :: proc(
+	title: string,
+	width: i32 = 1280,
+	height: i32 = 720,
+	shared_target := "",
+	adapter: u64 = 0,
+	content_dir := "",
+	project_path := "",
+	physics_backend_name := "",
+) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
 		return false
@@ -84,6 +102,12 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		log.error("core: failed to start the job system")
 		return false
 	}
+	platform.physics_host = physics_host.table()
+	backend_name := physics_backend_name if physics_backend_name != "" else physics_host.backend_setting(project, context.temp_allocator)
+	physics_api := load_physics(&platform.physics_host, backend_name)
+	physics_host.bind(physics_api)
+	info := physics_api.info()
+	log.infof("core: physics %s %s", info.name, info.version)
 	if !_window_open(title, width, height, visible = shared_target == "") {
 		log.error("core: failed to open window")
 		return false
@@ -165,8 +189,33 @@ init :: proc(title: string, width: i32 = 1280, height: i32 = 720, shared_target 
 		script_push_binding          = script_host.push_binding,
 		script_atom                  = script_host.atom,
 		script_direct_access         = script_host.direct_access,
+		physics                      = physics_api^,
 	}
 	return true
+}
+
+// load_physics loads the named physics backend and checks that it has this build's API version and layouts, or gives
+// the null backend, with an error, so that the game runs without physics rather than not at all.
+@(private = "file")
+load_physics :: proc(host: ^physics.Host, name: string) -> ^physics.Physics_API {
+	api := physics_backend.load(host, name)
+	if api == nil {
+		log.errorf("core: physics backend %q did not load, so the game runs without physics", name)
+		return physics_null.load(host)
+	}
+	info := api.info()
+	if info.api_version != physics.API_VERSION || info.layout != physics.layout_signature() {
+		log.errorf(
+			"core: physics backend %q has physics API version %d and layout %x, not %d and %x, so the game runs without physics",
+			name,
+			info.api_version,
+			info.layout,
+			physics.API_VERSION,
+			physics.layout_signature(),
+		)
+		return physics_null.load(host)
+	}
+	return api
 }
 
 // game_paths resolves where the game's files are: content_dir and project_path as given, or content and
@@ -192,6 +241,7 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	platform.api.physics.shutdown()
 	backend.shutdown()
 	_window_close()
 	jobs.shutdown()
@@ -257,11 +307,14 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, the virtual memory reservations and the script VMs, which the old game may have left, and frees all
-// permanent allocations.
+// Game scope, the virtual memory reservations, the script VMs and the physics worlds, which the old game may have left,
+// and frees all permanent allocations.
 soft_restart :: proc() {
 	if count := script_host.close_all(); count > 0 {
 		log.debugf("core: closed %d script VMs that the game left open", count)
+	}
+	if count := platform.api.physics.world_destroy_all(); count > 0 {
+		log.debugf("core: destroyed %d physics worlds that the game left", count)
 	}
 	if count := backend.destroy_scope(.Game); count > 0 {
 		log.debugf("core: destroyed %d GPU resources that the game left in the Game scope", count)

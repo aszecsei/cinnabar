@@ -219,7 +219,6 @@ The cook link's `Asset` has `size` for textures and `tool_texture` and `hotspots
 ## Future work
 
 - **A face ID pass.** The ID buffer's 7 spare bits above the entity hold the submesh, not a face ([Viewport](viewport.md#viewport)). A second `R32_Uint` target written only for live meshes in mesh mode, with the face index from the bake's triangle-to-face table, would make picking occlusion-exact and let box selection respect the scene's other geometry. Do this when picking through walls is a complaint.
-- **Collision.** Physics does not exist ([World](../world/README.md#future-work)); level meshes are the first thing it will need as colliders, and the cooked blob's level-0 triangles are the input. Keep the `.mesh` file the truth, and cook the collision shape beside the blob.
 - **Lightmap UVs.** A second UV set packed at cook, for baked lighting if it comes. The bake leaves UV1 off until then.
 - **Vertex colors** painted in the mode, as a face or vertex attribute in the file, for materials that read Vertex Color.
 - **Materials by normal.** An extruded wall's material comes from the face it was pulled from, and a face from nothing takes the project's default. A wall material distinct from a floor's and a ceiling's by the face's normal, when levels want it.

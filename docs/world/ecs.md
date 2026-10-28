@@ -8,7 +8,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 
 - **Entities** are generational handles: a 32-bit index and a 32-bit generation. A handle to a destroyed entity is detected; it is never reused silently. A slot whose generation would wrap is retired.
 - **Component types have stable IDs.** The ID is a hash of the type's name, or an explicit value. It is never a `typeid` (see [Hot reload](../overview/hot-reload.md#rules), rule 3). Cooked scenes, the editor link and scripts all identify component types by this ID.
-- **Native systems** run as jobs on the job system. Engine systems (transforms, physics, animation, render extraction) and performance-critical game logic are native.
+- **Native systems** run as jobs on the job system. Engine systems (transforms, render extraction) and performance-critical game logic are native.
 - **Structural changes are deferred.** Spawning, destroying, and adding or removing components go into command buffers. The buffers are applied at fixed points in the frame. Scripts are the exception: the script phase is serial, so they change the structure at once, except for despawns (see [Scripting](../scripting/api.md#structural-changes)).
 - **Resources are not entities.** World-wide state, such as the active camera or the physics settings, is a plain field in `Game_State`.
 
@@ -44,7 +44,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 
   | Stage | Runs | Use for |
   |---|---|---|
-  | `Fixed` | Once per fixed tick, zero or more times per frame | Physics, movement, gameplay that must be deterministic |
+  | `Fixed` | Once per fixed tick, zero or more times per frame | Movement and gameplay that must be deterministic; physics steps after them ([Physics](../physics/design.md#scripts-in-fixed-ticks)) |
   | `Update` | Once per frame, before the script phase | Input response, UI, camera, effects |
   | `Late` | Once per frame, after the script phase | Work that must see the results of scripts |
 
@@ -57,11 +57,18 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - The game drives the stages from its frame code:
 
   ```odin
-  ecs.run_fixed(&s.world, dt, s)          // phase 2: the ticks that are due
+  ticks := ecs.begin_ticks(&s.world, dt)  // phase 2: the ticks that are due
+  for ecs.next_tick(&ticks) {
+      ecs.run_tick_systems(&ticks, s)     // Previous_Transform, the Fixed systems, apply
+      // the scripts' fixed step (see docs/scripting/behaviours.md#fixed-step)
+      ecs.update_transforms(&s.world)
+  }
   ecs.run_stage(&s.world, .Update, dt, s) // phases 3 and 4
   // phase 5: scripts, then ecs.apply with their buffers (phase 6)
   ecs.run_stage(&s.world, .Late, dt, s)   // phase 7, then transform propagation
   ```
+
+  A game whose ticks run only the `Fixed` systems calls `ecs.run_fixed(&s.world, dt, s)` in place of the loop. While a tick runs, the clock's `tick` is its number, `ecs.tick_time` the world time at its end, and `ecs.first_tick` says whether it is the first of the frame.
 
 ### Command buffers
 
@@ -69,6 +76,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - To spawn, a job calls `reserve`, which takes an entity index with one atomic. Later commands in the same buffer can use the new handle. `apply` creates every reserved entity first.
 - A command for an entity that is no longer alive does nothing.
 - The buffers are applied in system order and then job order, not in the order that jobs finish. This keeps the world deterministic.
+- **Job buffers** give other packages the same rule. A package registers a kind with `register_job_buffer`: a `make` that makes a buffer in frame memory, and a `flush` that takes a stage's buffers. A job gets its own with `job_buffer(ctx, kind)`, made the first time it asks, and after the stage, or after a tick's `Fixed` systems, the world hands the kind's `flush` the buffers of the jobs that asked, in system order and then job order. Kinds are registrations, like systems. Physics records the effects that systems have on bodies this way ([Physics: Scripts](../physics/design.md#scripts)).
 - The slot index that a reservation gets depends on timing. Do not order or hash anything by entity handle value.
 
 ## The script view

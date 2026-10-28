@@ -46,6 +46,8 @@ callback_kind :: proc(method: cstring) -> profile.Callback {
 		return .Start
 	case "update":
 		return .Update
+	case "fixed_update":
+		return .Fixed_Update
 	case "on_enable":
 		return .On_Enable
 	case "on_disable":

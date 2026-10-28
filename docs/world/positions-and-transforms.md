@@ -22,7 +22,7 @@ The alternative designs, and why they were not taken: `f64` positions lose preci
 | Consumer | What it sees |
 |---|---|
 | Rendering | Render extraction gives poses relative to the camera's position. The GPU sees only camera-relative `f32` matrices. See [Render extraction](render-extraction.md#render-extraction). |
-| Physics | Simulates in `f32` relative to a `World_Position` anchor for each island, and writes back with `position_offset`. |
+| Physics | Simulates in `f64` offsets from a `World_Position` anchor for each physics world, with `position_sub_f64` and `position_offset_f64`. See [Physics: Positions and precision](../physics/design.md#positions-and-precision). |
 | Scripts | A `WorldPosition` userdata that supports only `-` (gives a `vector`) and `+ vector`. Entity helpers such as `entity:offset_to(other)` and `entity:move(v)` do not allocate. Scripts never see raw values: a Luau number is an `f64`. |
 | Cooked scenes, editor link | Raw `i64` values. The editor shows meters, and sends a move as a delta or as raw values. |
 

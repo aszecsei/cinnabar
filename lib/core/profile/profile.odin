@@ -41,6 +41,7 @@ Callback :: enum u16 {
 	On_Reload,
 	Event,
 	Coroutine,
+	Fixed_Update,
 }
 
 Zone_Flag :: enum u8 {

@@ -25,7 +25,7 @@ The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that
 | `component.odin` | `Registry` and `register_component`: stable IDs, sizes, layout hashes, defaults |
 | `archetype.odin` | Archetypes and their 16 KiB chunks |
 | `query.odin` | `Query`: terms, the archetype cache, chunk iteration, `collect` |
-| `schedule.odin` | Systems, stages, `run_stage` and `run_fixed` |
+| `schedule.odin` | Systems, stages, `run_stage`, the tick loop (`begin_ticks`, `next_tick`, `run_tick_systems`) and `run_fixed` |
 | `commands.odin` | `Command_Buffer`: deferred structural changes |
 | `activity.odin` | `Disabled` and `Inactive`, `set_active`, `update_activity` |
 | `transform.odin` | `Transform`, `Local_Transform`, `Parent`, `Previous_Transform`, propagation, `presented` |
@@ -37,7 +37,7 @@ The data flow in a frame: systems read and write components through queries, in 
 ## Future work
 
 - **Change tracking.** Several consumers scan the whole world: the editor's entity deltas ten times a second ([Editor](../editor/link.md#world)), the GPU scene's rewrite of every slot each frame ([Rendering](../rendering/gpu-scene.md#gpu-scene)), and `World.query` from scripts. A per-chunk change version for each column, bumped when a system with write access runs over the chunk (as Unity's DOTS does), lets a query ask for only the chunks that changed since a version it remembers. Do this when the editor's deltas or the GPU scene's upload show in the profile, which the designs expect at around 50 000 entities.
-- **Physics and animation.** Both are designed as native `Fixed` systems with `Previous_Transform` interpolation. Physics simulates each island in `f32` about a `World_Position` anchor ([Where positions go](positions-and-transforms.md#where-positions-go)), and reports contacts as script events through per-job event buffers ([Scripting](../scripting/behaviours.md#events)). Neither exists yet.
+- **Animation,** as native `Fixed` systems with `Previous_Transform` interpolation, as physics has ([Physics](../physics/design.md#scripts-in-fixed-ticks)). When a game animates characters.
 - **Spawning prefabs from systems.** A native system runs as a job, so it cannot call `scene.spawn_prefab` at once; it needs a `command_spawn_prefab` on the command buffer ([Editor: Prefabs](../editor/prefabs.md#future-work)). Do this with the first system that spawns.
 - **Child lists.** Entities do not store their children, so despawning a parent and finding a child both scan. A per-entity first-child and next-sibling pair, maintained by `apply`, would make both O(children). Do this when hierarchies are large or despawns show in the profile.
 - **A name index.** Unity's `GameObject.Find` is deliberately absent. If content needs lookups by name, a `Name` index maintained by `apply` is the place, so that it never scans.

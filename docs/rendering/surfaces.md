@@ -63,7 +63,7 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 ## Limits
 
 - A surface is not in the ray tracing acceleration structure, so a traced shadow mask does not see it as a caster; it receives traced shadows, since the mask is from the depth buffer, and it casts and receives mapped shadows.
-- It has no collision: physics comes later.
+- It has no collision.
 - It draws on the vertex-pulling path only: no mesh shaders, no vertex reuse, and no per-triangle culling of holes, which cost their vertex work.
 - Hole edges are the finest cells' edges, and an 8-bit height map terraces at 1/255 of its scale.
 - Selection is by the camera, so a shadow map far from it draws coarse patches there, as the meshlets do.
@@ -74,5 +74,5 @@ The sample's `surfaces.scene`, which F7 cycles to, is a lake with an island: a w
 - **Mesh shader patches**, with a triangle's vertices shared and holes culled per triangle, when the patch vertex work shows in the profile.
 - **An in-editor hole brush** that paints the mask, when painting holes outside the editor is in the way.
 - **16-bit height maps**, when terracing shows.
-- **Collision** from the height map, with physics.
+- **Collision** from the height map, as a physics height field, when a game walks on terrain.
 - **Patches in the acceleration structure**, from the displaced patches, when traced shadows of terrain matter.
