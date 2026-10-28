@@ -131,14 +131,14 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `SendMessage` | `entity:send(name, ...)` |
 | `behaviour.enabled`, `OnEnable`, `OnDisable` | `self.enabled`, `on_enable`, `on_disable` |
 | `SetActive`, `activeSelf`, `activeInHierarchy` | `entity:set_active(b)`, `entity.active_self`, `entity.active_in_hierarchy` |
-| `FixedUpdate` | A native `Fixed` system |
+| `FixedUpdate` | A native `Fixed` system; *later* `fixed_update` ([Physics](../physics/design.md#scripts-in-fixed-ticks)) |
 | `GameObject.Find` | Not provided. Use fields or a `Name` index. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
 
 ## Future work
 
 - **Asset fields of components in scripts.** `expose` skips a component's asset fields ([Rendering](../rendering/assets.md#asset-fields)); they could read and write the `Asset` value that behaviours' fields hold ([Values](#values)). Why: a script cannot swap a mesh or a material. When: with the first script that needs it.
-- **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). Waits for physics.
+- **Physics events.** `on_trigger_enter`, `on_collision_enter` and the rest, queued from `Fixed` systems through per-job event buffers that the script phase drains, because `script.send` is not safe for jobs ([Events](behaviours.md#events)). The design is [Physics: Events](../physics/design.md#events).
 - **`Debug.draw_line`.** The debug renderer exists ([Rendering](../rendering/layers-and-output.md#debug)); the binding does not. One binding each for `line`, `box`, `sphere` and `arrow`, taking `WorldPosition`s and a color.
 - **`Random`.** A per-world seeded generator, as the Unity mapping promises, so that replays and tests are deterministic. Luau's `math.random` is per-VM and unseeded by the world.
 - **A `Name` index.** `GameObject.Find` stays absent; a maintained index on `Name` would give `World.find(name)` without a scan ([World](../world/README.md#future-work)).

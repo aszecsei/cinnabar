@@ -61,7 +61,7 @@ return Door
 | `on_<event>(...)` | `OnTriggerEnter` and similar | When the event is delivered (see [Events](#events)) |
 
 - **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and of its other callbacks and coroutines ([Profiling](../core/profiling.md#frames-and-costs)), and the API favors events and coroutines.
-- **No `fixed_update`.** Scripts do not run in fixed ticks. Logic that must run every tick is a native `Fixed` system. A script influences the simulation by writing components, and the next tick reads them.
+- **No `fixed_update`.** *Later: `fixed_update(dt)` runs once per fixed tick, before physics steps, with contact events delivered in the same tick ([Physics: Scripts in fixed ticks](../physics/design.md#scripts-in-fixed-ticks)).* Scripts do not run in fixed ticks. Logic that must run every tick is a native `Fixed` system. A script influences the simulation by writing components, and the next tick reads them.
 - **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`.
 - **Callbacks** run on the main thread in a protected call, under the watchdog. An error logs the message with a traceback, and the other callbacks still run. A callback cannot wait: it is not a coroutine.
 
@@ -91,7 +91,7 @@ Unity has two switches, and so does cinnabar:
 
 ### Events
 
-- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors or entities. Call it from the frame code: the queue is not safe for jobs. *Physics contacts will become `on_trigger_enter`, `on_collision_enter` and similar, through per-job event buffers.*
+- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors or entities. Call it from the frame code: the queue is not safe for jobs. *Physics contacts will become `on_trigger_enter`, `on_collision_enter` and similar, sent from the frame code after the ticks ([Physics: Events](../physics/design.md#events)).*
 - `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase: events are delivered before `update` and again after the coroutines. Events that handlers send are delivered in the next round, for up to 16 rounds.
 - The script phase calls `on_<name>` on every enabled instance on the entity that defines it, in the order that the instances were added. An inactive entity gets no events.
 - An error in a handler logs the message with a traceback. The other handlers still run.
