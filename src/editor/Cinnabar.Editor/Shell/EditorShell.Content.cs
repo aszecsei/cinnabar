@@ -44,7 +44,7 @@ public sealed partial class EditorShell
         }
         switch (asset.Kind)
         {
-            case AssetKind.Scene:
+            case AssetKind.Scene or AssetKind.Prefab:
                 RequestOpenScene(path);
                 break;
             case AssetKind.MaterialFunction:

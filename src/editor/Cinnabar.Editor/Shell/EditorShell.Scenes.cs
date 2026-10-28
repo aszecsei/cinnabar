@@ -54,7 +54,7 @@ public sealed partial class EditorShell
     /// </summary>
     public bool OpenScene(string path)
     {
-        var (document, problems) = SceneDocument.Open(path, OpenPrefab);
+        var (document, problems) = SceneDocument.Open(path, OpenPrefab, PrefabGuidOf(path));
         Report(path, problems);
         if (document == null)
         {
@@ -86,7 +86,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"scene: cannot restore {autosave}");
             return false;
         }
-        Attach(SceneDocument.Restored(Scene.Path, scene, OpenPrefab));
+        Attach(SceneDocument.Restored(Scene.Path, scene, OpenPrefab, Scene.PrefabGuid));
         Console.Add(LogLevel.Info, $"scene: restored the unsaved changes of {Scene.Path} from {autosave}");
         return true;
     }
@@ -246,7 +246,7 @@ public sealed partial class EditorShell
             return;
         }
         var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
-        var create = SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]);
+        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
         if (Edit("Create Entity", create))
         {
             SelectScene(create.Created.Id);
@@ -264,7 +264,7 @@ public sealed partial class EditorShell
             return;
         }
         var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
-        var create = SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]);
+        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
         create.Created.Name = "Volume";
         create.Created.Components.Add(new SceneComponent(SceneEdits.VolumeId, "Volume", [new SceneField("shape", SceneValue.Name("Global"))]));
         if (Edit("Create Volume", create))

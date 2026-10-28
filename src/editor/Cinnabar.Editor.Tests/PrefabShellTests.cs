@@ -174,6 +174,55 @@ public sealed class PrefabShellTests : IDisposable
         Assert.Null(shell.InstanceOf(Front));
     }
 
+    [Fact]
+    public void APrefabOpensAsTheDocumentWithOneRoot()
+    {
+        using var shell = NewShell();
+        Index(shell, _directory);
+
+        Assert.True(shell.OpenScene(Path.Combine(_directory, "door.prefab")));
+
+        Assert.True(shell.Scene!.IsPrefab);
+        Assert.Equal(Door, shell.Scene.PrefabGuid);
+        Assert.Equal(6, shell.Scene.Expanded.Flat.Entities.Count);
+        // New Entity goes under the root, and an instance dropped in the viewport too.
+        shell.CreateEntity();
+        var created = shell.Scene.Scene.Entities.Single(e => e.Name == "Entity");
+        Assert.Equal(0x2000000000000001UL, created.Parent);
+        shell.PreviewPrefab(Lamp, [16777216, 0, 0]);
+        Assert.True(shell.CommitPrefab());
+        Assert.Equal(0x2000000000000001UL, shell.Scene.Scene.Entities.Last(e => e.Prefab == Lamp).Parent);
+        // The prefab itself cannot go inside it.
+        shell.PreviewPrefab(Door, [0, 0, 0]);
+        Assert.False(shell.CommitPrefab());
+        Assert.Equal(2, shell.Scene.History.Count);
+
+        Assert.True(shell.SaveScene());
+        Assert.Contains("name = \"Entity\"\nparent = @2000000000000001\n", File.ReadAllText(Path.Combine(_directory, "door.prefab")));
+    }
+
+    [Fact]
+    public void ApplyFromTheShellAndAReloadOfAChangedPrefab()
+    {
+        using var shell = NewShell();
+        Index(shell, _directory);
+        var frame = InDoor(0x2000000000000002);
+        shell.Edit("Override", new SetField(frame, 35, "intensity", SceneValue.Of(SceneNumber.Of(0.25))));
+
+        Assert.True(shell.ApplyField(frame, 35, null, "intensity"));
+        Assert.Null(shell.OverridesOf(frame));
+        Assert.True(shell.PrefabOfInstance(Front)!.IsDirty);
+        Assert.Equal("Apply Intensity to door", shell.Scene!.History[^1].Label);
+        shell.Scene.Undo();
+        shell.Scene.Undo();
+
+        // A clean prefab whose file changes shows the change when the index next reports.
+        var path = Path.Combine(_directory, "door.prefab");
+        File.WriteAllText(path, File.ReadAllText(path).Replace("name = \"Frame\"", "name = \"Jamb\""));
+        Index(shell, _directory);
+        Assert.Equal("Jamb", shell.Scene.Expanded.Flat.Find(frame)!.Name);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

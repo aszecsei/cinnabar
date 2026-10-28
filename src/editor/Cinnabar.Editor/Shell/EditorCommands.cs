@@ -33,6 +33,10 @@ static class EditorCommands
     public const string UnpackPrefab = "prefab.unpack";
     public const string UnpackPrefabCompletely = "prefab.unpackCompletely";
     public const string SelectPrefabAsset = "prefab.selectAsset";
+    public const string OpenPrefab = "prefab.open";
+    public const string ApplyAllPrefab = "prefab.applyAll";
+    public const string RevertAllPrefab = "prefab.revertAll";
+    public const string MakeVariant = "prefab.makeVariant";
     public const string EditMesh = "mesh.edit";
     public const string ObjectMode = "mesh.objectMode";
     public const string MeshVertices = "mesh.vertices";
@@ -268,6 +272,30 @@ static class EditorCommands
             Description = "Make the selected instances' entities the scene's own, through every prefab inside them.",
             Icon = "prefab",
             CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) is { IsInstanceRoot: true }),
+        });
+        commands.Register(new Command(OpenPrefab, "Open Prefab", shell.OpenSelectedPrefab)
+        {
+            Description = "Open the selected instance's prefab in the scene's place, to edit it as a scene.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedPrefab != null,
+        });
+        commands.Register(new Command(ApplyAllPrefab, "Apply All", () => shell.ApplyAllSelected())
+        {
+            Description = "Apply every override of the selected instances to their prefabs, so every instance has them.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) != null),
+        });
+        commands.Register(new Command(RevertAllPrefab, "Revert All", () => shell.RevertAllSelected())
+        {
+            Description = "Drop every override of the selected instances, and the entities added to them, so they are their prefabs again.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Any(e => shell.InstanceOf(e.Id) != null),
+        });
+        commands.Register(new Command(MakeVariant, "Make Variant", shell.RequestMakeVariant)
+        {
+            Description = "Make a new prefab of the selected instance with its overrides, which varies its prefab, and make the instance one of it.",
+            Icon = "prefab",
+            CanExecuteWhen = () => shell.SelectedSceneEntities.Select(e => shell.InstanceOf(e.Id)?.Instance).OfType<ulong>().Distinct().Count() == 1,
         });
         commands.Register(new Command(SelectPrefabAsset, "Select Prefab Asset", shell.SelectPrefabAsset)
         {

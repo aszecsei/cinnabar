@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using CommunityToolkit.Mvvm.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
@@ -192,7 +193,11 @@ public sealed class PropertiesView : ScrollViewer
             {
                 var editor = editable ? FieldEditor.ForComponent(_shell, document!.Id, id, f) : null;
                 var isSet = editor != null ? ComponentSet(document!.Id, id, f) : null;
-                return FieldRow.Of(owner, f, editor, isSet, () => editor?.Reset()) with { Overridden = isSet == null ? null : Overridden(document!.Id, id, isSet) };
+                return FieldRow.Of(owner, f, editor, isSet, () => editor?.Reset()) with
+                {
+                    Overridden = isSet == null ? null : Overridden(document!.Id, id, isSet),
+                    Apply = () => _shell.ApplyField(document!.Id, id, null, f.Name),
+                };
             });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             var added = prefabBase != null && prefabBase.Components.All(c => c.Id != id);
@@ -219,7 +224,10 @@ public sealed class PropertiesView : ScrollViewer
                     inDocument != null ? FieldEditor.ForBehaviour(_shell, document!.Id, script, f) : null,
                     isSet,
                     () => _shell.Edit($"Reset {FieldValues.Humanize(f.Name)}", new SetBehaviourField(document!.Id, script, f.Name, null)))
-                { Overridden = isSet == null ? null : Overridden(document!.Id, null, isSet) };
+                {
+                    Overridden = isSet == null ? null : Overridden(document!.Id, null, isSet),
+                    Apply = () => _shell.ApplyField(document!.Id, 0, script, f.Name),
+                };
             });
             _content.Children.Add(Group(title, fields, badge: "Script", disabled: !behaviour.Enabled,
                 remove: inDocument != null ? () => _shell.Edit($"Remove {title}", new RemoveBehaviour(document!.Id, script)) : null));
@@ -321,7 +329,9 @@ public sealed class PropertiesView : ScrollViewer
             ? "-"
             : $"{string.Join(",", document.Components.Select(c => c.Id))}|{string.Join(",", document.Behaviours.Select(b => b.Script))}";
         var scripts = behaviours.Select(b => Convert.ToHexStringLower(b.Script)).Concat(document?.Behaviours.Select(b => b.Script) ?? []);
-        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|" +
+        // An instance's header shows whether its prefab has unsaved changes.
+        var prefab = _shell.InstanceOf(node.SceneId) is { } instance ? _shell.PrefabOfInstance(instance.Instance)?.IsDirty.ToString() : "";
+        return $"{node.Handle}|{node.Name}|{node.Active}|{node.Parent}|{string.Join(",", node.Components)}|{_world.Types.Count}|{inDocument}|{prefab}|" +
             $"{_shell.ProblemsOf(node.SceneId).Count}|{string.Join(",", scripts.Where(ScriptMissing))}|" +
             string.Join(";", behaviours.Select(b =>
                 $"{b.Class}:{b.Enabled}:{string.Join(",", b.Fields.Select(f => $"{f.Name}={FieldValues.DisplayKindOf(f.Kind)}"))}"));
@@ -561,6 +571,22 @@ public sealed class PropertiesView : ScrollViewer
             }
             line.Children.Add(new TextBlock { Text = instance.Prefab != "" ? "Instance of" : "In an instance of", Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center });
             line.Children.Add(link);
+            if (_shell.PrefabOfInstance(instance.Instance) is { IsDirty: true } changed)
+            {
+                var mark = new TextBlock { Text = "•", Classes = { "prefab" }, VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(mark, $"{changed.Title} has changes that the next save writes");
+                line.Children.Add(mark);
+            }
+            Button Action(string text, string command, string tip)
+            {
+                var button = new Button { Content = text, Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
+                ToolTip.SetTip(button, tip);
+                button.Click += (_, _) => _shell.Commands.Get(command).Execute();
+                return button;
+            }
+            line.Children.Add(Action("Open", EditorCommands.OpenPrefab, "Open the prefab in the scene's place"));
+            line.Children.Add(Action("Apply All", EditorCommands.ApplyAllPrefab, "Apply every override of this instance to its prefab"));
+            line.Children.Add(Action("Revert All", EditorCommands.RevertAllPrefab, "Drop every override of this instance"));
             header.Children.Add(line);
         }
         var problems = _shell.ProblemsOf(node.SceneId);
@@ -591,6 +617,9 @@ public sealed class PropertiesView : ScrollViewer
     {
         /// <summary>For an instance's entity, whether its block overrides the field, which shows it in bold.</summary>
         public Func<bool>? Overridden { get; init; }
+
+        /// <summary>For an instance's entity, applies the field's override to its prefab.</summary>
+        public Action? Apply { get; init; }
 
         /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
         public string AssetKind { get; init; } = "";
@@ -640,6 +669,12 @@ public sealed class PropertiesView : ScrollViewer
             {
                 name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
                 _bold.Add((name, overridden));
+                // An override's menu carries it to the prefab, or drops it.
+                var apply = new MenuItem { Header = "Apply to Prefab", Command = new RelayCommand(() => field.Apply?.Invoke()) };
+                var revert = new MenuItem { Header = "Revert", Command = new RelayCommand(field.Reset) };
+                var menu = new ContextMenu { Items = { apply, revert } };
+                menu.Opening += (_, _) => apply.IsEnabled = revert.IsEnabled = overridden();
+                name.ContextMenu = menu;
             }
             if (field.HasOverride)
             {

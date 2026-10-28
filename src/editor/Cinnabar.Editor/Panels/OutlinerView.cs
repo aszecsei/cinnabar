@@ -405,9 +405,13 @@ public sealed class OutlinerView : DockPanel
         menu.Items.Add(new Separator());
         if (_shell.InstanceOf(row.Node.SceneId) is { } instance)
         {
+            menu.Items.Add(Item("Open Prefab", EditorCommands.OpenPrefab));
             menu.Items.Add(Item("Select Prefab Asset", EditorCommands.SelectPrefabAsset));
+            menu.Items.Add(Item("Apply All", EditorCommands.ApplyAllPrefab));
+            menu.Items.Add(Item("Revert All", EditorCommands.RevertAllPrefab));
             if (instance.IsInstanceRoot)
             {
+                menu.Items.Add(Item("Make Variant", EditorCommands.MakeVariant));
                 menu.Items.Add(Item("Unpack", EditorCommands.UnpackPrefab));
                 menu.Items.Add(Item("Unpack Completely", EditorCommands.UnpackPrefabCompletely));
             }
