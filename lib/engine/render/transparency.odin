@@ -75,7 +75,7 @@ add_transparency_passes :: proc(f: ^Frame) {
 	r := f.renderer
 	g := f.graph
 	overdraw := f.debug_view == .Transparent_Overdraw
-	sprites := f.sprites != nil
+	sprites := has_sprites(f)
 	moments := (has_group(f, .Moments) || sprites) && pipeline_ready(r.platform, &r.transparency_composite)
 	if overdraw {
 		moments = has_transparency(f) || sprites

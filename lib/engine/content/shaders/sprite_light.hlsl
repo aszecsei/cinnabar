@@ -12,8 +12,8 @@ struct Light_Push {
 	uint fog;
 	uint gi_diffuse;
 	uint records;
-	uint records_offset;
 	uint count;
+	uint capacity;
 	uint light;
 	uint fog_light;
 };
@@ -39,10 +39,10 @@ float sprite_shadow(Light_Record light, Light reaching, float3 p, float depth) {
 [numthreads(SPRITE_LIGHT_TEXELS, SPRITE_LIGHT_TEXELS, 1)]
 void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	uint index = group.y * SPRITE_LIGHT_COLUMNS + group.x;
-	if (index >= push.count) {
+	if (index >= sprite_count(push.count, push.capacity)) {
 		return;
 	}
-	Sprite_Record r = load_sprite(push.records, push.records_offset, index);
+	Sprite_Record r = load_sprite(push.records, index);
 	float2 q = (float2(thread.xy) + 0.5) / SPRITE_LIGHT_TEXELS * 2 - 1;
 	float2 rotation = float2(cos(r.rotation), sin(r.rotation));
 	float3 right = rotation.x * frame.camera_right.xyz + rotation.y * frame.camera_up.xyz;

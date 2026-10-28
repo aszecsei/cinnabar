@@ -3,11 +3,12 @@
 // front of the tile's farthest opaque surface. A sprite behind the near plane, or under a hundredth of a pixel, sets
 // none.
 #define MATERIAL_PUSH Bin_Push
-// Matches Bin_Push in lib/engine/render/sprites.odin. scale is the projection's x and y scales.
+// Matches Bin_Push in lib/engine/render/sprites.odin. count is the sprites' counter, and capacity the most that the
+// frame draws. scale is the projection's x and y scales.
 struct Bin_Push {
 	uint records;
-	uint records_offset;
 	uint count;
+	uint capacity;
 	uint screen;
 	uint tile_depths;
 	uint bins;
@@ -23,10 +24,10 @@ struct Bin_Push {
 [numthreads(64, 1, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	uint index = id.x;
-	if (index >= push.count) {
+	if (index >= sprite_count(push.count, push.capacity)) {
 		return;
 	}
-	Sprite_Record r = load_sprite(push.records, push.records_offset, index);
+	Sprite_Record r = load_sprite(push.records, index);
 	float4 clip = mul(frame.view_projection, float4(r.position, 1));
 	float depth = clip.w;
 	if (depth <= frame.near) {

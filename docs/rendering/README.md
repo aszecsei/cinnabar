@@ -45,7 +45,7 @@ Read them in this order the first time.
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |
 | `shadows.odin` | Shadow assignment, the atlas, cascades, the ray-traced mask ([Shadows](lighting-and-shadows.md#shadows)) |
 | `transparency.odin` | Moment-based and sorted transparency ([Transparency](transparency.md#transparency)) |
-| `sprites.odin` | Compute sprites: `Sprite`, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
+| `sprites.odin` | Compute sprites: `Sprite`, the records that the CPU and GPU passes write, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
 | `ambient_occlusion.odin` | GTAO, HBAO or SSAO on the compute queue ([Ambient occlusion](ambient-occlusion.md#ambient-occlusion)) |
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |

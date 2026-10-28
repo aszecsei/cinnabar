@@ -19,7 +19,8 @@ void cs_main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID) {
 	ByteAddressBuffer bins = cn_buffer(push.bins);
 	uint tile = sprite_tile(group.xy, push.tile_columns);
 	float4 sum = 0;
-	for (uint w = 0; w < push.words; w++) {
+	uint words = used_words();
+	for (uint w = 0; w < words; w++) {
 		// Every thread of the group is in the tile, so the loop is uniform.
 		uint bits = WaveReadLaneFirst(bins.Load((tile * push.words + w) * 4));
 		while (bits != 0) {
@@ -35,7 +36,7 @@ void cs_main(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID) {
 			if (alpha <= 0) {
 				continue;
 			}
-			Sprite_Record r = load_sprite(push.records, push.records_offset, index);
+			Sprite_Record r = load_sprite(push.records, index);
 			float2 uv = sprite_light_uv(index, q, push.light_texel);
 			float4 lit = light.SampleLevel(light_sampler, uv, 0);
 			float3 fog = fog_light.SampleLevel(light_sampler, uv, 0).rgb;
