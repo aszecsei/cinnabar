@@ -88,7 +88,7 @@ The order in which the editor was built. Phases 1 to 15 are done; what comes nex
 15. **Prefabs** (see [Editor](editor/prefabs.md)), in four steps: the scene format's version 2, `scene_path_id`, `scene_expand`, the `Prefab` kind and `cook scenes` cooking both kinds flat, with the shared fixture; instances in the editor, with `PrefabExpansion`, `Expanded`, `BlockOperation` and its wire form from the expansion's difference, the content browser's drop, the outliner's and the properties panel's marks, Duplicate, Unpack and Make Prefab; prefab editing, with `PrefabOperation`, Apply and Revert, a prefab as the document, reload from disk and Make Variant; and spawning, with `Field.asset`, the `Asset` value, `scene.spawn_prefab` and `World.spawn(prefab)`.
 
 ## Physics
-The seven phases, from the backend boundary and scripts in fixed ticks to plugins, are in [Physics: Phases](physics/design.md#phases).
+The order in which physics was built. Every phase is done; what remains is in [Future work](physics/design.md#future-work).
 
 1. **The boundary and the backend:** `lib/core/physics` and `physics.h`, the command format, `Host`, Jolt 5.6.0 with `just jolt` as `physics_jolt.dll` and static libraries, Jolt's jobs on fibers, the null backend, `Platform_API.physics`, the soft-restart cleanup, and the conformance suite.
 2. **Scripts in fixed ticks:** the tick loop (`ecs.begin_ticks`, `next_tick`, `run_tick_systems`, with `run_fixed` on them), `script.fixed_update` and `script.fixed_events`, `wait_fixed`, `Time.in_fixed`, input edges for ticks, `fixed_update` in the profiler, and the sample's frame driving its ticks.

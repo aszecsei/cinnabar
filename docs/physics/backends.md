@@ -74,6 +74,6 @@ The null backend reports `Rigid_Bodies`, `Joints`, `Queries` and `Sensors`: it t
 
 ## Future work
 
-- **A 2D boundary.** `Physics2D_API` follows the same rules, with a Box2D backend (see [Design](design.md#2d-physics)).
-- **Choosing at run time.** The backend is chosen when the host starts; changing it means restarting the host, which the editor's Restart Host does.
-- **A backend's own settings.** A backend reads nothing of the project's; a key such as `physics.jolt.threads` would need the host to pass them.
+- **A 2D boundary.** `Physics2D_API` follows the same rules, with a Box2D backend (see [Design](design.md#future-work)). When a game is 2D.
+- **Choosing at run time.** The backend is chosen when the host starts, so changing it means the editor's Restart Host. When switching backends while editing is common.
+- **A backend's own settings.** A backend reads nothing of the project's; a key such as `physics.jolt.threads` needs the host to pass them. When a backend has a setting worth exposing.

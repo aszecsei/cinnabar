@@ -1,5 +1,5 @@
 // Package physics_conformance is the suite that every simulating backend passes, driven through Physics_API with no
-// engine world. A backend's tests call each procedure with its table. See docs/physics/design.md#tests.
+// engine world. A backend's tests call each procedure with its table. See docs/physics/backends.md#conformance.
 package physics_conformance
 
 import "core:math"

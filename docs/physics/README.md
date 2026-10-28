@@ -1,12 +1,12 @@
 # Physics
 
-Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`. The boundary, the Jolt backend, scripts in fixed ticks, rigid bodies in the world, queries, sensors and events, constraints, mesh colliders, and plugins are built (every phase); the rest of the design and its phases are in [Design](design.md).
+Rigid bodies, constraints, collision queries and sensors: the boundary between the engine and a physics backend in `lib/core/physics`, the Jolt backend, and the components and systems in `lib/engine/physics`.
 
 ## Documents
 
 | Document | What it covers |
 |---|---|
-| [Design](design.md) | Where Jolt lives, the command-list boundary, positions and precision, the components, the physics tick, layers, shapes, constraints, queries, events, scripts, the editor, determinism, 2D physics, plugins, and the phases. |
+| [Design](design.md) | Where Jolt lives, the command-list boundary, positions and precision, the components, the physics tick, layers, shapes, constraints, queries, events, scripts, the editor, determinism, plugins, and future work, among it 2D physics. |
 | [Backends](backends.md) | How a backend plugs in: loading as a plugin or linked, choosing with `physics.backend`, the contract of `Physics_API` and `Host`, features, and the conformance suite. |
 
 ## Overview

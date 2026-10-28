@@ -37,7 +37,7 @@ The documentation starts at [docs/README.md](docs/README.md), which gives a read
 | [GPU](docs/gpu/README.md) | The backend-agnostic GPU interface and the render graph |
 | [Rendering](docs/rendering/README.md) | The built-in renderer |
 | [Scripting](docs/scripting/README.md) | Luau embedding, the script API, behaviours and tooling |
-| [Physics](docs/physics/README.md) | The design of physics on Jolt, its backend boundary, and the plans for 2D and plugins |
+| [Physics](docs/physics/README.md) | Physics on Jolt: rigid bodies, joints, queries and events behind a backend boundary |
 | [Content pipeline](docs/content/README.md) | The cooker, each asset kind, the cook daemon, blobs and loading |
 | [Editor](docs/editor/README.md) | The Avalonia editor and the editor link |
 

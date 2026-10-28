@@ -8,7 +8,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 
 - **Entities** are generational handles: a 32-bit index and a 32-bit generation. A handle to a destroyed entity is detected; it is never reused silently. A slot whose generation would wrap is retired.
 - **Component types have stable IDs.** The ID is a hash of the type's name, or an explicit value. It is never a `typeid` (see [Hot reload](../overview/hot-reload.md#rules), rule 3). Cooked scenes, the editor link and scripts all identify component types by this ID.
-- **Native systems** run as jobs on the job system. Engine systems (transforms, physics, animation, render extraction) and performance-critical game logic are native.
+- **Native systems** run as jobs on the job system. Engine systems (transforms, render extraction) and performance-critical game logic are native.
 - **Structural changes are deferred.** Spawning, destroying, and adding or removing components go into command buffers. The buffers are applied at fixed points in the frame. Scripts are the exception: the script phase is serial, so they change the structure at once, except for despawns (see [Scripting](../scripting/api.md#structural-changes)).
 - **Resources are not entities.** World-wide state, such as the active camera or the physics settings, is a plain field in `Game_State`.
 
@@ -44,7 +44,7 @@ Entities, the component registry, archetype storage, queries, systems and their 
 
   | Stage | Runs | Use for |
   |---|---|---|
-  | `Fixed` | Once per fixed tick, zero or more times per frame | Physics, movement, gameplay that must be deterministic |
+  | `Fixed` | Once per fixed tick, zero or more times per frame | Movement and gameplay that must be deterministic; physics steps after them ([Physics](../physics/design.md#scripts-in-fixed-ticks)) |
   | `Update` | Once per frame, before the script phase | Input response, UI, camera, effects |
   | `Late` | Once per frame, after the script phase | Work that must see the results of scripts |
 
