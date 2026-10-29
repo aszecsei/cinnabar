@@ -2,7 +2,8 @@
 //
 // `cook scripts` cooks scripts (see scripts.odin), `cook scenes` cooks scenes (see scenes.odin), `cook shaders` cooks
 // shaders (see shaders.odin), `cook models` cooks glTF models (see meshes.odin), `cook meshes` cooks mesh files (see
-// mesh_files.odin), and `cook daemon` cooks every kind whenever the content changes (see daemon.odin).
+// mesh_files.odin), `cook stages` cooks USD stages (see stages.odin), and `cook daemon` cooks every kind whenever the
+// content changes (see daemon.odin). `cook stage-report` measures stages against the renderer's limits.
 package cook
 
 import "core:fmt"
@@ -21,6 +22,8 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook effects --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook stage-report <stage>...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
        cook --emit-link-schema <file>`
 
@@ -60,6 +63,14 @@ main :: proc() {
 	case "effects":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Effect)
+		}
+	case "stages":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Stage)
+		}
+	case "stage-report":
+		if parsed = len(os.args) > 2; parsed {
+			ok = stage_report(os.args[2:])
 		}
 	case "shaders":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -123,6 +134,11 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	if kind == .Scene {
 		log.infof("cook: %d %s cooked, %d up to date", pass.cooked[.Prefab], kind_plural(.Prefab), pass.current[.Prefab])
 	}
+	if kind == .Stage {
+		for sub in ([]format.Asset_Kind{.Mesh, .Texture}) {
+			log.infof("cook: %d %s of stages cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
+		}
+	}
 	return pass.ok
 }
 
@@ -155,6 +171,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "prefabs"
 	case .Effect:
 		return "effects"
+	case .Stage:
+		return "stages"
 	}
 	return "assets"
 }

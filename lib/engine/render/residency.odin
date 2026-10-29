@@ -8,8 +8,9 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 
-// At most this many assets are resident at once.
-MAX_RESIDENT :: 512
+// At most this many assets are resident at once: Sponza with its curtains, a USD stage, is about 250 meshes and textures
+// (see docs/content/kinds/stages.md#limits).
+MAX_RESIDENT :: 1024
 // A resident mesh keeps at most this many submeshes. A mesh with more draws only these.
 MAX_SUBMESHES :: 16
 // An asset that cannot be made resident is tried again after this many frames.

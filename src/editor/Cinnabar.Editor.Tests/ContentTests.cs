@@ -22,8 +22,8 @@ public sealed class ContentTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", "", 0, [0, 0], "", []),
-            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
+            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", "", 0, [0, 0], "", [], ""),
+            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
         ], [new Folder("game", "lib")]));
         return shell;
     }
@@ -36,8 +36,8 @@ public sealed class ContentTests : IDisposable
         using var shell = NewShell();
         shell.Assets.Apply(new AssetDelta(
         [
-            new Asset("10", AssetKind.Model, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
-            new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0, [0, 0], "", []),
+            new Asset("10", AssetKind.Model, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0, [0, 0], "", [], ""),
         ], [], [], []));
 
         shell.SelectContent(null, ["10", DoorScript]);
@@ -58,9 +58,9 @@ public sealed class ContentTests : IDisposable
         using var shell = NewShell();
         shell.Assets.Apply(new AssetDelta(
         [
-            new Asset("20", AssetKind.Material, "game", "rock.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
-            new Asset("21", AssetKind.MaterialInstance, "game", "mossy.material_instance", AssetStatus.Current, 0, 0, "", [], ["20"], "", "", 0, [0, 0], "", []),
-            new Asset("22", AssetKind.ShadingModel, "game", "lit.shading", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
+            new Asset("20", AssetKind.Material, "game", "rock.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            new Asset("21", AssetKind.MaterialInstance, "game", "mossy.material_instance", AssetStatus.Current, 0, 0, "", [], ["20"], "", "", 0, [0, 0], "", [], ""),
+            new Asset("22", AssetKind.ShadingModel, "game", "lit.shading", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
         ], [], [], []));
 
         var materials = new Panels.AssetContext(shell.Assets, "material", _ => { });

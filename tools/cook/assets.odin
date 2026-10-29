@@ -27,6 +27,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Material_Function = {format.MATERIAL_FUNCTION_EXTENSION},
 	.Prefab = {format.PREFAB_EXTENSION},
 	.Effect = {format.EFFECT_EXTENSION},
+	.Stage  = STAGE_EXTENSIONS,
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -58,6 +59,8 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 		return MODEL_SETTINGS
 	case .Mesh:
 		return MESH_SETTINGS
+	case .Stage:
+		return STAGE_SETTINGS
 	}
 	return nil
 }
@@ -102,7 +105,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -132,6 +135,9 @@ Asset_Source :: struct {
 	size:         [2]u32,
 	tool_texture: format.Guid,
 	hotspots:     [][4]u32,
+	// For a source that a stage generates, such as its prefab, the stage's GUID: it is not a file of its own, and its
+	// meta is only its GUID (see stages.odin).
+	owner:        format.Guid,
 }
 
 // Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.
@@ -334,6 +340,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Prefab
 	case .Effect:
 		return .Effect
+	case .Stage:
+		return .Stage
 	}
 	return .Script
 }
@@ -416,15 +424,75 @@ meta_with :: proc(guid: format.Guid, old_text: string, settings: []format.Meta_S
 	return strings.to_string(b)
 }
 
+// subasset_kind_name is the name that a kind of sub-asset has in .meta files, such as "mesh".
+subasset_kind_name :: proc(kind: format.Asset_Kind) -> string {
+	#partial switch kind {
+	case .Mesh:
+		return format.MESH_KIND
+	case .Texture:
+		return format.TEXTURE_KIND
+	case .Material_Instance:
+		return format.MATERIAL_INSTANCE_KIND
+	case .Prefab:
+		return format.PREFAB_KIND
+	}
+	return ""
+}
+
+// assign_subassets gives each sub-asset that a file makes its GUID: the one in the .meta file for its kind and name, or
+// a new one, which it writes into the .meta file, and adds them to the asset's sub-assets. A line whose sub-asset is
+// gone stays, with a warning, so one renamed back gets its GUID again, until a re-import drops it.
+assign_subassets :: proc(a: ^Asset_Source, wanted: []Subasset, force: bool, problems: ^Problems) -> bool {
+	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
+	lines := make([dynamic]format.Meta_Subasset, 0, len(wanted), context.temp_allocator)
+	current := make(map[string]bool, len(wanted), context.temp_allocator)
+	changed := false
+	for w in wanted {
+		kind := subasset_kind_name(w.kind)
+		guid, found := format.meta_subasset(a.meta, kind, w.name)
+		if !found {
+			_, guid = new_meta(nil)
+			changed = true
+		}
+		append(&lines, format.Meta_Subasset{kind, w.name, guid})
+		append(&a.subassets, Subasset{w.kind, w.name, guid})
+		current[fmt.tprintf("%s.%s", kind, w.name)] = true
+	}
+	for s in a.meta.subassets {
+		if current[fmt.tprintf("%s.%s", s.kind, s.name)] {
+			continue
+		}
+		if force {
+			changed = true
+			continue
+		}
+		report_warning(problems, meta_path, 0, 0, "%s.%s is no longer in the file. Its GUID stays here until the file is re-imported.", s.kind, s.name)
+		append(&lines, s)
+	}
+	if !changed {
+		return true
+	}
+	text := meta_with(a.meta.guid, a.meta_text, a.meta.settings, lines[:])
+	if !write_blob(meta_path, transmute([]byte)text) {
+		report_error(problems, meta_path, 0, 0, "cannot write the sub-assets' GUIDs")
+		return false
+	}
+	return true
+}
+
 // cooked_key reads the key of a cooked blob. It returns 0 if there is none, or if the blob is of another kind or from
 // a cooker with other blob structures.
 cooked_key :: proc(output: string, kind: format.Asset_Kind, layout: u64) -> u64 {
-	data, err := os.read_entire_file(output, context.temp_allocator)
-	if err != nil || len(data) < size_of(format.Blob_Header) {
+	f, open_err := os.open(output)
+	if open_err != nil {
 		return 0
 	}
+	defer os.close(f)
 	header: format.Blob_Header
-	copy(([^]byte)(&header)[:size_of(header)], data)
+	n, read_err := os.read(f, ([^]byte)(&header)[:size_of(header)])
+	if read_err != nil || n < size_of(header) {
+		return 0
+	}
 	if header.magic != format.BLOB_MAGIC || header.kind != kind || header.layout != layout {
 		return 0
 	}

@@ -132,6 +132,11 @@ cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, fo
 	scanned: bool
 	pass.assets, pass.folders, pass.shared, scanned = scan(options.roots[:], &pass.problems)
 	pass.ok = scanned
+	// A stage's material instances and prefab are text that its cook generates, which the material and scene passes
+	// then cook as they would files, so the stages go first whenever either pass runs.
+	if kinds & {.Stage, .Scene, .Prefab, .Shading_Model, .Material, .Material_Instance, .Material_Function} != {} {
+		pass.ok = cook_stages(options, &pass) && pass.ok
+	}
 	if .Script in kinds {
 		pass.ok = cook_scripts(options, pass.assets, &pass) && pass.ok
 	}

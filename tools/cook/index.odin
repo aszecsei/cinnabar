@@ -33,9 +33,17 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 	// Each problem goes to the asset whose source or .meta file it is in.
 	owner := make(map[string]string, len(pass.assets) * 2, context.temp_allocator)
 	guids := make([]string, len(pass.assets), context.temp_allocator)
+	// The generated text of each sub-asset that has one, by its GUID.
+	generated := make(map[format.Guid]string, context.temp_allocator)
 	for a, i in pass.assets {
 		buffer: [32]u8
 		guids[i] = clone(format.guid_format(a.meta.guid, &buffer), allocator)
+		// A stage's generated text is not a file of the content; its problems are the stage's.
+		if a.owner != {} {
+			owner[a.path] = clone(format.guid_format(a.owner, &buffer), allocator)
+			generated[a.meta.guid] = a.path
+			continue
+		}
 		owner[a.path] = guids[i]
 		owner[fmt.tprintf("%s%s", a.path, format.META_EXTENSION)] = guids[i]
 	}
@@ -51,6 +59,10 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 		index.problems[guid] = slice.clone(list[:], allocator)
 	}
 	for a, i in pass.assets {
+		// The stage that generates it lists it among its sub-assets.
+		if a.owner != {} {
+			continue
+		}
 		root := roots[a.root]
 		entry := cook_link.Asset {
 			guid      = guids[i],
@@ -101,6 +113,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 				status   = entry.status,
 				parent   = entry.guid,
 				subasset = clone(s.name, allocator),
+				generated = clone(generated[s.guid] or_else "", allocator),
 			}
 			index.assets[sub.guid] = sub
 		}

@@ -155,8 +155,25 @@ texture_setting :: proc(a: Asset_Source, key: string) -> string {
 	return info.default
 }
 
-// cook_texture decodes, sizes, filters and compresses one texture, and gives its blob.
-cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+// Texture_Cook is how a texture cooks: what a texture asset's settings say, or what a stage's material asks of a texture
+// that it reads (see stages.odin).
+Texture_Cook :: struct {
+	usage:    format.Texture_Usage,
+	// Filter the mips with the edges wrapping, and with a box instead of the Kaiser filter.
+	wrap:     bool,
+	box:      bool,
+	mips:     bool,
+	max_size: int,
+	// For a mask, the source's channel that it keeps, 0 to 3, in red. 0 keeps red as it is.
+	channel:  int,
+	// For a mask, decode the source from sRGB first, as a channel of a color texture is.
+	srgb:     bool,
+	// For a normal map, negate y: one made for the other convention.
+	flip_y:   bool,
+}
+
+// texture_cook_of is how a texture asset cooks, by its settings.
+texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 	usage: format.Texture_Usage
 	switch texture_setting(a, "usage") {
 	case "normal":
@@ -170,12 +187,39 @@ cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems:
 	case:
 		usage = .Color
 	}
-	wrap := texture_setting(a, "wrap") == "repeat"
-	box := texture_setting(a, "filter") == "box"
-	max_size := strconv.parse_int(texture_setting(a, "max_size")) or_else 16384
+	return {
+		usage = usage,
+		wrap = texture_setting(a, "wrap") == "repeat",
+		box = texture_setting(a, "filter") == "box",
+		mips = texture_setting(a, "mips") == "true",
+		max_size = strconv.parse_int(texture_setting(a, "max_size")) or_else 16384,
+	}
+}
 
-	image := decode_image(a, usage, problems) or_return
-	for max(image.width, image.height) > max_size {
+// cook_texture decodes, sizes, filters and compresses one texture, and gives its blob.
+cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+	t := texture_cook_of(a)
+	image := decode_image_bytes(a.source, a.path, t, problems) or_return
+	return cook_texture_image(options, image, t, a.meta.guid, key, a.name, a.path, problems)
+}
+
+// cook_texture_image sizes, filters and compresses a decoded texture, and gives its blob. source_path is the name that
+// the blob keeps, and path the file that its problems name.
+cook_texture_image :: proc(
+	options: Cook_Options,
+	decoded: Image,
+	t: Texture_Cook,
+	guid: format.Guid,
+	key: u64,
+	source_path, path: string,
+	problems: ^Problems,
+) -> (
+	blob: []byte,
+	ok: bool,
+) {
+	usage, wrap, box := t.usage, t.wrap, t.box
+	image := decoded
+	for max(image.width, image.height) > t.max_size {
 		image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap, box)
 	}
 	tex_format := texture_format_of(usage)
@@ -188,7 +232,7 @@ cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems:
 	}
 
 	mip_count := 1
-	if texture_setting(a, "mips") == "true" {
+	if t.mips {
 		mip_count = int(math.floor(math.log2(f32(max(image.width, image.height))))) + 1
 	}
 	size := [2]u32{u32(image.width), u32(image.height)}
@@ -205,20 +249,20 @@ cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems:
 		}
 		mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
 		if !encode_mip(level, usage, quality, mips[offset:][:mip_size]) {
-			report_error(problems, a.path, 0, 0, "cannot compress mip %d", mip)
+			report_error(problems, path, 0, 0, "cannot compress mip %d", mip)
 			return
 		}
 		offset += mip_size
 	}
 	contents := format.Texture_Contents {
-		guid        = a.meta.guid,
+		guid        = guid,
 		key         = key,
 		format      = tex_format,
 		usage       = usage,
 		size        = size,
 		mip_count   = u32(mip_count),
 		mips        = mips,
-		source_path = a.name,
+		source_path = source_path,
 	}
 	return format.texture_write(contents, context.temp_allocator), true
 }
@@ -239,19 +283,20 @@ texture_format_of :: proc(usage: format.Texture_Usage) -> format.Texture_Format 
 	return .RGBA8_Unorm
 }
 
-// decode_image decodes a source into floating point. Color decodes from sRGB into linear light, a normal map maps to
-// -1..1, and .hdr files are linear already.
-decode_image :: proc(a: Asset_Source, usage: format.Texture_Usage, problems: ^Problems) -> (image: Image, ok: bool) {
-	if len(a.source) == 0 {
-		report_error(problems, a.path, 0, 0, "is empty")
+// decode_image_bytes decodes a source into floating point. Color decodes from sRGB into linear light, a normal map maps
+// to -1..1, and .hdr files are linear already. A mask keeps its channel in red.
+decode_image_bytes :: proc(source: []byte, path: string, t: Texture_Cook, problems: ^Problems) -> (image: Image, ok: bool) {
+	usage := t.usage
+	if len(source) == 0 {
+		report_error(problems, path, 0, 0, "is empty")
 		return
 	}
 	width, height, channels: c.int
-	is_hdr := stbi.is_hdr_from_memory(raw_data(a.source), c.int(len(a.source))) != 0
+	is_hdr := stbi.is_hdr_from_memory(raw_data(source), c.int(len(source))) != 0
 	if is_hdr {
-		data := stbi.loadf_from_memory(raw_data(a.source), c.int(len(a.source)), &width, &height, &channels, 4)
+		data := stbi.loadf_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
 		if data == nil {
-			report_error(problems, a.path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+			report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
 			return
 		}
 		defer stbi.image_free(data)
@@ -261,9 +306,9 @@ decode_image :: proc(a: Asset_Source, usage: format.Texture_Usage, problems: ^Pr
 		}
 		return image, true
 	}
-	data := stbi.load_from_memory(raw_data(a.source), c.int(len(a.source)), &width, &height, &channels, 4)
+	data := stbi.load_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
 	if data == nil {
-		report_error(problems, a.path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+		report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
 		return
 	}
 	defer stbi.image_free(data)
@@ -272,12 +317,18 @@ decode_image :: proc(a: Asset_Source, usage: format.Texture_Usage, problems: ^Pr
 		for ch in 0 ..< 4 {
 			v := f32(data[i * 4 + ch]) / 255
 			switch {
-			case usage == .Color && ch < 3:
+			case (usage == .Color || (usage == .Mask && t.srgb)) && ch < 3:
 				v = srgb_to_linear(v)
 			case usage == .Normal && ch < 3:
 				v = v * 2 - 1
 			}
 			p[ch] = v
+		}
+		if usage == .Mask && t.channel != 0 {
+			p.r = p[t.channel]
+		}
+		if usage == .Normal && t.flip_y {
+			p.y = -p.y
 		}
 	}
 	return image, true

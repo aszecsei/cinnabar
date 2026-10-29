@@ -45,10 +45,10 @@ public sealed class MeshTextureModeTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", []),
+            new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
             new Asset(MaterialGuid, AssetKind.Material, "game", "spots.material", AssetStatus.Current, 0, 0, "", [], [TextureGuid], "", "", 1, [0, 0], TextureGuid,
-                [new CookHotspot(0, 0, 256, 256), new CookHotspot(256, 0, 768, 256)]),
-            new Asset(TextureGuid, AssetKind.Texture, "game", "spots.png", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [1024, 1024], "", []),
+                [new CookHotspot(0, 0, 256, 256), new CookHotspot(256, 0, 768, 256)], ""),
+            new Asset(TextureGuid, AssetKind.Texture, "game", "spots.png", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [1024, 1024], "", [], ""),
         ], []));
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33])]));
         shell.Viewport.RequestSize(new PixelSize((int)Width, (int)Height));

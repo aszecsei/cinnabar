@@ -129,10 +129,25 @@ public sealed partial class EditorShell
     List<ulong> SelectedInstances() =>
         [.. SelectedSceneEntities.Select(e => InstanceOf(e.Id)?.Instance).OfType<ulong>().Distinct()];
 
+    // Whether the prefab is generated, as a USD stage's, which its stage writes again at every cook: an edit to it would
+    // be lost, so its instances keep their overrides in the scene.
+    bool IsGeneratedPrefab(string guid) => Assets.Find(guid) is { Generated: not "" };
+
+    // Refuses to apply to a generated prefab, with a line in the console.
+    bool RefuseGenerated(IEnumerable<ulong> instances)
+    {
+        if (Scene == null || !instances.Any(i => Scene.Scene.Find(i) is { } block && IsGeneratedPrefab(block.Prefab)))
+        {
+            return false;
+        }
+        Console.Add(LogLevel.Error, "edit: a USD stage's prefab is made by its stage, so its overrides stay in the scene (see docs/content/kinds/stages.md#prefab)");
+        return true;
+    }
+
     /// <summary>Applies one overridden field of an instance's entity to its prefab, so every instance has it.</summary>
     public bool ApplyField(ulong sceneId, ulong component, string? script, string field)
     {
-        if (Scene == null)
+        if (Scene == null || InstanceOf(sceneId) is not { } instance || RefuseGenerated([instance.Instance]))
         {
             return false;
         }
@@ -149,7 +164,7 @@ public sealed partial class EditorShell
     }
 
     /// <summary>Applies every override of the selected instances to their prefabs, as Apply All.</summary>
-    public bool ApplyAllSelected() => EditInstances("Apply All", PrefabEdits.ApplyAll);
+    public bool ApplyAllSelected() => !RefuseGenerated(SelectedInstances()) && EditInstances("Apply All", PrefabEdits.ApplyAll);
 
     /// <summary>Drops every override of the selected instances, as Revert All.</summary>
     public bool RevertAllSelected() => EditInstances("Revert All", PrefabEdits.RevertAll);
@@ -230,10 +245,16 @@ public sealed partial class EditorShell
         return path;
     }
 
-    // Opens a prefab's document from its file, which the index names, for the scene's expansion.
+    // Opens a prefab's document from its file, which the index names, for the scene's expansion. A USD stage's prefab is
+    // text that the cooker generates, which the index names instead.
     PrefabDocument? OpenPrefab(string guid)
     {
-        if (Assets.Find(guid) is not { Kind: AssetKind.Prefab } asset || Assets.FullPath(asset) is not { } path)
+        if (Assets.Find(guid) is not { Kind: AssetKind.Prefab } asset)
+        {
+            return null;
+        }
+        var path = asset.Generated != "" ? asset.Generated : Assets.FullPath(asset);
+        if (path == null)
         {
             return null;
         }

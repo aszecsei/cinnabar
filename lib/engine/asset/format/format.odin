@@ -74,6 +74,27 @@ Meta_Subasset :: struct {
 	guid:       Guid,
 }
 
+// The names of the other kinds of sub-asset in .meta files, which a USD stage makes besides meshes (see
+// docs/content/kinds/stages.md#sub-assets).
+TEXTURE_KIND :: "texture"
+MATERIAL_INSTANCE_KIND :: "material_instance"
+PREFAB_KIND :: "prefab"
+
+// subasset_kind_of is the kind of asset that a sub-asset line's kind names, or .None.
+subasset_kind_of :: proc(kind: string) -> Asset_Kind {
+	switch kind {
+	case MESH_KIND:
+		return .Mesh
+	case TEXTURE_KIND:
+		return .Texture
+	case MATERIAL_INSTANCE_KIND:
+		return .Material_Instance
+	case PREFAB_KIND:
+		return .Prefab
+	}
+	return .None
+}
+
 // meta_subasset is the GUID of a sub-asset of a kind and a name.
 meta_subasset :: proc(meta: Meta, kind, name: string) -> (guid: Guid, ok: bool) {
 	for s in meta.subassets {
@@ -176,6 +197,8 @@ Asset_Kind :: enum u32 {
 	Prefab,
 	// Emitters of particles, which a Particle_System places.
 	Effect,
+	// A USD stage, which has no blob: its meshes, textures, material instances and prefab are sub-assets.
+	Stage,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

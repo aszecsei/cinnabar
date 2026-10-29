@@ -8,3 +8,5 @@ vendor/fidelityfx/*/
 .vscode
 obj/
 *.user.settings
+samples/intel/downloads/
+samples/intel/content/.unpacked/

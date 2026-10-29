@@ -11,3 +11,6 @@
 [submodule "vendor/jolt"]
 	path = vendor/jolt
 	url = https://github.com/jrouwe/JoltPhysics.git
+[submodule "vendor/lightusd"]
+	path = vendor/lightusd
+	url = https://github.com/lighttransport/tinyusdz

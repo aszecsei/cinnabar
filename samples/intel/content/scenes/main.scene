@@ -1,0 +1,52 @@
+# Intel's Sponza with its curtains: the two stages' prefabs, a camera at the end of the nave looking down it, the sun
+# and a global volume. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 3e6501e8881e7358
+name = "Camera"
+component 1 Transform
+	position = [176307965, 51341299, -2566282]
+	rotation = [0.0, -0.7071068, 0.0, 0.7071068]
+	scale = [1.0, 1.0, 1.0]
+component 32 Camera
+	near = 0.05
+
+entity 6d808778eb055c3a
+name = "Global Volume"
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0.0, 0.0, 0.0, 1.0]
+	scale = [1.0, 1.0, 1.0]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	sky = [0.0, 0.0, 0.0]
+	ground = [0.0, 0.0, 0.0]
+
+entity 99fc7a52b56f77cb
+name = "Sun"
+component 1 Transform
+	position = [0, 335544320, 0]
+	rotation = [0.4829629, 0.2241439, -0.1294095, 0.8365163]
+	scale = [1.0, 1.0, 1.0]
+component 34 Directional_Light
+	color = [1.0, 0.95, 0.85]
+	cast_shadows = true
+	intensity = 2.0
+
+entity ad2ea49a8b462f92
+name = "Sponza"
+prefab = $bfd7069a83795b6a4ffb0c1ca75a8aa9
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0.0, 0.0, 0.0, 1.0]
+	scale = [1.0, 1.0, 1.0]
+
+entity d9beab7dd5794b42
+name = "Sponza Curtains"
+prefab = $b8060f22795ad3171392adf015047eae
+component 1 Transform
+	position = [0, 0, 0]
+	rotation = [0.0, 0.0, 0.0, 1.0]
+	scale = [1.0, 1.0, 1.0]

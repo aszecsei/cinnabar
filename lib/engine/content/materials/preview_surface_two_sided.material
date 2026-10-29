@@ -1,0 +1,30 @@
+material 1
+# A USD stage's UsdPreviewSurface material, which the stage's material instances set (see
+# docs/content/kinds/stages.md#materials): opaque, two-sided.
+shading = lit
+blend = opaque
+two_sided = true
+param base_color color = [0.18, 0.18, 0.18, 1]
+param base_color_tex texture = white
+param metallic float = 0
+param metallic_tex texture = black
+param roughness float = 0.5
+param roughness_tex texture = white
+param normal_tex texture = normal
+param emissive color = [0, 0, 0, 1]
+param emissive_tex texture = black
+param opacity float = 1
+param opacity_tex texture = white
+param opacity_threshold float = 0.5
+param uv_transform float4 = [1, 1, 0, 0]
+switch has_base_color_tex = false
+switch has_metallic_tex = false
+switch has_roughness_tex = false
+switch has_normal_tex = false
+switch has_emissive_tex = false
+switch has_opacity_tex = false
+switch opacity_from_base_alpha = false
+switch use_uv1 = false
+switch use_uv_transform = false
+---
+#include "preview_surface.hlsli"

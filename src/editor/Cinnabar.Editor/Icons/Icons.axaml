@@ -53,6 +53,8 @@
     <StreamGeometry x:Key="Icon.prefab">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM8 8H16V16H8Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.mesh">F0 M12 2.5L22 20H2ZM12 5.5L4.6 18.5H19.4Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.model">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM12 7L17.5 17H6.5Z</StreamGeometry>
+    <!-- Not from Fluent: a stage, a whole USD scene, a frame around two triangles. -->
+    <StreamGeometry x:Key="Icon.stage">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM9 8L13.5 17H4.5ZM15.5 11L19 17H12Z</StreamGeometry>
     <!-- Not from Fluent: a material, a ball half lit; its instance, a ball with a dot; a shading model, a ball and its light. -->
     <StreamGeometry x:Key="Icon.material">F0 M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 1 1 12 2.5ZM12 4A8 8 0 0 0 12 20Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.material-instance">F0 M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 1 1 12 2.5ZM12 4A8 8 0 1 0 12 20A8 8 0 1 0 12 4ZM12 9A3 3 0 1 1 12 15A3 3 0 1 1 12 9Z</StreamGeometry>

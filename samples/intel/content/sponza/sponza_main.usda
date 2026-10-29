@@ -1,0 +1,9 @@
+#usda 1.0
+(
+    doc = """Intel's PBR Sponza, from samples/intel/downloads/main_sponza.zip, which `just intel-unpack` unpacks
+    (see samples/intel/README.md). Only the root layer's upAxis and metersPerUnit count, so they are restated here."""
+    subLayers = [@../.unpacked/main_sponza/NewSponza_Main_USD_Yup_003.usda@]
+    upAxis = "Y"
+    metersPerUnit = 0.01
+    defaultPrim = "root"
+)

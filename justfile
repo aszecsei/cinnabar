@@ -47,6 +47,8 @@ cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
 clusterlod_dir := obj_dir + "/clusterlod"
+# LightUSD (TinyUSDZ) and the cooker's interface to it, tools/cook/usd, which tools/cook/usd.odin links from here.
+lightusd_dir := obj_dir + "/lightusd"
 # What tools/cook/compressonator builds from vendor/compressonator, which is checked out sparsely.
 compressonator_paths := "cmp_core license applications/_libs/cmp_math"
 # The cooker puts this in every script's cache key, so a Luau update cooks every script again.
@@ -55,6 +57,8 @@ luau_version := `git -C vendor/luau describe --tags --always`
 compressonator_version := `git -C vendor/compressonator describe --tags --always 2>/dev/null || echo unknown`
 # The cooker puts this in every mesh's cache key, so a meshoptimizer update cooks every mesh again.
 meshoptimizer_version := `git -C vendor/meshoptimizer describe --tags --always 2>/dev/null || echo unknown`
+# The cooker puts this in every stage's keys, so a LightUSD update cooks every stage again.
+lightusd_version := `git -C vendor/lightusd describe --tags --always 2>/dev/null || echo unknown`
 content_root := "samples/" + game + "/content"
 # Every cook takes the game's content root and the engine's, so one scan gives every asset its .meta file.
 roots := "--root game=" + content_root + " --root engine=lib/engine/content"
@@ -66,7 +70,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/" + game + " samples/" + game + "/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
 
 # =================================
 # Help
@@ -150,7 +154,7 @@ setup: install
     echo "✓ Project ready"
 
 # Update all vendored submodules
-update: update-luau update-compressonator update-meshoptimizer update-jolt
+update: update-luau update-compressonator update-meshoptimizer update-jolt update-lightusd
 
 # Update Luau to a release tag (default: latest)
 [script]
@@ -185,6 +189,17 @@ update-meshoptimizer tag="":
     git add vendor/meshoptimizer
     echo "✓ meshoptimizer at $tag"
 
+# Update LightUSD to a release tag (default: latest, release candidates included)
+[script]
+update-lightusd tag="":
+    set -euo pipefail
+    git -C vendor/lightusd fetch --tags --quiet
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/lightusd tag --list 'v*' --sort=-v:refname | head -n 1)
+    git -C vendor/lightusd -c advice.detachedHead=false checkout --quiet "$tag"
+    git add vendor/lightusd
+    echo "✓ LightUSD at $tag"
+
 # Update Compressonator to a release tag (default: latest)
 [script]
 update-compressonator tag="": install-compressonator
@@ -203,7 +218,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes materials effects
+build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt
@@ -251,10 +266,15 @@ meshoptimizer:
     [ -f "{{clusterlod_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/clusterlod -B "{{clusterlod_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
     cmake --build "{{clusterlod_dir}}" --config Release -- -m -nologo -v:quiet
 
+# Build LightUSD and the cooker's interface to it, with the static CRT that Odin links
+lightusd:
+    [ -f "{{lightusd_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/usd -B "{{lightusd_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
+    cmake --build "{{lightusd_dir}}" --config Release --target cn_usd -- -m -nologo -v:quiet
+
 # Build the cooker
-cook: luau compressonator meshoptimizer
+cook: luau compressonator meshoptimizer lightusd
     mkdir -p "{{tools_dir}}"
-    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -out:"{{tools_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -out:"{{tools_dir}}/cook.exe" -o:speed
 
 # Cook the game's scripts into the loose cache of the configuration. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
@@ -292,6 +312,12 @@ models config="dev": cook
 # its own GUID (see docs/content/kinds/meshes.md#mesh-files). A mesh without a .meta file gets one: commit it.
 meshes config="dev": cook
     "./{{tools_dir}}/cook.exe" meshes --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's USD stages into the loose cache of the configuration: each stage's meshes and textures, and the text of
+# its material instances and its prefab, which `just materials` and `just scenes` cook (see
+# docs/content/kinds/stages.md#stages). A stage without a .meta file gets one: commit it, with the GUIDs it gains.
+stages config="dev": cook
+    "./{{tools_dir}}/cook.exe" stages --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's effects and the engine's into the loose cache of the configuration (see
 # docs/content/kinds/effects.md#effects). An effect without a .meta file gets one: commit it.
@@ -417,12 +443,39 @@ fmt:
     odinfmt lib src samples -w
 
 # =================================
+# Intel sample
+# =================================
+
+# Unpack the Intel sample's downloads, the zips in samples/intel/downloads, into samples/intel/content/.unpacked, where
+# its stages read them (see samples/intel/README.md). It leaves out the files that no stage reads: the 3ds Max, FBX,
+# Blender and glTF versions and the renders. A missing zip is skipped with a note, so either scene can come first.
+[script]
+intel-unpack:
+    set -euo pipefail
+    src=samples/intel/downloads
+    dst=samples/intel/content/.unpacked
+    mkdir -p "$dst"
+    for zip in main_sponza.zip pkg_a_curtains.zip JungleRuins_1_0_1b.zip; do
+        if [ ! -f "$src/$zip" ]; then
+            echo "skipped $zip: not in $src (see samples/intel/README.md)"
+            continue
+        fi
+        echo "unpacking $zip"
+        # unzip's wildcards stop at a slash, so it leaves files out by extension instead of picking folders.
+        unzip -o -q "$src/$zip" -d "$dst" -x '*.max' '*.fbx' '*.blend' '*.blend1' '*.gltf' '*.bin' '*.pdf' '*/Render_*.png' '*/desktop.ini'
+    done
+
+# Report what the Intel sample's stages make, against the renderer's limits (see docs/rendering/assets.md#gpu-residency)
+intel-report: cook
+    "./{{tools_dir}}/cook.exe" stage-report samples/intel/content/sponza/sponza_main.usda samples/intel/content/sponza/sponza_curtains.usda samples/intel/content/jungle/jungle_ruins.usda
+
+# =================================
 # Testing
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau jolt compressonator meshoptimizer link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" || exit 1; done
+test: luau jolt compressonator meshoptimizer lightusd link-schema install-dxc
+    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).
