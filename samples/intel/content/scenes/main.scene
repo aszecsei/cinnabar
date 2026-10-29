@@ -1,6 +1,6 @@
-# Intel's Sponza with its curtains: the two stages' prefabs, a camera at the end of the nave looking down it, the sun
-# and a global volume. Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
-# docs/editor/document-and-scenes.md#scenes.
+# Intel's Sponza with its curtains: the two stages' prefabs, whose dome light is the sky, a camera at the end of the nave
+# looking down it, the sun and a global volume. Positions are raw World_Position values in units of 2^-24 m. The editor
+# writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 3e6501e8881e7358
@@ -20,9 +20,6 @@ component 1 Transform
 	scale = [1.0, 1.0, 1.0]
 component 42 Volume
 	shape = Global
-component 49 Environment
-	sky = [0.0, 0.0, 0.0]
-	ground = [0.0, 0.0, 0.0]
 
 entity 99fc7a52b56f77cb
 name = "Sun"

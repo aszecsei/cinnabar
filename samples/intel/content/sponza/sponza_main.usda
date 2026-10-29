@@ -7,3 +7,13 @@
     metersPerUnit = 0.01
     defaultPrim = "root"
 )
+
+# The sky. Sponza's download has its HDR image but no dome light, so this one draws it.
+def Xform "Environment"
+{
+    def DomeLight "domelight"
+    {
+        float inputs:intensity = 1
+        asset inputs:texture:file = @../.unpacked/main_sponza/textures/kloppenheim_05_4k.hdr@
+    }
+}

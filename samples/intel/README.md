@@ -18,9 +18,9 @@ Without the downloads, the stages warn that they are not cooked, the build still
 
 | Path | What it is |
 |---|---|
-| `content/sponza/sponza_main.usda` | Sublayers `main_sponza/NewSponza_Main_USD_Yup_003.usda`: 117 meshes, 3.7 million triangles, 28 materials, 98 textures. |
+| `content/sponza/sponza_main.usda` | Sublayers `main_sponza/NewSponza_Main_USD_Yup_003.usda`: 117 meshes, 3.7 million triangles, 28 materials, 98 textures. The download has an HDR sky, `textures/kloppenheim_05_4k.hdr`, but no dome light, so the layer adds one that draws it. |
 | `content/sponza/sponza_curtains.usda` | Sublayers `pkg_a_curtains/NewSponza_Curtains_USD_YUp.usda`. It is a stage of its own, because it defines the same material prims as the main stage, and one stage would merge them. |
-| `content/scenes/main.scene` | Places both Sponza prefabs, with a camera, a sun and a global volume. |
+| `content/scenes/main.scene` | Places both Sponza prefabs, with a camera, a sun and a global volume. The sky is the stage's dome light. |
 | `content/jungle/jungle_ruins.usda` | Sublayers `JungleRuins/USD/JungleRuins_Karma.usda`: 197 meshes of 18.6 million triangles, 53 of them the prototypes that its 778 point instancers share, 198 textures, 87 materials, and an instance set of each instancer, 8.7 million instances in all. Its `.meta` file turns on impostors. |
 | `content/scenes/jungle.scene` | Places the Jungle Ruins prefab, with a camera where the stage's default camera is, a sun and a global volume. Open it in the editor. |
 
