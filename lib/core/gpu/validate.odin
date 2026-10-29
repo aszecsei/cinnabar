@@ -431,8 +431,8 @@ validate_submission :: proc(
 	return .None, len(buffers), 0
 }
 
-// validate_upscale checks an upscale's textures against its upscaler: the inputs are sampled, cover the render size
-// and are in the Shader_Resource layout, and the output is a storage texture of the output size in the
+// validate_upscale checks an upscale's textures against its upscaler: the inputs, and the masks that it has, are
+// sampled, cover the render size and are in the Shader_Resource layout, and the output is a storage texture of the output size in the
 // Unordered_Access layout.
 @(private = "file")
 validate_upscale :: proc(resources: Resources, layouts: ^Layout_Tracker, u: ^Upscale) -> Validation_Error {
@@ -443,7 +443,10 @@ validate_upscale :: proc(resources: Resources, layouts: ^Layout_Tracker, u: ^Ups
 	if u.render_size.x == 0 || u.render_size.y == 0 || u.render_size.x > desc.max_render_size.x || u.render_size.y > desc.max_render_size.y {
 		return .Bad_Upscale
 	}
-	for input in ([]Texture{u.color, u.depth, u.motion}) {
+	for input, i in ([]Texture{u.color, u.depth, u.motion, u.reactive, u.transparency}) {
+		if i >= 3 && input == {} {
+			continue
+		}
 		texture, valid := resources.texture(input)
 		if !valid {
 			return .Invalid_Texture

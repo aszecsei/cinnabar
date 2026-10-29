@@ -85,12 +85,19 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_create_compute_pipeline  = null.create_compute_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
+		gpu_create_upscaler          = null.create_upscaler,
+		gpu_destroy_upscaler         = null.destroy_upscaler,
 	}
 	r := new(Renderer)
 	defer free(r)
 	r.platform = &platform
 	r.materials.defaults[.White] = platform.gpu_create_texture({size = {1, 1}, format = .RGBA8_Unorm, usage = {.Sampled}, label = "white"}, {255, 255, 255, 255})
 	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test composite"})
+	// FSR upscales the frame, with the transparent surfaces' mask.
+	r.post.upscalers.motion.pipeline = platform.gpu_create_compute_pipeline({compute = {1}, label = "test motion"})
+	upscaler := platform.gpu_create_upscaler({kind = .Fsr, max_render_size = {64, 32}, output_size = {64, 32}, label = "test"})
+	testing.expect(t, upscaler != {})
+	defer platform.gpu_destroy_upscaler(upscaler)
 	fake_sprite_pipelines(r)
 	defer sprites_destroy(&r.sprites, &platform)
 	// A moment-based material, a sorted two-sided one, and an additive one.
@@ -131,7 +138,9 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, debug_view = view}
+		f^ = {renderer = r, graph = &g, size = {64, 32}, output_size = {64, 32}, debug_view = view}
+		f.post = new(Post_Frame, platform.frame_allocator)
+		f.post.upscaler = upscaler
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.shadows = new(Shadow_Frame, platform.frame_allocator)
 		sf := new(Scene_Frame, platform.frame_allocator)
@@ -156,9 +165,11 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		f.scene = create_texture(&g, {size = f.size, format = SCENE_FORMAT, label = "scene"})
 		f.ids = create_texture(&g, {size = f.size, format = ID_FORMAT, label = "ids"})
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
+		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
 		p := add_render_pass(&g, "world", proc(_: ^Pass_Context) {}, f)
 		color(&g, p, f.scene, .Clear)
 		color(&g, p, f.ids, .Clear)
+		color(&g, p, f.velocity, .Clear)
 		depth(&g, p, f.depth, .Clear)
 
 		// Sprites draw among the moment-based surfaces.
@@ -167,6 +178,9 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		add_transparency_passes(f)
 		add_transparent_id_pass(f, keep_ids = true)
 		testing.expect_value(t, f.moments_zeroth != 0, true)
+		// The upscale reads the moments' coverage as its masks, except in the overdraw view, whose moments count layers.
+		add_upscale(f)
+		testing.expectf(t, (f.post.upscale_mask != 0) == (view == .Lit), "%v: upscale mask %v", view, f.post.upscale_mask)
 		p = add_render_pass(&g, "output", proc(_: ^Pass_Context) {}, f)
 		read(&g, p, f.scene)
 		read(&g, p, f.ids)

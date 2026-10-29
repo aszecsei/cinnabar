@@ -146,10 +146,11 @@ Post_Frame :: struct {
 	settings:         Post_Settings,
 	temporal:         bool,
 	// The upscaler that upscales in temporal AA's place, or nil, and whether its history starts again, with the
-	// motion that it reads and its result.
+	// motion and the transparent surfaces' mask that it reads, the mask zero without them, and its result.
 	upscaler:         gpu.Upscaler,
 	upscale_reset:    bool,
 	motion:           Texture,
+	upscale_mask:     Texture,
 	upscaled:         Texture,
 	// FXAA or SMAA, which run, or Off, and their textures: the tone-mapped scene that they read, and SMAA's edges and
 	// weights.

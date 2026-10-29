@@ -11,11 +11,12 @@ A vendor's temporal upscaler as a resource type (`Upscaler`), which the backend 
 
 ## Upscaling
 
-`cmd_upscale` records an `Upscale` packet: the upscaler, this frame's color, depth and motion, the output, the render size, and the frame's camera.
+`cmd_upscale` records an `Upscale` packet: the upscaler, this frame's color, depth and motion, its masks if it has them, the output, the render size, and the frame's camera.
 
 | Field | What it is |
 |---|---|
 | `color`, `depth`, `motion` | Sampled textures in the `Shader_Resource` layout, with the render size in their top left. Depth may have a stencil |
+| `reactive`, `transparency` | Optional masks, nil or textures as `color` is, from 0 to 1 in their red channels, of what the motion does not follow, such as transparent surfaces and particles. Where `reactive` is high, the new color takes the history's place. `transparency` marks content that the history follows less well, such as reflections, where the upscaler trusts its history less, more gently |
 | `output` | A storage texture of the upscaler's output size in the `Unordered_Access` layout |
 | `jitter` | The camera's jitter in the render's pixels, y down: the projection moved the image by `2 * jitter / render_size` in x and `-2 * jitter / render_size` in y, in normalized device coordinates |
 | `motion_scale` | Scales `motion`'s texels into the render's pixels, from where a pixel's surface is to where it was in the previous frame |
@@ -23,7 +24,7 @@ A vendor's temporal upscaler as a resource type (`Upscaler`), which the backend 
 | `sharpness` | The upscaler's own sharpening, from 0, none, to 1 |
 | `reset` | The history is not this frame's: a cut, the first frame, or a new render size |
 
-- **Rules:** an upscale is compute work on the graphics queue, outside a render pass. Validation checks the textures' usages and sizes against the upscaler, and with layout tracking, their layouts. The render graph declares it as a compute pass that reads the inputs and writes the output, so its barriers are a dispatch's.
+- **Rules:** an upscale is compute work on the graphics queue, outside a render pass. Validation checks the textures' usages and sizes against the upscaler, the masks' too when they are given, and with layout tracking, their layouts. The render graph declares it as a compute pass that reads the inputs and the masks and writes the output, so its barriers are a dispatch's.
 - **Bindings:** the library binds its own descriptor heaps, root signature and pipelines, so after an upscale no pipeline, push constants or pass constants are bound. The D3D12 backend binds its heaps and root signature again, and validation asks for a pipeline before the next dispatch.
 
 ## FSR
@@ -32,5 +33,6 @@ AMD FidelityFX Super Resolution through the FidelityFX API of the AMD FSR SDK (`
 
 - **The library:** `just install` downloads the API's loader, `amd_fidelityfx_loader_dx12.dll`, and the upscalers' library, `amd_fidelityfx_upscaler_dx12.dll`, from the SDK's release that the justfile pins, and the build copies them next to the executables. Both are signed by AMD and MIT-licensed (see `vendor/fidelityfx/README.md`). The backend loads the loader with `LoadLibraryExW` from the default directories, so a missing file means no FSR, and asks it for the versions of FSR that the device runs. The loader picks the newest: FSR 4 on the GPUs that have it, and FSR 3.1 on the others.
 - **A context per upscaler,** made with the HDR, depth and auto-exposure flags of the description. Debug builds turn on the API's checks. The API's messages reach the log once each, since it repeats a warning for every dispatch that it applies to.
-- **States:** the backend gives the inputs to the API in the read state that matches `Shader_Resource`, and the output in the unordered access state, which is where the graph's barriers left them. So the API issues no barriers on them, and leaves them as it found them.
+- **Masks:** `reactive` is the API's reactive mask, and `transparency` its transparency and composition mask. A nil mask is no resource, which the API takes as none.
+- **States:** the backend gives the inputs and the masks to the API in the read state that matches `Shader_Resource`, and the output in the unordered access state, which is where the graph's barriers left them. So the API issues no barriers on them, and leaves them as it found them.
 - **Pre-exposure is 1:** the API takes it from the CPU, and the engine's exposure is on the GPU, so the color's pre-exposure changes reach FSR as changes in shading (see [Anti-aliasing](../rendering/anti-aliasing.md#fsr)).

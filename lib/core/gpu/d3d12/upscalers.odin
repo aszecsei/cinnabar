@@ -177,35 +177,40 @@ upscale :: proc(list: rawptr, u: ^gpu.Upscale) {
 	assert(entry != nil, "gpu: invalid upscaler handle")
 	read_state :: FFX_RESOURCE_STATE_COMPUTE_READ | FFX_RESOURCE_STATE_PIXEL_READ
 	dispatch := Ffx_Dispatch_Desc_Upscale {
-		header                      = {type = FFX_DISPATCH_DESC_TYPE_UPSCALE},
-		command_list                = list,
-		color                       = ffx_resource(u.color, read_state),
-		depth                       = ffx_resource(u.depth, read_state),
-		motion_vectors              = ffx_resource(u.motion, read_state),
-		output                      = ffx_resource(u.output, FFX_RESOURCE_STATE_UNORDERED_ACCESS),
-		jitter_offset               = u.jitter,
-		motion_vector_scale         = u.motion_scale,
-		render_size                 = u.render_size,
-		upscale_size                = entry.desc.output_size,
-		enable_sharpening           = u.sharpness > 0,
-		sharpness                   = u.sharpness,
-		frame_time_delta            = u.delta_time * 1000,
-		pre_exposure                = 1,
-		reset                       = bool(u.reset),
-		camera_near                 = u.near,
-		camera_far                  = u.far,
-		camera_fov_angle_vertical   = u.fov_y,
-		view_space_to_meters_factor = 1,
+		header                       = {type = FFX_DISPATCH_DESC_TYPE_UPSCALE},
+		command_list                 = list,
+		color                        = ffx_resource(u.color, read_state),
+		depth                        = ffx_resource(u.depth, read_state),
+		motion_vectors               = ffx_resource(u.motion, read_state),
+		reactive                     = ffx_resource(u.reactive, read_state),
+		transparency_and_composition = ffx_resource(u.transparency, read_state),
+		output                       = ffx_resource(u.output, FFX_RESOURCE_STATE_UNORDERED_ACCESS),
+		jitter_offset                = u.jitter,
+		motion_vector_scale          = u.motion_scale,
+		render_size                  = u.render_size,
+		upscale_size                 = entry.desc.output_size,
+		enable_sharpening            = u.sharpness > 0,
+		sharpness                    = u.sharpness,
+		frame_time_delta             = u.delta_time * 1000,
+		pre_exposure                 = 1,
+		reset                        = bool(u.reset),
+		camera_near                  = u.near,
+		camera_far                   = u.far,
+		camera_fov_angle_vertical    = u.fov_y,
+		view_space_to_meters_factor  = 1,
 	}
 	if code := dev.ffx.dispatch(&entry.ffx_context, &dispatch.header); code != FFX_RETURN_OK {
 		log.errorf("d3d12: ffxDispatch failed: %d", code)
 	}
 }
 
-// ffx_resource describes a texture to the FidelityFX API, in the state that the graph's barriers left it in. The
-// API's views take the resource's own format, as they do for depth.
+// ffx_resource describes a texture to the FidelityFX API, in the state that the graph's barriers left it in, or no
+// resource for no texture. The API's views take the resource's own format, as they do for depth.
 @(private = "file")
 ffx_resource :: proc(texture: gpu.Texture, state: u32) -> Ffx_Resource {
+	if texture == {} {
+		return {}
+	}
 	entry := gpu.pool_get(&dev.textures, texture)
 	assert(entry != nil, "gpu: invalid texture handle")
 	usage := u32(FFX_RESOURCE_USAGE_READ_ONLY)
