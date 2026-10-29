@@ -51,7 +51,7 @@ void ms_depth(
 	out vertices DEPTH_VARYINGS vertices[MESHLET_MAX_VERTICES],
 	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
 ) {
-	Cluster c = load_cluster(clusters.meshlets[group], clusters.instance);
+	Cluster c = LOAD_CLUSTER(clusters, group);
 	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
 	if (thread < c.vertex_count) {
 		vertices[thread] = depth_varyings(cluster_vertex(c, thread));

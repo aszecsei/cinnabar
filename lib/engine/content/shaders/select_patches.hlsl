@@ -33,6 +33,10 @@ struct Cull_Constants {
 	uint instance_counters;
 	uint instance_views;
 	uint instance_ranges;
+	uint occlusion;
+	uint occlusion_offset;
+	uint view_first;
+	uint stats;
 	uint3 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);

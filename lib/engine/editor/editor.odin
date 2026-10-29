@@ -94,6 +94,7 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, re
 		platform    = platform,
 		assets      = assets,
 		residency   = residency,
+		renderer    = renderer,
 		live_meshes = make(map[format.Guid]Live_Mesh, platform.heap_allocator),
 		known       = make([dynamic]Known, platform.heap_allocator),
 		watched     = make([dynamic]Watched, platform.heap_allocator),
@@ -232,7 +233,13 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	}
 	if now - e.last_stats >= STATS_INTERVAL {
 		e.last_stats = now
-		link.write_message(out, game_stats(w, scripts, frame))
+		stats := game_stats(w, scripts, frame)
+		if e.renderer != nil {
+			c := render.cull_stats(e.renderer)
+			stats.early_items, stats.late_items, stats.hidden_items = c.early_items, c.late_items, c.hidden_items
+			stats.early_instances, stats.late_instances, stats.hidden_instances = c.early_instances, c.late_instances, c.hidden_instances
+		}
+		link.write_message(out, stats)
 	}
 }
 

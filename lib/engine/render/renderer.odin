@@ -249,6 +249,8 @@ Frame :: struct {
 	sky:                      ^Sky_Frame,
 	// nil without a Texture sky whose texture is resident.
 	sky_texture:              ^Sky_Texture_Frame,
+	// Frame_Desc.disable has occlusion culling.
+	no_occlusion:             bool,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -399,6 +401,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_update(&r.residency)
+	read_cull_stats(r)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
@@ -438,6 +441,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		f.post.raw, f.post.exposure, f.post.exposure_auto = true, false, false
 	}
 	f.shadow_settings = settings.shadows
+	f.no_occlusion = .Occlusion_Culling in desc.disable
 	r.last_sky_mode = settings.sky.mode
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
@@ -473,6 +477,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
 	depth(&g, p, f.depth, .Clear)
 	declare_scene_draws(f, p)
+	// With occlusion culling, that was the early view: the depth pyramid, the late view's culling and its prepass.
+	add_occlusion_passes(f)
+	add_cull_stats_copy(f)
 	add_particle_history_pass(f)
 	add_particle_prepass(f)
 	if desc.hooks.after_prepass != nil {
@@ -559,6 +566,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		add_preview_passes(f, &preview)
 	}
 	ok := execute(&g)
+	if ok {
+		finish_cull_stats(f)
+	}
 	debug.end_frame(&r.debug)
 	return ok
 }
@@ -626,6 +636,9 @@ draw_world :: proc(ctx: ^Pass_Context) {
 	if ctx.piece == 0 {
 		draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Forward)
 		draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Forward)
+		if sf := f.scene_frame; sf != nil && sf.occluding {
+			draw_scene_view(f, ctx.cb, sf.late_view, .Forward)
+		}
 	}
 	if f.hooks.world_draw != nil {
 		f.hooks.world_draw(f, ctx)

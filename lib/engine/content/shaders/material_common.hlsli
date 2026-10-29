@@ -107,7 +107,10 @@ struct Frame_Constants {
 	// The views' lists of visible instances, which a draw with DRAW_INSTANCES reads (see
 	// docs/rendering/gpu-scene.md#instanced-meshes).
 	uint visible_instances;
-	uint2 padding;
+	// The late view's occlusion constants in the upload ring, which its amplification shaders test each meshlet
+	// against (see occlusion.hlsli): the buffer's index plus 1, and 0 in every other view.
+	uint occlusion;
+	uint occlusion_offset;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

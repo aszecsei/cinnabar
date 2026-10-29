@@ -7,6 +7,7 @@
 #define MATERIAL_MESH_HLSLI
 
 #include "material_vertex.hlsli"
+#include "occlusion.hlsli"
 
 // Match MESHLET_MAX_VERTICES and MESHLET_MAX_TRIANGLES in lib/engine/asset/format/mesh.odin. A mesh group's threads
 // each write a vertex and a triangle.
@@ -39,10 +40,13 @@ struct Meshlet {
 	uint2 padding;
 };
 
-// The meshlets that an amplification group launches, and its instance ID, which an instanced draw's mesh groups take.
+// The meshlets that an amplification group launches, and its instance's poses, this frame's and last frame's, which
+// the group places once, an instanced draw's from its entity's and its own, so neither its threads nor its mesh
+// groups' do it again.
 struct Cluster_Payload {
 	uint meshlets[MESHLETS_PER_GROUP];
-	uint instance;
+	float4 rows[3];
+	float4 previous_rows[3];
 };
 
 groupshared Cluster_Payload cluster_payload;
@@ -65,7 +69,8 @@ bool lod_selected(Meshlet c, float4 rows[3], float scale) {
 // cluster_visible is whether a meshlet of an instance draws in the view: its level is selected, its sphere, grown by
 // the material's displacement bound, is in the frustum, and its normal cone does not point away from the view. The
 // cone is not tested for a two-sided material, for a material that displaces its vertices, which may turn them, for
-// an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull.
+// an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull. In the late view of
+// occlusion culling, its sphere is not behind the depth pyramid either.
 bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	float3 scales = axis_scales(instance.rows);
 	float scale = max(scales.x, max(scales.y, scales.z));
@@ -95,6 +100,10 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 		}
 	}
 #endif
+	// The late view of occlusion culling tests each meshlet against the depth pyramid too.
+	if (frame.occlusion != 0 && sphere_occluded(load_occlusion(frame.occlusion - 1, frame.occlusion_offset), center, radius)) {
+		return false;
+	}
 	return true;
 }
 
@@ -103,10 +112,6 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 // and y (see docs/rendering/gpu-scene.md#instanced-meshes).
 [numthreads(MESHLETS_PER_GROUP, 1, 1)]
 void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
-	if (thread == 0) {
-		cluster_count = 0;
-	}
-	GroupMemoryBarrierWithGroupSync();
 	Draw_Record d = load_draw();
 	uint chunk = group.x;
 	uint instance_id = 0;
@@ -116,19 +121,31 @@ void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		instance_id = group.y * INSTANCE_GROUP_ROW + group.x;
 		listed = instance_id < (d.flags >> DRAW_INSTANCE_SHIFT);
 	}
+	if (thread == 0) {
+		cluster_count = 0;
+		if (listed) {
+			Instance_Record placed = draw_instance(d, instance_id);
+			for (uint k = 0; k < 3; k++) {
+				cluster_payload.rows[k] = placed.rows[k];
+				cluster_payload.previous_rows[k] = placed.previous_rows[k];
+			}
+		}
+	}
+	GroupMemoryBarrierWithGroupSync();
 	uint local = chunk * MESHLETS_PER_GROUP + thread;
 	if (listed && local < d.count) {
 		uint meshlet = d.first + local;
 		Mesh_Record m = load_mesh(d);
 		Meshlet c = cn_buffer(m.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
-		if (cluster_visible(c, draw_instance(d, instance_id), d.bound)) {
+		Instance_Record instance = load_instance(d);
+		for (uint k = 0; k < 3; k++) {
+			instance.rows[k] = cluster_payload.rows[k];
+		}
+		if (cluster_visible(c, instance, d.bound)) {
 			uint slot;
 			InterlockedAdd(cluster_count, 1, slot);
 			cluster_payload.meshlets[slot] = meshlet;
 		}
-	}
-	if (thread == 0) {
-		cluster_payload.instance = instance_id;
 	}
 	GroupMemoryBarrierWithGroupSync();
 	DispatchMesh(cluster_count, 1, 1, cluster_payload);
@@ -145,17 +162,28 @@ struct Cluster {
 	uint triangle_count;
 };
 
-Cluster load_cluster(uint meshlet, uint instance_id) {
+// load_cluster is a meshlet of the draw, at the instance's poses that its amplification group placed. DXC cannot pass
+// the payload, or an array of it, to a function, so LOAD_CLUSTER passes its rows one by one.
+Cluster load_cluster(uint meshlet, float4 r0, float4 r1, float4 r2, float4 p0, float4 p1, float4 p2) {
 	Cluster c;
 	c.draw = load_draw();
 	c.mesh = load_mesh(c.draw);
-	c.instance = draw_instance(c.draw, instance_id);
+	c.instance = load_instance(c.draw);
+	c.instance.rows[0] = r0;
+	c.instance.rows[1] = r1;
+	c.instance.rows[2] = r2;
+	c.instance.previous_rows[0] = p0;
+	c.instance.previous_rows[1] = p1;
+	c.instance.previous_rows[2] = p2;
 	c.meshlet = cn_buffer(c.mesh.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
 	c.index = meshlet;
 	c.vertex_count = c.meshlet.counts & 0xff;
 	c.triangle_count = (c.meshlet.counts >> 8) & 0xff;
 	return c;
 }
+
+#define LOAD_CLUSTER(clusters, group) load_cluster(clusters.meshlets[group], clusters.rows[0], clusters.rows[1], clusters.rows[2], \
+	clusters.previous_rows[0], clusters.previous_rows[1], clusters.previous_rows[2])
 
 // cluster_vertex is a meshlet's vertex.
 Material_Vertex cluster_vertex(Cluster c, uint i) {

@@ -154,6 +154,7 @@ static class EditorCommands
     public const string GlobalIllumination = "view.globalIllumination";
     public const string Shadows = "view.shadows";
     public const string PostEffects = "view.postEffects";
+    public const string OcclusionCulling = "view.occlusionCulling";
     public const string Icons = "view.icons";
     public const string Helpers = "view.helpers";
     public const string ExposureUp = "view.exposureUp";
@@ -992,6 +993,7 @@ static class EditorCommands
         Feature(GlobalIllumination, "Global Illumination", "Light the viewport with the light that bounces; off, with the environment's ambient light.", s => s.NoGi, (s, v) => s with { NoGi = v });
         Feature(Shadows, "Shadows", "Draw the lights' shadows in the viewport.", s => s.NoShadows, (s, v) => s with { NoShadows = v });
         Feature(PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
+        Feature(OcclusionCulling, "Occlusion Culling", "Leave out what other surfaces hide, by last frame's depth and this one's; off, only what is outside the view.", s => s.NoOcclusionCulling, (s, v) => s with { NoOcclusionCulling = v });
         commands.Register(new Command(Icons, "Icons", () => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = !shell.ViewportSettings.ShowIcons })
         {
             Description = "Show icons for the lights, volumes and cameras, which select them when clicked.",

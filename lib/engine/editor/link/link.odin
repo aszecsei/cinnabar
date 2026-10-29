@@ -601,6 +601,7 @@ Viewport_Settings :: struct {
 	no_gi:                bool,
 	no_shadows:           bool,
 	no_post_effects:      bool,
+	no_occlusion_culling: bool,
 	// Stops added to the exposure.
 	exposure_offset:      f32,
 	// Icons for the lights, volumes and cameras, which pick them.
@@ -886,6 +887,14 @@ Game_Stats :: struct {
 	// the rest.
 	script_bytes: u64,
 	modules:      []Script_Module_Memory,
+	// What the camera drew a frame or two ago (see docs/rendering/gpu-scene.md#occlusion-culling): its items, as
+	// draws, and its instance sets' instances, each drawn early or late, and those that occlusion culling hid.
+	early_items:      u32,
+	late_items:       u32,
+	hidden_items:     u32,
+	early_instances:  u32,
+	late_instances:   u32,
+	hidden_instances: u32,
 }
 
 // Game commands (see docs/editor/shell-and-panels.md#commands).

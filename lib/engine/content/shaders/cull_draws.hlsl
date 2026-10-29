@@ -7,6 +7,7 @@
 // docs/rendering/gpu-scene.md#impostors). An instanced item is drawn once for each of its set's instances that
 // cull_instances.hlsl listed in the view (see docs/rendering/gpu-scene.md#instanced-meshes). A dispatch row is a view.
 #include "cinnabar.hlsli"
+#include "occlusion.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
 // upload ring, at these offsets of its buffer.
@@ -42,6 +43,14 @@ struct Cull_Constants {
 	uint instance_counters;
 	uint instance_views;
 	uint instance_ranges;
+	// The frame's Occlusion_Constants in the upload ring, without occlusion culling 0, and the first view of the
+	// dispatch: a dispatch row is the view after it by the row's number.
+	uint occlusion;
+	uint occlusion_offset;
+	uint view_first;
+	// The camera's tally (see Cull_Stats in lib/engine/render/occlusion.odin): its draws, early and late, and its
+	// items that the depth pyramid hides.
+	uint stats;
 	uint3 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
@@ -50,6 +59,8 @@ CN_PASS_CONSTANTS(Cull_Constants, cull);
 // space of the view's instances: a point is inside when dot(plane.xyz, p) + plane.w >= 0 for every one. A view's draws
 // start at first_draw. A shadow view draws only the items that cast shadows. The view model's view draws only the view
 // model's items, which are relative to the camera, and every other view leaves them out.
+// Matches VIEW_CAMERA in lib/engine/render/scene.odin: the camera's view is the first.
+static const uint VIEW_CAMERA = 0;
 static const uint VIEW_CASTERS = 1;
 static const uint VIEW_MODEL = 2;
 struct Cull_View {
@@ -118,14 +129,15 @@ struct Instance_Record {
 	uint2 padding;
 };
 
-bool item_visible(Item item, Cull_View view);
+bool item_visible(Item item, Cull_View view, out float3 center, out float radius);
 
 [numthreads(64, 1, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (id.x >= cull.item_count) {
 		return;
 	}
-	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + id.y * sizeof(Cull_View));
+	uint view_index = cull.view_first + id.y;
+	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + view_index * sizeof(Cull_View));
 	Item item = cn_buffer(cull.items).Load<Item>(cull.items_offset + id.x * sizeof(Item));
 	if ((item.flags & (ITEM_SURFACE | ITEM_RIBBON | ITEM_PARTICLES)) != 0) {
 		return;
@@ -136,23 +148,56 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (((view.flags & VIEW_MODEL) != 0) != ((item.flags & ITEM_VIEW_MODEL) != 0)) {
 		return;
 	}
+	// With occlusion culling (see occlusion.hlsli), the camera's opaque items are split between its early view, which
+	// draws an item whose slot was visible last frame, and the late view, which draws one that the depth pyramid shows
+	// and the early view did not draw, and keeps each slot that the pyramid shows for next frame. The other items draw
+	// in the early view.
+	bool culls_occlusion = (view.flags & (VIEW_EARLY | VIEW_LATE)) != 0;
+	Occlusion_Constants o = (Occlusion_Constants)0;
+	if (culls_occlusion) {
+		o = load_occlusion(cull.occlusion, cull.occlusion_offset);
+		if (item.bin >= o.opaque_bins) {
+			culls_occlusion = false;
+			if ((view.flags & VIEW_LATE) != 0) {
+				return;
+			}
+		}
+	}
 	uint instances = 1;
 	uint flags = 0;
 	uint visible = 0;
+	float3 center;
+	float radius;
 	if ((item.flags & ITEM_INSTANCED) != 0) {
-		// Its set's list in the view, which cull_instances.hlsl culled.
-		uint at = ((item.entry * cull.instance_views + id.y) * INSTANCE_LISTS + item.list) * 4;
+		// Its set's list in the view, which cull_instances.hlsl culled, by occlusion too.
+		uint at = ((item.entry * cull.instance_views + view_index) * INSTANCE_LISTS + item.list) * 4;
 		instances = cn_buffer(cull.instance_counters).Load(at);
 		if (instances == 0) {
 			return;
 		}
 		flags = DRAW_INSTANCES;
 		visible = cn_buffer(cull.instance_counters).Load(cull.instance_ranges * 4 + at);
-	} else if (!item_visible(item, view)) {
+	} else if (!item_visible(item, view, center, radius)) {
 		return;
+	} else if (culls_occlusion && (view.flags & VIEW_EARLY) != 0) {
+		if (!slot_was_seen(o, item.instance)) {
+			return;
+		}
+	} else if (culls_occlusion) {
+		if (sphere_occluded(o, center, radius)) {
+			cn_rw_buffer(cull.stats).InterlockedAdd(8, 1);
+			return;
+		}
+		mark_slot_seen(o, item.instance);
+		if (slot_was_seen(o, item.instance)) {
+			return;
+		}
+	}
+	if (view_index == VIEW_CAMERA || (view.flags & VIEW_LATE) != 0) {
+		cn_rw_buffer(cull.stats).InterlockedAdd((view.flags & VIEW_LATE) != 0 ? 4 : 0, 1);
 	}
 	uint slot;
-	cn_rw_buffer(cull.counts).InterlockedAdd((id.y * cull.bin_count + item.bin) * 4, 1, slot);
+	cn_rw_buffer(cull.counts).InterlockedAdd((view_index * cull.bin_count + item.bin) * 4, 1, slot);
 	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
 	uint groups = (item.count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP;
 	if ((item.flags & (ITEM_MESH_PATH | ITEM_INSTANCED)) == (ITEM_MESH_PATH | ITEM_INSTANCED)) {
@@ -177,11 +222,14 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 }
 
 // item_visible is whether a view draws an item: its sphere, moved by its instance's rows, is in the view's frustum, and
-// an item with an impostor, or an impostor's, is the one of the two that the camera draws.
-bool item_visible(Item item, Cull_View view) {
+// an item with an impostor, or an impostor's, is the one of the two that the camera draws. It gives the sphere, relative
+// to the camera, which occlusion culling tests.
+bool item_visible(Item item, Cull_View view, out float3 center, out float radius) {
+	center = 0;
+	radius = 0;
 	Instance_Record instance = cn_buffer(cull.instances).Load<Instance_Record>(item.instance * sizeof(Instance_Record));
-	float4 center = float4(item.sphere.xyz, 1);
-	float3 p = float3(dot(instance.rows[0], center), dot(instance.rows[1], center), dot(instance.rows[2], center)) - view.offset.xyz;
+	float4 sphere_center = float4(item.sphere.xyz, 1);
+	float3 p = float3(dot(instance.rows[0], sphere_center), dot(instance.rows[1], sphere_center), dot(instance.rows[2], sphere_center)) - view.offset.xyz;
 	// The largest scale of an axis, a column's length, scales the radius.
 	float3 scales = instance.rows[0].xyz * instance.rows[0].xyz + instance.rows[1].xyz * instance.rows[1].xyz + instance.rows[2].xyz * instance.rows[2].xyz;
 	float scale = sqrt(max(scales.x, max(scales.y, scales.z)));
@@ -195,12 +243,13 @@ bool item_visible(Item item, Cull_View view) {
 			return false;
 		}
 	}
-	float radius = item.sphere.w * scale + item.bound;
+	radius = item.sphere.w * scale + item.bound;
 	// A billboard's sphere turns about the instance's position, so the sphere about that position that holds it.
 	if ((item.flags & ITEM_BILLBOARD) != 0) {
 		p = float3(instance.rows[0].w, instance.rows[1].w, instance.rows[2].w) - view.offset.xyz;
 		radius = (length(item.sphere.xyz) + item.sphere.w) * scale + item.bound;
 	}
+	center = p;
 	for (uint i = 0; i < 6; i++) {
 		if (dot(view.planes[i].xyz, p) + view.planes[i].w < -radius) {
 			return false;

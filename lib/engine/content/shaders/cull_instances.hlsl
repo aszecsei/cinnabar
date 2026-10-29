@@ -8,6 +8,7 @@
 //   List: a group for each cell in each view writes its visible instances into their lists' ranges.
 // cull_draws.hlsl then draws each of a set's items once for each instance in its list's range of the view.
 #include "instanced.hlsli"
+#include "occlusion.hlsli"
 
 // Matches Instance_Cull_Constants in lib/engine/render/scene.odin. The sets, the jobs and the views are in the upload
 // ring, at these offsets of their buffers.
@@ -33,7 +34,14 @@ struct Instance_Cull_Constants {
 	float4 camera;
 	float lod_scale;
 	float lod_near;
-	uint2 padding;
+	// The views of the dispatch, the early phases' or the late view's, and the frame's Occlusion_Constants.
+	uint view_first;
+	uint view_rows;
+	uint occlusion;
+	uint occlusion_offset;
+	// The camera's tally (see Cull_Stats in lib/engine/render/occlusion.odin).
+	uint stats;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Instance_Cull_Constants, cull);
 
@@ -54,6 +62,8 @@ static const uint IMPOSTOR_LIST = LEVEL_BUCKETS;
 static const uint SET_CASTS_SHADOWS = 1;
 static const uint SET_IMPOSTOR = 2;
 static const uint SET_BILLBOARD = 4;
+// A set whose items are all opaque, which occlusion culling culls.
+static const uint SET_OCCLUDABLE = 8;
 struct Instance_Set_Record {
 	uint instances;
 	uint cells;
@@ -93,6 +103,11 @@ struct Cull_View {
 static const uint INSTANCE_RECORD_SIZE = 112;
 
 groupshared uint visible_bits[8];
+// With occlusion culling, the late view's instances that the depth pyramid shows, which are the cell's bits for next
+// frame.
+groupshared uint seen_bits[8];
+// The late view's instances in the frustum that the depth pyramid hides, for the camera's tally.
+groupshared uint hidden_count;
 groupshared uint list_bits[32];
 groupshared uint list_counts[LISTS];
 groupshared uint list_starts[LISTS];
@@ -135,6 +150,10 @@ uint level_bucket(Instance_Set_Record set, float3 mesh_center, float scale) {
 void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_index, uint view_index, uint bits_at) {
 	if (thread < 8) {
 		visible_bits[thread] = 0;
+		seen_bits[thread] = 0;
+	}
+	if (thread == 0) {
+		hidden_count = 0;
 	}
 	if (thread < 32) {
 		list_bits[thread] = 0;
@@ -144,6 +163,18 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 	}
 	GroupMemoryBarrierWithGroupSync();
 	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + view_index * sizeof(Cull_View));
+	// With occlusion culling (see occlusion.hlsli), a set whose items are all opaque is split between the camera's
+	// early view, which takes the instances that were visible last frame, and the late view, which takes those that the
+	// depth pyramid shows and the early view did not, and keeps them for next frame. A set with other items is the early
+	// view's alone.
+	bool occludable = (set.flags & SET_OCCLUDABLE) != 0;
+	bool early = (view.flags & VIEW_EARLY) != 0 && occludable;
+	bool late = (view.flags & VIEW_LATE) != 0;
+	Occlusion_Constants o = (Occlusion_Constants)0;
+	uint seen_at = (set.first_cell + cell_index) * 32;
+	if (early || late) {
+		o = load_occlusion(cull.occlusion, cull.occlusion_offset);
+	}
 	Instance_Cell cell = cn_buffer(set.cells).Load<Instance_Cell>(cell_index * sizeof(Instance_Cell));
 	ByteAddressBuffer records = cn_buffer(cull.instances);
 	float4 entity[3];
@@ -156,7 +187,16 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 	// The mesh's sphere, moved by an instance's pose, stays within its reach of the instance's position, scaled.
 	float reach = length(set.sphere.xyz) + set.sphere.w;
 	float3 cell_center = transform_point(entity, cell.center) - view.offset.xyz;
-	takes = takes && sphere_in_view(view, cell_center, (cell.radius + reach * cell.max_scale) * entity_scale + set.bound);
+	float cell_radius = (cell.radius + reach * cell.max_scale) * entity_scale + set.bound;
+	takes = takes && sphere_in_view(view, cell_center, cell_radius);
+	// The late view first tests the whole cell, whose instances are all hidden when it is, as the tally counts them.
+	if (takes && late && occludable && sphere_occluded(o, cell_center, cell_radius)) {
+		takes = false;
+		if (thread == 0) {
+			hidden_count = cell.count;
+		}
+	}
+	takes = takes && !(late && !occludable);
 	if (takes && thread < cell.count) {
 		float4 local[3];
 		instance_rows(cn_buffer(set.instances), cell.first + thread, local);
@@ -171,7 +211,21 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 			center = float3(rows[0].w, rows[1].w, rows[2].w) - view.offset.xyz;
 			radius = reach * scale + set.bound;
 		}
-		if (sphere_in_view(view, center, radius)) {
+		bool shown = sphere_in_view(view, center, radius);
+		uint bit = 1u << (thread % 32);
+		bool was_seen = (early || late) && (cn_rw_buffer(o.cell_seen).Load(seen_at + (thread / 32) * 4) & bit) != 0;
+		if (early) {
+			shown = shown && was_seen;
+		} else if (late && shown && !sphere_occluded(o, center, radius)) {
+			InterlockedOr(seen_bits[thread / 32], bit);
+			shown = !was_seen;
+		} else if (late) {
+			if (shown) {
+				InterlockedAdd(hidden_count, 1);
+			}
+			shown = false;
+		}
+		if (shown) {
 			InterlockedOr(visible_bits[thread / 32], 1u << (thread % 32));
 			// Each view draws the mesh or its impostor, and the mesh's levels, as the camera does, as cull_draws.hlsl
 			// picks them, so a shadow is the shape that the camera sees.
@@ -194,6 +248,22 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 	if (thread < 32) {
 		bits.Store(bits_at + 32 + thread * 4, list_bits[thread]);
 	}
+	// The camera's tally: what its views list, and what the late view's pyramid hides.
+	if (thread == 0 && (view_index == 0 || late)) {
+		uint listed = 0;
+		for (uint w = 0; w < 8; w++) {
+			listed += countbits(visible_bits[w]);
+		}
+		RWByteAddressBuffer stats = cn_rw_buffer(cull.stats);
+		stats.InterlockedAdd(late ? 16 : 12, listed);
+		if (hidden_count > 0) {
+			stats.InterlockedAdd(20, hidden_count);
+		}
+	}
+	// The late view keeps what the pyramid shows for next frame's early view.
+	if (late && occludable && thread < 8) {
+		cn_rw_buffer(o.cell_seen).Store(seen_at + thread * 4, seen_bits[thread]);
+	}
 	if (thread < LISTS && list_counts[thread] > 0) {
 		cn_rw_buffer(cull.counters).InterlockedAdd(counter(0, set_index, view_index, thread) * 4, list_counts[thread]);
 	}
@@ -202,19 +272,24 @@ void cull_cell(uint thread, uint set_index, Instance_Set_Record set, uint cell_i
 // place_lists is the thread of one of a set's lists in a view in the place phase: its range of the visible lists,
 // cut short where they are full.
 void place_lists(uint i) {
-	uint lists = cull.set_count * cull.view_count * LISTS;
-	if (i >= lists) {
+	if (i >= cull.set_count * cull.view_rows * LISTS) {
 		return;
 	}
+	// The dispatch's lists: each set's in each of its views.
+	uint per_set = cull.view_rows * LISTS;
+	uint set = i / per_set;
+	uint view = cull.view_first + (i % per_set) / LISTS;
+	uint list = i % LISTS;
 	RWByteAddressBuffer counters = cn_rw_buffer(cull.counters);
-	uint count = counters.Load(i * 4);
+	uint at = counter(0, set, view, list);
+	uint count = counters.Load(at * 4);
 	uint start = 0;
 	if (count > 0) {
 		counters.InterlockedAdd(counter(3, 0, 0, 0) * 4, count, start);
 	}
 	uint fits = start < cull.visible_capacity ? min(count, cull.visible_capacity - start) : 0;
-	counters.Store(i * 4, fits);
-	counters.Store((2 * lists + i) * 4, start);
+	counters.Store(at * 4, fits);
+	counters.Store(counter(2, set, view, list) * 4, start);
 }
 
 // list_cell is a cell's group in a view in the list phase: each instance that its bits have takes the next place of
@@ -270,7 +345,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex, uint3 id : S
 	if (job >= cull.job_count) {
 		return;
 	}
-	uint view_index = group.z;
+	uint view_index = cull.view_first + group.z;
 	uint set_index = cn_buffer(cull.jobs).Load(cull.jobs_offset + job * 4);
 	Instance_Set_Record set = cn_buffer(cull.sets).Load<Instance_Set_Record>(cull.sets_offset + set_index * sizeof(Instance_Set_Record));
 	uint cell_index = job - set.first_job;
