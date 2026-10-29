@@ -10,12 +10,17 @@ import "cinnabar:core/gpu"
 // The vendors' upscalers (see docs/rendering/anti-aliasing.md#fsr): FSR, as the quality chooses in temporal AA's
 // place, through the GPU interface's upscalers (see docs/gpu/upscalers.md#upscalers). Like temporal AA, it takes the
 // jittered scene and upscales it into a new scene at the frame's size, with its own history; it reads the prepass's
-// velocity, with the camera's motion where the prepass drew nothing, which the motion pass adds.
+// velocity, with the camera's motion where the prepass drew nothing, which the motion pass adds. The motion pass also
+// writes how much moment-based transparency and the sprites cover each pixel, which the upscaler takes as its reactive
+// and transparency masks, so what moves without velocity does not trail.
 
 UPSCALE_MOTION_SHADER :: #load("../content/shaders/upscale_motion.hlsl.meta", string)
 
 // The motion that the upscalers read: the velocity, in UV, from where a pixel's surface was to where it is.
 MOTION_FORMAT :: VELOCITY_FORMAT
+// The transparent surfaces' mask that the upscalers read: their coverage, 1 - e^-b0, from moment-based transparency's
+// optical depth.
+UPSCALE_MASK_FORMAT :: gpu.Format.R8_Unorm
 
 // Upscalers is the upscalers' state between frames, in Post. One upscaler upscales into the frame's size; a frame of
 // another size, or another technique, makes a new one.
@@ -34,13 +39,16 @@ Upscalers :: struct {
 // Motion_Push matches Push in upscale_motion.hlsl.
 @(private = "file")
 Motion_Push :: struct {
-	reproject:    matrix[4, 4]f32,
-	jitter:       [2]f32,
-	inverse_size: [2]f32,
-	size:         [2]u32,
-	velocity:     u32,
-	depth:        u32,
-	output:       u32,
+	reproject:      matrix[4, 4]f32,
+	jitter:         [2]f32,
+	inverse_size:   [2]f32,
+	size:           [2]u32,
+	velocity:       u32,
+	depth:          u32,
+	output:         u32,
+	// Zero without a mask.
+	moments_zeroth: u32,
+	mask:           u32,
 }
 
 #assert(size_of(Motion_Push) <= gpu.MAX_PUSH_CONSTANTS_SIZE)
@@ -117,6 +125,12 @@ add_upscale :: proc(f: ^Frame) {
 	read(g, pass, f.velocity)
 	read(g, pass, f.depth)
 	write(g, pass, pf.motion)
+	// The overdraw view counts layers in the moments, not their optical depth.
+	if f.moments_zeroth != 0 && f.debug_view != .Transparent_Overdraw {
+		pf.upscale_mask = create_texture(g, {size = f.size, format = UPSCALE_MASK_FORMAT, label = "upscale mask"})
+		read(g, pass, f.moments_zeroth)
+		write(g, pass, pf.upscale_mask)
+	}
 
 	pf.temporal_in = f.scene
 	pf.upscaled = create_texture(g, {size = f.output_size, format = SCENE_FORMAT, label = "upscaled scene"})
@@ -124,6 +138,9 @@ add_upscale :: proc(f: ^Frame) {
 	read(g, pass, f.scene)
 	read(g, pass, f.depth)
 	read(g, pass, pf.motion)
+	if pf.upscale_mask != 0 {
+		read(g, pass, pf.upscale_mask)
+	}
 	write(g, pass, pf.upscaled)
 	f.scene, f.scene_size = pf.upscaled, f.output_size
 }
@@ -141,20 +158,28 @@ run_motion :: proc(ctx: ^Pass_Context) {
 		depth        = gpu.read_index(gpu_texture(g, f.depth)),
 		output       = gpu.write_index(gpu_texture(g, f.post.motion)),
 	}
+	if f.post.upscale_mask != 0 {
+		push.moments_zeroth = gpu.read_index(gpu_texture(g, f.moments_zeroth))
+		push.mask = gpu.write_index(gpu_texture(g, f.post.upscale_mask))
+	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.upscalers.motion.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
 }
 
 // run_upscale gives the upscaler the jitter in the scene's pixels, y down, and the motion from where a surface is to
-// where it was, in the scene's pixels: the velocity's opposite. The first frame has no time since the last, so it
-// takes a 60th of a second.
+// where it was, in the scene's pixels: the velocity's opposite. The transparent surfaces' mask is both its reactive
+// mask and its transparency mask. The first frame has no time since the last, so it takes a 60th of a second.
 @(private = "file")
 run_upscale :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	pf := f.post
 	g := ctx.graph
 	size := [2]f32{f32(f.size.x), f32(f.size.y)}
+	mask: gpu.Texture
+	if pf.upscale_mask != 0 {
+		mask = gpu_texture(g, pf.upscale_mask)
+	}
 	gpu.cmd_upscale(
 		ctx.cb,
 		{
@@ -162,6 +187,8 @@ run_upscale :: proc(ctx: ^Pass_Context) {
 			color = gpu_texture(g, pf.temporal_in),
 			depth = gpu_texture(g, f.depth),
 			motion = gpu_texture(g, pf.motion),
+			reactive = mask,
+			transparency = mask,
 			output = gpu_texture(g, pf.upscaled),
 			render_size = f.size,
 			jitter = f.jitter * [2]f32{0.5, -0.5} * size,

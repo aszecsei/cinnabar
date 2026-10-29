@@ -876,6 +876,11 @@ validate_upscales :: proc(t: ^testing.T) {
 		{{upscaler = UPSCALER, color = TARGET, depth = SAMPLED, motion = SAMPLED, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
 		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, output = SAMPLED, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
 		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SMALL_TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		// The masks are optional, and sampled where they are given.
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = SAMPLED, transparency = STORAGE, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .None},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = SMALL_TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, transparency = TARGET, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Bad_Upscale},
+		{{upscaler = UPSCALER, color = SAMPLED, depth = SAMPLED, motion = SAMPLED, reactive = {index = 9, generation = 1}, output = STORAGE, render_size = {32, 32}}, false, .Graphics, .Invalid_Texture},
 	}
 	for c, i in cases {
 		cb := command_buffer(allocator)
@@ -909,6 +914,18 @@ validate_upscales :: proc(t: ^testing.T) {
 	err, _ = validate(cb, RESOURCES, &layouts)
 	testing.expect_value(t, err, Validation_Error.Layout_Mismatch)
 	track_layout(&layouts, STORAGE, .Unordered_Access)
+	err, _ = validate(cb, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.None)
+
+	// So are the masks.
+	masked := UPSCALE
+	masked.reactive, masked.transparency = SAMPLED, MULTI
+	track_layout(&layouts, MULTI, .Render_Target)
+	cb = command_buffer(allocator)
+	cmd_upscale(&cb, masked)
+	err, _ = validate(cb, RESOURCES, &layouts)
+	testing.expect_value(t, err, Validation_Error.Layout_Mismatch)
+	track_layout(&layouts, MULTI, .Shader_Resource)
 	err, _ = validate(cb, RESOURCES, &layouts)
 	testing.expect_value(t, err, Validation_Error.None)
 

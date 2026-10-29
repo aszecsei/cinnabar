@@ -41,7 +41,7 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 **The overdraw view.** The `Transparent_Overdraw` debug view counts the transparent layers at each pixel, sorted ones and sprites included: the moments pass, and the sprites' moments pass, add 1 for each layer in place of its optical depth. It shows them as heat colors from 1 to 8. Additive surfaces have no moments, so the view leaves them out.
 
 **Limits:**
-- Transparent surfaces have no velocities, so temporal AA moves their pixels with the camera, and a moving transparent surface leaves a short trail.
+- Transparent surfaces have no velocities, so temporal AA moves their pixels with the camera, and a moving transparent surface leaves a short trail. FSR takes the moments' coverage as its masks, so moment-based surfaces and sprites do not trail under it, but sorted and additive ones do (see [FSR](anti-aliasing.md#fsr)).
 - They cast no shadows, and the cooker turns `cast_shadows` off for them.
 - The material previews draw a moment-based material as a sorted one, since they have one mesh.
 

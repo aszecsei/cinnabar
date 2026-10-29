@@ -12,7 +12,7 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 - **Order:** the sprites take their place in the moments, so particles need no sort, and draw among glass.
 - **Limits:**
   - Particles draw as sprites, squares that face the camera, as ribbons (see [Ribbons](#ribbons)), or as meshes (see [Mesh particles](#mesh-particles)).
-  - Sprites and ribbons cast no shadows, have no velocities, and so trail under temporal AA and FSR.
+  - Sprites and ribbons cast no shadows and have no velocities, so they trail under temporal AA. Under FSR, the moments' mask keeps sprites and moment-based ribbons from trailing; sorted and additive ribbons still trail (see [FSR](anti-aliasing.md#fsr)).
   - They draw in the camera's view only.
 
 ## Systems

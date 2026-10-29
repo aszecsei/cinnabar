@@ -238,6 +238,12 @@ Upscale :: struct {
 	color:        Texture,
 	depth:        Texture,
 	motion:       Texture,
+	// Optional masks, as color is otherwise, from 0 to 1 in their red channels, of what the motion does not follow,
+	// such as transparent surfaces and particles. Where reactive is high, the new color takes the history's place.
+	// transparency marks content that the history follows less well, such as reflections, which the upscaler then
+	// trusts its history less on, more gently.
+	reactive:     Texture,
+	transparency: Texture,
 	output:       Texture,
 	render_size:  [2]u32,
 	// The camera's jitter in the render's pixels, y down: the projection moved the image by 2 * jitter / render_size
