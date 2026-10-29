@@ -1,6 +1,6 @@
 # Intel sample
 
-A scene built from USD stages of Intel's [Graphics Research Samples Library](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html): Sponza with its curtains. Jungle Ruins, from the same library, is the next scene; see [Jungle Ruins](#jungle-ruins). The scenes are not in the repository, because they are several gigabytes. This sample holds only small wrapper stages that point at the downloads, and the `.meta` files that give everything that the stages make a stable GUID (see [Stages](../../docs/content/kinds/stages.md)).
+Scenes built from USD stages of Intel's [Graphics Research Samples Library](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html): Sponza with its curtains, and Jungle Ruins (see [Jungle Ruins](#jungle-ruins)). The scenes are not in the repository, because they are several gigabytes. This sample holds only small wrapper stages that point at the downloads, and the `.meta` files that give everything that the stages make a stable GUID (see [Stages](../../docs/content/kinds/stages.md)).
 
 ## Getting the scenes
 
@@ -21,6 +21,8 @@ Without the downloads, the stages warn that they are not cooked, the build still
 | `content/sponza/sponza_main.usda` | Sublayers `main_sponza/NewSponza_Main_USD_Yup_003.usda`: 117 meshes, 3.7 million triangles, 28 materials, 98 textures. |
 | `content/sponza/sponza_curtains.usda` | Sublayers `pkg_a_curtains/NewSponza_Curtains_USD_YUp.usda`. It is a stage of its own, because it defines the same material prims as the main stage, and one stage would merge them. |
 | `content/scenes/main.scene` | Places both Sponza prefabs, with a camera, a sun and a global volume. |
+| `content/jungle/jungle_ruins.usda` | Sublayers `JungleRuins/USD/JungleRuins_Karma.usda`: 197 meshes of 18.6 million triangles, 53 of them the prototypes that its 778 point instancers share, 198 textures, 87 materials, and an instance set of each instancer, 8.7 million instances in all. Its `.meta` file turns on impostors. |
+| `content/scenes/jungle.scene` | Places the Jungle Ruins prefab, with a camera where the stage's default camera is, a sun and a global volume. Open it in the editor. |
 
 `just intel-report` prints what each stage makes against the renderer's limits: the prims, meshes, triangles, materials, textures and instances.
 
@@ -28,11 +30,11 @@ Sponza's dirt decals (`decals_1st_floor`, `decals_2nd_floor` and `decals_3rd_flo
 
 ### Jungle Ruins
 
-`just intel-unpack` unpacks Jungle Ruins too, and the cooker reads it: a stage that sublayers `JungleRuins/USD/JungleRuins_Karma.usda` composes its 19 binary layers and converts in about 17 seconds. It is not a stage of the sample yet, because cooking it needs more than the engine has:
+`just intel-unpack` unpacks Jungle Ruins too. Its first cook takes about 8 minutes and 18 GB of memory. Its foliage is point instancers, which draw as one `Instanced_Mesh_Renderer` each (see [GPU scene](../../docs/rendering/gpu-scene.md#instanced-meshes)). How it draws:
 
-- Its foliage is point instancers: 8.7 million instances. An entity for each is far beyond a scene's limits; drawing them needs an instanced renderer.
-- Its meshes alone are 171 million triangles, and converting it with its point instancers takes about 26 GB of memory.
-- Its plant textures are TIFF and some of its tree textures are EXR, which the cooker cannot decode yet.
+- **Speed.** A frame of the editor's view of it takes about 38 ms on an RTX 5090, 25 ms of it on the CPU. Without mesh shaders, the instances draw at their meshes' finest level until their impostors take over, about 800 ms.
+- **Textures.** Its plant textures are TIFF and some of its tree textures are EXR, which the cooker cannot decode yet, so the plants are untextured.
+- **Sky.** The scene's background is black: the engine has no sky.
 
 ## Credits and licenses
 

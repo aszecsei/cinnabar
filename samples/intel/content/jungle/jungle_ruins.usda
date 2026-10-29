@@ -1,0 +1,8 @@
+#usda 1.0
+(
+    doc = """Intel's Jungle Ruins, from samples/intel/downloads/JungleRuins_1_0_1b.zip, which `just intel-unpack` unpacks
+    (see samples/intel/README.md). Only the root layer's upAxis and metersPerUnit count, so they are restated here."""
+    subLayers = [@../.unpacked/JungleRuins/USD/JungleRuins_Karma.usda@]
+    upAxis = "Z"
+    metersPerUnit = 0.01
+)

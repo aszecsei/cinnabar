@@ -4,7 +4,8 @@
 // shader path writes a mesh draw instead, of an amplification group for each MESHLETS_PER_GROUP of its meshlets, which
 // cull them (see material_mesh.hlsli). An item with an impostor draws as its mesh up to where the impostor takes over,
 // and its impostor's item past it, by the camera's level of detail in every view (see
-// docs/rendering/gpu-scene.md#impostors). A dispatch row is a view.
+// docs/rendering/gpu-scene.md#impostors). An instanced item is drawn once for each of its set's instances that
+// cull_instances.hlsl listed in the view (see docs/rendering/gpu-scene.md#instanced-meshes). A dispatch row is a view.
 #include "cinnabar.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
@@ -36,7 +37,12 @@ struct Cull_Constants {
 	float4 camera;
 	float lod_scale;
 	float lod_near;
-	uint2 padding;
+	// cull_instances.hlsl's counters: the count of each of each set's lists in each view, then at instance_ranges
+	// words, where they start.
+	uint instance_counters;
+	uint instance_views;
+	uint instance_ranges;
+	uint3 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -72,6 +78,8 @@ static const uint ITEM_HAS_IMPOSTOR = 64;
 // particle_meshes.hlsl writes.
 static const uint ITEM_RIBBON = 128;
 static const uint ITEM_PARTICLES = 256;
+// An Instanced_Mesh_Renderer's item, whose entry is its set's and list its set's list that it draws.
+static const uint ITEM_INSTANCED = 512;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -84,7 +92,8 @@ struct Item {
 	float4 sphere;
 	float bound;
 	float impostor_error;
-	uint2 padding;
+	uint entry;
+	uint list;
 	float4 lod_sphere;
 };
 
@@ -92,6 +101,13 @@ struct Item {
 static const uint ID_ENTITY_BITS = 25;
 // Matches MESHLETS_PER_GROUP in lib/engine/render/scene.odin.
 static const uint MESHLETS_PER_GROUP = 32;
+// Match DRAW_INSTANCES, DRAW_INSTANCE_SHIFT, INSTANCE_LISTS, INSTANCE_GROUP_ROW and MAX_MESH_GROUPS in
+// lib/engine/render/scene.odin.
+static const uint DRAW_INSTANCES = 2;
+static const uint DRAW_INSTANCE_SHIFT = 8;
+static const uint INSTANCE_LISTS = 9;
+static const uint INSTANCE_GROUP_ROW = 32768;
+static const uint MAX_MESH_GROUPS = 1u << 22;
 
 // Matches Instance_Record in lib/engine/render/scene.odin.
 struct Instance_Record {
@@ -101,6 +117,8 @@ struct Instance_Record {
 	uint flags;
 	uint2 padding;
 };
+
+bool item_visible(Item item, Cull_View view);
 
 [numthreads(64, 1, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
@@ -118,6 +136,49 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (((view.flags & VIEW_MODEL) != 0) != ((item.flags & ITEM_VIEW_MODEL) != 0)) {
 		return;
 	}
+	uint instances = 1;
+	uint flags = 0;
+	uint visible = 0;
+	if ((item.flags & ITEM_INSTANCED) != 0) {
+		// Its set's list in the view, which cull_instances.hlsl culled.
+		uint at = ((item.entry * cull.instance_views + id.y) * INSTANCE_LISTS + item.list) * 4;
+		instances = cn_buffer(cull.instance_counters).Load(at);
+		if (instances == 0) {
+			return;
+		}
+		flags = DRAW_INSTANCES;
+		visible = cn_buffer(cull.instance_counters).Load(cull.instance_ranges * 4 + at);
+	} else if (!item_visible(item, view)) {
+		return;
+	}
+	uint slot;
+	cn_rw_buffer(cull.counts).InterlockedAdd((id.y * cull.bin_count + item.bin) * 4, 1, slot);
+	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
+	uint groups = (item.count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP;
+	if ((item.flags & (ITEM_MESH_PATH | ITEM_INSTANCED)) == (ITEM_MESH_PATH | ITEM_INSTANCED)) {
+		// The meshlets along z and the instances along x and y, as many as a dispatch may have, and the count of
+		// instances in the flags, which tells as_cluster where the last row ends.
+		instances = min(instances, MAX_MESH_GROUPS / max(groups, 1));
+		flags |= instances << DRAW_INSTANCE_SHIFT;
+		uint rows = (instances + INSTANCE_GROUP_ROW - 1) / INSTANCE_GROUP_ROW;
+		cn_rw_buffer(cull.mesh_arguments).Store4(index * 16, uint4(index, min(instances, INSTANCE_GROUP_ROW), rows, groups));
+	} else if ((item.flags & ITEM_MESH_PATH) != 0) {
+		// Draw_Mesh_Indirect_Args: draw ID, then the amplification groups.
+		cn_rw_buffer(cull.mesh_arguments).Store4(index * 16, uint4(index, groups, 1, 1));
+	} else {
+		// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
+		cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.count, instances, 0));
+		cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
+	}
+	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count, the bound, the
+	// flags and an instanced draw's list.
+	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first, item.material));
+	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, asuint(item.bound), flags, visible));
+}
+
+// item_visible is whether a view draws an item: its sphere, moved by its instance's rows, is in the view's frustum, and
+// an item with an impostor, or an impostor's, is the one of the two that the camera draws.
+bool item_visible(Item item, Cull_View view) {
 	Instance_Record instance = cn_buffer(cull.instances).Load<Instance_Record>(item.instance * sizeof(Instance_Record));
 	float4 center = float4(item.sphere.xyz, 1);
 	float3 p = float3(dot(instance.rows[0], center), dot(instance.rows[1], center), dot(instance.rows[2], center)) - view.offset.xyz;
@@ -131,7 +192,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float distance = max(length(to_mesh) - item.lod_sphere.w * scale, cull.lod_near);
 		bool far = item.impostor_error * scale / distance * cull.lod_scale <= 1;
 		if (far != ((item.flags & ITEM_IMPOSTOR) != 0)) {
-			return;
+			return false;
 		}
 	}
 	float radius = item.sphere.w * scale + item.bound;
@@ -142,21 +203,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	for (uint i = 0; i < 6; i++) {
 		if (dot(view.planes[i].xyz, p) + view.planes[i].w < -radius) {
-			return;
+			return false;
 		}
 	}
-	uint slot;
-	cn_rw_buffer(cull.counts).InterlockedAdd((id.y * cull.bin_count + item.bin) * 4, 1, slot);
-	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
-	if ((item.flags & ITEM_MESH_PATH) != 0) {
-		// Draw_Mesh_Indirect_Args: draw ID, then the amplification groups.
-		cn_rw_buffer(cull.mesh_arguments).Store4(index * 16, uint4(index, (item.count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP, 1, 1));
-	} else {
-		// Draw_Indirect_Args: draw ID, vertex count, instance count, first vertex, first instance.
-		cn_rw_buffer(cull.arguments).Store4(index * 20, uint4(index, item.count, 1, 0));
-		cn_rw_buffer(cull.arguments).Store(index * 20 + 16, 0);
-	}
-	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count and the bound.
-	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first, item.material));
-	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, asuint(item.bound), 0, 0));
+	return true;
 }

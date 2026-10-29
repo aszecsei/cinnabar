@@ -72,6 +72,7 @@ Renderer :: struct {
 	debug:           debug.Draw,
 	// Registrations, created again in renderer_reload.
 	meshes:          Extractor,
+	instanced:       Extractor,
 	surfaces:        Extractor,
 	volumes:         volume.Volumes,
 	materials:       Materials,
@@ -308,6 +309,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.caps = device_caps(platform)
 	r.quality = default_quality(r.caps)
 	r.meshes = mesh_extractor(w)
+	r.instanced = instanced_extractor(w)
 	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
@@ -341,10 +343,17 @@ mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
 	return extractor(w, {ecs.read(w, Mesh_Renderer), ecs.optional(ecs.read(w, View_Model))})
 }
 
+// instanced_extractor selects the entities with an Instanced_Mesh_Renderer.
+@(private = "file")
+instanced_extractor :: proc(w: ^ecs.World) -> Extractor {
+	return extractor(w, {ecs.read(w, Instanced_Mesh_Renderer)})
+}
+
 // renderer_reload keeps the renderer after a code reload, and makes its registrations again.
 renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.World) {
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	r.instanced = instanced_extractor(w)
 	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)

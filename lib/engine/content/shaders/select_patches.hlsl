@@ -30,7 +30,10 @@ struct Cull_Constants {
 	float4 camera;
 	float lod_scale;
 	float lod_near;
-	uint2 padding;
+	uint instance_counters;
+	uint instance_views;
+	uint instance_ranges;
+	uint3 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 

@@ -104,7 +104,10 @@ struct Frame_Constants {
 	uint ribbon_vertices;
 	// The mesh particles' instances, which a draw with DRAW_PARTICLES reads (see docs/rendering/particles.md#mesh-particles).
 	uint particle_instances;
-	uint3 padding;
+	// The views' lists of visible instances, which a draw with DRAW_INSTANCES reads (see
+	// docs/rendering/gpu-scene.md#instanced-meshes).
+	uint visible_instances;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -184,8 +187,11 @@ static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 // count are the submesh's indices, or on the mesh shader path its meshlets. bound is how far the material's
 // displacement may move a vertex, in meters, which the mesh shader path's culling adds to each meshlet's sphere. A
 // draw with DRAW_PARTICLES draws its submesh once for each of its emitter's living particles, whose instances start at
-// instance in frame.particle_instances (see docs/rendering/particles.md#mesh-particles).
+// instance in frame.particle_instances (see docs/rendering/particles.md#mesh-particles). A draw with DRAW_INSTANCES
+// draws its submesh once for each of its instance set's instances that its view sees, whose indices start at visible
+// in frame.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes).
 static const uint DRAW_PARTICLES = 1;
+static const uint DRAW_INSTANCES = 2;
 struct Draw_Record {
 	uint instance;
 	uint mesh;
@@ -194,7 +200,7 @@ struct Draw_Record {
 	uint count;
 	float bound;
 	uint flags;
-	uint padding;
+	uint visible;
 };
 
 // Matches Mesh_Record in lib/engine/render/scene.odin. impostor is the impostor's atlas, impostor_size a frame's side
@@ -220,14 +226,15 @@ struct Mesh_Record {
 
 // Matches Instance_Record in lib/engine/render/scene.odin: the pose relative to the render origin as the rows of a
 // 3x4 matrix, last frame's, and the entity's value in the editor's ID buffer. A mesh particle's instance has its
-// color too, as unorm8, which scales its mesh's vertex colors.
+// color too, as unorm8, which scales its mesh's vertex colors, and an Instanced_Mesh_Renderer's its set's instances,
+// whose poses are relative to its rows.
 struct Instance_Record {
 	float4 rows[3];
 	float4 previous_rows[3];
 	uint id;
 	uint flags;
 	uint color;
-	uint padding;
+	uint instance_set;
 };
 
 // What a material's evaluate reads. position is relative to the camera, object_position is in the mesh's own space,

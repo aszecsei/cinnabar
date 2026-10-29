@@ -15,6 +15,10 @@
 #define MESHLET_THREADS 128
 // Matches MESHLETS_PER_GROUP in lib/engine/render/scene.odin.
 #define MESHLETS_PER_GROUP 32
+// Matches INSTANCE_GROUP_ROW and DRAW_INSTANCE_SHIFT in lib/engine/render/scene.odin: an instanced draw's groups have
+// its instances in rows of this many, and its draw record's flags have its count of instances above this bit.
+static const uint INSTANCE_GROUP_ROW = 32768;
+static const uint DRAW_INSTANCE_SHIFT = 8;
 // Vertex.cluster has the meshlet's level above its index.
 static const uint MESHLET_DEPTH_SHIFT = 24;
 
@@ -35,8 +39,10 @@ struct Meshlet {
 	uint2 padding;
 };
 
+// The meshlets that an amplification group launches, and its instance ID, which an instanced draw's mesh groups take.
 struct Cluster_Payload {
 	uint meshlets[MESHLETS_PER_GROUP];
+	uint instance;
 };
 
 groupshared Cluster_Payload cluster_payload;
@@ -92,24 +98,37 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	return true;
 }
 
-// as_cluster is every opaque pass's amplification shader. The draw's meshlets are its draw record's first and count.
+// as_cluster is every opaque pass's amplification shader. The draw's meshlets are its draw record's first and count,
+// MESHLETS_PER_GROUP to a group along x. An instanced draw's groups are its meshlets along z and its instances along x
+// and y (see docs/rendering/gpu-scene.md#instanced-meshes).
 [numthreads(MESHLETS_PER_GROUP, 1, 1)]
-void as_cluster(uint group : SV_GroupID, uint thread : SV_GroupIndex) {
+void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	if (thread == 0) {
 		cluster_count = 0;
 	}
 	GroupMemoryBarrierWithGroupSync();
 	Draw_Record d = load_draw();
-	uint local = group * MESHLETS_PER_GROUP + thread;
-	if (local < d.count) {
+	uint chunk = group.x;
+	uint instance_id = 0;
+	bool listed = true;
+	if ((d.flags & DRAW_INSTANCES) != 0) {
+		chunk = group.z;
+		instance_id = group.y * INSTANCE_GROUP_ROW + group.x;
+		listed = instance_id < (d.flags >> DRAW_INSTANCE_SHIFT);
+	}
+	uint local = chunk * MESHLETS_PER_GROUP + thread;
+	if (listed && local < d.count) {
 		uint meshlet = d.first + local;
 		Mesh_Record m = load_mesh(d);
 		Meshlet c = cn_buffer(m.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
-		if (cluster_visible(c, load_instance(d), d.bound)) {
+		if (cluster_visible(c, draw_instance(d, instance_id), d.bound)) {
 			uint slot;
 			InterlockedAdd(cluster_count, 1, slot);
 			cluster_payload.meshlets[slot] = meshlet;
 		}
+	}
+	if (thread == 0) {
+		cluster_payload.instance = instance_id;
 	}
 	GroupMemoryBarrierWithGroupSync();
 	DispatchMesh(cluster_count, 1, 1, cluster_payload);
@@ -126,11 +145,11 @@ struct Cluster {
 	uint triangle_count;
 };
 
-Cluster load_cluster(uint meshlet) {
+Cluster load_cluster(uint meshlet, uint instance_id) {
 	Cluster c;
 	c.draw = load_draw();
 	c.mesh = load_mesh(c.draw);
-	c.instance = load_instance(c.draw);
+	c.instance = draw_instance(c.draw, instance_id);
 	c.meshlet = cn_buffer(c.mesh.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
 	c.index = meshlet;
 	c.vertex_count = c.meshlet.counts & 0xff;

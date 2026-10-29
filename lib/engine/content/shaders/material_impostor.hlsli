@@ -28,6 +28,8 @@ struct Impostor_Varyings {
 	// The point of the quad, relative to the camera.
 	float3 world : POSITION1;
 	nointerpolation uint draw : DRAW;
+	// The instance ID, which an instanced draw's instance is (see draw_instance).
+	nointerpolation uint instance : INSTANCE;
 };
 
 // The quad's two triangles, which cull no faces.
@@ -62,10 +64,10 @@ void view_ray(float3 p, out float3 origin, out float3 direction) {
 
 // impostor_vertex is a corner of the quad: in front of the sphere, toward the view, as wide as the sphere, so it covers
 // the sphere's outline from a point outside it.
-Impostor_Varyings impostor_vertex(uint vertex_id) {
+Impostor_Varyings impostor_vertex(uint vertex_id, uint instance_id) {
 	Draw_Record d = load_draw();
 	Mesh_Record m = load_mesh(d);
-	Instance_Record instance = load_instance(d);
+	Instance_Record instance = draw_instance(d, instance_id);
 	float3 scales = axis_scales(instance.rows);
 	float radius = m.impostor_sphere.w * max(scales.x, max(scales.y, scales.z));
 	float3 center = transform_point(instance.rows, m.impostor_sphere.xyz) - frame.camera_offset.xyz;
@@ -79,19 +81,20 @@ Impostor_Varyings impostor_vertex(uint vertex_id) {
 	o.world = center + (right * corner.x + up * corner.y + direction) * radius;
 	o.position = clip_position(o.world);
 	o.draw = CN_DRAW_ID;
+	o.instance = instance_id;
 	return o;
 }
 
-Impostor_Varyings vs_impostor_forward(uint vertex_id : SV_VertexID) {
-	return impostor_vertex(vertex_id);
+Impostor_Varyings vs_impostor_forward(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return impostor_vertex(vertex_id, instance_id);
 }
 
-Impostor_Varyings vs_impostor_prepass(uint vertex_id : SV_VertexID) {
-	return impostor_vertex(vertex_id);
+Impostor_Varyings vs_impostor_prepass(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return impostor_vertex(vertex_id, instance_id);
 }
 
-Impostor_Varyings vs_impostor_depth(uint vertex_id : SV_VertexID) {
-	return impostor_vertex(vertex_id);
+Impostor_Varyings vs_impostor_depth(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return impostor_vertex(vertex_id, instance_id);
 }
 
 // inverse3 is the inverse of the rows' rotation and scale: its columns are the cross products of the rows.
@@ -133,7 +136,7 @@ bool impostor_surface(Impostor_Varyings i, float bias, out Impostor_Surface hit)
 	hit = (Impostor_Surface)0;
 	Draw_Record d = cn_buffer(frame.draws).Load<Draw_Record>(i.draw * sizeof(Draw_Record));
 	Mesh_Record m = load_mesh(d);
-	Instance_Record instance = load_instance(d);
+	Instance_Record instance = draw_instance(d, i.instance);
 	float3x3 rotation = float3x3(instance.rows[0].xyz, instance.rows[1].xyz, instance.rows[2].xyz);
 	float3x3 inverse = inverse3(rotation);
 	float3 translation = float3(instance.rows[0].w, instance.rows[1].w, instance.rows[2].w) - frame.camera_offset.xyz;

@@ -116,9 +116,9 @@ LightUSD is the submodule `vendor/lightusd` (github.com/lighttransport/tinyusdz)
 
 - **`.usdz`** is not yet a stage.
 - **Images** are those that `stb_image` decodes: PNG, JPEG, TGA and HDR. A TIFF or EXR image is a warning, and its input keeps its value.
-- **Instance sets are not drawn yet:** the renderer does not draw `Instanced_Mesh_Renderer`.
+- **Instance sets** draw at their meshes' finest level until their impostors take over on a device without mesh shaders, and cast no traced shadows (see [Rendering: GPU scene](../../rendering/gpu-scene.md#instanced-meshes)). A stage bakes impostors with `impostor = true`.
 - **Nested instancing**, a point instancer in another's prototype, is left out, with a warning that counts them; the outer instancer draws its prototypes' meshes.
 - **Size:** a mesh cooks whole, so its triangles fit in memory. Jungle Ruins' meshes that cook are 18.6 million triangles; converting it with its point instancers expanded took about 26 GB.
-- **Residency:** Jungle Ruins makes 1,173 meshes, textures and instance sets, past the renderer's `MAX_RESIDENT` of 1,024.
+- **Residency:** Jungle Ruins makes 1,173 meshes, textures and instance sets, within the renderer's `MAX_RESIDENT` of 4,096.
 - **Decals** that a stage models as quads on a surface, as Sponza's `decals_*_floor` are, z-fight with the surface: the engine has no decals yet, and an opaque or masked material takes no depth bias.
 - **Not imported:** cameras, lights, skins, animation, variants other than the stage's selections, and materials other than UsdPreviewSurface, such as MaterialX.
