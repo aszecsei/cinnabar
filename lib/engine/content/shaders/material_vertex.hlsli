@@ -178,10 +178,18 @@ Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record insta
 // A ribbon material's vertices are a particle ribbon's (see docs/rendering/particles.md#ribbons).
 #include "material_ribbon.hlsli"
 #else
-// load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID.
+// load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID. A draw of mesh particles draws
+// its indices once for each particle, each with the particle's instance, and its color scales the mesh's.
 Material_Vertex load_vertex(uint vertex_id) {
 	Draw_Record d = load_draw();
 	Mesh_Record m = load_mesh(d);
+	if ((d.flags & DRAW_PARTICLES) != 0) {
+		uint particle = vertex_id / d.count;
+		Instance_Record instance = cn_buffer(frame.particle_instances).Load<Instance_Record>((d.instance + particle) * sizeof(Instance_Record));
+		Material_Vertex v = place_vertex(d, m, instance, draw_index(d, m, vertex_id - particle * d.count));
+		v.color *= unpack_unorm8(instance.color);
+		return v;
+	}
 	return place_vertex(d, m, load_instance(d), draw_index(d, m, vertex_id));
 }
 #endif

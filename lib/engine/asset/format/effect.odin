@@ -17,11 +17,13 @@ MAX_EFFECT_EMITTERS :: 8
 MAX_EMITTER_CAPACITY :: 65536
 MAX_RIBBON_CAPACITY :: 1024
 
-// Effect_Render is what an emitter's particles draw as: each a sprite, or together a ribbon through them in the order
-// that they spawned, with a material of geometry = ribbon (see docs/rendering/particles.md#ribbons).
+// Effect_Render is what an emitter's particles draw as: each a sprite; together a ribbon through them in the order
+// that they spawned, with a material of geometry = ribbon (see docs/rendering/particles.md#ribbons); or each a mesh
+// (see docs/rendering/particles.md#mesh-particles).
 Effect_Render :: enum u32 {
 	Sprite,
 	Ribbon,
+	Mesh,
 }
 
 // Effect_Shape is where an emitter's particles start, in the emitter's space, and which way they leave: from a point
@@ -77,8 +79,11 @@ Effect_Emitter :: struct {
 	// A sphere's radius in x; a box's half extents; a cone's base radius in x and its angle from +y in y, in radians.
 	shape_size:    [3]f32,
 	render:        Effect_Render,
-	// A ribbon's material, or the engine's default ribbon material when zero.
+	// A ribbon's material, or the engine's default ribbon material when zero; or a mesh's material, for each of its
+	// submeshes, or the engine's default material when zero.
 	material:      Guid,
+	// A mesh emitter's mesh.
+	mesh:          Guid,
 	texture:       Guid,
 	// The texture's frames, columns by rows, which play at flipbook_rate frames a second; 1 by 1 is no flipbook.
 	flipbook:      [2]u32,
@@ -132,6 +137,9 @@ effect_view :: proc(data: []byte) -> (blob: ^Effect_Blob, ok: bool) {
 			return nil, false
 		}
 		if e.render == .Ribbon && e.capacity > MAX_RIBBON_CAPACITY {
+			return nil, false
+		}
+		if e.render > .Mesh {
 			return nil, false
 		}
 	}

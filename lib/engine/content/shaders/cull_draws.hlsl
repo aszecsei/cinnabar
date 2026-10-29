@@ -68,8 +68,10 @@ static const uint ITEM_BILLBOARD = 16;
 // An impostor's item, which draws past where it takes over, and a mesh's item with an impostor, which draws up to it.
 static const uint ITEM_IMPOSTOR = 32;
 static const uint ITEM_HAS_IMPOSTOR = 64;
-// A particle ribbon's item, whose draw ribbon_build.hlsl writes.
+// A particle ribbon's item, whose draw ribbon_build.hlsl writes, and a mesh particles' item, whose draws
+// particle_meshes.hlsl writes.
 static const uint ITEM_RIBBON = 128;
+static const uint ITEM_PARTICLES = 256;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -107,7 +109,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + id.y * sizeof(Cull_View));
 	Item item = cn_buffer(cull.items).Load<Item>(cull.items_offset + id.x * sizeof(Item));
-	if ((item.flags & (ITEM_SURFACE | ITEM_RIBBON)) != 0) {
+	if ((item.flags & (ITEM_SURFACE | ITEM_RIBBON | ITEM_PARTICLES)) != 0) {
 		return;
 	}
 	if ((view.flags & VIEW_CASTERS) != 0 && (item.flags & ITEM_CASTS_SHADOWS) == 0) {

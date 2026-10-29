@@ -3,7 +3,9 @@
 // modules and collides with last frame's depth. A dead one takes one of the frame's new particles from the emitter's
 // counter, while any are left, and starts in the emitter's shape. Each living particle then appends its sprite, with its
 // color, size and emission from the emitter's curves at its age. A ribbon's emitter instead spawns over its oldest
-// particles in its range's order, and appends no sprites: ribbon_build.hlsl draws them.
+// particles in its range's order, and appends no sprites: ribbon_build.hlsl draws them. A mesh emitter's living
+// particles append their instances instead, which its draws draw its mesh at (see
+// docs/rendering/particles.md#mesh-particles).
 #include "particles.hlsli"
 #include "sprites.hlsli"
 
@@ -104,6 +106,46 @@ void collide(inout Particle p, Emitter_Record e, float4 values, float dt) {
 	p.position += n * behind;
 }
 
+// Matches Instance_Record in material_common.hlsli.
+struct Particle_Instance {
+	float4 rows[3];
+	float4 previous_rows[3];
+	uint id;
+	uint flags;
+	uint color;
+	uint padding;
+};
+
+// instance_rows are the rows of a mesh particle's pose: turned by angle about axis, scaled, at position.
+void instance_rows(out float4 rows[3], float3 axis, float angle, float scale, float3 position) {
+	float s, c;
+	sincos(angle, s, c);
+	float3 a = axis * (1 - c);
+	rows[0] = float4(float3(c + a.x * axis.x, a.x * axis.y - s * axis.z, a.x * axis.z + s * axis.y) * scale, position.x);
+	rows[1] = float4(float3(a.y * axis.x + s * axis.z, c + a.y * axis.y, a.y * axis.z - s * axis.x) * scale, position.y);
+	rows[2] = float4(float3(a.z * axis.x - s * axis.y, a.z * axis.y + s * axis.x, c + a.z * axis.z) * scale, position.z);
+}
+
+// append_instance appends a mesh particle's instance: turned about an axis of its own by its rotation, its size from the
+// curve, and colored by its color's, with its pose before this step as last frame's, so it has a velocity.
+void append_instance(Emitter_Record e, Particle p, float3 before, float before_rotation) {
+	uint state = p.seed ^ 0x9e3779b9u;
+	float3 axis = random_direction(state);
+	float t = p.age / p.lifetime;
+	float before_t = max(p.age - e.delta, 0) / p.lifetime;
+	Particle_Instance instance;
+	instance_rows(instance.rows, axis, p.rotation, curve_at(e.curves + CURVE_SIZE, t).x, p.position + e.scene_anchor);
+	instance_rows(instance.previous_rows, axis, before_rotation, curve_at(e.curves + CURVE_SIZE, before_t).x, before + e.scene_anchor);
+	instance.id = e.id;
+	instance.flags = 0;
+	uint4 color = uint4(round(saturate(curve_at(e.curves + CURVE_COLOR, t)) * 255));
+	instance.color = color.r | (color.g << 8) | (color.b << 16) | (color.a << 24);
+	instance.padding = 0;
+	uint slot;
+	cn_rw_buffer(constants.counters).InterlockedAdd((MAX_FRAME_EMITTERS + push.emitter) * 4, 1, slot);
+	cn_rw_buffer(constants.mesh_instances).Store<Particle_Instance>((e.instances + slot) * sizeof(Particle_Instance), instance);
+}
+
 // step moves a living particle by the emitter's modules, in their order, then integrates it.
 void step(inout Particle p, Emitter_Record e, float dt) {
 	bool collides = false;
@@ -156,6 +198,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		pool.Store<Particle>(address, p);
 		return;
 	}
+	// Where the particle was before this step, which a mesh particle's velocity is from.
+	float3 before = p.position;
+	float before_rotation = p.rotation;
 	if (alive) {
 		p.age += dt;
 		alive = p.age < p.lifetime;
@@ -183,8 +228,16 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 			return;
 		}
 		p = spawn(e, id.x, ticket);
+		before = p.position;
+		before_rotation = p.rotation;
 	}
 	pool.Store<Particle>(address, p);
+	if ((e.flags & EMITTER_MESH) != 0) {
+		if (e.instances != NO_PARTICLE_INSTANCES) {
+			append_instance(e, p, before, before_rotation);
+		}
+		return;
+	}
 
 	float t = p.age / p.lifetime;
 	Sprite_Record s;

@@ -1,8 +1,8 @@
 # Particles
 
-GPU particles: a `Particle_System` places an effect asset, whose emitters the GPU simulates in frame time and draws as compute sprites, or as ribbons, among the moment-based transparent surfaces. Read [Transparency](transparency.md#sprites) first for the sprites that they draw as, and [Effects](../content/kinds/effects.md#effects) for the asset.
+GPU particles: a `Particle_System` places an effect asset, whose emitters the GPU simulates in frame time and draws as compute sprites among the moment-based transparent surfaces, as ribbons, or as meshes. Read [Transparency](transparency.md#sprites) first for the sprites that they draw as, and [Effects](../content/kinds/effects.md#effects) for the asset.
 
-**In this document:** [Particles](#particles) · [Systems](#systems) · [Time](#time) · [Simulation](#simulation) · [Collision](#collision) · [Ribbons](#ribbons) · [Previews](#previews)
+**In this document:** [Particles](#particles) · [Systems](#systems) · [Time](#time) · [Simulation](#simulation) · [Collision](#collision) · [Ribbons](#ribbons) · [Mesh particles](#mesh-particles) · [Previews](#previews)
 
 ## Particles
 
@@ -11,8 +11,8 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 - **Lighting** is the sprites': the clusters, the shadow maps, the global illumination and the fog, on an 8x8 grid of points on each sprite (see [Sprites](transparency.md#sprites)). The sample's smoke is lit by the glass scene's point light.
 - **Order:** the sprites take their place in the moments, so particles need no sort, and draw among glass.
 - **Limits:**
-  - Particles draw as sprites, squares that face the camera, or as ribbons (see [Ribbons](#ribbons)).
-  - They cast no shadows, have no velocities, and so trail under temporal AA and FSR.
+  - Particles draw as sprites, squares that face the camera, as ribbons (see [Ribbons](#ribbons)), or as meshes (see [Mesh particles](#mesh-particles)).
+  - Sprites and ribbons cast no shadows, have no velocities, and so trail under temporal AA and FSR.
   - They draw in the camera's view only.
 
 ## Systems
@@ -27,7 +27,7 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 - **Starting.** The first frame of an effect, a new effect, or a new version of its blob, starts the system: each emitter takes a range of `capacity` particles from the pool, `MAX_PARTICLES` (262144) of 48 bytes, by first fit, and its particles start dead. An emitter that the pool has no room for draws nothing, which is logged once.
 - **The anchor.** Particles are relative to the system's anchor, its position when it started, so they stay where they are in the world when the system moves, and the render origin's moves do not touch them. Each frame gives the anchor relative to this frame's camera and last frame's.
 - **Spawning.** Each emitter's rate times the frame's time, with the fraction carried to the next frame, and its bursts when they are due, are the frame's new particles, at most its capacity.
-- **Records.** The emitters' records, their modules and their curves' rows go into the upload ring, and the frame reserves room for the capacity of sprites of every emitter that is not a ribbon's (`reserve_sprites`).
+- **Records.** The emitters' records, their modules and their curves' rows go into the upload ring, and the frame reserves room for the capacity of sprites of every sprite emitter (`reserve_sprites`).
 
 ## Time
 
@@ -61,10 +61,23 @@ The simulation runs before the prepass, so it collides with what the camera saw 
 An emitter with `render = ribbon` draws its particles as one ribbon, a strip through them in the order that they spawned, oldest first, as a trail does. The sample's trail effect is a ribbon behind the glass scene's spinner.
 
 - **Spawning.** A ribbon's emitter spawns in its range's order: `Particle_Slot.head` is where it spawns next, and the frame's new particles take the places after it, over the oldest ones. So the range is a ring, and its particles stay in the order that they spawned. A ribbon has at most `MAX_RIBBON_CAPACITY` (1024) particles, since one group builds it. Its emitter's record has the `EMITTER_RIBBON` flag, and the update appends no sprites for it and reserves none.
-- **The item.** `add_ribbon_items`, while `build_scene` writes the instances, gives each ribbon of each started system that is not hidden an item with the `ITEM_RIBBON` flag in its material's bin, with an instance slot at the system's anchor, keyed by `ribbon_key`, and a range of `Particles.ribbon_vertices`, two for each particle of its capacity, which grows to hold them. `cull_draws.hlsl` skips the item, as it skips a surface's.
+- **The item.** `add_ribbon_items`, while `build_scene` writes the instances, gives each ribbon of each started system that is not hidden an item with the `ITEM_RIBBON` flag in its material's bin, with an instance slot at the system's anchor, keyed by `particle_key`, and a range of `Particles.ribbon_vertices`, two for each particle of its capacity, which grows to hold them. `cull_draws.hlsl` skips the item, as it skips a surface's.
 - **The build.** `ribbon_build.hlsl`, after the update, a group for each ribbon that its system stepped this frame, a thread for each particle of its range from the oldest: the living ones are compacted in their order with wave prefix counts, and each writes the ribbon's two edges at it (`Ribbon_Vertex`, 64 bytes), its size's width apart, across the ribbon's direction there and facing the camera, with its color, both from the emitter's curves at its age. `u` is the particle's age over its lifetime, and `v` is 0 on one edge and 1 on the other. Then thread 0 takes the ribbon's draw in its item's bin of the camera's view, as `cull_draws.hlsl` takes a mesh's: two triangles for each segment between two particles. A ribbon of fewer than two living particles draws nothing.
 - **The material.** A ribbon draws with the emitter's `material`, a material with `geometry = ribbon`, or the engine's default ribbon material (`lib/engine/content/materials/default_ribbon.material`): lit, transparent and two-sided, its color from the color curve, fading toward its edges. A ribbon material's vertex path (`material_ribbon.hlsli`) reads the vertices from `Frame_Constants.ribbon_vertices`, and the vertex goes through `finish_vertex`, so the instance places it. A ribbon material is transparent or additive and draws only in the transparent passes; on a `Mesh_Renderer` the default material stands in, and its preview is the background.
 - **Limits:** a ribbon draws in the camera's view only, and a ribbon whose system did not step this frame, because it is hidden or the frame has no particles to step, draws nothing.
+
+## Mesh particles
+
+An emitter with `render = mesh` draws a mesh at each of its particles, with its `material` on each submesh, or the engine's default material. The sample's smoke effect has gold nuggets, the sample's box, that tumble out and bounce on the floor.
+
+- **The items.** `add_mesh_particle_items`, while `build_scene` writes the instances, gives each submesh of each mesh emitter of each started system that is not hidden an item with the `ITEM_PARTICLES` flag, and each emitter a range of `capacity` instances in `Particles.mesh_instances`, which grows to hold them. The item's instance is the system's anchor, as a ribbon's is, which the sorted draws sort by. `sort_bins` gives the items of each material a bin of their own after its own, as it does impostors, which draws with vertex pulling (`Scene_Frame.bin_particles`), so an opaque material on the mesh shader path draws mesh particles too. `cull_draws.hlsl` skips the items.
+- **The instances.** In the update, each living particle of a mesh emitter appends an `Instance_Record` instead of a sprite, at its emitter's first instance, counted in the second half of the counters (from `MAX_FRAME_EMITTERS`):
+  - its pose: turned by its rotation about an axis of its own, from its seed, and scaled by its size, at its position relative to the GPU scene's origin;
+  - its pose before this step as last frame's, so it has a velocity;
+  - its system's ID, so the editor picks the system;
+  - its color from the color curve, as unorm8, which scales its mesh's vertex colors in `inputs.color`.
+- **The draws.** `particle_meshes.hlsl`, after the update, a thread for each item in each view: each item takes one draw in its bin, with `DRAW_PARTICLES`, whose vertex count is its submesh's indices times its emitter's living particles. The vertex path (`load_vertex` in `material_vertex.hlsli`) draws the submesh once for each particle, with its instance from `Frame_Constants.particle_instances`. An item draws in the camera's view and, when its material casts shadows, in every shadow view; the view model's view draws none.
+- **Limits:** mesh particles are not culled, by view or by particle, nor in the ray-traced shadows; and an effect's preview draws no mesh particles.
 
 ## Previews
 
