@@ -28,6 +28,11 @@ Preview :: struct {
 	version:         u32,
 	// The cooked blob's version when the preview last looked, which a new cook changes.
 	asset_version:   u32,
+	// Whether the blob is an effect, once a look found it, and whether the look could not load it. Both last until
+	// the blob changes, so a material that is not cooked is read and reported once, not in every frame.
+	kind_known:      bool,
+	effect:          bool,
+	load_failed:     bool,
 	// Draw at the next chance. The renderer sets complete when a drawing showed everything; until then, it draws again.
 	dirty:           bool,
 	complete:        bool,
@@ -85,6 +90,7 @@ free_preview_data :: proc(e: ^Editor, p: ^Preview) {
 		delete(p.data, e.platform.asset_allocator)
 	}
 	p.data, p.modified = nil, 0
+	p.kind_known, p.load_failed = false, false
 }
 
 // close_previews closes every preview, as when the editor leaves.
@@ -148,24 +154,34 @@ refresh_preview :: proc(e: ^Editor, p: ^Preview) {
 	if h, loaded := asset.find(e.assets, p.material); loaded {
 		if version := asset.version(e.assets, h); version != p.asset_version {
 			p.asset_version, p.dirty = version, true
+			p.kind_known, p.load_failed = false, false
 		}
 	}
 }
 
 // is_effect is whether a preview shows an effect, by its blob's kind. The first look loads the cooked blob, which the
-// renderer would load anyway.
+// renderer would load anyway. A blob that does not load is not tried again until refresh_preview sees it change,
+// which it does once the renderer, which retries, loads it.
 @(private = "file")
 is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
+	if p.kind_known {
+		return p.effect
+	}
 	data := p.data
 	if data == nil {
-		h, loaded := asset.load(e.assets, p.material)
+		h, loaded := asset.find(e.assets, p.material)
+		if !loaded && !p.load_failed {
+			h, loaded = asset.load(e.assets, p.material)
+			p.load_failed = !loaded
+		}
 		if !loaded {
 			return false
 		}
 		data, _ = asset.data(e.assets, h)
 	}
 	header, ok := format.blob_header(data)
-	return ok && header.kind == .Effect
+	p.kind_known, p.effect = ok, ok && header.kind == .Effect
+	return p.effect
 }
 
 // reads_time is whether the preview changes every frame: an effect, or a material that reads the frame's time.

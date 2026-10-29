@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:log"
 import "core:mem/virtual"
 import "core:slice"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -737,6 +738,11 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 	defer teardown(f)
 	assets: asset.Assets
 	f.platform.file_modified = proc(path: string) -> i64 {return 0}
+	// The preview looks for the material's blob to tell an effect, and the cache has none: it says so once, and does
+	// not read the disk again in every frame.
+	f.platform.file_read = core.file_read
+	missing := Missing_Blobs{next = context.logger}
+	context.logger = {count_missing_blobs, &missing, .Debug, {}}
 	asset.init(&assets, &f.platform, asset.loose_cache("missing"))
 	f.editor.assets = &assets
 	f.platform.gpu_preview_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
@@ -775,6 +781,25 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(previews(&f.editor)), 1)
 	step(f, 1, link.Close_Preview{id = 0})
 	testing.expect_value(t, len(previews(&f.editor)), 0)
+	testing.expect_value(t, missing.count, 1)
+}
+
+// Missing_Blobs counts the asset runtime's reports of a blob that is not cooked, and passes every other message to the
+// test's logger, through which the test's expectations fail.
+@(private = "file")
+Missing_Blobs :: struct {
+	count: int,
+	next:  log.Logger,
+}
+
+@(private = "file")
+count_missing_blobs :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location: runtime.Source_Code_Location) {
+	m := (^Missing_Blobs)(data)
+	if strings.contains(text, "no blob for") {
+		m.count += 1
+	} else if level >= m.next.lowest_level {
+		m.next.procedure(m.next.data, level, text, options, location)
+	}
 }
 
 @(test)
