@@ -96,9 +96,8 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	if (!indirect_only && !fog_only) {
 		color += direct_light(s, p, inputs.normal, i.position);
 	}
-	// The global illumination's light, or without it the sky's light from above and the ground's from below, which the
-	// ambient occlusion takes away from. The occlusion is the opaque surfaces', from the prepass, so a transparent
-	// surface has none.
+	// The global illumination's light, or without it the Environment's ambient light, which the ambient occlusion takes
+	// away from. The occlusion is the opaque surfaces', from the prepass, so a transparent surface has none.
 #if MATERIAL_TRANSPARENT
 	float occlusion = 1;
 #else
@@ -109,9 +108,8 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 		indirect.diffuse = cn_texture(push.gi_diffuse).Load(int3(i.position.xy, 0)).rgb;
 		indirect.specular = cn_texture(push.gi_specular).Load(int3(i.position.xy, 0)).rgb;
 	} else {
-		indirect.diffuse = lerp(frame.ground_color.rgb, frame.sky_color.rgb, p.normal.y * 0.5 + 0.5);
-		float3 reflected = reflect(-p.view, p.normal);
-		indirect.specular = lerp(frame.ground_color.rgb, frame.sky_color.rgb, reflected.y * 0.5 + 0.5);
+		indirect.diffuse = ambient_light(frame.ambient, p.normal);
+		indirect.specular = ambient_light(frame.ambient, reflect(-p.view, p.normal));
 	}
 	indirect.diffuse *= occlusion;
 	indirect.specular *= occlusion;

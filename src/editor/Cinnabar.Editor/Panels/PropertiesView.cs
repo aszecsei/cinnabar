@@ -32,15 +32,8 @@ public sealed class PropertiesView : ScrollViewer
     readonly WorldModel _world;
     readonly Selection _selection;
     readonly StackPanel _content = new() { Classes = { "properties" } };
-    // The view and the editor of each field, by component ID or behaviour class, and field name.
-    readonly Dictionary<(string Owner, string Field), FieldView> _views = [];
-    readonly Dictionary<(string Owner, string Field), FieldEditor> _editors = [];
-    // Each reset button, with whether its field is set in the document, which edits change without a rebuild.
-    readonly List<(Control Button, Func<bool> IsSet)> _resets = [];
-    // Each field name of an instance's entity, with whether its block overrides the field, which shows it in bold.
-    readonly List<(TextBlock Name, Func<bool> IsOverridden)> _bold = [];
-    // The override check box of each volume setting, which the host's values tick.
-    readonly Dictionary<(string Owner, string Field), OverrideRow> _overrides = [];
+    // The rows of the fields, by component ID or behaviour class, and field name.
+    readonly FieldGrid _grid;
     // Groups that the user collapsed, by title, which stay collapsed across selections.
     readonly HashSet<string> _collapsed = [];
     string _structure = "";
@@ -50,6 +43,7 @@ public sealed class PropertiesView : ScrollViewer
         _shell = shell;
         _world = shell.World;
         _selection = shell.Selection;
+        _grid = new FieldGrid(shell);
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         // A script that defines a behaviour drags in from the content browser, and adds it to the selected entities.
@@ -122,14 +116,7 @@ public sealed class PropertiesView : ScrollViewer
             Rebuild();
             return;
         }
-        foreach (var (button, isSet) in _resets)
-        {
-            button.IsVisible = isSet();
-        }
-        foreach (var (name, overridden) in _bold)
-        {
-            name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
-        }
+        _grid.ShowDocument();
     }
 
     // Whether the scene sets a component's field: for a plain entity, its block has it; for an instance's entity, its
@@ -150,11 +137,7 @@ public sealed class PropertiesView : ScrollViewer
     void Rebuild()
     {
         _content.Children.Clear();
-        _views.Clear();
-        _editors.Clear();
-        _resets.Clear();
-        _bold.Clear();
-        _overrides.Clear();
+        _grid.Clear();
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
         if (node != null && _selection.Count > 1)
@@ -275,21 +258,9 @@ public sealed class PropertiesView : ScrollViewer
         ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
         foreach (var component in values.Components)
         {
-            var owner = component.Id.ToString("x16");
-            foreach (var field in _world.Type(component.Id)?.Fields ?? [])
+            if (_world.Type(component.Id) is { } type)
             {
-                if (_editors.TryGetValue((owner, field.Name), out var editor))
-                {
-                    editor.Current = FieldEditor.Read(field, component.Data, SceneIdOf);
-                }
-                if (_views.TryGetValue((owner, field.Name), out var view))
-                {
-                    view.Show(FieldValues.Display(field, component.Data));
-                }
-                if (field.HasOverride && field.OverrideOffset < component.Data.Length)
-                {
-                    ShowOverride((owner, field.Name), component.Data[(int)field.OverrideOffset] != 0);
-                }
+                _grid.ShowComponent(component.Id.ToString("x16"), type, component.Data, SceneIdOf);
             }
         }
         foreach (var behaviour in values.Behaviours)
@@ -297,11 +268,11 @@ public sealed class PropertiesView : ScrollViewer
             foreach (var field in behaviour.Fields)
             {
                 var key = ("behaviour:" + behaviour.Class, field.Name);
-                if (_editors.TryGetValue(key, out var editor))
+                if (_grid.Editors.TryGetValue(key, out var editor))
                 {
                     editor.Current = FieldEditor.Read(field, SceneIdOf);
                 }
-                if (_views.TryGetValue(key, out var view))
+                if (_grid.Views.TryGetValue(key, out var view))
                 {
                     view.Show(FieldValues.Display(field));
                 }
@@ -392,7 +363,7 @@ public sealed class PropertiesView : ScrollViewer
             return;
         }
         ulong SceneIdOf(ulong handle) => _world.Find(handle)?.SceneId ?? 0;
-        foreach (var (key, view) in _views)
+        foreach (var (key, view) in _grid.Views)
         {
             if (key.Owner.StartsWith("behaviour:", StringComparison.Ordinal) || !ulong.TryParse(key.Owner, System.Globalization.NumberStyles.HexNumber, null, out var id)
                 || _world.Type(id)?.Fields.FirstOrDefault(f => f.Name == key.Field) is not { } field)
@@ -404,7 +375,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 continue;
             }
-            if (_editors.TryGetValue(key, out var editor))
+            if (_grid.Editors.TryGetValue(key, out var editor))
             {
                 for (var i = 0; i < data.Count; i++)
                 {
@@ -415,7 +386,7 @@ public sealed class PropertiesView : ScrollViewer
             if (field.HasOverride && data.All(d => field.OverrideOffset < d!.Length))
             {
                 var flags = data.Select(d => d![(int)field.OverrideOffset] != 0).Distinct().ToList();
-                ShowOverride(key, flags.Count == 1 ? flags[0] : null);
+                _grid.ShowOverride(key, flags.Count == 1 ? flags[0] : null);
             }
         }
     }
@@ -614,149 +585,15 @@ public sealed class PropertiesView : ScrollViewer
     static bool InDocument(SceneComponent component, Link.Protocol.FieldInfo f) =>
         component.Fields.Any(x => x.Name == f.Name || (f.HasOverride && x.Name == f.Name + FieldEditor.OverrideSuffix));
 
-    sealed record FieldRow(string Owner, string Field, DisplayKind Kind, bool IsEnum, FieldEditor? Editor, Func<bool>? IsSet, Action Reset)
-    {
-        /// <summary>For an instance's entity, whether its block overrides the field, which shows it in bold.</summary>
-        public Func<bool>? Overridden { get; init; }
-
-        /// <summary>For an instance's entity, applies the field's override to its prefab.</summary>
-        public Action? Apply { get; init; }
-
-        /// <summary>For an asset field, the kind of asset that it takes ("" for any).</summary>
-        public string AssetKind { get; init; } = "";
-
-        /// <summary>For an Axes field, its number of boxes.</summary>
-        public int Axes { get; init; } = 3;
-
-        /// <summary>For a number, the range of its slider, from the game's editor:"range=min,max" tag.</summary>
-        public (double Min, double Max)? Range { get; init; }
-
-        /// <summary>A volume's setting: a check box before its name says whether the volume overrides it.</summary>
-        public bool HasOverride { get; init; }
-
-        /// <summary>A component field's row, with what its field info says of how it shows.</summary>
-        public static FieldRow Of(string owner, Link.Protocol.FieldInfo f, FieldEditor? editor, Func<bool>? isSet, Action reset) =>
-            new(owner, f.Name, FieldValues.DisplayKindOf(f), f.Kind == Link.Protocol.FieldKind.Enum, editor, isSet, reset)
-            {
-                AssetKind = f.AssetKind,
-                Axes = f.Kind == Link.Protocol.FieldKind.Vector2 ? 2 : 3,
-                Range = f.HasRange ? (f.RangeMin, f.RangeMax) : null,
-                HasOverride = f.HasOverride,
-            };
-    }
-
     Control Group(string title, IEnumerable<FieldRow> fields, string? badge = null, bool disabled = false, Action? remove = null, string? note = null)
     {
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Classes = { "fields" } };
-        var row = 0;
-        foreach (var field in fields)
-        {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var name = new TextBlock
-            {
-                Text = FieldValues.Humanize(field.Field),
-                Classes = { "field-name" },
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                VerticalAlignment = VerticalAlignment.Center,
-            };
-            ToolTip.SetTip(name, field.Editor != null && field.Kind == DisplayKind.Number ? $"{field.Field}. Drag to change it." : field.Field);
-            if (field.Editor != null && field.Kind == DisplayKind.Number)
-            {
-                FieldView.Scrubbable(name, field.Editor, 0);
-            }
-            var view = FieldView.Create(field.Kind, _selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(_shell.Assets, field.AssetKind, _shell.RevealAsset), field.Axes, field.Range);
-            Control label = name;
-            if (field.Overridden is { } overridden)
-            {
-                name.FontWeight = overridden() ? FontWeight.Bold : FontWeight.Normal;
-                _bold.Add((name, overridden));
-                // An override's menu carries it to the prefab, or drops it.
-                var apply = new MenuItem { Header = "Apply to Prefab", Command = new RelayCommand(() => field.Apply?.Invoke()) };
-                var revert = new MenuItem { Header = "Revert", Command = new RelayCommand(field.Reset) };
-                var menu = new ContextMenu { Items = { apply, revert } };
-                menu.Opening += (_, _) => apply.IsEnabled = revert.IsEnabled = overridden();
-                name.ContextMenu = menu;
-            }
-            if (field.HasOverride)
-            {
-                label = OverrideLabel(field, name, view);
-            }
-            Grid.SetRow(label, row);
-            Grid.SetRow(view.Control, row);
-            Grid.SetColumn(view.Control, 1);
-            rows.Children.Add(label);
-            rows.Children.Add(view.Control);
-            if (field.IsSet != null)
-            {
-                var reset = new Button { Content = "↺", Classes = { "field-button" }, IsVisible = field.IsSet(), VerticalAlignment = VerticalAlignment.Center };
-                ToolTip.SetTip(reset, field.Overridden != null ? "Revert to the prefab's value" : "Reset to the default");
-                reset.Click += (_, _) => field.Reset();
-                Grid.SetRow(reset, row);
-                Grid.SetColumn(reset, 2);
-                rows.Children.Add(reset);
-                _resets.Add((reset, field.IsSet));
-            }
-            _views[(field.Owner, field.Field)] = view;
-            if (field.Editor != null)
-            {
-                _editors[(field.Owner, field.Field)] = field.Editor;
-            }
-            row++;
-        }
+        var rows = _grid.Rows(fields);
         Control content = rows;
         if (note != null)
         {
             content = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = note, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap }, rows } };
         }
         return Expander(title, content, badge, disabled, remove);
-    }
-
-    // A volume's setting: a check box before its name, ticked when the volume overrides it. Ticking it overrides with the
-    // value that shows, and clearing it leaves the setting to the volumes below it but keeps the value, so the two can be
-    // compared. A setting that is not overridden is dim, and the reset button sets it back to its default.
-    Control OverrideLabel(FieldRow field, TextBlock name, FieldView view)
-    {
-        var check = new CheckBox { MinHeight = 0, Padding = new Thickness(0), Classes = { "value-check" }, VerticalAlignment = VerticalAlignment.Center };
-        check.IsHitTestVisible = check.Focusable = field.Editor != null;
-        ToolTip.SetTip(check, "Override: the volume sets this, over the volumes below it");
-        var entry = new OverrideRow(check, view.Control);
-        check.IsCheckedChanged += (_, _) =>
-        {
-            if (entry.Showing || field.Editor == null)
-            {
-                return;
-            }
-            if (check.IsChecked == true)
-            {
-                field.Editor.Override();
-            }
-            else
-            {
-                field.Editor.StopOverriding();
-            }
-        };
-        _overrides[(field.Owner, field.Field)] = entry;
-        return new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4, Children = { check, name } };
-    }
-
-    // Shows whether a volume overrides a setting: null when the selected entities differ.
-    void ShowOverride((string Owner, string Field) key, bool? overridden)
-    {
-        if (!_overrides.TryGetValue(key, out var entry))
-        {
-            return;
-        }
-        entry.Showing = true;
-        entry.Check.IsChecked = overridden;
-        entry.Showing = false;
-        entry.Value.Opacity = overridden == false ? 0.5 : 1;
-    }
-
-    sealed class OverrideRow(CheckBox check, Control value)
-    {
-        public CheckBox Check { get; } = check;
-        public Control Value { get; } = value;
-        public bool Showing { get; set; }
     }
 
     // A component that the document has and the game does not: the scene keeps it, and the panel shows its values.

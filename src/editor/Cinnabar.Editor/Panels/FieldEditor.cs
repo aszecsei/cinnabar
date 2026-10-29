@@ -114,7 +114,7 @@ sealed class FieldEditor : IFieldEditor
     }
 
     /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world/volumes.md#volumes).</summary>
-    public const string OverrideSuffix = ".override";
+    public const string OverrideSuffix = SceneEdits.OverrideSuffix;
 
     /// <summary>An editor for a behaviour's field, or null for a kind that the editor cannot set.</summary>
     public static FieldEditor? ForBehaviour(EditorShell shell, ulong sceneId, string script, BehaviourField field)

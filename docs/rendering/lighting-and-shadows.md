@@ -28,6 +28,7 @@ The renderer has one shading path: forward shading with a prepass.
 - **Clusters:** a compute pass (`cluster_lights.hlsl`) assigns the punctual and area lights to clusters: tiles of `CLUSTER_TILE` (64) pixels, in `CLUSTER_SLICES` (32) depth slices, exponential from the near plane to `CLUSTER_FAR` (500 m); the last slice reaches on to infinity. A thread for each cluster tests each light's sphere against the cluster's box in view space, so a spot light counts as its whole sphere. It takes room for its lights in one index list with an atomic add, and writes its offset and count. The list has room for `CLUSTER_AVERAGE_LIGHTS` (32) lights per cluster on average; a cluster that finds it full gets fewer. The clusters' buffers live in the `Renderer` and grow with the frame's size.
 - **The forward pass** finds its pixel's cluster from its position and its depth (`cluster_of`), and calls the shading model's `shade_direct` for each directional light, then for each light of its cluster, with the light's shadow (`material_lighting.hlsli`). It calls `shade_area` for an area light. Without the cluster pipeline, the forward pass leaves the punctual and area lights out.
 - The directional lights are not clustered. Every pixel loops over them.
+- **The sun:** an `Environment` in Atmosphere mode can name a directional light as its sun. The air between the camera and the sun then dims and colors that light's own light, to 0 below the horizon (see [The sun](sky.md#the-sun)).
 
 ### Area lights
 

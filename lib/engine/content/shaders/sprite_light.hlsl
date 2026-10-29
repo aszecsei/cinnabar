@@ -73,7 +73,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 		float2 pixel = (clip.xy / depth * float2(0.5, -0.5) + 0.5) * frame.screen_size;
 		light += load_screen(push.gi_diffuse, clamp(pixel, 0, frame.screen_size - 1)).rgb;
 	} else {
-		light += 0.5 * (frame.sky_color.rgb + frame.ground_color.rgb);
+		light += ambient_average(frame.ambient);
 	}
 	float4 fog = frame.fog != 0 ? fog_at(p) : float4(0, 0, 0, 1);
 	uint2 texel = group.xy * SPRITE_LIGHT_TEXELS + thread.xy;

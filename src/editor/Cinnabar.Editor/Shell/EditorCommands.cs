@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Commands;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Tools;
@@ -167,6 +168,19 @@ static class EditorCommands
     public const string UserOutput = "project.userOutput";
     public const string ProjectQuality = "project.quality";
     public const string UserQuality = "project.userQuality";
+    public const string AtmosphereSelect = "atmosphere.select";
+    public const string AtmosphereMode = "atmosphere.mode";
+    public const string LinkSun = "atmosphere.linkSun";
+    public const string Stars = "atmosphere.stars";
+    public const string Moon = "atmosphere.moon";
+    public const string AtmosphereFog = "atmosphere.fog";
+
+    /// <summary>The commands that set the time of day, the sky and the fog to a preset.</summary>
+    public static string TimeOfDay(string name) => $"atmosphere.time.{name.ToLowerInvariant()}";
+
+    public static string SkyPreset(string name) => $"atmosphere.sky.{name.ToLowerInvariant()}";
+
+    public static string FogPreset(string name) => $"atmosphere.fog.{name.ToLowerInvariant()}";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";
@@ -771,6 +785,7 @@ static class EditorCommands
             Icon = "scale",
         });
         RegisterRendering(shell);
+        RegisterAtmosphere(shell);
         RegisterProfiler(shell);
         RegisterCapture(shell);
         RegisterGameWindow(shell);
@@ -861,6 +876,87 @@ static class EditorCommands
             Shortcut = "Shift+F12",
             CanExecuteWhen = () => shell.Host.Linked && !shell.Captures.Busy,
         });
+    }
+
+    // The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere): its volume, its sky's mode and sun, presets
+    // of the time of day, the sky and the fog, and the night's stars and moon. Each edit is one undo entry, and gives
+    // the scene an atmosphere first when it has none.
+    static void RegisterAtmosphere(EditorShell shell)
+    {
+        var commands = shell.Commands;
+        bool CanEdit() => shell.Scene != null && shell.IsEditing;
+        commands.Register(new Command(AtmosphereSelect, "Atmosphere", shell.SelectAtmosphere)
+        {
+            Description = "Select the global volume that holds the scene's sky, ambient light and fog, and add one with an atmosphere when the scene has none.",
+            Icon = "sky",
+            CanExecuteWhen = CanEdit,
+        });
+        commands.Register(new ChoiceCommand(AtmosphereMode, "Sky", Atmosphere.Modes,
+            () => shell.AtmosphereVolume is { } volume ? Atmosphere.ModeOf(volume) : "Flat",
+            mode => shell.EditAtmosphere("Set Sky", (_, volume) => Atmosphere.Set(volume, SceneEdits.EnvironmentId, Atmosphere.Mode, SceneValue.Name(mode))))
+        {
+            Description = "Flat: a background color, and an ambient light from a sky color and a ground color. Atmosphere: a sky that the sun and the moon light through the air, with stars at night.",
+            CanExecuteWhen = CanEdit,
+        });
+        commands.Register(new Command(LinkSun, "Link Sun", shell.ToggleSunLink)
+        {
+            Description = "Take the sky's sun from the selected directional light, or the scene's first: its direction and its light, which the air then tints. Again, the sky has a sun of its own.",
+            Icon = "sun",
+            IsCheckedWhen = () => shell.AtmosphereSun != null,
+            CanExecuteWhen = () => CanEdit() && (shell.AtmosphereSun != null || Atmosphere.DirectionalLights(shell.Scene!.Expanded.Flat).Any()),
+        });
+        foreach (var (name, azimuth, elevation) in Atmosphere.TimesOfDay)
+        {
+            commands.Register(new Command(TimeOfDay(name), name, () => shell.EditAtmosphere($"Set Time to {name}", (scene, volume) => Atmosphere.Aim(scene, volume, azimuth, elevation)))
+            {
+                Description = $"Aim the sun as at {name.ToLowerInvariant()}: {elevation} degrees above the horizon, at {azimuth} degrees from +z toward +x. A linked sun turns its light.",
+                Icon = "sun",
+                CanExecuteWhen = CanEdit,
+            });
+        }
+        foreach (var (name, _) in Atmosphere.Skies)
+        {
+            commands.Register(new Command(SkyPreset(name), name, () => shell.EditAtmosphere($"Set Air to {name}", (_, volume) => Atmosphere.Sky(volume, name)))
+            {
+                Description = name == "Clear" ? "Give the atmosphere Earth's clear air." : $"Give the atmosphere {name.ToLowerInvariant()} air.",
+                Icon = "sky",
+                CanExecuteWhen = CanEdit,
+            });
+        }
+        void Night(string id, string label, string field, double on, string description, string icon) =>
+            commands.Register(new Command(id, label, () =>
+            {
+                var shown = shell.AtmosphereVolume is { } v && Atmosphere.Number(v, field, 0) > 0;
+                shell.EditAtmosphere(shown ? $"Hide {label}" : $"Show {label}", (_, volume) => Atmosphere.Set(volume, SceneEdits.EnvironmentId, field, SceneEdits.Floats(shown ? 0 : on)));
+            })
+            {
+                Description = description,
+                Icon = icon,
+                IsCheckedWhen = () => shell.AtmosphereVolume is { } v && Atmosphere.Number(v, field, 0) > 0,
+                CanExecuteWhen = CanEdit,
+            });
+        Night(Stars, "Stars", Atmosphere.StarIntensity, Atmosphere.StarsOn, "Show stars in the atmosphere's sky, which the day's light hides.", "stars");
+        Night(Moon, "Moon", Atmosphere.MoonIlluminance, Atmosphere.MoonOn, "Show the moon in the atmosphere's sky, which the sun lights in phases, and which lights the night sky.", "moon");
+        commands.Register(new Command(AtmosphereFog, "Fog", () =>
+        {
+            var foggy = shell.AtmosphereVolume is { } v && Atmosphere.HasFog(v);
+            shell.EditAtmosphere(foggy ? "Clear Fog" : "Add Fog", (_, volume) => foggy ? Atmosphere.NoFog(volume) : Atmosphere.Fog(volume, "Light"));
+        })
+        {
+            Description = "Fill the world with the atmosphere's volumetric fog, or clear it and keep its settings.",
+            Icon = "fog",
+            IsCheckedWhen = () => shell.AtmosphereVolume is { } v && Atmosphere.HasFog(v),
+            CanExecuteWhen = CanEdit,
+        });
+        foreach (var (name, _, _) in Atmosphere.Fogs)
+        {
+            commands.Register(new Command(FogPreset(name), name, () => shell.EditAtmosphere($"Set Fog to {name}", (_, volume) => Atmosphere.Fog(volume, name)))
+            {
+                Description = name == "None" ? "Give the atmosphere's fog a density of 0." : $"Give the atmosphere {name.ToLowerInvariant()} fog.",
+                Icon = "fog",
+                CanExecuteWhen = CanEdit,
+            });
+        }
     }
 
     // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features

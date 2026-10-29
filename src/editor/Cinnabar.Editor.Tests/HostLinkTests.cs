@@ -504,6 +504,39 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheAtmospheresSkyIsBlueByDayAndDarkByNight()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+
+        // A global volume with an atmosphere whose own sun is high, and nothing else, so the frame is sky. The camera
+        // looks at the horizon, so the frame's top is the sky above it.
+        Document.SceneEntity Sky(double elevation)
+        {
+            var volume = Entity(1, "Atmosphere");
+            volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+            volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment",
+                [Field("mode", Document.SceneValue.Name("Atmosphere")), Field("sun_elevation", Document.SceneValue.Of(Number(elevation)))]));
+            return volume;
+        }
+        await Load(editor, Scene(Sky(60)));
+        editor.Link.Send(new EditorCamera([Origin, 0, -Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+        editor.Link.Send(EditorShell.DefaultViewportSettings);
+
+        var day = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 32, 2);
+        Assert.True(day.B > day.R + 20 && day.B > 40, $"the day's sky is {day}, not blue");
+
+        await Load(editor, Scene(Sky(-20)));
+        var night = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 32, 2);
+        Assert.True(night.R + night.G + night.B < 30, $"the night's sky is {night}, not dark");
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
     public async Task ALightsIconPicksIt()
     {
         await using var editor = await Connect();

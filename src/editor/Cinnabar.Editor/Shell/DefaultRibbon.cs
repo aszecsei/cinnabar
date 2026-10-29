@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands.Ribbon;
 using Cinnabar.Editor.Docking;
+using Cinnabar.Editor.Document;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -91,6 +92,27 @@ static class DefaultRibbon
                     ]),
                     new RibbonGroup("Capture", [new LargeButton(EditorCommands.Screenshot), new SmallStack([EditorCommands.CaptureGif])]),
                     new RibbonGroup("Layout", [new LargeButton(EditorCommands.ResetLayout), new LargeButton(EditorCommands.CollapseRibbon)]),
+                ]),
+                // The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere). Its panel has every setting.
+                new RibbonTab("atmosphere", "Atmosphere",
+                [
+                    new RibbonGroup("Atmosphere", [new LargeButton(EditorCommands.AtmosphereSelect), new ComboBox(EditorCommands.AtmosphereMode)]),
+                    new RibbonGroup("Sun",
+                    [
+                        new LargeButton(EditorCommands.LinkSun),
+                        new Dropdown("Time of Day", "sun", [.. Atmosphere.TimesOfDay.Select(t => EditorCommands.TimeOfDay(t.Name))]),
+                    ]),
+                    new RibbonGroup("Sky",
+                    [
+                        new Dropdown("Air", "sky", [.. Atmosphere.Skies.Select(s => EditorCommands.SkyPreset(s.Name))]),
+                        new SmallStack([EditorCommands.Stars, EditorCommands.Moon]),
+                    ]),
+                    new RibbonGroup("Fog",
+                    [
+                        new LargeButton(EditorCommands.AtmosphereFog),
+                        new Dropdown("Density", "fog", [.. Atmosphere.Fogs.Select(f => EditorCommands.FogPreset(f.Name))]),
+                    ]),
+                    new RibbonGroup("Details", [new LargeButton(EditorCommands.Panel("atmosphere"))]),
                 ]),
                 // The contextual Mesh tab, while mesh mode is on (see docs/editor/mesh-editing.md#mesh-mode).
                 new RibbonTab("mesh", "Mesh",

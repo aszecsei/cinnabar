@@ -48,8 +48,8 @@ Frame_Constants :: struct {
 	camera_offset:            [4]f32,
 	previous_camera_offset:   [4]f32,
 	origin_offset:            [4]f32,
-	sky_color:                [4]f32,
-	ground_color:             [4]f32,
+	// The ambient light's constant, x, y and z (see Ambient).
+	ambient:                  [4][4]f32,
 	cascade_splits:           [4]f32,
 	// The view's frustum, which the mesh shader path culls meshlets with, and where it looks from: a point relative to
 	// the camera in w = 1, or the direction it looks along in w = 0.
@@ -291,7 +291,7 @@ Cull_Constants :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 656 && size_of(Cull_Constants) == 112)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 688 && size_of(Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -738,8 +738,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		camera_offset            = {camera_offset.x, camera_offset.y, camera_offset.z, 0},
 		previous_camera_offset   = {previous_offset.x, previous_offset.y, previous_offset.z, 0},
 		origin_offset            = {camera_offset.x, camera_offset.y, camera_offset.z, 0},
-		sky_color                = {ambient.sky.r, ambient.sky.g, ambient.sky.b, 0},
-		ground_color             = {ambient.ground.r, ambient.ground.g, ambient.ground.b, 0},
+		ambient                  = ambient_constants(ambient),
 		cascade_splits           = shadows.cascade_splits,
 		camera_right             = {right.x, right.y, right.z, 0},
 		camera_up                = {up.x, up.y, up.z, 0},

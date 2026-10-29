@@ -45,7 +45,7 @@ GI_PARAMS := [Quality_Level]Gi_Params {
 
 // Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
 Gi_Settings :: struct {
-	// Without it, the indirect light is Frame_Settings.ambient.
+	// Without it, the indirect light is the Environment's ambient light.
 	off:   bool,
 	// The cascades' GI_PARAMS.
 	level: Quality_Level,
@@ -69,8 +69,7 @@ Gi_Constants :: struct {
 	up:               [4]f32,
 	forward:          [4]f32,
 	projection:       [4]f32,
-	sky:              [4]f32,
-	ground:           [4]f32,
+	ambient:          [4][4]f32,
 	depth:            u32,
 	stencil:          u32,
 	normals:          u32,
@@ -186,8 +185,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		up             = {up.x, up.y, up.z, 0},
 		forward        = {forward.x, forward.y, forward.z, 0},
 		projection     = {scale.x, scale.y, f.view.near, 0},
-		sky            = {ambient.sky.r, ambient.sky.g, ambient.sky.b, 0},
-		ground         = {ambient.ground.r, ambient.ground.g, ambient.ground.b, 0},
+		ambient        = ambient_constants(ambient),
 		lit_valid      = u32(gf.lit.valid),
 		valid          = u32(gf.diffuse.valid && gf.specular.valid),
 		frame          = gi.frame,

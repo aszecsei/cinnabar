@@ -72,13 +72,72 @@ Global_Illumination :: struct {
 	off: volume.Value(bool),
 }
 
-// Environment is what is around the world: the background where nothing draws, which is not pre-exposed, and the light
-// from everything else until global illumination, the sky's from above and the ground's from below. By default, the
-// background is black and the light is DEFAULT_AMBIENT.
+// Environment is what is around the world (see docs/rendering/sky.md#sky): the background where nothing draws, and the
+// light from everything else until global illumination, its ambient light. With Flat, the background is a color, which
+// is not pre-exposed, and the ambient light is the sky's color from above and the ground's from below. With Atmosphere,
+// both are the sky's: the atmosphere scatters the sun's and the moon's light, and the night has stars.
 Environment :: struct {
-	background: volume.Value([3]f32) `editor:"color"`,
-	sky:        volume.Value([3]f32) `editor:"color"`,
-	ground:     volume.Value([3]f32) `editor:"color"`,
+	mode:              volume.Value(Sky_Mode),
+	background:        volume.Value([3]f32) `editor:"color"`,
+	sky:               volume.Value([3]f32) `editor:"color"`,
+	ground:            volume.Value([3]f32) `editor:"color"`,
+	// Multiplies the ambient light, in either mode.
+	ambient_intensity: volume.Value(f32) `editor:"range=0,4"`,
+	// The directional light that is the sun, whose direction and light the sky takes and whose light the atmosphere
+	// tints (see docs/rendering/sky.md#the-sun). Without one, the sky's sun is at the angles below and lights nothing
+	// else.
+	sun:               volume.Value(ecs.Entity),
+	// In degrees: the azimuth from +z toward +x, and the elevation above the horizon.
+	sun_azimuth:       volume.Value(f32) `editor:"range=0,360"`,
+	sun_elevation:     volume.Value(f32) `editor:"range=-90,90"`,
+	sun_illuminance:   volume.Value(f32) `editor:"range=0,100"`,
+	// The sun disc's angular diameter, in degrees.
+	sun_disc_size:     volume.Value(f32) `editor:"range=0,5"`,
+	atmosphere:        Atmosphere,
+	night:             Night,
+}
+
+// Sky_Mode is what an Environment draws around the world.
+Sky_Mode :: enum u8 {
+	Flat,
+	Atmosphere,
+}
+
+// Atmosphere is the planet's air (see docs/rendering/sky.md#the-atmosphere), after Hillaire's model: molecules that
+// scatter blue more than red (Rayleigh), aerosols that scatter all colors forward and absorb some (Mie), and ozone that
+// absorbs. Coefficients are per megameter, and heights in kilometers, as the literature has them; the defaults are
+// Earth's.
+Atmosphere :: struct {
+	rayleigh_scattering: volume.Value([3]f32),
+	// The height over which the density falls by e.
+	rayleigh_height:     volume.Value(f32) `editor:"range=0.1,30"`,
+	mie_scattering:      volume.Value(f32) `editor:"range=0,100"`,
+	mie_absorption:      volume.Value(f32) `editor:"range=0,100"`,
+	mie_anisotropy:      volume.Value(f32) `editor:"range=0,0.99"`,
+	mie_height:          volume.Value(f32) `editor:"range=0.1,10"`,
+	ozone_absorption:    volume.Value([3]f32),
+	ground_albedo:       volume.Value([3]f32) `editor:"color"`,
+	planet_radius:       volume.Value(f32) `editor:"range=1,10000"`,
+	// From the ground to the top of the atmosphere.
+	atmosphere_height:   volume.Value(f32) `editor:"range=1,200"`,
+	// The world's y of 0 above the ground, to which the camera's y adds.
+	altitude:            volume.Value(f32) `editor:"range=0,50"`,
+}
+
+// Night is what an Atmosphere has besides the sun (see docs/rendering/sky.md#night). The moon is a disc that the sun
+// lights, so its phase follows the angle between them, and it lights the sky; stars are points in every direction. An
+// illuminance or intensity of 0 leaves either out.
+Night :: struct {
+	// In degrees, as the sun's.
+	moon_azimuth:     volume.Value(f32) `editor:"range=0,360"`,
+	moon_elevation:   volume.Value(f32) `editor:"range=-90,90"`,
+	// When full.
+	moon_illuminance: volume.Value(f32) `editor:"range=0,1"`,
+	moon_disc_size:   volume.Value(f32) `editor:"range=0,10"`,
+	moon_color:       volume.Value([3]f32) `editor:"color"`,
+	star_intensity:   volume.Value(f32) `editor:"range=0,10"`,
+	// The share of directions with a star, about.
+	star_density:     volume.Value(f32) `editor:"range=0,1"`,
 }
 
 // Shadows are the directional lights' cascades: how far they reach, and how their depths split, between even (toward
@@ -123,8 +182,31 @@ DEFAULT_AMBIENT_OCCLUSION :: Ambient_Occlusion {
 	power = {value = DEFAULT_AO_POWER},
 }
 DEFAULT_ENVIRONMENT :: Environment {
-	sky = {value = DEFAULT_AMBIENT.sky},
-	ground = {value = DEFAULT_AMBIENT.ground},
+	sky = {value = DEFAULT_SKY_COLOR},
+	ground = {value = DEFAULT_GROUND_COLOR},
+	ambient_intensity = {value = 1},
+	sun_elevation = {value = 45},
+	sun_illuminance = {value = 3},
+	sun_disc_size = {value = DEFAULT_SUN_DISC},
+	atmosphere = {
+		rayleigh_scattering = {value = {5.802, 13.558, 33.1}},
+		rayleigh_height = {value = 8},
+		mie_scattering = {value = 3.996},
+		mie_absorption = {value = 4.4},
+		mie_anisotropy = {value = 0.8},
+		mie_height = {value = 1.2},
+		ozone_absorption = {value = {0.65, 1.881, 0.085}},
+		ground_albedo = {value = {0.3, 0.3, 0.3}},
+		planet_radius = {value = 6360},
+		atmosphere_height = {value = 100},
+	},
+	night = {
+		moon_azimuth = {value = 180},
+		moon_elevation = {value = 30},
+		moon_disc_size = {value = DEFAULT_MOON_DISC},
+		moon_color = {value = {1, 1, 1}},
+		star_density = {value = 0.3},
+	},
 }
 DEFAULT_FOG :: Fog {
 	albedo = {value = {1, 1, 1}},
@@ -164,9 +246,8 @@ Frame_Settings :: struct {
 	gi:                Gi_Settings,
 	fog:               Fog_Settings,
 	shadows:           Shadow_Settings,
-	// The world pass clears the scene to this, which is not pre-exposed.
-	background:        [3]f32,
-	ambient:           Ambient,
+	// What is around the world: the background and the ambient light.
+	sky:               Sky_Settings,
 	// The game's post effects' settings, by their index in Renderer.effects (see register_post_effect).
 	effects:           []Effect_Settings,
 }
@@ -223,8 +304,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 			anisotropy = fog.anisotropy.value,
 		},
 		shadows = {distance = shadows.distance.value, split_lambda = shadows.split_lambda.value},
-		background = env.background.value,
-		ambient = {sky = env.sky.value, ground = env.ground.value},
+		sky = sky_settings(env),
 		effects = resolve_effects(r, w, &inf),
 	}
 }
