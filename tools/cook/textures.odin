@@ -1,5 +1,5 @@
-// Textures are .png, .jpg, .tga and .hdr files. The cooker decodes them, sizes them, makes their mips in floating
-// point, and block-compresses each mip by its usage with Compressonator (see compressonator.odin). See
+// Textures are .png, .jpg, .tga, .hdr, .tif and .exr files. The cooker decodes them, sizes them, makes their mips in
+// floating point, and block-compresses each mip by its usage with Compressonator (see compressonator.odin). See
 // docs/content/kinds/textures.md#textures.
 package cook
 
@@ -9,6 +9,7 @@ import "core:hash"
 import "core:math"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strconv"
 import "core:strings"
 
@@ -18,7 +19,7 @@ import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks textures changes this, which invalidates every cooked texture.
 TEXTURE_COOK_VERSION :: "textures 1"
-TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr"}
+TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr"}
 // Compressonator's quality, from 0 to 1. Development cooks fast, and release cooks well.
 DEV_TEXTURE_QUALITY :: 0.05
 RELEASE_TEXTURE_QUALITY :: 0.5
@@ -54,12 +55,13 @@ TEXTURE_SETTINGS := []Setting_Info {
 	},
 }
 
-// texture_usage_for is the usage that a new texture's .meta file gets, from its name: .hdr files are hdr, a name that
-// ends in _n or _normal is normal, one that ends in _r, _rough, _ao, _m, _metal or _mask is mask, and the rest are
-// color.
+// texture_usage_for is the usage that a new texture's .meta file gets, from its name: .hdr and .exr files are hdr, a
+// name that ends in _n or _normal is normal, one that ends in _r, _rough, _ao, _m, _metal or _mask is mask, and the
+// rest are color.
 texture_usage_for :: proc(path: string) -> string {
 	name := strings.to_lower(filepath.stem(path), context.temp_allocator)
-	if strings.has_suffix(strings.to_lower(path, context.temp_allocator), ".hdr") {
+	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
+	if ext == ".hdr" || ext == ".exr" {
 		return "hdr"
 	}
 	for suffix in ([]string{"_n", "_normal"}) {
@@ -283,46 +285,72 @@ texture_format_of :: proc(usage: format.Texture_Usage) -> format.Texture_Format 
 	return .RGBA8_Unorm
 }
 
-// decode_image_bytes decodes a source into floating point. Color decodes from sRGB into linear light, a normal map maps
-// to -1..1, and .hdr files are linear already. A mask keeps its channel in red.
+// decode_image_bytes decodes a source into floating point, by its first bytes: OpenEXR, TIFF, Radiance .hdr, or what
+// stb_image reads. Color decodes from sRGB into linear light, a normal map maps to -1..1, and a mask keeps its channel
+// in red. Float images (.exr, .hdr and a TIFF of floats) are linear already, so they skip the sRGB step.
 decode_image_bytes :: proc(source: []byte, path: string, t: Texture_Cook, problems: ^Problems) -> (image: Image, ok: bool) {
-	usage := t.usage
 	if len(source) == 0 {
 		report_error(problems, path, 0, 0, "is empty")
 		return
 	}
-	width, height, channels: c.int
-	is_hdr := stbi.is_hdr_from_memory(raw_data(source), c.int(len(source))) != 0
-	if is_hdr {
-		data := stbi.loadf_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
-		if data == nil {
-			report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+	linear: bool
+	switch {
+	case len(source) >= 4 && [4]u8{source[0], source[1], source[2], source[3]} == EXR_MAGIC:
+		width, height, pixels, err := decode_exr(source)
+		if err != "" {
+			report_error(problems, path, 0, 0, "cannot decode: %s", err)
 			return
 		}
-		defer stbi.image_free(data)
-		image = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}
-		for &p, i in image.pixels {
-			p = {data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]}
+		image, linear = {width, height, pixels}, true
+	case len(source) >= 4 && (string(source[:4]) == "II*\x00" || string(source[:4]) == "MM\x00*"):
+		tiff, err := decode_tiff(source)
+		if err != "" {
+			report_error(problems, path, 0, 0, "cannot decode: the TIFF %s", err)
+			return
 		}
-		return image, true
-	}
-	data := stbi.load_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
-	if data == nil {
-		report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
-		return
-	}
-	defer stbi.image_free(data)
-	image = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}
-	for &p, i in image.pixels {
-		for ch in 0 ..< 4 {
-			v := f32(data[i * 4 + ch]) / 255
-			switch {
-			case (usage == .Color || (usage == .Mask && t.srgb)) && ch < 3:
-				v = srgb_to_linear(v)
-			case usage == .Normal && ch < 3:
-				v = v * 2 - 1
+		image, linear = {tiff.width, tiff.height, tiff.pixels}, tiff.linear
+	case:
+		width, height, channels: c.int
+		if stbi.is_hdr_from_memory(raw_data(source), c.int(len(source))) != 0 {
+			data := stbi.loadf_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
+			if data == nil {
+				report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+				return
 			}
-			p[ch] = v
+			defer stbi.image_free(data)
+			image, linear = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}, true
+			for &p, i in image.pixels {
+				p = {data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]}
+			}
+		} else {
+			data := stbi.load_from_memory(raw_data(source), c.int(len(source)), &width, &height, &channels, 4)
+			if data == nil {
+				report_error(problems, path, 0, 0, "cannot decode: %s", stbi.failure_reason())
+				return
+			}
+			defer stbi.image_free(data)
+			image = {int(width), int(height), make([][4]f32, int(width * height), context.temp_allocator)}
+			for &p, i in image.pixels {
+				p = {f32(data[i * 4]), f32(data[i * 4 + 1]), f32(data[i * 4 + 2]), f32(data[i * 4 + 3])} / 255
+			}
+		}
+	}
+	convert_image(&image, t, linear)
+	return image, true
+}
+
+// convert_image turns decoded values into what a usage cooks from: color from sRGB into linear light, unless the image
+// is linear already, a normal map to -1..1, and a mask's channel into red. An hdr or data texture keeps its values.
+convert_image :: proc(image: ^Image, t: Texture_Cook, linear: bool) {
+	usage := t.usage
+	for &p in image.pixels {
+		for ch in 0 ..< 3 {
+			switch {
+			case (usage == .Color || (usage == .Mask && t.srgb)) && !linear:
+				p[ch] = srgb_to_linear(p[ch])
+			case usage == .Normal:
+				p[ch] = p[ch] * 2 - 1
+			}
 		}
 		if usage == .Mask && t.channel != 0 {
 			p.r = p[t.channel]
@@ -331,7 +359,26 @@ decode_image_bytes :: proc(source: []byte, path: string, t: Texture_Cook, proble
 			p.y = -p.y
 		}
 	}
-	return image, true
+}
+
+// image_undecodable gives why the cooker cannot decode an image file, or "" when it can: its extension is not a
+// texture's, or it is an OpenEXR image in a compression that TinyEXR does not have, which its header's start says.
+image_undecodable :: proc(path: string) -> string {
+	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
+	if !slice.contains(TEXTURE_EXTENSIONS, ext) {
+		return "its format"
+	}
+	if ext != ".exr" {
+		return ""
+	}
+	f, err := os.open(path)
+	if err != nil {
+		return "it cannot be opened"
+	}
+	defer os.close(f)
+	head := make([]byte, 64 * 1024, context.temp_allocator)
+	n, _ := os.read(f, head)
+	return exr_undecodable(head[:max(n, 0)])
 }
 
 srgb_to_linear :: proc(v: f32) -> f32 {

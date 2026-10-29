@@ -26,6 +26,8 @@ LightUSD composes the stage: its sublayers, references, payloads, inherits, vari
 - **A missing root sublayer** is a warning, `not cooked`, and the stage makes nothing: a build without a sample's downloads passes. The stage's sub-assets from an earlier cook stay.
 - **Tydra**, LightUSD's render-scene converter, turns the composed stage into nodes, triangulated meshes, materials and textures. It stops at the first mesh that it cannot convert, so the cooker converts again without what broke it. First the mesh's authored normals go, which is what exporters most often get wrong, and the cooker makes its own. If the mesh still fails, it becomes an empty `Xform` and is left out. Each is a warning that names the mesh and why.
 - **A primvar reader whose `inputs:varname` connects to an input of a NodeGraph**, as 3ds Max writes every texture of Sponza, takes the input's value before Tydra sees it, because Tydra cannot follow that connection.
+- **Targets inside a reference.** LightUSD composes a referenced prim's children under the referencing prim but keeps the paths that their relationships and connections target as the referenced layer wrote them. Jungle Ruins' plant prototypes reference prims of their `*_classes.usda` layers, so each prototype's mesh binds `</root/ShrubSorrel_01_Translucent/Looks/...>` where the material is at `</World/.../Prototypes/ShrubSorrel_04_Translucent/Looks/...>`. Without a repair, the plants have no material, and one material whose shaders connect that way stops Tydra. A target that is not on the composed stage is looked for under each ancestor of the prim that holds it, the nearest first, as its path less its first elements, the longest rest first. The cooker repairs meshes' and geometry subsets' material bindings, materials' outputs, and the inputs of the UsdPreviewSurface, UsdUVTexture, UsdTransform2d and primvar reader shaders.
+- **Copies of a material.** A referenced prim's material is a material of its own under each prim that references it: Jungle Ruins has 2,890 materials, most of them copies. A material whose inputs and textures (their files, channels and sampling) are the same as an earlier one's is that one, so the copies make one material instance (Jungle Ruins makes 104), and the prototypes that they bind still share their meshes.
 
 ## Meshes
 
@@ -115,7 +117,7 @@ LightUSD is the submodule `vendor/lightusd` (github.com/lighttransport/tinyusdz)
 ## Limits
 
 - **`.usdz`** is not yet a stage.
-- **Images** are those that `stb_image` decodes: PNG, JPEG, TGA and HDR. A TIFF or EXR image is a warning, and its input keeps its value.
+- **Images** are those that the cooker decodes (see [Textures](textures.md#textures)). Another image is a warning, and its input keeps its value. The images that the cooker decodes are in the stage's key, so a stage cooks again when the cooker learns another.
 - **Instance sets** draw at their meshes' finest level until their impostors take over on a device without mesh shaders, and cast no traced shadows (see [Rendering: GPU scene](../../rendering/gpu-scene.md#instanced-meshes)). A stage bakes impostors with `impostor = true`.
 - **Nested instancing**, a point instancer in another's prototype, is left out, with a warning that counts them; the outer instancer draws its prototypes' meshes.
 - **Size:** a mesh cooks whole, so its triangles fit in memory. Jungle Ruins' meshes that cook are 18.6 million triangles; converting it with its point instancers expanded took about 26 GB.

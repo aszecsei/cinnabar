@@ -52,6 +52,8 @@ struct Cn_Usd {
 	std::vector<Cn_Usd_Subset> subsets;
 	std::vector<std::string> subset_names;
 	std::vector<std::string> resolved;
+	// Each material's first copy: the first material whose inputs and textures are the same (see material_key).
+	std::vector<int32_t> material_alias;
 };
 
 static Cn_Usd_String str(const std::string &s) {
@@ -179,6 +181,146 @@ static void resolve_varname_connections(lightusd::Stage &stage, lightusd::Prim &
 	}
 }
 
+// The prim that an absolute path names on the composed stage, if there is one.
+static const lightusd::Prim *stage_prim(const lightusd::Stage &stage, const std::string &path) {
+	const lightusd::Prim *prim = nullptr;
+	if (!stage.find_prim_at_path(lightusd::Path(path, ""), prim, nullptr)) {
+		return nullptr;
+	}
+	return prim;
+}
+
+// LightUSD composes a reference's prims under the referencing prim but leaves the paths that their relationships and
+// connections target as the referenced layer authored them. Jungle Ruins' plant prototypes reference prims of their
+// *_classes.usda layers, so a prototype's mesh binds </root/ShrubSorrel_01_Translucent/Looks/MI_...>, and the
+// material's shaders connect to each other there, where the material is at
+// </World/.../Prototypes/ShrubSorrel_04_Translucent/Looks/MI_...>, and Tydra loses the material or fails the stage.
+// remap_target finds such a target's prim on the composed stage: its path less its first elements, the longest rest
+// first, under each ancestor of the prim that holds the property, the nearest first. A target that is on the stage
+// stays.
+static bool remap_target(const lightusd::Stage &stage, const std::string &owner, const lightusd::Path &target,
+                         bool material, lightusd::Path *out) {
+	std::string prim_path = target.prim_part();
+	const lightusd::Prim *found = stage_prim(stage, prim_path);
+	if (found && (!material || found->as<lightusd::Material>())) {
+		return false;
+	}
+	std::vector<std::string> elements;
+	for (size_t at = 1; at < prim_path.size();) {
+		size_t end = prim_path.find('/', at);
+		end = end == std::string::npos ? prim_path.size() : end;
+		elements.push_back(prim_path.substr(at, end - at));
+		at = end + 1;
+	}
+	for (size_t first = 1; first < elements.size(); first++) {
+		std::string rest;
+		for (size_t k = first; k < elements.size(); k++) {
+			rest += "/" + elements[k];
+		}
+		for (size_t slash = owner.rfind('/'); slash != std::string::npos && slash > 0; slash = owner.rfind('/', slash - 1)) {
+			std::string candidate = owner.substr(0, slash) + rest;
+			const lightusd::Prim *prim = stage_prim(stage, candidate);
+			if (prim && (!material || prim->as<lightusd::Material>())) {
+				*out = lightusd::Path(candidate, target.prop_part());
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+static void remap_binding(const lightusd::Stage &stage, const std::string &owner,
+                          lightusd::RelationshipProperty &binding, int *fixed) {
+	lightusd::Path remapped;
+	if (binding.authored() && binding.relationship().is_path() &&
+	    remap_target(stage, owner, binding.relationship().targetPath, true, &remapped)) {
+		binding.set(remapped);
+		(*fixed)++;
+	}
+}
+
+// remap_paths remaps a list of connections, and gives whether it changed.
+static bool remap_paths(const lightusd::Stage &stage, const std::string &owner, std::vector<lightusd::Path> &paths,
+                        int *fixed) {
+	bool changed = false;
+	for (lightusd::Path &p : paths) {
+		lightusd::Path remapped;
+		if (remap_target(stage, owner, p, false, &remapped)) {
+			p = remapped;
+			changed = true;
+			(*fixed)++;
+		}
+	}
+	return changed;
+}
+
+template <typename A>
+static void remap_input(const lightusd::Stage &stage, const std::string &owner, A &input, int *fixed) {
+	std::vector<lightusd::Path> paths = input.get_connections();
+	if (remap_paths(stage, owner, paths, fixed)) {
+		input.set_connections(paths);
+	}
+}
+
+template <typename T>
+static void remap_output(const lightusd::Stage &stage, const std::string &owner, lightusd::TypedConnection<T> &output,
+                         int *fixed) {
+	std::vector<lightusd::Path> paths = output.get_connections();
+	if (remap_paths(stage, owner, paths, fixed)) {
+		output.set(paths);
+	}
+}
+
+template <typename T>
+static void remap_reader(const lightusd::Stage &stage, const std::string &owner, lightusd::Shader *shader, int *fixed) {
+	if (auto *reader = shader->value.as<lightusd::UsdPrimvarReader<T>>()) {
+		remap_input(stage, owner, reader->varname, fixed);
+	}
+}
+
+// remap_targets repairs each mesh's and geometry subset's material bindings, each material's outputs, and the inputs
+// of each UsdPreviewSurface, UsdUVTexture, UsdTransform2d and primvar reader, the shaders that the cooker reads (see
+// remap_target). A composed prim's absolute_path is not set, so the walk builds each prim's path from its parent's.
+static void remap_targets(const lightusd::Stage &stage, lightusd::Prim &prim, const std::string &parent, int *fixed) {
+	auto name = prim.element_name();
+	std::string path = parent + "/" + std::string(name.data(), name.size());
+	if (lightusd::GeomMesh *mesh = prim.get_data().as<lightusd::GeomMesh>()) {
+		remap_binding(stage, path, mesh->materialBinding, fixed);
+		remap_binding(stage, path, mesh->materialBindingPreview, fixed);
+	} else if (lightusd::GeomSubset *subset = prim.get_data().as<lightusd::GeomSubset>()) {
+		remap_binding(stage, path, subset->materialBinding, fixed);
+		remap_binding(stage, path, subset->materialBindingPreview, fixed);
+	} else if (lightusd::Material *material = prim.get_data().as<lightusd::Material>()) {
+		remap_output(stage, path, material->surface, fixed);
+		remap_output(stage, path, material->displacement, fixed);
+	} else if (lightusd::Shader *shader = prim.get_data().as<lightusd::Shader>()) {
+		if (auto *s = shader->value.as<lightusd::UsdPreviewSurface>()) {
+			for (auto *input : {&s->metallic, &s->clearcoat, &s->clearcoatRoughness, &s->roughness, &s->opacity,
+			                    &s->opacityThreshold, &s->ior, &s->displacement, &s->occlusion}) {
+				remap_input(stage, path, *input, fixed);
+			}
+			remap_input(stage, path, s->diffuseColor, fixed);
+			remap_input(stage, path, s->emissiveColor, fixed);
+			remap_input(stage, path, s->specularColor, fixed);
+			remap_input(stage, path, s->useSpecularWorkflow, fixed);
+			remap_input(stage, path, s->normal, fixed);
+		} else if (auto *texture = shader->value.as<lightusd::UsdUVTexture>()) {
+			remap_input(stage, path, texture->st, fixed);
+			remap_input(stage, path, texture->file, fixed);
+		} else if (auto *transform = shader->value.as<lightusd::UsdTransform2d>()) {
+			remap_input(stage, path, transform->in, fixed);
+		}
+		remap_reader<float>(stage, path, shader, fixed);
+		remap_reader<lightusd::value::float2>(stage, path, shader, fixed);
+		remap_reader<lightusd::value::float3>(stage, path, shader, fixed);
+		remap_reader<lightusd::value::float4>(stage, path, shader, fixed);
+		remap_reader<int>(stage, path, shader, fixed);
+	}
+	for (lightusd::Prim &child : prim.children()) {
+		remap_targets(stage, child, path, fixed);
+	}
+}
+
 // The prim at an absolute path such as /root/a/b, found by its elements' names.
 static lightusd::Prim *find_prim(std::vector<lightusd::Prim> &prims, const std::string &path) {
 	size_t at = path.find_first_not_of('/');
@@ -277,6 +419,55 @@ static const lightusd::Layer *load_layer(void *userdata, const std::string &asse
 	return c->first->GetOrLoad(*c->second, asset_path, cwp, warn, err);
 }
 
+// material_key is everything that the cooker reads of a material but its name and path, its textures' files and
+// sampling included, as bytes.
+static std::string material_key(Cn_Usd *usd, int32_t index) {
+	Cn_Usd_Material m;
+	cn_usd_material(usd, index, &m);
+	std::string key;
+	auto bytes = [&key](const void *p, size_t n) { key.append(static_cast<const char *>(p), n); };
+	auto text = [&key](Cn_Usd_String s) {
+		key.append(s.ptr ? s.ptr : "", s.len);
+		key += '\0';
+	};
+	auto input = [&](const Cn_Usd_Input &in) {
+		bytes(&in.channel, sizeof(in.channel));
+		bytes(in.value, sizeof(in.value));
+		if (in.texture < 0) {
+			key += '-';
+			return;
+		}
+		Cn_Usd_Texture t;
+		cn_usd_texture(usd, in.texture, &t);
+		text(t.resolved.len ? t.resolved : t.asset);
+		text(t.uv_name);
+		for (int32_t v : {t.color_space, t.wrap_s, t.wrap_t, t.has_transform}) {
+			bytes(&v, sizeof(v));
+		}
+		bytes(t.scale, sizeof(t.scale));
+		bytes(t.bias, sizeof(t.bias));
+		bytes(t.transform_scale, sizeof(t.transform_scale));
+		bytes(&t.transform_rotation, sizeof(t.transform_rotation));
+		bytes(t.transform_translation, sizeof(t.transform_translation));
+	};
+	bytes(&m.preview_surface, sizeof(m.preview_surface));
+	bytes(&m.specular_workflow, sizeof(m.specular_workflow));
+	for (const Cn_Usd_Input *in :
+	     {&m.diffuse, &m.emissive, &m.metallic, &m.roughness, &m.opacity, &m.normal, &m.occlusion}) {
+		input(*in);
+	}
+	bytes(&m.opacity_threshold, sizeof(m.opacity_threshold));
+	return key;
+}
+
+// alias_material is a material's first copy, or -1 for none.
+static int32_t alias_material(Cn_Usd *usd, int32_t material) {
+	if (material < 0 || size_t(material) >= usd->material_alias.size()) {
+		return material;
+	}
+	return usd->material_alias[size_t(material)];
+}
+
 // Composes the stage as LightUSD's large-scene loader does (src/large-scene-loader.cc), but with the root layer's
 // sublayers found in their own folders: the loader leaves the root layer's working path empty, so a relative sublayer
 // resolves against the process's working directory.
@@ -349,6 +540,8 @@ static bool load_stage(const std::string &file, const std::vector<Repair> &repai
 	}
 	int fixed = 0;
 	for (lightusd::Prim &root : stage->root_prims()) {
+		// The targets first, so a primvar reader's varname connects to where its value is.
+		remap_targets(*stage, root, "", &fixed);
 		resolve_varname_connections(*stage, root, &fixed);
 	}
 	for (const Repair &repair : repairs) {
@@ -548,6 +741,14 @@ extern "C" Cn_Usd *cn_usd_open(const char *path, const Cn_Usd_Options *options) 
 			}
 		}
 	}
+	// A referenced prim's material is a material of its own under each prim that references it, as each of Jungle
+	// Ruins' plant prototypes has a copy of its class's: copies that read the same are one, so their meshes share.
+	std::unordered_map<std::string, int32_t> first_material;
+	usd->material_alias.resize(usd->scene.materials.size());
+	for (size_t i = 0; i < usd->scene.materials.size(); i++) {
+		auto it = first_material.emplace(material_key(usd, int32_t(i)), int32_t(i)).first;
+		usd->material_alias[i] = it->second;
+	}
 	return usd;
 }
 
@@ -620,7 +821,7 @@ extern "C" void cn_usd_instance(Cn_Usd *usd, int32_t index, Cn_Usd_Instance *out
 	const tydra::RenderInstance &instance = usd->scene.instances[size_t(index)];
 	*out = {};
 	out->mesh = instance.mesh_id;
-	out->material = instance.material_id;
+	out->material = alias_material(usd, instance.material_id);
 	out->visible = instance.visible;
 	out->path = str(instance.abs_path);
 	copy_matrix(instance.global_matrix, out->world);
@@ -823,7 +1024,7 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 		}
 		if (at > first) {
 			Cn_Usd_Subset s = {};
-			s.material = group_material[size_t(g)];
+			s.material = alias_material(usd, group_material[size_t(g)]);
 			s.first = int32_t(first);
 			s.count = int32_t(at - first);
 			usd->subsets.push_back(s);

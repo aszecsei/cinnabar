@@ -1,6 +1,6 @@
-# Builds vendor/lightusd (TinyUSDZ) and cn_usd.cpp, its C interface, for tools/cook (see docs/content/kinds/stages.md).
-# `just lightusd` configures it, and puts cn_usd.lib and lightusd_static.lib in <build dir>/out, where tools/cook/usd.odin
-# looks for them.
+# Builds vendor/lightusd (TinyUSDZ), cn_usd.cpp, its C interface, and cn_exr.cpp, an OpenEXR decoder, for tools/cook (see
+# docs/content/kinds/stages.md). `just lightusd` configures it, and puts cn_usd.lib and lightusd_static.lib in
+# <build dir>/out, where tools/cook/usd.odin and tools/cook/exr.odin look for them.
 cmake_minimum_required(VERSION 3.24)
 project(cinnabar_usd LANGUAGES C CXX)
 
@@ -64,6 +64,7 @@ target_compile_options(lightusd_static PRIVATE /W0)
 # link.
 target_compile_definitions(lightusd_static PRIVATE STB_IMAGE_WRITE_STATIC)
 
-add_library(cn_usd STATIC cn_usd.cpp)
+# cn_exr.cpp is the cooker's OpenEXR decoder, TinyEXR, which inflates with the miniz in lightusd_static.
+add_library(cn_usd STATIC cn_usd.cpp cn_exr.cpp)
 target_link_libraries(cn_usd PRIVATE lightusd_static)
-target_include_directories(cn_usd PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../vendor/lightusd/src")
+target_include_directories(cn_usd PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../../vendor/lightusd/src" "${CMAKE_CURRENT_SOURCE_DIR}/../../../vendor/lightusd/src/external")

@@ -25,7 +25,7 @@ import "core:time"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
-STAGE_COOK_VERSION :: "stages 2"
+STAGE_COOK_VERSION :: "stages 3"
 STAGE_EXTENSIONS :: []string{".usda", ".usdc", ".usd"}
 // A part of a mesh has at most this many submeshes, which a Mesh_Renderer has material slots for.
 STAGE_MAX_SLOTS :: format.MESH_MAX_SLOTS
@@ -220,7 +220,8 @@ stage_setting :: proc(a: Asset_Source, key: string) -> string {
 }
 
 // stage_key covers what every sub-asset depends on besides the files that the stage reads: the cooker, the libraries,
-// the configuration, the path, the source, the GUID and the settings. The sub-asset lines of the .meta file are not in
+// the images that the cooker decodes, which decide what a material's inputs read, the configuration, the path, the
+// source, the GUID and the settings. The sub-asset lines of the .meta file are not in
 // it, because the cooker writes them.
 @(private = "file")
 stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
@@ -231,6 +232,9 @@ stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 			options.config, a.name, format.mesh_layout(), format.texture_layout(),
 		),
 	)
+	for ext in TEXTURE_EXTENSIONS {
+		key = hash.fnv64a(transmute([]byte)ext, key)
+	}
 	key = hash.fnv64a(a.source, key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -478,8 +482,8 @@ stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes
 				report_warning(problems, a.path, 0, 0, "material %s reads %s, which is not there", usd_string(mat.path), usd_string(tex.asset))
 				continue
 			}
-			if !slice.contains(TEXTURE_EXTENSIONS, strings.to_lower(filepath.ext(resolved), context.temp_allocator)) {
-				report_warning(problems, a.path, 0, 0, "material %s reads %s, which the cooker cannot decode, so the input keeps its value", usd_string(mat.path), resolved)
+			if why := image_undecodable(resolved); why != "" {
+				report_warning(problems, a.path, 0, 0, "material %s reads %s, which the cooker cannot decode (%s), so the input keeps its value", usd_string(mat.path), resolved, why)
 				continue
 			}
 			texture_name := stage_texture_name(a, usd, resolved, role)
@@ -1573,10 +1577,10 @@ read_manifest :: proc(path: string) -> (m: Stage_Manifest, ok: bool) {
 			m.key = strconv.parse_u64_of_base(tail, 16) or_return
 		case "file":
 			size_text, _, after := strings.partition(tail, " ")
-			modified_text, _, path := strings.partition(after, " ")
+			modified_text, _, file_path := strings.partition(after, " ")
 			size := strconv.parse_i64(size_text) or_return
 			modified := strconv.parse_i64(modified_text) or_return
-			append(&m.files, Stage_File{size, modified, path})
+			append(&m.files, Stage_File{size, modified, file_path})
 		case "subasset":
 			fields := strings.split_n(tail, " ", 4, context.temp_allocator)
 			if len(fields) != 4 {
