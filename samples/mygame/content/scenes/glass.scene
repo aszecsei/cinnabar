@@ -2,7 +2,8 @@
 # an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
 # around a gold one, an additive hologram behind them, a Particle_System whose smoke rises beside the glass and drifts
 # through it while its sparks bounce on the floor, and a spinner that draws a ribbon trail (see
-# docs/rendering/particles.md#particles). The editor writes this file; see docs/editor.md#scenes.
+# docs/rendering/particles.md#particles), under an atmosphere's sky whose sun is the Sun's light (see
+# docs/rendering/sky.md#sky). The editor writes this file; see docs/editor.md#scenes.
 scene 2
 
 entity 0c5c7fd0a6a3a450
@@ -88,9 +89,13 @@ component 1 Transform
 component 42 Volume
 	shape = Global
 component 49 Environment
+	mode = Atmosphere
 	background = [0.3, 0.42, 0.6]
 	sky = [0.35, 0.45, 0.6]
 	ground = [0.12, 0.1, 0.08]
+	sun = @0c5c7fd0a6a3a450
+	night.moon_illuminance = 0.05
+	night.star_intensity = 1
 component 38 Fog
 	density = 0.01
 	height_falloff = 0.3

@@ -82,6 +82,7 @@ Renderer :: struct {
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
 	fog:             Volumetric_Fog,
+	sky:             Sky,
 	post:            Post,
 	// The game's post effects, in the order that they run at each point. renderer_reload clears them.
 	effects:         [MAX_POST_EFFECTS]Post_Effect,
@@ -241,6 +242,8 @@ Frame :: struct {
 	gi:                       ^Gi_Frame,
 	// nil without fog.
 	fog:                      ^Fog_Frame,
+	// nil without an Atmosphere sky.
+	sky:                      ^Sky_Frame,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -326,6 +329,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	ao_init(&r.ao)
 	gi_init(&r.gi)
 	fog_init(&r.fog)
+	sky_init(&r.sky)
 	sprites_init(&r.sprites)
 	particles_init(&r.particles, w)
 	post_init(&r.post, platform)
@@ -364,6 +368,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
+	sky_destroy(&r.sky, r.platform)
 	sprites_destroy(&r.sprites, r.platform)
 	particles_destroy(&r.particles, r.platform)
 	post_destroy(&r.post, r.platform)
@@ -427,11 +432,13 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			casts = false
 		}
 	}
+	// The sky tints its sun's light before the shadows and the upload take the lights.
+	ambient := begin_sky(f, settings.sky)
 	assign_shadows(f)
 	upload_lights(f)
 	begin_fog(f, settings.fog)
-	begin_gi(f, settings.gi, settings.ambient)
-	add_scene_passes(f, settings.ambient)
+	begin_gi(f, settings.gi, ambient)
+	add_scene_passes(f, ambient)
 	begin_sprites(f, desc.sprites, &r.sprites.main)
 	begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
 	lines := debug.frame_lines(&r.debug)
@@ -462,21 +469,25 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_cluster_passes(f)
 	add_shadow_passes(f)
 	add_fog_passes(f)
+	add_sky_passes(f)
 
+	// The sky draws over the background after the world pass, so the clear is black under it.
+	background := f.sky == nil ? settings.sky.background : {}
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
-	color(&g, p, f.scene, .Clear, {settings.background.r, settings.background.g, settings.background.b, 1})
+	color(&g, p, f.scene, .Clear, {background.r, background.g, background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
-	// The debug layer tests against the depth, the editor reads it, and so do the fog over the background, the
+	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || f.sky != nil || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
-	// The background's fog first, so it does not dim the transparent surfaces in front of it, and the global
+	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
 	// illumination's lit scene, which keeps only the opaque surfaces.
+	add_sky_background(f)
 	add_fog_background(f)
 	add_gi_lit(f)
 	add_transparency_passes(f)
@@ -560,6 +571,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
 	sync_fog_pipelines(r, force)
+	sync_sky_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
 	sync_particle_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)

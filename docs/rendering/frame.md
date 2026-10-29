@@ -13,6 +13,8 @@ flowchart TB
     AO["Ambient occlusion"]
     GI["Global illumination"]
     FOG["Fog volume"]
+    SKYLUT["Sky tables<br/>transmittance, multiple scattering, view"]
+    SKY["Sky<br/>where nothing drew"]
     FWD["Forward<br/>opaque"]
     VMFWD["View model forward"]
     TRANS["Transparent"]
@@ -26,7 +28,8 @@ flowchart TB
     PRE --> SHADOW & CLUSTER & AO & GI
     CLUSTER --> FOG
     SHADOW & CLUSTER & AO & GI & FOG --> FWD
-    FWD --> VMFWD --> TRANS --> POST --> TONE --> OUT
+    SKYLUT --> SKY
+    FWD --> VMFWD --> SKY --> TRANS --> POST --> TONE --> OUT
     UI --> OUT
     DEBUG --> OUT
 ```
@@ -64,14 +67,14 @@ The settings that make the scene's look are settings components on [volumes](../
 | `Bloom` | 46 | `off`, `intensity` |
 | `Ambient_Occlusion` | 47 | `off`, `radius`, `power` |
 | `Global_Illumination` | 48 | `off` |
-| `Environment` | 49 | The `background`, which the world pass clears the scene to and which is not pre-exposed, and the ambient light's `sky` and `ground` (`DEFAULT_AMBIENT` by default) |
+| `Environment` | 49 | The `mode`: Flat's `background`, which the world pass clears the scene to and which is not pre-exposed, and its ambient light's `sky` and `ground`; or the atmosphere's sky, with its sun, moon and stars. The `ambient_intensity` in either. See [Sky](sky.md#sky) |
 | `Fog` | 38 | See [Volumetric fog](fog.md#volumetric-fog) |
 | `Shadows` | 50 | The directional cascades' `distance` (`SHADOW_DISTANCE`, 100 m) and `split_lambda` between even and exponential (`SHADOW_SPLIT_LAMBDA`, 0.75) |
 
-- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Fog_Settings`, the background and the `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
+- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Fog_Settings` and `Sky_Settings`, from which `begin_sky` gives the frame's `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
 - **Quality:** the settings are the look, the same at every quality. `draw_frame` then gives them the frame's [quality](quality.md#order-in-the-frame), which sets each feature's level and can turn a feature off but never on, and then the editor's debug flags.
 - **Defaults:** each component registers its `DEFAULT_*` value (see [Volumes](../world/volumes.md#volumes)). Volumes blend from it, so a volume that reaches halfway sets a value halfway from the default, and a component added in the editor starts from it. Paper white and the peak have no fixed default, the display's, so their default is 0, which gives the display's. The exposure, the exposure range, the adaptation speed, the shadow distance and the ambient occlusion's radius and power also take their defaults at 0 in `Frame_Settings`, where 0 would mean nothing.
-- **The sample's scene** has a Global Volume with its background.
+- **The sample's scene** has a Global Volume with its background. The glass scene's has an atmosphere whose sun is the scene's directional light, with stars and a moon.
 
 ## Views
 

@@ -7,6 +7,7 @@
 #ifndef GI_COMMON_HLSLI
 #define GI_COMMON_HLSLI
 
+#include "ambient.hlsli"
 #include "cinnabar.hlsli"
 
 // Matches Gi_Constants in lib/engine/render/gi.odin. previous maps a position relative to the camera to last frame's
@@ -19,8 +20,7 @@ struct Gi_Constants {
 	float4 up;
 	float4 forward;
 	float4 projection;
-	float4 sky;
-	float4 ground;
+	float4 ambient[4];
 	uint depth;
 	uint stencil;
 	uint normals;
@@ -96,9 +96,9 @@ float3 direction_of(uint2 texel, uint directions, float2 within) {
 	return octahedral((float2(texel) + within) / directions * 2 - 1);
 }
 
-// The ambient light from a direction: the sky's from above and the ground's from below.
+// The ambient light from a direction.
 float3 sky_light(float3 direction) {
-	return lerp(constants.ground.rgb, constants.sky.rgb, direction.y * 0.5 + 0.5);
+	return ambient_light(constants.ambient, direction);
 }
 
 float interleaved_noise(float2 pixel) {

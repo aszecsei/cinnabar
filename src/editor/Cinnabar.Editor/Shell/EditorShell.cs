@@ -100,11 +100,11 @@ public sealed partial class EditorShell : IDisposable
         Selection.Changed += (old, entities) =>
         {
             _selectedSceneIds = [.. entities.Select(e => World.Find(e)?.SceneId ?? 0).Where(id => id != 0)];
-            foreach (var gone in old.Except(entities))
+            foreach (var gone in old.Except(entities).Where(e => !_watches.ContainsKey(e)))
             {
                 Host.Send(new UnwatchEntity(gone));
             }
-            foreach (var added in entities.Except(old))
+            foreach (var added in entities.Except(old).Where(e => !_watches.ContainsKey(e)))
             {
                 Host.Send(new WatchEntity(added));
             }
@@ -118,7 +118,7 @@ public sealed partial class EditorShell : IDisposable
         {
             SendLiveMeshes();
             ResendMeshOverlay();
-            foreach (var entity in Selection.Entities)
+            foreach (var entity in Selection.Entities.Union(_watches.Keys))
             {
                 Host.Send(new WatchEntity(entity));
             }
@@ -171,6 +171,7 @@ public sealed partial class EditorShell : IDisposable
         yield return new PanelTool("properties", "Properties", "properties", EditorLayout.RightDock, () => new PropertiesView(this));
         yield return new PanelTool("faceEditor", "Face", "mesh", EditorLayout.RightDock, () => new FaceEditorView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
+        yield return new PanelTool("atmosphere", "Atmosphere", "sky", EditorLayout.RightDock, () => new AtmosphereView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));
         yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats, CaptureFrame));

@@ -72,16 +72,44 @@ Light_Record :: struct {
 
 #assert(size_of(Light_Record) == 80)
 
-// Ambient is the light from everything else until global illumination: the sky's from above and the ground's from
-// below.
+// Ambient is the light from everything else until global illumination (see docs/rendering/sky.md#ambient-light): from a
+// direction d, constant + x * d.x + y * d.y + z * d.z, per channel. A linear function holds the Flat sky's light from
+// above and the ground's from below exactly, and the Atmosphere's sky as its first spherical harmonics, convolved with
+// the cosine.
 Ambient :: struct {
-	sky:    [3]f32,
-	ground: [3]f32,
+	constant: [3]f32,
+	x, y, z:  [3]f32,
 }
 
+// The Flat ambient light's default colors.
+DEFAULT_SKY_COLOR :: [3]f32{0.3, 0.36, 0.45}
+DEFAULT_GROUND_COLOR :: [3]f32{0.14, 0.12, 0.1}
+
+// flat_ambient is the light of a sky's color from above and a ground's from below, between them on the horizon.
+flat_ambient :: proc(sky, ground: [3]f32) -> Ambient {
+	return {constant = (sky + ground) * 0.5, y = (sky - ground) * 0.5}
+}
+
+// flat_ambient of the default colors.
 DEFAULT_AMBIENT :: Ambient {
-	sky    = {0.3, 0.36, 0.45},
-	ground = {0.14, 0.12, 0.1},
+	constant = {0.22, 0.24, 0.275},
+	y        = {0.08, 0.12, 0.175},
+}
+
+// ambient_at is the ambient light from a direction, as ambient_light in ambient.hlsli has it.
+ambient_at :: proc(a: Ambient, d: [3]f32) -> [3]f32 {
+	return linalg.max(a.constant + a.x * d.x + a.y * d.y + a.z * d.z, 0)
+}
+
+// ambient_constants is an Ambient as the shaders take it: constant, x, y and z in four float4s.
+@(private)
+ambient_constants :: proc(a: Ambient) -> [4][4]f32 {
+	return {
+		{a.constant.r, a.constant.g, a.constant.b, 0},
+		{a.x.r, a.x.g, a.x.b, 0},
+		{a.y.r, a.y.g, a.y.b, 0},
+		{a.z.r, a.z.g, a.z.b, 0},
+	}
 }
 
 // Cluster_Constants matches Cluster_Constants in cluster_lights.hlsl.
@@ -133,6 +161,8 @@ Light_Frame :: struct {
 	records:           [dynamic]Light_Record,
 	casts:             [dynamic]bool,
 	directional_count: int,
+	// The directional lights' entities, in their records' order, so the sky finds its sun's.
+	directional:       [MAX_DIRECTIONAL_LIGHTS]ecs.Entity,
 	upload:            gpu.Upload,
 	columns:           u32,
 	rows:              u32,
@@ -251,6 +281,7 @@ extract_lights :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) -> ^Light_Frame 
 				continue
 			}
 			add(lf, {type = .Directional, color = color_of(light.color, light.intensity), direction = forward_of(pose), shadow = -1, mask = -1}, light.cast_shadows)
+			lf.directional[lf.directional_count] = e
 			lf.directional_count += 1
 		}
 	}

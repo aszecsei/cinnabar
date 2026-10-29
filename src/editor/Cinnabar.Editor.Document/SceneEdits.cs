@@ -13,6 +13,14 @@ public static class SceneEdits
     public const ulong VolumeId = 42;
     /// <summary>The renderer's Mesh_Renderer (see docs/rendering/assets.md#components).</summary>
     public const ulong MeshRendererId = 33;
+    /// <summary>The renderer's Directional_Light (see docs/rendering/lighting-and-shadows.md#lights-and-clusters).</summary>
+    public const ulong DirectionalLightId = 34;
+    /// <summary>The renderer's Fog setting (see docs/rendering/fog.md#volumetric-fog).</summary>
+    public const ulong FogId = 38;
+    /// <summary>The renderer's Environment setting (see docs/rendering/sky.md#sky).</summary>
+    public const ulong EnvironmentId = 49;
+    /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world/volumes.md#volumes).</summary>
+    public const string OverrideSuffix = ".override";
 
     /// <summary>Sets a field in a list, or removes it with a null value, and returns the old value or null.</summary>
     public static SceneValue? Put(List<SceneField> fields, string name, SceneValue? value)

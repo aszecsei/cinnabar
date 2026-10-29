@@ -3,6 +3,7 @@
 #ifndef MATERIAL_COMMON_HLSLI
 #define MATERIAL_COMMON_HLSLI
 
+#include "ambient.hlsli"
 #include "cinnabar.hlsli"
 
 // Matches Frame_Constants in lib/engine/render/scene.odin. Positions in the GPU scene are relative to the render
@@ -20,9 +21,8 @@ struct Frame_Constants {
 	// The camera's offset from the render origin in every view's copy, the view model's included, so a point's position
 	// relative to the origin is its position relative to the camera plus this (see world_position).
 	float4 origin_offset;
-	// The ambient light from above and from below, until global illumination.
-	float4 sky_color;
-	float4 ground_color;
+	// The ambient light until global illumination, as ambient_light takes it.
+	float4 ambient[4];
 	// The view depth at which each shadow cascade ends.
 	float4 cascade_splits;
 	// The view's frustum relative to the camera, which the mesh shader path culls meshlets with: a point is inside when

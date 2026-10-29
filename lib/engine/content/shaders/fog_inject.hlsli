@@ -96,7 +96,7 @@ float3 fog_light(float3 p, float depth) {
 		}
 	}
 	// The ambient light comes from every direction, so it scatters toward the camera whatever the phase.
-	return result + 0.5 * (frame.sky_color.rgb + frame.ground_color.rgb);
+	return result + ambient_average(frame.ambient);
 }
 
 // fog_inject fills one froxel. Each shader that includes this file calls it from its cs_main, with 4x4x4 threads,

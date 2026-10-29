@@ -1,12 +1,12 @@
 # Shell and panels
 
-Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the resource monitor, the profiler and the content browser.
+Docking, the ribbon, commands and game commands, and each panel: the outliner, properties, the atmosphere, the resource monitor, the profiler and the content browser.
 
 **In this document:** [Shell](#shell) · [Panels](#panels)
 
 ## Shell
 
-- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties and undo history on the right, and the console, content browser and resource monitor at the bottom.
+- **Docking:** the Dock library for Avalonia. The default layout is the outliner on the left, the viewport in the middle, the properties, undo history and atmosphere on the right, and the console, content browser and resource monitor at the bottom.
 - **One instance of each panel.** Closing a panel takes it out of the layout, and showing it again puts the same panel back in its default dock, so its state survives. Docking can rebuild a panel's view at any time, so a view holds no state: the console's lines are in a `ConsoleLog`, and the viewport's device and frames are in a `ViewportSession`.
 - **The layout file:** the editor saves the layout to `layout.json` when it closes. The file is the editor's own: the tree of splits, tool docks and the document dock, with proportions and panel IDs. Dock's serializer would store Dock's types, and need metadata for each. A panel that floats docks again in its default dock at the next start, and panels cannot be pinned. A layout that has no viewport, or that does not parse, is replaced by the default with a warning in the console.
 - **Documents:** the viewport is the first document, and cannot close, float or move into a tool dock. The material editor's documents go beside it (see [Material editor](material-editor.md#material-editor)); the layout file does not keep them.
@@ -51,6 +51,7 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 | Face | In mesh mode, the selected faces' material and texture mapping, with the texture tools (see [Mesh editing](mesh-editing.md#mesh-mode)) |
 | Viewport | The frames, the overlays, the gizmo and the camera |
 | Content Browser | The content roots' folders and assets, from the cook daemon's index, with each asset's cook status |
+| Atmosphere | The scene's sky, sun, ambient light, night and fog, from its atmosphere's volume |
 | Undo History | The undo stack, after a row for the scene as it opened. Clicking an entry undoes or redoes to it. Undone entries are dimmed, and the one that the file has is marked saved. |
 | Console | The host's and the cook daemon's log |
 | Resource Monitor | Frame times, memory, GPU resource counts and script memory by module |
@@ -86,6 +87,15 @@ The editor has its own ribbon control. The Avalonia ribbon libraries are small a
 ### Face
 
 - The Face panel is mesh mode's face edit sheet (see [Mesh editing](mesh-editing.md#mesh-mode)): with faces selected, their material, with the properties panel's asset picker and drop target, the dev materials first; the material's tool texture and its size; the faces' texel density beside the scale, and the project's; the mapping's axes, read-only; its scale, shift and rotation, typed or dragged as the properties panel's numbers are, each drag one undo entry; the hotspot the faces sit on, in the warning color when the texture leaves it; and the texture tools as buttons. A field whose values differ among the faces shows a dash, and an edit sets every face.
+
+### Atmosphere
+
+The Atmosphere tab and panel edit the scene's surroundings in one place, whatever is selected (see [Rendering](../rendering/sky.md#sky)).
+
+- **The atmosphere's volume** is a global volume of the scene's: one with an `Environment`, the highest priority first (`Atmosphere.Find`). Every edit of the tab or the panel is one undo entry, and when the scene has no such volume, the same entry first adds a global volume named Atmosphere at the origin, with an `Environment` in Atmosphere mode linked to the scene's first directional light, or gives a global volume without one an `Environment`. Setting a setting overrides it, as the properties panel's edits do.
+- **The tab:** Atmosphere selects the volume, and Sky picks Flat or Atmosphere. Link Sun links the sky's sun to the selected directional light, or the scene's first, and unlinks it when it is linked. Time of Day aims the sun at dawn, morning, noon, afternoon, dusk or night: a linked sun turns its light, and the sky's own sun sets its azimuth and elevation. Air resets the atmosphere's air and sets clear, hazy, dusty or alien air. Stars and Moon show or hide the night's. Fog adds the volume's `Fog`, or sets its density to 0 and keeps its other settings, and Density sets a fog's density and falloff. Details shows the panel.
+- **The panel** has groups for the sun, the sky, the night and the fog, with the properties panel's rows: sliders, colors, override check boxes and reset buttons (`FieldGrid`). The sun's group has its link, its azimuth and elevation, which turn a linked light's rotation, or its `Local_Transform`'s under a parent, so its world rotation is the one asked for; then the linked light's color and intensity, or the sky's own sun's illuminance; and the disc's size. The sky's group has Flat's colors or the atmosphere's air, by the mode, and the night's group shows only in Atmosphere. A drag of a name or a slider is one undo entry.
+- **Values:** the panel watches the volume and the linked light while it shows them, as the properties panel watches the selection (`EditorShell.Watch`), so they have values whatever is selected. The shell counts the watches, so a change of the selection does not stop them.
 
 ### Resource monitor
 

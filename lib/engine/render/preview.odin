@@ -430,8 +430,7 @@ write_preview_records :: proc(
 		cluster_view_projection  = view_projection,
 		// The preview's world has its origin at the mesh's middle, or an effect's at the effect.
 		origin_offset            = {origin.x, origin.y, origin.z, 0},
-		sky_color                = {DEFAULT_AMBIENT.sky.r, DEFAULT_AMBIENT.sky.g, DEFAULT_AMBIENT.sky.b, 0},
-		ground_color             = {DEFAULT_AMBIENT.ground.r, DEFAULT_AMBIENT.ground.g, DEFAULT_AMBIENT.ground.b, 0},
+		ambient                  = ambient_constants(DEFAULT_AMBIENT),
 		instances                = gpu.read_index(r.previews.instances),
 		draws                    = gpu.read_index(r.previews.draws),
 		meshes                   = buffer,
