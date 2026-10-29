@@ -1,7 +1,8 @@
 // The cooker's C interface to LightUSD (vendor/lightusd), which tools/cook/usd.odin binds. One handle holds one composed
 // stage, converted to render data by Tydra: nodes, triangulated meshes, UsdPreviewSurface materials and the textures
-// they read. Strings and arrays stay valid until cn_usd_close, except a mesh's, which stay valid until the next
-// cn_usd_mesh call. See docs/content/kinds/stages.md.
+// they read. Strings and arrays stay valid until cn_usd_close, except a mesh's, which stay valid until the thread's next
+// cn_usd_mesh call. After cn_usd_open, several threads may call cn_usd_mesh and cn_usd_texture at once. See
+// docs/content/kinds/stages.md.
 #pragma once
 
 #include <stddef.h>

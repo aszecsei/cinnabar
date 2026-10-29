@@ -22,7 +22,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 3"
+MODEL_COOK_VERSION :: "models 4"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -645,6 +645,10 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 
 	config := clod_default_config(format.MESHLET_MAX_TRIANGLES)
 	config.max_vertices = format.MESHLET_MAX_VERTICES
+	// Without the sloppy fallback, which merges vertices by position alone: across a seam it stretches the UVs, and its
+	// error is the shape's, so a flat surface of many UV islands, as a tiled floor, would take it up close. A group that
+	// cannot simplify within its seams stays as it is.
+	config.simplify_fallback_sloppy = false
 	weights := [3]f32{LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT}
 	// The attributes are the floats of Vertex from its normal on. The normal weighs in, and the UV sets' seams are
 	// protected, which permissive simplification needs.

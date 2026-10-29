@@ -83,8 +83,9 @@ Image :: struct {
 	pixels:        [][4]f32,
 }
 
-// cook_textures cooks the textures among the assets whose keys changed. A texture that fails keeps its old blob. It
-// reports every failure, and returns false if any.
+// cook_textures cooks the textures among the assets whose keys changed, at once (see parallel_for), the largest
+// sources first. A texture that fails keeps its old blob. It reports every failure, in the assets' order, and returns
+// false if any.
 cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
 	out_dir := config_dir(options)
@@ -96,6 +97,12 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 			return false
 		}
 	}
+	work := Texture_Work {
+		options = options,
+		assets  = assets,
+		out_dir = out_dir,
+		jobs    = make([dynamic]Texture_Job, 0, len(textures), context.temp_allocator),
+	}
 	for i in textures {
 		a := &assets[i]
 		if !check_settings(a^, problems) {
@@ -103,24 +110,75 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 			ok = false
 			continue
 		}
-		key := texture_key(options, a^)
-		buffer: [32]u8
-		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.meta.guid, &buffer))
-		// The index carries the size of the blob that the cache ends up with, cooked now or kept.
-		defer a.size = texture_blob_size(output)
-		if cooked_key(output, .Texture, format.texture_layout()) == key && !pass.force[a.meta.guid] {
-			pass.current[.Texture] += 1
-			continue
-		}
-		blob, cooked := cook_texture(options, a^, key, problems)
-		if !cooked || !write_blob(output, blob) {
+		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], scratch = {problems = {log = problems.log}}})
+	}
+	Sized :: struct {
+		size, job: int,
+	}
+	by_size := make([]Sized, len(work.jobs), context.temp_allocator)
+	for job, i in work.jobs {
+		by_size[i] = {len(assets[job.asset].source), i}
+	}
+	slice.stable_sort_by(by_size, proc(x, y: Sized) -> bool {
+		return x.size > y.size
+	})
+	work.order = make([]int, len(work.jobs), context.temp_allocator)
+	for s, i in by_size {
+		work.order[i] = s.job
+	}
+	parallel_for(len(work.jobs), &work, cook_texture_job)
+	for &job in work.jobs {
+		a := &assets[job.asset]
+		a.size = job.size
+		if !finish_job(job.result, &job.scratch, .Texture, pass) {
 			a.failed = true
 			ok = false
-			continue
 		}
-		pass.cooked[.Texture] += 1
 	}
 	return ok
+}
+
+// Texture_Work is the textures that cook_textures cooks: a job for each, in the assets' order, and the order that
+// parallel_for takes them in.
+@(private = "file")
+Texture_Work :: struct {
+	options: Cook_Options,
+	assets:  []Asset_Source,
+	out_dir: string,
+	jobs:    [dynamic]Texture_Job,
+	order:   []int,
+}
+
+// Texture_Job is one texture's cook: its asset's index, whether it cooks also when its blob is up to date, what came
+// of it, the size of the blob that the cache ends up with, cooked now or kept, which the index carries, and the
+// scratch that holds its problems until finish_job.
+@(private = "file")
+Texture_Job :: struct {
+	asset:   int,
+	force:   bool,
+	result:  Cook_Result,
+	size:    [2]u32,
+	scratch: Scratch,
+}
+
+@(private = "file")
+cook_texture_job :: proc(data: rawptr, index: int) {
+	w := (^Texture_Work)(data)
+	job := &w.jobs[w.order[index]]
+	defer scratch_keep(&job.scratch)
+	a := w.assets[job.asset]
+	key := texture_key(w.options, a)
+	buffer: [32]u8
+	output := fmt.tprintf("%s/%s.blob", w.out_dir, format.guid_format(a.meta.guid, &buffer))
+	defer job.size = texture_blob_size(output)
+	if cooked_key(output, .Texture, format.texture_layout()) == key && !job.force {
+		job.result = .Current
+		return
+	}
+	blob, cooked := cook_texture(w.options, a, key, &job.scratch.problems)
+	if cooked && write_blob(output, blob) {
+		job.result = .Cooked
+	}
 }
 
 // texture_blob_size is the size of a cooked texture blob, from its header, or zero for a file that is not one.

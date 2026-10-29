@@ -47,16 +47,20 @@ struct Cn_Usd {
 		bool nested;
 	};
 	std::vector<Instancer> instancers;
-	// The current cn_usd_mesh's corners.
-	std::vector<float> positions, normals, uv0, uv1, colors;
-	std::vector<Cn_Usd_Subset> subsets;
-	std::vector<std::string> subset_names;
 	std::vector<std::string> resolved;
 	// Each light's texture's file, resolved as a texture's is.
 	std::vector<std::string> light_resolved;
 	// Each material's first copy: the first material whose inputs and textures are the same (see material_key).
 	std::vector<int32_t> material_alias;
 };
+
+// A thread's last cn_usd_mesh's corners: each thread has its own, so threads can read meshes at once.
+struct Mesh_Corners {
+	std::vector<float> positions, normals, uv0, uv1, colors;
+	std::vector<Cn_Usd_Subset> subsets;
+	std::vector<std::string> subset_names;
+};
+static thread_local Mesh_Corners mesh_corners;
 
 static Cn_Usd_String str(const std::string &s) {
 	return {s.data(), s.size()};
@@ -622,6 +626,8 @@ extern "C" Cn_Usd *cn_usd_open(const char *path, const Cn_Usd_Options *options) 
 		env.material_config.allow_backslash_in_asset_path = true;
 		env.material_config.allow_missing_asset = true;
 		env.set_search_paths(search);
+		// A sample's wrapper layer reaches its downloads through a parent folder, as Sponza's dome light's image.
+		env.asset_resolver.set_allow_parent_relative_paths(true);
 		usd->scene = {};
 		if (converter.ConvertToRenderScene(env, &usd->scene)) {
 			warn += converter.GetWarning();
@@ -915,6 +921,7 @@ static bool attribute_floats(const tydra::VertexAttribute &a, uint32_t width, si
 
 extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 	const tydra::RenderMesh &mesh = usd->scene.meshes[size_t(index)];
+	Mesh_Corners *b = &mesh_corners;
 	*out = {};
 	out->name = str(mesh.prim_name);
 	out->path = str(mesh.abs_path);
@@ -951,11 +958,11 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 	// Each triangle's subset: the GeomSubsets in name order, then the faces that none of them hold.
 	std::vector<int32_t> group(triangles, -1);
 	std::vector<int32_t> group_material;
-	usd->subset_names.clear();
+	b->subset_names.clear();
 	for (const auto &kv : mesh.material_subsetMap) {
 		int32_t g = int32_t(group_material.size());
 		group_material.push_back(kv.second.material_id);
-		usd->subset_names.push_back(kv.first);
+		b->subset_names.push_back(kv.first);
 		for (int tri : kv.second.indices()) {
 			if (tri >= 0 && size_t(tri) < triangles && group[size_t(tri)] < 0) {
 				group[size_t(tri)] = g;
@@ -972,7 +979,7 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 	}
 	if (any_rest) {
 		group_material.push_back(mesh.material_id);
-		usd->subset_names.push_back("default");
+		b->subset_names.push_back("default");
 	}
 
 	bool has_normals = !mesh.normals.empty();
@@ -988,12 +995,12 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 	bool has_colors = !mesh.vertex_colors.empty();
 
 	size_t corners = triangles * 3;
-	usd->positions.assign(corners * 3, 0.0f);
-	usd->normals.assign(has_normals ? corners * 3 : 0, 0.0f);
-	usd->uv0.assign(uv0 ? corners * 2 : 0, 0.0f);
-	usd->uv1.assign(uv1 ? corners * 2 : 0, 0.0f);
-	usd->colors.assign(has_colors ? corners * 3 : 0, 1.0f);
-	usd->subsets.clear();
+	b->positions.assign(corners * 3, 0.0f);
+	b->normals.assign(has_normals ? corners * 3 : 0, 0.0f);
+	b->uv0.assign(uv0 ? corners * 2 : 0, 0.0f);
+	b->uv1.assign(uv1 ? corners * 2 : 0, 0.0f);
+	b->colors.assign(has_colors ? corners * 3 : 0, 1.0f);
+	b->subsets.clear();
 
 	size_t at = 0;
 	for (int32_t g = 0; g < int32_t(group_material.size()); g++) {
@@ -1009,24 +1016,24 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 					return 0;
 				}
 				const auto &p = mesh.points[vertex];
-				usd->positions[at * 3 + 0] = p[0];
-				usd->positions[at * 3 + 1] = p[1];
-				usd->positions[at * 3 + 2] = p[2];
-				if (has_normals && !attribute_floats(mesh.normals, 3, corner, vertex, face_of[t], &usd->normals[at * 3])) {
-					usd->normals.clear();
+				b->positions[at * 3 + 0] = p[0];
+				b->positions[at * 3 + 1] = p[1];
+				b->positions[at * 3 + 2] = p[2];
+				if (has_normals && !attribute_floats(mesh.normals, 3, corner, vertex, face_of[t], &b->normals[at * 3])) {
+					b->normals.clear();
 					has_normals = false;
 				}
-				if (uv0 && !attribute_floats(*uv0, 2, corner, vertex, face_of[t], &usd->uv0[at * 2])) {
-					usd->uv0.clear();
+				if (uv0 && !attribute_floats(*uv0, 2, corner, vertex, face_of[t], &b->uv0[at * 2])) {
+					b->uv0.clear();
 					uv0 = nullptr;
 				}
-				if (uv1 && !attribute_floats(*uv1, 2, corner, vertex, face_of[t], &usd->uv1[at * 2])) {
-					usd->uv1.clear();
+				if (uv1 && !attribute_floats(*uv1, 2, corner, vertex, face_of[t], &b->uv1[at * 2])) {
+					b->uv1.clear();
 					uv1 = nullptr;
 				}
 				if (has_colors &&
-				    !attribute_floats(mesh.vertex_colors, 3, corner, vertex, face_of[t], &usd->colors[at * 3])) {
-					usd->colors.clear();
+				    !attribute_floats(mesh.vertex_colors, 3, corner, vertex, face_of[t], &b->colors[at * 3])) {
+					b->colors.clear();
 					has_colors = false;
 				}
 				at++;
@@ -1037,40 +1044,40 @@ extern "C" int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *out) {
 			s.material = alias_material(usd, group_material[size_t(g)]);
 			s.first = int32_t(first);
 			s.count = int32_t(at - first);
-			usd->subsets.push_back(s);
+			b->subsets.push_back(s);
 		}
 	}
 	// Names last: subset_names no longer grows, so the strings stay put.
 	{
 		size_t s = 0;
-		for (int32_t g = 0; g < int32_t(group_material.size()) && s < usd->subsets.size(); g++) {
+		for (int32_t g = 0; g < int32_t(group_material.size()) && s < b->subsets.size(); g++) {
 			bool used = false;
 			for (size_t t = 0; t < triangles && !used; t++) {
 				used = group[t] == g;
 			}
 			if (used) {
-				usd->subsets[s++].name = str(usd->subset_names[size_t(g)]);
+				b->subsets[s++].name = str(b->subset_names[size_t(g)]);
 			}
 		}
 	}
 	if (!has_colors && mesh.has_authored_displayColor) {
-		usd->colors.assign(corners * 3, 0.0f);
+		b->colors.assign(corners * 3, 0.0f);
 		for (size_t c = 0; c < corners; c++) {
-			usd->colors[c * 3 + 0] = mesh.displayColor[0];
-			usd->colors[c * 3 + 1] = mesh.displayColor[1];
-			usd->colors[c * 3 + 2] = mesh.displayColor[2];
+			b->colors[c * 3 + 0] = mesh.displayColor[0];
+			b->colors[c * 3 + 1] = mesh.displayColor[1];
+			b->colors[c * 3 + 2] = mesh.displayColor[2];
 		}
 		has_colors = true;
 	}
 
 	out->corner_count = int32_t(corners);
-	out->positions = usd->positions.data();
-	out->normals = has_normals ? usd->normals.data() : nullptr;
-	out->uv0 = uv0 ? usd->uv0.data() : nullptr;
-	out->uv1 = uv1 ? usd->uv1.data() : nullptr;
-	out->colors = has_colors ? usd->colors.data() : nullptr;
-	out->subset_count = int32_t(usd->subsets.size());
-	out->subsets = usd->subsets.data();
+	out->positions = b->positions.data();
+	out->normals = has_normals ? b->normals.data() : nullptr;
+	out->uv0 = uv0 ? b->uv0.data() : nullptr;
+	out->uv1 = uv1 ? b->uv1.data() : nullptr;
+	out->colors = has_colors ? b->colors.data() : nullptr;
+	out->subset_count = int32_t(b->subsets.size());
+	out->subsets = b->subsets.data();
 	return 1;
 }
 

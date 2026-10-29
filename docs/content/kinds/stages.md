@@ -100,7 +100,7 @@ A scene places the prefab as it places any: an entity with `prefab = $<guid>` (s
 
 ## Cooking
 
-A stage cooks each sub-asset on its own and writes its blob at once, in an arena that is freed after it, so a stage of gigabytes of images never sits in memory whole. A sub-asset that fails keeps its old blob, and the stage fails.
+A stage cooks each mesh and texture as a job of its own, the meshes first, many at once (see [Cooking](../identity-and-cooking.md#cooking)), and each writes its blob as it finishes, in memory that is freed after it, so a stage of gigabytes of images never sits in memory whole. The wrapper reads meshes into buffers of each thread's, so jobs read the stage at once. A sub-asset that fails keeps its old blob, and the stage fails.
 
 - **Each sub-asset's key** covers what it is made from. A texture's is its image's path, size and modification time, its role and the settings; a mesh's is its corners and subsets after conversion; an instance set's is its instancer's points and its prototypes' poses of its mesh. A change to one image cooks only its textures.
 - **The manifest**, `<cache>/stages/<guid>.deps`, holds what the last cook read and made: the stage's key, the size and modification time of every USD file under its sublayers' folders and of every image, and each sub-asset with its blob's key and its generated text. A stage whose manifest still matches is current without being opened: on Sponza that takes milliseconds, where opening it takes seconds.

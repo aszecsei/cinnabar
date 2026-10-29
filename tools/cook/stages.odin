@@ -7,7 +7,6 @@
 // docs/content/kinds/stages.md#stages.
 package cook
 
-import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:hash"
@@ -26,7 +25,7 @@ import "core:time"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
-STAGE_COOK_VERSION :: "stages 3"
+STAGE_COOK_VERSION :: "stages 4"
 // Changing what a stage's prefab or material instances hold, or which sub-assets it makes, changes this. It is in the
 // stage's key alone, so every stage converts again but keeps its meshes, textures and instance sets that are current.
 STAGE_PREFAB_VERSION :: "prefab 2"
@@ -337,15 +336,33 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		stage_watch_layers(usd_string(cn_usd_layer(usd, i)), &manifest)
 	}
 
-	for t in textures {
-		blob_key, cooked := cook_stage_texture(options, a^, usd, t, out_dir, pass, &manifest)
-		ok &&= cooked
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Texture, t.guid, blob_key, t.name, ""})
+	// The meshes and the textures cook at once, the meshes first, as their costs differ the most. Their problems, counts
+	// and files join the pass's after, in order.
+	work := Stage_Work {
+		options  = options,
+		a        = a^,
+		usd      = usd,
+		info     = info,
+		textures = textures[:],
+		parts    = parts[:],
+		out_dir  = out_dir,
+		force    = pass.force[a.meta.guid],
+		log      = pass.problems.log,
+		jobs     = make([]Stage_Job, len(parts) + len(textures), context.temp_allocator),
 	}
-	for p in parts {
-		blob_key, cooked := cook_stage_part(a^, usd, info, p, out_dir, pass)
-		ok &&= cooked
-		append(&manifest.subassets, Stage_Manifest_Subasset{.Mesh, p.guid, blob_key, p.name, ""})
+	parallel_for(len(work.jobs), &work, cook_stage_job)
+	for t, i in textures {
+		job := &work.jobs[len(parts) + i]
+		if job.file.path != "" {
+			append(&manifest.files, Stage_File{job.file.size, job.file.modified, strings.clone(job.file.path, context.temp_allocator)})
+		}
+		ok &&= finish_job(job.result, &job.scratch, .Texture, pass)
+		append(&manifest.subassets, Stage_Manifest_Subasset{.Texture, t.guid, job.blob_key, t.name, ""})
+	}
+	for p, i in parts {
+		job := &work.jobs[i]
+		ok &&= finish_job(job.result, &job.scratch, .Mesh, pass)
+		append(&manifest.subassets, Stage_Manifest_Subasset{.Mesh, p.guid, job.blob_key, p.name, ""})
 	}
 	for set in sets {
 		blob_key, cooked := cook_stage_set(a^, usd, info, set, meshes, out_dir, pass)
@@ -869,38 +886,6 @@ stage_basis :: proc(a: Asset_Source, info: Cn_Usd_Info) -> (basis: matrix[3, 3]f
 	return
 }
 
-// Scratch is an arena for one sub-asset's cook, so its memory goes as soon as its blob is written. Problems reported
-// inside it are copied out when it ends.
-@(private = "file")
-Scratch :: struct {
-	arena:    virtual.Arena,
-	outer:    runtime.Allocator,
-	problems: Problems,
-}
-
-@(private = "file")
-scratch_begin :: proc(s: ^Scratch, pass: ^Pass) {
-	_ = virtual.arena_init_growing(&s.arena)
-	s.outer = context.temp_allocator
-	s.problems = Problems{log = pass.problems.log}
-	context.temp_allocator = virtual.arena_allocator(&s.arena)
-}
-
-@(private = "file")
-scratch_end :: proc(s: ^Scratch, pass: ^Pass) {
-	context.temp_allocator = s.outer
-	if pass.problems.list == nil {
-		pass.problems.list = make([dynamic]Problem, context.temp_allocator)
-	}
-	for p in s.problems.list {
-		copied := p
-		copied.file = strings.clone(p.file, context.temp_allocator)
-		copied.text = strings.clone(p.text, context.temp_allocator)
-		append(&pass.problems.list, copied)
-	}
-	virtual.arena_destroy(&s.arena)
-}
-
 @(private = "file")
 file_stamp :: proc(path: string) -> (size, modified: i64, ok: bool) {
 	info, err := os.stat(path, context.temp_allocator)
@@ -935,21 +920,65 @@ stage_watch_layers :: proc(layer: string, manifest: ^Stage_Manifest) {
 	}
 }
 
+// Stage_Work is a stage's meshes and textures, which cook_stage_job cooks at once, one job for each.
 @(private = "file")
-cook_stage_texture :: proc(options: Cook_Options, a: Asset_Source, usd: ^Cn_Usd, t: Stage_Texture, out_dir: string, pass: ^Pass, manifest: ^Stage_Manifest) -> (blob_key: u64, ok: bool) {
+Stage_Work :: struct {
+	options:  Cook_Options,
+	a:        Asset_Source,
+	usd:      ^Cn_Usd,
+	info:     Cn_Usd_Info,
+	textures: []Stage_Texture,
+	parts:    []Stage_Part,
+	out_dir:  string,
+	// Whether the stage cooks its blobs also when they are up to date, and whether problems log as they are reported.
+	force:    bool,
+	log:      bool,
+	// The parts' jobs, then the textures'.
+	jobs:     []Stage_Job,
+}
+
+// Stage_Job is one mesh's or texture's cook: its blob's key, what came of it, a texture's source, which the manifest
+// watches, and the scratch that holds its problems until finish_job.
+@(private = "file")
+Stage_Job :: struct {
+	blob_key: u64,
+	result:   Cook_Result,
+	file:     Stage_File,
+	scratch:  Scratch,
+}
+
+// cook_stage_job cooks a job of a Stage_Work, on one of parallel_for's threads, in the thread's temp allocator, which
+// the thread frees as soon as the job returns. So the job's problems and file move to its scratch at the end, and the
+// images and meshes of the jobs that have finished do not wait for the rest.
+@(private = "file")
+cook_stage_job :: proc(data: rawptr, index: int) {
+	w := (^Stage_Work)(data)
+	job := &w.jobs[index]
+	job.scratch.problems = Problems{log = w.log}
+	if index < len(w.parts) {
+		cook_stage_part(w, w.parts[index], job)
+	} else {
+		cook_stage_texture(w, w.textures[index - len(w.parts)], job)
+	}
+	scratch_keep(&job.scratch, &job.file.path)
+}
+
+@(private = "file")
+cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) {
+	a := w.a
 	// A dome's image wraps around the sky.
 	tex := Cn_Usd_Texture{wrap_s = .Repeat, wrap_t = .Repeat}
 	path := t.path
 	if t.texture >= 0 {
-		cn_usd_texture(usd, t.texture, &tex)
+		cn_usd_texture(w.usd, t.texture, &tex)
 		path = strings.clone(usd_string(tex.resolved), context.temp_allocator)
 	}
 	size, modified, stamped := file_stamp(path)
 	if !stamped {
-		report_error(&pass.problems, a.path, 0, 0, "cannot read %s", path)
+		report_error(&job.scratch.problems, a.path, 0, 0, "cannot read %s", path)
 		return
 	}
-	append(&manifest.files, Stage_File{size, modified, path})
+	job.file = {size, modified, path}
 	cook := Texture_Cook {
 		usage    = t.role.usage,
 		wrap     = tex.wrap_s != .Clamp && tex.wrap_t != .Clamp,
@@ -959,21 +988,15 @@ cook_stage_texture :: proc(options: Cook_Options, a: Asset_Source, usd: ^Cn_Usd,
 		srgb     = t.role.srgb,
 		flip_y   = stage_setting(a, "normal_y") == "flip",
 	}
-	blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, options.config, format.texture_layout(), path, cook, size, modified))
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(t.guid))
-	if cooked_key(output, .Texture, format.texture_layout()) == blob_key && !pass.force[a.meta.guid] {
-		pass.current[.Texture] += 1
-		return blob_key, true
+	job.blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, w.options.config, format.texture_layout(), path, cook, size, modified))
+	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(t.guid))
+	if cooked_key(output, .Texture, format.texture_layout()) == job.blob_key && !w.force {
+		job.result = .Current
+		return
 	}
-	scratch: Scratch
-	scratch_begin(&scratch, pass)
-	context.temp_allocator = virtual.arena_allocator(&scratch.arena)
-	ok = cook_stage_texture_blob(options, a, path, t, cook, blob_key, output, &scratch.problems)
-	scratch_end(&scratch, pass)
-	if ok {
-		pass.cooked[.Texture] += 1
+	if cook_stage_texture_blob(w.options, a, path, t, cook, job.blob_key, output, &job.scratch.problems) {
+		job.result = .Cooked
 	}
-	return blob_key, ok
 }
 
 @(private = "file")
@@ -989,39 +1012,37 @@ cook_stage_texture_blob :: proc(options: Cook_Options, a: Asset_Source, path: st
 }
 
 @(private = "file")
-cook_stage_part :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, p: Stage_Part, out_dir: string, pass: ^Pass) -> (blob_key: u64, ok: bool) {
-	scratch: Scratch
-	scratch_begin(&scratch, pass)
-	context.temp_allocator = virtual.arena_allocator(&scratch.arena)
-	defer scratch_end(&scratch, pass)
+cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) {
+	a := w.a
+	problems := &job.scratch.problems
 	m: Cn_Usd_Mesh
-	if cn_usd_mesh(usd, p.mesh, &m) == 0 {
-		report_error(&scratch.problems, a.path, 0, 0, "mesh %s has faces that are not triangles after triangulation", p.name)
+	if cn_usd_mesh(w.usd, p.mesh, &m) == 0 {
+		report_error(problems, a.path, 0, 0, "mesh %s has faces that are not triangles after triangulation", p.name)
 		return
 	}
-	basis, scale := stage_basis(a, info)
+	basis, scale := stage_basis(a, w.info)
 	cook := stage_cook_mesh(a, m, p, basis, scale)
 	if len(cook.corners) == 0 {
-		report_error(&scratch.problems, a.path, 0, 0, "mesh %s has no triangles", p.name)
+		report_error(problems, a.path, 0, 0, "mesh %s has no triangles", p.name)
 		return
 	}
-	blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.collision, cook.impostor_size))
+	blob_key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.collision, cook.impostor_size))
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.corners), blob_key)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.ranges), blob_key)
 	for n in cook.names {
 		blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00", n), blob_key)
 	}
-	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(p.guid))
-	if cooked_key(output, .Mesh, format.mesh_layout()) == blob_key && !pass.force[a.meta.guid] {
-		pass.current[.Mesh] += 1
-		return blob_key, true
-	}
-	if !write_blob(output, finish_mesh(cook, p.guid, blob_key)) {
-		report_error(&scratch.problems, output, 0, 0, "cannot write the mesh")
+	job.blob_key = blob_key
+	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(p.guid))
+	if cooked_key(output, .Mesh, format.mesh_layout()) == blob_key && !w.force {
+		job.result = .Current
 		return
 	}
-	pass.cooked[.Mesh] += 1
-	return blob_key, true
+	if !write_blob(output, finish_mesh(cook, p.guid, blob_key)) {
+		report_error(problems, output, 0, 0, "cannot write the mesh")
+		return
+	}
+	job.result = .Cooked
 }
 
 // stage_cook_mesh converts a part of a mesh to corners on the engine's axes in meters, with v down as the engine's
