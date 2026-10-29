@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Panels;
 using UnwatchEntity = Cinnabar.Editor.Link.Protocol.UnwatchEntity;
 using WatchEntity = Cinnabar.Editor.Link.Protocol.WatchEntity;
 
@@ -52,6 +53,45 @@ public sealed partial class EditorShell
     /// <summary>
     /// Links the sky's sun to the selected directional light, or the scene's first, or unlinks it when it is linked.
     /// </summary>
+    // Whether an Aim Sun at Sky waits for the game's answer.
+    bool _aimingSun;
+
+    /// <summary>
+    /// Asks the game where its texture sky's sun is, then aims the scene's sun there as one undo entry, as a time of day
+    /// does: a linked light turns, and the user can move it on from there.
+    /// </summary>
+    public void AimSunAtSky()
+    {
+        _aimingSun = true;
+        Host.Send(new Link.Protocol.SkySunRequest());
+    }
+
+    void OnSkySun(Link.Protocol.SkySun sun)
+    {
+        if (!_aimingSun)
+        {
+            return;
+        }
+        _aimingSun = false;
+        switch (sun.State)
+        {
+            case Link.Protocol.SkySunState.Found:
+                var (azimuth, elevation) = Atmosphere.AnglesToward([sun.Direction[0], sun.Direction[1], sun.Direction[2]]);
+                EditAtmosphere("Aim Sun at Sky", (scene, volume) => Atmosphere.Aim(scene, volume, azimuth, elevation));
+                Console.Add(LogLevel.Info, $"atmosphere: the sky's sun is at {azimuth:0.#} degrees of azimuth, {elevation:0.#} of elevation");
+                break;
+            case Link.Protocol.SkySunState.NoTextureSky:
+                Console.Add(LogLevel.Warning, "atmosphere: the sky is not a texture's, so it has no sun to aim at");
+                break;
+            case Link.Protocol.SkySunState.NotReady:
+                Console.Add(LogLevel.Warning, "atmosphere: the sky's texture is not ready yet; try again in a moment");
+                break;
+            default:
+                Console.Add(LogLevel.Warning, "atmosphere: the sky's texture has no sun: no part of it is much brighter than the rest");
+                break;
+        }
+    }
+
     public void ToggleSunLink()
     {
         if (AtmosphereSun != null)

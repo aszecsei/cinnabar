@@ -59,6 +59,8 @@ Editor :: struct {
 	// residency that draws them, in Game_State, or nil without a renderer.
 	live_meshes:  map[format.Guid]Live_Mesh,
 	residency:    ^render.Residency,
+	// The renderer, which answers where the texture sky's sun is.
+	renderer:     ^render.Renderer,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
 	mesh_overlay: link.Mesh_Overlay,
 }
@@ -85,8 +87,9 @@ Watched :: struct {
 
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
 // editor; without them (nil), the tools stay off. The live meshes draw through residency, the renderer's, which must
-// outlive the editor too; without it (nil), they are kept and baked but not drawn.
-init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil) {
+// outlive the editor too; without it (nil), they are kept and baked but not drawn. The renderer answers for the sky
+// (see Sky_Sun_Request); without it (nil), the sky has no sun.
+init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, residency: ^render.Residency = nil, renderer: ^render.Renderer = nil) {
 	e^ = {
 		platform    = platform,
 		assets      = assets,
@@ -192,6 +195,13 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			}
 		case link.Run_Game_Command:
 			run_command(e, w, scripts, user, v.id, out, frame)
+		case link.Sky_Sun_Request:
+			answer := link.Sky_Sun{state = .No_Texture_Sky}
+			if e.renderer != nil {
+				direction, state := render.sky_texture_sun(e.renderer)
+				answer = {state = link.Sky_Sun_State(state), direction = direction}
+			}
+			link.write_message(out, answer)
 		case link.Step_Frame:
 			if e.mode == .Paused {
 				e.steps += 1
@@ -405,5 +415,6 @@ find :: proc(ids: []ecs.Component_Id, id: ecs.Component_Id) -> (int, bool) {
 
 #assert(int(script.Behaviour_Field_Kind.Entity) == int(link.Behaviour_Field_Kind.Entity))
 #assert(int(script.Behaviour_Field_Kind.Asset) == int(link.Behaviour_Field_Kind.Asset))
+#assert(len(render.Sky_Sun_State) == len(link.Sky_Sun_State) && int(render.Sky_Sun_State.No_Sun) == int(link.Sky_Sun_State.No_Sun))
 #assert(int(format.Scene_Value_Kind.Entity) == int(link.Scene_Value_Kind.Entity))
 #assert(int(format.Scene_Value_Kind.Asset) == int(link.Scene_Value_Kind.Asset))

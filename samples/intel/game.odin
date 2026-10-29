@@ -58,7 +58,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	// Game_State is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(s)
 	s.platform = platform
-	editor.init(&s.editor, platform, &s.assets, &s.renderer.residency)
+	editor.init(&s.editor, platform, &s.assets, &s.renderer.residency, &s.renderer)
 	if !ecs.init(&s.world, platform) {
 		log.panic("intel: cannot create the world")
 	}

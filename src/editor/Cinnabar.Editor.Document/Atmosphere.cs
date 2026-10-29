@@ -193,7 +193,15 @@ public static class Atmosphere
     public static (double Azimuth, double Elevation) SunAnglesOf(Quat rotation)
     {
         var travels = rotation.Rotate([0, 0, 1]);
-        var toward = new[] { -travels[0], -travels[1], -travels[2] };
+        return AnglesToward([-travels[0], -travels[1], -travels[2]]);
+    }
+
+    /// <summary>
+    /// The azimuth, from 0 to 360, and the elevation of a unit direction toward the sun, such as where a texture sky's
+    /// sun is.
+    /// </summary>
+    public static (double Azimuth, double Elevation) AnglesToward(double[] toward)
+    {
         var elevation = Math.Asin(Math.Clamp(toward[1], -1, 1)) * 180 / Math.PI;
         // Straight up or down, the azimuth is any, so it stays 0.
         var azimuth = Math.Abs(toward[1]) > 0.999999 ? 0 : Math.Atan2(toward[0], toward[2]) * 180 / Math.PI;

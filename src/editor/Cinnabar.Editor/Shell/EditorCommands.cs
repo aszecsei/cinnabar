@@ -171,6 +171,7 @@ static class EditorCommands
     public const string AtmosphereSelect = "atmosphere.select";
     public const string AtmosphereMode = "atmosphere.mode";
     public const string LinkSun = "atmosphere.linkSun";
+    public const string AimSun = "atmosphere.aimSun";
     public const string Stars = "atmosphere.stars";
     public const string Moon = "atmosphere.moon";
     public const string AtmosphereFog = "atmosphere.fog";
@@ -895,7 +896,7 @@ static class EditorCommands
             () => shell.AtmosphereVolume is { } volume ? Atmosphere.ModeOf(volume) : "Flat",
             mode => shell.EditAtmosphere("Set Sky", (_, volume) => Atmosphere.Set(volume, SceneEdits.EnvironmentId, Atmosphere.Mode, SceneValue.Name(mode))))
         {
-            Description = "Flat: a background color, and an ambient light from a sky color and a ground color. Atmosphere: a sky that the sun and the moon light through the air, with stars at night.",
+            Description = "Flat: a background color, and an ambient light from a sky color and a ground color. Atmosphere: a sky that the sun and the moon light through the air, with stars at night. Texture: an hdr image of the sky.",
             CanExecuteWhen = CanEdit,
         });
         commands.Register(new Command(LinkSun, "Link Sun", shell.ToggleSunLink)
@@ -904,6 +905,12 @@ static class EditorCommands
             Icon = "sun",
             IsCheckedWhen = () => shell.AtmosphereSun != null,
             CanExecuteWhen = () => CanEdit() && (shell.AtmosphereSun != null || Atmosphere.DirectionalLights(shell.Scene!.Expanded.Flat).Any()),
+        });
+        commands.Register(new Command(AimSun, "Aim Sun at Sky", shell.AimSunAtSky)
+        {
+            Description = "Aim the sun at the texture sky's: where its brightest texels are. A linked sun turns its light, which you can move on from there.",
+            Icon = "sun",
+            CanExecuteWhen = () => CanEdit() && shell.Host.Linked && shell.AtmosphereVolume is { } volume && Atmosphere.ModeOf(volume) == "Texture",
         });
         foreach (var (name, azimuth, elevation) in Atmosphere.TimesOfDay)
         {

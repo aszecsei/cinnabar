@@ -100,6 +100,7 @@ static class DefaultRibbon
                     new RibbonGroup("Sun",
                     [
                         new LargeButton(EditorCommands.LinkSun),
+                        new LargeButton(EditorCommands.AimSun),
                         new Dropdown("Time of Day", "sun", [.. Atmosphere.TimesOfDay.Select(t => EditorCommands.TimeOfDay(t.Name))]),
                     ]),
                     new RibbonGroup("Sky",

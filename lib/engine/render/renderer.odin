@@ -84,6 +84,8 @@ Renderer :: struct {
 	gi:              Gi_Passes,
 	fog:             Volumetric_Fog,
 	sky:             Sky,
+	// The last frame's sky, which sky_texture_sun answers for.
+	last_sky_mode:   Sky_Mode,
 	post:            Post,
 	// The game's post effects, in the order that they run at each point. renderer_reload clears them.
 	effects:         [MAX_POST_EFFECTS]Post_Effect,
@@ -436,6 +438,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		f.post.raw, f.post.exposure, f.post.exposure_auto = true, false, false
 	}
 	f.shadow_settings = settings.shadows
+	r.last_sky_mode = settings.sky.mode
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {

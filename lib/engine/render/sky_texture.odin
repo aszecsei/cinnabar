@@ -15,11 +15,17 @@ import format "cinnabar:engine/asset/format"
 // The engine's texture sky shaders, by their .meta files.
 SKY_TEXTURE_SHADER :: #load("../content/shaders/sky_texture.hlsl.meta", string)
 SKY_TEXTURE_AMBIENT_SHADER :: #load("../content/shaders/sky_texture_ambient.hlsl.meta", string)
-// The ambient light integrates the largest mip at most this wide.
+// The ambient light integrates the largest mip at most this wide, which finds the sun's texel there too. The sun is
+// then found in a window around it of the largest mip at most SKY_SUN_WIDTH wide: in a coarser one, the light around
+// the sun moves it, by 16 degrees of elevation in Jungle Ruins' sky at 128 texels, and 1 at 1024.
 SKY_AMBIENT_WIDTH :: 128
+SKY_SUN_WIDTH :: 2048
 // The integral's result, which sky_texture_ambient.hlsl writes: the constant and the x, y and z gradients as float4s,
-// then the ticket that it was asked for.
-SKY_AMBIENT_RESULT_SIZE :: 80
+// the sun's direction with its brightest luminance over the average, then the ticket that it was asked for.
+SKY_AMBIENT_RESULT_SIZE :: 96
+// A texture has a sun when its brightest texel is at least this many times as bright as its average, so an overcast
+// sky's brightest cloud is not one.
+SKY_SUN_RATIO :: 10
 // An integral that has not come back after this many frames is asked for again.
 SKY_AMBIENT_RETRY_FRAMES :: 120
 
@@ -38,10 +44,16 @@ Sky_Texture_State :: struct {
 	// The integral's result, and its copy that the CPU reads.
 	result:     gpu.Buffer,
 	readback:   gpu.Buffer,
-	// The ambient light of key's texture, before its rotation and intensity.
+	// The ambient light of key's texture, before its rotation and intensity, and the direction toward its sun, with how
+	// much brighter the sun is than the average.
 	key:        Sky_Texture_Key,
 	light:      Ambient,
+	sun:        [3]f32,
+	sun_ratio:  f32,
 	valid:      bool,
+	// The sun in the world, by the rotation of the last frame that drew the texture, and that frame.
+	world_sun:  [3]f32,
+	sun_frame:  u64,
 	// The integral in flight, of pending_key's texture, and its ticket.
 	pending:       bool,
 	pending_key:   Sky_Texture_Key,
@@ -62,18 +74,22 @@ Sky_Texture_Constants :: struct {
 	sampler_index: u32,
 }
 
-// Sky_Texture_Push matches Sky_Texture_Push in sky_texture.hlsl and sky_texture_ambient.hlsl: the frame's textures for
-// the background, or the mip, its size and the ticket for the integral.
+// Sky_Texture_Push matches Sky_Texture_Push in sky_texture.hlsli: the frame's textures for the background, or the
+// integral's mip, its size and the ticket, and the sun's mip and its size.
 @(private = "file")
 Sky_Texture_Push :: struct {
-	texture:  u32,
-	depth:    u32,
-	output:   u32,
-	exposure: u32,
-	mip:      u32,
-	ticket:   u32,
-	width:    u32,
-	height:   u32,
+	texture:    u32,
+	depth:      u32,
+	output:     u32,
+	exposure:   u32,
+	mip:        u32,
+	ticket:     u32,
+	width:      u32,
+	height:     u32,
+	sun_mip:    u32,
+	sun_width:  u32,
+	sun_height: u32,
+	padding:    u32,
 }
 
 // Sky_Texture_Frame is what one frame's texture sky passes need, in frame memory.
@@ -85,6 +101,8 @@ Sky_Texture_Frame :: struct {
 	integrate: bool,
 	mip:       u32,
 	mip_size:  [2]u32,
+	sun_mip:   u32,
+	sun_size:  [2]u32,
 	ticket:    u32,
 	result:    Buffer,
 	readback:  Buffer,
@@ -130,10 +148,11 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	if s.pending {
 		if data, back := platform.gpu_read_buffer(s.readback); back && len(data) >= SKY_AMBIENT_RESULT_SIZE {
 			values := mem.slice_data_cast([]f32, data[:SKY_AMBIENT_RESULT_SIZE])
-			if transmute(u32)values[16] == s.ticket {
+			if transmute(u32)values[20] == s.ticket {
 				for v, i in ([]^[3]f32{&s.light.constant, &s.light.x, &s.light.y, &s.light.z}) {
 					v^ = {values[i * 4], values[i * 4 + 1], values[i * 4 + 2]}
 				}
+				s.sun, s.sun_ratio = {values[16], values[17], values[18]}, values[19]
 				s.key, s.valid, s.pending = s.pending_key, true, false
 			}
 		}
@@ -153,10 +172,17 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 		}
 		sf.integrate, sf.mip, sf.ticket = true, mip, s.ticket
 		sf.mip_size = {max(t.size.x >> mip, 1), max(t.size.y >> mip, 1)}
+		sun_mip := u32(0)
+		for sun_mip + 1 < t.mip_count && t.size.x >> sun_mip > SKY_SUN_WIDTH {
+			sun_mip += 1
+		}
+		sf.sun_mip, sf.sun_size = sun_mip, {max(t.size.x >> sun_mip, 1), max(t.size.y >> sun_mip, 1)}
 	}
 	ambient := flat
 	if s.valid && s.key == key {
-		ambient = scale_ambient(turn_ambient(s.light, math.to_radians(settings.texture_rotation)), settings.texture_intensity * settings.ambient_intensity)
+		turn := math.to_radians(settings.texture_rotation)
+		ambient = scale_ambient(turn_ambient(s.light, turn), settings.texture_intensity * settings.ambient_intensity)
+		s.world_sun, s.sun_frame = turn_direction(s.sun, turn), r.scene.frame
 	}
 
 	if pipeline_ready(platform, &s.background) {
@@ -189,6 +215,40 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 turn_ambient :: proc(a: Ambient, angle: f32) -> Ambient {
 	c, s := math.cos(angle), math.sin(angle)
 	return {constant = a.constant, x = a.x * c + a.z * s, y = a.y, z = a.z * c - a.x * s}
+}
+
+// turn_direction is where a direction of the texture is in the world, by its rotation: at the azimuth plus the
+// rotation.
+@(private)
+turn_direction :: proc(d: [3]f32, angle: f32) -> [3]f32 {
+	c, s := math.cos(angle), math.sin(angle)
+	return {d.x * c + d.z * s, d.y, d.z * c - d.x * s}
+}
+
+// Sky_Sun_State is whether the frame's sky has a sun that sky_texture_sun can give.
+Sky_Sun_State :: enum u8 {
+	Found,
+	// The last frame's sky was not a texture's.
+	No_Texture_Sky,
+	// The texture is not resident, or its integral is not back yet.
+	Not_Ready,
+	// No texel is SKY_SUN_RATIO times as bright as the average.
+	No_Sun,
+}
+
+// sky_texture_sun is the direction toward the sun of the last frame's texture sky, in the world: where its brightest
+// texels are (see docs/rendering/sky.md#texture). The editor aims a light at it.
+sky_texture_sun :: proc(r: ^Renderer) -> (direction: [3]f32, state: Sky_Sun_State) {
+	s := &r.sky.texture
+	switch {
+	case r.last_sky_mode != .Texture:
+		return {}, .No_Texture_Sky
+	case !s.valid || r.scene.frame > s.sun_frame + 1:
+		return {}, .Not_Ready
+	case s.sun_ratio < SKY_SUN_RATIO:
+		return {}, .No_Sun
+	}
+	return s.world_sun, .Found
 }
 
 // ensure_sky_texture_buffers creates the integral's buffers the first time.
@@ -253,12 +313,15 @@ run_sky_texture_ambient :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	sf := f.sky_texture
 	push := Sky_Texture_Push {
-		texture = gpu.read_index(sf.texture),
-		output  = gpu.write_index(gpu_buffer(ctx.graph, sf.result)),
-		mip     = sf.mip,
-		ticket  = sf.ticket,
-		width   = sf.mip_size.x,
-		height  = sf.mip_size.y,
+		texture    = gpu.read_index(sf.texture),
+		output     = gpu.write_index(gpu_buffer(ctx.graph, sf.result)),
+		mip        = sf.mip,
+		ticket     = sf.ticket,
+		width      = sf.mip_size.x,
+		height     = sf.mip_size.y,
+		sun_mip    = sf.sun_mip,
+		sun_width  = sf.sun_size.x,
+		sun_height = sf.sun_size.y,
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.sky.texture.ambient.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

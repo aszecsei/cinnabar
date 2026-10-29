@@ -166,11 +166,17 @@ public sealed class AtmosphereView : ScrollViewer
         var note = atmosphere ? null
             : texture ? "The texture's sun is its image's. A linked light still lights the world."
             : "The Flat sky draws no sun. A linked light still lights the world.";
-        _content.Children.Add(Group("Sun", new StackPanel
+        var sunPanel = new StackPanel
         {
             Spacing = 4,
             Children = { _grid.Rows(sunRows.OfType<FieldRow>()), Angles(), _grid.Rows(sunTail.OfType<FieldRow>()) },
-        }, note));
+        };
+        // A texture sky's sun is in its image: the button aims the sun there.
+        if (texture)
+        {
+            sunPanel.Children.Add(CommandButton("Aim Sun at Sky", EditorCommands.AimSun));
+        }
+        _content.Children.Add(Group("Sun", sunPanel, note));
 
         // The sky and the ambient light: Flat's colors, the atmosphere's air, or the texture with Flat's colors until it
         // is ready.

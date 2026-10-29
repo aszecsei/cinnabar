@@ -88,6 +88,8 @@ Message :: union {
 	Live_Mesh_Vertices,
 	Release_Live_Mesh,
 	Mesh_Overlay,
+	Sky_Sun_Request,
+	Sky_Sun,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -632,6 +634,25 @@ Set_Mode :: struct {
 
 // Editor to game: while paused, run one frame of one fixed tick.
 Step_Frame :: struct {}
+
+// Editor to game: ask where the sun of the frame's texture sky is (see docs/rendering/sky.md#texture), which the
+// editor aims the scene's sun at. The game answers with a Sky_Sun.
+Sky_Sun_Request :: struct {}
+
+// Sky_Sun_State matches render.Sky_Sun_State: whether the sky has a sun, or why not.
+Sky_Sun_State :: enum u8 {
+	Found,
+	No_Texture_Sky,
+	Not_Ready,
+	No_Sun,
+}
+
+// Game to editor: the direction toward the texture sky's sun in the world, where its brightest texels are, when the
+// state is Found.
+Sky_Sun :: struct {
+	state:     Sky_Sun_State,
+	direction: [3]f32,
+}
 
 // A key or a mouse button, as core.Key has them.
 Input_Key :: enum u8 {

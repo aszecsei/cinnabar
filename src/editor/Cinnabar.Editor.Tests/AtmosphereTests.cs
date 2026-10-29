@@ -41,6 +41,21 @@ public sealed class AtmosphereTests : IDisposable
         Assert.Equal(elevation, e, 6);
     }
 
+    // A texture sky's sun comes as the direction toward it, which the engine's sky_direction makes from the angles.
+    [Theory]
+    [InlineData(0, 0, 1, 0, 0)]
+    [InlineData(1, 0, 0, 90, 0)]
+    [InlineData(0, 1, 0, 0, 90)]
+    [InlineData(-0.5, 0.5, -0.5, 225, 35.26439)]
+    public void TheSunsAnglesComeFromTheDirectionTowardIt(double x, double y, double z, double azimuth, double elevation)
+    {
+        var length = Math.Sqrt(x * x + y * y + z * z);
+        var (a, e) = Atmosphere.AnglesToward([x / length, y / length, z / length]);
+
+        Assert.Equal(azimuth, a, 4);
+        Assert.Equal(elevation, e, 4);
+    }
+
     [Fact]
     public void ASunLightShinesAwayFromItsAngles()
     {

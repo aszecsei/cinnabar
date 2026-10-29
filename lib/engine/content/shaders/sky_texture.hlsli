@@ -6,7 +6,7 @@
 #include "cinnabar.hlsli"
 
 // Matches Sky_Texture_Push in lib/engine/render/sky_texture.odin: the background's frame textures, or the integral's
-// mip, its size and its ticket.
+// mip, its size and its ticket, and the mip that the sun is found in and its size.
 struct Sky_Texture_Push {
 	uint texture;
 	uint depth;
@@ -16,6 +16,10 @@ struct Sky_Texture_Push {
 	uint ticket;
 	uint width;
 	uint height;
+	uint sun_mip;
+	uint sun_width;
+	uint sun_height;
+	uint padding;
 };
 CN_PUSH_CONSTANTS(Sky_Texture_Push, push);
 

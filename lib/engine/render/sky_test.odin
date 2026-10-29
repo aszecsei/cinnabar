@@ -76,3 +76,30 @@ a_texture_sky_without_its_texture_is_flat :: proc(t: ^testing.T) {
 	testing.expect(t, near(ambient_at(ambient, {0, 1, 0}), {0.8, 1, 1.8}))
 	testing.expect(t, f.sky_texture == nil && f.sky == nil)
 }
+
+// The texture sky's sun, which the editor aims at: only a texture sky has one, once its integral is back, when its
+// brightest texels stand out, and it turns with the rotation.
+@(test)
+a_texture_skys_sun_is_where_its_brightest_texels_are :: proc(t: ^testing.T) {
+	r := new(Renderer)
+	defer free(r)
+	s := &r.sky.texture
+	_, state := sky_texture_sun(r)
+	testing.expect_value(t, state, Sky_Sun_State.No_Texture_Sky)
+	r.last_sky_mode = .Texture
+	_, state = sky_texture_sun(r)
+	testing.expect_value(t, state, Sky_Sun_State.Not_Ready)
+	s.valid, s.sun_ratio = true, 3
+	s.sun, s.sun_frame = {0, 0.5, 0.866}, 0
+	s.world_sun = turn_direction(s.sun, math.PI / 2)
+	_, state = sky_texture_sun(r)
+	testing.expect_value(t, state, Sky_Sun_State.No_Sun)
+	s.sun_ratio = 1000
+	direction, found := sky_texture_sun(r)
+	testing.expect_value(t, found, Sky_Sun_State.Found)
+	// A quarter turn takes the texture's +z to +x, as the background and the ambient light turn it.
+	testing.expect(t, near(direction, {0.866, 0.5, 0}, 1e-4))
+	r.scene.frame = 5
+	_, state = sky_texture_sun(r)
+	testing.expect_value(t, state, Sky_Sun_State.Not_Ready)
+}
