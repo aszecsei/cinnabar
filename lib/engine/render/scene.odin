@@ -341,6 +341,15 @@ Bin_Group :: enum u8 {
 	Sorted,
 }
 
+// Bin_Filter is which of a group's bins draw_scene_view draws. The camera's prepass draws the mesh particles' bins after
+// the rest, once the particle history has the depth without them, so a mesh particle does not collide with itself or
+// another (see docs/rendering/particles.md#collision).
+Bin_Filter :: enum u8 {
+	All,
+	No_Particles,
+	Particles,
+}
+
 // Scene_Frame is what one frame's GPU scene passes need, in frame memory.
 @(private)
 Scene_Frame :: struct {
@@ -645,6 +654,12 @@ bin_particles :: proc(items: []Cull_Item, bins: int, allocator := context.alloca
 		particles[item.bin] = item.flags & ITEM_PARTICLES != 0
 	}
 	return particles
+}
+
+// has_mesh_particles is whether any of the frame's bins is of mesh particles.
+@(private)
+has_mesh_particles :: proc(sf: ^Scene_Frame) -> bool {
+	return sf != nil && slice.contains(sf.bin_particles, true)
 }
 
 // squared_distance is the squared distance to a point in an instance's space, moved by its rows, from another point.
@@ -1102,9 +1117,9 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 // (see docs/rendering/materials.md#runtime). The forward and transparent passes push the frame's textures. The sorted
 // transparent draws blend over the scene, a two-sided one's back faces first. Every pass but the shadow maps' draws with
 // the view model's stencil bit as the reference: set for the view model, clear for the world (see
-// docs/rendering/layers-and-output.md#view-model).
+// docs/rendering/layers-and-output.md#view-model). filter leaves out the mesh particles' bins, or draws only them.
 @(private)
-draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque) {
+draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque, filter := Bin_Filter.All) {
 	sf := f.scene_frame
 	if sf == nil || len(sf.items) == 0 || view >= sf.view_count {
 		return
@@ -1122,6 +1137,9 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	bin_count := len(sf.bin_pipelines)
 	bins := sf.groups[group]
 	for bin in bins[0] ..< bins[1] {
+		if filter != .All && sf.bin_particles[bin] != (filter == .Particles) {
+			continue
+		}
 		p := &f.renderer.materials.pipelines[sf.bin_draws[bin]]
 		pipelines := [2]gpu.Pipeline{{}, p.pipelines[pass]}
 		if pass == .Transparent && group == .Sorted {
