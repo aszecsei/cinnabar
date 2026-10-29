@@ -88,6 +88,27 @@ typedef struct {
 	double local[16];
 } Cn_Usd_Prototype_Mesh;
 
+typedef enum {
+	CN_USD_LIGHT_OTHER = 0,
+	CN_USD_LIGHT_DOME = 1,
+	CN_USD_LIGHT_DISTANT = 2,
+} Cn_Usd_Light_Kind;
+
+// A UsdLux light. A DomeLight's texture is its image of the light from every direction, latlong; resolved is empty when
+// the file was not found.
+typedef struct {
+	int32_t kind; // Cn_Usd_Light_Kind
+	Cn_Usd_String name;
+	Cn_Usd_String path;
+	float color[3];
+	float intensity;
+	float exposure;
+	// Row-major, for row vectors, as Cn_Usd_Node's.
+	double world[16];
+	Cn_Usd_String texture;
+	Cn_Usd_String resolved;
+} Cn_Usd_Light;
+
 // A run of a mesh's corners that one material draws.
 typedef struct {
 	int32_t material; // -1 when nothing is bound
@@ -198,6 +219,7 @@ int32_t cn_usd_instancer_points(Cn_Usd *usd, int32_t instancer, int32_t *prototy
 // False when the mesh cannot be made into corners.
 int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *mesh);
 void cn_usd_material(Cn_Usd *usd, int32_t index, Cn_Usd_Material *material);
+void cn_usd_light(Cn_Usd *usd, int32_t index, Cn_Usd_Light *light);
 void cn_usd_texture(Cn_Usd *usd, int32_t index, Cn_Usd_Texture *texture);
 
 #ifdef __cplusplus

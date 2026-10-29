@@ -56,6 +56,25 @@ Cn_Usd_Node :: struct {
 	world:     [16]f64,
 }
 
+Cn_Usd_Light_Kind :: enum i32 {
+	Other   = 0,
+	Dome    = 1,
+	Distant = 2,
+}
+
+// A UsdLux light (see usd/cn_usd.h). A DomeLight's texture is its latlong image of the light from every direction.
+Cn_Usd_Light :: struct {
+	kind:      Cn_Usd_Light_Kind,
+	name:      Cn_Usd_String,
+	path:      Cn_Usd_String,
+	color:     [3]f32,
+	intensity: f32,
+	exposure:  f32,
+	world:     [16]f64,
+	texture:   Cn_Usd_String,
+	resolved:  Cn_Usd_String,
+}
+
 Cn_Usd_Instance :: struct {
 	mesh:     i32,
 	material: i32,
@@ -179,6 +198,7 @@ foreign lightusd {
 	cn_usd_prototype_meshes :: proc(usd: ^Cn_Usd, instancer, prototype: i32, meshes: ^[^]Cn_Usd_Prototype_Mesh) -> i32 ---
 	cn_usd_instancer_points :: proc(usd: ^Cn_Usd, instancer: i32, prototypes: [^]i32, matrices: [^]f64) -> i32 ---
 	cn_usd_mesh :: proc(usd: ^Cn_Usd, index: i32, mesh: ^Cn_Usd_Mesh) -> i32 ---
+	cn_usd_light :: proc(usd: ^Cn_Usd, index: i32, light: ^Cn_Usd_Light) ---
 	cn_usd_material :: proc(usd: ^Cn_Usd, index: i32, material: ^Cn_Usd_Material) ---
 	cn_usd_texture :: proc(usd: ^Cn_Usd, index: i32, texture: ^Cn_Usd_Texture) ---
 }

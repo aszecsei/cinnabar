@@ -3,8 +3,8 @@ package render
 import "core:math"
 import "core:math/linalg"
 
-import "cinnabar:core"
 import "cinnabar:core/gpu"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // The sky (see docs/rendering/sky.md#sky): with an Environment of Atmosphere, compute passes make Hillaire's lookup
@@ -84,6 +84,10 @@ Sky_Settings :: struct {
 	moon_radius:       f32,
 	star_intensity:    f32,
 	star_density:      f32,
+	// Texture's sky, and its rotation in degrees.
+	texture:           format.Guid,
+	texture_intensity: f32,
+	texture_rotation:  f32,
 }
 
 // Sky is the sky's state between frames, in the Renderer.
@@ -96,6 +100,8 @@ Sky :: struct {
 	ambient_key:   Sky_Light_Key,
 	ambient:       Ambient,
 	ambient_valid: bool,
+	// The Texture mode's (see sky_texture.odin).
+	texture:       Sky_Texture_State,
 }
 
 // Sky_Light_Key is what the ambient light of an Atmosphere depends on.
@@ -166,12 +172,14 @@ sky_init :: proc(s: ^Sky) {
 	s.multiscatter = shader_pipeline(SKY_MULTISCATTER_SHADER)
 	s.view = shader_pipeline(SKY_VIEW_SHADER)
 	s.background = shader_pipeline(SKY_BACKGROUND_SHADER)
+	sky_texture_init(&s.texture)
 }
 
-sky_destroy :: proc(s: ^Sky, platform: ^core.Platform_API) {
+sky_destroy :: proc(s: ^Sky, r: ^Renderer) {
 	for p in ([]^Shader_Pipeline{&s.transmittance, &s.multiscatter, &s.view, &s.background}) {
-		destroy_shader_pipeline(p, platform)
+		destroy_shader_pipeline(p, r.platform)
 	}
+	sky_texture_destroy(&s.texture, r)
 }
 
 @(private)
@@ -182,6 +190,7 @@ sync_sky_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&s.multiscatter, r.platform, assets, {label = "sky multiscatter"}, force)
 	sync_compute_pipeline(&s.view, r.platform, assets, {label = "sky view"}, force)
 	sync_compute_pipeline(&s.background, r.platform, assets, {label = "sky"}, force)
+	sync_sky_texture_pipelines(r, force)
 }
 
 // sky_settings takes the Sky_Settings from a blended Environment.
@@ -218,6 +227,9 @@ sky_settings :: proc(env: Environment) -> Sky_Settings {
 		moon_radius = math.to_radians(n.moon_disc_size.value) * 0.5,
 		star_intensity = n.star_intensity.value,
 		star_density = clamp(n.star_density.value, 0, 1),
+		texture = env.texture.value,
+		texture_intensity = max(env.texture_intensity.value, 0),
+		texture_rotation = env.texture_rotation.value,
 	}
 }
 
@@ -229,11 +241,16 @@ sky_direction :: proc(azimuth, elevation: f32) -> [3]f32 {
 
 // begin_sky readies the frame's sky, after the lights are extracted and before they are uploaded, and gives the frame's
 // ambient light. With Atmosphere, it tints a linked sun's light by the air that it crosses to reach the camera.
-// Without Atmosphere or its pipelines, Frame.sky stays nil and the world pass clears to the background color.
+// Without Atmosphere or its pipelines, Frame.sky stays nil and the world pass clears to the background color. Texture
+// is begin_sky_texture's.
 @(private)
 begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
-	if s.mode != .Atmosphere {
+	switch s.mode {
+	case .Flat:
 		return scale_ambient(flat_ambient(s.sky, s.ground), s.ambient_intensity)
+	case .Texture:
+		return begin_sky_texture(f, s)
+	case .Atmosphere:
 	}
 	r := f.renderer
 	a := s.atmosphere

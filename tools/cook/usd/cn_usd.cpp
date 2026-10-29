@@ -52,6 +52,8 @@ struct Cn_Usd {
 	std::vector<Cn_Usd_Subset> subsets;
 	std::vector<std::string> subset_names;
 	std::vector<std::string> resolved;
+	// Each light's texture's file, resolved as a texture's is.
+	std::vector<std::string> light_resolved;
 	// Each material's first copy: the first material whose inputs and textures are the same (see material_key).
 	std::vector<int32_t> material_alias;
 };
@@ -723,22 +725,30 @@ extern "C" Cn_Usd *cn_usd_open(const char *path, const Cn_Usd_Options *options) 
 			}
 		}
 	}
-	// Each texture's file, resolved against the layer that authored it if Tydra left it relative.
+	// Each texture's file, resolved against the layer that authored it if Tydra left it relative, and each light's.
+	auto resolve = [&search](std::string asset) -> std::string {
+		std::replace(asset.begin(), asset.end(), '\\', '/');
+		std::error_code ec;
+		for (const std::string &dir : search) {
+			std::string candidate = resolve_relative(dir, asset);
+			if (std::filesystem::exists(candidate, ec)) {
+				return candidate;
+			}
+		}
+		return {};
+	};
 	usd->resolved.resize(usd->scene.textures.size());
 	for (size_t i = 0; i < usd->scene.textures.size(); i++) {
 		const tydra::UVTexture &t = usd->scene.textures[i];
 		if (t.texture_image_id < 0 || size_t(t.texture_image_id) >= usd->scene.images.size()) {
 			continue;
 		}
-		std::string asset = usd->scene.images[size_t(t.texture_image_id)].asset_identifier;
-		std::replace(asset.begin(), asset.end(), '\\', '/');
-		std::error_code ec;
-		for (const std::string &dir : search) {
-			std::string candidate = resolve_relative(dir, asset);
-			if (std::filesystem::exists(candidate, ec)) {
-				usd->resolved[i] = candidate;
-				break;
-			}
+		usd->resolved[i] = resolve(usd->scene.images[size_t(t.texture_image_id)].asset_identifier);
+	}
+	usd->light_resolved.resize(usd->scene.lights.size());
+	for (size_t i = 0; i < usd->scene.lights.size(); i++) {
+		if (!usd->scene.lights[i].textureFile.empty()) {
+			usd->light_resolved[i] = resolve(usd->scene.lights[i].textureFile);
 		}
 	}
 	// A referenced prim's material is a material of its own under each prim that references it, as each of Jungle
@@ -1124,6 +1134,35 @@ extern "C" void cn_usd_material(Cn_Usd *usd, int32_t index, Cn_Usd_Material *out
 	out->normal = input_of(usd, s.normal, false);
 	out->occlusion = input_of(usd, s.occlusion, true);
 	out->opacity_threshold = s.opacityThreshold.value;
+}
+
+extern "C" void cn_usd_light(Cn_Usd *usd, int32_t index, Cn_Usd_Light *out) {
+	const tydra::RenderLight &l = usd->scene.lights[size_t(index)];
+	*out = {};
+	switch (l.type) {
+	case tydra::RenderLight::Type::Dome:
+		out->kind = CN_USD_LIGHT_DOME;
+		break;
+	case tydra::RenderLight::Type::Distant:
+		out->kind = CN_USD_LIGHT_DISTANT;
+		break;
+	default:
+		out->kind = CN_USD_LIGHT_OTHER;
+	}
+	out->name = str(l.name);
+	out->path = str(l.abs_path);
+	for (int c = 0; c < 3; c++) {
+		out->color[c] = l.color[c];
+	}
+	out->intensity = l.intensity;
+	out->exposure = l.exposure;
+	for (int r = 0; r < 4; r++) {
+		for (int c = 0; c < 4; c++) {
+			out->world[r * 4 + c] = l.transform.m[r][c];
+		}
+	}
+	out->texture = str(l.textureFile);
+	out->resolved = str(usd->light_resolved[size_t(index)]);
 }
 
 static int32_t wrap_of(tydra::UVTexture::WrapMode w) {

@@ -499,3 +499,68 @@ a_malformed_stage_is_an_error :: proc(t: ^testing.T) {
 	testing.expect(t, !pass.ok)
 	expect_error(t, &errors, "cannot read the stage")
 }
+
+// A stage in meters, Y-up, with a ground and a DomeLight whose image is beside it, turned a quarter about the up axis.
+@(private = "file")
+DOME_STAGE :: `#usda 1.0
+(
+    upAxis = "Y"
+    metersPerUnit = 1
+    defaultPrim = "root"
+)
+
+def Xform "root"
+{
+    def Mesh "ground"
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 0, 1)]
+    }
+
+    def DomeLight "sky"
+    {
+        float inputs:intensity = 2
+        float inputs:exposure = 1
+        asset inputs:texture:file = @./sky.hdr@
+        token inputs:texture:format = "latlong"
+        float3 xformOp:rotateXYZ = (0, 90, 0)
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+    }
+}
+`
+
+// A 2x1 Radiance image of 1.0 in every channel: RGBE (128, 128, 128, 129) is 0.5 times 2.
+@(private = "file")
+dome_image :: proc() -> string {
+	header := "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 2\n"
+	pixels := []u8{128, 128, 128, 129, 128, 128, 128, 129}
+	return strings.concatenate({header, string(pixels)}, context.temp_allocator)
+}
+
+@(test)
+a_dome_light_is_a_texture_sky :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/sky.usda", DOME_STAGE}, {"content/sky.hdr", dome_image()}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Stage, .Scene})
+	testing.expect(t, pass.ok)
+	meta := stage_meta(t, tree, "sky.usda")
+	guid, found := format.meta_subasset(meta, format.TEXTURE_KIND, "sky.hdr@hdr")
+	testing.expectf(t, found, "the dome's image is not a texture of the stage: %v", meta.subassets)
+	if found {
+		blob, ok := format.texture_view(tree_blob(t, tree, guid))
+		testing.expect(t, ok && blob.usage == .HDR)
+	}
+	prefab_text := ""
+	for a in pass.assets {
+		if a.owner != {} && a.kind == .Prefab {
+			prefab_text = string(a.source)
+		}
+	}
+	for want in ([]string{"component 42 Volume", "shape = Global", "mode = Texture", fmt.tprintf("texture = $%s", guid_text(guid)), "texture_intensity = 4"}) {
+		testing.expectf(t, strings.contains(prefab_text, want), "the prefab has no %q: %s", want, prefab_text)
+	}
+	// USD's quarter turn about +y takes +z to +x, which the stage's mirrored x makes -x: an azimuth of 270 degrees.
+	testing.expectf(t, strings.contains(prefab_text, "texture_rotation = 270"), "the dome's quarter turn is not its rotation: %s", prefab_text)
+}

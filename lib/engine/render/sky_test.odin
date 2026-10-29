@@ -1,5 +1,6 @@
 package render
 
+import "core:math"
 import "core:math/linalg"
 import "core:testing"
 
@@ -51,4 +52,27 @@ an_environment_takes_its_sun_from_the_angles :: proc(t: ^testing.T) {
 	testing.expect_value(t, s.mode, Sky_Mode.Atmosphere)
 	testing.expect(t, near(s.sun_direction, {1, 0, 0}))
 	testing.expect_value(t, sky_settings(DEFAULT_ENVIRONMENT).mode, Sky_Mode.Flat)
+}
+
+// A texture sky's rotation turns its ambient light about +y: the light that the texture's middle column holds, toward
+// +z unturned, comes from +x after a quarter turn, as the background shows the column there.
+@(test)
+a_texture_skys_rotation_turns_its_ambient_light :: proc(t: ^testing.T) {
+	a := Ambient{constant = {1, 1, 1}, z = {0.5, 0.5, 0.5}}
+	turned := turn_ambient(a, math.PI / 2)
+	testing.expect(t, near(ambient_at(turned, {1, 0, 0}), {1.5, 1.5, 1.5}))
+	testing.expect(t, near(ambient_at(turned, {0, 0, 1}), {1, 1, 1}))
+	testing.expect(t, near(ambient_at(turn_ambient(a, 0), {0, 0, 1}), {1.5, 1.5, 1.5}))
+}
+
+// Until its texture is resident, a texture sky's ambient light is the Flat one, and nothing draws over the background.
+@(test)
+a_texture_sky_without_its_texture_is_flat :: proc(t: ^testing.T) {
+	r := new(Renderer)
+	defer free(r)
+	f := Frame{renderer = r}
+	settings := Sky_Settings{mode = .Texture, sky = {0.4, 0.5, 0.9}, ground = {0.2, 0.1, 0.05}, ambient_intensity = 2, texture_intensity = 1}
+	ambient := begin_sky(&f, settings)
+	testing.expect(t, near(ambient_at(ambient, {0, 1, 0}), {0.8, 1, 1.8}))
+	testing.expect(t, f.sky_texture == nil && f.sky == nil)
 }

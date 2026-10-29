@@ -67,7 +67,7 @@ The settings that make the scene's look are settings components on [volumes](../
 | `Bloom` | 46 | `off`, `intensity` |
 | `Ambient_Occlusion` | 47 | `off`, `radius`, `power` |
 | `Global_Illumination` | 48 | `off` |
-| `Environment` | 49 | The `mode`: Flat's `background`, which the world pass clears the scene to and which is not pre-exposed, and its ambient light's `sky` and `ground`; or the atmosphere's sky, with its sun, moon and stars. The `ambient_intensity` in either. See [Sky](sky.md#sky) |
+| `Environment` | 49 | The `mode`: Flat's `background`, which the world pass clears the scene to and which is not pre-exposed, and its ambient light's `sky` and `ground`; the atmosphere's sky, with its sun, moon and stars; or a texture's. The `ambient_intensity` in each. See [Sky](sky.md#sky) |
 | `Fog` | 38 | See [Volumetric fog](fog.md#volumetric-fog) |
 | `Shadows` | 50 | The directional cascades' `distance` (`SHADOW_DISTANCE`, 100 m) and `split_lambda` between even and exponential (`SHADOW_SPLIT_LAMBDA`, 0.75) |
 

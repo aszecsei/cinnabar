@@ -102,6 +102,9 @@ add_fields :: proc(fields: ^[dynamic]Field, ti: ^runtime.Type_Info, prefix: stri
 		if value, override, is_value := overridable(s.types[i]); is_value {
 			if field_kind(value.type, &field, allocator) {
 				field.color &&= field.kind == .Vector3
+				if field.kind == .Asset {
+					field.asset_kind = asset_kind
+				}
 				field.has_override = true
 				field.override_offset = field.offset + u32(override)
 				field.offset += u32(value.offset)

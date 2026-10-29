@@ -1,5 +1,6 @@
 package render
 
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
 
@@ -95,12 +96,19 @@ Environment :: struct {
 	sun_disc_size:     volume.Value(f32) `editor:"range=0,5"`,
 	atmosphere:        Atmosphere,
 	night:             Night,
+	// Texture's sky (see docs/rendering/sky.md#texture): an hdr texture of the light from every direction,
+	// equirectangular, whose middle column is toward +z, scaled by its intensity and turned about +y by its rotation in
+	// degrees.
+	texture:           volume.Value(format.Guid) `asset:"texture"`,
+	texture_intensity: volume.Value(f32) `editor:"range=0,16"`,
+	texture_rotation:  volume.Value(f32) `editor:"range=0,360"`,
 }
 
 // Sky_Mode is what an Environment draws around the world.
 Sky_Mode :: enum u8 {
 	Flat,
 	Atmosphere,
+	Texture,
 }
 
 // Atmosphere is the planet's air (see docs/rendering/sky.md#the-atmosphere), after Hillaire's model: molecules that
@@ -207,6 +215,7 @@ DEFAULT_ENVIRONMENT :: Environment {
 		moon_color = {value = {1, 1, 1}},
 		star_density = {value = 0.3},
 	},
+	texture_intensity = {value = 1},
 }
 DEFAULT_FOG :: Fog {
 	albedo = {value = {1, 1, 1}},

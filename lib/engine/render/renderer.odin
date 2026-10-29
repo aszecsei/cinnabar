@@ -245,6 +245,8 @@ Frame :: struct {
 	fog:                      ^Fog_Frame,
 	// nil without an Atmosphere sky.
 	sky:                      ^Sky_Frame,
+	// nil without a Texture sky whose texture is resident.
+	sky_texture:              ^Sky_Texture_Frame,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -377,7 +379,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
-	sky_destroy(&r.sky, r.platform)
+	sky_destroy(&r.sky, r)
 	sprites_destroy(&r.sprites, r.platform)
 	particles_destroy(&r.particles, r.platform)
 	post_destroy(&r.post, r.platform)
@@ -479,15 +481,17 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_shadow_passes(f)
 	add_fog_passes(f)
 	add_sky_passes(f)
+	add_sky_texture_passes(f)
 
 	// The sky draws over the background after the world pass, so the clear is black under it.
-	background := f.sky == nil ? settings.sky.background : {}
+	sky_draws := f.sky != nil || sky_texture_draws(f)
+	background := sky_draws ? {} : settings.sky.background
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, {background.r, background.g, background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || f.sky != nil || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || sky_draws || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -497,6 +501,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
 	// illumination's lit scene, which keeps only the opaque surfaces.
 	add_sky_background(f)
+	add_sky_texture_background(f)
 	add_fog_background(f)
 	add_gi_lit(f)
 	add_transparency_passes(f)

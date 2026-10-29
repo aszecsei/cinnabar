@@ -1,4 +1,5 @@
-# Intel's Jungle Ruins: the stage's prefab, a camera where the stage's default camera is, the sun and a global volume.
+# Intel's Jungle Ruins: the stage's prefab, whose dome light is the sky, a camera where the stage's default camera is,
+# the sun and a global volume.
 # Positions are raw World_Position values in units of 2^-24 m. The editor writes this file; see
 # docs/editor/document-and-scenes.md#scenes.
 scene 2
@@ -20,9 +21,6 @@ component 1 Transform
 	scale = [1.0, 1.0, 1.0]
 component 42 Volume
 	shape = Global
-component 49 Environment
-	sky = [0.35, 0.45, 0.6]
-	ground = [0.12, 0.1, 0.08]
 
 entity f156b9a452b5a2dc
 name = "Sun"

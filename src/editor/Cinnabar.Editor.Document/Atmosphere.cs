@@ -16,7 +16,7 @@ public static class Atmosphere
     public const string MoonIlluminance = "night.moon_illuminance";
 
     /// <summary>The Environment's modes, as the engine's Sky_Mode names them.</summary>
-    public static readonly IReadOnlyList<string> Modes = ["Flat", "Atmosphere"];
+    public static readonly IReadOnlyList<string> Modes = ["Flat", "Atmosphere", "Texture"];
 
     /// <summary>The star intensity and the moon's illuminance that the Stars and Moon toggles turn on.</summary>
     public const double StarsOn = 1;

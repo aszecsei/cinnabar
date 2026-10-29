@@ -2,7 +2,7 @@
 
 Stages are USD files: `.usda` text, `.usdc` crate and `.usd` of either kind, read with LightUSD, which TinyUSDZ is now named (see [LightUSD](#lightusd)). A stage is a `Stage` asset, which has no blob of its own: like a glTF model, it is a file of sub-assets, each with its GUID on a line of its `.meta` file (see [Identity](../identity-and-cooking.md#identity)). Unlike a model, a stage brings its whole scene: its meshes, the images and UsdPreviewSurface materials that they use, its point instancers' poses, and its prims as a prefab. `just stages` runs `cook stages --cache build/<target>/content --config dev|release` with the roots; the material and scene passes run it first too, so `just build` cooks stages without asking.
 
-**In this document:** [Sub-assets](#sub-assets) · [Composition](#composition) · [Meshes](#meshes) · [Textures](#textures) · [Materials](#materials) · [Point instancers](#point-instancers) · [Prefab](#prefab) · [Cooking](#cooking) · [Import settings](#import-settings) · [LightUSD](#lightusd) · [Limits](#limits)
+**In this document:** [Sub-assets](#sub-assets) · [Composition](#composition) · [Meshes](#meshes) · [Textures](#textures) · [Materials](#materials) · [Point instancers](#point-instancers) · [Lights](#lights) · [Prefab](#prefab) · [Cooking](#cooking) · [Import settings](#import-settings) · [LightUSD](#lightusd) · [Limits](#limits)
 
 ## Sub-assets
 
@@ -76,6 +76,16 @@ A UsdGeomPointInstancer places its prototypes at its points: Jungle Ruins has 77
 - **The prefab** has an entity for each point instancer, under the root and posed in the stage, whose `Instanced_Mesh_Renderer` draws its set. An instancer of several sets has a child for each, and a mesh in parts a child for each part, all drawing the same set.
 - **`point_instancers = skip`** leaves instancers out, prototypes too; **`entities`** makes an entity of each point, as Tydra expands them, which is far too many for a forest.
 
+## Lights
+
+A DomeLight is the stage's sky: its image is a texture sub-asset, named `<image>@hdr`, and the prefab has an entity for it under the root with a global `Volume` and an `Environment` of mode `Texture` that draws the texture (see [Rendering: Sky](../../rendering/sky.md#texture)).
+
+- **Intensity:** the light's `intensity` times 2 to the power of its `exposure`, times its color's average. The sky's texture has no tint, so a color that is not gray is a warning.
+- **Rotation:** the azimuth that the light's transform turns its +z to, on the engine's axes. The texture's middle column is toward the light's +z, which is the engine's convention; this has not been checked against a USD renderer's.
+- **Left out, with a warning:** a dome without an image, or with one that the cooker cannot decode, such as an OpenEXR image in DWAA.
+- Jungle Ruins' dome is its sky, `kloppenheim_06_puresky_8k.hdr`.
+- Other lights are not imported yet.
+
 ## Prefab
 
 The stage's prims are one prefab: a root named for the stage, at the origin, and an entity for each prim that holds a mesh or has one below it, posed under its parent with a `Local_Transform`. An entity's ID is the hash of its prim's path, so a scene's overrides of the prefab's entities survive a cook (see [Prefabs](../../editor/prefabs.md#instances-in-a-scene)).
@@ -123,4 +133,4 @@ LightUSD is the submodule `vendor/lightusd` (github.com/lighttransport/tinyusdz)
 - **Size:** a mesh cooks whole, so its triangles fit in memory. Jungle Ruins' meshes that cook are 18.6 million triangles; converting it with its point instancers expanded took about 26 GB.
 - **Residency:** Jungle Ruins makes 1,173 meshes, textures and instance sets, within the renderer's `MAX_RESIDENT` of 4,096.
 - **Decals** that a stage models as quads on a surface, as Sponza's `decals_*_floor` are, z-fight with the surface: the engine has no decals yet, and an opaque or masked material takes no depth bias.
-- **Not imported:** cameras, lights, skins, animation, variants other than the stage's selections, and materials other than UsdPreviewSurface, such as MaterialX.
+- **Not imported:** cameras, lights other than DomeLights, skins, animation, variants other than the stage's selections, and materials other than UsdPreviewSurface, such as MaterialX.

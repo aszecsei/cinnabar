@@ -12,6 +12,7 @@ import "core:c"
 import "core:fmt"
 import "core:hash"
 import "core:hash/xxhash"
+import "core:math"
 import "core:math/linalg"
 import "core:mem"
 import "core:mem/virtual"
@@ -26,6 +27,9 @@ import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
 STAGE_COOK_VERSION :: "stages 3"
+// Changing what a stage's prefab or material instances hold, or which sub-assets it makes, changes this. It is in the
+// stage's key alone, so every stage converts again but keeps its meshes, textures and instance sets that are current.
+STAGE_PREFAB_VERSION :: "prefab 2"
 STAGE_EXTENSIONS :: []string{".usda", ".usdc", ".usd"}
 // A part of a mesh has at most this many submeshes, which a Mesh_Renderer has material slots for.
 STAGE_MAX_SLOTS :: format.MESH_MAX_SLOTS
@@ -110,6 +114,10 @@ Stage_Texture :: struct {
 	role:    Stage_Role,
 	name:    string,
 	guid:    format.Guid,
+	// A DomeLight's image, which no material reads: the light, and its file. Its texture is -1.
+	dome:    bool,
+	light:   i32,
+	path:    string,
 }
 
 @(private = "file")
@@ -221,14 +229,14 @@ stage_setting :: proc(a: Asset_Source, key: string) -> string {
 
 // stage_key covers what every sub-asset depends on besides the files that the stage reads: the cooker, the libraries,
 // the images that the cooker decodes, which decide what a material's inputs read, the configuration, the path, the
-// source, the GUID and the settings. The sub-asset lines of the .meta file are not in
-// it, because the cooker writes them.
+// source, the GUID and the settings. The sub-asset lines of the .meta file are not in it, because the cooker writes
+// them.
 @(private = "file")
 stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
-			STAGE_COOK_VERSION, LIGHTUSD_VERSION, MESHOPTIMIZER_VERSION, COMPRESSONATOR_VERSION, TEXTURE_COOK_VERSION,
+			"%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
+			STAGE_COOK_VERSION, STAGE_PREFAB_VERSION, LIGHTUSD_VERSION, MESHOPTIMIZER_VERSION, COMPRESSONATOR_VERSION, TEXTURE_COOK_VERSION,
 			options.config, a.name, format.mesh_layout(), format.texture_layout(),
 		),
 	)
@@ -282,6 +290,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 
 	meshes := stage_meshes(usd, info, instancers)
 	materials, textures := stage_materials(a^, usd, info, meshes, problems)
+	stage_domes(a^, usd, info, &textures, problems)
 	parts := stage_parts(a^, usd, info, meshes)
 	sets := instancers == "instanced" ? stage_sets(a^, usd, info, meshes, problems) : make([dynamic]Stage_Set, context.temp_allocator)
 
@@ -352,7 +361,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Material_Instance, m.guid, 0, m.name, path})
 	}
 	{
-		text := stage_prefab_text(a^, usd, info, meshes, parts[:], sets[:], materials[:], problems)
+		text := stage_prefab_text(a^, usd, info, meshes, parts[:], sets[:], materials[:], textures[:], problems)
 		path := fmt.tprintf("%s/generated/stages/%s%s", out_dir, guid_text(prefab_guid), format.PREFAB_EXTENSION)
 		ok &&= write_generated(path, text, problems)
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Prefab, prefab_guid, 0, STAGE_PREFAB_NAME, path})
@@ -395,6 +404,8 @@ role_name :: proc(r: Stage_Role) -> string {
 	#partial switch r.usage {
 	case .Normal:
 		return "normal"
+	case .HDR:
+		return "hdr"
 	case .Mask:
 		channels := "rgba"
 		return fmt.tprintf("mask.%c%s", channels[r.channel], r.srgb ? ".srgb" : "")
@@ -926,9 +937,13 @@ stage_watch_layers :: proc(layer: string, manifest: ^Stage_Manifest) {
 
 @(private = "file")
 cook_stage_texture :: proc(options: Cook_Options, a: Asset_Source, usd: ^Cn_Usd, t: Stage_Texture, out_dir: string, pass: ^Pass, manifest: ^Stage_Manifest) -> (blob_key: u64, ok: bool) {
-	tex: Cn_Usd_Texture
-	cn_usd_texture(usd, t.texture, &tex)
-	path := strings.clone(usd_string(tex.resolved), context.temp_allocator)
+	// A dome's image wraps around the sky.
+	tex := Cn_Usd_Texture{wrap_s = .Repeat, wrap_t = .Repeat}
+	path := t.path
+	if t.texture >= 0 {
+		cn_usd_texture(usd, t.texture, &tex)
+		path = strings.clone(usd_string(tex.resolved), context.temp_allocator)
+	}
 	size, modified, stamped := file_stamp(path)
 	if !stamped {
 		report_error(&pass.problems, a.path, 0, 0, "cannot read %s", path)
@@ -1276,7 +1291,7 @@ stage_pose :: proc(m: [16]f64, basis: matrix[3, 3]f64, scale: f64) -> (offset: [
 // or one below it, posed under its parent, but for point instancers' prototypes, an entity for each instance, posed in
 // the stage, and an entity for each point instancer that has instance sets, posed in the stage, which draws them.
 @(private = "file")
-stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, parts: []Stage_Part, sets: []Stage_Set, materials: []Stage_Material, problems: ^Problems) -> string {
+stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, parts: []Stage_Part, sets: []Stage_Set, materials: []Stage_Material, textures: []Stage_Texture, problems: ^Problems) -> string {
 	basis, scale := stage_basis(a, info)
 	entities := make([dynamic]Stage_Entity, context.temp_allocator)
 	root := Stage_Entity {
@@ -1472,7 +1487,67 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, mesh
 			fmt.sbprintln(&b, "\tcast_shadows = true")
 		}
 	}
+	// Each DomeLight is a global volume under the root whose Environment draws its image (see
+	// docs/content/kinds/stages.md#lights).
+	for t in textures {
+		if !t.dome || len(entities) == 0 {
+			continue
+		}
+		light: Cn_Usd_Light
+		cn_usd_light(usd, t.light, &light)
+		_, rotation, _, _ := stage_pose(light.world, basis, 1)
+		forward := linalg.quaternion_mul_vector3(rotation, [3]f64{0, 0, 1})
+		yaw := math.to_degrees(math.atan2(forward.x, forward.z))
+		fmt.sbprintfln(&b, "\nentity %016x", entity_id(usd_string(light.path)))
+		fmt.sbprintfln(&b, "name = %q", usd_string(light.name))
+		fmt.sbprintfln(&b, "parent = @%016x", entities[0].id)
+		fmt.sbprintln(&b, "component 1 Transform")
+		fmt.sbprintln(&b, "\tposition = [0, 0, 0]")
+		fmt.sbprintln(&b, "\trotation = [0.0, 0.0, 0.0, 1.0]")
+		fmt.sbprintln(&b, "\tscale = [1.0, 1.0, 1.0]")
+		fmt.sbprintln(&b, "component 2 Local_Transform")
+		fmt.sbprintln(&b, "\toffset = [0.0, 0.0, 0.0]")
+		fmt.sbprintln(&b, "\trotation = [0.0, 0.0, 0.0, 1.0]")
+		fmt.sbprintln(&b, "\tscale = [1.0, 1.0, 1.0]")
+		fmt.sbprintln(&b, "component 42 Volume")
+		fmt.sbprintln(&b, "\tshape = Global")
+		fmt.sbprintln(&b, "component 49 Environment")
+		fmt.sbprintln(&b, "\tmode = Texture")
+		fmt.sbprintfln(&b, "\ttexture = $%s", guid_text(t.guid))
+		gray := (light.color.r + light.color.g + light.color.b) / 3
+		fmt.sbprintfln(&b, "\ttexture_intensity = %v", f64(gray * light.intensity) * math.pow(2, f64(light.exposure)))
+		fmt.sbprintfln(&b, "\ttexture_rotation = %v", yaw < 0 ? yaw + 360 : yaw)
+	}
 	return strings.to_string(b)
+}
+
+// stage_domes adds a texture of each DomeLight's image, which the prefab's volume for the light draws as the sky. A
+// dome without an image, or with one that the cooker cannot decode, is a warning. The sky's texture has an intensity
+// and no tint, so a dome's color scales it by its average, with a warning when it is not gray.
+@(private = "file")
+stage_domes :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, textures: ^[dynamic]Stage_Texture, problems: ^Problems) {
+	for i in 0 ..< info.light_count {
+		light: Cn_Usd_Light
+		cn_usd_light(usd, i, &light)
+		if light.kind != .Dome {
+			continue
+		}
+		resolved := strings.clone(usd_string(light.resolved), context.temp_allocator)
+		path := usd_string(light.path)
+		if resolved == "" {
+			report_warning(problems, a.path, 0, 0, "the dome light %s has no image that is there (%s), so it is left out", path, usd_string(light.texture))
+			continue
+		}
+		if why := image_undecodable(resolved); why != "" {
+			report_warning(problems, a.path, 0, 0, "the dome light %s's image %s cannot be decoded (%s), so it is left out", path, resolved, why)
+			continue
+		}
+		if abs(light.color.r - light.color.g) > 0.01 || abs(light.color.g - light.color.b) > 0.01 {
+			report_warning(problems, a.path, 0, 0, "the dome light %s's color %v is its average: the sky's texture has no tint", path, light.color)
+		}
+		role := Stage_Role{usage = .HDR}
+		append(textures, Stage_Texture{texture = -1, role = role, name = stage_texture_name(a, usd, resolved, role), dome = true, light = i, path = resolved})
+	}
 }
 
 // stage_report opens each stage as a cook would, with its point instancers as instance sets, and prints what it would

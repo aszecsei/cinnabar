@@ -34,7 +34,7 @@ Sponza's dirt decals (`decals_1st_floor`, `decals_2nd_floor` and `decals_3rd_flo
 
 - **Speed.** A frame of the editor's view of it takes about 38 ms on an RTX 5090, 25 ms of it on the CPU. Without mesh shaders, the instances draw at their meshes' finest level until their impostors take over, about 800 ms.
 - **Textures.** Its plants' textures are TIFF, which the cooker reads. The palm trunks' normal and roughness maps are OpenEXR in DWAA compression, which TinyEXR does not decode, so the stage warns, and the trunks take their materials' values.
-- **Sky.** The scene's background is black: the engine has no sky.
+- **Sky.** The stage's DomeLight is its sky, `kloppenheim_06_puresky_8k.hdr`, as a texture sky and its ambient light. The scene's sun is placed by hand, and is not yet aimed at the image's sun.
 
 ## Credits and licenses
 
