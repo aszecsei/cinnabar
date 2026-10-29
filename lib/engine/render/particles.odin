@@ -1146,7 +1146,7 @@ add_particle_passes :: proc(f: ^Frame) {
 }
 
 // add_particle_history_pass adds, after the prepass, the pass that keeps this frame's view depth and normals for next
-// frame's collisions.
+// frame's collisions. The prepass leaves out the mesh particles, which add_particle_prepass draws after it.
 @(private)
 add_particle_history_pass :: proc(f: ^Frame) {
 	pf := f.particles
@@ -1171,6 +1171,23 @@ add_particle_history_pass :: proc(f: ^Frame) {
 	read(g, pass, f.depth)
 	read(g, pass, f.normals)
 	write(g, pass, pf.history.current)
+}
+
+// add_particle_prepass adds, after the history pass, the camera's prepass of the mesh particles, which the history
+// leaves out so a mesh particle does not collide with itself or another.
+@(private)
+add_particle_prepass :: proc(f: ^Frame) {
+	if !has_mesh_particles(f.scene_frame) {
+		return
+	}
+	g := f.graph
+	p := add_render_pass(g, "particle prepass", proc(ctx: ^Pass_Context) {
+		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass, filter = .Particles)
+	}, f)
+	color(g, p, f.normals, .Load)
+	color(g, p, f.velocity, .Load)
+	depth(g, p, f.depth, .Load)
+	declare_scene_draws(f, p)
 }
 
 @(private = "file")

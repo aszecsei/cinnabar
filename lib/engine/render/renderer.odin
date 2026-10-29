@@ -446,13 +446,14 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	// The view model first, which sets its stencil bit, then the world, which draws only where the bit is clear.
 	p := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
 		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_VIEW_MODEL, .Prepass)
-		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass)
+		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_CAMERA, .Prepass, filter = .No_Particles)
 	}, f)
 	color(&g, p, f.normals, .Clear)
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
 	depth(&g, p, f.depth, .Clear)
 	declare_scene_draws(f, p)
 	add_particle_history_pass(f)
+	add_particle_prepass(f)
 	if desc.hooks.after_prepass != nil {
 		desc.hooks.after_prepass(f)
 	}

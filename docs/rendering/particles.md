@@ -52,7 +52,7 @@ GPU particles: a `Particle_System` places an effect asset, whose emitters the GP
 
 The simulation runs before the prepass, so it collides with what the camera saw last frame, as Unity's VFX Graph and Unreal's Niagara do for their depth collision.
 
-- **The history.** After the prepass, `particle_history.hlsl` writes each pixel's view depth and world normal into a history texture (`PARTICLE_HISTORY_FORMAT`, `RGBA16_Float`), which the next frame's update reads. Where nothing drew, the depth is as far as the format holds.
+- **The history.** After the prepass, `particle_history.hlsl` writes each pixel's view depth and world normal into a history texture (`PARTICLE_HISTORY_FORMAT`, `RGBA16_Float`), which the next frame's update reads. Where nothing drew, the depth is as far as the format holds. The camera's prepass leaves out the mesh particles' bins (`Bin_Filter`), and a particle prepass after the history draws them, so a mesh particle does not collide with its own mesh or another's, and the floor under it stays in the history.
 - **A collision.** A particle with `collide` projects with last frame's view projection. When it is behind the depth there by less than a thickness, 0.3 m or twice its step, whichever is more, and moving into the surface, it bounces: it keeps `restitution` of its speed into the surface and `1 - friction` of its speed along it, and moves back out by how far it went in.
 - **No collision** happens off last frame's screen, in the first frame, after the frame's size changes, or behind what last frame showed.
 
@@ -77,6 +77,7 @@ An emitter with `render = mesh` draws a mesh at each of its particles, with its 
   - its system's ID, so the editor picks the system;
   - its color from the color curve, as unorm8, which scales its mesh's vertex colors in `inputs.color`.
 - **The draws.** `particle_meshes.hlsl`, after the update, a thread for each item in each view: each item takes one draw in its bin, with `DRAW_PARTICLES`, whose vertex count is its submesh's indices times its emitter's living particles. The vertex path (`load_vertex` in `material_vertex.hlsli`) draws the submesh once for each particle, with its instance from `Frame_Constants.particle_instances`. An item draws in the camera's view and, when its material casts shadows, in every shadow view; the view model's view draws none.
+- **The prepass.** The camera's draws of mesh particles go into a particle prepass of their own, after the particle history (see [Collision](#collision)).
 - **Limits:** mesh particles are not culled, by view or by particle, nor in the ray-traced shadows; and an effect's preview draws no mesh particles.
 
 ## Previews
