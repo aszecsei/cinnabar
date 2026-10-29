@@ -77,11 +77,21 @@ abstract class FieldView
     protected static double? ParseShown(string text) =>
         double.TryParse(text.Replace(",", "").TrimEnd('°'), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
 
-    /// <summary>A slider over a range, whose drag is one scrub: one undo entry from press to release.</summary>
+    /// <summary>
+    /// A slider over a range, whose drag is one scrub: one undo entry from press to release. Only the user's moves edit
+    /// the field: Avalonia also moves the value itself when it coerces it into the range, as when the properties panel's
+    /// views are made again after Stop, and a field outside the range, such as a camera's 0 for its default field of
+    /// view, keeps its value.
+    /// </summary>
     protected static Slider RangeSlider(IFieldEditor editor, double min, double max, Func<bool> showing)
     {
         var slider = new Slider { Minimum = min, Maximum = max, Classes = { "value-slider" }, VerticalAlignment = VerticalAlignment.Center };
         var dragging = false;
+        // A press on the track moves the value without a drag, after the press reaches the slider.
+        var pressed = false;
+        slider.AddHandler(InputElement.PointerPressedEvent, (_, _) => pressed = true, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        slider.AddHandler(InputElement.PointerReleasedEvent, (_, _) => pressed = false, Avalonia.Interactivity.RoutingStrategies.Tunnel, handledEventsToo: true);
+        slider.AddHandler(InputElement.PointerCaptureLostEvent, (_, _) => pressed = false, handledEventsToo: true);
         slider.AddHandler(Avalonia.Controls.Primitives.Thumb.DragStartedEvent, (_, _) =>
         {
             dragging = true;
@@ -94,7 +104,7 @@ abstract class FieldView
         });
         slider.ValueChanged += (_, e) =>
         {
-            if (!showing())
+            if (!showing() && (dragging || pressed || slider.IsKeyboardFocusWithin))
             {
                 editor.SetNumbers([e.NewValue]);
             }
