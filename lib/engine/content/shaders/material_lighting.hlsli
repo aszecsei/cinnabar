@@ -182,8 +182,10 @@ Light light_falloff(Light_Record l, float3 p) {
 // light_at is one light as it reaches a point, after its falloff and its shadow.
 Light light_at(Light_Record l, float3 p, float3 normal, float4 position) {
 	Light light = light_falloff(l, p);
-	if (any(light.color > 0) && dot(normal, light.direction) > 0) {
-		light.color *= light_shadow(l, p, normal, light.direction, position);
+	if (any(light.color > 0)) {
+		// A surface that faces away from the light is in its own shadow. Its shading would not clip that to nothing,
+		// because a normal map can tilt the shading normal toward the light.
+		light.color *= dot(normal, light.direction) > 0 ? light_shadow(l, p, normal, light.direction, position) : 0;
 	}
 	return light;
 }
