@@ -75,7 +75,7 @@ static class DefaultRibbon
                         new ComboBox(EditorCommands.DebugView),
                         new SmallStack([EditorCommands.TemporalAa, EditorCommands.Bloom, EditorCommands.ToneMapping]),
                         new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
-                        new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
+                        new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects, EditorCommands.OcclusionCulling]),
                         new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
                     ]),
                     new RibbonGroup("Quality",
@@ -100,6 +100,7 @@ static class DefaultRibbon
                     new RibbonGroup("Sun",
                     [
                         new LargeButton(EditorCommands.LinkSun),
+                        new LargeButton(EditorCommands.AimSun),
                         new Dropdown("Time of Day", "sun", [.. Atmosphere.TimesOfDay.Select(t => EditorCommands.TimeOfDay(t.Name))]),
                     ]),
                     new RibbonGroup("Sky",

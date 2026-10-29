@@ -2,13 +2,14 @@
 
 The world's surroundings: the background where nothing draws, and the ambient light until global illumination. Both come from the `Environment` settings (stable ID 49, see [Settings](frame.md#settings)), on a volume at the camera (`lib/engine/render/settings.odin`, `sky.odin`).
 
-**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Ambient light](#ambient-light) · [Passes](#passes) · [Limits](#limits)
+**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Texture](#texture) · [Ambient light](#ambient-light) · [Passes](#passes) · [Limits](#limits)
 
 ## Modes
 
 - **`mode`** is `Flat` by default, so a scene without one keeps the look that it had before the atmosphere.
 - **Flat:** the world pass clears the scene to `background`, which is not pre-exposed. The ambient light is `sky`'s color from above and `ground`'s from below, which blend on the horizon (`DEFAULT_SKY_COLOR` and `DEFAULT_GROUND_COLOR` by default).
 - **Atmosphere:** the background is the sky of a planet's air, which the sun and the moon light. It is pre-exposed, as the rest of the scene is. The ambient light comes from the same sky.
+- **Texture:** the background is an hdr texture of the light from every direction, such as a captured sky, and the ambient light comes from it (see [Texture](#texture)).
 - **`ambient_intensity`** multiplies the ambient light in either mode (1 by default).
 - **Missing shaders:** an `Atmosphere` whose pipelines do not exist yet, because their shaders are not cooked, draws the `background` color. Its ambient light, which the CPU makes, is still the sky's.
 
@@ -35,10 +36,21 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 - **The stars** are procedural: at most one in each cell of a grid on each face of a cube around the camera, in about `night.star_density` of the cells, with random places, brightnesses and colors from blue to orange. `night.star_intensity` is the brightest star's light. The air in front of them dims them, and the day's sky outshines them, so they show only at night. An intensity of 0 leaves them out.
 - The night's light is very dim beside the day's. The auto exposure adapts to it (see [Post-processing](post-processing.md#post-processing)).
 
+## Texture
+
+`Texture` draws an image of the light from every direction (`sky_texture.odin`, `sky_texture*.hlsl`), as a USD stage's DomeLight makes it (see [Stages](../content/kinds/stages.md#lights)).
+
+- **`texture`** is a texture asset, best of usage `hdr` (an `.hdr` or `.exr` file, see [Textures](../content/kinds/textures.md#textures)), equirectangular: across, the azimuth, with the middle column toward +z and +x to its right; down, the angle from straight up. **`texture_intensity`** scales its light (1 by default), and **`texture_rotation`** turns it about +y, in degrees: at 90 the middle column is toward +x.
+- **The background** (`sky texture`): after the world pass, where the depth is 0, the texture's light from the pixel's direction, at the mip whose texels are about as wide as a pixel, pre-exposed. The fog over the background then dims it, as it does the atmosphere's.
+- **The ambient light** is the atmosphere's linear function of the direction, from the texture. A compute pass (`sky texture ambient`, one group) sums one mip, the largest at most `SKY_AMBIENT_WIDTH` (128) wide, each texel weighted by its solid angle: the constant is the average light, and each gradient twice the average of the light times its direction. A copy moves it to a readback buffer, with a ticket, and the CPU takes it when it is back, a few frames later, then turns it by the rotation and scales it by the intensity and `ambient_intensity` each frame. It is integrated once for each version of the texture, and again if it has not come back after `SKY_AMBIENT_RETRY_FRAMES` (120).
+- **Until it is ready:** while the texture is not resident, nothing draws over the background, which is the `background` color, and the ambient light is Flat's. While its integral is not back, the ambient light is Flat's.
+- **The sun** is not the texture's. A directional light lights the scene as in Flat. The editor's Aim Sun at Sky aims it at the image's sun (see [Editor](../editor/shell-and-panels.md#atmosphere)), which the same pass finds: the brightest texel of the integral's mip, then, in a window of five of its texels on a side, of the largest mip at most `SKY_SUN_WIDTH` (2048) wide, the direction of the texels within half of the brightest luminance there, weighted by their light. A coarser mip's light around the sun would move it: in Jungle Ruins' sky, by 16 degrees of elevation at 128 texels wide and 1 degree at 1024. `sky_texture_sun` gives it in the world, turned by the rotation, when the last frame's sky was a texture's whose integral is back, and its brightest luminance is at least `SKY_SUN_RATIO` (10) times the average, so an overcast sky has no sun. Jungle Ruins' is 45 times as bright, about 39 degrees of azimuth and 7 of elevation.
+
 ## Ambient light
 
 - **`Ambient`** is a linear function of the direction, per channel: `constant + x·d.x + y·d.y + z·d.z`. It holds the Flat sky's light from above and the ground's from below exactly, so `flat_ambient` gives the same light as before. Shaders evaluate it with `ambient_light` (`ambient.hlsli`), from four float4s in `Frame_Constants.ambient` and the global illumination's constants.
 - **In `Atmosphere`**, the CPU integrates the sky in 64 directions spread over the sphere (`sky_ambient`), with the sun's and the moon's light, and the ground's below the horizon. It takes the sky's first spherical harmonics, convolved with the cosine: the constant is the sky's average light, and the gradient twice the average of the light times its direction. Multiple scattering on the CPU is an even share of the light that each point scatters, not the table. The renderer keeps the result until the atmosphere, the camera's height or a light changes.
+- **In `Texture`**, the GPU integrates it from the texture (see [Texture](#texture)).
 - **Its readers:** the forward pass without global illumination, for the diffuse light along the normal and the specular light along the reflection; the global illumination's sky beyond its last cascade; the fog's injection and the sprites, which take its constant, the light from every direction alike.
 
 ## Passes
@@ -52,6 +64,8 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 | `sky view` | 256×128 | The light from every direction at the camera: the sun's and the moon's scattering, once from the transmittance and more from the multiple scattering table, and the ground's. Rows are squeezed toward the horizon. |
 | `sky` | The scene | Where the depth is 0, after the world pass and before the fog over the background: the sky view table, and above the horizon the sun, the moon and the stars, pre-exposed |
 
+`Texture` has two passes of its own, when its texture is resident and their pipelines exist: `sky texture` draws over the background where `sky` would, and `sky texture ambient`, with its copy to the readback buffer, runs only in a frame that integrates the texture.
+
 - The tables are made again each frame, since the blended settings can change each frame. They are small.
 - The world pass clears the scene to black under the sky. The fog over the background then dims the sky by the whole fog volume, as it did the background color (see [Volumetric fog](fog.md#volumetric-fog)).
 - **Precision:** the planet's radius is thousands of kilometers, and a float keeps only about a meter of it, which can be the camera's whole height. The shaders keep a point as its height above the ground and the cosine of a direction from its zenith, and find each height along a ray from a difference that keeps it (`height_along` in `sky_common.hlsli`). The CPU works in f64.
@@ -60,5 +74,6 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 
 - **No aerial perspective:** the air between the camera and the world's surfaces does not dim or color them. The fog does that within its 500 m.
 - **No clouds**, and the stars do not turn with the time.
+- **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's: reflections see only its linear function, not the image.
 - **The sky's sun lights nothing without a link.** A scene that wants sunlight links a directional light, which the Atmosphere tab does (see [Editor](../editor/shell-and-panels.md#atmosphere)).
 - The camera stays inside the atmosphere: its height is clamped between 1 m and 1 m below the top.

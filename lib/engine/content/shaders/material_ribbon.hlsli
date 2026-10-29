@@ -11,7 +11,7 @@
 // A segment's corners: x is the particle, this one or the next, and y the edge.
 static const uint2 RIBBON_CORNERS[6] = {uint2(0, 0), uint2(0, 1), uint2(1, 0), uint2(1, 0), uint2(0, 1), uint2(1, 1)};
 
-Material_Vertex load_vertex(uint vertex_id) {
+Material_Vertex load_vertex(uint vertex_id, uint instance_id) {
 	Draw_Record d = load_draw();
 	Instance_Record instance = load_instance(d);
 	uint segment = vertex_id / 6;

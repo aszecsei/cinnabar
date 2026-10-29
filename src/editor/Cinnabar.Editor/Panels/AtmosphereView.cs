@@ -149,6 +149,7 @@ public sealed class AtmosphereView : ScrollViewer
             environment.Fields.Where(f => f.Name.StartsWith(prefix, StringComparison.Ordinal))
                 .Select(f => Row(volume, SceneEdits.EnvironmentId, f, FieldValues.Humanize(f.Name[prefix.Length..])));
         var atmosphere = Atmosphere.ModeOf(volume) == "Atmosphere";
+        var texture = Atmosphere.ModeOf(volume) == "Texture";
 
         // The sun: its light, where it is, and how bright it is.
         var sunRows = new List<FieldRow?> { Environment(Atmosphere.Sun, "Light") };
@@ -162,18 +163,32 @@ public sealed class AtmosphereView : ScrollViewer
             sunTail.Add(Environment("sun_illuminance", "Illuminance"));
         }
         sunTail.Add(Environment("sun_disc_size", "Disc Size"));
-        var note = atmosphere ? null : "The Flat sky draws no sun. A linked light still lights the world.";
-        _content.Children.Add(Group("Sun", new StackPanel
+        var note = atmosphere ? null
+            : texture ? "The texture's sun is its image's. A linked light still lights the world."
+            : "The Flat sky draws no sun. A linked light still lights the world.";
+        var sunPanel = new StackPanel
         {
             Spacing = 4,
             Children = { _grid.Rows(sunRows.OfType<FieldRow>()), Angles(), _grid.Rows(sunTail.OfType<FieldRow>()) },
-        }, note));
+        };
+        // A texture sky's sun is in its image: the button aims the sun there.
+        if (texture)
+        {
+            sunPanel.Children.Add(CommandButton("Aim Sun at Sky", EditorCommands.AimSun));
+        }
+        _content.Children.Add(Group("Sun", sunPanel, note));
 
-        // The sky and the ambient light: Flat's colors, or the atmosphere's air.
+        // The sky and the ambient light: Flat's colors, the atmosphere's air, or the texture with Flat's colors until it
+        // is ready.
         var sky = new List<FieldRow?> { Environment(Atmosphere.Mode), Environment("ambient_intensity") };
         if (atmosphere)
         {
             sky.AddRange(Prefixed("atmosphere."));
+        }
+        else if (texture)
+        {
+            sky.AddRange([Environment("texture"), Environment("texture_intensity", "Intensity"), Environment("texture_rotation", "Rotation"),
+                Environment("background"), Environment("sky", "Sky Color"), Environment("ground", "Ground Color")]);
         }
         else
         {

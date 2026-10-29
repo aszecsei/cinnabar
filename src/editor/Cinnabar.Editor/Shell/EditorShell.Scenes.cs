@@ -422,6 +422,9 @@ public sealed partial class EditorShell
             case Link.Protocol.GameCommandResult result:
                 OnGameCommandResult(result);
                 return;
+            case Link.Protocol.SkySun sun:
+                OnSkySun(sun);
+                return;
             case Link.Protocol.GameStats stats:
                 Stats.Apply(stats);
                 return;

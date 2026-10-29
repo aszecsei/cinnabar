@@ -1,6 +1,7 @@
 package render
 
 import "core:log"
+import "core:math/linalg"
 import "core:mem"
 
 import "cinnabar:core"
@@ -8,8 +9,10 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 
-// At most this many assets are resident at once.
-MAX_RESIDENT :: 512
+// At most this many assets are resident at once: Sponza with its curtains, a USD stage, is about 250 meshes and textures,
+// and Jungle Ruins about 1,200 with an instance set for each of its 778 point instancers (see
+// docs/content/kinds/stages.md#limits).
+MAX_RESIDENT :: 4096
 // A resident mesh keeps at most this many submeshes. A mesh with more draws only these.
 MAX_SUBMESHES :: 16
 // An asset that cannot be made resident is tried again after this many frames.
@@ -39,6 +42,12 @@ Resident_Mesh :: struct {
 	submesh_count:     u32,
 	submeshes:         [MAX_SUBMESHES]Resident_Submesh,
 	submesh_bounds:    [MAX_SUBMESHES]format.Mesh_Bounds,
+	// For instanced draws on the mesh shader path (see docs/rendering/gpu-scene.md#instanced-meshes): each submesh's
+	// first meshlet of each level bucket, from its first, at its last level for a bucket past it; and for each level
+	// below the last bucket's, the largest parent error of the mesh's meshlets there and how far their parents'
+	// spheres reach from the mesh's center, F32_MAX past the mesh's last level.
+	level_first:       [MAX_SUBMESHES][INSTANCE_LEVEL_BUCKETS]u32,
+	levels:            [INSTANCE_LEVEL_BUCKETS][2]f32,
 	// With Ray_Query, the bottom-level acceleration structure of every triangle, which the renderer builds the first
 	// frame after the mesh is ready (see docs/rendering/lighting-and-shadows.md#shadows).
 	accel:             gpu.Accel_Struct,
@@ -50,6 +59,15 @@ Resident_Submesh :: struct {
 	index_count:   u32,
 	first_meshlet: u32,
 	meshlet_count: u32,
+}
+
+// Resident_Instance_Set is an instance set asset's GPU buffers, its instances and its cells, and what culling them
+// needs from its blob (see docs/rendering/gpu-scene.md#instanced-meshes).
+Resident_Instance_Set :: struct {
+	instances:  gpu.Buffer,
+	cells:      gpu.Buffer,
+	count:      u32,
+	cell_count: u32,
 }
 
 // Resident_Texture is a texture asset's GPU texture.
@@ -68,10 +86,18 @@ Residency :: struct {
 	assets:   ^asset.Assets,
 	entries:  [MAX_RESIDENT]Resident_Entry,
 	count:    int,
+	// Each entry's index, by its GUID and kind.
+	index:    map[Resident_Key]int,
 	frame:    u64,
 	// Whether meshes get acceleration structures, which the renderer sets the first frame that traces (see
 	// residency_enable_accels).
 	accels:   bool,
+}
+
+@(private)
+Resident_Key :: struct {
+	guid: format.Guid,
+	kind: format.Asset_Kind,
 }
 
 @(private)
@@ -88,7 +114,7 @@ Resident_Entry :: struct {
 	pending:       Resident_Resources,
 	pending_version: u32,
 	streaming:     bool,
-	// A mesh's six streams and its impostor, or a texture's one.
+	// A mesh's six streams and its impostor, a texture's one, or an instance set's two.
 	transfers:     [7]gpu.Transfer,
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
@@ -105,12 +131,14 @@ Resident_Entry :: struct {
 Resident_Resources :: struct {
 	mesh:    Resident_Mesh,
 	texture: Resident_Texture,
+	set:     Resident_Instance_Set,
 }
 
 residency_init :: proc(r: ^Residency, platform: ^core.Platform_API, assets: ^asset.Assets) {
 	// The table is too large for a temporary on the stack, so it is zeroed in place.
 	mem.zero_item(r)
 	r.platform, r.assets = platform, assets
+	r.index = make(map[Resident_Key]int, platform.heap_allocator)
 }
 
 // residency_reload keeps every resident asset after a code reload.
@@ -126,6 +154,7 @@ residency_destroy :: proc(r: ^Residency) {
 		free_live_next(r, &e)
 	}
 	r.count = 0
+	delete(r.index)
 }
 
 // residency_update starts a frame: it swaps in the resources whose transfers are done, and streams a new version of
@@ -168,6 +197,12 @@ resident_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh
 	return &e.current.mesh, e.ready
 }
 
+// resident_instance_set gives an instance set asset's resources, and whether they are ready, as resident_mesh does.
+resident_instance_set :: proc(r: ^Residency, guid: format.Guid) -> (set: ^Resident_Instance_Set, ready: bool) {
+	e := entry(r, guid, .Instance_Set) or_return
+	return &e.current.set, e.ready
+}
+
 // resident_texture gives a texture asset's resources, and whether they are ready. Until it is ready, use a default
 // for its usage.
 resident_texture :: proc(r: ^Residency, guid: format.Guid) -> (texture: ^Resident_Texture, ready: bool) {
@@ -192,16 +227,15 @@ find_entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) ->
 	if guid == {} {
 		return
 	}
-	for &existing in r.entries[:r.count] {
-		if existing.guid == guid && existing.kind == kind {
-			return &existing, true
-		}
+	if i, found := r.index[{guid, kind}]; found {
+		return &r.entries[i], true
 	}
 	if r.count == MAX_RESIDENT {
 		log.errorf("render: more than %d resident assets", MAX_RESIDENT)
 		return
 	}
 	e = &r.entries[r.count]
+	r.index[{guid, kind}] = r.count
 	r.count += 1
 	e^ = {guid = guid, kind = kind}
 	return e, true
@@ -239,12 +273,8 @@ clear_live :: proc(r: ^Residency, guid: format.Guid) {
 
 // is_live is whether a GUID draws a live mesh.
 is_live :: proc(r: ^Residency, guid: format.Guid) -> bool {
-	for &e in r.entries[:r.count] {
-		if e.guid == guid && e.kind == .Mesh {
-			return e.live
-		}
-	}
-	return false
+	i, found := r.index[{guid, .Mesh}]
+	return found && r.entries[i].live
 }
 
 @(private = "file")
@@ -288,6 +318,8 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 		ok = stream_mesh(r, e, data)
 	case .Texture:
 		ok = stream_texture(r, e, data)
+	case .Instance_Set:
+		ok = stream_instance_set(r, e, data)
 	}
 	if !ok {
 		destroy_resources(r, e.kind, &e.pending)
@@ -327,6 +359,7 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count}
 		m.submesh_bounds[i] = s.bounds
 	}
+	mesh_levels(m, format.mesh_meshlets(data, blob))
 	m.positions = stream_buffer(r, e, format.blob_bytes(data, blob.positions), {}, "mesh positions") or_return
 	m.attributes = stream_buffer(r, e, format.blob_bytes(data, blob.attributes), {}, "mesh attributes") or_return
 	m.indices = stream_buffer(r, e, format.blob_bytes(data, blob.indices), {.Index}, "mesh indices") or_return
@@ -339,6 +372,61 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 		m.impostor_size, m.impostor_error = blob.impostor_size, blob.impostor_error
 	}
 	return true
+}
+
+@(private = "file")
+stream_instance_set :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
+	blob, ok := format.instance_set_view(data)
+	if !ok || blob.count == 0 {
+		return false
+	}
+	s := &e.pending.set
+	s.count, s.cell_count = blob.count, blob.cell_count
+	s.instances = stream_buffer(r, e, format.blob_bytes(data, blob.instances), {}, "instances") or_return
+	s.cells = stream_buffer(r, e, format.blob_bytes(data, blob.cells), {}, "instance cells") or_return
+	return true
+}
+
+// mesh_levels finds each submesh's level buckets and each level's errors among the mesh's meshlets, which the cooker
+// orders by level within each submesh.
+@(private)
+mesh_levels :: proc(m: ^Resident_Mesh, meshlets: []format.Meshlet) {
+	deepest := -1
+	m.levels = {}
+	for s, i in m.submeshes[:m.submesh_count] {
+		if u64(s.first_meshlet) + u64(s.meshlet_count) > u64(len(meshlets)) {
+			continue
+		}
+		own := meshlets[s.first_meshlet:][:s.meshlet_count]
+		last := 0
+		for c in own {
+			last = max(last, int(c.depth))
+		}
+		deepest = max(deepest, last)
+		for &first, bucket in m.level_first[i] {
+			first = s.meshlet_count
+			for c, k in own {
+				if int(c.depth) >= min(bucket, last) {
+					first = u32(k)
+					break
+				}
+			}
+		}
+		for c in own {
+			if int(c.depth) >= INSTANCE_LEVEL_BUCKETS {
+				continue
+			}
+			l := &m.levels[c.depth]
+			l[0] = max(l[0], c.parent_error)
+			if c.parent_error < max(f32) {
+				reach := linalg.length(c.parent_center - m.bounds.center) + c.parent_radius
+				l[1] = max(l[1], reach)
+			}
+		}
+	}
+	for &l in m.levels[clamp(deepest + 1, 0, INSTANCE_LEVEL_BUCKETS):] {
+		l[0] = max(f32)
+	}
 }
 
 // residency_enable_accels gives meshes acceleration structures from now on, and gives one to every mesh that is
@@ -478,6 +566,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		}
 	case .Texture:
 		r.platform.gpu_destroy_texture(resources.texture.texture)
+	case .Instance_Set:
+		r.platform.gpu_destroy_buffer(resources.set.instances)
+		r.platform.gpu_destroy_buffer(resources.set.cells)
 	}
 	resources^ = {}
 }

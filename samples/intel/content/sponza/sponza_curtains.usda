@@ -1,0 +1,9 @@
+#usda 1.0
+(
+    doc = """The curtains add-on to Intel's PBR Sponza, from samples/intel/downloads/pkg_a_curtains.zip, which
+    `just intel-unpack` unpacks (see samples/intel/README.md). It is a stage of its own because it defines the same
+    material prims as the main stage, which one stage would merge."""
+    subLayers = [@../.unpacked/pkg_a_curtains/NewSponza_Curtains_USD_YUp.usda@]
+    upAxis = "Y"
+    metersPerUnit = 0.01
+)

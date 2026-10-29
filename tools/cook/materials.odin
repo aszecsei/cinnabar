@@ -155,6 +155,10 @@ material_set :: proc(assets: []Asset_Source, problems: ^Problems) -> (set: Mater
 	set.kinds = make(map[format.Guid]format.Asset_Kind, len(assets), context.temp_allocator)
 	for a in assets {
 		set.kinds[a.meta.guid] = a.kind
+		// A sub-asset's kind, as a stage's textures, which its material instances name.
+		for s in a.meta.subassets {
+			set.kinds[s.guid] = format.subasset_kind_of(s.kind)
+		}
 	}
 	set.functions = make(map[format.Guid]^Function_Decl, context.temp_allocator)
 	for i in assets_of(assets, .Material_Function) {

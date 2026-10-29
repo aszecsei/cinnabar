@@ -34,6 +34,7 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 	return {
 		frame_allocator = virtual.arena_allocator(frame),
 		asset_allocator = runtime.heap_allocator(),
+		heap_allocator = runtime.heap_allocator(),
 		file_read = core.file_read,
 		file_modified = core.file_modified,
 		gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
@@ -171,7 +172,6 @@ live_meshes_draw_from_memory_in_place_of_the_asset :: proc(t: ^testing.T) {
 	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
 	defer virtual.arena_destroy(&frame)
 	platform := fake_platform(&frame)
-	platform.heap_allocator = runtime.heap_allocator()
 	dir, err := os.make_directory_temp("", "residency_test_*", context.temp_allocator)
 	testing.expect(t, err == nil)
 	defer os.remove_all(dir)

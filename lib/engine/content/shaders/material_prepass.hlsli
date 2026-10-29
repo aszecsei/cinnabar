@@ -27,8 +27,8 @@ Prepass_Varyings prepass_varyings(Material_Vertex v) {
 	return o;
 }
 
-Prepass_Varyings vs_prepass(uint vertex_id : SV_VertexID) {
-	return prepass_varyings(load_vertex(vertex_id));
+Prepass_Varyings vs_prepass(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return prepass_varyings(load_vertex(vertex_id, instance_id));
 }
 
 [outputtopology("triangle")]
@@ -40,7 +40,7 @@ void ms_prepass(
 	out vertices Prepass_Varyings vertices[MESHLET_MAX_VERTICES],
 	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
 ) {
-	Cluster c = load_cluster(clusters.meshlets[group]);
+	Cluster c = LOAD_CLUSTER(clusters, group);
 	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
 	if (thread < c.vertex_count) {
 		vertices[thread] = prepass_varyings(cluster_vertex(c, thread));

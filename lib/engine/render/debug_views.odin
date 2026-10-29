@@ -59,6 +59,8 @@ Feature :: enum u8 {
 	Shadows,
 	// The game's post effects.
 	Post_Effects,
+	// Two-phase occlusion culling, without which the camera's view is culled by its frustum only.
+	Occlusion_Culling,
 }
 
 Features :: bit_set[Feature;u16]

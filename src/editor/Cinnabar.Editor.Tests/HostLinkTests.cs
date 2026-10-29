@@ -308,6 +308,19 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task TheGameSaysWhereItsSkysSunIs()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        // The sample's sky is Flat, so it has no texture whose sun to aim at.
+        await editor.Next<HostStats>(s => s.Frames > 0);
+        editor.Link.Send(new SkySunRequest());
+        var sun = await editor.Next<SkySun>();
+        Assert.Equal(SkySunState.NoTextureSky, sun.State);
+    }
+
+    [Fact]
     public async Task TheHostProfilesItsFramesAndCapturesOne()
     {
         await using var editor = await Connect();

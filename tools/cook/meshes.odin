@@ -22,7 +22,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 3"
+MODEL_COOK_VERSION :: "models 4"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -141,7 +141,11 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		report_warning(problems, a.path, 0, 0, "has no meshes")
 	}
 	force := pass.force[a.meta.guid]
-	assign_subassets(a, meshes, force, problems) or_return
+	wanted := make([]Subasset, len(meshes), context.temp_allocator)
+	for m, i in meshes {
+		wanted[i] = {kind = .Mesh, name = m.name}
+	}
+	assign_subassets(a, wanted, force, problems) or_return
 
 	key, key_ok := model_key(options, a^, data, problems)
 	if !key_ok {
@@ -266,49 +270,6 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 		append(&result, m)
 	}
 	return result[:]
-}
-
-// assign_subassets gives each mesh its GUID: the one in the .meta file for its name, or a new one, which it writes into
-// the .meta file. A line whose mesh is gone stays, with a warning, so a mesh renamed back gets its GUID again, until a
-// re-import drops it.
-@(private = "file")
-assign_subassets :: proc(a: ^Asset_Source, meshes: []Model_Mesh, force: bool, problems: ^Problems) -> bool {
-	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
-	lines := make([dynamic]format.Meta_Subasset, context.temp_allocator)
-	changed := false
-	for m in meshes {
-		guid, found := format.meta_subasset(a.meta, format.MESH_KIND, m.name)
-		if !found {
-			_, guid = new_meta(nil)
-			changed = true
-		}
-		append(&lines, format.Meta_Subasset{format.MESH_KIND, m.name, guid})
-		append(&a.subassets, Subasset{.Mesh, m.name, guid})
-	}
-	for s in a.meta.subassets {
-		current := false
-		for m in meshes {
-			current ||= s.kind == format.MESH_KIND && s.name == m.name
-		}
-		if current {
-			continue
-		}
-		if force {
-			changed = true
-			continue
-		}
-		report_warning(problems, meta_path, 0, 0, "%s.%s is no longer in the file. Its GUID stays here until the file is re-imported.", s.kind, s.name)
-		append(&lines, s)
-	}
-	if !changed {
-		return true
-	}
-	text := meta_with(a.meta.guid, a.meta_text, a.meta.settings, lines[:])
-	if !write_blob(meta_path, transmute([]byte)text) {
-		report_error(problems, meta_path, 0, 0, "cannot write the meshes' GUIDs")
-		return false
-	}
-	return true
 }
 
 // model_key covers what the meshes depend on: the cooker, meshoptimizer, the path, the source, the GUID and the
@@ -684,6 +645,10 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 
 	config := clod_default_config(format.MESHLET_MAX_TRIANGLES)
 	config.max_vertices = format.MESHLET_MAX_VERTICES
+	// Without the sloppy fallback, which merges vertices by position alone: across a seam it stretches the UVs, and its
+	// error is the shape's, so a flat surface of many UV islands, as a tiled floor, would take it up close. A group that
+	// cannot simplify within its seams stays as it is.
+	config.simplify_fallback_sloppy = false
 	weights := [3]f32{LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT, LOD_NORMAL_WEIGHT}
 	// The attributes are the floats of Vertex from its normal on. The normal weighs in, and the UV sets' seams are
 	// protected, which permissive simplification needs.

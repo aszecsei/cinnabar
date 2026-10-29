@@ -88,6 +88,8 @@ Message :: union {
 	Live_Mesh_Vertices,
 	Release_Live_Mesh,
 	Mesh_Overlay,
+	Sky_Sun_Request,
+	Sky_Sun,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -599,6 +601,7 @@ Viewport_Settings :: struct {
 	no_gi:                bool,
 	no_shadows:           bool,
 	no_post_effects:      bool,
+	no_occlusion_culling: bool,
 	// Stops added to the exposure.
 	exposure_offset:      f32,
 	// Icons for the lights, volumes and cameras, which pick them.
@@ -632,6 +635,25 @@ Set_Mode :: struct {
 
 // Editor to game: while paused, run one frame of one fixed tick.
 Step_Frame :: struct {}
+
+// Editor to game: ask where the sun of the frame's texture sky is (see docs/rendering/sky.md#texture), which the
+// editor aims the scene's sun at. The game answers with a Sky_Sun.
+Sky_Sun_Request :: struct {}
+
+// Sky_Sun_State matches render.Sky_Sun_State: whether the sky has a sun, or why not.
+Sky_Sun_State :: enum u8 {
+	Found,
+	No_Texture_Sky,
+	Not_Ready,
+	No_Sun,
+}
+
+// Game to editor: the direction toward the texture sky's sun in the world, where its brightest texels are, when the
+// state is Found.
+Sky_Sun :: struct {
+	state:     Sky_Sun_State,
+	direction: [3]f32,
+}
 
 // A key or a mouse button, as core.Key has them.
 Input_Key :: enum u8 {
@@ -865,6 +887,14 @@ Game_Stats :: struct {
 	// the rest.
 	script_bytes: u64,
 	modules:      []Script_Module_Memory,
+	// What the camera drew a frame or two ago (see docs/rendering/gpu-scene.md#occlusion-culling): its items, as
+	// draws, and its instance sets' instances, each drawn early or late, and those that occlusion culling hid.
+	early_items:      u32,
+	late_items:       u32,
+	hidden_items:     u32,
+	early_instances:  u32,
+	late_instances:   u32,
+	hidden_instances: u32,
 }
 
 // Game commands (see docs/editor/shell-and-panels.md#commands).

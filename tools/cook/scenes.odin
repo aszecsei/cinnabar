@@ -29,9 +29,8 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	known := make(map[format.Guid]format.Asset_Kind, len(assets), context.temp_allocator)
 	for a in assets {
 		known[a.meta.guid] = a.kind
-		// No sub-asset is a prefab.
 		for s in a.meta.subassets {
-			known[s.guid] = .None
+			known[s.guid] = format.subasset_kind_of(s.kind)
 		}
 	}
 	out_dir := config_dir(options)

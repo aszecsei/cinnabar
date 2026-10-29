@@ -7,8 +7,8 @@
 #include "material_mesh.hlsli"
 
 #if MATERIAL_MASKED
-Varyings vs_depth(uint vertex_id : SV_VertexID) {
-	return vertex_varyings(load_vertex(vertex_id));
+Varyings vs_depth(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return vertex_varyings(load_vertex(vertex_id, instance_id));
 }
 
 Varyings depth_varyings(Material_Vertex v) {
@@ -20,8 +20,8 @@ void ps_depth(Varyings i, bool front : SV_IsFrontFace) {
 	clip(shade_opacity(s) - MATERIAL_CUTOFF);
 }
 #else
-float4 vs_depth(uint vertex_id : SV_VertexID) : SV_Position {
-	return clip_position(load_vertex(vertex_id).world);
+float4 vs_depth(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) : SV_Position {
+	return clip_position(load_vertex(vertex_id, instance_id).world);
 }
 
 // What an opaque material's mesh shader gives the depth pass, which has no pixel shader.
@@ -51,7 +51,7 @@ void ms_depth(
 	out vertices DEPTH_VARYINGS vertices[MESHLET_MAX_VERTICES],
 	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
 ) {
-	Cluster c = load_cluster(clusters.meshlets[group]);
+	Cluster c = LOAD_CLUSTER(clusters, group);
 	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
 	if (thread < c.vertex_count) {
 		vertices[thread] = depth_varyings(cluster_vertex(c, thread));

@@ -20,8 +20,8 @@ struct Targets {
 	uint id : SV_Target1;
 };
 
-Varyings vs_forward(uint vertex_id : SV_VertexID) {
-	return vertex_varyings(load_vertex(vertex_id));
+Varyings vs_forward(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
+	return vertex_varyings(load_vertex(vertex_id, instance_id));
 }
 
 [outputtopology("triangle")]
@@ -33,7 +33,7 @@ void ms_forward(
 	out vertices Varyings vertices[MESHLET_MAX_VERTICES],
 	out indices uint3 triangles[MESHLET_MAX_TRIANGLES]
 ) {
-	Cluster c = load_cluster(clusters.meshlets[group]);
+	Cluster c = LOAD_CLUSTER(clusters, group);
 	SetMeshOutputCounts(c.vertex_count, c.triangle_count);
 	if (thread < c.vertex_count) {
 		vertices[thread] = vertex_varyings(cluster_vertex(c, thread));

@@ -6,6 +6,7 @@
 #define MATERIAL_VERTEX_HLSLI
 
 #include "material_common.hlsli"
+#include "instanced.hlsli"
 
 // A vertex as a material pass sees it. world is relative to the camera, and previous is the same point last frame,
 // relative to last frame's camera.
@@ -91,6 +92,23 @@ Mesh_Record load_mesh(Draw_Record d) {
 
 Instance_Record load_instance(Draw_Record d) {
 	return cn_buffer(frame.instances).Load<Instance_Record>(d.instance * sizeof(Instance_Record));
+}
+
+// draw_instance is the instance that a draw draws at, by the instance ID: its instance's, or for a draw with
+// DRAW_INSTANCES the ID's visible instance of its set, whose poses, this frame's and last frame's, are its entity's
+// placed by the instance's own.
+Instance_Record draw_instance(Draw_Record d, uint instance_id) {
+	Instance_Record instance = load_instance(d);
+	if ((d.flags & DRAW_INSTANCES) != 0) {
+		uint index = cn_buffer(frame.visible_instances).Load((d.visible + instance_id) * 4);
+		float4 local[3];
+		instance_rows(cn_buffer(instance.instance_set), index, local);
+		float4 entity[3] = instance.rows;
+		compose_rows(entity, local, instance.rows);
+		entity = instance.previous_rows;
+		compose_rows(entity, local, instance.previous_rows);
+	}
+	return instance;
 }
 
 // draw_index is the mesh's vertex at a corner of the draw's indices.
@@ -179,8 +197,9 @@ Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record insta
 #include "material_ribbon.hlsli"
 #else
 // load_vertex is the vertex pulling path's vertex: the draw's indices, by its draw ID. A draw of mesh particles draws
-// its indices once for each particle, each with the particle's instance, and its color scales the mesh's.
-Material_Vertex load_vertex(uint vertex_id) {
+// its indices once for each particle, each with the particle's instance, and its color scales the mesh's. An
+// instanced draw draws them once for each instance ID, at its instance.
+Material_Vertex load_vertex(uint vertex_id, uint instance_id) {
 	Draw_Record d = load_draw();
 	Mesh_Record m = load_mesh(d);
 	if ((d.flags & DRAW_PARTICLES) != 0) {
@@ -190,7 +209,7 @@ Material_Vertex load_vertex(uint vertex_id) {
 		v.color *= unpack_unorm8(instance.color);
 		return v;
 	}
-	return place_vertex(d, m, load_instance(d), draw_index(d, m, vertex_id));
+	return place_vertex(d, m, draw_instance(d, instance_id), draw_index(d, m, vertex_id));
 }
 #endif
 

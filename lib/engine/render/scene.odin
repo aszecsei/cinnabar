@@ -12,7 +12,8 @@ import "cinnabar:engine/ecs"
 // The GPU scene (see docs/rendering/gpu-scene.md#gpu-scene): every Mesh_Renderer's instance at a stable slot of a persistent
 // buffer, its pose relative to a render origin that snaps to a 1024 m grid. Each frame writes every slot, then culls
 // each submesh of each instance on the GPU, for the camera, the view model and each shadow view, into the bin of its
-// material's pipelines. The view model's instances are relative to the camera, not the origin (see
+// material's pipelines. An Instanced_Mesh_Renderer has one slot, and its instance set's instances are culled on the GPU
+// first (see docs/rendering/gpu-scene.md#instanced-meshes). The view model's instances are relative to the camera, not the origin (see
 // docs/rendering/layers-and-output.md#view-model). The prepass, the shadow maps and the forward pass each draw a bin with one indirect draw.
 
 // The render origin snaps to cells of 1024 m: 2^34 units of 2^-24 m.
@@ -30,9 +31,18 @@ CULL_GROUP_SIZE :: 64
 // Each amplification group of the mesh shader path tests this many meshlets. Matches MESHLETS_PER_GROUP in
 // material_mesh.hlsli.
 MESHLETS_PER_GROUP :: 32
+// The instance sets' cells, which keep their visibility bits from frame to frame, are at most this many.
+MAX_INSTANCE_CELLS :: 1 << 18
+// The views' lists of visible instances hold at most this many, 128 MB. A set's list in a view that would pass it is
+// cut short.
+MAX_VISIBLE_INSTANCES :: 1 << 25
+// Each cull_instances.hlsl group culls a cell.
+#assert(format.INSTANCE_CELL_SIZE == 256)
 
 // CULL_SHADER is the engine's culling shader (lib/engine/content/shaders/cull_draws.hlsl), by its .meta file.
 CULL_SHADER :: #load("../content/shaders/cull_draws.hlsl.meta", string)
+// INSTANCE_CULL_SHADER culls the instance sets' instances (lib/engine/content/shaders/cull_instances.hlsl).
+INSTANCE_CULL_SHADER :: #load("../content/shaders/cull_instances.hlsl.meta", string)
 
 // The culling's views: the camera, the view model, then the shadow views.
 VIEW_CAMERA :: 0
@@ -118,7 +128,13 @@ Frame_Constants :: struct {
 	// The mesh particles' instances, which a draw with DRAW_PARTICLES reads (see
 	// docs/rendering/particles.md#mesh-particles).
 	particle_instances:       u32,
-	padding:                  [3]u32,
+	// The views' lists of visible instances, which a draw with DRAW_INSTANCES reads (see
+	// docs/rendering/gpu-scene.md#instanced-meshes).
+	visible_instances:        u32,
+	// The late view's Occlusion_Constants in the upload ring, which its amplification shaders test each meshlet
+	// against (see occlusion.odin): the buffer's read index plus 1, and 0 in every other view.
+	occlusion:                u32,
+	occlusion_offset:         u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -143,7 +159,9 @@ Material_Push :: struct {
 // and count are the submesh's indices, or on the mesh shader path its meshlets. bound is the material's displacement
 // bound in meters, which the mesh shader path's culling adds to each meshlet's sphere. A draw with DRAW_PARTICLES draws
 // its submesh once for each of its emitter's living particles, whose instances start at instance in
-// Frame_Constants.particle_instances (see docs/rendering/particles.md#mesh-particles).
+// Frame_Constants.particle_instances (see docs/rendering/particles.md#mesh-particles). A draw with DRAW_INSTANCES draws
+// its submesh once for each of its instance set's instances that its view sees, whose list starts at visible in
+// Frame_Constants.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes).
 Draw_Record :: struct {
 	instance: u32,
 	mesh:     u32,
@@ -152,11 +170,18 @@ Draw_Record :: struct {
 	count:    u32,
 	bound:    f32,
 	flags:    u32,
-	padding:  u32,
+	visible:  u32,
 }
 
-// Matches DRAW_PARTICLES in material_common.hlsli and particle_meshes.hlsl.
+// Match DRAW_PARTICLES and DRAW_INSTANCES in material_common.hlsli, cull_draws.hlsl and particle_meshes.hlsl.
 DRAW_PARTICLES :: 1
+DRAW_INSTANCES :: 2
+// An instanced draw's flags have its count of instances above this bit, and on the mesh shader path its groups have
+// its instances in rows of INSTANCE_GROUP_ROW, at most MAX_MESH_GROUPS in all, as D3D12 allows a mesh dispatch (see
+// docs/rendering/gpu-scene.md#instanced-meshes).
+DRAW_INSTANCE_SHIFT :: 8
+INSTANCE_GROUP_ROW :: 32768
+MAX_MESH_GROUPS :: 1 << 22
 
 MESH_RECORD_INDEX32 :: 1
 MESH_RECORD_UV1 :: 2
@@ -189,7 +214,8 @@ Instance_Record :: struct {
 	flags:         u32,
 	// A mesh particle's color, as unorm8, which scales its mesh's vertex colors.
 	color:         u32,
-	padding:       u32,
+	// An Instanced_Mesh_Renderer's instance set's instances, whose poses are relative to these rows.
+	instance_set:  u32,
 }
 
 // An item that casts shadows: its Mesh_Renderer's cast_shadows, and its material's.
@@ -214,6 +240,13 @@ ITEM_RIBBON :: 128
 // docs/rendering/particles.md#mesh-particles): cull_draws.hlsl skips it, and sort_bins gives it a bin of its own,
 // which draws with vertex pulling.
 ITEM_PARTICLES :: 256
+// An Instanced_Mesh_Renderer's item of a submesh, or of its impostor, whose instances cull_instances.hlsl culls (see
+// docs/rendering/gpu-scene.md#instanced-meshes): cull_draws.hlsl draws it once for each of its set's instances that a
+// view sees in its list. Its entry is its set's in Scene_Frame.sets, and its list is a level bucket, or
+// INSTANCE_IMPOSTOR_LIST.
+ITEM_INSTANCED :: 512
+// The items that sort_bins gives bins of their own, apart from their pipelines' others.
+ITEM_BIN_KINDS :: ITEM_IMPOSTOR | ITEM_PARTICLES
 // The vertices of an impostor's quad.
 IMPOSTOR_VERTICES :: 6
 
@@ -235,9 +268,10 @@ Cull_Item :: struct {
 	sphere:   [4]f32,
 	bound:    f32,
 	impostor_error: f32,
-	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles.
+	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles, or an ITEM_INSTANCED item's set in Scene_Frame.sets.
 	entry:    u32,
-	padding:  u32,
+	// An ITEM_INSTANCED item's list of its set's instances.
+	list:     u32,
 	lod_sphere: [4]f32,
 }
 
@@ -287,11 +321,109 @@ Cull_Constants :: struct {
 	camera:             [4]f32,
 	lod_scale:          f32,
 	lod_near:           f32,
-	padding:            [2]u32,
+	// The instance sets' counters (see Instance_Cull_Constants), with the count of views and where the lists' starts
+	// are among them, in words: an instanced item's draw is its set's count of visible instances in its view.
+	instance_counters:  u32,
+	instance_views:     u32,
+	instance_ranges:    u32,
+	// The frame's Occlusion_Constants in the upload ring, without occlusion culling 0, and the first view of the
+	// dispatch, whose rows are the views from it: the late view's culling is a dispatch of its own.
+	occlusion:          u32,
+	occlusion_offset:   u32,
+	view_first:         u32,
+	// The camera's tally (see Cull_Stats), as its write index.
+	stats:              u32,
+	padding:            [3]u32,
+}
+
+// Instance_Set_Record matches Instance_Set_Record in cull_instances.hlsl: an Instanced_Mesh_Renderer's set this frame.
+// instances and cells are its set's buffers, first_cell its first in the visibility bits, and first_job its first cell
+// in the frame's. sphere is its mesh's, which each instance is culled by, grown by bound, its materials' largest
+// displacement bound, and impostor_error picks between the mesh and its impostor, when the set has one.
+Instance_Set_Record :: struct {
+	instances:      u32,
+	cells:          u32,
+	first_cell:     u32,
+	first_job:      u32,
+	slot:           u32,
+	flags:          u32,
+	bound:          f32,
+	impostor_error: f32,
+	sphere:         [4]f32,
+	// For each level below the last bucket's, the largest parent error of the mesh's meshlets there and how far their
+	// parents' spheres reach from its center, which pick each instance's level bucket (see Resident_Mesh.levels).
+	levels:         [INSTANCE_LEVEL_BUCKETS][2]f32,
+}
+
+// An instance set's visible instances in a view are in lists: one for each level bucket of its mesh, the finest level
+// that the camera could select for the instance, up to the last bucket, which takes the levels past it too, and the
+// impostor's. An item of a bucket draws the meshlets from its level up, so a far instance tests only its mesh's coarse
+// meshlets.
+INSTANCE_LEVEL_BUCKETS :: 8
+INSTANCE_LISTS :: INSTANCE_LEVEL_BUCKETS + 1
+INSTANCE_IMPOSTOR_LIST :: INSTANCE_LEVEL_BUCKETS
+
+// A set whose instances cast shadows, which the shadow views take; whose mesh's impostor draws past where it takes
+// over, for every submesh; and with a billboard's submesh, whose sphere turns about each instance's position.
+SET_CASTS_SHADOWS :: 1
+SET_IMPOSTOR :: 2
+SET_BILLBOARD :: 4
+// A set whose items are all opaque, which occlusion culling culls (see occlusion.odin).
+SET_OCCLUDABLE :: 8
+
+// The phases of cull_instances.hlsl, a dispatch each: culling each cell's instances in each view, which writes their
+// bits and counts them; placing each set's lists; and listing each cell's visible instances in them.
+INSTANCE_PHASE_CULL :: 0
+INSTANCE_PHASE_PLACE :: 1
+INSTANCE_PHASE_LIST :: 2
+
+// Instance_Cull_Constants matches Instance_Cull_Constants in cull_instances.hlsl. The sets, the jobs (a cell each, as
+// its set's index) and the views are in the upload ring. A cell's visibility bits in a view are at (view × bits_cells
+// + cell) × INSTANCE_BITS_SIZE: 256 bits of the instances that the view sees, then 4 bits of each one's list. The
+// counters are a word for each of each set's lists in each view (INSTANCE_LISTS): the counts, the cursors that the
+// listing takes places with, the lists' starts, then the total.
+Instance_Cull_Constants :: struct {
+	phase:            u32,
+	set_count:        u32,
+	view_count:       u32,
+	job_count:        u32,
+	sets:             u32,
+	sets_offset:      u32,
+	jobs:             u32,
+	jobs_offset:      u32,
+	views:            u32,
+	views_offset:     u32,
+	instances:        u32,
+	bits:             u32,
+	bits_cells:       u32,
+	counters:         u32,
+	visible:          u32,
+	visible_capacity: u32,
+	camera:           [4]f32,
+	lod_scale:        f32,
+	lod_near:         f32,
+	// The views of a dispatch, the early phases' or the late view's, and the frame's Occlusion_Constants.
+	view_first:       u32,
+	view_rows:        u32,
+	occlusion:        u32,
+	occlusion_offset: u32,
+	// The camera's tally (see Cull_Stats).
+	stats:            u32,
+	padding:          u32,
+}
+
+// The bytes of a cell's visibility bits in a view, and the groups in a row of a dispatch of the cells.
+INSTANCE_BITS_SIZE :: 160
+INSTANCE_JOB_ROW :: 32768
+
+// Cell_Range is a slot's range of the instance sets' cells.
+Cell_Range :: struct {
+	first, count: u32,
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 688 && size_of(Cull_Constants) == 112)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 688 && size_of(Cull_Constants) == 144)
+#assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
 Gpu_Scene :: struct {
@@ -330,6 +462,22 @@ Gpu_Scene :: struct {
 	patch_counts:             gpu.Buffer,
 	select_pipeline:          Shader_Pipeline,
 	cull_patches_pipeline:    Shader_Pipeline,
+	// Each Instanced_Mesh_Renderer's slot's range of the instance sets' cells, the free ranges in order, and the end of
+	// the used ones.
+	slot_cells:               [MAX_INSTANCES]Cell_Range,
+	cell_free:                [dynamic]Cell_Range,
+	cell_high:                u32,
+	// The cells' visibility bits in each view, which last from frame to frame while a slot keeps its range, the
+	// instance sets' counters, and the views' lists of visible instances, each grown as a frame needs.
+	instance_bits:            gpu.Buffer,
+	bits_cells:               u32,
+	bits_views:               u32,
+	instance_counters:        gpu.Buffer,
+	counter_capacity:         int,
+	visible_instances:        gpu.Buffer,
+	visible_capacity:         int,
+	instance_pipeline:        Shader_Pipeline,
+	occlusion:                Occlusion,
 }
 
 // Bin_Group is a range of the frame's bins: the opaque and masked materials', which the prepass, the shadow maps and
@@ -377,10 +525,31 @@ Scene_Frame :: struct {
 	// docs/rendering/particles.md#mesh-particles).
 	mesh_particles:     []Mesh_Particle_Entry,
 	particle_instances: Buffer,
+	// The Instanced_Mesh_Renderers' sets and their upload, the frame's cells (a set's index each) and the count of the
+	// sets' instances (see docs/rendering/gpu-scene.md#instanced-meshes).
+	sets:               []Instance_Set_Record,
+	set_upload:         gpu.Upload,
+	job_upload:         gpu.Upload,
+	job_count:          int,
+	set_instances:      int,
+	// The constants of each phase of cull_instances.hlsl, for the early views and the late view, and its buffers.
+	instance_constants: [2][3]gpu.Upload,
+	instance_bits:      Buffer,
+	instance_counters:  Buffer,
+	visible_instances:  Buffer,
 	// Each group's first bin and the bin after its last.
 	groups:          [Bin_Group][2]int,
 	// The camera, the view model, then each shadow view.
 	view_count:      int,
+	// With occlusion culling, the late view after them, and the views that have draws: the late view's too.
+	occluding:       bool,
+	late_view:       int,
+	draw_views:      int,
+	occlusion:       Occlusion_Frame,
+	// The camera's tally (see Cull_Stats).
+	stats:           Buffer,
+	// The instance sets' counters this frame, in words, which update_scene zeroes.
+	counter_words:   int,
 	instance_upload: gpu.Upload,
 	instance_bytes:  int,
 	item_upload:     gpu.Upload,
@@ -412,15 +581,21 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.cull_pipeline = shader_pipeline(CULL_SHADER)
 	s.select_pipeline = shader_pipeline(SELECT_PATCHES_SHADER)
 	s.cull_patches_pipeline = shader_pipeline(CULL_PATCHES_SHADER)
+	s.cell_free = make([dynamic]Cell_Range, platform.heap_allocator)
+	s.instance_pipeline = shader_pipeline(INSTANCE_CULL_SHADER)
+	occlusion_init(&s.occlusion)
 }
 
 scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	delete(s.slots)
 	delete(s.free)
-	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts}) {
+	delete(s.cell_free)
+	for b in ([]gpu.Buffer{s.instances, s.arguments, s.mesh_arguments, s.draws, s.counts, s.patches, s.patch_counts, s.instance_bits, s.instance_counters, s.visible_instances}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
+	destroy_shader_pipeline(&s.instance_pipeline, platform)
+	occlusion_destroy(&s.occlusion, platform)
 	destroy_shader_pipeline(&s.select_pipeline, platform)
 	destroy_shader_pipeline(&s.cull_patches_pipeline, platform)
 }
@@ -448,6 +623,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
 	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
 	sync_compute_pipeline(&s.cull_patches_pipeline, r.platform, r.residency.assets, {label = "cull patches"}, r.reloaded)
+	sync_compute_pipeline(&s.instance_pipeline, r.platform, r.residency.assets, {label = "cull instances"}, r.reloaded)
+	sync_compute_pipeline(&s.occlusion.pipeline, r.platform, r.residency.assets, {label = "depth pyramid"}, r.reloaded)
 
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
@@ -494,6 +671,35 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 			}
 		}
 	}
+	// The Instanced_Mesh_Renderers: a slot each, at the entity's pose, which its set's instances are relative to, and an
+	// item for each submesh, whose draws the GPU writes once it has culled the instances.
+	sets := make([dynamic]Instance_Set_Record, r.platform.frame_allocator)
+	jobs := make([dynamic]u32, r.platform.frame_allocator)
+	set_instances := 0
+	instanced_it := ecs.query_iter(w, r.instanced.query)
+	for view in ecs.query_next(&instanced_it) {
+		entities := ecs.entities(view)
+		current := ecs.column(view, 0, ecs.Transform)
+		previous := ecs.column(view, 1, ecs.Previous_Transform)
+		renderers := ecs.column(view, EXTRACT_TERMS, Instanced_Mesh_Renderer)
+		for e, i in entities {
+			slot, slot_ok := scene_slot(s, e)
+			if !slot_ok {
+				continue
+			}
+			pose := current[i]
+			if previous != nil {
+				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
+			}
+			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
+			records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
+			s.previous[slot], s.seen[slot] = pose, s.frame
+			if is_hidden(hidden, e) {
+				continue
+			}
+			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot, &records[slot])
+		}
+	}
 	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
 	// docs/rendering/surfaces.md#surfaces).
 	surfaces := make([dynamic]Surface_Record, r.platform.frame_allocator)
@@ -527,11 +733,13 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	ribbons := add_ribbon_items(f, w, &table, &items, records, hidden)
 	// The mesh particles: an item for each submesh of each mesh emitter, whose draws the GPU writes.
 	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, records, hidden)
-	// A slot whose entity has no Mesh_Renderer, Surface_Renderer or particle system any more is free again.
+	// A slot whose entity has no Mesh_Renderer, Instanced_Mesh_Renderer, Surface_Renderer or particle system any more is
+	// free again, and so are its cells.
 	for slot in 0 ..< s.high {
 		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
 			delete_key(&s.slots, s.slot_entities[slot])
 			s.slot_entities[slot] = 0
+			free_cells(s, slot)
 			append(&s.free, slot)
 		}
 	}
@@ -578,7 +786,9 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	bin_upload, bins_ok := upload_bytes(platform, slice.to_bytes(sf.bin_offsets))
 	accel_upload, accel_ok := upload_bytes(platform, slice.to_bytes(accel_instances[:]))
 	surface_upload, surfaces_ok := upload_bytes(platform, slice.to_bytes(surfaces[:]))
-	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && surfaces_ok) {
+	set_upload, sets_ok := upload_bytes(platform, slice.to_bytes(sets[:]))
+	job_upload, jobs_ok := upload_bytes(platform, slice.to_bytes(jobs[:]))
+	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && surfaces_ok && sets_ok && jobs_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
 		return
@@ -586,6 +796,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload = item_upload, mesh_upload, table_upload, bin_upload
 	sf.surfaces, sf.surface_upload = surfaces[:], surface_upload
 	sf.accel_instances, sf.accel_count = accel_upload, len(accel_instances)
+	sf.sets, sf.set_upload, sf.job_upload, sf.job_count, sf.set_instances = sets[:], set_upload, job_upload, len(jobs), set_instances
 }
 
 // Sort_Item is a draw item as build_scene sorts it into bins. Its item's bin is its material pipeline.
@@ -599,28 +810,58 @@ Sort_Item :: struct {
 
 // sort_bins writes the items in their bins' order, each with its bin, and gives each bin's material pipeline and each
 // group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, with its
-// impostors' items and its mesh particles' items each in a bin after its own, then a bin for each sorted item, the
-// farthest first.
+// impostors' items and its mesh particles' items each in a bin after its own (ITEM_BIN_KINDS), then a bin for each
+// sorted item, the farthest first. The items of a bin keep their order. A frame has tens of thousands of items, which
+// a counting sort by their bins orders in one pass, and few sorted items, which sort by their distance.
 @(private)
 sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
-	slice.sort_by(sorting, proc(a, b: Sort_Item) -> bool {
-		if a.group != b.group {
-			return a.group < b.group
+	// The kinds of bin that a pipeline has in a group: its own items', its impostors' and its mesh particles'.
+	KINDS :: 3
+	KEYS :: (len(Bin_Group) - 1) * MAX_MATERIAL_PIPELINES * KINDS
+	bin_key :: proc(s: Sort_Item) -> int {
+		kind := 0
+		if s.item.flags & ITEM_IMPOSTOR != 0 {
+			kind = 1
+		} else if s.item.flags & ITEM_PARTICLES != 0 {
+			kind = 2
 		}
-		if a.group == .Sorted {
-			return a.distance > b.distance
+		return (int(s.group) * MAX_MATERIAL_PIPELINES + int(s.item.bin)) * KINDS + kind
+	}
+	Far :: struct {
+		distance: f32,
+		index:    int,
+	}
+	starts := make([]int, KEYS + 1, context.temp_allocator)
+	far := make([dynamic]Far, context.temp_allocator)
+	for s, i in sorting {
+		if s.group == .Sorted {
+			append(&far, Far{s.distance, i})
+		} else {
+			starts[bin_key(s) + 1] += 1
 		}
-		if a.item.bin != b.item.bin {
-			return a.item.bin < b.item.bin
+	}
+	for k in 1 ..< len(starts) {
+		starts[k] += starts[k - 1]
+	}
+	order := make([]int, len(sorting), context.temp_allocator)
+	for s, i in sorting {
+		if s.group != .Sorted {
+			k := bin_key(s)
+			order[starts[k]] = i
+			starts[k] += 1
 		}
-		return a.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES) < b.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES)
-	})
+	}
+	slice.sort_by(far[:], proc(a, b: Far) -> bool {return a.distance > b.distance})
+	for f, k in far {
+		order[len(sorting) - len(far) + k] = f.index
+	}
 	bins := make([dynamic]int, allocator)
 	group_bins: [Bin_Group]int
-	for entry, i in sorting {
+	for index, i in order {
+		entry := sorting[index]
 		pipeline := int(entry.item.bin)
-		previous := sorting[max(i - 1, 0)]
-		kind := entry.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES) != previous.item.flags & (ITEM_IMPOSTOR | ITEM_PARTICLES)
+		previous := sorting[order[max(i - 1, 0)]]
+		kind := entry.item.flags & ITEM_BIN_KINDS != previous.item.flags & ITEM_BIN_KINDS
 		if i == 0 || entry.group == .Sorted || entry.group != previous.group || pipeline != int(previous.item.bin) || kind {
 			append(&bins, pipeline)
 			group_bins[entry.group] += 1
@@ -707,10 +948,19 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		return
 	}
 	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
+	// With occlusion culling, the late view is one more, after the shadow views.
+	sf.occluding = has_items && occlusion_ready(f, f.no_occlusion)
+	sf.late_view = sf.view_count
+	sf.draw_views = sf.view_count + (sf.occluding ? 1 : 0)
 	ok: bool
 	if has_items {
-		ensure_draw_buffers(r, sf.draws_per_view * sf.view_count, len(sf.bin_pipelines) * sf.view_count)
-		zeros := make([]byte, len(sf.bin_pipelines) * sf.view_count * 4, platform.frame_allocator)
+		ensure_draw_buffers(r, sf.draws_per_view * sf.draw_views, len(sf.bin_pipelines) * sf.draw_views)
+		if len(sf.sets) > 0 {
+			sf.counter_words = 3 * len(sf.sets) * sf.draw_views * INSTANCE_LISTS + 1
+			ensure_instance_buffers(r, sf.draw_views, sf.counter_words, min(sf.set_instances * sf.draw_views, MAX_VISIBLE_INSTANCES))
+		}
+		// The zeros clear the bins' counts, the instance sets' counters and this frame's slots' bits.
+		zeros := make([]byte, max(len(sf.bin_pipelines) * sf.draw_views * 4, sf.counter_words * 4, MAX_INSTANCES / 8), platform.frame_allocator)
 		sf.zero_upload, ok = upload_bytes(platform, zeros)
 		if !ok {
 			sf.items = nil
@@ -757,6 +1007,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		surfaces_offset          = sf.surface_upload.offset,
 		ribbon_vertices          = gpu.read_index(r.particles.ribbon_vertices),
 		particle_instances       = gpu.read_index(r.particles.mesh_instances),
+		visible_instances        = gpu.read_index(s.visible_instances),
 		lights                   = gpu.read_index(lf.upload.buffer),
 		lights_offset            = lf.upload.offset,
 		directional_count        = u32(lf.directional_count),
@@ -788,8 +1039,8 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		constants.clusters = gpu.read_index(r.lights.clusters)
 		constants.cluster_indices = gpu.read_index(r.lights.indices)
 	}
-	sf.view_constants = make([]gpu.Upload, sf.view_count, platform.frame_allocator)
-	views := make([]Cull_View, sf.view_count, platform.frame_allocator)
+	sf.view_constants = make([]gpu.Upload, sf.draw_views, platform.frame_allocator)
+	views := make([]Cull_View, sf.draw_views, platform.frame_allocator)
 	for v in 0 ..< sf.view_count {
 		c := constants
 		views[v].first_draw = u32(v * sf.draws_per_view)
@@ -825,6 +1076,13 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			return
 		}
 		(^Frame_Constants)(raw_data(sf.view_constants[v].data))^ = c
+	}
+	// The late view draws as the camera does, after the early one.
+	if sf.occluding {
+		views[VIEW_CAMERA].flags |= VIEW_EARLY
+		views[sf.late_view] = views[VIEW_CAMERA]
+		views[sf.late_view].flags = VIEW_LATE
+		views[sf.late_view].first_draw = u32(sf.late_view * sf.draws_per_view)
 	}
 	if !has_items {
 		return
@@ -867,19 +1125,80 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		lod_scale          = constants.lod_scale,
 		lod_near           = constants.lod_near,
 	}
+	if ensure_cull_stats(r) {
+		cull.stats = gpu.write_index(s.occlusion.stats)
+		sf.stats = import_buffer(g, s.occlusion.stats)
+	}
+	if sf.occluding {
+		if !occlusion_constants(f) {
+			sf.items = nil
+			return
+		}
+		cull.occlusion, cull.occlusion_offset = gpu.read_index(sf.occlusion.constants.buffer), sf.occlusion.constants.offset
+		// The late view's constants are the camera's, with the occlusion constants for its meshlets.
+		late := (^Frame_Constants)(raw_data(sf.view_constants[VIEW_CAMERA].data))^
+		late.occlusion, late.occlusion_offset = cull.occlusion + 1, cull.occlusion_offset
+		sf.view_constants[sf.late_view], ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		if !ok {
+			sf.items = nil
+			return
+		}
+		(^Frame_Constants)(raw_data(sf.view_constants[sf.late_view].data))^ = late
+	}
+	if len(sf.sets) > 0 {
+		cull.instance_counters = gpu.read_index(s.instance_counters)
+		cull.instance_views = u32(sf.draw_views)
+		cull.instance_ranges = u32(2 * len(sf.sets) * sf.draw_views * INSTANCE_LISTS)
+		if !instance_constants(f, view_upload, cull) {
+			sf.items = nil
+			return
+		}
+		sf.instance_bits = import_buffer(g, s.instance_bits)
+		sf.instance_counters = import_buffer(g, s.instance_counters)
+		sf.visible_instances = import_buffer(g, s.visible_instances)
+	}
 	sf.cull_constants, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		sf.items = nil
 		return
 	}
 	(^Cull_Constants)(raw_data(sf.cull_constants.data))^ = cull
+	if sf.occluding {
+		late := cull
+		late.view_first = u32(sf.late_view)
+		sf.occlusion.late_cull, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		if !ok {
+			sf.items = nil
+			return
+		}
+		(^Cull_Constants)(raw_data(sf.occlusion.late_cull.data))^ = late
+	}
 
 	p := add_compute_pass(g, "update scene", update_scene, f)
 	copy_dest(g, p, sf.instances)
 	copy_dest(g, p, sf.counts)
+	if len(sf.sets) > 0 {
+		copy_dest(g, p, sf.instance_counters)
+	}
+	if sf.occluding {
+		copy_dest(g, p, sf.occlusion.slot_seen_next)
+	}
+	if sf.stats != 0 {
+		copy_dest(g, p, sf.stats)
+	}
 	add_select_patches_pass(f)
+	add_instance_passes(f)
 	p = add_compute_pass(g, "cull draws", cull_draws, f)
 	read(g, p, sf.instances)
+	if len(sf.sets) > 0 {
+		read(g, p, sf.instance_counters)
+	}
+	if sf.occluding {
+		read(g, p, sf.occlusion.slot_seen)
+	}
+	if sf.stats != 0 {
+		write(g, p, sf.stats)
+	}
 	write(g, p, sf.arguments)
 	write(g, p, sf.mesh_arguments)
 	write(g, p, sf.draws)
@@ -905,6 +1224,9 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	}
 	if sf.particle_instances != 0 {
 		read(g, p, sf.particle_instances)
+	}
+	if sf.visible_instances != 0 {
+		read(g, p, sf.visible_instances)
 	}
 }
 
@@ -939,6 +1261,193 @@ scene_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity) -> (slot: u32, ok: bool) {
 	s.slots[e] = slot
 	s.slot_entities[slot] = e
 	return slot, true
+}
+
+// scene_cells gives a slot's range of the instance sets' cells, which it keeps while its set's count of cells does, so
+// their visibility bits are last frame's, or a new one.
+@(private)
+scene_cells :: proc(s: ^Gpu_Scene, slot: u32, count: u32) -> (cells: Cell_Range, ok: bool) {
+	if s.slot_cells[slot].count == count {
+		return s.slot_cells[slot], true
+	}
+	free_cells(s, slot)
+	for &f, i in s.cell_free {
+		if f.count >= count {
+			cells = {f.first, count}
+			f.first += count
+			f.count -= count
+			if f.count == 0 {
+				ordered_remove(&s.cell_free, i)
+			}
+			s.slot_cells[slot] = cells
+			return cells, true
+		}
+	}
+	if s.cell_high + count > MAX_INSTANCE_CELLS {
+		log.errorf("render: more than %d cells of instance sets", MAX_INSTANCE_CELLS)
+		return
+	}
+	cells = {s.cell_high, count}
+	s.cell_high += count
+	s.slot_cells[slot] = cells
+	return cells, true
+}
+
+// free_cells gives back a slot's range of cells, merged with the free ranges beside it, or below the used ones' end.
+@(private)
+free_cells :: proc(s: ^Gpu_Scene, slot: u32) {
+	cells := s.slot_cells[slot]
+	s.slot_cells[slot] = {}
+	if cells.count == 0 {
+		return
+	}
+	at := len(s.cell_free)
+	for f, i in s.cell_free {
+		if f.first > cells.first {
+			at = i
+			break
+		}
+	}
+	inject_at(&s.cell_free, at, cells)
+	if at + 1 < len(s.cell_free) && s.cell_free[at].first + s.cell_free[at].count == s.cell_free[at + 1].first {
+		s.cell_free[at].count += s.cell_free[at + 1].count
+		ordered_remove(&s.cell_free, at + 1)
+	}
+	if at > 0 && s.cell_free[at - 1].first + s.cell_free[at - 1].count == s.cell_free[at].first {
+		s.cell_free[at - 1].count += s.cell_free[at].count
+		ordered_remove(&s.cell_free, at)
+		at -= 1
+	}
+	if last := s.cell_free[len(s.cell_free) - 1]; last.first + last.count == s.cell_high {
+		s.cell_high = last.first
+		pop(&s.cell_free)
+	}
+}
+
+// add_instanced_items adds an Instanced_Mesh_Renderer's set, with a job for each of its cells, and an ITEM_INSTANCED
+// item for each submesh of its mesh, when the mesh and the set are resident (see
+// docs/rendering/gpu-scene.md#instanced-meshes). Its impostor's items are added too when every submesh's material has
+// the impostor path, since each instance draws all of its submeshes or its impostor. It gives the set's count of
+// instances.
+@(private = "file")
+add_instanced_items :: proc(
+	r: ^Renderer,
+	table: ^Material_Table,
+	meshes: ^[dynamic]Mesh_Record,
+	mesh_indices: ^map[^Resident_Mesh]u32,
+	items: ^[dynamic]Cull_Item,
+	sets: ^[dynamic]Instance_Set_Record,
+	jobs: ^[dynamic]u32,
+	renderer: Instanced_Mesh_Renderer,
+	slot: u32,
+	record: ^Instance_Record,
+) -> int {
+	mesh, mesh_ready := resident_mesh(&r.residency, renderer.mesh)
+	set, set_ready := resident_instance_set(&r.residency, renderer.instances)
+	if !mesh_ready || !set_ready {
+		return 0
+	}
+	cells, cells_ok := scene_cells(&r.scene, slot, set.cell_count)
+	if !cells_ok {
+		return 0
+	}
+	mesh_index, known := mesh_indices[mesh]
+	if !known {
+		mesh_index = u32(len(meshes))
+		append(meshes, mesh_record(mesh))
+		mesh_indices[mesh] = mesh_index
+	}
+	index := u32(len(sets))
+	first_item := len(items)
+	impostors := mesh.impostor != {}
+	occludable := true
+	set_flags: u32
+	bound: f32
+	// Each submesh's item, which has a copy for each level bucket and, with impostors, the impostor's.
+	submesh_items := make([dynamic]Cull_Item, context.temp_allocator)
+	for submesh, s in mesh.submeshes[:mesh.submesh_count] {
+		material := renderer.materials[s] if s < MAX_MATERIAL_SLOTS else {}
+		use := use_material(r, table, material) or_continue
+		// A material that draws patches or ribbons draws no mesh: the default material stands in.
+		if r.materials.pipelines[use.pipeline].patches || r.materials.pipelines[use.pipeline].ribbon {
+			use = use_material(r, table, {}) or_continue
+		}
+		pipeline := &r.materials.pipelines[use.pipeline]
+		flags: u32 = ITEM_INSTANCED
+		if renderer.cast_shadows && pipeline.cast_shadows {
+			flags |= ITEM_CASTS_SHADOWS
+			set_flags |= SET_CASTS_SHADOWS
+		}
+		if pipeline.billboard {
+			flags |= ITEM_BILLBOARD
+			set_flags |= SET_BILLBOARD
+		}
+		impostors &&= pipeline.impostor_path && material_group(pipeline) == .Opaque
+		occludable &&= material_group(pipeline) == .Opaque
+		bound = max(bound, pipeline.displacement_bound)
+		b := mesh.submesh_bounds[s] if s < MAX_SUBMESHES else mesh.bounds
+		item := Cull_Item {
+			instance = slot,
+			mesh     = mesh_index,
+			first    = submesh.first_index,
+			count    = submesh.index_count,
+			material = use.block,
+			bin      = u32(use.pipeline),
+			flags    = flags,
+			submesh  = u32(min(s, ID_MAX_SUBMESH)),
+			sphere   = {b.center.x, b.center.y, b.center.z, b.radius},
+			bound    = pipeline.displacement_bound,
+			entry    = index,
+		}
+		append(&submesh_items, item)
+		// On the mesh shader path, a bucket's item draws the submesh's meshlets from the bucket's level up; with vertex
+		// pulling, each draws the submesh's indices.
+		mesh_path := pipeline.mesh_path && material_group(pipeline) == .Opaque
+		for bucket in 0 ..< INSTANCE_LEVEL_BUCKETS {
+			level := item
+			level.list = u32(bucket)
+			if mesh_path {
+				first := mesh.level_first[s][bucket] if s < MAX_SUBMESHES else 0
+				level.flags |= ITEM_MESH_PATH
+				level.first, level.count = submesh.first_meshlet + first, submesh.meshlet_count - first
+			}
+			append(items, level)
+		}
+	}
+	if len(items) == first_item {
+		return 0
+	}
+	if occludable {
+		set_flags |= SET_OCCLUDABLE
+	}
+	if impostors {
+		set_flags |= SET_IMPOSTOR
+		for item in submesh_items {
+			impostor := item
+			impostor.flags |= ITEM_IMPOSTOR
+			impostor.first, impostor.count, impostor.bound = 0, IMPOSTOR_VERTICES, 0
+			impostor.list = INSTANCE_IMPOSTOR_LIST
+			append(items, impostor)
+		}
+	}
+	m := mesh.bounds
+	append(sets, Instance_Set_Record {
+		instances      = gpu.read_index(set.instances),
+		cells          = gpu.read_index(set.cells),
+		first_cell     = cells.first,
+		first_job      = u32(len(jobs)),
+		slot           = slot,
+		flags          = set_flags,
+		bound          = bound,
+		impostor_error = mesh.impostor_error,
+		sphere         = {m.center.x, m.center.y, m.center.z, m.radius},
+		levels         = mesh.levels,
+	})
+	for _ in 0 ..< set.cell_count {
+		append(jobs, index)
+	}
+	record.instance_set = gpu.read_index(set.instances)
+	return int(set.count)
 }
 
 // add_items adds a draw item for each submesh of a Mesh_Renderer whose mesh is resident, with its material's block and
@@ -1078,6 +1587,159 @@ ensure_draw_buffers :: proc(r: ^Renderer, draws, counts: int) {
 	}
 }
 
+// ensure_instance_buffers grows the instance sets' buffers to hold the frame's: their cells' visibility bits in every
+// view, their counters, and the views' lists of visible instances. The bits are lost when their buffer grows.
+@(private = "file")
+ensure_instance_buffers :: proc(r: ^Renderer, views, counters, visible: int) {
+	s := &r.scene
+	platform := r.platform
+	if s.cell_high > s.bits_cells || u32(views) > s.bits_views || s.instance_bits == {} {
+		platform.gpu_destroy_buffer(s.instance_bits)
+		s.bits_cells = min(max(s.cell_high, s.bits_cells * 2, 1024), MAX_INSTANCE_CELLS)
+		s.bits_views = max(u32(views), s.bits_views)
+		s.instance_bits = platform.gpu_create_buffer({size = s.bits_cells * s.bits_views * INSTANCE_BITS_SIZE, usage = {.Storage}, label = "instance bits"}, nil)
+	}
+	if counters > s.counter_capacity || s.instance_counters == {} {
+		platform.gpu_destroy_buffer(s.instance_counters)
+		s.counter_capacity = max(counters, s.counter_capacity * 2, 256)
+		s.instance_counters = platform.gpu_create_buffer({size = u32(s.counter_capacity * 4), usage = {.Storage}, label = "instance counters"}, nil)
+	}
+	if visible > s.visible_capacity || s.visible_instances == {} {
+		platform.gpu_destroy_buffer(s.visible_instances)
+		s.visible_capacity = min(max(visible, s.visible_capacity * 2, 1024), MAX_VISIBLE_INSTANCES)
+		s.visible_instances = platform.gpu_create_buffer({size = u32(s.visible_capacity * 4), usage = {.Storage}, label = "visible instances"}, nil)
+	}
+}
+
+// instance_constants writes the constants of each phase of cull_instances.hlsl.
+@(private = "file")
+instance_constants :: proc(f: ^Frame, views: gpu.Upload, cull: Cull_Constants) -> bool {
+	s := &f.renderer.scene
+	sf := f.scene_frame
+	c := Instance_Cull_Constants {
+		set_count        = u32(len(sf.sets)),
+		view_count       = u32(sf.draw_views),
+		job_count        = u32(sf.job_count),
+		sets             = gpu.read_index(sf.set_upload.buffer),
+		sets_offset      = sf.set_upload.offset,
+		jobs             = gpu.read_index(sf.job_upload.buffer),
+		jobs_offset      = sf.job_upload.offset,
+		views            = gpu.read_index(views.buffer),
+		views_offset     = views.offset,
+		instances        = gpu.read_index(s.instances),
+		bits             = gpu.write_index(s.instance_bits),
+		bits_cells       = s.bits_cells,
+		counters         = gpu.write_index(s.instance_counters),
+		visible          = gpu.write_index(s.visible_instances),
+		visible_capacity = u32(s.visible_capacity),
+		camera           = cull.camera,
+		lod_scale        = cull.lod_scale,
+		lod_near         = cull.lod_near,
+		occlusion        = cull.occlusion,
+		occlusion_offset = cull.occlusion_offset,
+		stats            = cull.stats,
+	}
+	// The early phases' views, and the late view's when the frame culls by occlusion.
+	for &phases, late in sf.instance_constants {
+		if late == 1 && !sf.occluding {
+			break
+		}
+		c.view_first, c.view_rows = late == 1 ? u32(sf.late_view) : 0, late == 1 ? 1 : u32(sf.view_count)
+		for &u, phase in phases {
+			c.phase = u32(phase)
+			ok: bool
+			u, ok = f.renderer.platform.gpu_upload(size_of(Instance_Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+			if !ok {
+				return false
+			}
+			(^Instance_Cull_Constants)(raw_data(u.data))^ = c
+		}
+	}
+	return true
+}
+
+// add_instance_passes adds the phases of cull_instances.hlsl for the early views, after the scene's update and before
+// the draws' culling, which draws each instanced item once for each instance that its set's list in the view has (see
+// docs/rendering/gpu-scene.md#instanced-meshes). The camera's view takes only the instances that were visible last
+// frame when the frame culls by occlusion, which reads their cells' bits.
+@(private = "file")
+add_instance_passes :: proc(f: ^Frame) {
+	sf := f.scene_frame
+	if len(sf.sets) == 0 {
+		return
+	}
+	add_instance_phases(f, false)
+}
+
+// add_late_instance_passes adds the late view's phases of cull_instances.hlsl, after the depth pyramid: the instances
+// that it shows and the early view did not take, and each cell's bits for next frame.
+@(private)
+add_late_instance_passes :: proc(f: ^Frame) {
+	sf := f.scene_frame
+	if len(sf.sets) == 0 {
+		return
+	}
+	add_instance_phases(f, true)
+}
+
+@(private = "file")
+add_instance_phases :: proc(f: ^Frame, late: bool) {
+	sf := f.scene_frame
+	g := f.graph
+	alloc := f.renderer.platform.frame_allocator
+	p := add_compute_pass(g, late ? "cull late instances" : "cull instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_CULL, late}, alloc))
+	read(g, p, sf.instances)
+	write(g, p, sf.instance_bits)
+	write(g, p, sf.instance_counters)
+	if sf.occluding {
+		if late {
+			for t in sf.occlusion.hzb[:f.renderer.scene.occlusion.hzb_levels] {
+				read(g, p, t)
+			}
+		}
+		write(g, p, sf.occlusion.cell_seen)
+	}
+	if sf.stats != 0 {
+		write(g, p, sf.stats)
+	}
+	p = add_compute_pass(g, late ? "place late instances" : "place instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_PLACE, late}, alloc))
+	write(g, p, sf.instance_counters)
+	p = add_compute_pass(g, late ? "list late instances" : "list instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_LIST, late}, alloc))
+	write(g, p, sf.instance_bits)
+	write(g, p, sf.instance_counters)
+	write(g, p, sf.visible_instances)
+}
+
+// Instance_Step is a phase's pass's data, in frame memory: the early views' or the late view's.
+@(private = "file")
+Instance_Step :: struct {
+	frame: ^Frame,
+	phase: int,
+	late:  bool,
+}
+
+// run_instance_phase dispatches a phase: a group for each cell in each of its views, in rows of INSTANCE_JOB_ROW, or a
+// thread for each of each set's lists in each of its views.
+@(private = "file")
+run_instance_phase :: proc(ctx: ^Pass_Context) {
+	step := (^Instance_Step)(ctx.data)
+	f := step.frame
+	sf := f.scene_frame
+	pipeline := f.renderer.scene.instance_pipeline.pipeline
+	if pipeline == {} {
+		return
+	}
+	rows := step.late ? 1 : sf.view_count
+	gpu.cmd_set_pipeline(ctx.cb, pipeline)
+	gpu.cmd_set_pass_constants(ctx.cb, sf.instance_constants[step.late ? 1 : 0][step.phase])
+	if step.phase == INSTANCE_PHASE_PLACE {
+		gpu.cmd_dispatch(ctx.cb, {u32(len(sf.sets) * rows * INSTANCE_LISTS + format.INSTANCE_CELL_SIZE - 1) / format.INSTANCE_CELL_SIZE, 1, 1})
+		return
+	}
+	jobs := u32(sf.job_count)
+	gpu.cmd_dispatch(ctx.cb, {min(jobs, INSTANCE_JOB_ROW), (jobs + INSTANCE_JOB_ROW - 1) / INSTANCE_JOB_ROW, u32(rows)})
+}
+
 // frustum_planes are the planes of a view's frustum, relative to the camera, from its projection: left, right, bottom
 // and top, and the near plane. The far plane is at infinity. Each is normalized, so a sphere tests by its radius.
 @(private)
@@ -1095,7 +1757,16 @@ update_scene :: proc(ctx: ^Pass_Context) {
 	if sf.instance_bytes > 0 {
 		gpu.cmd_copy_buffer(ctx.cb, sf.instance_upload.buffer, sf.instance_upload.offset, gpu_buffer(g, sf.instances), 0, u32(sf.instance_bytes))
 	}
-	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.view_count * 4))
+	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.draw_views * 4))
+	if sf.counter_words > 0 {
+		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.instance_counters), 0, u32(sf.counter_words * 4))
+	}
+	if sf.occluding {
+		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.occlusion.slot_seen_next), 0, MAX_INSTANCES / 8)
+	}
+	if sf.stats != 0 {
+		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.stats), 0, CULL_STATS_WORDS * 4)
+	}
 }
 
 @(private = "file")
@@ -1120,7 +1791,7 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 @(private)
 draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: format.Material_Pass, group := Bin_Group.Opaque, filter := Bin_Filter.All) {
 	sf := f.scene_frame
-	if sf == nil || len(sf.items) == 0 || view >= sf.view_count {
+	if sf == nil || len(sf.items) == 0 || view >= sf.draw_views {
 		return
 	}
 	g := f.graph

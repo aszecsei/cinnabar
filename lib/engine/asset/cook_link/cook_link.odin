@@ -112,6 +112,8 @@ Asset_Kind :: enum u8 {
 	Material_Function,
 	Prefab,
 	Effect,
+	Stage,
+	Instance_Set,
 }
 
 Asset_Status :: enum u8 {
@@ -151,6 +153,9 @@ Asset :: struct {
 	size:         [2]u32,
 	tool_texture: string,
 	hotspots:     []Hotspot,
+	// For a sub-asset whose source the cooker generates, as a USD stage's prefab, the generated text's absolute path,
+	// which the editor reads in place of the file's (see docs/content/kinds/stages.md#prefab). "" otherwise.
+	generated:    string,
 }
 
 // A hotspot rectangle of a material's tool texture, in texels: a complete tileable piece that the Hotspot tool maps a

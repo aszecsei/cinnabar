@@ -93,6 +93,10 @@ public sealed class ResourceMonitorView : Grid
             [
                 ("Entities", $"{g.Entities:N0}"),
                 ("Archetypes", $"{g.Archetypes:N0}"),
+                ("Camera draws", $"{g.EarlyItems + g.LateItems:N0} ({g.LateItems:N0} late)"),
+                ("Draws hidden", $"{g.HiddenItems:N0}"),
+                ("Instances drawn", $"{g.EarlyInstances + g.LateInstances:N0} ({g.LateInstances:N0} late)"),
+                ("Instances hidden", $"{g.HiddenInstances:N0}"),
                 ("Behaviours", $"{g.Behaviours:N0}"),
                 ("Script memory", ResourceStats.Bytes(g.ScriptBytes)),
                 ("Engine's part", ResourceStats.Bytes(g.ScriptBytes - Math.Min(modules, g.ScriptBytes))),

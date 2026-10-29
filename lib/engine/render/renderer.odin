@@ -72,6 +72,7 @@ Renderer :: struct {
 	debug:           debug.Draw,
 	// Registrations, created again in renderer_reload.
 	meshes:          Extractor,
+	instanced:       Extractor,
 	surfaces:        Extractor,
 	volumes:         volume.Volumes,
 	materials:       Materials,
@@ -83,6 +84,8 @@ Renderer :: struct {
 	gi:              Gi_Passes,
 	fog:             Volumetric_Fog,
 	sky:             Sky,
+	// The last frame's sky, which sky_texture_sun answers for.
+	last_sky_mode:   Sky_Mode,
 	post:            Post,
 	// The game's post effects, in the order that they run at each point. renderer_reload clears them.
 	effects:         [MAX_POST_EFFECTS]Post_Effect,
@@ -244,6 +247,10 @@ Frame :: struct {
 	fog:                      ^Fog_Frame,
 	// nil without an Atmosphere sky.
 	sky:                      ^Sky_Frame,
+	// nil without a Texture sky whose texture is resident.
+	sky_texture:              ^Sky_Texture_Frame,
+	// Frame_Desc.disable has occlusion culling.
+	no_occlusion:             bool,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -308,6 +315,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	r.caps = device_caps(platform)
 	r.quality = default_quality(r.caps)
 	r.meshes = mesh_extractor(w)
+	r.instanced = instanced_extractor(w)
 	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	for &p in r.output_pipelines {
@@ -341,10 +349,17 @@ mesh_extractor :: proc(w: ^ecs.World) -> Extractor {
 	return extractor(w, {ecs.read(w, Mesh_Renderer), ecs.optional(ecs.read(w, View_Model))})
 }
 
+// instanced_extractor selects the entities with an Instanced_Mesh_Renderer.
+@(private = "file")
+instanced_extractor :: proc(w: ^ecs.World) -> Extractor {
+	return extractor(w, {ecs.read(w, Instanced_Mesh_Renderer)})
+}
+
 // renderer_reload keeps the renderer after a code reload, and makes its registrations again.
 renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.World) {
 	r.platform = platform
 	r.meshes = mesh_extractor(w)
+	r.instanced = instanced_extractor(w)
 	r.surfaces = surface_extractor(w)
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
@@ -368,7 +383,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
 	fog_destroy(&r.fog, r.platform)
-	sky_destroy(&r.sky, r.platform)
+	sky_destroy(&r.sky, r)
 	sprites_destroy(&r.sprites, r.platform)
 	particles_destroy(&r.particles, r.platform)
 	post_destroy(&r.post, r.platform)
@@ -386,6 +401,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_update(&r.residency)
+	read_cull_stats(r)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
@@ -425,6 +441,8 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		f.post.raw, f.post.exposure, f.post.exposure_auto = true, false, false
 	}
 	f.shadow_settings = settings.shadows
+	f.no_occlusion = .Occlusion_Culling in desc.disable
+	r.last_sky_mode = settings.sky.mode
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {
@@ -459,6 +477,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
 	depth(&g, p, f.depth, .Clear)
 	declare_scene_draws(f, p)
+	// With occlusion culling, that was the early view: the depth pyramid, the late view's culling and its prepass.
+	add_occlusion_passes(f)
+	add_cull_stats_copy(f)
 	add_particle_history_pass(f)
 	add_particle_prepass(f)
 	if desc.hooks.after_prepass != nil {
@@ -470,15 +491,17 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_shadow_passes(f)
 	add_fog_passes(f)
 	add_sky_passes(f)
+	add_sky_texture_passes(f)
 
 	// The sky draws over the background after the world pass, so the clear is black under it.
-	background := f.sky == nil ? settings.sky.background : {}
+	sky_draws := f.sky != nil || sky_texture_draws(f)
+	background := sky_draws ? {} : settings.sky.background
 	p = add_render_pass(&g, "world", draw_world, f, pieces = max(desc.hooks.world_pieces, 1))
 	color(&g, p, f.scene, .Clear, {background.r, background.g, background.b, 1})
 	color(&g, p, f.ids, .Clear, store = desc.keep_ids || desc.debug_view == .Entity_Ids ? .Store : .Discard)
 	// The debug layer tests against the depth, the editor reads it, and so do the sky, the fog over the background, the
 	// transparent surfaces, the sprites, temporal AA, the exposure and the depth's debug view.
-	keep_depth := desc.keep_ids || has_debug || f.fog != nil || f.sky != nil || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
+	keep_depth := desc.keep_ids || has_debug || f.fog != nil || sky_draws || has_transparency(f) || has_sprites(f) || reads_depth(f) || desc.debug_view == .Depth
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
@@ -488,6 +511,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
 	// illumination's lit scene, which keeps only the opaque surfaces.
 	add_sky_background(f)
+	add_sky_texture_background(f)
 	add_fog_background(f)
 	add_gi_lit(f)
 	add_transparency_passes(f)
@@ -542,6 +566,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		add_preview_passes(f, &preview)
 	}
 	ok := execute(&g)
+	if ok {
+		finish_cull_stats(f)
+	}
 	debug.end_frame(&r.debug)
 	return ok
 }
@@ -609,6 +636,9 @@ draw_world :: proc(ctx: ^Pass_Context) {
 	if ctx.piece == 0 {
 		draw_scene_view(f, ctx.cb, VIEW_VIEW_MODEL, .Forward)
 		draw_scene_view(f, ctx.cb, VIEW_CAMERA, .Forward)
+		if sf := f.scene_frame; sf != nil && sf.occluding {
+			draw_scene_view(f, ctx.cb, sf.late_view, .Forward)
+		}
 	}
 	if f.hooks.world_draw != nil {
 		f.hooks.world_draw(f, ctx)

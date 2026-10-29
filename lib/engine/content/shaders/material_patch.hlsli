@@ -36,7 +36,7 @@ Surface_Record load_surface(Draw_Record d) {
 // The two triangles of a quad, by their corners: clockwise seen from above, which is the front.
 static const uint2 PATCH_CORNERS[2][3] = {{uint2(0, 0), uint2(0, 1), uint2(1, 0)}, {uint2(1, 0), uint2(0, 1), uint2(1, 1)}};
 
-Material_Vertex load_vertex(uint vertex_id) {
+Material_Vertex load_vertex(uint vertex_id, uint instance_id) {
 	Draw_Record d = load_draw();
 	Instance_Record instance = load_instance(d);
 	Surface_Record s = load_surface(d);

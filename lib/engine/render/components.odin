@@ -19,6 +19,7 @@ LINE_LIGHT_ID :: ecs.Component_Id(41)
 // 42 is the Volume, and 43 to 50 the settings components (see settings.odin).
 SURFACE_RENDERER_ID :: ecs.Component_Id(51)
 // 52 is the Particle_System (see particles.odin).
+INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -46,6 +47,16 @@ View_Model :: struct {}
 Mesh_Renderer :: struct {
 	mesh:         format.Guid `asset:"mesh"`,
 	materials:    [MAX_MATERIAL_SLOTS]format.Guid `asset:"material"`,
+	cast_shadows: bool,
+}
+
+// Instanced_Mesh_Renderer draws a mesh at each pose of an instance set (see docs/rendering/gpu-scene.md#instanced-meshes),
+// relative to its entity's Transform, each of its first submeshes with the material or instance in its slot, as a
+// Mesh_Renderer does. A USD stage's point instancers are instance sets (see docs/content/kinds/stages.md#point-instancers).
+Instanced_Mesh_Renderer :: struct {
+	mesh:         format.Guid `asset:"mesh"`,
+	materials:    [MAX_MATERIAL_SLOTS]format.Guid `asset:"material"`,
+	instances:    format.Guid `asset:"instance_set"`,
 	cast_shadows: bool,
 }
 
@@ -152,6 +163,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Line_Light, LINE_LIGHT_ID)
 	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID)
 	ecs.register_component(r, Particle_System, PARTICLE_SYSTEM_ID)
+	ecs.register_component(r, Instanced_Mesh_Renderer, INSTANCED_MESH_RENDERER_ID)
 	register_settings_components(r)
 }
 
