@@ -113,6 +113,7 @@ Asset_Kind :: enum u8 {
 	Prefab,
 	Effect,
 	Stage,
+	Instance_Set,
 }
 
 Asset_Status :: enum u8 {

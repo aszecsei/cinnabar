@@ -11,6 +11,7 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:hash"
+import "core:hash/xxhash"
 import "core:math/linalg"
 import "core:mem"
 import "core:mem/virtual"
@@ -24,7 +25,7 @@ import "core:time"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
-STAGE_COOK_VERSION :: "stages 1"
+STAGE_COOK_VERSION :: "stages 2"
 STAGE_EXTENSIONS :: []string{".usda", ".usdc", ".usd"}
 // A part of a mesh has at most this many submeshes, which a Mesh_Renderer has material slots for.
 STAGE_MAX_SLOTS :: format.MESH_MAX_SLOTS
@@ -70,9 +71,9 @@ STAGE_SETTINGS := []Setting_Info {
 	},
 	{
 		key = "point_instancers",
-		values = {"skip", "entities"},
-		default = "skip",
-		description = "Leave out point instancers, or make an entity of each point. A forest of them can be millions of entities.",
+		values = {"instanced", "skip", "entities"},
+		default = "instanced",
+		description = "Draw each point instancer with an Instanced_Mesh_Renderer of an instance set, leave them out, or make an entity of each point. A forest of them can be millions of entities.",
 	},
 }
 
@@ -126,6 +127,27 @@ Stage_Part :: struct {
 	first, count:  int,
 	name:          string,
 	guid:          format.Guid,
+}
+
+// Stage_Meshes is which of a stage's meshes cook. A point instancer's prototype is a mesh of the stage as any other,
+// and a scene that tiles its instancers, as Jungle Ruins does, has a copy of the same prototype in each tile: a
+// prototype's mesh that is the same as one before it draws as that one.
+@(private = "file")
+Stage_Meshes :: struct {
+	// Each mesh's mesh after sharing, or -1 for one that does not cook.
+	shared:    []i32,
+	// Whether each mesh is a prototype's.
+	prototype: []bool,
+}
+
+// Stage_Set is the poses of one mesh of a point instancer's prototypes, which is an Instance_Set sub-asset.
+@(private = "file")
+Stage_Set :: struct {
+	instancer: i32,
+	// The mesh that its instances draw, after sharing.
+	mesh:      i32,
+	name:      string,
+	guid:      format.Guid,
 }
 
 // Stage_Manifest is what a stage's last cook made and read, beside its blobs as <cache>/stages/<guid>.deps, so a stage
@@ -232,8 +254,9 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		return use_manifest(a, old, generated, problems)
 	}
 
+	instancers := stage_setting(a^, "point_instancers")
 	options_c := Cn_Usd_Options {
-		point_instancers = stage_setting(a^, "point_instancers") == "entities" ? 1 : 0,
+		point_instancers = instancers == "entities" ? 1 : 0,
 	}
 	usd := cn_usd_open(strings.clone_to_cstring(a.path, context.temp_allocator), &options_c)
 	defer cn_usd_close(usd)
@@ -253,8 +276,10 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	info: Cn_Usd_Info
 	cn_usd_info(usd, &info)
 
-	materials, textures := stage_materials(a^, usd, info, problems)
-	parts := stage_parts(a^, usd, info)
+	meshes := stage_meshes(usd, info, instancers)
+	materials, textures := stage_materials(a^, usd, info, meshes, problems)
+	parts := stage_parts(a^, usd, info, meshes)
+	sets := instancers == "instanced" ? stage_sets(a^, usd, info, meshes, problems) : make([dynamic]Stage_Set, context.temp_allocator)
 
 	wanted := make([dynamic]Subasset, context.temp_allocator)
 	for t in textures {
@@ -265,6 +290,9 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	}
 	for p in parts {
 		append(&wanted, Subasset{kind = .Mesh, name = p.name})
+	}
+	for set in sets {
+		append(&wanted, Subasset{kind = .Instance_Set, name = set.name})
 	}
 	append(&wanted, Subasset{kind = .Prefab, name = STAGE_PREFAB_NAME})
 	assign_subassets(a, wanted[:], pass.force[a.meta.guid], problems) or_return
@@ -280,6 +308,9 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	}
 	for &p in parts {
 		p.guid = guid_of[fmt.tprintf("%s.%s", format.MESH_KIND, p.name)]
+	}
+	for &set in sets {
+		set.guid = guid_of[fmt.tprintf("%s.%s", format.INSTANCE_SET_KIND, set.name)]
 	}
 	prefab_guid := guid_of[fmt.tprintf("%s.%s", format.PREFAB_KIND, STAGE_PREFAB_NAME)]
 
@@ -303,6 +334,11 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		ok &&= cooked
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Mesh, p.guid, blob_key, p.name, ""})
 	}
+	for set in sets {
+		blob_key, cooked := cook_stage_set(a^, usd, info, set, meshes, out_dir, pass)
+		ok &&= cooked
+		append(&manifest.subassets, Stage_Manifest_Subasset{.Instance_Set, set.guid, blob_key, set.name, ""})
+	}
 
 	// The generated texts, which later passes cook as they would files.
 	for m in materials {
@@ -312,7 +348,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Material_Instance, m.guid, 0, m.name, path})
 	}
 	{
-		text := stage_prefab_text(a^, usd, info, parts[:], materials[:], problems)
+		text := stage_prefab_text(a^, usd, info, meshes, parts[:], sets[:], materials[:], problems)
 		path := fmt.tprintf("%s/generated/stages/%s%s", out_dir, guid_text(prefab_guid), format.PREFAB_EXTENSION)
 		ok &&= write_generated(path, text, problems)
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Prefab, prefab_guid, 0, STAGE_PREFAB_NAME, path})
@@ -385,16 +421,16 @@ stage_texture_name :: proc(a: Asset_Source, usd: ^Cn_Usd, resolved: string, role
 	return name
 }
 
-// stage_materials lists the material instances that the stage's meshes use, with each one's sidedness, and the
-// textures that they read.
+// stage_materials lists the material instances that the stage's meshes that cook use, with each one's sidedness, and
+// the textures that they read.
 @(private = "file")
-stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, problems: ^Problems) -> (materials: [dynamic]Stage_Material, textures: [dynamic]Stage_Texture) {
+stage_materials :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, problems: ^Problems) -> (materials: [dynamic]Stage_Material, textures: [dynamic]Stage_Texture) {
 	materials = make([dynamic]Stage_Material, context.temp_allocator)
 	textures = make([dynamic]Stage_Texture, context.temp_allocator)
 	used := make(map[[2]i32]bool, context.temp_allocator)
 	for i in 0 ..< info.mesh_count {
 		m: Cn_Usd_Mesh
-		if cn_usd_mesh(usd, i, &m) == 0 {
+		if meshes.shared[i] != i || cn_usd_mesh(usd, i, &m) == 0 {
 			continue
 		}
 		for s in m.subsets[:m.subset_count] {
@@ -484,17 +520,21 @@ stage_role :: proc(usd: ^Cn_Usd, input: Cn_Usd_Input, usage: format.Texture_Usag
 	return {usage = .Mask, channel = channel, srgb = tex.color_space == .SRGB}
 }
 
-// stage_parts splits each mesh into parts of at most STAGE_MAX_SLOTS subsets.
+// stage_parts splits each mesh that cooks into parts of at most STAGE_MAX_SLOTS subsets. A prototype's mesh is named
+// for its prim alone, under prototypes/, as the copies that share it are in different tiles.
 @(private = "file")
-stage_parts :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info) -> [dynamic]Stage_Part {
+stage_parts :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes) -> [dynamic]Stage_Part {
 	parts := make([dynamic]Stage_Part, context.temp_allocator)
 	names := make(map[string]int, context.temp_allocator)
 	for i in 0 ..< info.mesh_count {
 		m: Cn_Usd_Mesh
-		if cn_usd_mesh(usd, i, &m) == 0 || m.subset_count == 0 {
+		if meshes.shared[i] != i || cn_usd_mesh(usd, i, &m) == 0 || m.subset_count == 0 {
 			continue
 		}
 		base := strings.trim_prefix(usd_string(m.path), "/")
+		if meshes.prototype[i] {
+			base = fmt.tprintf("prototypes/%s", filepath.base(usd_string(m.path)))
+		}
 		base, _ = strings.replace_all(base, "=", "_", context.temp_allocator)
 		// Two meshes of one prim path, as two instances' prototypes can be, keep apart.
 		if n := names[base]; n > 0 {
@@ -512,6 +552,285 @@ stage_parts :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info) -> [dynami
 		}
 	}
 	return parts
+}
+
+// stage_meshes finds the meshes of point instancers' prototypes, which a prefab never places as prims, and shares each
+// one that is the same as one before it: the same corners and subsets, with the same materials. With point instancers
+// skipped, no prototype's mesh cooks.
+@(private = "file")
+stage_meshes :: proc(usd: ^Cn_Usd, info: Cn_Usd_Info, instancers: string) -> Stage_Meshes {
+	meshes := Stage_Meshes {
+		shared    = make([]i32, info.mesh_count, context.temp_allocator),
+		prototype = make([]bool, info.mesh_count, context.temp_allocator),
+	}
+	for i in 0 ..< info.mesh_count {
+		meshes.shared[i] = i
+	}
+	for i in 0 ..< info.instancer_count {
+		inst: Cn_Usd_Instancer
+		cn_usd_instancer(usd, i, &inst)
+		for p in 0 ..< inst.prototype_count {
+			list: [^]Cn_Usd_Prototype_Mesh
+			count := cn_usd_prototype_meshes(usd, i, p, &list)
+			for pm in list[:count] {
+				meshes.prototype[pm.mesh] = true
+			}
+		}
+	}
+	first_of := make(map[u64]i32, context.temp_allocator)
+	for i in 0 ..< info.mesh_count {
+		if !meshes.prototype[i] {
+			continue
+		}
+		if instancers == "skip" {
+			meshes.shared[i] = -1
+			continue
+		}
+		m: Cn_Usd_Mesh
+		if cn_usd_mesh(usd, i, &m) == 0 {
+			continue
+		}
+		key := stage_mesh_hash(m)
+		if first, found := first_of[key]; found {
+			meshes.shared[i] = first
+		} else {
+			first_of[key] = i
+		}
+	}
+	return meshes
+}
+
+// stage_mesh_hash is a hash of what a mesh draws: its corners, its subsets and their materials, and its sides.
+@(private = "file")
+stage_mesh_hash :: proc(m: Cn_Usd_Mesh) -> u64 {
+	n := int(m.corner_count)
+	streams := [?][]f32 {
+		m.positions[:n * 3] if m.positions != nil else nil,
+		m.normals[:n * 3] if m.normals != nil else nil,
+		m.uv0[:n * 2] if m.uv0 != nil else nil,
+		m.uv1[:n * 2] if m.uv1 != nil else nil,
+		m.colors[:n * 3] if m.colors != nil else nil,
+	}
+	h := hash.fnv64a(transmute([]byte)fmt.tprintf("%d\x00%d\x00%d\x00", m.corner_count, m.double_sided, m.left_handed))
+	for stream, i in streams {
+		h = hash.fnv64a(transmute([]byte)fmt.tprintf("%d:%d\x00", i, len(stream)), h)
+		if len(stream) > 0 {
+			sum := xxhash.XXH3_64_default(mem.slice_to_bytes(stream))
+			h = hash.fnv64a(mem.ptr_to_bytes(&sum), h)
+		}
+	}
+	for s in m.subsets[:m.subset_count] {
+		h = hash.fnv64a(transmute([]byte)fmt.tprintf("%d %d %d\x00", s.material, s.first, s.count), h)
+	}
+	return h
+}
+
+// stage_sets is an instance set for each mesh that each point instancer's prototypes draw, after sharing. A set is
+// named for its instancer's prim, and when it has several, for its mesh's place among them.
+@(private = "file")
+stage_sets :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, problems: ^Problems) -> [dynamic]Stage_Set {
+	sets := make([dynamic]Stage_Set, context.temp_allocator)
+	empty, nested := 0, 0
+	for i in 0 ..< info.instancer_count {
+		inst: Cn_Usd_Instancer
+		cn_usd_instancer(usd, i, &inst)
+		if inst.nested != 0 {
+			nested += 1
+			continue
+		}
+		drawn := make([dynamic]i32, context.temp_allocator)
+		for p in 0 ..< inst.prototype_count {
+			list: [^]Cn_Usd_Prototype_Mesh
+			count := cn_usd_prototype_meshes(usd, i, p, &list)
+			for pm in list[:count] {
+				if shared := meshes.shared[pm.mesh]; shared >= 0 && !slice.contains(drawn[:], shared) {
+					append(&drawn, shared)
+				}
+			}
+		}
+		if inst.point_count == 0 || len(drawn) == 0 {
+			empty += 1
+			continue
+		}
+		base := strings.trim_prefix(usd_string(inst.path), "/")
+		base, _ = strings.replace_all(base, "=", "_", context.temp_allocator)
+		for mesh, k in drawn {
+			name := len(drawn) == 1 ? base : fmt.tprintf("%s#%d", base, k + 1)
+			append(&sets, Stage_Set{instancer = i, mesh = mesh, name = name})
+		}
+	}
+	if empty > 0 {
+		report_warning(problems, a.path, 0, 0, "%d point instancers have no points or no meshes in their prototypes, so they draw nothing", empty)
+	}
+	if nested > 0 {
+		report_warning(problems, a.path, 0, 0, "%d point instancers are in another's prototypes, which the cooker does not draw", nested)
+	}
+	return sets
+}
+
+// cook_stage_set writes an instance set's blob: a pose for each point whose prototype has the set's mesh, for each time
+// that it has it, which is the mesh's pose under the prototype, then the point's, in the instancer's space. A pose is
+// in meters on the engine's axes, as a child entity's is.
+@(private = "file")
+cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: Stage_Set, meshes: Stage_Meshes, out_dir: string, pass: ^Pass) -> (blob_key: u64, ok: bool) {
+	scratch: Scratch
+	scratch_begin(&scratch, pass)
+	context.temp_allocator = virtual.arena_allocator(&scratch.arena)
+	defer scratch_end(&scratch, pass)
+	inst: Cn_Usd_Instancer
+	cn_usd_instancer(usd, set.instancer, &inst)
+	prototypes := make([]i32, inst.point_count, context.temp_allocator)
+	matrices := make([]f64, int(inst.point_count) * 16, context.temp_allocator)
+	if cn_usd_instancer_points(usd, set.instancer, raw_data(prototypes), raw_data(matrices)) == 0 {
+		report_error(&scratch.problems, a.path, 0, 0, "point instancer %s has arrays of different lengths", usd_string(inst.path))
+		return
+	}
+	// Each prototype's poses of the set's mesh.
+	locals := make([][dynamic][16]f64, inst.prototype_count, context.temp_allocator)
+	for p in 0 ..< inst.prototype_count {
+		locals[p] = make([dynamic][16]f64, context.temp_allocator)
+		list: [^]Cn_Usd_Prototype_Mesh
+		count := cn_usd_prototype_meshes(usd, set.instancer, p, &list)
+		for pm in list[:count] {
+			if meshes.shared[pm.mesh] == set.mesh {
+				append(&locals[p], pm.local)
+			}
+		}
+	}
+	blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00%s\x00%s\x00", STAGE_COOK_VERSION, a.name, format.instance_set_layout(), set.name, stage_setting(a, "scale")))
+	blob_key = hash.fnv64a(mem.slice_to_bytes(prototypes), blob_key)
+	blob_key = hash.fnv64a(mem.slice_to_bytes(matrices), blob_key)
+	for list in locals {
+		blob_key = hash.fnv64a(mem.slice_to_bytes(list[:]), blob_key)
+	}
+	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(set.guid))
+	if cooked_key(output, .Instance_Set, format.instance_set_layout()) == blob_key && !pass.force[a.meta.guid] {
+		pass.current[.Instance_Set] += 1
+		return blob_key, true
+	}
+
+	basis, scale := stage_basis(a, info)
+	instances := make([dynamic]format.Instance, context.temp_allocator)
+	skipped, sheared := 0, 0
+	for point in 0 ..< int(inst.point_count) {
+		p := prototypes[point]
+		if p < 0 || p >= inst.prototype_count {
+			skipped += 1
+			continue
+		}
+		x := matrices[point * 16:][:16]
+		for local in locals[p] {
+			// Row vectors: the mesh's pose under the prototype, then the point's.
+			m: [16]f64
+			for r in 0 ..< 4 {
+				for c in 0 ..< 4 {
+					for k in 0 ..< 4 {
+						m[r * 4 + c] += local[r * 4 + k] * x[k * 4 + c]
+					}
+				}
+			}
+			offset, rotation, size, exact := stage_pose(m, basis, scale)
+			sheared += int(!exact)
+			append(&instances, stage_instance(offset, rotation, size, u32(point)))
+		}
+	}
+	if skipped > 0 {
+		report_warning(&scratch.problems, a.path, 0, 0, "point instancer %s has %d points whose prototype index is out of range, which are left out", usd_string(inst.path), skipped)
+	}
+	if sheared > 0 {
+		report_warning(&scratch.problems, a.path, 0, 0, "point instancer %s has %d poses with shear, which an instance cannot hold; they are posed without it", usd_string(inst.path), sheared)
+	}
+	contents := stage_cells(instances[:])
+	contents.guid = set.guid
+	contents.key = blob_key
+	contents.name = set.name
+	contents.source_path = a.name
+	if !write_blob(output, format.instance_set_write(contents, context.temp_allocator)) {
+		report_error(&scratch.problems, output, 0, 0, "cannot write the instance set")
+		return
+	}
+	pass.cooked[.Instance_Set] += 1
+	return blob_key, true
+}
+
+// stage_instance packs a pose as an instance, its rotation with w at least 0.
+@(private = "file")
+stage_instance :: proc(offset: [3]f64, rotation: quaternion256, size: [3]f64, point: u32) -> format.Instance {
+	q := [4]f64{imag(rotation), jmag(rotation), kmag(rotation), real(rotation)}
+	if q.w < 0 {
+		q = -q
+	}
+	snorm :: proc(v: f64) -> i16 {
+		return i16(clamp(v, -1, 1) * 32767 + (v < 0 ? -0.5 : 0.5))
+	}
+	return {
+		position = {f32(offset.x), f32(offset.y), f32(offset.z)},
+		rotation = {snorm(q.x), snorm(q.y), snorm(q.z), snorm(q.w)},
+		scale = {f16(size.x), f16(size.y), f16(size.z)},
+		point = point,
+	}
+}
+
+// stage_cells orders instances along a Morton curve over their bounds, so each run of INSTANCE_CELL_SIZE is near
+// together, and makes a cell of each run.
+@(private = "file")
+stage_cells :: proc(instances: []format.Instance) -> (contents: format.Instance_Set_Contents) {
+	if len(instances) == 0 {
+		return {instances = instances}
+	}
+	lo, hi := instances[0].position, instances[0].position
+	for i in instances {
+		lo = linalg.min(lo, i.position)
+		hi = linalg.max(hi, i.position)
+	}
+	extent := linalg.max(hi - lo, [3]f32{1e-6, 1e-6, 1e-6})
+	// 21 bits an axis, spread to every third bit.
+	spread :: proc(v: u64) -> u64 {
+		x := v & 0x1fffff
+		x = (x | x << 32) & 0x1f00000000ffff
+		x = (x | x << 16) & 0x1f0000ff0000ff
+		x = (x | x << 8) & 0x100f00f00f00f00f
+		x = (x | x << 4) & 0x10c30c30c30c30c3
+		x = (x | x << 2) & 0x1249249249249249
+		return x
+	}
+	Keyed :: struct {
+		code:     u64,
+		instance: format.Instance,
+	}
+	keyed := make([]Keyed, len(instances), context.temp_allocator)
+	for i, k in instances {
+		t := (i.position - lo) / extent * f32((1 << 21) - 1)
+		keyed[k] = {spread(u64(t.x)) | spread(u64(t.y)) << 1 | spread(u64(t.z)) << 2, i}
+	}
+	slice.sort_by(keyed, proc(x, y: Keyed) -> bool {return x.code < y.code || (x.code == y.code && x.instance.point < y.instance.point)})
+	sorted := make([]format.Instance, len(instances), context.temp_allocator)
+	for k, i in keyed {
+		sorted[i] = k.instance
+	}
+	sphere :: proc(run: []format.Instance) -> (center: [3]f32, radius: f32, max_scale: f32) {
+		lo, hi := run[0].position, run[0].position
+		for i in run {
+			lo = linalg.min(lo, i.position)
+			hi = linalg.max(hi, i.position)
+			max_scale = max(max_scale, abs(f32(i.scale.x)), abs(f32(i.scale.y)), abs(f32(i.scale.z)))
+		}
+		center = (lo + hi) / 2
+		for i in run {
+			radius = max(radius, linalg.length(i.position - center))
+		}
+		return
+	}
+	cells := make([dynamic]format.Instance_Cell, context.temp_allocator)
+	for first := 0; first < len(sorted); first += format.INSTANCE_CELL_SIZE {
+		run := sorted[first:min(first + format.INSTANCE_CELL_SIZE, len(sorted))]
+		center, radius, max_scale := sphere(run)
+		append(&cells, format.Instance_Cell{center = center, radius = radius, max_scale = max_scale, first = u32(first), count = u32(len(run))})
+	}
+	contents.instances = sorted
+	contents.cells = cells[:]
+	contents.center, contents.radius, contents.max_scale = sphere(sorted)
+	return
 }
 
 // stage_basis is the matrix that takes a stage's axes to the engine's, and the scale that takes its units to meters.
@@ -902,6 +1221,8 @@ Stage_Entity :: struct {
 	scale:     [3]f64,
 	mesh:      format.Guid,
 	materials: [STAGE_MAX_SLOTS]format.Guid,
+	// An instance set that the mesh draws at, with an Instanced_Mesh_Renderer, or none for a Mesh_Renderer.
+	instances: format.Guid,
 }
 
 @(private = "file")
@@ -948,9 +1269,10 @@ stage_pose :: proc(m: [16]f64, basis: matrix[3, 3]f64, scale: f64) -> (offset: [
 }
 
 // stage_prefab_text is the prefab of the whole stage: a root at the origin, an entity for each prim that holds a mesh
-// or one below it, posed under its parent, and an entity for each instance, posed in the stage.
+// or one below it, posed under its parent, but for point instancers' prototypes, an entity for each instance, posed in
+// the stage, and an entity for each point instancer that has instance sets, posed in the stage, which draws them.
 @(private = "file")
-stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, parts: []Stage_Part, materials: []Stage_Material, problems: ^Problems) -> string {
+stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, meshes: Stage_Meshes, parts: []Stage_Part, sets: []Stage_Set, materials: []Stage_Material, problems: ^Problems) -> string {
 	basis, scale := stage_basis(a, info)
 	entities := make([dynamic]Stage_Entity, context.temp_allocator)
 	root := Stage_Entity {
@@ -978,8 +1300,8 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 			}
 		}
 	}
-	// A mesh of several parts is an entity with a child for each.
-	add_mesh :: proc(entities: ^[dynamic]Stage_Entity, e: ^Stage_Entity, usd: ^Cn_Usd, mesh: i32, path: string, override: i32, parts_of: map[i32][dynamic]Stage_Part, instance_of: map[[2]i32]format.Guid) {
+	// A mesh of several parts is an entity with a child for each. With an instance set, each draws at its instances.
+	add_mesh :: proc(entities: ^[dynamic]Stage_Entity, e: ^Stage_Entity, usd: ^Cn_Usd, mesh: i32, path: string, override: i32, parts_of: map[i32][dynamic]Stage_Part, instance_of: map[[2]i32]format.Guid, instances: format.Guid = {}) {
 		list, found := parts_of[mesh]
 		if !found {
 			return
@@ -990,6 +1312,7 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 		}
 		if len(list) == 1 {
 			add_renderer(e, list[0], m, override, instance_of)
+			e.instances = instances
 			return
 		}
 		for p, i in list {
@@ -1001,6 +1324,7 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 				scale    = {1, 1, 1},
 			}
 			add_renderer(&child, p, m, override, instance_of)
+			child.instances = instances
 			append(entities, child)
 		}
 	}
@@ -1014,7 +1338,7 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 	}
 	for i := int(info.node_count) - 1; i >= 0; i -= 1 {
 		n := nodes[i]
-		keep[i] ||= n.kind == .Mesh && n.visible != 0 && n.mesh >= 0
+		keep[i] ||= n.kind == .Mesh && n.visible != 0 && n.mesh >= 0 && n.prototype == 0
 		if keep[i] && n.parent >= 0 {
 			keep[n.parent] = true
 		}
@@ -1035,7 +1359,7 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 		e.offset, e.rotation, e.scale, exact = stage_pose(n.local, basis, scale)
 		sheared += int(!exact)
 		ids[i] = e.id
-		if n.kind == .Mesh {
+		if n.kind == .Mesh && n.prototype == 0 {
 			add_mesh(&entities, &e, usd, n.mesh, path, -1, parts_of, instance_of)
 		}
 		append(&entities, e)
@@ -1043,7 +1367,7 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 	for i in 0 ..< info.instance_count {
 		inst: Cn_Usd_Instance
 		cn_usd_instance(usd, i, &inst)
-		if inst.visible == 0 || inst.mesh < 0 {
+		if inst.visible == 0 || inst.mesh < 0 || meshes.shared[inst.mesh] < 0 {
 			continue
 		}
 		path := fmt.tprintf("%s#instance%d", usd_string(inst.path), i)
@@ -1055,8 +1379,44 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 		exact: bool
 		e.offset, e.rotation, e.scale, exact = stage_pose(inst.world, basis, scale)
 		sheared += int(!exact)
-		add_mesh(&entities, &e, usd, inst.mesh, path, inst.material, parts_of, instance_of)
+		add_mesh(&entities, &e, usd, meshes.shared[inst.mesh], path, inst.material, parts_of, instance_of)
 		append(&entities, e)
+	}
+	// An instancer of one set draws it; one of several has a child for each.
+	for first := 0; first < len(sets); {
+		count := 1
+		for first + count < len(sets) && sets[first + count].instancer == sets[first].instancer {
+			count += 1
+		}
+		inst: Cn_Usd_Instancer
+		cn_usd_instancer(usd, sets[first].instancer, &inst)
+		path := fmt.tprintf("%s#instancer", usd_string(inst.path))
+		e := Stage_Entity {
+			id     = entity_id(path),
+			parent = root.id,
+			name   = strings.clone(usd_string(inst.name), context.temp_allocator),
+		}
+		exact: bool
+		e.offset, e.rotation, e.scale, exact = stage_pose(inst.world, basis, scale)
+		sheared += int(!exact)
+		if count == 1 {
+			add_mesh(&entities, &e, usd, sets[first].mesh, path, -1, parts_of, instance_of, sets[first].guid)
+		} else {
+			for set, k in sets[first:][:count] {
+				child_path := fmt.tprintf("%s#set%d", path, k + 1)
+				child := Stage_Entity {
+					id       = entity_id(child_path),
+					parent   = e.id,
+					name     = fmt.tprintf("%s set %d", e.name, k + 1),
+					rotation = 1,
+					scale    = {1, 1, 1},
+				}
+				add_mesh(&entities, &child, usd, set.mesh, child_path, -1, parts_of, instance_of, set.guid)
+				append(&entities, child)
+			}
+		}
+		append(&entities, e)
+		first += count
 	}
 	if sheared > 0 {
 		report_warning(problems, a.path, 0, 0, "%d prims have a transform with shear, which an entity cannot hold; they are posed without it", sheared)
@@ -1091,12 +1451,19 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 		fmt.sbprintfln(&b, "\trotation = %s", vector_text([]f64{imag(q), jmag(q), kmag(q), real(q)}))
 		fmt.sbprintfln(&b, "\tscale = %s", vector_text([]f64{e.scale.x, e.scale.y, e.scale.z}))
 		if e.mesh != {} {
-			fmt.sbprintln(&b, "component 33 Mesh_Renderer")
+			if e.instances != {} {
+				fmt.sbprintln(&b, "component 53 Instanced_Mesh_Renderer")
+			} else {
+				fmt.sbprintln(&b, "component 33 Mesh_Renderer")
+			}
 			fmt.sbprintfln(&b, "\tmesh = $%s", guid_text(e.mesh))
 			for m, slot in e.materials {
 				if m != {} {
 					fmt.sbprintfln(&b, "\tmaterials.%d = $%s", slot, guid_text(m))
 				}
+			}
+			if e.instances != {} {
+				fmt.sbprintfln(&b, "\tinstances = $%s", guid_text(e.instances))
 			}
 			fmt.sbprintln(&b, "\tcast_shadows = true")
 		}
@@ -1104,14 +1471,15 @@ stage_prefab_text :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, part
 	return strings.to_string(b)
 }
 
-// stage_report opens each stage as a cook would, and prints what it would make, to set against the renderer's limits
-// (see docs/rendering/assets.md#gpu-residency): the meshes and textures that are resident at once, and the entities.
+// stage_report opens each stage as a cook would, with its point instancers as instance sets, and prints what it would
+// make, to set against the renderer's limits (see docs/rendering/assets.md#gpu-residency): the meshes, textures and
+// instance sets that are resident at once, and the entities.
 stage_report :: proc(paths: []string) -> bool {
 	ok := true
 	for path in paths {
 		started := time.now()
 		a := Asset_Source{path = forward_slashes(path), name = path}
-		options_c := Cn_Usd_Options{point_instancers = 1}
+		options_c := Cn_Usd_Options{}
 		usd := cn_usd_open(strings.clone_to_cstring(path, context.temp_allocator), &options_c)
 		defer cn_usd_close(usd)
 		fmt.printfln("%s: opened in %v", path, time.since(started))
@@ -1123,21 +1491,35 @@ stage_report :: proc(paths: []string) -> bool {
 		info: Cn_Usd_Info
 		cn_usd_info(usd, &info)
 		problems: Problems
-		materials, textures := stage_materials(a, usd, info, &problems)
-		parts := stage_parts(a, usd, info)
-		triangles, most_subsets := 0, 0
+		meshes := stage_meshes(usd, info, "instanced")
+		materials, textures := stage_materials(a, usd, info, meshes, &problems)
+		parts := stage_parts(a, usd, info, meshes)
+		sets := stage_sets(a, usd, info, meshes, &problems)
+		triangles, most_subsets, cooked, prototypes, shared := 0, 0, 0, 0, 0
 		for i in 0 ..< info.mesh_count {
+			prototypes += int(meshes.prototype[i])
+			if meshes.shared[i] != i {
+				continue
+			}
+			shared += int(meshes.prototype[i])
 			m: Cn_Usd_Mesh
 			if cn_usd_mesh(usd, i, &m) != 0 {
+				cooked += 1
 				triangles += int(m.corner_count) / 3
 				most_subsets = max(most_subsets, int(m.subset_count))
 			}
 		}
+		points := 0
+		for i in 0 ..< info.instancer_count {
+			inst: Cn_Usd_Instancer
+			cn_usd_instancer(usd, i, &inst)
+			points += int(inst.point_count)
+		}
 		fmt.printfln("  up %v, %g meters per unit", info.up, info.meters_per_unit)
-		fmt.printfln("  prims %d, meshes %d (%d parts, at most %d subsets in one), triangles %d", info.node_count, info.mesh_count, len(parts), most_subsets, triangles)
-		fmt.printfln("  material instances %d, textures %d", len(materials), len(textures))
-		fmt.printfln("  instances %d (with point instancers), lights %d", info.instance_count, info.light_count)
-		fmt.printfln("  resident at once: %d meshes and textures", len(parts) + len(textures))
+		fmt.printfln("  prims %d, meshes %d cooked of %d (%d parts, at most %d subsets in one), triangles %d", info.node_count, cooked, info.mesh_count, len(parts), most_subsets, triangles)
+		fmt.printfln("  point instancers %d, points %d, prototype meshes %d shared as %d, instance sets %d", info.instancer_count, points, prototypes, shared, len(sets))
+		fmt.printfln("  material instances %d, textures %d, lights %d", len(materials), len(textures), info.light_count)
+		fmt.printfln("  resident at once: %d meshes, textures and instance sets", len(parts) + len(textures) + len(sets))
 	}
 	return ok
 }
@@ -1230,7 +1612,7 @@ manifest_current :: proc(m: Stage_Manifest, a: Asset_Source, out_dir: string) ->
 			return false
 		}
 		if s.key != 0 {
-			layout := s.kind == .Texture ? format.texture_layout() : format.mesh_layout()
+			layout := s.kind == .Texture ? format.texture_layout() : s.kind == .Instance_Set ? format.instance_set_layout() : format.mesh_layout()
 			if cooked_key(fmt.tprintf("%s/%s.blob", out_dir, guid_text(s.guid)), s.kind, layout) != s.key {
 				return false
 			}

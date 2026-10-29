@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "asset-resolution.hh"
@@ -16,6 +17,8 @@
 #include "pcp/layer-registry.hh"
 #include "tydra/render-data-converter.hh"
 #include "tydra/render-data.hh"
+#include "usdGeom.hh"
+#include "xform.hh"
 
 namespace tydra = lightusd::tydra;
 
@@ -32,6 +35,18 @@ struct Cn_Usd {
 		int32_t parent;
 	};
 	std::vector<Flat_Node> nodes;
+	// Whether each node is a prototype or under one.
+	std::vector<int32_t> node_prototype;
+	struct Instancer {
+		const lightusd::GeomPointInstancer *prim;
+		std::string name, path;
+		lightusd::value::matrix4d world;
+		std::vector<std::string> prototypes;
+		std::vector<std::vector<Cn_Usd_Prototype_Mesh>> meshes;
+		int32_t point_count;
+		bool nested;
+	};
+	std::vector<Instancer> instancers;
 	// The current cn_usd_mesh's corners.
 	std::vector<float> positions, normals, uv0, uv1, colors;
 	std::vector<Cn_Usd_Subset> subsets;
@@ -56,6 +71,47 @@ static void flatten(Cn_Usd *usd, const tydra::Node &node, int32_t parent) {
 	usd->nodes.push_back({&node, parent});
 	for (const tydra::Node &child : node.children) {
 		flatten(usd, child, self);
+	}
+}
+
+// is_under is whether a prim path is `root` or below it.
+static bool is_under(const std::string &path, const std::string &root) {
+	return path.size() >= root.size() && path.compare(0, root.size(), root) == 0 &&
+	       (path.size() == root.size() || path[root.size()] == '/');
+}
+
+// find_instancers lists the point instancers under a prim, with their world matrices, which it composes from each
+// prim's xformOps as it goes down.
+static void find_instancers(Cn_Usd *usd, const lightusd::Prim &prim, const std::string &parent_path,
+                            const lightusd::value::matrix4d &parent_world) {
+	std::string path = parent_path + "/" + std::string(prim.element_name());
+	bool reset = false;
+	lightusd::value::matrix4d local = lightusd::GetLocalTransform(prim, &reset);
+	lightusd::value::matrix4d world = reset ? local : lightusd::value::Mult(local, parent_world);
+	if (const lightusd::GeomPointInstancer *pi = prim.as<lightusd::GeomPointInstancer>()) {
+		Cn_Usd::Instancer in;
+		in.prim = pi;
+		in.name = std::string(prim.element_name());
+		in.path = path;
+		in.world = world;
+		if (pi->prototypes) {
+			if (pi->prototypes->is_path()) {
+				in.prototypes.push_back(pi->prototypes->targetPath.full_path_name());
+			} else if (pi->prototypes->is_pathvector()) {
+				for (const lightusd::Path &p : pi->prototypes->targetPathVector) {
+					in.prototypes.push_back(p.full_path_name());
+				}
+			}
+		}
+		std::vector<bool> mask;
+		std::string err;
+		lightusd::ComputeMaskAtTime(*pi, lightusd::value::TimeCode::Default(), &mask, &err);
+		in.point_count = int32_t(std::count(mask.begin(), mask.end(), true));
+		in.nested = false;
+		usd->instancers.push_back(std::move(in));
+	}
+	for (const lightusd::Prim &child : prim.children()) {
+		find_instancers(usd, child, path, world);
 	}
 }
 
@@ -425,6 +481,55 @@ extern "C" Cn_Usd *cn_usd_open(const char *path, const Cn_Usd_Options *options) 
 			}
 		}
 	}
+	// The point instancers, and the meshes of their prototypes, which Tydra converts as meshes of the scene.
+	for (const lightusd::Prim &root : usd->stage.root_prims()) {
+		find_instancers(usd, root, "", lightusd::value::matrix4d::identity());
+	}
+	{
+		std::unordered_map<std::string, const lightusd::value::matrix4d *> world_of;
+		for (const Cn_Usd::Flat_Node &n : usd->nodes) {
+			world_of[n.node->abs_path] = &n.node->global_matrix;
+		}
+		auto world = [&](const std::string &path) {
+			auto it = world_of.find(path);
+			return it != world_of.end() ? *it->second : lightusd::value::matrix4d::identity();
+		};
+		for (Cn_Usd::Instancer &in : usd->instancers) {
+			in.meshes.resize(in.prototypes.size());
+			for (size_t p = 0; p < in.prototypes.size(); p++) {
+				lightusd::value::matrix4d inverse_root = lightusd::value::matrix4d::identity();
+				lightusd::inverse(world(in.prototypes[p]), inverse_root);
+				for (size_t m = 0; m < usd->scene.meshes.size(); m++) {
+					const std::string &mesh_path = usd->scene.meshes[m].abs_path;
+					if (!is_under(mesh_path, in.prototypes[p])) {
+						continue;
+					}
+					Cn_Usd_Prototype_Mesh pm = {};
+					pm.mesh = int32_t(m);
+					// Row vectors: the mesh's world is its pose under the root, then the root's world.
+					copy_matrix(lightusd::value::Mult(world(mesh_path), inverse_root), pm.local);
+					in.meshes[p].push_back(pm);
+				}
+			}
+		}
+		for (Cn_Usd::Instancer &in : usd->instancers) {
+			for (const Cn_Usd::Instancer &outer : usd->instancers) {
+				for (const std::string &p : outer.prototypes) {
+					in.nested = in.nested || is_under(in.path, p);
+				}
+			}
+		}
+		usd->node_prototype.assign(usd->nodes.size(), 0);
+		for (size_t i = 0; i < usd->nodes.size(); i++) {
+			for (const Cn_Usd::Instancer &in : usd->instancers) {
+				for (const std::string &p : in.prototypes) {
+					if (is_under(usd->nodes[i].node->abs_path, p)) {
+						usd->node_prototype[i] = 1;
+					}
+				}
+			}
+		}
+	}
 	// Each texture's file, resolved against the layer that authored it if Tydra left it relative.
 	usd->resolved.resize(usd->scene.textures.size());
 	for (size_t i = 0; i < usd->scene.textures.size(); i++) {
@@ -470,6 +575,7 @@ extern "C" void cn_usd_info(Cn_Usd *usd, Cn_Usd_Info *info) {
 	info->instance_count = int32_t(usd->scene.instances.size());
 	info->light_count = int32_t(usd->scene.lights.size());
 	info->layer_count = int32_t(usd->layers.size());
+	info->instancer_count = int32_t(usd->instancers.size());
 }
 
 extern "C" Cn_Usd_String cn_usd_layer(Cn_Usd *usd, int32_t index) {
@@ -483,6 +589,7 @@ extern "C" void cn_usd_node(Cn_Usd *usd, int32_t index, Cn_Usd_Node *out) {
 	out->parent = flat.parent;
 	out->mesh = -1;
 	out->visible = 1;
+	out->prototype = usd->node_prototype[size_t(index)];
 	out->name = str(node.prim_name);
 	out->path = str(node.abs_path);
 	switch (node.category) {
@@ -517,6 +624,54 @@ extern "C" void cn_usd_instance(Cn_Usd *usd, int32_t index, Cn_Usd_Instance *out
 	out->visible = instance.visible;
 	out->path = str(instance.abs_path);
 	copy_matrix(instance.global_matrix, out->world);
+}
+
+extern "C" void cn_usd_instancer(Cn_Usd *usd, int32_t index, Cn_Usd_Instancer *out) {
+	const Cn_Usd::Instancer &in = usd->instancers[size_t(index)];
+	*out = {};
+	out->name = str(in.name);
+	out->path = str(in.path);
+	copy_matrix(in.world, out->world);
+	out->prototype_count = int32_t(in.prototypes.size());
+	out->point_count = in.point_count;
+	out->nested = in.nested;
+}
+
+extern "C" int32_t cn_usd_prototype_meshes(Cn_Usd *usd, int32_t instancer, int32_t prototype,
+                                           const Cn_Usd_Prototype_Mesh **meshes) {
+	const std::vector<Cn_Usd_Prototype_Mesh> &list = usd->instancers[size_t(instancer)].meshes[size_t(prototype)];
+	*meshes = list.data();
+	return int32_t(list.size());
+}
+
+extern "C" int32_t cn_usd_instancer_points(Cn_Usd *usd, int32_t instancer, int32_t *prototypes, double *matrices) {
+	const Cn_Usd::Instancer &in = usd->instancers[size_t(instancer)];
+	const double time = lightusd::value::TimeCode::Default();
+	std::vector<lightusd::value::matrix4d> xforms;
+	std::vector<bool> mask;
+	std::string err;
+	if (!lightusd::ComputeInstanceTransformsAtTime(*in.prim, time, lightusd::value::TimeSampleInterpolationType::Linear,
+	                                               &xforms, &err) ||
+	    !lightusd::ComputeMaskAtTime(*in.prim, time, &mask, &err)) {
+		return 0;
+	}
+	std::vector<int32_t> indices = in.prim->get_protoIndices(time);
+	if (indices.size() != xforms.size() || mask.size() != xforms.size()) {
+		return 0;
+	}
+	int32_t at = 0;
+	for (size_t i = 0; i < xforms.size(); i++) {
+		if (!mask[i]) {
+			continue;
+		}
+		if (at >= in.point_count) {
+			return 0;
+		}
+		prototypes[at] = indices[i];
+		copy_matrix(xforms[i], &matrices[size_t(at) * 16]);
+		at++;
+	}
+	return at == in.point_count;
 }
 
 // Reads element `i` of an attribute with `width` floats per element, whatever its variability. False when the

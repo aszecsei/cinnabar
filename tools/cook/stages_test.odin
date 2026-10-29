@@ -335,6 +335,144 @@ a_texture_through_a_node_graph_is_a_mask_of_its_red :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(instance, "has_metallic_tex = true"))
 }
 
+// A stage in centimeters with two point instancers, each with its own copy of the same prototype, as Jungle Ruins tiles
+// its forests, and a ground that is a prim of its own. The second instancer hides one of its points.
+@(private = "file")
+INSTANCER_STAGE :: `#usda 1.0
+(
+    upAxis = "Y"
+    metersPerUnit = 0.01
+    defaultPrim = "root"
+)
+
+def Xform "root"
+{
+    def Mesh "ground"
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1000, 0, 0), (0, 0, 1000)]
+    }
+
+    def PointInstancer "trees_a"
+    {
+        double3 xformOp:translate = (100, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+        rel prototypes = [</root/trees_a/Prototypes/tree>]
+        int[] protoIndices = [0, 0, 0]
+        point3f[] positions = [(0, 0, 0), (100, 0, 0), (0, 0, 100)]
+        float3[] scales = [(1, 1, 1), (2, 2, 2), (1, 1, 1)]
+
+        def Scope "Prototypes"
+        {
+            def Mesh "tree"
+            {
+                int[] faceVertexCounts = [3]
+                int[] faceVertexIndices = [0, 1, 2]
+                point3f[] points = [(0, 0, 0), (50, 0, 0), (0, 200, 0)]
+            }
+        }
+    }
+
+    def PointInstancer "trees_b"
+    {
+        rel prototypes = [</root/trees_b/Prototypes/tree>]
+        int[] protoIndices = [0, 0]
+        point3f[] positions = [(0, 0, -500), (0, 0, -600)]
+        int64[] invisibleIds = [1]
+
+        def Scope "Prototypes"
+        {
+            def Mesh "tree"
+            {
+                int[] faceVertexCounts = [3]
+                int[] faceVertexIndices = [0, 1, 2]
+                point3f[] points = [(0, 0, 0), (50, 0, 0), (0, 200, 0)]
+            }
+        }
+    }
+}
+`
+
+@(private = "file")
+stage_set :: proc(t: ^testing.T, tree: Tree, meta: format.Meta, name: string) -> (data: []byte, blob: ^format.Instance_Set_Blob, ok: bool) {
+	guid, found := format.meta_subasset(meta, format.INSTANCE_SET_KIND, name)
+	testing.expectf(t, found, "the stage has no instance set %s", name)
+	if !found {
+		return
+	}
+	data = tree_blob(t, tree, guid)
+	blob, ok = format.instance_set_view(data)
+	testing.expectf(t, ok, "%s did not cook into an instance set blob", name)
+	return
+}
+
+@(test)
+point_instancers_are_instance_sets_of_shared_prototypes :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/forest.usda", INSTANCER_STAGE}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, {.Stage})
+	testing.expect(t, pass.ok)
+	// The ground, and the trees' prototype once: the two copies are the same mesh.
+	testing.expect_value(t, pass.cooked[.Mesh], 2)
+	testing.expect_value(t, pass.cooked[.Instance_Set], 2)
+	meta := stage_meta(t, tree, "forest.usda")
+	_, has_ground := format.meta_subasset(meta, format.MESH_KIND, "root/ground")
+	tree_mesh, has_tree := format.meta_subasset(meta, format.MESH_KIND, "prototypes/tree")
+	testing.expect(t, has_ground && has_tree)
+	for s in meta.subassets {
+		testing.expectf(t, !strings.contains(s.name, "Prototypes"), "a prototype's prim is a sub-asset of its own: %s", s.name)
+	}
+
+	// The first instancer's three points, about it, in meters with x mirrored; the second's visible point.
+	data, blob, ok := stage_set(t, tree, meta, "root/trees_a")
+	if ok {
+		testing.expect_value(t, blob.count, 3)
+		testing.expect_value(t, blob.cell_count, 1)
+		testing.expect_value(t, blob.max_scale, 2)
+		wants := [3][3]f32{{0, 0, 0}, {-1, 0, 0}, {0, 0, 1}}
+		for i in format.instance_set_instances(data, blob) {
+			want := wants[i.point]
+			testing.expectf(t, i.position == want, "point %d is at %v, not %v", i.point, i.position, want)
+			testing.expect_value(t, f32(i.scale.y), i.point == 1 ? 2 : 1)
+			testing.expect_value(t, i.rotation.w, 32767)
+		}
+	}
+	data, blob, ok = stage_set(t, tree, meta, "root/trees_b")
+	if ok {
+		testing.expect_value(t, blob.count, 1)
+		instances := format.instance_set_instances(data, blob)
+		testing.expect_value(t, instances[0].point, 0)
+		testing.expect_value(t, instances[0].position, [3]f32{0, 0, -5})
+	}
+
+	// Each instancer is an entity that draws the shared tree at its set, and the prototypes are not entities.
+	again := cook(options, {.Stage, .Scene})
+	testing.expect(t, again.ok)
+	prefab_text := ""
+	for a in again.assets {
+		if a.owner != {} && a.kind == .Prefab {
+			prefab_text = string(a.source)
+		}
+	}
+	testing.expect_value(t, strings.count(prefab_text, "component 53 Instanced_Mesh_Renderer"), 2)
+	testing.expect_value(t, strings.count(prefab_text, fmt.tprintf("mesh = $%s", guid_text(tree_mesh))), 2)
+	testing.expect_value(t, strings.count(prefab_text, "component 33 Mesh_Renderer"), 1)
+	testing.expectf(t, strings.contains(prefab_text, "offset = [-1.0, 0.0, 0.0]"), "trees_a is not 1 m along -x: %s", prefab_text)
+	testing.expect(t, !strings.contains(prefab_text, "name = \"tree\""))
+}
+
+@(test)
+skipped_point_instancers_cook_neither_sets_nor_prototypes :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/forest.usda", INSTANCER_STAGE}, {"content/forest.usda.meta", "guid = 0123456789abcdef0123456789abcdef\npoint_instancers = skip\n"}})
+	defer remove_tree(tree)
+	pass := cook(tree_options(tree), {.Stage})
+	testing.expect(t, pass.ok)
+	testing.expect_value(t, pass.cooked[.Mesh], 1)
+	testing.expect_value(t, pass.cooked[.Instance_Set], 0)
+}
+
 @(test)
 a_stage_without_its_layers_warns_and_cooks_nothing :: proc(t: ^testing.T) {
 	stage := "#usda 1.0\n(\n    subLayers = [@./downloads/missing.usda@]\n)\n"

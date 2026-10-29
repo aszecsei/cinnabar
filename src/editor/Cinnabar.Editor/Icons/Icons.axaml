@@ -51,6 +51,8 @@
     <!-- Not from Fluent: a mesh, an outlined triangle, and a model, a file of meshes: a frame around a triangle. Drawn for those assets. -->
     <StreamGeometry x:Key="Icon.effect">M9 11.5A3.5 3.5 0 1 1 9 18.5A3.5 3.5 0 1 1 9 11.5ZM9 13A2 2 0 1 0 9 17A2 2 0 1 0 9 13ZM16 4A2.5 2.5 0 1 1 16 9A2.5 2.5 0 1 1 16 4ZM16 5.5A1 1 0 1 0 16 7.5A1 1 0 1 0 16 5.5ZM17.5 13A1.75 1.75 0 1 1 17.5 16.5A1.75 1.75 0 1 1 17.5 13Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.prefab">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM8 8H16V16H8Z</StreamGeometry>
+    <!-- Not from Fluent: an instance set, the poses of a point instancer, a scatter of points. -->
+    <StreamGeometry x:Key="Icon.instance-set">M4 4H8V8H4ZM11 6H15V10H11ZM17 3H21V7H17ZM5 11H9V15H5ZM12 13H16V17H12ZM18 10H22V14H18ZM7 18H11V22H7ZM16 19H20V23H16Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.mesh">F0 M12 2.5L22 20H2ZM12 5.5L4.6 18.5H19.4Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.model">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM12 7L17.5 17H6.5Z</StreamGeometry>
     <!-- Not from Fluent: a stage, a whole USD scene, a frame around two triangles. -->

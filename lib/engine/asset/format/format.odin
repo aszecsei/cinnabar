@@ -91,6 +91,8 @@ subasset_kind_of :: proc(kind: string) -> Asset_Kind {
 		return .Material_Instance
 	case PREFAB_KIND:
 		return .Prefab
+	case INSTANCE_SET_KIND:
+		return .Instance_Set
 	}
 	return .None
 }
@@ -197,8 +199,10 @@ Asset_Kind :: enum u32 {
 	Prefab,
 	// Emitters of particles, which a Particle_System places.
 	Effect,
-	// A USD stage, which has no blob: its meshes, textures, material instances and prefab are sub-assets.
+	// A USD stage, which has no blob: its meshes, textures, material instances, instance sets and prefab are sub-assets.
 	Stage,
+	// The poses of a USD point instancer's points, which an Instanced_Mesh_Renderer draws a mesh at.
+	Instance_Set,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

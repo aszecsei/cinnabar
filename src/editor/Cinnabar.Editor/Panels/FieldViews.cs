@@ -625,12 +625,13 @@ sealed class EntityView : FieldView
 sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string> Reveal)
 {
     /// <summary>
-    /// Whether the field takes an asset: one in the index of the field's kind. A material field takes materials and their
-    /// instances alike, as a renderer draws either.
+    /// Whether the field takes an asset: one in the index of the field's kind, whose snake case name, such as
+    /// "instance_set", is the kind's without underscores. A material field takes materials and their instances alike, as
+    /// a renderer draws either.
     /// </summary>
     public bool Takes(Link.Cook.Asset asset) =>
         Kind == ""
-        || string.Equals(asset.Kind.ToString(), Kind, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(asset.Kind.ToString(), Kind.Replace("_", ""), StringComparison.OrdinalIgnoreCase)
         || (Kind == "material" && asset.Kind == Link.Cook.AssetKind.MaterialInstance);
 
     /// <summary>GUIDs of assets that the picker offers first, before the rest by name: the Face panel's dev materials.</summary>

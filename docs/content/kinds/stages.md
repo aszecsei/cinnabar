@@ -1,16 +1,17 @@
 # Stages
 
-Stages are USD files: `.usda` text, `.usdc` crate and `.usd` of either kind, read with LightUSD, which TinyUSDZ is now named (see [LightUSD](#lightusd)). A stage is a `Stage` asset, which has no blob of its own: like a glTF model, it is a file of sub-assets, each with its GUID on a line of its `.meta` file (see [Identity](../identity-and-cooking.md#identity)). Unlike a model, a stage brings its whole scene: its meshes, the images and UsdPreviewSurface materials that they use, and its prims as a prefab. `just stages` runs `cook stages --cache build/<target>/content --config dev|release` with the roots; the material and scene passes run it first too, so `just build` cooks stages without asking.
+Stages are USD files: `.usda` text, `.usdc` crate and `.usd` of either kind, read with LightUSD, which TinyUSDZ is now named (see [LightUSD](#lightusd)). A stage is a `Stage` asset, which has no blob of its own: like a glTF model, it is a file of sub-assets, each with its GUID on a line of its `.meta` file (see [Identity](../identity-and-cooking.md#identity)). Unlike a model, a stage brings its whole scene: its meshes, the images and UsdPreviewSurface materials that they use, its point instancers' poses, and its prims as a prefab. `just stages` runs `cook stages --cache build/<target>/content --config dev|release` with the roots; the material and scene passes run it first too, so `just build` cooks stages without asking.
 
-**In this document:** [Sub-assets](#sub-assets) · [Composition](#composition) · [Meshes](#meshes) · [Textures](#textures) · [Materials](#materials) · [Prefab](#prefab) · [Cooking](#cooking) · [Import settings](#import-settings) · [LightUSD](#lightusd) · [Limits](#limits)
+**In this document:** [Sub-assets](#sub-assets) · [Composition](#composition) · [Meshes](#meshes) · [Textures](#textures) · [Materials](#materials) · [Point instancers](#point-instancers) · [Prefab](#prefab) · [Cooking](#cooking) · [Import settings](#import-settings) · [LightUSD](#lightusd) · [Limits](#limits)
 
 ## Sub-assets
 
 | Kind | Line in the `.meta` file | Blob |
 |---|---|---|
-| Mesh | `mesh.<prim path>`, or `mesh.<prim path>#<n>` for each part of a mesh that is split | Cooked by the stage |
+| Mesh | `mesh.<prim path>`, or `mesh.<prim path>#<n>` for each part of a mesh that is split; a point instancer's prototype is `mesh.prototypes/<prim name>` | Cooked by the stage |
 | Texture | `texture.<image path>@<role>`, such as `texture.main_sponza/textures/wall_Roughness.png@mask.r` | Cooked by the stage |
 | Material instance | `material_instance.<material path>`, with `#two_sided` for a two-sided mesh's | Cooked by the material pass, from text that the stage generates |
+| Instance set | `instance_set.<instancer path>`, or `instance_set.<instancer path>#<n>` for each mesh of an instancer whose prototypes have several | Cooked by the stage |
 | Prefab | `prefab.stage` | Cooked by the scene pass, from text that the stage generates |
 
 A prim path is the prim's absolute path without its leading `/`. An image path is from the folder that holds the stage's first sublayer's folder, as a download's, or else from the stage's own folder. Names are keys, so an `=` in one becomes `_`.
@@ -62,6 +63,17 @@ A UsdPreviewSurface material is an instance of one of six built-in materials, `l
 - **UsdTransform2d** on a material's textures becomes its `uv_transform`, the first one's scale and translation for all of them, with v's offset made for v down. Its rotation is not drawn.
 - **Not drawn:** `occlusion`, which the lit shading model has no input for, and the specular workflow, which draws as metallic 0. Each is a warning that counts the materials.
 
+## Point instancers
+
+A UsdGeomPointInstancer places its prototypes at its points: Jungle Ruins has 778 of them, with 8.7 million points. The cooker keeps each one whole, as an `Instance_Set` sub-asset for each mesh that its prototypes draw, which an `Instanced_Mesh_Renderer` draws the mesh at (see [Rendering: GPU scene](../../rendering/gpu-scene.md#instanced-meshes)). That is the default, `point_instancers = instanced`.
+
+- **Prototypes** are prims of the stage, under their instancer, which Tydra converts as it does any mesh. The prefab leaves them out, so a prototype is not drawn where it was modeled.
+- **Shared prototypes.** A scene that tiles its instancers has a copy of each prototype in each tile: Jungle Ruins' 773 prototype meshes are 53 meshes. A prototype's mesh that is the same as one before it, by its corners, subsets, materials and sides, draws as that one, which is the only one that cooks. A prototype's mesh is named for its prim alone, `prototypes/<name>`, since its copies are in different tiles; a second mesh of the same name gets `_2`.
+- **Poses.** An instance's pose is the mesh's pose under its prototype, then its point's, from `positions`, `orientations` and `scales`, in the instancer's space, turned into the engine's axes in meters as a child entity's is. A point that `invisibleIds` or `inactiveIds` hides is left out, and so is one whose `protoIndices` entry is out of range, with a warning. A pose with shear is posed without it, with a warning that counts them.
+- **The blob** (`format.Instance_Set_Blob`, `lib/engine/asset/format/instances.odin`) holds 32 bytes an instance: its position, its rotation as a unit quaternion in snorm16, its scale in `f16`, and its point's index. The instances are in the order of a Morton curve over their bounds, in cells of at most `INSTANCE_CELL_SIZE` (256), and each cell has a sphere about its positions and the largest scale of any of their axes, which culling grows a mesh's sphere by.
+- **The prefab** has an entity for each point instancer, under the root and posed in the stage, whose `Instanced_Mesh_Renderer` draws its set. An instancer of several sets has a child for each, and a mesh in parts a child for each part, all drawing the same set.
+- **`point_instancers = skip`** leaves instancers out, prototypes too; **`entities`** makes an entity of each point, as Tydra expands them, which is far too many for a forest.
+
 ## Prefab
 
 The stage's prims are one prefab: a root named for the stage, at the origin, and an entity for each prim that holds a mesh or has one below it, posed under its parent with a `Local_Transform`. An entity's ID is the hash of its prim's path, so a scene's overrides of the prefab's entities survive a cook (see [Prefabs](../../editor/prefabs.md#instances-in-a-scene)).
@@ -69,6 +81,7 @@ The stage's prims are one prefab: a root named for the stage, at the origin, and
 - **A pose** is the prim's local matrix, turned into the engine's axes in meters, then split into an offset, a rotation and a scale. A matrix with shear cannot be split exactly; such a prim is posed without its shear, with one warning that counts them.
 - **A mesh** is the entity's `Mesh_Renderer`, whose slots are the instances of its subsets' materials. A mesh in parts is an entity with a child for each part.
 - **Instances** of USD's scene-graph instancing, and the points of point instancers with `point_instancers = entities`, are entities under the root, posed in the stage.
+- **Point instancers** are entities with an `Instanced_Mesh_Renderer` (see [Point instancers](#point-instancers)), and their prototypes are not entities.
 - **Cameras and lights** are not in the prefab.
 
 A scene places the prefab as it places any: an entity with `prefab = $<guid>` (see [Prefabs](../../editor/prefabs.md#instances-in-a-scene)). The editor opens it for viewing; edits to it are overrides in the scene, because the stage writes it again.
@@ -77,11 +90,11 @@ A scene places the prefab as it places any: an entity with `prefab = $<guid>` (s
 
 A stage cooks each sub-asset on its own and writes its blob at once, in an arena that is freed after it, so a stage of gigabytes of images never sits in memory whole. A sub-asset that fails keeps its old blob, and the stage fails.
 
-- **Each sub-asset's key** covers what it is made from. A texture's is its image's path, size and modification time, its role and the settings; a mesh's is its corners and subsets after conversion. A change to one image cooks only its textures.
+- **Each sub-asset's key** covers what it is made from. A texture's is its image's path, size and modification time, its role and the settings; a mesh's is its corners and subsets after conversion; an instance set's is its instancer's points and its prototypes' poses of its mesh. A change to one image cooks only its textures.
 - **The manifest**, `<cache>/stages/<guid>.deps`, holds what the last cook read and made: the stage's key, the size and modification time of every USD file under its sublayers' folders and of every image, and each sub-asset with its blob's key and its generated text. A stage whose manifest still matches is current without being opened: on Sponza that takes milliseconds, where opening it takes seconds.
 - **The stage's key** covers the cooker's version, LightUSD's, meshoptimizer's and Compressonator's, the configuration, the path, the source, the GUID and the settings. The sub-asset lines of the `.meta` file are not in it, because the cooker writes them.
 - **The daemon's watcher** does not see a stage's downloads, which are outside the content or in a dot folder, so after changing them, re-import the stage or run `just stages`.
-- **`cook stage-report <stage>...`**, which `just intel-report` runs, opens stages as a cook would and prints what they would make: prims, meshes and their parts, triangles, material instances, textures, instances and lights, and the meshes and textures resident at once (see [Rendering: Assets](../../rendering/assets.md#gpu-residency)).
+- **`cook stage-report <stage>...`**, which `just intel-report` runs, opens stages as a cook would and prints what they would make, with point instancers as instance sets: prims, the meshes that cook and their parts, triangles, point instancers, points, prototype meshes and the meshes they share, instance sets, material instances, textures and lights, and the meshes, textures and instance sets resident at once (see [Rendering: Assets](../../rendering/assets.md#gpu-residency)).
 
 ## Import settings
 
@@ -93,17 +106,19 @@ A stage cooks each sub-asset on its own and writes its blob at once, in an arena
 | `impostor` | `true`, `false` | `false` | Bakes each mesh's impostor (see [Impostors](meshes.md#impostors)). |
 | `texture_max_size` | `256` to `16384` | `4096` | Halves each texture until it fits. |
 | `normal_y` | `file`, `flip` | `file` | Negates the normal maps' green channel, for maps made for the other convention. |
-| `point_instancers` | `skip`, `entities` | `skip` | Leaves out point instancers, or makes an entity of each point. |
+| `point_instancers` | `instanced`, `skip`, `entities` | `instanced` | Draws each point instancer with an instance set, leaves them out, or makes an entity of each point (see [Point instancers](#point-instancers)). |
 
 ## LightUSD
 
-LightUSD is the submodule `vendor/lightusd` (github.com/lighttransport/tinyusdz), pinned to a release, and `just update-lightusd <tag>` moves the pin. It is C++17 without dependencies. `just lightusd` builds it with `tools/cook/usd/CMakeLists.txt`, which turns off its image loader, tools and extras, and builds `cn_usd.cpp`, the cooker's C interface to it (`cn_usd.h`), which `tools/cook/usd.odin` binds. One handle holds one composed and converted stage, and gives its nodes, meshes as triangle corners grouped by subset, materials and textures as flat C structures.
+LightUSD is the submodule `vendor/lightusd` (github.com/lighttransport/tinyusdz), pinned to a release, and `just update-lightusd <tag>` moves the pin. It is C++17 without dependencies. `just lightusd` builds it with `tools/cook/usd/CMakeLists.txt`, which turns off its image loader, tools and extras, and builds `cn_usd.cpp`, the cooker's C interface to it (`cn_usd.h`), which `tools/cook/usd.odin` binds. One handle holds one composed and converted stage, and gives its nodes, meshes as triangle corners grouped by subset, materials, textures and point instancers as flat C structures. Point instancers come from the composed stage, not from Tydra: their prototypes' meshes, each with its pose under its prototype, and their points' matrices, which it computes only when asked, so a forest is never a list of millions of instances.
 
 ## Limits
 
 - **`.usdz`** is not yet a stage.
 - **Images** are those that `stb_image` decodes: PNG, JPEG, TGA and HDR. A TIFF or EXR image is a warning, and its input keeps its value.
-- **Point instancers** make an entity of each point at most, which is far too many for a forest: Jungle Ruins has 8.7 million. They need an instanced renderer.
-- **Size:** a mesh cooks whole, so its triangles fit in memory. Jungle Ruins' meshes are 171 million triangles, and converting it with its point instancers takes about 26 GB.
+- **Instance sets are not drawn yet:** the renderer does not draw `Instanced_Mesh_Renderer`.
+- **Nested instancing**, a point instancer in another's prototype, is left out, with a warning that counts them; the outer instancer draws its prototypes' meshes.
+- **Size:** a mesh cooks whole, so its triangles fit in memory. Jungle Ruins' meshes that cook are 18.6 million triangles; converting it with its point instancers expanded took about 26 GB.
+- **Residency:** Jungle Ruins makes 1,173 meshes, textures and instance sets, past the renderer's `MAX_RESIDENT` of 1,024.
 - **Decals** that a stage models as quads on a surface, as Sponza's `decals_*_floor` are, z-fight with the surface: the engine has no decals yet, and an opaque or masked material takes no depth bias.
 - **Not imported:** cameras, lights, skins, animation, variants other than the stage's selections, and materials other than UsdPreviewSurface, such as MaterialX.

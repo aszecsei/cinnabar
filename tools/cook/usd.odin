@@ -31,6 +31,7 @@ Cn_Usd_Info :: struct {
 	instance_count:  i32,
 	light_count:     i32,
 	layer_count:     i32,
+	instancer_count: i32,
 }
 
 Cn_Usd_Node_Kind :: enum i32 {
@@ -42,15 +43,17 @@ Cn_Usd_Node_Kind :: enum i32 {
 }
 
 Cn_Usd_Node :: struct {
-	parent:  i32,
-	kind:    Cn_Usd_Node_Kind,
-	mesh:    i32,
-	visible: i32,
-	name:    Cn_Usd_String,
-	path:    Cn_Usd_String,
+	parent:    i32,
+	kind:      Cn_Usd_Node_Kind,
+	mesh:      i32,
+	visible:   i32,
+	// The prim is a point instancer's prototype or under one.
+	prototype: i32,
+	name:      Cn_Usd_String,
+	path:      Cn_Usd_String,
 	// Row-major, for row vectors, as USD stores it.
-	local:   [16]f64,
-	world:   [16]f64,
+	local:     [16]f64,
+	world:     [16]f64,
 }
 
 Cn_Usd_Instance :: struct {
@@ -59,6 +62,23 @@ Cn_Usd_Instance :: struct {
 	visible:  i32,
 	path:     Cn_Usd_String,
 	world:    [16]f64,
+}
+
+Cn_Usd_Instancer :: struct {
+	name:            Cn_Usd_String,
+	path:            Cn_Usd_String,
+	world:           [16]f64,
+	prototype_count: i32,
+	// The points that are not invisible or inactive.
+	point_count:     i32,
+	// The instancer is under another's prototype.
+	nested:          i32,
+}
+
+Cn_Usd_Prototype_Mesh :: struct {
+	mesh:  i32,
+	// The mesh's pose under its prototype's root.
+	local: [16]f64,
 }
 
 Cn_Usd_Subset :: struct {
@@ -155,6 +175,9 @@ foreign lightusd {
 	cn_usd_layer :: proc(usd: ^Cn_Usd, index: i32) -> Cn_Usd_String ---
 	cn_usd_node :: proc(usd: ^Cn_Usd, index: i32, node: ^Cn_Usd_Node) ---
 	cn_usd_instance :: proc(usd: ^Cn_Usd, index: i32, instance: ^Cn_Usd_Instance) ---
+	cn_usd_instancer :: proc(usd: ^Cn_Usd, index: i32, instancer: ^Cn_Usd_Instancer) ---
+	cn_usd_prototype_meshes :: proc(usd: ^Cn_Usd, instancer, prototype: i32, meshes: ^[^]Cn_Usd_Prototype_Mesh) -> i32 ---
+	cn_usd_instancer_points :: proc(usd: ^Cn_Usd, instancer: i32, prototypes: [^]i32, matrices: [^]f64) -> i32 ---
 	cn_usd_mesh :: proc(usd: ^Cn_Usd, index: i32, mesh: ^Cn_Usd_Mesh) -> i32 ---
 	cn_usd_material :: proc(usd: ^Cn_Usd, index: i32, material: ^Cn_Usd_Material) ---
 	cn_usd_texture :: proc(usd: ^Cn_Usd, index: i32, texture: ^Cn_Usd_Texture) ---

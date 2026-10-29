@@ -33,6 +33,7 @@ typedef struct {
 	int32_t instance_count;
 	int32_t light_count;
 	int32_t layer_count;
+	int32_t instancer_count;
 } Cn_Usd_Info;
 
 typedef enum {
@@ -49,6 +50,8 @@ typedef struct {
 	int32_t kind;   // Cn_Usd_Node_Kind
 	int32_t mesh;   // index of the mesh for CN_USD_NODE_MESH, else -1
 	int32_t visible;
+	// The prim is a point instancer's prototype or under one, which Tydra converts as though it were in the scene.
+	int32_t prototype;
 	Cn_Usd_String name;
 	Cn_Usd_String path;
 	// Row-major, for row vectors, as USD stores it: p' = p * local.
@@ -64,6 +67,26 @@ typedef struct {
 	Cn_Usd_String path;
 	double world[16];
 } Cn_Usd_Instance;
+
+// A UsdGeomPointInstancer, kept whole: its prototypes and its points, each a prototype placed by a matrix, without
+// expanding them into instances.
+typedef struct {
+	Cn_Usd_String name;
+	Cn_Usd_String path;
+	// Row-major, for row vectors, as Cn_Usd_Node's.
+	double world[16];
+	int32_t prototype_count;
+	// The points that are not invisible or inactive.
+	int32_t point_count;
+	// The instancer is under another's prototype.
+	int32_t nested;
+} Cn_Usd_Instancer;
+
+// A mesh of a prototype, posed under the prototype's root.
+typedef struct {
+	int32_t mesh;
+	double local[16];
+} Cn_Usd_Prototype_Mesh;
 
 // A run of a mesh's corners that one material draws.
 typedef struct {
@@ -151,7 +174,7 @@ typedef struct {
 } Cn_Usd_Texture;
 
 typedef struct {
-	// Expand point instancers into instances. Off, they are left out.
+	// Expand point instancers into instances. Off, they are left out of the instances, and cn_usd_instancer gives them.
 	int32_t point_instancers;
 } Cn_Usd_Options;
 
@@ -166,6 +189,12 @@ void cn_usd_info(Cn_Usd *usd, Cn_Usd_Info *info);
 Cn_Usd_String cn_usd_layer(Cn_Usd *usd, int32_t index);
 void cn_usd_node(Cn_Usd *usd, int32_t index, Cn_Usd_Node *node);
 void cn_usd_instance(Cn_Usd *usd, int32_t index, Cn_Usd_Instance *instance);
+void cn_usd_instancer(Cn_Usd *usd, int32_t index, Cn_Usd_Instancer *instancer);
+// The meshes of an instancer's prototype, valid until cn_usd_close. Returns how many.
+int32_t cn_usd_prototype_meshes(Cn_Usd *usd, int32_t instancer, int32_t prototype, const Cn_Usd_Prototype_Mesh **meshes);
+// Fills point_count prototype indices and matrices, 16 to a point, relative to the instancer and row-major for row
+// vectors. False when the instancer's arrays do not agree.
+int32_t cn_usd_instancer_points(Cn_Usd *usd, int32_t instancer, int32_t *prototypes, double *matrices);
 // False when the mesh cannot be made into corners.
 int32_t cn_usd_mesh(Cn_Usd *usd, int32_t index, Cn_Usd_Mesh *mesh);
 void cn_usd_material(Cn_Usd *usd, int32_t index, Cn_Usd_Material *material);

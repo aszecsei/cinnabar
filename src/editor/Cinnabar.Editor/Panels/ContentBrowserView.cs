@@ -337,6 +337,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Prefab => "prefab",
         AssetKind.Effect => "effect",
         AssetKind.Stage => "stage",
+        AssetKind.InstanceSet => "instance set",
         _ => "script",
     };
 
