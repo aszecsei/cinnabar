@@ -22,11 +22,11 @@ public enum MeshTool
 
 /// <summary>
 /// Mesh mode (see docs/editor/mesh-editing.md#mesh-mode): the editor's mode, not the game's, in which the viewport
-/// selects vertices, edges and faces of the edited mesh files and the gizmo moves them. The shell owns the meshes, does
+/// selects vertices, edges and faces of the edited mesh files and the gizmo moves them. The session owns the meshes, does
 /// the picking itself from the documents, the camera and the entities' poses, and tells the game what to draw over
 /// them as a Mesh_Overlay.
 /// </summary>
-public sealed partial class EditorShell
+public sealed partial class MeshSession
 {
     /// <summary>The context that the Mesh tab shows in.</summary>
     public const string MeshContext = "mode.mesh";
@@ -38,6 +38,9 @@ public sealed partial class EditorShell
     BlockDrag? _blockDrag;
 
     public bool InMeshMode { get; private set; }
+
+    /// <summary>Whether mesh mode is on and the editor is in its Edit mode.</summary>
+    public bool CanEditInMeshMode => InMeshMode && _shell.IsEditing;
 
     public MeshElement MeshElement { get; private set; } = MeshElement.Faces;
 
@@ -83,7 +86,7 @@ public sealed partial class EditorShell
     }
 
     /// <summary>Whether the selected entities place mesh files, which Edit Mesh and Tab can edit.</summary>
-    public bool CanEditMesh => CanEditScene && (InMeshMode || MeshEntities(SelectedSceneEntities).Count > 0);
+    public bool CanEditMesh => _shell.CanEditScene && (InMeshMode || MeshEntities(_shell.SelectedSceneEntities).Count > 0);
 
     // The selected entities whose Mesh_Renderer names a mesh file, with the file's GUID. A glTF mesh is not one.
     List<(SceneEntity Entity, string Guid)> MeshEntities(IEnumerable<SceneEntity> entities)
@@ -113,26 +116,26 @@ public sealed partial class EditorShell
         {
             return guid;
         }
-        return Assets.Find(guid) is { Kind: AssetKind.Mesh } asset && !Cinnabar.Editor.Content.AssetIndex.IsSubasset(asset) ? guid : null;
+        return _shell.Assets.Find(guid) is { Kind: AssetKind.Mesh } asset && !Cinnabar.Editor.Content.AssetIndex.IsSubasset(asset) ? guid : null;
     }
 
     /// <summary>Enters mesh mode with the selected entities' mesh files, or says in the console why it cannot.</summary>
     public void EnterMeshMode()
     {
-        if (!IsEditing || Scene == null)
+        if (!_shell.IsEditing || _shell.Scene == null)
         {
             return;
         }
-        var selected = SelectedSceneEntities;
+        var selected = _shell.SelectedSceneEntities;
         var meshes = MeshEntities(selected);
         if (meshes.Count == 0)
         {
-            Console.Add(LogLevel.Warning, selected.Any(e => e.Components.Any(c => c.Id == SceneEdits.MeshRendererId))
+            _shell.Console.Add(LogLevel.Warning, selected.Any(e => e.Components.Any(c => c.Id == SceneEdits.MeshRendererId))
                 ? "mesh: the selected mesh is a model's, which cannot be edited. Build level geometry as a .mesh file."
                 : "mesh: select an entity that places a .mesh file to edit it.");
             return;
         }
-        CancelGizmo();
+        _shell.CancelGizmo();
         _editedMeshes.Clear();
         foreach (var (entity, guid) in meshes)
         {
@@ -148,7 +151,7 @@ public sealed partial class EditorShell
         InMeshMode = true;
         MeshSelection = new MeshSelection(MeshElement, []);
         _hovered = null;
-        Context.Set(MeshContext, true);
+        _shell.Context.Set(MeshContext, true);
         OnMeshModeChanged();
     }
 
@@ -160,7 +163,7 @@ public sealed partial class EditorShell
             return;
         }
         CancelPendingDistance();
-        CancelGizmo();
+        _shell.CancelGizmo();
         CancelBlock();
         CancelToolPoints();
         InMeshMode = false;
@@ -168,7 +171,7 @@ public sealed partial class EditorShell
         MeshSelection = new MeshSelection(MeshElement, []);
         _hovered = null;
         _editedMeshes.Clear();
-        Context.Set(MeshContext, false);
+        _shell.Context.Set(MeshContext, false);
         OnMeshModeChanged();
     }
 
@@ -217,24 +220,24 @@ public sealed partial class EditorShell
     /// <summary>Enters mesh mode on the entity at a pixel, as a double click does, once the pick answers.</summary>
     public void EnterMeshModeAt(Vec2 pixel)
     {
-        if (InMeshMode || !IsEditing)
+        if (InMeshMode || !_shell.IsEditing)
         {
             return;
         }
-        PickPixel(pixel, result =>
+        _shell.PickPixel(pixel, result =>
         {
-            var hits = result.Hits.Where(h => Pickable(h.Entity)).ToList();
+            var hits = result.Hits.Where(h => _shell.Pickable(h.Entity)).ToList();
             // A double click inside an instance first selects the entity under the mouse, which a click does not.
-            if (hits.Count > 0 && InstanceOf(hits[0].SceneId) is { IsInstanceRoot: false } && !Selection.Contains(hits[0].Entity))
+            if (hits.Count > 0 && _shell.InstanceOf(hits[0].SceneId) is { IsInstanceRoot: false } && !_shell.Selection.Contains(hits[0].Entity))
             {
-                Selection.Set([hits[0].Entity]);
+                _shell.Selection.Set([hits[0].Entity]);
                 return;
             }
-            if (hits.Count == 0 || Scene?.Expanded.Flat.Find(hits[0].SceneId) is not { } entity || MeshFileOf(entity) == null)
+            if (hits.Count == 0 || _shell.Scene?.Expanded.Flat.Find(hits[0].SceneId) is not { } entity || MeshFileOf(entity) == null)
             {
                 return;
             }
-            Selection.Select(hits[0].Entity);
+            _shell.Selection.Select(hits[0].Entity);
             EnterMeshMode();
         });
     }
@@ -246,7 +249,7 @@ public sealed partial class EditorShell
             return;
         }
         CommitPendingDistance();
-        CancelGizmo();
+        _shell.CancelGizmo();
         MeshElement = kind;
         MeshSelection = MeshSelection.As(kind, FindMeshData);
         _hovered = null;
@@ -304,7 +307,7 @@ public sealed partial class EditorShell
         {
             selection = selection.As(MeshElement, FindMeshData);
         }
-        CancelGizmo();
+        _shell.CancelGizmo();
         MeshSelection = selection;
         OnMeshModeChanged();
     }
@@ -316,14 +319,14 @@ public sealed partial class EditorShell
 
     // The placement of an edited mesh relative to the camera, from its entity's pose in the document.
     MeshPlacement? PlacementOf(string guid) =>
-        Scene != null && _editedMeshes.TryGetValue(guid, out var id) && Scene.Expanded.Flat.Find(id) is { } entity && SceneEdits.WorldPose(Scene.Expanded.Flat, entity) is { } pose
-            ? MeshPlacement.Of(pose, Camera.Position) : null;
+        _shell.Scene != null && _editedMeshes.TryGetValue(guid, out var id) && _shell.Scene.Expanded.Flat.Find(id) is { } entity && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, entity) is { } pose
+            ? MeshPlacement.Of(pose, _shell.Camera.Position) : null;
 
     /// <summary>The element under a pixel in the current kind, or null: the editor's own pick, synchronous.</summary>
     public MeshItem? MeshElementAt(Vec2 pixel)
     {
-        var (width, height) = FrameSize;
-        var ray = Camera.Ray(pixel, width, height);
+        var (width, height) = _shell.FrameSize;
+        var ray = _shell.Camera.Ray(pixel, width, height);
         MeshItem? best = null;
         var bestDistance = double.MaxValue;
         foreach (var guid in _editedMeshes.Keys)
@@ -335,8 +338,8 @@ public sealed partial class EditorShell
             var hit = MeshPick.Face(mesh, placement, ray, SelectThrough);
             int? index = MeshElement switch
             {
-                MeshElement.Vertices => MeshPick.Vertex(mesh, placement, Camera, pixel, width, height, hit?.Distance),
-                MeshElement.Edges => MeshPick.Edge(mesh, placement, Camera, pixel, width, height, hit?.Distance),
+                MeshElement.Vertices => MeshPick.Vertex(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance),
+                MeshElement.Edges => MeshPick.Edge(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance),
                 _ => hit?.Face,
             };
             if (index is not { } i)
@@ -357,7 +360,7 @@ public sealed partial class EditorShell
     /// <summary>Highlights the element under the mouse. The game hears of it only when it changes.</summary>
     public void HoverMesh(Vec2 pixel)
     {
-        if (!InMeshMode || _gizmo.Target is MeshDrag)
+        if (!InMeshMode || _shell.Gizmos.Target is MeshDrag)
         {
             return;
         }
@@ -386,7 +389,7 @@ public sealed partial class EditorShell
     /// <summary>A box in mesh mode: selects the elements inside it.</summary>
     public void PickMeshBox(Vec2 a, Vec2 b, SelectMode mode)
     {
-        var (width, height) = FrameSize;
+        var (width, height) = _shell.FrameSize;
         var min = new Vec2(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y));
         var max = new Vec2(Math.Max(a.X, b.X), Math.Max(a.Y, b.Y));
         var items = new List<MeshItem>();
@@ -394,7 +397,7 @@ public sealed partial class EditorShell
         {
             if (FindMeshData(guid) is { } mesh && PlacementOf(guid) is { } placement)
             {
-                items.AddRange(MeshPick.InBox(mesh, placement, Camera, MeshElement, min, max, width, height, SelectThrough).Select(i => new MeshItem(guid, i)));
+                items.AddRange(MeshPick.InBox(mesh, placement, _shell.Camera, MeshElement, min, max, width, height, SelectThrough).Select(i => new MeshItem(guid, i)));
             }
         }
         ApplyMeshPick(items, mode);
@@ -411,19 +414,19 @@ public sealed partial class EditorShell
     }
 
     /// <summary>The gizmo's pivot and axes in mesh mode: the selected vertices' centroid, with the primary mesh's axes in local space.</summary>
-    (long[] Pivot, Quat Axes)? MeshGizmoPose()
+    internal (long[] Pivot, Quat Axes)? MeshGizmoPose()
     {
         if (PivotGizmoPose() is { } pivotPose)
         {
             return pivotPose;
         }
-        if (!InMeshMode || ActiveGizmoKind == GizmoKind.None || Scene == null || MeshSelection.IsEmpty)
+        if (!InMeshMode || ActiveGizmoKind == GizmoKind.None || _shell.Scene == null || MeshSelection.IsEmpty)
         {
             return null;
         }
         var sum = Vec3.Zero;
         var count = 0;
-        var origin = Camera.Position;
+        var origin = _shell.Camera.Position;
         Quat? primary = null;
         foreach (var guid in MeshSelection.Guids)
         {
@@ -446,7 +449,7 @@ public sealed partial class EditorShell
         {
             return ((sum / count).Offset(origin), textureAxes);
         }
-        var local = _pending == null && (Space == Space.Local || Tool == Tool.Scale);
+        var local = _pending == null && (_shell.Space == Space.Local || _shell.Tool == Tool.Scale);
         return ((sum / count).Offset(origin), local ? primary ?? Quat.Identity : Quat.Identity);
     }
 
@@ -454,8 +457,8 @@ public sealed partial class EditorShell
     // camera's nearest world axis.
     (long[] Origin, int Axis) GridPlane()
     {
-        long[] origin = MeshGizmoPose()?.Pivot ?? (SelectedSceneEntity is { } entity && Scene != null && SceneEdits.WorldPose(Scene.Expanded.Flat, entity) is { } pose ? pose.Position : Camera.Pivot);
-        return (SnapRaw(origin), MeshGrid.NearestAxis(Camera.Forward));
+        long[] origin = MeshGizmoPose()?.Pivot ?? (_shell.SelectedSceneEntity is { } entity && _shell.Scene != null && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, entity) is { } pose ? pose.Position : _shell.Camera.Pivot);
+        return (SnapRaw(origin), MeshGrid.NearestAxis(_shell.Camera.Forward));
     }
 
     /// <summary>A raw World_Position rounded to the grid, in raw units, which the grid's sizes divide exactly.</summary>
@@ -469,31 +472,31 @@ public sealed partial class EditorShell
     long[] SnapToGrid(Vec3 relative)
     {
         // Snapping happens near a grid point, in small doubles, since world positions are too large for them.
-        var anchor = SnapRaw(relative.Offset(Camera.Position));
-        var local = relative + Vec3.Between(anchor, Camera.Position);
+        var anchor = SnapRaw(relative.Offset(_shell.Camera.Position));
+        var local = relative + Vec3.Between(anchor, _shell.Camera.Position);
         return MeshGrid.Snap(local, GridSize).Offset(anchor);
     }
 
-    bool PressMeshGizmo(Vec2 pixel, bool extrude)
+    internal bool PressMeshGizmo(Vec2 pixel, bool extrude)
     {
         // Shift at the start of a Move drag extrudes first, as in Hammer; the drag then sets the distance.
-        if (extrude && _pending == null && Tool == Tool.Move && MeshElement != MeshElement.Vertices)
+        if (extrude && _pending == null && _shell.Tool == Tool.Move && MeshElement != MeshElement.Vertices)
         {
             Extrude();
-            HoverGizmo(pixel);
+            _shell.HoverGizmo(pixel);
         }
-        if (MeshGizmoPose() is not var (pivot, axes) || Scene == null)
+        if (MeshGizmoPose() is not var (pivot, axes) || _shell.Scene == null)
         {
             return false;
         }
-        var (width, height) = FrameSize;
+        var (width, height) = _shell.FrameSize;
         if (_pending != null)
         {
-            if (HotPart == GizmoPart.None)
+            if (_shell.HotPart == GizmoPart.None)
             {
                 return false;
             }
-            _gizmo.Start(new GizmoDrag(GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), new DistanceDrag(this), null);
+            _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new DistanceDrag(this), null);
             return true;
         }
         if (EditPivot)
@@ -508,8 +511,8 @@ public sealed partial class EditorShell
             {
                 return false;
             }
-            _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
-                $"{Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
+            _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
+                $"{_shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
             return true;
         }
         var drag = new MeshDrag(this, pivot, axes);
@@ -517,8 +520,8 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
+        var verb = _shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
+        _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
             $"{verb} {ElementsLabel(MeshSelection.Count)}");
         return true;
     }
@@ -526,7 +529,7 @@ public sealed partial class EditorShell
     /// <summary>Deletes the selected elements of each edited mesh, as one undo entry.</summary>
     public void DeleteMeshSelection()
     {
-        if (!InMeshMode || MeshSelection.IsEmpty || Scene == null)
+        if (!InMeshMode || MeshSelection.IsEmpty || _shell.Scene == null)
         {
             return;
         }
@@ -538,7 +541,7 @@ public sealed partial class EditorShell
                 ops.Add(new MeshOperation(guid, mesh, MeshTools.Delete(mesh, MeshElement, MeshSelection.Of(guid)), Meshes));
             }
         }
-        if (Edit($"Delete {ElementsLabel(MeshSelection.Count)}", [.. ops]))
+        if (_shell.Edit($"Delete {ElementsLabel(MeshSelection.Count)}", [.. ops]))
         {
             SetMeshSelection(MeshSelection.Clear());
         }
@@ -547,7 +550,7 @@ public sealed partial class EditorShell
     /// <summary>Starts a primitive: a drag on the grid plane from a pixel, which becomes its footprint.</summary>
     public bool BeginBlock(Vec2 pixel)
     {
-        if (!IsEditing || Scene == null || MeshTool != MeshTool.Create)
+        if (!_shell.IsEditing || _shell.Scene == null || MeshTool != MeshTool.Create)
         {
             return false;
         }
@@ -609,9 +612,9 @@ public sealed partial class EditorShell
 
     long[]? PointOnGrid(Vec2 pixel, long[] origin, int axis)
     {
-        var (width, height) = FrameSize;
-        var ray = Camera.Ray(pixel, width, height);
-        if (MeshGrid.HitPlane(Camera.RelativeTo(origin), MeshGrid.AxisVector(axis), ray) is not { } hit)
+        var (width, height) = _shell.FrameSize;
+        var ray = _shell.Camera.Ray(pixel, width, height);
+        if (MeshGrid.HitPlane(_shell.Camera.RelativeTo(origin), MeshGrid.AxisVector(axis), ray) is not { } hit)
         {
             return null;
         }
@@ -624,7 +627,7 @@ public sealed partial class EditorShell
         for (var n = 1; ; n++)
         {
             var name = n == 1 ? stem : $"{stem}_{n}";
-            if (Scene!.Expanded.Flat.Entities.All(e => e.Name != name) && Meshes.Documents.All(d => Path.GetFileNameWithoutExtension(d.Path) != name))
+            if (_shell.Scene!.Expanded.Flat.Entities.All(e => e.Name != name) && Meshes.Documents.All(d => Path.GetFileNameWithoutExtension(d.Path) != name))
             {
                 return name;
             }
@@ -634,12 +637,12 @@ public sealed partial class EditorShell
     void OnMeshModeChanged()
     {
         // Any edit but a primitive's own parameter change ends its parameters' editability.
-        if (!_remaking && _lastPrimitive is { } last && Scene != null && (Scene.History.Count != last.Position || Scene.Position != last.Position))
+        if (!_remaking && _lastPrimitive is { } last && _shell.Scene != null && (_shell.Scene.History.Count != last.Position || _shell.Scene.Position != last.Position))
         {
             _lastPrimitive = null;
         }
-        Commands.InvalidateAll();
-        SendGizmo();
+        _shell.Commands.InvalidateAll();
+        _shell.SendGizmo();
         SendMeshOverlay();
         MeshModeChanged?.Invoke();
     }
@@ -658,7 +661,7 @@ public sealed partial class EditorShell
                 {
                     continue;
                 }
-                var handle = World.FindScene(sceneId)?.Handle ?? 0;
+                var handle = _shell.World.FindScene(sceneId)?.Handle ?? 0;
                 var selected = MeshSelection.Of(guid).ToList();
                 var hovered = _hovered is { } h && h.Guid == guid ? h.Index : -1;
                 var edges = MeshElement == MeshElement.Edges ? selected.Where(e => e < mesh.Edges.Length).Select(e => new Wire.LiveEdge((uint)mesh.Edges[e].A, (uint)mesh.Edges[e].B)).ToArray() : [];
@@ -680,15 +683,15 @@ public sealed partial class EditorShell
         }
         var key = $"{message.Active}|{message.Element}|{message.Grid}|{message.GridSize}|{string.Join(",", message.GridOrigin)}|{message.GridAxis}|"
             + string.Join(";", message.Meshes.Select(m => $"{Convert.ToHexStringLower(m.Guid)}:{m.Entity}:{string.Join(",", m.SelectedVertices)}:{string.Join(",", m.SelectedEdges.Select(e => $"{e.A}-{e.B}"))}:{string.Join(",", m.SelectedFaces)}:{m.HoveredVertex}:{m.HasHoveredEdge}:{m.HoveredEdge.A}-{m.HoveredEdge.B}:{m.HoveredFace}:{string.Join(",", m.Marks)}"));
-        if (key != _sentOverlay && Host.Linked)
+        if (key != _sentOverlay && _shell.Host.Linked)
         {
             _sentOverlay = key;
-            Host.Send(message);
+            _shell.Host.Send(message);
         }
     }
 
     // After a resync, the game has no overlay.
-    void ResendMeshOverlay()
+    internal void ResendMeshOverlay()
     {
         _sentOverlay = "";
         SendMeshOverlay();
@@ -696,7 +699,7 @@ public sealed partial class EditorShell
 
     /// <summary>The project's default mesh material, for new faces: <c>mesh.default_material</c>, or the engine's dev_gray.</summary>
     public string DefaultMeshMaterial =>
-        ProjectSettings.Get(ProjectPath, "mesh.default_material") is { Length: 32 } guid && guid.All(Uri.IsHexDigit) ? guid.ToLowerInvariant() : DevGrayMaterial;
+        ProjectSettings.Get(_shell.ProjectPath, "mesh.default_material") is { Length: 32 } guid && guid.All(Uri.IsHexDigit) ? guid.ToLowerInvariant() : DevGrayMaterial;
 
     /// <summary>The engine's dev_gray material instance (see docs/editor/mesh-editing.md#dev-materials).</summary>
     public const string DevGrayMaterial = "5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d";
@@ -710,19 +713,19 @@ public sealed partial class EditorShell
     /// </summary>
     sealed class MeshDrag : IGizmoTarget
     {
-        readonly EditorShell _shell;
+        readonly MeshSession _session;
         readonly long[] _pivot;
         readonly Quat _axes;
         readonly List<(string Guid, MeshData Start, List<int> Vertices, MeshPlacement Placement)> _meshes = [];
 
-        public MeshDrag(EditorShell shell, long[] pivot, Quat axes)
+        public MeshDrag(MeshSession session, long[] pivot, Quat axes)
         {
-            (_shell, _pivot, _axes) = (shell, pivot, axes);
-            foreach (var guid in shell.MeshSelection.Guids)
+            (_session, _pivot, _axes) = (session, pivot, axes);
+            foreach (var guid in session.MeshSelection.Guids)
             {
-                if (shell.FindMeshData(guid) is { } mesh && shell.PlacementOf(guid) is { } placement)
+                if (session.FindMeshData(guid) is { } mesh && session.PlacementOf(guid) is { } placement)
                 {
-                    var vertices = shell.MeshSelection.VerticesOf(mesh, shell.MeshSelection.Of(guid)).ToList();
+                    var vertices = session.MeshSelection.VerticesOf(mesh, session.MeshSelection.Of(guid)).ToList();
                     if (vertices.Count > 0)
                     {
                         _meshes.Add((guid, mesh, vertices, placement));
@@ -737,14 +740,14 @@ public sealed partial class EditorShell
         // entity gizmo's do.
         public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            var move = _shell.Tool == Tool.Move;
-            return Apply(drag.Update(pixel, snap && !move ? _shell.Snapping : null), snap && move);
+            var move = _session.Shell.Tool == Tool.Move;
+            return Apply(drag.Update(pixel, snap && !move ? _session.Shell.Snapping : null), snap && move);
         }
 
         public List<Operation> Apply(GizmoChange change, bool snapToGrid)
         {
             var ops = new List<Operation>();
-            var pivot = _shell.Camera.RelativeTo(_pivot);
+            var pivot = _session.Shell.Camera.RelativeTo(_pivot);
             foreach (var (guid, start, vertices, placement) in _meshes)
             {
                 var after = MeshTools.MoveVertices(start, vertices, v =>
@@ -763,15 +766,15 @@ public sealed partial class EditorShell
                     var world = pivot + moved + change.Translation;
                     if (snapToGrid)
                     {
-                        world = _shell.Camera.RelativeTo(_shell.SnapToGrid(world));
+                        world = _session.Shell.Camera.RelativeTo(_session.SnapToGrid(world));
                     }
                     return placement.ToLocal(world);
                 });
-                if (_shell.KeepPlanar)
+                if (_session.KeepPlanar)
                 {
                     after = MeshTools.KeepPlanar(after, vertices);
                 }
-                ops.Add(new MeshOperation(guid, _shell.FindMeshData(guid) ?? start, after, _shell.Meshes));
+                ops.Add(new MeshOperation(guid, _session.FindMeshData(guid) ?? start, after, _session.Meshes));
             }
             return ops;
         }

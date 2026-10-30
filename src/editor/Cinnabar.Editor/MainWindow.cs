@@ -96,7 +96,7 @@ public sealed class MainWindow : Window
         shell.World.EntitiesChanged += UpdateWorldStatus;
         shell.Selection.Changed += (_, _) => UpdateWorldStatus();
         shell.ModeChanged += UpdateModeStatus;
-        shell.MeshModeChanged += UpdateModeStatus;
+        shell.Mesh.MeshModeChanged += UpdateModeStatus;
         _autosave.Tick += (_, _) => shell.Tick(DateTime.UtcNow);
         _autosave.Start();
         // The command line's scene opened before the window could ask about its autosave.
@@ -161,12 +161,12 @@ public sealed class MainWindow : Window
     /// <summary>Asks about unsaved changes, the scene's and its meshes', before they would be lost, and returns whether to go on.</summary>
     async Task<bool> ConfirmDiscard(string doing)
     {
-        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Meshes.AnyDirty))
+        if (_shell.Scene is not { } scene || (!scene.IsDirty && !_shell.Mesh.Meshes.AnyDirty))
         {
             return true;
         }
         var what = scene.IsDirty
-            ? _shell.Meshes.AnyDirty ? $"{scene.Title} and its meshes have" : $"{scene.Title} has"
+            ? _shell.Mesh.Meshes.AnyDirty ? $"{scene.Title} and its meshes have" : $"{scene.Title} has"
             : $"The meshes of {scene.Title} have";
         var answer = await Dialogs.Ask(this, "Unsaved changes", $"{what} changes that are not saved. Save them before {doing}?",
             "Save", "Don't Save", "Cancel");
@@ -391,7 +391,7 @@ public sealed class MainWindow : Window
         {
             Link.Protocol.EditorMode.Play => _shell.FreeCamera ? "Play, free camera" : "Play",
             Link.Protocol.EditorMode.Paused => "Paused",
-            _ => _shell.InMeshMode ? $"Mesh  ·  {_shell.MeshStatus}" : "Edit",
+            _ => _shell.Mesh.InMeshMode ? $"Mesh  ·  {_shell.Mesh.MeshStatus}" : "Edit",
         };
         _status?.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
         _status?.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);

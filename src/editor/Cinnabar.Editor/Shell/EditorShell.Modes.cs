@@ -25,9 +25,6 @@ public sealed partial class EditorShell
     [MemberNotNullWhen(true, nameof(Scene))]
     public bool CanEditScene => IsEditing && Scene != null;
 
-    /// <summary>Whether the open scene's meshes are in edit mode and edits are allowed.</summary>
-    public bool CanEditInMeshMode => InMeshMode && IsEditing;
-
     /// <summary>While playing, the viewport flies the editor's camera and the game draws from it, instead of the game's input and camera.</summary>
     public bool FreeCamera { get; private set; }
 
@@ -45,7 +42,7 @@ public sealed partial class EditorShell
         if (Mode == EditorMode.Edit)
         {
             // A drag or a scrub that is under way ends as it is, and mesh mode with it.
-            LeaveMeshMode();
+            Mesh.LeaveMeshMode();
             CancelGizmo();
             // A material that a drag only shows was never dropped.
             CancelMaterial();

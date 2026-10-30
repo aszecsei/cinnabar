@@ -19,11 +19,12 @@ namespace Cinnabar.Editor.Shell;
 /// The editor's parts and how they connect: the host, the viewport, the panels and their layout, the commands and
 /// the ribbon. The window shows a shell, and the shell has no controls of its own, so tests can build one.
 /// </summary>
-public sealed partial class EditorShell : IDisposable
+public sealed partial class EditorShell : IDisposable, IMeshHost
 {
     public EditorSettings Settings { get; }
     public CommandRegistry Commands { get; } = new();
     public EditorContext Context { get; } = new();
+    public MeshSession Mesh { get; }
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
     public ViewportSession Viewport { get; } = new();
@@ -64,6 +65,7 @@ public sealed partial class EditorShell : IDisposable
         _options = options;
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
+        Mesh = new MeshSession(this);
         _gizmo = new GizmoController(BeginEdit, PreviewEdit, CommitEdit, CancelEdit, SendGizmo);
         Host = new HostSession(options);
         Watches = new EntityWatches(Selection, Host);
@@ -71,7 +73,7 @@ public sealed partial class EditorShell : IDisposable
         Cook = new CookSession(options.Cook, Assets);
         Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll);
         WireCook();
-        WireMeshes();
+        Mesh.Subscribe();
         Autosave = new Autosave(options.AutosaveDirectory);
         Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport, () => new ViewportView(this)));
         RestoreLayout();
@@ -96,7 +98,7 @@ public sealed partial class EditorShell : IDisposable
                 // The new game state starts in Edit, with the game's own scene, and knows no live meshes.
                 ResetMode();
                 SendScene();
-                SendLiveMeshes();
+                Mesh.SendLiveMeshes();
             }
         };
         Host.GameMessage += OnGameMessage;
@@ -121,8 +123,8 @@ public sealed partial class EditorShell : IDisposable
         // connection's game knows no live meshes either, and an old one keeps them, so sending them again is safe.
         World.Reset += () =>
         {
-            SendLiveMeshes();
-            ResendMeshOverlay();
+            Mesh.SendLiveMeshes();
+            Mesh.ResendMeshOverlay();
             foreach (var entity in Selection.Entities.Union(Watches.Handles))
             {
                 Host.Send(new WatchEntity(entity));
@@ -169,6 +171,14 @@ public sealed partial class EditorShell : IDisposable
     }
 
     public void RequestPalette() => PaletteRequested?.Invoke();
+
+    GizmoController IMeshHost.Gizmos => _gizmo;
+
+    bool IMeshHost.Pickable(ulong handle) => Pickable(handle);
+
+    void IMeshHost.SendGizmo() => SendGizmo();
+
+    void IMeshHost.Report(string area, string path, IEnumerable<(int Line, string Message, bool IsError)> problems) => Report(area, path, problems);
 
     IEnumerable<PanelTool> CreatePanels()
     {

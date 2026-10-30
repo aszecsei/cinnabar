@@ -30,12 +30,12 @@ public enum HotspotChoice
 public sealed record DevMaterial(string Name, string Guid);
 
 /// <summary>
-/// The texture tools in the shell (see docs/editor/mesh-editing.md#texture-tools): each runs on the selected faces of
+/// The texture tools in the session (see docs/editor/mesh-editing.md#texture-tools): each runs on the selected faces of
 /// every edited mesh as one undo entry, and the Face panel's drags run them as a scrub. The project's texel density
 /// and each material's tool texture, from the cook index, give new faces their scale and the Face panel its density.
 /// Transform Texture turns the gizmo onto the selected faces' mappings instead of their vertices.
 /// </summary>
-public sealed partial class EditorShell
+public sealed partial class MeshSession
 {
     /// <summary>The project setting of the texture tools' density, in texels per meter.</summary>
     public const string TexelDensityKey = "mesh.texel_density";
@@ -59,7 +59,7 @@ public sealed partial class EditorShell
     public static readonly IReadOnlyList<string> DensityOptions = ["32", "64", "128", "256", "512", "1024", "2048"];
 
     Dictionary<string, MeshData>? _mappingStarts;
-    string? _faceMaterialKey;
+    internal string? FaceMaterialKey { get; set; }
     double? _texelDensityOverride;
 
     /// <summary>The face last clicked in the Faces kind, which Align to Face copies from, or null.</summary>
@@ -70,7 +70,7 @@ public sealed partial class EditorShell
 
     /// <summary>The project's texel density: <c>mesh.texel_density</c>, or 256 texels per meter.</summary>
     public double TexelDensity => _texelDensityOverride
-        ?? (double.TryParse(ProjectSettings.Get(ProjectPath, TexelDensityKey), NumberStyles.Float, CultureInfo.InvariantCulture, out var density) && density > 0
+        ?? (double.TryParse(ProjectSettings.Get(_shell.ProjectPath, TexelDensityKey), NumberStyles.Float, CultureInfo.InvariantCulture, out var density) && density > 0
             ? density : MeshTexture.DefaultDensity);
 
     /// <summary>Sets the project's texel density, in its settings file, so the game and the next session see it too.</summary>
@@ -82,12 +82,12 @@ public sealed partial class EditorShell
         }
         try
         {
-            ProjectSettings.Set(ProjectPath, TexelDensityKey, density.ToString(CultureInfo.InvariantCulture));
+            ProjectSettings.Set(_shell.ProjectPath, TexelDensityKey, density.ToString(CultureInfo.InvariantCulture));
             _texelDensityOverride = null;
         }
         catch (IOException e)
         {
-            Console.Add(LogLevel.Warning, $"project: cannot write {ProjectPath}: {e.Message}; the density holds for this session");
+            _shell.Console.Add(LogLevel.Warning, $"project: cannot write {_shell.ProjectPath}: {e.Message}; the density holds for this session");
             _texelDensityOverride = density;
         }
         OnMeshModeChanged();
@@ -99,9 +99,9 @@ public sealed partial class EditorShell
     /// </summary>
     public (string Texture, double Width, double Height)? MaterialTexture(string material)
     {
-        if (Assets.Find(material) is { } asset && asset.ToolTexture != "")
+        if (_shell.Assets.Find(material) is { } asset && asset.ToolTexture != "")
         {
-            var texture = Assets.Find(asset.ToolTexture);
+            var texture = _shell.Assets.Find(asset.ToolTexture);
             return texture is { Size: [> 0, > 0] } ? (asset.ToolTexture, texture.Size[0], texture.Size[1])
                 : asset.ToolTexture == DevGridTexture ? (DevGridTexture, DevGridSize, DevGridSize) : null;
         }
@@ -110,7 +110,7 @@ public sealed partial class EditorShell
 
     /// <summary>A material's hotspot rectangles from the index, in its tool texture's texels.</summary>
     public IReadOnlyList<Hotspot> MaterialHotspots(string material) =>
-        Assets.Find(material)?.Hotspots.Select(h => new Hotspot((int)h.X0, (int)h.Y0, (int)h.X1, (int)h.Y1)).ToList() ?? [];
+        _shell.Assets.Find(material)?.Hotspots.Select(h => new Hotspot((int)h.X0, (int)h.Y0, (int)h.X1, (int)h.Y1)).ToList() ?? [];
 
     /// <summary>The scale in meters per repeat of a new face with a material: its texture's size at the project's density, or 1.</summary>
     public double NewFaceScale(string material) =>
@@ -161,25 +161,25 @@ public sealed partial class EditorShell
     public bool EditMappings(string label, Func<MeshData, int, Mapping, Mapping> change)
     {
         CommitPendingDistance();
-        if (!CanRunTextureTool || Scene is not { InTransaction: false })
+        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
         }
         var ops = MappingOperations(FindMeshData, change);
         if (ops.Count == 0)
         {
-            Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
+            _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
             return false;
         }
         foreach (var op in ops.OfType<MeshOperation>())
         {
             if (op.After.Validate() is { Count: > 0 } problems)
             {
-                Console.Add(LogLevel.Error, $"mesh: cannot {label.ToLowerInvariant()}: {string.Join("; ", problems)}");
+                _shell.Console.Add(LogLevel.Error, $"mesh: cannot {label.ToLowerInvariant()}: {string.Join("; ", problems)}");
                 return false;
             }
         }
-        if (!Edit(label, [.. ops]))
+        if (!_shell.Edit(label, [.. ops]))
         {
             return false;
         }
@@ -191,26 +191,26 @@ public sealed partial class EditorShell
     public bool BeginMappingScrub(string label)
     {
         CommitPendingDistance();
-        if (!CanRunTextureTool || Scene is not { InTransaction: false })
+        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
         }
         _mappingStarts = SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => FindMeshData(g)!);
-        BeginEdit(label);
+        _shell.BeginEdit(label);
         return true;
     }
 
     /// <summary>A step of the drag: the change from where each mapping was at the start.</summary>
     public void PreviewMappings(Func<MeshData, int, Mapping, Mapping> change)
     {
-        if (_mappingStarts is not { } starts || Scene is not { InTransaction: true })
+        if (_mappingStarts is not { } starts || _shell.Scene is not { InTransaction: true })
         {
             return;
         }
         var ops = MappingOperations(starts.GetValueOrDefault, change);
         if (ops.Count > 0)
         {
-            PreviewEdit(ops);
+            _shell.PreviewEdit(ops);
         }
     }
 
@@ -221,7 +221,7 @@ public sealed partial class EditorShell
             return;
         }
         _mappingStarts = null;
-        CommitEdit();
+        _shell.CommitEdit();
         OnMeshModeChanged();
     }
 
@@ -273,7 +273,7 @@ public sealed partial class EditorShell
             default:
                 if (ActiveFace is not { } active || !MeshSelection.Contains(active.Guid, active.Index) || FindMeshData(active.Guid) is not { } source || active.Index >= source.Faces.Length)
                 {
-                    Console.Add(LogLevel.Info, "mesh: click the face to copy the texture from, then Shift-click the faces to carry it onto");
+                    _shell.Console.Add(LogLevel.Info, "mesh: click the face to copy the texture from, then Shift-click the faces to carry it onto");
                     return false;
                 }
                 var mapping = source.Faces[active.Index].Mapping;
@@ -288,9 +288,9 @@ public sealed partial class EditorShell
     bool AlignTextureToEdges()
     {
         CommitPendingDistance();
-        if (!CanRunMeshTool(MeshElement.Edges) || Scene is not { InTransaction: false })
+        if (!CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
         {
-            Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
+            _shell.Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
             return false;
         }
         var ops = new List<Operation>();
@@ -314,7 +314,7 @@ public sealed partial class EditorShell
                 ops.Add(new MeshOperation(guid, mesh, mesh.With(faces: faces), Meshes));
             }
         }
-        return ops.Count > 0 && Edit("Align Texture to Edge", [.. ops]);
+        return ops.Count > 0 && _shell.Edit("Align Texture to Edge", [.. ops]);
     }
 
     /// <summary>Fit: the texture's repeat, or some, over each face's bounding rectangle along u, v or both.</summary>
@@ -362,8 +362,8 @@ public sealed partial class EditorShell
         });
         foreach (var material in fitted.Distinct())
         {
-            var name = Assets.Find(material) is { } a ? Cinnabar.Editor.Content.AssetIndex.DisplayName(a) : material;
-            Console.Add(LogLevel.Info, $"mesh: {name} has no hotspots, so its faces fit the texture instead");
+            var name = _shell.Assets.Find(material) is { } a ? Cinnabar.Editor.Content.AssetIndex.DisplayName(a) : material;
+            _shell.Console.Add(LogLevel.Info, $"mesh: {name} has no hotspots, so its faces fit the texture instead");
         }
         return ok;
     }
@@ -372,7 +372,7 @@ public sealed partial class EditorShell
     public bool SetFaceMaterial(string guid)
     {
         CommitPendingDistance();
-        if (!CanRunTextureTool || Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
+        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
         {
             return false;
         }
@@ -385,14 +385,14 @@ public sealed partial class EditorShell
             }
             else
             {
-                Console.Add(LogLevel.Warning, $"mesh: cannot set the material: {reason}");
+                _shell.Console.Add(LogLevel.Warning, $"mesh: cannot set the material: {reason}");
                 return false;
             }
         }
-        return ops.Count > 0 && Edit("Set Material", [.. ops]);
+        return ops.Count > 0 && _shell.Edit("Set Material", [.. ops]);
     }
 
-    bool IsMaterialOrNone(string guid) => guid == "" || IsMaterial(guid) || DevMaterials.Any(d => d.Guid == guid);
+    bool IsMaterialOrNone(string guid) => guid == "" || _shell.IsMaterial(guid) || DevMaterials.Any(d => d.Guid == guid);
 
     // The operations that give some faces of a mesh a material, or null with the reason.
     List<Operation>? MaterialOperations(string meshGuid, IEnumerable<int> faces, string material, out string? reason)
@@ -414,7 +414,7 @@ public sealed partial class EditorShell
             ops.Add(new MeshOperation(meshGuid, mesh, after, Meshes));
         }
         var slot = after.Materials.IndexOf(material);
-        if (slot >= 0 && Scene?.Expanded.Flat.Find(entity) is { } document)
+        if (slot >= 0 && _shell.Scene?.Expanded.Flat.Find(entity) is { } document)
         {
             var renderer = document.Components.Find(c => c.Id == SceneEdits.MeshRendererId);
             var field = $"materials.{slot}";
@@ -434,8 +434,8 @@ public sealed partial class EditorShell
         {
             return null;
         }
-        var (width, height) = FrameSize;
-        var ray = Camera.Ray(pixel, width, height);
+        var (width, height) = _shell.FrameSize;
+        var ray = _shell.Camera.Ray(pixel, width, height);
         (string Guid, int Face)? best = null;
         var bestDistance = double.MaxValue;
         foreach (var guid in _editedMeshes.Keys)
@@ -464,12 +464,12 @@ public sealed partial class EditorShell
     {
         var target = pixel is { } p ? DropTarget(p) : null;
         var key = target is var (meshGuid, faces) ? $"{meshGuid}:{string.Join(",", faces.Order())}:{guid}" : null;
-        if (key == _faceMaterialKey)
+        if (key == FaceMaterialKey)
         {
             return;
         }
-        CancelMaterial();
-        if (target == null || Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
+        _shell.CancelMaterial();
+        if (target == null || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
         {
             return;
         }
@@ -478,20 +478,20 @@ public sealed partial class EditorShell
         {
             return;
         }
-        BeginEdit("Set Material");
-        _faceMaterialKey = key;
-        PreviewEdit(ops);
+        _shell.BeginEdit("Set Material");
+        FaceMaterialKey = key;
+        _shell.PreviewEdit(ops);
     }
 
     /// <summary>Drops a material on the faces under a pixel, keeping the preview as one undo entry.</summary>
     public bool DropFaceMaterial(Vec2 pixel, string guid)
     {
         PreviewFaceMaterial(pixel, guid);
-        if (CommitMaterial())
+        if (_shell.CommitMaterial())
         {
             return true;
         }
-        Console.Add(LogLevel.Info, "mesh: a material drops onto a face of an edited mesh");
+        _shell.Console.Add(LogLevel.Info, "mesh: a material drops onto a face of an edited mesh");
         return false;
     }
 
@@ -499,7 +499,7 @@ public sealed partial class EditorShell
     public void ToggleTextureGizmo()
     {
         TextureGizmo = !TextureGizmo;
-        CancelGizmo();
+        _shell.CancelGizmo();
         OnMeshModeChanged();
     }
 
@@ -532,16 +532,16 @@ public sealed partial class EditorShell
     /// </summary>
     sealed class TextureDrag : IGizmoTarget
     {
-        readonly EditorShell _shell;
+        readonly MeshSession _session;
         readonly Vec3 _pivot;
         readonly List<(string Guid, MeshData Start, HashSet<int> Faces, MeshPlacement Placement)> _meshes = [];
 
-        public TextureDrag(EditorShell shell, long[] pivot)
+        public TextureDrag(MeshSession session, long[] pivot)
         {
-            (_shell, _pivot) = (shell, shell.Camera.RelativeTo(pivot));
-            foreach (var group in shell.SelectedFaces.GroupBy(f => f.Guid))
+            (_session, _pivot) = (session, session.Shell.Camera.RelativeTo(pivot));
+            foreach (var group in session.SelectedFaces.GroupBy(f => f.Guid))
             {
-                if (shell.FindMeshData(group.Key) is { } mesh && shell.PlacementOf(group.Key) is { } placement)
+                if (session.FindMeshData(group.Key) is { } mesh && session.PlacementOf(group.Key) is { } placement)
                 {
                     _meshes.Add((group.Key, mesh, [.. group.Select(f => f.Face)], placement));
                 }
@@ -553,8 +553,8 @@ public sealed partial class EditorShell
         // A shift snaps the texture's offset; turns and scales snap as the entity gizmo's do.
         public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            var move = _shell.Tool == Tool.Move;
-            return Apply(drag.Update(pixel, snap && !move ? _shell.Snapping : null), snap && move);
+            var move = _session.Shell.Tool == Tool.Move;
+            return Apply(drag.Update(pixel, snap && !move ? _session.Shell.Snapping : null), snap && move);
         }
 
         public List<Operation> Apply(GizmoChange change, bool snap)
@@ -591,7 +591,7 @@ public sealed partial class EditorShell
                     }
                     return f with { Mapping = m };
                 });
-                ops.Add(new MeshOperation(guid, _shell.FindMeshData(guid) ?? start, start.With(faces: faces), _shell.Meshes));
+                ops.Add(new MeshOperation(guid, _session.FindMeshData(guid) ?? start, start.With(faces: faces), _session.Meshes));
             }
             return ops;
         }

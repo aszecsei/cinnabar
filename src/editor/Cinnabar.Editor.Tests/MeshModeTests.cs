@@ -49,8 +49,8 @@ public sealed class MeshModeTests : IDisposable
     {
         var shell = NewShell();
         shell.Selection.Select(Handle(0));
-        shell.EnterMeshMode();
-        Assert.True(shell.InMeshMode);
+        shell.Mesh.EnterMeshMode();
+        Assert.True(shell.Mesh.InMeshMode);
         return shell;
     }
 
@@ -67,35 +67,35 @@ public sealed class MeshModeTests : IDisposable
     public void EnteringNeedsAMeshFileAndLeavingKeepsTheMeshOpen()
     {
         using var shell = NewShell();
-        Assert.False(shell.CanEditMesh);
+        Assert.False(shell.Mesh.CanEditMesh);
         shell.Selection.Select(Handle(1));
-        Assert.False(shell.CanEditMesh);
-        shell.EnterMeshMode();
-        Assert.False(shell.InMeshMode);
+        Assert.False(shell.Mesh.CanEditMesh);
+        shell.Mesh.EnterMeshMode();
+        Assert.False(shell.Mesh.InMeshMode);
         Assert.Contains(shell.Console.Lines, l => l.Text.Contains("select an entity that places a .mesh file"));
 
         shell.Selection.Select(Handle(0));
-        Assert.True(shell.CanEditMesh);
+        Assert.True(shell.Mesh.CanEditMesh);
         Assert.True(shell.Commands.Get(EditorCommands.EditMesh).Execute());
-        Assert.True(shell.InMeshMode);
-        Assert.True(shell.Context.IsActive(EditorShell.MeshContext));
-        Assert.Equal(MeshElement.Faces, shell.MeshElement);
-        Assert.Equal("Faces: 0 of 1 mesh", shell.MeshStatus);
-        var document = Assert.Single(shell.Meshes.Documents);
+        Assert.True(shell.Mesh.InMeshMode);
+        Assert.True(shell.Context.IsActive(MeshSession.MeshContext));
+        Assert.Equal(MeshElement.Faces, shell.Mesh.MeshElement);
+        Assert.Equal("Faces: 0 of 1 mesh", shell.Mesh.MeshStatus);
+        var document = Assert.Single(shell.Mesh.Meshes.Documents);
         Assert.True(document.IsLive);
-        Assert.Equal([MeshFixtures.MeshGuid], shell.EditedMeshes.Keys);
+        Assert.Equal([MeshFixtures.MeshGuid], shell.Mesh.EditedMeshes.Keys);
 
         shell.Commands.Get(EditorCommands.ObjectMode).Execute();
-        Assert.False(shell.InMeshMode);
-        Assert.False(shell.Context.IsActive(EditorShell.MeshContext));
-        Assert.Single(shell.Meshes.Documents);
-        Assert.Empty(shell.EditedMeshes);
+        Assert.False(shell.Mesh.InMeshMode);
+        Assert.False(shell.Context.IsActive(MeshSession.MeshContext));
+        Assert.Single(shell.Mesh.Meshes.Documents);
+        Assert.Empty(shell.Mesh.EditedMeshes);
 
         // Play leaves the mode too.
-        shell.ToggleMeshMode();
-        Assert.True(shell.InMeshMode);
+        shell.Mesh.ToggleMeshMode();
+        Assert.True(shell.Mesh.InMeshMode);
         shell.Play();
-        Assert.False(shell.InMeshMode);
+        Assert.False(shell.Mesh.InMeshMode);
         shell.Stop();
     }
 
@@ -105,34 +105,34 @@ public sealed class MeshModeTests : IDisposable
         using var shell = EnteredShell();
         // A click in the middle hits the front face.
         shell.PickAt(Center, SelectMode.Replace);
-        Assert.Equal([new MeshItem(MeshFixtures.MeshGuid, 2)], shell.MeshSelection.Items);
-        Assert.Equal("Faces: 1 of 1 mesh", shell.MeshStatus);
+        Assert.Equal([new MeshItem(MeshFixtures.MeshGuid, 2)], shell.Mesh.MeshSelection.Items);
+        Assert.Equal("Faces: 1 of 1 mesh", shell.Mesh.MeshStatus);
         // Vertices: the face's four, and 1 in the viewport is the Vertices command.
         shell.Commands.Get(EditorCommands.MeshVertices).Execute();
-        Assert.Equal(MeshElement.Vertices, shell.MeshElement);
-        Assert.Equal([0, 1, 4, 5], shell.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
+        Assert.Equal(MeshElement.Vertices, shell.Mesh.MeshElement);
+        Assert.Equal([0, 1, 4, 5], shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
         // A click near a vertex picks it; Ctrl toggles it away; a click on nothing clears.
         var corner = PixelOf(shell, new Vec3(0.5, 0.5, -0.5)) + new Vec2(2, -2);
         shell.PickAt(corner, SelectMode.Toggle);
-        Assert.Equal([0, 1, 4], shell.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
+        Assert.Equal([0, 1, 4], shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
         shell.PickAt(new Vec2(5, 5), SelectMode.Replace);
-        Assert.True(shell.MeshSelection.IsEmpty);
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
         // Ctrl+A selects every vertex, and a box over the left half the two front ones there.
         shell.Commands.Get(EditorCommands.SelectAll).Execute();
-        Assert.Equal(8, shell.MeshSelection.Count);
+        Assert.Equal(8, shell.Mesh.MeshSelection.Count);
         shell.PickBox(new Vec2(0, 0), new Vec2(Width / 2, Height), SelectMode.Replace);
-        Assert.Equal([0, 4], shell.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
-        shell.ToggleSelectThrough();
+        Assert.Equal([0, 4], shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
+        shell.Mesh.ToggleSelectThrough();
         shell.PickBox(new Vec2(0, 0), new Vec2(Width / 2, Height), SelectMode.Replace);
-        Assert.Equal([0, 3, 4, 7], shell.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
+        Assert.Equal([0, 3, 4, 7], shell.Mesh.MeshSelection.Of(MeshFixtures.MeshGuid).Order());
         // Edges: those with both ends selected.
-        shell.SetMeshElement(MeshElement.Edges);
-        Assert.Equal(4, shell.MeshSelection.Count);
+        shell.Mesh.SetMeshElement(MeshElement.Edges);
+        Assert.Equal(4, shell.Mesh.MeshSelection.Count);
         // Escape clears, then leaves.
-        shell.EscapeMeshMode();
-        Assert.True(shell.MeshSelection.IsEmpty && shell.InMeshMode);
-        shell.EscapeMeshMode();
-        Assert.False(shell.InMeshMode);
+        shell.Mesh.EscapeMeshMode();
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty && shell.Mesh.InMeshMode);
+        shell.Mesh.EscapeMeshMode();
+        Assert.False(shell.Mesh.InMeshMode);
     }
 
     [Fact]
@@ -144,13 +144,13 @@ public sealed class MeshModeTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.DeleteEntity).Execute());
         Assert.Equal(5, MeshFixtures.Mesh(shell).Faces.Length);
         Assert.Equal("Delete 1 Face", shell.Scene!.History[^1].Label);
-        Assert.True(shell.MeshSelection.IsEmpty);
-        Assert.True(shell.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
+        Assert.True(shell.Mesh.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
         // The scene's entities are untouched, and undo brings the face back.
         Assert.Equal(2, shell.Scene.Scene.Entities.Count);
         shell.Scene.Undo();
         Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
-        Assert.False(shell.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
+        Assert.False(shell.Mesh.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
     }
 
     [Fact]
@@ -196,7 +196,7 @@ public sealed class MeshModeTests : IDisposable
         shell.Scene.Undo();
         shell.Scene.Undo();
         Assert.Equal(0.5, MeshFixtures.Mesh(shell).Vertices[5].X, 3);
-        Assert.False(shell.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
+        Assert.False(shell.Mesh.Meshes.Find(MeshFixtures.MeshGuid)!.IsDirty);
     }
 
     [Fact]
@@ -204,20 +204,20 @@ public sealed class MeshModeTests : IDisposable
     {
         using var shell = NewShell();
         shell.Commands.Get(EditorCommands.MeshBlock).Execute();
-        Assert.Equal(MeshTool.Create, shell.MeshTool);
+        Assert.Equal(MeshTool.Create, shell.Mesh.MeshTool);
         // Nothing is selected, so the grid's plane faces the camera through its pivot, 5 m ahead. The drag covers the
         // middle of the view: about a meter and a half across at that distance.
-        Assert.True(shell.BeginBlock(Center + new Vec2(-100, -100)));
-        shell.DragBlock(Center + new Vec2(100, 100));
-        shell.EndBlock();
+        Assert.True(shell.Mesh.BeginBlock(Center + new Vec2(-100, -100)));
+        shell.Mesh.DragBlock(Center + new Vec2(100, 100));
+        shell.Mesh.EndBlock();
 
         var entry = Assert.Single(shell.Scene!.History);
         Assert.Equal("Block", entry.Label);
         var block = shell.Scene.Scene.Entities.Single(e => e.Name == "block");
         var renderer = block.Components.Single(c => c.Id == SceneEdits.MeshRendererId);
         var guid = renderer.Fields.Single(f => f.Name == "mesh").Value.Asset;
-        Assert.Equal(EditorShell.DevGrayMaterial, renderer.Fields.Single(f => f.Name == "materials.0").Value.Asset);
-        var document = shell.Meshes.Find(guid);
+        Assert.Equal(MeshSession.DevGrayMaterial, renderer.Fields.Single(f => f.Name == "materials.0").Value.Asset);
+        var document = shell.Mesh.Meshes.Find(guid);
         Assert.NotNull(document);
         Assert.True(document.IsLive && document.IsDirty);
         Assert.Null(document.Saved);
@@ -232,9 +232,9 @@ public sealed class MeshModeTests : IDisposable
         // Undo removes the entity and the document together; redo brings them back.
         shell.Scene.Undo();
         Assert.DoesNotContain(shell.Scene.Scene.Entities, e => e.Name == "block");
-        Assert.Null(shell.Meshes.Find(guid));
+        Assert.Null(shell.Mesh.Meshes.Find(guid));
         shell.Scene.Redo();
-        Assert.NotNull(shell.Meshes.Find(guid));
+        Assert.NotNull(shell.Mesh.Meshes.Find(guid));
 
         // Save writes the scene, the mesh and its .meta with the GUID.
         Assert.True(shell.SaveScene());
@@ -246,13 +246,13 @@ public sealed class MeshModeTests : IDisposable
 
         // A second block gets the next name, and in mesh mode a block joins the edited mesh instead.
         shell.Selection.Select(Handle(0));
-        shell.EnterMeshMode();
-        shell.SetPrimitive(PrimitiveKind.Block);
-        Assert.True(shell.BeginBlock(Center + new Vec2(-50, -50)));
-        shell.DragBlock(Center + new Vec2(50, 50));
-        shell.EndBlock();
+        shell.Mesh.EnterMeshMode();
+        shell.Mesh.SetPrimitive(PrimitiveKind.Block);
+        Assert.True(shell.Mesh.BeginBlock(Center + new Vec2(-50, -50)));
+        shell.Mesh.DragBlock(Center + new Vec2(50, 50));
+        shell.Mesh.EndBlock();
         Assert.Equal(12, MeshFixtures.Mesh(shell).Faces.Length);
-        Assert.Equal(6, shell.MeshSelection.Count);
+        Assert.Equal(6, shell.Mesh.MeshSelection.Count);
         Assert.Equal(3, shell.Scene.Scene.Entities.Count);
     }
 

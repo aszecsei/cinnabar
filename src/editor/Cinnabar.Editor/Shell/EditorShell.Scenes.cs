@@ -120,7 +120,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"scene: cannot save {path ?? old}: {e.Message}");
             return false;
         }
-        var meshesSaved = SaveMeshes();
+        var meshesSaved = Mesh.SaveMeshes();
         Autosave.Delete(old);
         Autosave.Delete(Scene.Path);
         // Save As keeps what the user hid and locked for the new file.
@@ -320,9 +320,9 @@ public sealed partial class EditorShell
     /// <summary>Deletes the selected entities with their descendants, or in mesh mode the selected elements.</summary>
     public void DeleteSelected()
     {
-        if (InMeshMode)
+        if (Mesh.InMeshMode)
         {
-            DeleteMeshSelection();
+            Mesh.DeleteMeshSelection();
             return;
         }
         var roots = TopmostSelected();
@@ -380,7 +380,7 @@ public sealed partial class EditorShell
         {
             Scene.Applied -= SendOperations;
             Scene.Changed -= OnDocumentChanged;
-            CloseMeshes();
+            Mesh.CloseMeshes();
         }
         Scene = document;
         document.Applied += SendOperations;

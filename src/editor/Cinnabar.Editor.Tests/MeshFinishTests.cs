@@ -23,7 +23,7 @@ public sealed class MeshFinishTests : IDisposable
 
     static readonly string Text = "scene 1\n\n" +
         "entity 0000000000000001\nname = \"Room\"\ncomponent 1 Transform\n\tposition = [0, 0, 83886080]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n" +
-        $"component 33 Mesh_Renderer\n\tmesh = ${MeshFixtures.MeshGuid}\n\tmaterials.0 = ${EditorShell.DevGrayMaterial}\n";
+        $"component 33 Mesh_Renderer\n\tmesh = ${MeshFixtures.MeshGuid}\n\tmaterials.0 = ${MeshSession.DevGrayMaterial}\n";
 
     static ulong Handle(uint index) => 1UL << 32 | index;
 
@@ -49,8 +49,8 @@ public sealed class MeshFinishTests : IDisposable
         shell.Viewport.RequestSize(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);
         shell.Selection.Select(Handle(0));
-        shell.EnterMeshMode();
-        Assert.True(shell.InMeshMode);
+        shell.Mesh.EnterMeshMode();
+        Assert.True(shell.Mesh.InMeshMode);
         return shell;
     }
 
@@ -116,7 +116,7 @@ public sealed class MeshFinishTests : IDisposable
         Assert.Equal(before.Position, EntityPose(shell).Position);
         shell.Scene.Redo();
         Assert.True(shell.Commands.Get(EditorCommands.MeshPivotToGrid).CanExecute);
-        Assert.False(shell.PivotToGrid());
+        Assert.False(shell.Mesh.PivotToGrid());
         // The Edit Pivot gizmo stands on the entity and drags it, with the vertices moving the other way.
         shell.SetTool(Tool.Move);
         Assert.True(shell.Commands.Get(EditorCommands.MeshEditPivot).Execute());
@@ -132,9 +132,9 @@ public sealed class MeshFinishTests : IDisposable
         var dragged = EntityPose(shell);
         Assert.Equal(0.5, Vec3.Between(after.Position, dragged.Position).X, 6);
         Assert.Equal(worldBefore, MeshFixtures.Mesh(shell).Vertices.Select(v => v + Vec3.Between([0, 0, 0], dragged.Position)).Select(v => new Vec3(Math.Round(v.X, 6), Math.Round(v.Y, 6), Math.Round(v.Z, 6))).ToList());
-        Assert.True(shell.EditPivot);
-        shell.ToggleEditPivot();
-        Assert.False(shell.EditPivot);
+        Assert.True(shell.Mesh.EditPivot);
+        shell.Mesh.ToggleEditPivot();
+        Assert.False(shell.Mesh.EditPivot);
     }
 
     [Fact]
@@ -146,9 +146,9 @@ public sealed class MeshFinishTests : IDisposable
             faces: Box.Faces.Add(new MeshFace(0, [Box.Vertices.Length, Box.Vertices.Length + 1, Box.Edges[0].B, Box.Edges[0].A], Mapping.WorldAligned(Vec3.UnitZ))));
         using var shell = NewShell(fin);
         shell.Commands.Get(EditorCommands.MeshClean).Execute();
-        Assert.Equal(MeshElement.Edges, shell.MeshElement);
-        Assert.Single(shell.MeshSelection.Items);
-        var edge = MeshFixtures.Mesh(shell).Edges[shell.MeshSelection.Items.Single().Index];
+        Assert.Equal(MeshElement.Edges, shell.Mesh.MeshElement);
+        Assert.Single(shell.Mesh.MeshSelection.Items);
+        var edge = MeshFixtures.Mesh(shell).Edges[shell.Mesh.MeshSelection.Items.Single().Index];
         Assert.Equal(3, MeshFixtures.Mesh(shell).FacesOfEdge(edge).Count);
     }
 
@@ -158,11 +158,11 @@ public sealed class MeshFinishTests : IDisposable
         using var shell = NewShell(Box);
         shell.SetTool(Tool.Move);
         shell.Commands.Get(EditorCommands.MeshKeepPlanar).Execute();
-        Assert.True(shell.KeepPlanar);
+        Assert.True(shell.Mesh.KeepPlanar);
         // The front face's corner nearest the camera's right, dragged along x, bends the faces around it unless kept planar.
         var front = Enumerable.Range(0, 6).First(f => MeshFixtures.Mesh(shell).FaceNormal(f) == -Vec3.UnitZ);
         var corner = MeshFixtures.Mesh(shell).Faces[front].Corners.OrderBy(c => MeshFixtures.Mesh(shell).Vertices[c].X).ThenBy(c => MeshFixtures.Mesh(shell).Vertices[c].Y).First();
-        shell.SetMeshSelection(new MeshSelection(MeshElement.Vertices, [new MeshItem(MeshFixtures.MeshGuid, corner)]), switchKind: true);
+        shell.Mesh.SetMeshSelection(new MeshSelection(MeshElement.Vertices, [new MeshItem(MeshFixtures.MeshGuid, corner)]), switchKind: true);
         var (pivot, _) = shell.GizmoPose()!.Value;
         var center = shell.Camera.RelativeTo(pivot);
         var size = Gizmo.Size(shell.Camera, center, Height);

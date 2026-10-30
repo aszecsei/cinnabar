@@ -95,9 +95,9 @@ public sealed partial class EditorShell
     /// </summary>
     public void PickAt(Vec2 pixel, SelectMode mode)
     {
-        if (InMeshMode)
+        if (Mesh.InMeshMode)
         {
-            PickMeshAt(pixel, mode);
+            Mesh.PickMeshAt(pixel, mode);
             return;
         }
         Pick((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y), 1, 1, mode);
@@ -106,9 +106,9 @@ public sealed partial class EditorShell
     /// <summary>Selects what is drawn in a rectangle of the frame, between two corners.</summary>
     public void PickBox(Vec2 a, Vec2 b, SelectMode mode)
     {
-        if (InMeshMode)
+        if (Mesh.InMeshMode)
         {
-            PickMeshBox(a, b, mode);
+            Mesh.PickMeshBox(a, b, mode);
             return;
         }
         var (x0, y0) = ((int)Math.Floor(Math.Min(a.X, b.X)), (int)Math.Floor(Math.Min(a.Y, b.Y)));
@@ -168,11 +168,11 @@ public sealed partial class EditorShell
     /// </summary>
     public (long[] Pivot, Quat Axes)? GizmoPose()
     {
-        if (InMeshMode)
+        if (Mesh.InMeshMode)
         {
-            return MeshGizmoPose();
+            return Mesh.MeshGizmoPose();
         }
-        if (ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
+        if (Mesh.ActiveGizmoKind == GizmoKind.None || Scene == null || SelectedSceneEntity is not { } primary
             || SceneEdits.WorldPose(Scene.Expanded.Flat, primary) is not { } pose)
         {
             return null;
@@ -193,7 +193,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var (width, height) = FrameSize;
-            part = Gizmo.HitTest(ActiveGizmoKind, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
+            part = Gizmo.HitTest(Mesh.ActiveGizmoKind, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         }
         if (part != HotPart)
         {
@@ -213,9 +213,9 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        if (InMeshMode)
+        if (Mesh.InMeshMode)
         {
-            return PressMeshGizmo(pixel, extrude);
+            return Mesh.PressMeshGizmo(pixel, extrude);
         }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
         var poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
@@ -330,7 +330,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var size = Gizmo.Size(Camera, Camera.RelativeTo(pivot), FrameSize.Height);
-            state = new GizmoState(ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _gizmo.IsDragging);
+            state = new GizmoState(Mesh.ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _gizmo.IsDragging);
         }
         var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
         if (key != _sentGizmo && Host.Linked)
@@ -350,7 +350,7 @@ public sealed partial class EditorShell
         SendSelection();
         Visibility.Resend();
         SendViewportSettings();
-        ResendMeshOverlay();
+        Mesh.ResendMeshOverlay();
     }
 
     void OnPickResult(PickResult result)
