@@ -287,32 +287,6 @@ public sealed partial class EditorShell
         return true;
     }
 
-    // A drag's step: the tool at a distance on every mesh, replacing the step before.
-    void ApplyDistance(double distance)
-    {
-        if (_pending is not { } pending || Scene is not { InTransaction: true })
-        {
-            return;
-        }
-        var ops = new List<Operation>();
-        var items = new List<MeshItem>();
-        MeshElement? kind = null;
-        foreach (var (guid, (start, selected)) in pending.Meshes)
-        {
-            var result = pending.Run(start, selected, distance);
-            ops.Add(new MeshOperation(guid, FindMeshData(guid) ?? start, result.Mesh, Meshes));
-            kind = result.Kind;
-            items.AddRange(result.Selected.Select(i => new MeshItem(guid, i)));
-        }
-        if (!PreviewEdit(ops))
-        {
-            return;
-        }
-        MeshElement = kind ?? MeshElement;
-        MeshSelection = new MeshSelection(MeshElement, [.. items]);
-        SendMeshOverlay();
-    }
-
     /// <summary>Ends a pending distance tool as it is: with its drag's last distance, or with no entry when nothing was dragged.</summary>
     public void CommitPendingDistance()
     {
@@ -321,7 +295,7 @@ public sealed partial class EditorShell
             return;
         }
         _pending = null;
-        if (_drag == null)
+        if (!_gizmo.IsDragging)
         {
             CommitEdit();
         }
@@ -336,8 +310,7 @@ public sealed partial class EditorShell
             return;
         }
         _pending = null;
-        _drag = null;
-        _meshDrag = null;
+        _gizmo.Drop();
         CancelEdit();
         MeshSelection = MeshSelection.Pruned(FindMeshData);
         SendGizmo();
@@ -347,20 +320,63 @@ public sealed partial class EditorShell
     /// <summary>The gizmo while a distance is pending: Move, whatever the tool.</summary>
     GizmoKind ActiveGizmoKind => InMeshMode && (_pending != null || EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(Tool);
 
-    // A gizmo drag with a distance pending: the change along the axis, or its length.
-    void DragDistance(Vec2 pixel, bool invertSnap)
+    // A gizmo drag with a distance pending: each step runs the tool at the change along the axis, or its length, on
+    // every mesh, replacing the step before. Releasing ends the tool; one that ended during the drag ignores it.
+    sealed class DistanceDrag(EditorShell shell) : IGizmoTarget
     {
-        if (_drag == null || _pending is not { } pending)
+        MeshElement? _kind;
+        List<MeshItem> _items = [];
+        bool _pending;
+
+        public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            return;
+            if (shell._pending is not { } pending)
+            {
+                return [];
+            }
+            var change = drag.Update(pixel, null);
+            var distance = pending.Magnitude ? change.Translation.Length : Vec3.Dot(change.Translation, pending.Axis);
+            if (snap)
+            {
+                distance = Math.Round(distance / shell.GridSize) * shell.GridSize;
+            }
+            var ops = new List<Operation>();
+            (_kind, _items) = (null, []);
+            foreach (var (guid, (start, selected)) in pending.Meshes)
+            {
+                var result = pending.Run(start, selected, distance);
+                ops.Add(new MeshOperation(guid, shell.FindMeshData(guid) ?? start, result.Mesh, shell.Meshes));
+                _kind = result.Kind;
+                _items.AddRange(result.Selected.Select(i => new MeshItem(guid, i)));
+            }
+            return ops;
         }
-        var change = _drag.Update(pixel, null);
-        var distance = pending.Magnitude ? change.Translation.Length : Vec3.Dot(change.Translation, pending.Axis);
-        if (Snap != invertSnap)
+
+        public void Previewed()
         {
-            distance = Math.Round(distance / GridSize) * GridSize;
+            shell.MeshElement = _kind ?? shell.MeshElement;
+            shell.MeshSelection = new MeshSelection(shell.MeshElement, [.. _items]);
+            shell.SendMeshOverlay();
         }
-        ApplyDistance(distance);
+
+        public void Ending()
+        {
+            _pending = shell._pending != null;
+            shell._pending = null;
+        }
+
+        public void Ended(bool committed)
+        {
+            if (!_pending)
+            {
+                return;
+            }
+            if (!committed)
+            {
+                shell.MeshSelection = shell.MeshSelection.Pruned(shell.FindMeshData);
+            }
+            shell.OnMeshModeChanged();
+        }
     }
 
     public void SetNormalAngle(double degrees)

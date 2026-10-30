@@ -13,9 +13,6 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class EditorShell
 {
-    // An Edit Pivot drag: the mesh being moved under its entity, from the start of the drag.
-    (string Guid, MeshData Start, MeshPlacement Placement, Vec3 Pivot)? _pivotDrag;
-
     /// <summary>A Move drag keeps the faces that it would bend planar, by moving their other vertices.</summary>
     public bool KeepPlanar { get; private set; }
 
@@ -69,44 +66,38 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        var (width, height) = FrameSize;
-        _poseEdit = new PoseEdit(Scene.Expanded.Flat, [entity]);
-        if (_poseEdit.IsEmpty)
+        var poseEdit = new PoseEdit(Scene.Expanded.Flat, [entity]);
+        if (poseEdit.IsEmpty)
         {
-            _poseEdit = null;
             return false;
         }
-        _drag = new GizmoDrag(Link.Protocol.GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), Quat.Identity, pixel, width, height);
-        (_dragPivot, _dragAxes) = (pivot, Quat.Identity);
-        _pivotDrag = (guid, mesh, placement, Camera.RelativeTo(pivot));
-        BeginEdit("Edit Pivot");
-        SendGizmo();
+        var (width, height) = FrameSize;
+        _gizmo.Start(new GizmoDrag(Link.Protocol.GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), Quat.Identity, pixel, width, height),
+            new PivotDrag(this, poseEdit, pivot, guid, mesh, placement), "Edit Pivot");
         return true;
     }
 
-    void DragPivotGizmo(Vec2 pixel, bool invertSnap)
+    // An Edit Pivot drag: the mesh being moved under its entity, from the start of the drag.
+    sealed class PivotDrag(EditorShell shell, PoseEdit poseEdit, long[] rawPivot, string guid, MeshData start, MeshPlacement placement) : IGizmoTarget
     {
-        if (_drag == null || _poseEdit == null || _pivotDrag is not var (guid, start, placement, pivot) || Scene is not { InTransaction: true })
+        readonly Vec3 _pivot = shell.Camera.RelativeTo(rawPivot);
+
+        public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            return;
-        }
-        var translation = _drag.Update(pixel, null).Translation;
-        if (Snap != invertSnap)
-        {
-            // The pivot lands on the grid, not the drag's delta.
-            translation = Camera.RelativeTo(SnapToGrid(pivot + translation)) - pivot;
-        }
-        var ops = PivotOperations(guid, start, placement, pivot, translation);
-        if (ops.Count > 0)
-        {
-            PreviewEdit(ops);
+            var translation = drag.Update(pixel, null).Translation;
+            if (snap)
+            {
+                // The pivot lands on the grid, not the drag's delta.
+                translation = shell.Camera.RelativeTo(shell.SnapToGrid(_pivot + translation)) - _pivot;
+            }
+            return shell.PivotOperations(poseEdit, rawPivot, guid, start, placement, _pivot, translation);
         }
     }
 
     // The entity moved by a translation in view space, and the vertices moved by its inverse in the mesh's space.
-    List<Operation> PivotOperations(string guid, MeshData start, MeshPlacement placement, Vec3 pivot, Vec3 translation)
+    List<Operation> PivotOperations(PoseEdit poseEdit, long[] rawPivot, string guid, MeshData start, MeshPlacement placement, Vec3 pivot, Vec3 translation)
     {
-        var ops = _poseEdit!.Apply(new GizmoChange(translation, Quat.Identity, new Vec3(1, 1, 1)), _dragPivot, _dragAxes);
+        var ops = poseEdit.Apply(new GizmoChange(translation, Quat.Identity, new Vec3(1, 1, 1)), rawPivot, Quat.Identity);
         var local = placement.ToLocal(pivot + translation) - placement.ToLocal(pivot);
         var after = start.With(vertices: start.Vertices.Select(v => v - local));
         ops.Add(new MeshOperation(guid, FindMeshData(guid) ?? start, after, Meshes));
@@ -144,10 +135,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
             return false;
         }
-        _poseEdit = new PoseEdit(Scene.Expanded.Flat, [entity]);
-        (_dragPivot, _dragAxes) = (pose.Position, Quat.Identity);
-        var ops = PivotOperations(guid, mesh, placement, pivot, t);
-        _poseEdit = null;
+        var ops = PivotOperations(new PoseEdit(Scene.Expanded.Flat, [entity]), pose.Position, guid, mesh, placement, pivot, t);
         return Edit(label, [.. ops]);
     }
 }

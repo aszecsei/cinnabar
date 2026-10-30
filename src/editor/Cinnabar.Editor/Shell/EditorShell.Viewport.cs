@@ -32,10 +32,7 @@ public sealed partial class EditorShell
 {
     readonly PendingReplies<Action<PickResult>> _picks = new();
     string _sentGizmo = "";
-    GizmoDrag? _drag;
-    PoseEdit? _poseEdit;
-    long[] _dragPivot = [0, 0, 0];
-    Quat _dragAxes = Quat.Identity;
+    readonly GizmoController _gizmo;
 
     public EditorCamera Camera { get; } = new();
 
@@ -51,7 +48,7 @@ public sealed partial class EditorShell
     /// <summary>The gizmo part under the mouse, or the one that a drag holds.</summary>
     public GizmoPart HotPart { get; private set; }
 
-    public bool IsDraggingGizmo => _drag != null;
+    public bool IsDraggingGizmo => _gizmo.IsDragging;
 
     /// <summary>The tool, the space, snapping or the hot part changed.</summary>
     public event Action? ToolsChanged;
@@ -188,7 +185,7 @@ public sealed partial class EditorShell
     /// <summary>Highlights the gizmo part under the mouse.</summary>
     public void HoverGizmo(Vec2 pixel)
     {
-        if (_drag != null)
+        if (_gizmo.IsDragging)
         {
             return;
         }
@@ -221,84 +218,33 @@ public sealed partial class EditorShell
             return PressMeshGizmo(pixel, extrude);
         }
         var ids = Selection.Entities.Select(h => World.Find(h)?.SceneId ?? 0).Where(id => id != 0);
-        _poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
-        if (_poseEdit.IsEmpty)
+        var poseEdit = new PoseEdit(Scene.Expanded.Flat, ids);
+        if (poseEdit.IsEmpty)
         {
-            _poseEdit = null;
             return false;
         }
         var (width, height) = FrameSize;
-        _drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
-        (_dragPivot, _dragAxes) = (pivot, axes);
-        var count = _poseEdit.Moved.Count();
+        var count = poseEdit.Moved.Count();
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        BeginEdit(count == 1 ? $"{verb} {Label(Scene.Expanded.Flat.Find(_poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
-        SendGizmo();
+        _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height),
+            new PoseTarget(this, poseEdit, pivot, axes),
+            count == 1 ? $"{verb} {Label(Scene.Expanded.Flat.Find(poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
         return true;
     }
 
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>
-    public void DragGizmo(Vec2 pixel, bool invertSnap)
-    {
-        if (_meshDrag != null || _textureDrag != null || _pivotDrag != null || _pending != null)
-        {
-            DragMeshGizmo(pixel, invertSnap);
-            return;
-        }
-        if (_drag == null || _poseEdit == null)
-        {
-            return;
-        }
-        var change = _drag.Update(pixel, Snap != invertSnap ? Snapping : null);
-        var ops = _poseEdit.Apply(change, _dragPivot, _dragAxes);
-        if (ops.Count > 0 && Scene is { InTransaction: true })
-        {
-            PreviewEdit(ops);
-        }
-    }
+    public void DragGizmo(Vec2 pixel, bool invertSnap) => _gizmo.Drag(pixel, Snap != invertSnap);
 
-    public void ReleaseGizmo()
-    {
-        if (_drag == null)
-        {
-            return;
-        }
-        _drag = null;
-        _poseEdit = null;
-        _meshDrag = null;
-        _textureDrag = null;
-        _pivotDrag = null;
-        var pending = _pending != null;
-        _pending = null;
-        CommitEdit();
-        SendGizmo();
-        if (pending)
-        {
-            OnMeshModeChanged();
-        }
-    }
+    public void ReleaseGizmo() => _gizmo.Release();
 
     /// <summary>Ends a drag and puts the selection back where it was.</summary>
-    public void CancelGizmo()
+    public void CancelGizmo() => _gizmo.Cancel();
+
+    // A drag of the selected entities: each step moves, turns or scales them about the pivot.
+    sealed class PoseTarget(EditorShell shell, PoseEdit poseEdit, long[] pivot, Quat axes) : IGizmoTarget
     {
-        if (_drag == null)
-        {
-            return;
-        }
-        _drag = null;
-        _poseEdit = null;
-        _meshDrag = null;
-        _textureDrag = null;
-        _pivotDrag = null;
-        var pending = _pending != null;
-        _pending = null;
-        CancelEdit();
-        SendGizmo();
-        if (pending)
-        {
-            MeshSelection = MeshSelection.Pruned(FindMeshData);
-            OnMeshModeChanged();
-        }
+        public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap) =>
+            poseEdit.Apply(drag.Update(pixel, snap ? shell.Snapping : null), pivot, axes);
     }
 
     /// <summary>Moves the camera so the selected entities fill the view.</summary>
@@ -384,7 +330,7 @@ public sealed partial class EditorShell
         if (GizmoPose() is var (pivot, axes))
         {
             var size = Gizmo.Size(Camera, Camera.RelativeTo(pivot), FrameSize.Height);
-            state = new GizmoState(ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _drag != null);
+            state = new GizmoState(ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _gizmo.IsDragging);
         }
         var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
         if (key != _sentGizmo && Host.Linked)

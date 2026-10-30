@@ -176,7 +176,7 @@ public sealed partial class EditorShell
         else
         {
             SendLiveMesh(document);
-            if (InMeshMode && _meshDrag == null)
+            if (InMeshMode && _gizmo.Target is not MeshDrag)
             {
                 MeshSelection = MeshSelection.Pruned(FindMeshData);
             }
