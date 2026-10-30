@@ -6,8 +6,6 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The region and topology tools on a box: counts, planarity, winding and the mappings of new faces.</summary>
 public class MeshRegionToolsTests
 {
-    static MeshData Box() => Primitives.Block(Vec3.Zero, new Vec3(1, 1, 1));
-
     // Every face fronts away from the box's middle.
     static void AssertFrontsOut(MeshData mesh, Vec3 middle)
     {
@@ -21,7 +19,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void ExtrudePullsAFaceOutWithWalls()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (mesh, kind, selected) = MeshTools.Extrude(box, [1], 0.5);
         Assert.Equal(MeshElement.Faces, kind);
         Assert.Equal([1], selected);
@@ -62,14 +60,14 @@ public class MeshRegionToolsTests
         Assert.Equal(3, mesh.Faces.Length);
         Assert.All(selected, e => Assert.True(mesh.Vertices[mesh.Edges[e].A].Y > 0.99 && mesh.Vertices[mesh.Edges[e].B].Y > 0.99));
         Assert.Empty(mesh.Validate());
-        var box = Box();
+        var box = MeshFixtures.Box();
         Assert.Empty(MeshTools.ExtrudeEdges(box, [box.EdgeIndex(4, 5)], 0.5).Selected);
     }
 
     [Fact]
     public void PushPullAndOffsetMoveFaces()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (pushed, _, _) = MeshTools.PushPull(box, [1], 0.5);
         Assert.Equal(8, pushed.Vertices.Length);
         Assert.All(pushed.Faces[1].Corners, c => Assert.Equal(1.5, pushed.Vertices[c].Y));
@@ -90,7 +88,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void InsetShrinksAFaceInsideARing()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (mesh, _, selected) = MeshTools.Inset(box, [1], 0.25);
         Assert.Equal([1], selected);
         Assert.Equal(12, mesh.Vertices.Length);
@@ -115,7 +113,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void DuplicateCopiesFacesInPlace()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (mesh, kind, selected) = MeshTools.Duplicate(box, [1, 2]);
         Assert.Equal(MeshElement.Faces, kind);
         Assert.Equal([6, 7], selected);
@@ -129,7 +127,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void InvertFlipsFacesAndTheirTextures()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (mesh, _, _) = MeshTools.Invert(box, [1]);
         Assert.Equal(-1, Vec3.Dot(mesh.FaceNormal(1), Vec3.UnitY), 9);
         Assert.Equal(-box.Faces[1].Mapping.VAxis, mesh.Faces[1].Mapping.VAxis);
@@ -139,7 +137,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void CollapseMergesVerticesEdgesAndFaces()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // The top's four vertices become one at its middle: a pyramid of four triangles and the bottom.
         var (pyramid, kind, selected) = MeshTools.Collapse(box, MeshElement.Faces, [1]);
         Assert.Equal(MeshElement.Vertices, kind);
@@ -163,7 +161,7 @@ public class MeshRegionToolsTests
     public void MergeFacesDissolvesCoplanarNeighbors()
     {
         // The top split in two by a cut, then merged back into one quad.
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (cut, reason) = MeshCut.Cut(box, [new CutPoint.OnEdge(4, 7, 0.5), new CutPoint.OnEdge(5, 6, 0.5)]);
         Assert.Null(reason);
         Assert.Equal(7, cut.Mesh.Faces.Length);
@@ -183,7 +181,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void CleanWeldsAndDissolves()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // A doubled vertex a hair off, a collinear vertex on the top's edge, and a degenerate face.
         var vertices = box.Vertices.Add(new Vec3(1, 1, 1.00001)).Add(new Vec3(0.5, 1, 1));
         var faces = box.Faces.SetItem(3, box.Faces[3] with { Corners = [2, 8, 7, 3] }).SetItem(1, box.Faces[1] with { Corners = [4, 7, 9, 6, 5] })
@@ -203,7 +201,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void RecalculateNormalsMarksSharpEdgesByAngle()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var smooth = box.With(sharpEdges: []);
         Assert.Equal(12, MeshTools.RecalculateNormals(smooth, 30).SharpEdges.Length);
         Assert.Empty(MeshTools.RecalculateNormals(smooth, 91).SharpEdges);
@@ -215,7 +213,7 @@ public class MeshRegionToolsTests
     [Fact]
     public void SplitTakesFacesIntoTheirOwnMesh()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var (extracted, remaining) = MeshTools.Split(box, [1]);
         Assert.Single(extracted.Faces);
         Assert.Equal(4, extracted.Vertices.Length);

@@ -7,9 +7,8 @@ namespace Cinnabar.Editor.Tests;
 
 public sealed class MeshDocumentTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-mesh-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("mesh");
 
-    const string MeshGuid = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
 
     const string Quad = """
         mesh 1
@@ -25,12 +24,12 @@ public sealed class MeshDocumentTests : IDisposable
     (SceneDocument Scene, MeshSet Meshes, MeshDocument Mesh, List<(MeshDocument, MeshData)> Changes) Open()
     {
         var (scene, _) = SceneFile.Parse("scene 1\n");
-        var document = new SceneDocument(Path.Combine(_directory, "room.scene"), scene!);
+        var document = new SceneDocument(_temp.Combine("room.scene"), scene!);
         var meshes = new MeshSet();
         var changes = new List<(MeshDocument, MeshData)>();
         meshes.Changed += (d, before) => changes.Add((d, before));
         var (mesh, _) = MeshFile.Parse(Quad.ReplaceLineEndings("\n"));
-        var meshDocument = new MeshDocument(Path.Combine(_directory, "room.mesh"), MeshGuid, mesh!);
+        var meshDocument = new MeshDocument(_temp.Combine("room.mesh"), MeshFixtures.MeshGuid, mesh!);
         meshes.Add(meshDocument);
         return (document, meshes, meshDocument, changes);
     }
@@ -47,8 +46,8 @@ public sealed class MeshDocumentTests : IDisposable
         scene.Applied += ops => sent.AddRange(ops);
 
         scene.Begin("Move");
-        scene.Preview(new MeshOperation(MeshGuid, mesh.Data, Moved(start, 1), meshes));
-        scene.Preview(new MeshOperation(MeshGuid, mesh.Data, Moved(start, 2), meshes));
+        scene.Preview(new MeshOperation(MeshFixtures.MeshGuid, mesh.Data, Moved(start, 1), meshes));
+        scene.Preview(new MeshOperation(MeshFixtures.MeshGuid, mesh.Data, Moved(start, 2), meshes));
         scene.Commit();
 
         Assert.Single(scene.History);
@@ -74,12 +73,12 @@ public sealed class MeshDocumentTests : IDisposable
     public void SceneAndMeshDirtyStatesAreIndependent()
     {
         var (scene, meshes, mesh, _) = Open();
-        scene.Apply("Move", new MeshOperation(MeshGuid, mesh.Data, Moved(mesh.Data, 1), meshes));
+        scene.Apply("Move", new MeshOperation(MeshFixtures.MeshGuid, mesh.Data, Moved(mesh.Data, 1), meshes));
         Assert.True(scene.IsDirty);
         Assert.True(mesh.IsDirty);
 
         // Saving the mesh makes it clean, and the scene stays dirty, since its history position is not the saved one.
-        Directory.CreateDirectory(_directory);
+        Directory.CreateDirectory(_temp.Path);
         mesh.Save();
         Assert.False(mesh.IsDirty);
         Assert.True(scene.IsDirty);
@@ -93,7 +92,7 @@ public sealed class MeshDocumentTests : IDisposable
 
         // A mixed entry: a scene operation and a mesh operation together.
         var create = SceneEdits.NewEntity(scene.Scene, [0, 0, 0]);
-        scene.Apply("Block", create, new MeshOperation(MeshGuid, mesh.Data, Moved(mesh.Data, 3), meshes));
+        scene.Apply("Block", create, new MeshOperation(MeshFixtures.MeshGuid, mesh.Data, Moved(mesh.Data, 3), meshes));
         Assert.NotNull(scene.Scene.Find(create.Created.Id));
         Assert.Equal(3, mesh.Data.Vertices[0].Y);
         scene.Undo();
@@ -114,8 +113,8 @@ public sealed class MeshDocumentTests : IDisposable
     {
         var (_, _, mesh, _) = Open();
         var data = mesh.Data.With(materials: ["", "00112233445566778899aabbccddeeff"], sharpEdges: [new MeshEdge(0, 1)]);
-        var message = LiveMeshes.Mesh(MeshGuid, data);
-        Assert.Equal(Convert.FromHexString(MeshGuid), message.Guid);
+        var message = LiveMeshes.Mesh(MeshFixtures.MeshGuid, data);
+        Assert.Equal(Convert.FromHexString(MeshFixtures.MeshGuid), message.Guid);
         var material = Assert.Single(message.Materials);
         Assert.Equal(1u, material.Slot);
         Assert.Equal(Convert.FromHexString("00112233445566778899aabbccddeeff"), material.Guid);
@@ -129,9 +128,9 @@ public sealed class MeshDocumentTests : IDisposable
         var edge = Assert.Single(message.Sharp);
         Assert.Equal((0u, 1u), (edge.A, edge.B));
 
-        var vertices = LiveMeshes.Vertices(MeshGuid, Moved(data, 2));
+        var vertices = LiveMeshes.Vertices(MeshFixtures.MeshGuid, Moved(data, 2));
         Assert.Equal(3, vertices.Positions[4]);
-        Assert.Equal(Convert.FromHexString(MeshGuid), LiveMeshes.Release(MeshGuid).Guid);
+        Assert.Equal(Convert.FromHexString(MeshFixtures.MeshGuid), LiveMeshes.Release(MeshFixtures.MeshGuid).Guid);
 
         // A move keeps the faces, so it is a vertices-only change; a new face is not, nor is a new vertex.
         Assert.True(LiveMeshes.IsVerticesOnly(data, Moved(data, 2)));
@@ -139,11 +138,5 @@ public sealed class MeshDocumentTests : IDisposable
         Assert.False(LiveMeshes.IsVerticesOnly(data, data.With(vertices: data.Vertices.Add(Vec3.Zero))));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

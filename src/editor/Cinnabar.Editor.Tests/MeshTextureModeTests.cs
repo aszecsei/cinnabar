@@ -17,9 +17,8 @@ namespace Cinnabar.Editor.Tests;
 /// </summary>
 public sealed class MeshTextureModeTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-mesh-texture-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("mesh-texture");
 
-    const string MeshGuid = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
     const string MaterialGuid = "aa112233445566778899aabbccddeeff";
     const string TextureGuid = "bb112233445566778899aabbccddeeff";
     const double Width = 1600;
@@ -27,25 +26,21 @@ public sealed class MeshTextureModeTests : IDisposable
 
     static readonly string Text = "scene 1\n\n" +
         "entity 0000000000000001\nname = \"Room\"\ncomponent 1 Transform\n\tposition = [0, 0, 83886080]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n" +
-        $"component 33 Mesh_Renderer\n\tmesh = ${MeshGuid}\n\tmaterials.0 = ${EditorShell.DevGrayMaterial}\n";
+        $"component 33 Mesh_Renderer\n\tmesh = ${MeshFixtures.MeshGuid}\n\tmaterials.0 = ${EditorShell.DevGrayMaterial}\n";
 
     static ulong Handle(uint index) => 1UL << 32 | index;
 
-    string ProjectPath => Path.Combine(_directory, "project.settings");
+    string ProjectPath => _temp.Combine("project.settings");
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var scenePath = Path.Combine(_directory, "main.scene");
-        File.WriteAllText(scenePath, Text);
-        File.WriteAllText(Path.Combine(_directory, "room.mesh"), MeshFile.Write(Primitives.Block(new Vec3(-0.5, -0.5, -0.5), new Vec3(0.5, 0.5, 0.5), material: EditorShell.DevGrayMaterial)));
+        MeshFixtures.WriteRoom(_temp, EditorShell.DevGrayMaterial);
         File.WriteAllText(ProjectPath, "# Test project.\noutput = Sdr\n");
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave"), ProjectPath = ProjectPath },
-            new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
+        var shell = TestShell.Open(_temp, "main.scene", Text, ProjectPath);
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            new Asset(MeshFixtures.MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
             new Asset(MaterialGuid, AssetKind.Material, "game", "spots.material", AssetStatus.Current, 0, 0, "", [], [TextureGuid], "", "", 1, [0, 0], TextureGuid,
                 [new CookHotspot(0, 0, 256, 256), new CookHotspot(256, 0, 768, 256)], ""),
             new Asset(TextureGuid, AssetKind.Texture, "game", "spots.png", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [1024, 1024], "", [], ""),
@@ -59,13 +54,11 @@ public sealed class MeshTextureModeTests : IDisposable
         return shell;
     }
 
-    static MeshData Mesh(EditorShell shell) => shell.Meshes.Find(MeshGuid)!.Data;
-
     // The face that fronts the camera, whose normal is -z.
-    static int Front(EditorShell shell) => Enumerable.Range(0, Mesh(shell).Faces.Length).First(f => Mesh(shell).FaceNormal(f) == -Vec3.UnitZ);
+    static int Front(EditorShell shell) => Enumerable.Range(0, MeshFixtures.Mesh(shell).Faces.Length).First(f => MeshFixtures.Mesh(shell).FaceNormal(f) == -Vec3.UnitZ);
 
     static void SelectFaces(EditorShell shell, params int[] faces) =>
-        shell.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. faces.Select(f => new MeshItem(MeshGuid, f))]), switchKind: true);
+        shell.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. faces.Select(f => new MeshItem(MeshFixtures.MeshGuid, f))]), switchKind: true);
 
     static Vec2 PixelOf(EditorShell shell, Vec3 local)
     {
@@ -79,23 +72,23 @@ public sealed class MeshTextureModeTests : IDisposable
         using var shell = NewShell();
         var front = Front(shell);
         SelectFaces(shell, front, (front + 1) % 6);
-        var before = Mesh(shell).Faces[front].Mapping;
+        var before = MeshFixtures.Mesh(shell).Faces[front].Mapping;
         Assert.True(shell.Commands.Get(EditorCommands.TextureShiftLeft).Execute());
         Assert.Single(shell.Scene!.History);
-        Assert.Equal(before.ShiftU + MeshTexture.ShiftStep, Mesh(shell).Faces[front].Mapping.ShiftU);
-        Assert.Equal(before.ShiftU + MeshTexture.ShiftStep, Mesh(shell).Faces[(front + 1) % 6].Mapping.ShiftU);
+        Assert.Equal(before.ShiftU + MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftU);
+        Assert.Equal(before.ShiftU + MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[(front + 1) % 6].Mapping.ShiftU);
         // The other faces keep their mappings, and the selection stays.
-        Assert.Equal(before.ShiftU, Mesh(shell).Faces[(front + 2) % 6].Mapping.ShiftU);
+        Assert.Equal(before.ShiftU, MeshFixtures.Mesh(shell).Faces[(front + 2) % 6].Mapping.ShiftU);
         Assert.Equal(2, shell.MeshSelection.Count);
         // Shift makes the step ten times, as the viewport's keys ask.
         Assert.True(shell.ShiftTexture(0, -1, 10));
-        Assert.Equal(before.ShiftV - 10 * MeshTexture.ShiftStep, Mesh(shell).Faces[front].Mapping.ShiftV, 9);
+        Assert.Equal(before.ShiftV - 10 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
         Assert.True(shell.RotateTexture(1));
-        Assert.Equal(15, Mesh(shell).Faces[front].Mapping.Rotation);
+        Assert.Equal(15, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation);
         Assert.True(shell.ScaleTexture(1));
-        Assert.Equal(1.25, Mesh(shell).Faces[front].Mapping.ScaleU, 9);
+        Assert.Equal(1.25, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU, 9);
         shell.Scene.Undo();
-        Assert.Equal(1, Mesh(shell).Faces[front].Mapping.ScaleU);
+        Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
         // Nothing selected, or another kind, and the tool does not run.
         shell.SetMeshElement(MeshElement.Vertices);
         Assert.False(shell.Commands.Get(EditorCommands.TextureShiftLeft).CanExecute);
@@ -119,7 +112,7 @@ public sealed class MeshTextureModeTests : IDisposable
         var front = Front(shell);
         SelectFaces(shell, front);
         Assert.True(shell.Commands.Get(EditorCommands.TextureResetScale).Execute());
-        Assert.Equal((2.0, 2.0), (Mesh(shell).Faces[front].Mapping.ScaleU, Mesh(shell).Faces[front].Mapping.ScaleV));
+        Assert.Equal((2.0, 2.0), (MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleV));
         // An extruded wall takes the density too.
         shell.SetTool(Tool.Select);
         Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
@@ -129,8 +122,8 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.True(shell.PressGizmo(Along(0.5 * size)));
         shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
-        Assert.Equal(10, Mesh(shell).Faces.Length);
-        Assert.All(Mesh(shell).Faces.Skip(6), f => Assert.Equal(2, f.Mapping.ScaleU));
+        Assert.Equal(10, MeshFixtures.Mesh(shell).Faces.Length);
+        Assert.All(MeshFixtures.Mesh(shell).Faces.Skip(6), f => Assert.Equal(2, f.Mapping.ScaleU));
     }
 
     [Fact]
@@ -142,14 +135,14 @@ public sealed class MeshTextureModeTests : IDisposable
         var blue = EditorShell.DevMaterials.First(d => d.Name == "Blue").Guid;
         Assert.True(shell.SetFaceMaterial(blue));
         Assert.Single(shell.Scene!.History);
-        Assert.Equal(1, Mesh(shell).Faces[front].Slot);
-        Assert.Equal(blue, Mesh(shell).Materials[1]);
+        Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Slot);
+        Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[1]);
         var renderer = shell.Scene.Scene.Find(1)!.Components.Find(c => c.Id == SceneEdits.MeshRendererId)!;
         Assert.Equal(blue, renderer.Fields.Single(f => f.Name == "materials.1").Value.Asset);
         // The dropdown shows it, and undo takes both back.
         Assert.Equal("Blue", ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.MeshDevMaterial)).Selected);
         shell.Scene.Undo();
-        Assert.Equal(0, Mesh(shell).Faces[front].Slot);
+        Assert.Equal(0, MeshFixtures.Mesh(shell).Faces[front].Slot);
         Assert.DoesNotContain(renderer.Fields, f => f.Name == "materials.1");
         Assert.DoesNotContain(shell.Scene.Scene.Find(1)!.Components.Find(c => c.Id == SceneEdits.MeshRendererId)!.Fields, f => f.Name == "materials.1");
 
@@ -158,18 +151,18 @@ public sealed class MeshTextureModeTests : IDisposable
         var pixel = PixelOf(shell, new Vec3(0.1, 0.1, -0.5));
         shell.PreviewFaceMaterial(pixel, blue);
         Assert.True(shell.Scene.InTransaction);
-        Assert.Equal(blue, Mesh(shell).Materials[Mesh(shell).Faces[front].Slot]);
+        Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
         shell.PreviewFaceMaterial(null, blue);
         Assert.False(shell.Scene.InTransaction);
-        Assert.Equal(EditorShell.DevGrayMaterial, Mesh(shell).Materials[Mesh(shell).Faces[front].Slot]);
+        Assert.Equal(EditorShell.DevGrayMaterial, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
         Assert.True(shell.DropFaceMaterial(pixel, blue));
-        Assert.Equal(blue, Mesh(shell).Materials[Mesh(shell).Faces[front].Slot]);
+        Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
         Assert.Single(shell.Scene.History);
         // A drop over a selected face sets every selected face.
         SelectFaces(shell, front, (front + 1) % 6);
         var red = EditorShell.DevMaterials.First(d => d.Name == "Red").Guid;
         Assert.True(shell.DropFaceMaterial(pixel, red));
-        Assert.Equal(red, Mesh(shell).Materials[Mesh(shell).Faces[(front + 1) % 6].Slot]);
+        Assert.Equal(red, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[(front + 1) % 6].Slot]);
         Assert.False(shell.DropFaceMaterial(new Vec2(5, 5), red));
     }
 
@@ -184,18 +177,18 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.Equal(2, shell.MaterialHotspots(MaterialGuid).Count);
         // The 1 m face is 256 texels at the project's density: the square rectangle.
         Assert.True(shell.Commands.Get(EditorCommands.TextureHotspot).Execute());
-        var (minU, maxU, minV, maxV) = MeshTexture.UvBounds(Mesh(shell), front, Mesh(shell).Faces[front].Mapping);
+        var (minU, maxU, minV, maxV) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0, 0.25, 0, 0.25), (Math.Round(minU, 6), Math.Round(maxU, 6), Math.Round(minV, 6), Math.Round(maxV, 6)));
         Assert.True(shell.Commands.Get(EditorCommands.TextureHotspotNext).Execute());
-        (minU, maxU, _, _) = MeshTexture.UvBounds(Mesh(shell), front, Mesh(shell).Faces[front].Mapping);
+        (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0.25, 0.75), (Math.Round(minU, 6), Math.Round(maxU, 6)));
         // Random keeps the best rectangle in one of its symmetries.
         Assert.True(shell.ApplyHotspot(HotspotChoice.Random, new Random(3)));
-        Assert.Equal(0, MeshTexture.CurrentHotspot(Mesh(shell), front, Mesh(shell).Faces[front].Mapping, shell.MaterialHotspots(MaterialGuid), 1024, 1024));
+        Assert.Equal(0, MeshTexture.CurrentHotspot(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping, shell.MaterialHotspots(MaterialGuid), 1024, 1024));
         // A material without hotspots fits instead.
         Assert.True(shell.SetFaceMaterial(EditorShell.DevGrayMaterial));
         Assert.True(shell.ApplyHotspot(HotspotChoice.Best));
-        (minU, maxU, _, _) = MeshTexture.UvBounds(Mesh(shell), front, Mesh(shell).Faces[front].Mapping);
+        (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0, 1), (Math.Round(minU, 6), Math.Round(maxU, 6)));
     }
 
@@ -214,22 +207,22 @@ public sealed class MeshTextureModeTests : IDisposable
         var center = shell.Camera.RelativeTo(pivot);
         var size = Gizmo.Size(shell.Camera, center, Height);
         Vec2 Along(double meters) => shell.Camera.Project(center + Vec3.UnitX * meters, Width, Height)!.Value;
-        var vertices = Mesh(shell).Vertices;
+        var vertices = MeshFixtures.Mesh(shell).Vertices;
         Assert.True(shell.PressGizmo(Along(0.5 * size)));
         shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
         Assert.Single(shell.Scene!.History);
-        Assert.Equal(vertices, Mesh(shell).Vertices);
+        Assert.Equal(vertices, MeshFixtures.Mesh(shell).Vertices);
         // The texture moved half a meter along u: the shift fell by half a repeat at a scale of 1.
-        Assert.Equal(-0.5, Mesh(shell).Faces[front].Mapping.ShiftU, 6);
-        Assert.Equal(0, Mesh(shell).Faces[front].Mapping.ShiftV, 6);
+        Assert.Equal(-0.5, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftU, 6);
+        Assert.Equal(0, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 6);
         // Off again, and a drag moves the vertices.
         Assert.True(shell.Commands.Get(EditorCommands.MeshTransformTexture).Execute());
         Assert.False(shell.TextureGizmo);
         Assert.True(shell.PressGizmo(Along(0.5 * size)));
         shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
-        Assert.NotEqual(vertices, Mesh(shell).Vertices);
+        Assert.NotEqual(vertices, MeshFixtures.Mesh(shell).Vertices);
     }
 
     [Fact]
@@ -241,22 +234,16 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.True(shell.BeginMappingScrub("Drag Texture Scale"));
         shell.PreviewMappings((_, _, m) => m with { ScaleU = 2 });
         shell.PreviewMappings((_, _, m) => m with { ScaleU = 3 });
-        Assert.Equal(3, Mesh(shell).Faces[front].Mapping.ScaleU);
+        Assert.Equal(3, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
         shell.EndMappingScrub();
         Assert.Single(shell.Scene!.History);
         shell.Scene.Undo();
-        Assert.Equal(1, Mesh(shell).Faces[front].Mapping.ScaleU);
+        Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
         Assert.True(shell.SetTextureScale(null, 0.5));
-        Assert.Equal((1.0, 0.5), (Mesh(shell).Faces[front].Mapping.ScaleU, Mesh(shell).Faces[front].Mapping.ScaleV));
+        Assert.Equal((1.0, 0.5), (MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleV));
         Assert.True(shell.SetTextureRotation(400));
-        Assert.Equal(40, Mesh(shell).Faces[front].Mapping.Rotation, 9);
+        Assert.Equal(40, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation, 9);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

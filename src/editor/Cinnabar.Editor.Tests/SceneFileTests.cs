@@ -70,7 +70,7 @@ public class SceneFileTests
     [Fact]
     public void TheSampleSceneRoundTrips()
     {
-        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
+        var path = Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "main.scene");
         var text = File.ReadAllText(path).ReplaceLineEndings("\n");
         Assert.Equal(text, SceneFile.Write(Parse(text)));
     }
@@ -248,7 +248,7 @@ public class SceneFileTests
     [InlineData("expected.scene", false)]
     public void ThePrefabFixtureParses(string name, bool roundTrips)
     {
-        var path = Path.Combine(RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name);
+        var path = Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name);
         var text = File.ReadAllText(path).ReplaceLineEndings("\n");
         var scene = Parse(text);
         if (roundTrips)
@@ -272,17 +272,5 @@ public class SceneFileTests
 
         Assert.Null(scene);
         Assert.Contains(problems, p => p.IsError && p.Message.Contains(fragment));
-    }
-
-    static string RepositoryRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return dir.FullName;
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
     }
 }

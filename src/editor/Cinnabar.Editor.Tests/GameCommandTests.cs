@@ -15,15 +15,11 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The game's commands in the shell, and the resource monitor's stats, without a host.</summary>
 public sealed class GameCommandTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-command-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("command");
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var path = Path.Combine(_directory, "door.scene");
-        File.WriteAllText(path, "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
-        return new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        return TestShell.Open(_temp, "door.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
     }
 
     static GameCommandInfo Info(string id, string tab, string group, bool edits = false) => new(id, id, "", tab, group, "", edits);
@@ -139,11 +135,5 @@ public sealed class GameCommandTests : IDisposable
         Assert.Equal("12 B", ResourceStats.Bytes(12));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

@@ -5,7 +5,7 @@ namespace Cinnabar.Editor.Tests;
 
 public sealed class PrefabTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-prefab-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("prefab");
 
     const string Door = "22222222222222222222222222222222";
     const string Lamp = "11111111111111111111111111111111";
@@ -15,25 +15,10 @@ public sealed class PrefabTests : IDisposable
     const ulong PorchId = 0x2000000000000005;
     const ulong BulbId = 0x1000000000000002;
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
-    static string FixtureDirectory()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return Path.Combine(dir.FullName, "lib", "engine", "asset", "format", "testdata", "prefabs");
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
-    }
+    static string FixtureDirectory() =>
+        Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs");
 
     static Scene Parse(string text)
     {
@@ -104,8 +89,8 @@ public sealed class PrefabTests : IDisposable
     (SceneDocument Document, List<Wire.Operation> Sent) Open(string text = "scene 2\n\nentity 5000000000000001\nname = \"Front Door\"\nprefab = $22222222222222222222222222222222\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n")
     {
         var prefabs = FixturePrefabs();
-        var document = new SceneDocument(Path.Combine(_directory, "level.scene"), Parse(text),
-            g => prefabs.TryGetValue(g, out var scene) ? new PrefabDocument(Path.Combine(_directory, g + ".prefab"), g, scene, SceneFile.Write(scene)) : null);
+        var document = new SceneDocument(_temp.Combine("level.scene"), Parse(text),
+            g => prefabs.TryGetValue(g, out var scene) ? new PrefabDocument(_temp.Combine(g + ".prefab"), g, scene, SceneFile.Write(scene)) : null);
         var sent = new List<Wire.Operation>();
         document.Applied += ops => sent.AddRange(ops.SelectMany(o => o.ToWires()));
         return (document, sent);
@@ -355,7 +340,7 @@ public sealed class PrefabTests : IDisposable
             "entity 0000000000000002\nname = \"Lid\"\nparent = @0000000000000001\n\n" +
             "entity 0000000000000003\nname = \"Watcher\"\ncomponent 1001 Spin\n\ttarget = @0000000000000002\n";
         var (document, sent) = Open(text);
-        var path = Path.Combine(_directory, "crate.prefab");
+        var path = _temp.Combine("crate.prefab");
 
         var (ops, prefab) = PrefabEdits.MakePrefab(document, 1, path);
         document.Apply("Make Prefab Crate", ops);

@@ -16,28 +16,23 @@ namespace Cinnabar.Editor.Tests;
 /// </summary>
 public sealed class MeshToolModeTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-mesh-tool-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("mesh-tool");
 
-    const string MeshGuid = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
     const double Width = 1600;
     const double Height = 900;
 
     static readonly string Text = "scene 1\n\n" +
         "entity 0000000000000001\nname = \"Room\"\ncomponent 1 Transform\n\tposition = [0, 0, 83886080]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n" +
-        $"component 33 Mesh_Renderer\n\tmesh = ${MeshGuid}\n\tmaterials.0 = $00112233445566778899aabbccddeeff\n";
+        $"component 33 Mesh_Renderer\n\tmesh = ${MeshFixtures.MeshGuid}\n\tmaterials.0 = $00112233445566778899aabbccddeeff\n";
 
     static ulong Handle(uint index) => 1UL << 32 | index;
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var scenePath = Path.Combine(_directory, "main.scene");
-        File.WriteAllText(scenePath, Text);
-        File.WriteAllText(Path.Combine(_directory, "room.mesh"), MeshFile.Write(Primitives.Block(new Vec3(-0.5, -0.5, -0.5), new Vec3(0.5, 0.5, 0.5))));
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
-        shell.Assets.Apply(new AssetSnapshot([new Asset(MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "")], []));
+        MeshFixtures.WriteRoom(_temp);
+        var shell = TestShell.Open(_temp, "main.scene", Text);
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
+        shell.Assets.Apply(new AssetSnapshot([new Asset(MeshFixtures.MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "")], []));
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33])]));
         shell.Viewport.RequestSize(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);
@@ -47,10 +42,8 @@ public sealed class MeshToolModeTests : IDisposable
         return shell;
     }
 
-    static MeshData Mesh(EditorShell shell) => shell.Meshes.Find(MeshGuid)!.Data;
-
     static void SelectFaces(EditorShell shell, params int[] faces) =>
-        shell.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. faces.Select(f => new MeshItem(MeshGuid, f))]), switchKind: true);
+        shell.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. faces.Select(f => new MeshItem(MeshFixtures.MeshGuid, f))]), switchKind: true);
 
     // A pixel along the x axis from the gizmo's pivot at the press, by meters: the gizmo follows the selection as the
     // drag moves it, but the drag is from where it started.
@@ -76,26 +69,26 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
         Assert.True(shell.HasPendingDistance);
         Assert.Empty(shell.Scene!.History);
-        Assert.Equal(6, Mesh(shell).Faces.Length);
+        Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
         // A Move gizmo shows whatever the tool, on the face's centroid.
         Assert.NotNull(shell.GizmoPose());
         var size = Gizmo.Size(shell.Camera, shell.Camera.RelativeTo(shell.GizmoPose()!.Value.Pivot), Height);
         var along = Along(shell);
         Assert.True(shell.PressGizmo(along(0.5 * size)));
         shell.DragGizmo(along(0.5 * size + 0.25), invertSnap: false);
-        Assert.Equal(10, Mesh(shell).Faces.Length);
+        Assert.Equal(10, MeshFixtures.Mesh(shell).Faces.Length);
         shell.DragGizmo(along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
 
         Assert.False(shell.HasPendingDistance);
         var entry = Assert.Single(shell.Scene.History);
         Assert.Equal("Extrude", entry.Label);
-        var mesh = Mesh(shell);
+        var mesh = MeshFixtures.Mesh(shell);
         Assert.Equal(10, mesh.Faces.Length);
         Assert.All(mesh.Faces[5].Corners, c => Assert.Equal(1.0, mesh.Vertices[c].X, 3));
-        Assert.Equal([5], shell.MeshSelection.Of(MeshGuid));
+        Assert.Equal([5], shell.MeshSelection.Of(MeshFixtures.MeshGuid));
         shell.Scene.Undo();
-        Assert.Equal(6, Mesh(shell).Faces.Length);
+        Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
 
         // Escape cancels a tool that waits, and a tool that is never dragged leaves no entry.
         Assert.True(shell.Commands.Get(EditorCommands.MeshInset).Execute());
@@ -106,7 +99,7 @@ public sealed class MeshToolModeTests : IDisposable
         // The undone extrude is still the only entry, at position zero.
         Assert.Single(shell.Scene.History);
         Assert.Equal(0, shell.Scene.Position);
-        Assert.Equal(6, Mesh(shell).Faces.Length);
+        Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
     }
 
     [Fact]
@@ -122,8 +115,8 @@ public sealed class MeshToolModeTests : IDisposable
         shell.DragGizmo(along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
         Assert.Equal("Extrude", Assert.Single(shell.Scene!.History).Label);
-        Assert.Equal(10, Mesh(shell).Faces.Length);
-        Assert.Empty(Mesh(shell).Validate());
+        Assert.Equal(10, MeshFixtures.Mesh(shell).Faces.Length);
+        Assert.Empty(MeshFixtures.Mesh(shell).Validate());
     }
 
     [Fact]
@@ -136,12 +129,12 @@ public sealed class MeshToolModeTests : IDisposable
         var pixel = PixelOf(shell, new Vec3(-0.5, -0.25, -0.5)) + new Vec2(2, 0);
         shell.HoverMesh(pixel);
         Assert.True(shell.AddToolPoint(pixel));
-        var mesh = Mesh(shell);
+        var mesh = MeshFixtures.Mesh(shell);
         Assert.Equal(10, mesh.Faces.Length);
         Assert.Equal(12, mesh.Vertices.Length);
         Assert.Equal(MeshElement.Vertices, shell.MeshElement);
         Assert.Equal(4, shell.MeshSelection.Count);
-        Assert.All(shell.MeshSelection.Of(MeshGuid), v => Assert.Equal(-0.25, mesh.Vertices[v].Y, 2));
+        Assert.All(shell.MeshSelection.Of(MeshFixtures.MeshGuid), v => Assert.Equal(-0.25, mesh.Vertices[v].Y, 2));
         Assert.Equal("Cut", Assert.Single(shell.Scene!.History).Label);
         // A click on nothing with the tool is taken and cuts nothing.
         Assert.True(shell.AddToolPoint(new Vec2(5, 5)));
@@ -160,10 +153,10 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal(4, shell.ToolPointCount);
         // A click on the first corner closes the polygon.
         Assert.True(shell.AddToolPoint(PixelOf(shell, new Vec3(-0.25, -0.25, -0.5))));
-        var mesh = Mesh(shell);
+        var mesh = MeshFixtures.Mesh(shell);
         Assert.Equal(8, mesh.Faces.Length);
         Assert.Equal(MeshElement.Faces, shell.MeshElement);
-        var inner = mesh.Faces[Assert.Single(shell.MeshSelection.Of(MeshGuid))];
+        var inner = mesh.Faces[Assert.Single(shell.MeshSelection.Of(MeshFixtures.MeshGuid))];
         Assert.Equal(4, inner.Corners.Length);
         Assert.All(inner.Corners, c => Assert.Equal(-0.5, mesh.Vertices[c].Z, 6));
         Assert.Empty(mesh.Validate());
@@ -184,7 +177,7 @@ public sealed class MeshToolModeTests : IDisposable
         // The source's material comes along, and the entity is at the source's pose.
         Assert.Equal("00112233445566778899aabbccddeeff", renderer.Fields.Single(f => f.Name == "materials.0").Value.Asset);
         Assert.Equal((long)(5 * Pose.Unit), SceneEdits.WorldPose(shell.Scene.Scene, detached)!.Position[2]);
-        Assert.Equal(5, Mesh(shell).Faces.Length);
+        Assert.Equal(5, MeshFixtures.Mesh(shell).Faces.Length);
         var document = shell.Meshes.Find(guid)!;
         Assert.Single(document.Data.Faces);
         Assert.Equal(4, document.Data.Vertices.Length);
@@ -193,13 +186,13 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal("Detach", Assert.Single(shell.Scene.History).Label);
         // Undo takes the entity, the document and the faces back together.
         shell.Scene.Undo();
-        Assert.Equal(6, Mesh(shell).Faces.Length);
+        Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
         Assert.Null(shell.Meshes.Find(guid));
         Assert.DoesNotContain(shell.Scene.Scene.Entities, e => e.Name == "detach");
         // Extract keeps the source.
         SelectFaces(shell, 5);
         Assert.True(shell.Commands.Get(EditorCommands.MeshExtract).Execute());
-        Assert.Equal(6, Mesh(shell).Faces.Length);
+        Assert.Equal(6, MeshFixtures.Mesh(shell).Faces.Length);
         Assert.Contains(shell.Scene.Scene.Entities, e => e.Name == "extract");
     }
 
@@ -241,11 +234,5 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal(2, shell.Scene.History.Count);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

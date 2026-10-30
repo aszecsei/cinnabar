@@ -10,7 +10,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Instances in the shell, without a host: the prefabs that the index names, a drop, an override's drag, Reset and Make Prefab.</summary>
 public sealed class PrefabShellTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-prefab-shell-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("prefab-shell");
 
     const string Door = "22222222222222222222222222222222";
     const string Lamp = "11111111111111111111111111111111";
@@ -23,27 +23,15 @@ public sealed class PrefabShellTests : IDisposable
 
     static ulong Handle(uint index) => 1UL << 32 | index;
 
-    static string Fixture(string name)
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return File.ReadAllText(Path.Combine(dir.FullName, "lib", "engine", "asset", "format", "testdata", "prefabs", name));
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
-    }
+    static string Fixture(string name) =>
+        File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name));
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(Path.Combine(_directory, "door.prefab"), Fixture("door.prefab"));
-        File.WriteAllText(Path.Combine(_directory, "lamp.prefab"), Fixture("lamp.prefab"));
-        var path = Path.Combine(_directory, "level.scene");
-        File.WriteAllText(path, Text);
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("door.prefab"), Fixture("door.prefab"));
+        File.WriteAllText(_temp.Combine("lamp.prefab"), Fixture("lamp.prefab"));
+        var shell = TestShell.Open(_temp, "level.scene", Text);
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Crate", Crate, 0, true, [1]), new EntityInfo(Handle(1), "Front Door", Front, 0, true, [1])]));
         return shell;
     }
@@ -67,7 +55,7 @@ public sealed class PrefabShellTests : IDisposable
         // Before the index arrives, the instance is its root alone.
         Assert.Equal(2, shell.Scene!.Expanded.Flat.Entities.Count);
 
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
 
         Assert.Equal(7, shell.Scene.Expanded.Flat.Entities.Count);
         Assert.Equal("Front Door", shell.Scene.Expanded.Flat.Find(Front)!.Name);
@@ -80,7 +68,7 @@ public sealed class PrefabShellTests : IDisposable
     public void ADropShowsTheInstanceUnderTheDragAndIsOneEntry()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         var before = shell.Scene!.Scene.Entities.Count;
 
         shell.PreviewPrefab(Door, [16777216, 0, 0]);
@@ -109,7 +97,7 @@ public sealed class PrefabShellTests : IDisposable
     public void ADragOfAChildIsAnOverrideAndResetRevertsIt()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         var frame = InDoor(0x2000000000000002);
 
         shell.BeginEdit("Move Frame");
@@ -139,11 +127,11 @@ public sealed class PrefabShellTests : IDisposable
     public void MakePrefabWritesTheFileAtTheSave()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         shell.SelectScene(Crate);
 
         Assert.True(shell.MakePrefab("crate"));
-        var path = Path.Combine(_directory, "crate.prefab");
+        var path = _temp.Combine("crate.prefab");
         Assert.False(File.Exists(path));
         var instance = shell.Scene!.Scene.Find(Crate)!;
         Assert.NotEqual("", instance.Prefab);
@@ -152,7 +140,7 @@ public sealed class PrefabShellTests : IDisposable
 
         Assert.True(shell.SaveScene());
         Assert.True(File.Exists(path));
-        Assert.Contains($"prefab = ${instance.Prefab}\n", File.ReadAllText(Path.Combine(_directory, "level.scene")));
+        Assert.Contains($"prefab = ${instance.Prefab}\n", File.ReadAllText(_temp.Combine("level.scene")));
         Assert.Contains($"guid = {instance.Prefab}", File.ReadAllText(path + ".meta"));
 
         // A name that a file has is refused.
@@ -164,7 +152,7 @@ public sealed class PrefabShellTests : IDisposable
     public void UnpackMakesTheInstanceTheScenes()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         shell.SelectScene(Front);
 
         Assert.True(shell.UnpackSelected(completely: true));
@@ -178,9 +166,9 @@ public sealed class PrefabShellTests : IDisposable
     public void APrefabOpensAsTheDocumentWithOneRoot()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
 
-        Assert.True(shell.OpenScene(Path.Combine(_directory, "door.prefab")));
+        Assert.True(shell.OpenScene(_temp.Combine("door.prefab")));
 
         Assert.True(shell.Scene!.IsPrefab);
         Assert.Equal(Door, shell.Scene.PrefabGuid);
@@ -198,14 +186,14 @@ public sealed class PrefabShellTests : IDisposable
         Assert.Equal(2, shell.Scene.History.Count);
 
         Assert.True(shell.SaveScene());
-        Assert.Contains("name = \"Entity\"\nparent = @2000000000000001\n", File.ReadAllText(Path.Combine(_directory, "door.prefab")));
+        Assert.Contains("name = \"Entity\"\nparent = @2000000000000001\n", File.ReadAllText(_temp.Combine("door.prefab")));
     }
 
     [Fact]
     public void ApplyFromTheShellAndAReloadOfAChangedPrefab()
     {
         using var shell = NewShell();
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         var frame = InDoor(0x2000000000000002);
         shell.Edit("Override", new SetField(frame, 35, "intensity", SceneValue.Of(SceneNumber.Of(0.25))));
 
@@ -217,17 +205,11 @@ public sealed class PrefabShellTests : IDisposable
         shell.Scene.Undo();
 
         // A clean prefab whose file changes shows the change when the index next reports.
-        var path = Path.Combine(_directory, "door.prefab");
+        var path = _temp.Combine("door.prefab");
         File.WriteAllText(path, File.ReadAllText(path).Replace("name = \"Frame\"", "name = \"Jamb\""));
-        Index(shell, _directory);
+        Index(shell, _temp.Path);
         Assert.Equal("Jamb", shell.Scene.Expanded.Flat.Find(frame)!.Name);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

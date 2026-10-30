@@ -8,7 +8,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The atmosphere's edits (see docs/editor/shell-and-panels.md#atmosphere): its volume, its sun and its presets.</summary>
 public sealed class AtmosphereTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-atmosphere-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("atmosphere");
 
     // A scene with a sun, a light whose +z points down and toward -z, and nothing else.
     const string Text = "scene 1\n\nentity 0000000000000001\nname = \"Sun\"\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n" +
@@ -16,11 +16,7 @@ public sealed class AtmosphereTests : IDisposable
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var path = Path.Combine(_directory, "sky.scene");
-        File.WriteAllText(path, Text);
-        return new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        return TestShell.Open(_temp, "sky.scene", Text);
     }
 
     static SceneComponent Environment(EditorShell shell) =>
@@ -181,11 +177,5 @@ public sealed class AtmosphereTests : IDisposable
         Assert.Equal(12, Field(environment, "atmosphere.mie_scattering")!.Numbers[0].Float);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

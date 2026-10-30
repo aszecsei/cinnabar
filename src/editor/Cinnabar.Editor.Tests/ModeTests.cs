@@ -9,15 +9,11 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Play, pause, step and stop in the shell, without a host, and the game's input keys.</summary>
 public sealed class ModeTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-mode-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("mode");
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var path = Path.Combine(_directory, "door.scene");
-        File.WriteAllText(path, "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        var shell = TestShell.Open(_temp, "door.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n");
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Door", 1, 0, true, [])]));
         return shell;
     }
@@ -72,11 +68,5 @@ public sealed class ModeTests : IDisposable
         Assert.Equal(InputKey.Mouse5, GameInput.Button(PointerUpdateKind.XButton2Released));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

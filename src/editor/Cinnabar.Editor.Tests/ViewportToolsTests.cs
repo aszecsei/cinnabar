@@ -11,7 +11,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The viewport's tools in the shell, without a host: selection of several entities, their edits, and gizmo drags.</summary>
 public sealed class ViewportToolsTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-viewport-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("viewport");
 
     // Two roots 1 m apart along x, 5 m ahead of a camera at the origin.
     const string Text = "scene 1\n\n" +
@@ -22,11 +22,7 @@ public sealed class ViewportToolsTests : IDisposable
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var path = Path.Combine(_directory, "two.scene");
-        File.WriteAllText(path, Text);
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        var shell = TestShell.Open(_temp, "two.scene", Text);
         Report(shell, 1);
         shell.Viewport.RequestSize(new PixelSize(1600, 900));
         shell.Camera.Place([0, 0, 0], 0, 0);
@@ -232,11 +228,5 @@ public sealed class ViewportToolsTests : IDisposable
         Assert.False(shell.IsHidden(2));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

@@ -6,7 +6,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Editing prefabs from the scene, Apply, Revert and Make Variant, and a prefab as the open document.</summary>
 public sealed class PrefabApplyTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-prefab-apply-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("prefab-apply");
 
     const string Door = "22222222222222222222222222222222";
     const string Lamp = "11111111111111111111111111111111";
@@ -23,25 +23,10 @@ public sealed class PrefabApplyTests : IDisposable
         "entity 5000000000000002\nname = \"Back Door\"\nprefab = $22222222222222222222222222222222\ncomponent 1 Transform\n\tposition = [16777216, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n\n" +
         "entity 6000000000000001\nname = \"Trigger\"\n";
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 
-    static string Fixture(string name)
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return File.ReadAllText(Path.Combine(dir.FullName, "lib", "engine", "asset", "format", "testdata", "prefabs", name));
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
-    }
+    static string Fixture(string name) =>
+        File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "lib", "engine", "asset", "format", "testdata", "prefabs", name));
 
     static Scene Parse(string text)
     {
@@ -53,18 +38,18 @@ public sealed class PrefabApplyTests : IDisposable
     // The fixture's door and lamp as files in the test's directory, and a document that opens them from there.
     Func<string, PrefabDocument?> Files()
     {
-        Directory.CreateDirectory(_directory);
+        Directory.CreateDirectory(_temp.Path);
         var files = new Dictionary<string, string> { [Door] = "door.prefab", [Lamp] = "lamp.prefab" };
         foreach (var (guid, name) in files)
         {
-            File.WriteAllText(Path.Combine(_directory, name), Fixture(name));
+            File.WriteAllText(_temp.Combine(name), Fixture(name));
         }
-        return g => files.TryGetValue(g, out var name) ? PrefabDocument.Open(Path.Combine(_directory, name), g).Document : null;
+        return g => files.TryGetValue(g, out var name) ? PrefabDocument.Open(_temp.Combine(name), g).Document : null;
     }
 
     (SceneDocument Document, List<Wire.Operation> Sent) Open(string text = Level)
     {
-        var document = new SceneDocument(Path.Combine(_directory, "level.scene"), Parse(text), Files());
+        var document = new SceneDocument(_temp.Combine("level.scene"), Parse(text), Files());
         var sent = new List<Wire.Operation>();
         document.Applied += ops => sent.AddRange(ops.SelectMany(o => o.ToWires()));
         return (document, sent);
@@ -103,7 +88,7 @@ public sealed class PrefabApplyTests : IDisposable
         document.Redo();
 
         document.Save();
-        Assert.Contains("intensity = 0.25", File.ReadAllText(Path.Combine(_directory, "door.prefab")));
+        Assert.Contains("intensity = 0.25", File.ReadAllText(_temp.Combine("door.prefab")));
         Assert.False(door.IsDirty);
     }
 
@@ -179,7 +164,7 @@ public sealed class PrefabApplyTests : IDisposable
             new AddComponent(Outside, new SceneComponent(1001, "Spin", [new SceneField("target", SceneValue.EntityRef(In(Front, HandleId)))])));
         var names = document.Expanded.Flat.Entities.Select(e => e.Name).Order().ToList();
 
-        var (ops, variant) = PrefabEdits.MakeVariant(document, Front, Path.Combine(_directory, "dim_door.prefab"));
+        var (ops, variant) = PrefabEdits.MakeVariant(document, Front, _temp.Combine("dim_door.prefab"));
         document.Apply("Make Variant Door", ops);
 
         Assert.Equal(variant.Guid, document.Scene.Find(Front)!.Prefab);
@@ -204,7 +189,7 @@ public sealed class PrefabApplyTests : IDisposable
     public void APrefabDocumentKeepsOneRootAndCannotContainItself()
     {
         var files = Files();
-        var (document, _) = SceneDocument.Open(Path.Combine(_directory, "door.prefab"), files, Door);
+        var (document, _) = SceneDocument.Open(_temp.Combine("door.prefab"), files, Door);
         Assert.NotNull(document);
         Assert.True(document.IsPrefab);
         Assert.Equal(6, document.Expanded.Flat.Entities.Count);
@@ -225,7 +210,7 @@ public sealed class PrefabApplyTests : IDisposable
         // A child of the root is fine.
         document.Apply("Create", new CreateEntity(new SceneEntity(0x7000000000000001) { Name = "Bell", Parent = 0x2000000000000001 }));
         document.Save();
-        Assert.Contains("name = \"Bell\"", File.ReadAllText(Path.Combine(_directory, "door.prefab")));
+        Assert.Contains("name = \"Bell\"", File.ReadAllText(_temp.Combine("door.prefab")));
     }
 
     [Fact]
@@ -233,7 +218,7 @@ public sealed class PrefabApplyTests : IDisposable
     {
         var (document, _) = Open();
         Assert.Equal(1.0, Intensity(document, In(Front, FrameId)));
-        var path = Path.Combine(_directory, "door.prefab");
+        var path = _temp.Combine("door.prefab");
         File.WriteAllText(path, File.ReadAllText(path).Replace("intensity = 1.0", "intensity = 0.75"));
 
         var before = document.Expanded.Flat.Entities.ToList();
