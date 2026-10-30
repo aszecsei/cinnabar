@@ -24,8 +24,11 @@ public sealed class FaceEditorView : ScrollViewer
     readonly StackPanel _content = new() { Classes = { "properties" } };
     readonly Dictionary<string, FieldView> _views = [];
     readonly HashSet<string> _collapsed = [];
+    // The tool buttons' hooks on their commands, which outlive the panel's rows.
+    readonly List<Action> _unhook = [];
     TextBlock? _title;
-    string _structure = "";
+    // Null when the rows are not built: before the first attach, and after a detach drops the hooks.
+    string? _structure;
 
     public FaceEditorView(EditorShell shell)
     {
@@ -46,7 +49,18 @@ public sealed class FaceEditorView : ScrollViewer
             _shell.Meshes.Changed -= OnMeshChanged;
             _shell.Assets.Changed -= Refresh;
             _shell.SceneChanged -= Refresh;
+            Unhook();
+            _structure = null;
         };
+    }
+
+    void Unhook()
+    {
+        foreach (var unhook in _unhook)
+        {
+            unhook();
+        }
+        _unhook.Clear();
     }
 
     void OnMeshChanged(MeshDocument document, MeshData data) => Refresh();
@@ -65,6 +79,7 @@ public sealed class FaceEditorView : ScrollViewer
 
     void Rebuild()
     {
+        Unhook();
         _content.Children.Clear();
         _views.Clear();
         _title = null;
@@ -141,7 +156,9 @@ public sealed class FaceEditorView : ScrollViewer
                 var button = new Button { Content = text, Classes = { "field-button" }, Margin = new Avalonia.Thickness(0, 0, 4, 4), IsEnabled = command.CanExecute };
                 ToolTip.SetTip(button, command.Description);
                 button.Click += (_, _) => command.Execute();
-                command.Changed += () => button.IsEnabled = command.CanExecute;
+                void Enable() => button.IsEnabled = command.CanExecute;
+                command.Changed += Enable;
+                _unhook.Add(() => command.Changed -= Enable);
                 wrap.Children.Add(button);
             }
             panel.Children.Add(new StackPanel

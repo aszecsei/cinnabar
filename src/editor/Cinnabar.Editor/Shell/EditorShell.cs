@@ -240,5 +240,9 @@ public sealed partial class EditorShell : IDisposable
         {
             editor.Dispose();
         }
+        foreach (var effect in _effects)
+        {
+            effect.Dispose();
+        }
     }
 }

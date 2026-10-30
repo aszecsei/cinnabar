@@ -407,6 +407,7 @@ public sealed partial class EditorShell
     {
         _sentGizmo = "";
         _picks.Clear();
+        _aimingSun = false;
         SendCamera();
         SendSelection();
         ResendHidden();
