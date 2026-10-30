@@ -65,6 +65,7 @@ public sealed partial class EditorShell : IDisposable
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
         Host = new HostSession(options);
+        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
         WireCook();
         WireMeshes();
@@ -124,11 +125,11 @@ public sealed partial class EditorShell : IDisposable
                 Host.Send(new WatchEntity(entity));
             }
             SendSelection();
-            ResendHidden();
+            Visibility.Resend();
         };
         World.EntitiesChanged += OnEntitiesChanged;
         // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
-        World.EntitiesChanged += SendHidden;
+        World.EntitiesChanged += Visibility.Send;
         Layout.Changed += Commands.InvalidateAll;
         Layout.ActiveDocumentChanged += OnActiveDocumentChanged;
         Layout.DocumentClosing = OnDocumentClosing;

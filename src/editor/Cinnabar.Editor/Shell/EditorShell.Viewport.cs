@@ -401,7 +401,7 @@ public sealed partial class EditorShell
         _aimingSun = false;
         SendCamera();
         SendSelection();
-        ResendHidden();
+        Visibility.Resend();
         SendViewportSettings();
         ResendMeshOverlay();
     }

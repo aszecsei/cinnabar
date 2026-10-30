@@ -126,7 +126,7 @@ public sealed partial class EditorShell
         // Save As keeps what the user hid and locked for the new file.
         if (Scene.Path != old)
         {
-            SaveSceneView();
+            Visibility.Save();
         }
         Console.Add(LogLevel.Info, $"scene: saved {Scene.Path}");
         return meshesSaved;
@@ -390,7 +390,7 @@ public sealed partial class EditorShell
         ReportExpansion();
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
-        LoadSceneView();
+        Visibility.Load();
         SendScene();
         FrameScene();
     }
