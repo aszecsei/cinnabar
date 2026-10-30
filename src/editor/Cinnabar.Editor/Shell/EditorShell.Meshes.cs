@@ -72,10 +72,7 @@ public sealed partial class EditorShell
             return null;
         }
         var (document, problems) = MeshDocument.Open(path, guid);
-        foreach (var p in problems)
-        {
-            Console.Add(p.IsError ? LogLevel.Error : LogLevel.Warning, $"mesh: {(p.Line > 0 ? $"{path}:{p.Line}" : path)}: {p.Message}");
-        }
+        Report("mesh", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
         if (document == null)
         {
             Console.Add(LogLevel.Error, $"mesh: cannot open {path}");

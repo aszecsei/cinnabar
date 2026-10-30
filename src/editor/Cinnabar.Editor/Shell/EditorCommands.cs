@@ -256,13 +256,13 @@ static class EditorCommands
             Description = "Add an entity with a Transform, where the selected entity is.",
             Icon = "add",
             Shortcut = "Ctrl+Shift+N",
-            CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         commands.Register(new Command(CreateVolume, "New Volume", shell.CreateVolume)
         {
             Description = "Add a global volume, where the selected entity is, for settings such as the post-processing and the fog. Add its settings components in the properties panel.",
             Icon = "add",
-            CanExecuteWhen = () => shell.Scene != null && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         commands.Register(new Command(DuplicateEntity, "Duplicate", shell.DuplicateSelected)
         {
@@ -367,26 +367,26 @@ static class EditorCommands
         {
             Description = "Drag a rectangle on the grid to add a box a grid cell high: a new mesh file and entity, or faces of the edited mesh in mesh mode. Ctrl at the release makes a new entity anyway.",
             Icon = "add",
-            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            CanExecuteWhen = () => shell.CanEditScene,
             IsCheckedWhen = () => shell.MeshTool == MeshTool.Create && shell.Primitive == PrimitiveKind.Block,
         });
         commands.Register(new Command(MeshCreate, "Create", () => shell.SetMeshTool(shell.MeshTool == MeshTool.Create ? MeshTool.Select : MeshTool.Create))
         {
             Description = "Drag a rectangle on the grid to add the chosen primitive, a grid cell high, with its parameters, which stay editable until the next edit.",
             Icon = "add",
-            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            CanExecuteWhen = () => shell.CanEditScene,
             IsCheckedWhen = () => shell.MeshTool == MeshTool.Create,
         });
         commands.Register(new ChoiceCommand(MeshPrimitive, "Primitive", [.. Enum.GetNames<PrimitiveKind>()], () => shell.Primitive.ToString(), name => shell.SetPrimitive(Enum.Parse<PrimitiveKind>(name)))
         {
             Description = "The primitive that Create makes: a block, a wedge, a cylinder, a cone, a sphere, an arch, stairs, a torus or a plane.",
-            CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         void Parameter(string id, string label, IReadOnlyList<string> options, Func<PrimitiveParameters, string> get, Func<PrimitiveParameters, string, PrimitiveParameters> set, string description) =>
             commands.Register(new ChoiceCommand(id, label, options, () => get(shell.PrimitiveParameters), value => shell.SetPrimitiveParameters(set(shell.PrimitiveParameters, value)))
             {
                 Description = description,
-                CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+                CanExecuteWhen = () => shell.CanEditScene,
             });
         static string Nearest(IReadOnlyList<string> options, double value) => options.MinBy(o => Math.Abs(double.Parse(o, System.Globalization.CultureInfo.InvariantCulture) - value))!;
         static double Number(string value) => double.Parse(value, System.Globalization.CultureInfo.InvariantCulture);
@@ -402,7 +402,7 @@ static class EditorCommands
             {
                 Description = description,
                 Icon = icon,
-                CanExecuteWhen = () => shell.IsEditing && shell.Scene != null,
+                CanExecuteWhen = () => shell.CanEditScene,
                 IsCheckedWhen = () => shell.MeshTool == tool,
             });
         ModeTool(MeshCut, MeshTool.Cut, "Cut", "scale-tool", "A loop cut: hover an edge to see the loop through the quads around the mesh, and click to cut it there. Snap puts the cut on the grid.");
@@ -436,7 +436,7 @@ static class EditorCommands
         {
             Description = "Mark an edge sharp where its faces' normals differ by more than the angle, and smooth otherwise, on the selected faces or the whole mesh.",
             Icon = "reset",
-            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditInMeshMode,
         });
         commands.Register(new ChoiceCommand(MeshNormalAngle, "Angle", EditorShell.NormalAngles, () => Nearest(EditorShell.NormalAngles, shell.NormalAngle), v => shell.SetNormalAngle(Number(v)))
         {
@@ -452,7 +452,7 @@ static class EditorCommands
         {
             Description = "Merge vertices within a tenth of a millimeter, remove degenerate faces and unused vertices, dissolve vertices on straight edges, and report edges with more than two faces.",
             Icon = "reset",
-            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditInMeshMode,
         });
         // The texture tools (see docs/editor/mesh-editing.md#texture-tools), on the selected faces.
         void TextureCommand(string id, string label, string icon, Func<bool> run, string description) =>
@@ -548,13 +548,13 @@ static class EditorCommands
         {
             Description = "Put the mesh's entity at the center of its bounds, with the geometry staying where it is.",
             Icon = "frame",
-            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditInMeshMode,
         });
         commands.Register(new Command(MeshPivotToGrid, "Pivot to Grid", () => shell.PivotToGrid())
         {
             Description = "Snap the mesh's entity to the grid, with the geometry staying where it is.",
             Icon = "snap",
-            CanExecuteWhen = () => shell.InMeshMode && shell.IsEditing,
+            CanExecuteWhen = () => shell.CanEditInMeshMode,
         });
         commands.Register(new Command(MeshGridToggle, "Show Grid", shell.ToggleShowGrid)
         {
@@ -886,32 +886,31 @@ static class EditorCommands
     static void RegisterAtmosphere(EditorShell shell)
     {
         var commands = shell.Commands;
-        bool CanEdit() => shell.Scene != null && shell.IsEditing;
         commands.Register(new Command(AtmosphereSelect, "Atmosphere", shell.SelectAtmosphere)
         {
             Description = "Select the global volume that holds the scene's sky, ambient light and fog, and add one with an atmosphere when the scene has none.",
             Icon = "sky",
-            CanExecuteWhen = CanEdit,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         commands.Register(new ChoiceCommand(AtmosphereMode, "Sky", Atmosphere.Modes,
             () => shell.AtmosphereVolume is { } volume ? Atmosphere.ModeOf(volume) : "Flat",
             mode => shell.EditAtmosphere("Set Sky", (_, volume) => Atmosphere.Set(volume, SceneEdits.EnvironmentId, Atmosphere.Mode, SceneValue.Name(mode))))
         {
             Description = "Flat: a background color, and an ambient light from a sky color and a ground color. Atmosphere: a sky that the sun and the moon light through the air, with stars at night. Texture: an hdr image of the sky.",
-            CanExecuteWhen = CanEdit,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         commands.Register(new Command(LinkSun, "Link Sun", shell.ToggleSunLink)
         {
             Description = "Take the sky's sun from the selected directional light, or the scene's first: its direction and its light, which the air then tints. Again, the sky has a sun of its own.",
             Icon = "sun",
             IsCheckedWhen = () => shell.AtmosphereSun != null,
-            CanExecuteWhen = () => CanEdit() && (shell.AtmosphereSun != null || Atmosphere.DirectionalLights(shell.Scene!.Expanded.Flat).Any()),
+            CanExecuteWhen = () => shell.CanEditScene && (shell.AtmosphereSun != null || Atmosphere.DirectionalLights(shell.Scene!.Expanded.Flat).Any()),
         });
         commands.Register(new Command(AimSun, "Aim Sun at Sky", shell.AimSunAtSky)
         {
             Description = "Aim the sun at the texture sky's: where its brightest texels are. A linked sun turns its light, which you can move on from there.",
             Icon = "sun",
-            CanExecuteWhen = () => CanEdit() && shell.Host.Linked && shell.AtmosphereVolume is { } volume && Atmosphere.ModeOf(volume) == "Texture",
+            CanExecuteWhen = () => shell.CanEditScene && shell.Host.Linked && shell.AtmosphereVolume is { } volume && Atmosphere.ModeOf(volume) == "Texture",
         });
         foreach (var (name, azimuth, elevation) in Atmosphere.TimesOfDay)
         {
@@ -919,7 +918,7 @@ static class EditorCommands
             {
                 Description = $"Aim the sun as at {name.ToLowerInvariant()}: {elevation} degrees above the horizon, at {azimuth} degrees from +z toward +x. A linked sun turns its light.",
                 Icon = "sun",
-                CanExecuteWhen = CanEdit,
+                CanExecuteWhen = () => shell.CanEditScene,
             });
         }
         foreach (var (name, _) in Atmosphere.Skies)
@@ -928,7 +927,7 @@ static class EditorCommands
             {
                 Description = name == "Clear" ? "Give the atmosphere Earth's clear air." : $"Give the atmosphere {name.ToLowerInvariant()} air.",
                 Icon = "sky",
-                CanExecuteWhen = CanEdit,
+                CanExecuteWhen = () => shell.CanEditScene,
             });
         }
         void Night(string id, string label, string field, double on, string description, string icon) =>
@@ -941,7 +940,7 @@ static class EditorCommands
                 Description = description,
                 Icon = icon,
                 IsCheckedWhen = () => shell.AtmosphereVolume is { } v && Atmosphere.Number(v, field, 0) > 0,
-                CanExecuteWhen = CanEdit,
+                CanExecuteWhen = () => shell.CanEditScene,
             });
         Night(Stars, "Stars", Atmosphere.StarIntensity, Atmosphere.StarsOn, "Show stars in the atmosphere's sky, which the day's light hides.", "stars");
         Night(Moon, "Moon", Atmosphere.MoonIlluminance, Atmosphere.MoonOn, "Show the moon in the atmosphere's sky, which the sun lights in phases, and which lights the night sky.", "moon");
@@ -954,7 +953,7 @@ static class EditorCommands
             Description = "Fill the world with the atmosphere's volumetric fog, or clear it and keep its settings.",
             Icon = "fog",
             IsCheckedWhen = () => shell.AtmosphereVolume is { } v && Atmosphere.HasFog(v),
-            CanExecuteWhen = CanEdit,
+            CanExecuteWhen = () => shell.CanEditScene,
         });
         foreach (var (name, _, _) in Atmosphere.Fogs)
         {
@@ -962,7 +961,7 @@ static class EditorCommands
             {
                 Description = name == "None" ? "Give the atmosphere's fog a density of 0." : $"Give the atmosphere {name.ToLowerInvariant()} fog.",
                 Icon = "fog",
-                CanExecuteWhen = CanEdit,
+                CanExecuteWhen = () => shell.CanEditScene,
             });
         }
     }

@@ -57,14 +57,7 @@ public sealed partial class EditorShell
             }
             _viewportSettings = value;
             SendViewportSettings();
-            try
-            {
-                Settings.Write(EditorSettings.ViewportFileName, JsonSerializer.Serialize(value));
-            }
-            catch (IOException e)
-            {
-                Console.Add(LogLevel.Warning, $"viewport: cannot save its settings: {e.Message}");
-            }
+            WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(value));
             Commands.InvalidateAll();
             ViewportSettingsChanged?.Invoke();
         }

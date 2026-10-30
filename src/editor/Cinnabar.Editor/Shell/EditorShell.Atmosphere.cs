@@ -16,7 +16,7 @@ public sealed partial class EditorShell
     readonly Dictionary<ulong, int> _watches = [];
 
     /// <summary>The volume that holds the open scene's atmosphere, or null without one, or while the game plays.</summary>
-    public SceneEntity? AtmosphereVolume => IsEditing && Scene != null ? Atmosphere.Find(Scene.Expanded.Flat) : null;
+    public SceneEntity? AtmosphereVolume => CanEditScene ? Atmosphere.Find(Scene.Expanded.Flat) : null;
 
     /// <summary>The directional light that the atmosphere's sky takes its sun from, or null.</summary>
     public SceneEntity? AtmosphereSun => Scene != null && AtmosphereVolume is { } volume ? Atmosphere.SunOf(Scene.Expanded.Flat, volume) : null;
@@ -27,7 +27,7 @@ public sealed partial class EditorShell
     /// </summary>
     public bool EditAtmosphere(string label, Func<Scene, SceneEntity, Operation[]> edit)
     {
-        if (Scene == null || !IsEditing)
+        if (!CanEditScene)
         {
             return false;
         }
@@ -39,7 +39,7 @@ public sealed partial class EditorShell
     /// <summary>Selects the atmosphere's volume, giving the scene one first when it has none.</summary>
     public void SelectAtmosphere()
     {
-        if (Scene == null || !IsEditing)
+        if (!CanEditScene)
         {
             return;
         }

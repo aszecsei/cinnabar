@@ -154,14 +154,7 @@ public sealed partial class EditorShell
         {
             views[key] = new SceneView([.. _hidden.Order().Select(id => id.ToString("x16"))], [.. _locked.Order().Select(id => id.ToString("x16"))]);
         }
-        try
-        {
-            Settings.Write(SceneViewsFileName, JsonSerializer.Serialize(views, new JsonSerializerOptions { WriteIndented = true }));
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            Console.Add(Panels.LogLevel.Warning, $"scene views: cannot write {Path.Combine(Settings.Directory, SceneViewsFileName)}: {e.Message}");
-        }
+        WriteSetting("scene views", SceneViewsFileName, JsonSerializer.Serialize(views, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     // A new link, or a resync, has a game that hides nothing yet.

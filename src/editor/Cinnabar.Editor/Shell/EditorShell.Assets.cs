@@ -10,6 +10,16 @@ namespace Cinnabar.Editor.Shell;
 public sealed record ContentFolder(string Root, string Path)
 {
     public string Name => Path == "" ? Root : AssetIndex.Name(Path);
+
+    /// <summary>The folder as the root's name and its path, for a message.</summary>
+    public string Display => Path == "" ? Root : $"{Root}/{Path}";
+
+    /// <summary>The folder under this one with a name, trimmed.</summary>
+    public ContentFolder Child(string name) => new(Root, Path == "" ? name.Trim() : $"{Path}/{name.Trim()}");
+
+    /// <summary>The folder's directory on disk, or null when the index has no such root.</summary>
+    public string? Directory(AssetIndex assets) =>
+        assets.FindRoot(Root) is { } root ? System.IO.Path.Combine(root.Dir, Path) : null;
 }
 
 /// <summary>An asset, by its GUID, or a folder, which an operation such as Rename or Delete acts on.</summary>
@@ -27,6 +37,18 @@ public sealed record ContentItem(string? Guid, ContentFolder? Folder)
 /// </summary>
 public sealed partial class EditorShell
 {
+    /// <summary>The source file of the asset of a GUID, when it is of a kind and its root is known.</summary>
+    public bool TryFileOf(string guid, AssetKind kind, out string path)
+    {
+        if (Assets.Find(guid) is { } asset && asset.Kind == kind && Assets.FullPath(asset) is { } full)
+        {
+            path = full;
+            return true;
+        }
+        path = "";
+        return false;
+    }
+
     /// <summary>The content browser's folder, where new assets go.</summary>
     public ContentFolder? ContentFolder { get; private set; }
 
@@ -106,7 +128,7 @@ public sealed partial class EditorShell
             AssetTemplate.Effect => "new_effect",
             _ => "new_folder",
         };
-        if (ContentFolder is not { } folder || Assets.FindRoot(folder.Root) is not { } root)
+        if (ContentFolder?.Directory(Assets) is not { } dir)
         {
             return stem;
         }
@@ -121,7 +143,6 @@ public sealed partial class EditorShell
             null => "",
             _ => Assets.ExtensionOf(AssetKind.Script),
         };
-        var dir = Path.Combine(root.Dir, folder.Path);
         for (var n = 1; ; n++)
         {
             var name = n == 1 ? stem : $"{stem}_{n}";
@@ -149,12 +170,12 @@ public sealed partial class EditorShell
             }
             return result != null;
         }
-        var path = folder.Path == "" ? name.Trim() : $"{folder.Path}/{name.Trim()}";
-        if (await Operate(new CreateFolder(folder.Root, path)) == null)
+        var created = folder.Child(name);
+        if (await Operate(new CreateFolder(created.Root, created.Path)) == null)
         {
             return false;
         }
-        ContentRevealed?.Invoke(ContentItem.Of(new ContentFolder(folder.Root, path)));
+        ContentRevealed?.Invoke(ContentItem.Of(created));
         return true;
     }
 
@@ -177,8 +198,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        var parent = AssetIndex.Parent(folder.Path);
-        ContentRevealed?.Invoke(ContentItem.Of(new ContentFolder(folder.Root, parent == "" ? name.Trim() : $"{parent}/{name.Trim()}")));
+        ContentRevealed?.Invoke(ContentItem.Of(new ContentFolder(folder.Root, AssetIndex.Parent(folder.Path)).Child(name)));
         return true;
     }
 

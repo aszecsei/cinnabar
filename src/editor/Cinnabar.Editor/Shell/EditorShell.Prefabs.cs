@@ -151,16 +151,8 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        try
-        {
-            return Edit($"Apply {FieldValues.Humanize(field)} to {PrefabName(Scene.Scene.Find(InstanceOf(sceneId)!.Instance)!.Prefab)}",
-                PrefabEdits.Apply(Scene, sceneId, component, script, field));
-        }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: cannot apply {field}: {e.Message}");
-            return false;
-        }
+        return TryEdit($"Apply {FieldValues.Humanize(field)} to {PrefabName(Scene.Scene.Find(InstanceOf(sceneId)!.Instance)!.Prefab)}",
+            () => PrefabEdits.Apply(Scene, sceneId, component, script, field), $"apply {field}");
     }
 
     /// <summary>Applies every override of the selected instances to their prefabs, as Apply All.</summary>
@@ -176,16 +168,8 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        try
-        {
-            var name = instances.Count == 1 ? PrefabName(Scene.Scene.Find(instances[0])!.Prefab) : $"{instances.Count} Instances";
-            return Edit($"{verb} {name}", [.. instances.SelectMany(i => edit(Scene, i))]);
-        }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: cannot {verb.ToLowerInvariant()}: {e.Message}");
-            return false;
-        }
+        var name = instances.Count == 1 ? PrefabName(Scene.Scene.Find(instances[0])!.Prefab) : $"{instances.Count} Instances";
+        return TryEdit($"{verb} {name}", () => [.. instances.SelectMany(i => edit(Scene, i))], verb.ToLowerInvariant());
     }
 
     public void RequestMakeVariant()
@@ -206,27 +190,19 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        try
+        if (!TryEdit($"Make Variant {Path.GetFileNameWithoutExtension(path)}", () => PrefabEdits.MakeVariant(Scene, instance, path).Item1, "make a variant"))
         {
-            var (ops, _) = PrefabEdits.MakeVariant(Scene, instance, path);
-            if (Edit($"Make Variant {Path.GetFileNameWithoutExtension(path)}", ops))
-            {
-                Console.Add(LogLevel.Info, $"edit: made the variant {path}, which the next save writes");
-                return true;
-            }
+            return false;
         }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: cannot make a variant: {e.Message}");
-        }
-        return false;
+        Console.Add(LogLevel.Info, $"edit: made the variant {path}, which the next save writes");
+        return true;
     }
 
     // The file of a new prefab of a name in the content browser's folder, or null with a line in the console.
     string? NewPrefabPath(string name)
     {
         var folder = ContentFolder ?? (Assets.FindRoot("game") is { } game ? new ContentFolder(game.Name, "") : null);
-        if (folder == null || Assets.FindRoot(folder.Root) is not { } root)
+        if (folder?.Directory(Assets) is not { } dir)
         {
             Console.Add(LogLevel.Error, "edit: a new prefab goes in the content browser's folder. Choose one first.");
             return null;
@@ -236,7 +212,7 @@ public sealed partial class EditorShell
         {
             file = file[..^SceneFile.PrefabExtension.Length];
         }
-        var path = Path.GetFullPath(Path.Combine(root.Dir, folder.Path, file + SceneFile.PrefabExtension));
+        var path = Path.GetFullPath(Path.Combine(dir, file + SceneFile.PrefabExtension));
         if (file.Length == 0 || file.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || File.Exists(path) || Scene!.Prefabs.Documents.Any(d => d.Path == path))
         {
             Console.Add(LogLevel.Error, $"edit: cannot make the prefab {path}: the name is taken or is not a file's");
@@ -476,21 +452,13 @@ public sealed partial class EditorShell
             return false;
         }
         var file = Path.GetFileNameWithoutExtension(path);
-        try
+        if (!TryEdit($"Make Prefab {file}", () => PrefabEdits.MakePrefab(Scene, entity.Id, path).Item1, "make a prefab"))
         {
-            var (ops, prefab) = PrefabEdits.MakePrefab(Scene, entity.Id, path);
-            if (Edit($"Make Prefab {file}", ops))
-            {
-                Console.Add(LogLevel.Info, $"edit: made the prefab {path}, which the next save writes");
-                SelectScene(entity.Id);
-                return true;
-            }
+            return false;
         }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: cannot make a prefab: {e.Message}");
-        }
-        return false;
+        Console.Add(LogLevel.Info, $"edit: made the prefab {path}, which the next save writes");
+        SelectScene(entity.Id);
+        return true;
     }
 
     /// <summary>Makes the selected instances' entities plain entities of the scene: one level, or with completely, every nesting.</summary>
@@ -507,16 +475,8 @@ public sealed partial class EditorShell
             return false;
         }
         var verb = completely ? "Unpack Completely" : "Unpack";
-        try
-        {
-            return Edit(roots.Count == 1 ? $"{verb} {Label(roots[0])}" : $"{verb} {roots.Count} Instances",
-                [.. roots.SelectMany(r => completely ? PrefabEdits.UnpackCompletely(Scene, r.Id) : PrefabEdits.Unpack(Scene, r.Id))]);
-        }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: cannot {verb.ToLowerInvariant()}: {e.Message}");
-            return false;
-        }
+        return TryEdit(roots.Count == 1 ? $"{verb} {Label(roots[0])}" : $"{verb} {roots.Count} Instances",
+            () => [.. roots.SelectMany(r => completely ? PrefabEdits.UnpackCompletely(Scene, r.Id) : PrefabEdits.Unpack(Scene, r.Id))], verb.ToLowerInvariant());
     }
 
     /// <summary>Shows the prefab of the selected entity's instance in the content browser.</summary>

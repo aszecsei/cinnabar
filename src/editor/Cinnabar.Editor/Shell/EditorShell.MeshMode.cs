@@ -83,7 +83,7 @@ public sealed partial class EditorShell
     }
 
     /// <summary>Whether the selected entities place mesh files, which Edit Mesh and Tab can edit.</summary>
-    public bool CanEditMesh => IsEditing && Scene != null && (InMeshMode || MeshEntities(SelectedSceneEntities).Count > 0);
+    public bool CanEditMesh => CanEditScene && (InMeshMode || MeshEntities(SelectedSceneEntities).Count > 0);
 
     // The selected entities whose Mesh_Renderer names a mesh file, with the file's GUID. A glTF mesh is not one.
     List<(SceneEntity Entity, string Guid)> MeshEntities(IEnumerable<SceneEntity> entities)
@@ -547,14 +547,7 @@ public sealed partial class EditorShell
         if (_textureDrag != null)
         {
             var textureChange = _drag.Update(pixel, Snap != invertSnap && Tool != Tool.Move ? Snapping : null);
-            try
-            {
-                Scene.Preview(_textureDrag.Apply(textureChange, Snap != invertSnap && Tool == Tool.Move));
-            }
-            catch (InvalidOperationException e)
-            {
-                Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            }
+            PreviewEdit(_textureDrag.Apply(textureChange, Snap != invertSnap && Tool == Tool.Move));
             return;
         }
         if (_meshDrag == null)
@@ -568,14 +561,7 @@ public sealed partial class EditorShell
         var ops = _meshDrag.Apply(change, snapping && Tool == Tool.Move);
         if (ops.Count > 0)
         {
-            try
-            {
-                Scene.Preview(ops);
-            }
-            catch (InvalidOperationException e)
-            {
-                Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            }
+            PreviewEdit(ops);
         }
     }
 
@@ -705,7 +691,7 @@ public sealed partial class EditorShell
     void SendMeshOverlay()
     {
         var message = new Wire.MeshOverlay(false, Wire.MeshElement.Faces, [], false, 0, [0, 0, 0], 0);
-        if (InMeshMode && IsEditing)
+        if (CanEditInMeshMode)
         {
             var meshes = new List<Wire.MeshOverlayMesh>();
             foreach (var (guid, sceneId) in _editedMeshes)

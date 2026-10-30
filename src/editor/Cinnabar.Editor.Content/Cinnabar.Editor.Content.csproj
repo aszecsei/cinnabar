@@ -6,5 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
+    <ProjectReference Include="..\Cinnabar.Editor.Model\Cinnabar.Editor.Model.csproj" />
   </ItemGroup>
 </Project>

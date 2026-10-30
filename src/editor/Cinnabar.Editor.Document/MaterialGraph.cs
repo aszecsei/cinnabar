@@ -230,8 +230,8 @@ public sealed class MaterialGraph
     }
 }
 
-/// <summary>A line of a material file that does not parse, with its number from 1.</summary>
-public sealed record MaterialProblem(int Line, string Message);
+/// <summary>A line of a material file that does not parse, with its number from 1. A problem is an error unless it says otherwise.</summary>
+public sealed record MaterialProblem(int Line, string Message, bool IsError = true);
 
 /// <summary>
 /// The material file format's reader and writer, as the cooker reads it (tools/cook/materials.odin and graphs.odin).

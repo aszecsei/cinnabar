@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Content;
 
@@ -51,15 +52,18 @@ public sealed class CookSession : IDisposable
     CancellationTokenSource? _connecting;
     readonly Stopwatch _uptime = new();
     // The operations that wait for the daemon's answer, by request ID.
-    readonly Dictionary<uint, TaskCompletionSource<OperationResult>> _requests = [];
-    readonly Dictionary<uint, TaskCompletionSource<PreviewResult>> _previews = [];
-    uint _nextRequest;
+    readonly PendingReplies<TaskCompletionSource<OperationResult>> _requests;
+    readonly PendingReplies<TaskCompletionSource<PreviewResult>> _previews;
 
     public CookSession(CookOptions options, AssetIndex index)
     {
         _options = options;
         Index = index;
         _context = SynchronizationContext.Current;
+        // Both kinds of request count from one ID. ID 0 is a message that wants no answer.
+        var ids = new ReplyIds(skipZero: true);
+        _requests = new(ids);
+        _previews = new(ids);
     }
 
     public AssetIndex Index { get; }
@@ -139,9 +143,8 @@ public sealed class CookSession : IDisposable
         {
             return Task.FromResult(new OperationResult("The cook daemon is not running, so the content cannot change.", []));
         }
-        var request = NextRequest();
         var answer = new TaskCompletionSource<OperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _requests[request] = answer;
+        var request = _requests.Add(answer);
         _link.Send(operation, request);
         return answer.Task;
     }
@@ -156,18 +159,10 @@ public sealed class CookSession : IDisposable
         {
             return Task.FromResult(new PreviewResult("The cook daemon is not running.", []));
         }
-        var request = NextRequest();
         var answer = new TaskCompletionSource<PreviewResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _previews[request] = answer;
+        var request = _previews.Add(answer);
         _link.Send(new CookPreview(guid, text), request);
         return answer.Task;
-    }
-
-    uint NextRequest()
-    {
-        var request = ++_nextRequest;
-        // Request 0 is a message that wants no answer.
-        return request == 0 ? ++_nextRequest : request;
     }
 
     public void Stop()
@@ -238,13 +233,13 @@ public sealed class CookSession : IDisposable
                 Cooked?.Invoke(finished);
                 break;
             case OperationResult result:
-                if (_requests.Remove(request, out var answer))
+                if (_requests.TryTake(request, out var answer))
                 {
                     answer.SetResult(result);
                 }
                 break;
             case PreviewResult preview:
-                if (_previews.Remove(request, out var cooked))
+                if (_previews.TryTake(request, out var cooked))
                 {
                     cooked.SetResult(preview);
                 }
@@ -316,16 +311,8 @@ public sealed class CookSession : IDisposable
     // The daemon may have done an operation that it could not answer. Its next snapshot has the content as it is.
     void FailRequests()
     {
-        foreach (var answer in _requests.Values)
-        {
-            answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", []));
-        }
-        _requests.Clear();
-        foreach (var answer in _previews.Values)
-        {
-            answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", []));
-        }
-        _previews.Clear();
+        _requests.FailAll(answer => answer.TrySetResult(new OperationResult("The cook link closed before the cook daemon answered.", [])));
+        _previews.FailAll(answer => answer.TrySetResult(new PreviewResult("The cook link closed before the cook daemon answered.", [])));
     }
 
     void SetState(CookState state, int exitCode = 0)

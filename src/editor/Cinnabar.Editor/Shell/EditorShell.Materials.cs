@@ -58,7 +58,7 @@ public sealed partial class EditorShell
 
     MaterialGraph? ReadFunction(string guid)
     {
-        if (Assets.Find(guid) is not { Kind: AssetKind.MaterialFunction } asset || Assets.FullPath(asset) is not { } path)
+        if (!TryFileOf(guid, AssetKind.MaterialFunction, out var path))
         {
             return null;
         }
@@ -100,10 +100,7 @@ public sealed partial class EditorShell
             return null;
         }
         var (document, problems) = MaterialDocument.Open(path, asset.Guid);
-        foreach (var p in problems)
-        {
-            Console.Add(LogLevel.Error, p.Line > 0 ? $"material: {path}:{p.Line}: {p.Message}" : $"material: {path}: {p.Message}");
-        }
+        Report("material", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
         if (document == null)
         {
             return null;

@@ -51,8 +51,7 @@ public sealed class CaptureModel
 
     readonly Action<ILinkMessage> _send;
     readonly Func<int, CancellationToken, Task> _awaitFrames;
-    readonly Dictionary<uint, TaskCompletionSource<CaptureResult>> _waiting = [];
-    uint _nextId;
+    readonly PendingReplies<TaskCompletionSource<CaptureResult>> _waiting = new();
     int _sequence;
 
     /// <param name="send">Sends a message to the host.</param>
@@ -204,7 +203,7 @@ public sealed class CaptureModel
     /// <summary>Completes the request that the result answers. False for a result nothing waits for.</summary>
     public bool Apply(CaptureResult result)
     {
-        if (!_waiting.Remove(result.Id, out var waiting))
+        if (!_waiting.TryTake(result.Id, out var waiting))
         {
             return false;
         }
@@ -214,9 +213,8 @@ public sealed class CaptureModel
 
     async Task<CaptureResult> RequestAsync(CaptureKind kind, string path, CancellationToken cancel)
     {
-        var id = ++_nextId;
         var waiting = new TaskCompletionSource<CaptureResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _waiting[id] = waiting;
+        var id = _waiting.Add(waiting);
         _send(new CaptureRequest(id, kind, path));
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
         timeout.CancelAfter(ResultTimeout);
@@ -226,12 +224,12 @@ public sealed class CaptureModel
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
-            _waiting.Remove(id);
+            _waiting.Discard(id);
             return new CaptureResult(id, kind, false, $"the host did not answer within {ResultTimeout.TotalSeconds} s", path, 0, 0, 0, 0, 0, OutputMode.Sdr);
         }
         catch (OperationCanceledException)
         {
-            _waiting.Remove(id);
+            _waiting.Discard(id);
             throw;
         }
     }

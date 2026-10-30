@@ -227,7 +227,20 @@ public sealed partial class EditorShell : IDisposable
         }
     }
 
-    public void SaveLayout() => Settings.Write(EditorSettings.LayoutFileName, Layout.Save().ToJson());
+    public void SaveLayout() => WriteSetting("layout", EditorSettings.LayoutFileName, Layout.Save().ToJson());
+
+    // Writes a settings file. A file that cannot be written is a warning with its path, not a failure of what changed.
+    void WriteSetting(string area, string name, string text)
+    {
+        try
+        {
+            Settings.Write(name, text);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.Add(LogLevel.Warning, $"{area}: cannot write {Path.Combine(Settings.Directory, name)}: {e.Message}");
+        }
+    }
 
     public void Dispose()
     {

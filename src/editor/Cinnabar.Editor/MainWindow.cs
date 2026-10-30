@@ -203,7 +203,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakePrefab(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var place = _shell.ContentFolder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Prefab", $"Name the prefab, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -213,7 +213,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakeVariant(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var place = _shell.ContentFolder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Variant", $"Name the variant, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -239,7 +239,7 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Effect => ("New Effect", "effect"),
             _ => ("New Folder", "folder"),
         };
-        var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";
+        var place = folder.Display;
         var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.NewName(template), "Create");
         if (name != null)
         {

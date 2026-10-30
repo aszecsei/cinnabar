@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
@@ -28,8 +29,7 @@ public enum SelectMode
 /// </summary>
 public sealed partial class EditorShell
 {
-    readonly Dictionary<uint, Action<PickResult>> _picks = [];
-    uint _nextPick;
+    readonly PendingReplies<Action<PickResult>> _picks = new();
     string _sentGizmo = "";
     GizmoDrag? _drag;
     PoseEdit? _poseEdit;
@@ -133,9 +133,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        var id = ++_nextPick;
-        _picks[id] = then;
-        Host.Send(new PickRequest(id, x, y, width, height));
+        Host.Send(new PickRequest(_picks.Add(then), x, y, width, height));
         return true;
     }
 
@@ -254,14 +252,7 @@ public sealed partial class EditorShell
         var ops = _poseEdit.Apply(change, _dragPivot, _dragAxes);
         if (ops.Count > 0 && Scene is { InTransaction: true })
         {
-            try
-            {
-                Scene.Preview(ops);
-            }
-            catch (InvalidOperationException e)
-            {
-                Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            }
+            PreviewEdit(ops);
         }
     }
 
@@ -417,7 +408,7 @@ public sealed partial class EditorShell
 
     void OnPickResult(PickResult result)
     {
-        if (_picks.Remove(result.Id, out var then))
+        if (_picks.TryTake(result.Id, out var then))
         {
             then(result);
         }

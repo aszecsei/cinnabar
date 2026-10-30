@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Cinnabar.Editor.Document;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -31,11 +32,7 @@ public sealed class EditorSettings(string directory)
 
     public void Write(string name, string text)
     {
-        System.IO.Directory.CreateDirectory(Directory);
-        // Through a temporary file, so a crash while writing never leaves half a file.
-        var path = Path.Combine(Directory, name);
-        File.WriteAllText(path + ".tmp", text);
-        File.Move(path + ".tmp", path, overwrite: true);
+        SceneDocument.WriteAtomically(Path.Combine(Directory, name), text);
     }
 
     /// <summary>

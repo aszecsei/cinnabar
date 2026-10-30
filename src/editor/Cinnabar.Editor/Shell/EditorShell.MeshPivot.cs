@@ -97,14 +97,7 @@ public sealed partial class EditorShell
         var ops = PivotOperations(guid, start, placement, pivot, translation);
         if (ops.Count > 0)
         {
-            try
-            {
-                Scene.Preview(ops);
-            }
-            catch (InvalidOperationException e)
-            {
-                Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            }
+            PreviewEdit(ops);
         }
     }
 

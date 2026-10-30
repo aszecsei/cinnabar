@@ -132,7 +132,7 @@ public sealed partial class EditorShell
             : [];
 
     /// <summary>Whether a texture tool can run: mesh mode with faces selected.</summary>
-    public bool CanRunTextureTool => InMeshMode && IsEditing && MeshElement == MeshElement.Faces && !MeshSelection.IsEmpty;
+    public bool CanRunTextureTool => CanEditInMeshMode && MeshElement == MeshElement.Faces && !MeshSelection.IsEmpty;
 
     // The operations that change the selected faces' mappings from a snapshot of each mesh: none for a change that
     // changes nothing.
@@ -429,7 +429,7 @@ public sealed partial class EditorShell
     // face under it, with its mesh.
     (string Guid, List<int> Faces)? DropTarget(Vec2 pixel)
     {
-        if (!InMeshMode || !IsEditing)
+        if (!CanEditInMeshMode)
         {
             return null;
         }
