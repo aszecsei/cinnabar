@@ -312,6 +312,15 @@ public sealed partial class MeshSession
         OnMeshModeChanged();
     }
 
+    /// <summary>Select Linked: everything the selected elements reach through their neighbors.</summary>
+    public void SelectLinked() => SetMeshSelection(MeshSelection.Linked(FindMeshData));
+
+    /// <summary>Grow: the selection and its neighbors.</summary>
+    public void GrowSelection() => SetMeshSelection(MeshSelection.Grown(FindMeshData));
+
+    /// <summary>Shrink: the selection without its boundary.</summary>
+    public void ShrinkSelection() => SetMeshSelection(MeshSelection.Shrunk(FindMeshData));
+
     internal MeshData? FindMeshData(string guid) => Meshes.Find(guid)?.Data;
 
     // "3 Faces", or "1 Face", for the undo history.
@@ -414,12 +423,12 @@ public sealed partial class MeshSession
     }
 
     /// <summary>The gizmo while a distance is pending: Move, whatever the tool.</summary>
-    internal GizmoKind ActiveGizmoKind => InMeshMode && (Tools.HasPendingDistance || EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(_shell.Tool);
+    internal GizmoKind ActiveGizmoKind => InMeshMode && (Tools.HasPendingDistance || Pivot.EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(_shell.Tool);
 
     /// <summary>The gizmo's pivot and axes in mesh mode: the selected vertices' centroid, with the primary mesh's axes in local space.</summary>
     internal (long[] Pivot, Quat Axes)? MeshGizmoPose()
     {
-        if (PivotGizmoPose() is { } pivotPose)
+        if (Pivot.PivotGizmoPose() is { } pivotPose)
         {
             return pivotPose;
         }
@@ -502,9 +511,9 @@ public sealed partial class MeshSession
             _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new MeshToolRunner.DistanceDrag(Tools, this), null);
             return true;
         }
-        if (EditPivot)
+        if (Pivot.EditPivot)
         {
-            return PressPivotGizmo(pixel, pivot);
+            return Pivot.PressPivotGizmo(pixel, pivot);
         }
         if (Texture.TextureGizmo && MeshElement == MeshElement.Faces)
         {
@@ -769,7 +778,7 @@ public sealed partial class MeshSession
                     }
                     return placement.ToLocal(world);
                 });
-                if (_session.KeepPlanar)
+                if (_session.Pivot.KeepPlanar)
                 {
                     after = MeshTools.KeepPlanar(after, vertices);
                 }

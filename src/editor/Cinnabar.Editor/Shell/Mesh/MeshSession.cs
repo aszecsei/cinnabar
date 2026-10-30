@@ -21,6 +21,7 @@ public sealed partial class MeshSession
         _shell = shell;
         Tools = new MeshToolRunner(this, shell);
         Texture = new TextureMapper(this, shell);
+        Pivot = new PivotEditor(this, shell);
     }
 
     internal IMeshHost Shell => _shell;
@@ -30,6 +31,9 @@ public sealed partial class MeshSession
 
     /// <summary>The texture tools: mappings, the Face panel's scrubs, hotspots and face materials, and the texture gizmo.</summary>
     public TextureMapper Texture { get; }
+
+    /// <summary>The pivot tools: Edit Pivot, Center Pivot, Pivot to Grid and Keep Planar.</summary>
+    public PivotEditor Pivot { get; }
 
     /// <summary>The open mesh documents of the scene, by GUID.</summary>
     public MeshSet Meshes { get; } = new();

@@ -116,7 +116,7 @@ public sealed class MeshFinishTests : IDisposable
         Assert.Equal(before.Position, EntityPose(shell).Position);
         shell.Scene.Redo();
         Assert.True(shell.Commands.Get(EditorCommands.MeshPivotToGrid).CanExecute);
-        Assert.False(shell.Mesh.PivotToGrid());
+        Assert.False(shell.Mesh.Pivot.PivotToGrid());
         // The Edit Pivot gizmo stands on the entity and drags it, with the vertices moving the other way.
         shell.SetTool(Tool.Move);
         Assert.True(shell.Commands.Get(EditorCommands.MeshEditPivot).Execute());
@@ -132,9 +132,9 @@ public sealed class MeshFinishTests : IDisposable
         var dragged = EntityPose(shell);
         Assert.Equal(0.5, Vec3.Between(after.Position, dragged.Position).X, 6);
         Assert.Equal(worldBefore, MeshFixtures.Mesh(shell).Vertices.Select(v => v + Vec3.Between([0, 0, 0], dragged.Position)).Select(v => new Vec3(Math.Round(v.X, 6), Math.Round(v.Y, 6), Math.Round(v.Z, 6))).ToList());
-        Assert.True(shell.Mesh.EditPivot);
-        shell.Mesh.ToggleEditPivot();
-        Assert.False(shell.Mesh.EditPivot);
+        Assert.True(shell.Mesh.Pivot.EditPivot);
+        shell.Mesh.Pivot.ToggleEditPivot();
+        Assert.False(shell.Mesh.Pivot.EditPivot);
     }
 
     [Fact]
@@ -158,7 +158,7 @@ public sealed class MeshFinishTests : IDisposable
         using var shell = NewShell(Box);
         shell.SetTool(Tool.Move);
         shell.Commands.Get(EditorCommands.MeshKeepPlanar).Execute();
-        Assert.True(shell.Mesh.KeepPlanar);
+        Assert.True(shell.Mesh.Pivot.KeepPlanar);
         // The front face's corner nearest the camera's right, dragged along x, bends the faces around it unless kept planar.
         var front = Enumerable.Range(0, 6).First(f => MeshFixtures.Mesh(shell).FaceNormal(f) == -Vec3.UnitZ);
         var corner = MeshFixtures.Mesh(shell).Faces[front].Corners.OrderBy(c => MeshFixtures.Mesh(shell).Vertices[c].X).ThenBy(c => MeshFixtures.Mesh(shell).Vertices[c].Y).First();

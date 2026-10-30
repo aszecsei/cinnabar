@@ -159,27 +159,27 @@ static partial class EditorCommands
             Icon = "collapse",
             CanExecuteWhen = () => shell.Mesh.InMeshMode && !shell.Mesh.MeshSelection.IsEmpty,
         });
-        commands.Register(new Command(MeshKeepPlanar, "Keep Planar", shell.Mesh.ToggleKeepPlanar)
+        commands.Register(new Command(MeshKeepPlanar, "Keep Planar", shell.Mesh.Pivot.ToggleKeepPlanar)
         {
             Description = "A Move drag keeps the faces it would bend flat, by moving their other vertices along.",
             Icon = "mesh",
             CanExecuteWhen = () => shell.Mesh.InMeshMode,
-            IsCheckedWhen = () => shell.Mesh.KeepPlanar,
+            IsCheckedWhen = () => shell.Mesh.Pivot.KeepPlanar,
         });
-        commands.Register(new Command(MeshEditPivot, "Edit Pivot", shell.Mesh.ToggleEditPivot)
+        commands.Register(new Command(MeshEditPivot, "Edit Pivot", shell.Mesh.Pivot.ToggleEditPivot)
         {
             Description = "The gizmo moves the mesh's entity, with the geometry staying where it is. Snap puts the pivot on the grid.",
             Icon = "move",
             CanExecuteWhen = () => shell.Mesh.InMeshMode,
-            IsCheckedWhen = () => shell.Mesh.EditPivot,
+            IsCheckedWhen = () => shell.Mesh.Pivot.EditPivot,
         });
-        commands.Register(new Command(MeshCenterPivot, "Center Pivot", () => shell.Mesh.CenterPivot())
+        commands.Register(new Command(MeshCenterPivot, "Center Pivot", () => shell.Mesh.Pivot.CenterPivot())
         {
             Description = "Put the mesh's entity at the center of its bounds, with the geometry staying where it is.",
             Icon = "frame",
             CanExecuteWhen = () => shell.Mesh.CanEditInMeshMode,
         });
-        commands.Register(new Command(MeshPivotToGrid, "Pivot to Grid", () => shell.Mesh.PivotToGrid())
+        commands.Register(new Command(MeshPivotToGrid, "Pivot to Grid", () => shell.Mesh.Pivot.PivotToGrid())
         {
             Description = "Snap the mesh's entity to the grid, with the geometry staying where it is.",
             Icon = "snap",
