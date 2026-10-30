@@ -9,7 +9,8 @@ import "cinnabar:core/gpu"
 // on the compute queue, the cascades' probes trace their intervals through the depth buffer into last frame's lit
 // scene, merge from the last cascade to the first with the ambient sky beyond, and each pixel gathers its diffuse and
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After
-// the world pass, the scene is kept, without its pre-exposure, for the next frame's rays.
+// the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With World_Probes, the world
+// probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place.
 
 // The engine's global illumination shaders, by their .meta files.
 GI_TRACE_SHADER :: #load("../content/shaders/gi_trace.hlsl.meta", string)
@@ -46,9 +47,11 @@ GI_PARAMS := [Quality_Level]Gi_Params {
 // Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
 Gi_Settings :: struct {
 	// Without it, the indirect light is the Environment's ambient light.
-	off:   bool,
-	// The cascades' GI_PARAMS.
-	level: Quality_Level,
+	off:       bool,
+	// World_Probes adds the world probes to the cascades.
+	technique: Gi_Technique,
+	// The cascades' GI_PARAMS, and the world probes' GI_PROBE_PARAMS.
+	level:     Quality_Level,
 }
 
 // Gi_Passes is the global illumination's state between frames, in the Renderer.
@@ -59,6 +62,7 @@ Gi_Passes :: struct {
 	lit:    Shader_Pipeline,
 	// Counts the frames, for the noise.
 	frame:  u32,
+	probes: Gi_Probes,
 }
 
 // Gi_Constants matches Gi_Constants in gi_common.hlsli.
@@ -95,6 +99,10 @@ Gi_Constants :: struct {
 	max_frames:       f32,
 	spacing:          u32,
 	steps:            u32,
+	probes:           u32,
+	probe_grid:       u32,
+	probe_grid_offset: u32,
+	probe_padding:    u32,
 }
 
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
@@ -110,6 +118,9 @@ Gi_Frame :: struct {
 	specular:  History,
 	// The scene that the lit pass keeps: later passes replace Frame.scene before the passes record.
 	scene:     Texture,
+	settings:  Gi_Settings,
+	// The world probes, once add_gi_world_probes has updated them, or nil.
+	probes:    ^Gi_Probe_Frame,
 }
 
 // Gi_Merge is one merge pass, of one cascade.
@@ -124,12 +135,14 @@ gi_init :: proc(gi: ^Gi_Passes) {
 	gi.merge = shader_pipeline(GI_MERGE_SHADER)
 	gi.gather = shader_pipeline(GI_GATHER_SHADER)
 	gi.lit = shader_pipeline(GI_LIT_SHADER)
+	gi_probes_init(&gi.probes)
 }
 
 gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&gi.trace, &gi.merge, &gi.gather, &gi.lit}) {
 		destroy_shader_pipeline(p, platform)
 	}
+	gi_probes_destroy(&gi.probes, platform)
 }
 
 @(private)
@@ -140,6 +153,7 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&gi.merge, r.platform, assets, {label = "gi merge"}, force)
 	sync_compute_pipeline(&gi.gather, r.platform, assets, {label = "gi gather"}, force)
 	sync_compute_pipeline(&gi.lit, r.platform, assets, {label = "gi lit"}, force)
+	sync_gi_probe_pipelines(r, force)
 }
 
 // gi_region is the size of one cascade's rows: the most texels that a cascade's probes and directions take.
@@ -153,6 +167,7 @@ gi_region :: proc(size: [2]u32, params: Gi_Params) -> (region: [2]u32) {
 }
 
 // begin_gi decides whether the frame has global illumination, before the scene's constants are written, which say so.
+// With World_Probes and the probes' pipelines, it requests the ray scene, which the probes trace.
 @(private)
 begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	r := f.renderer
@@ -178,6 +193,10 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		return
 	}
 	gi.frame += 1
+	gf.settings = settings
+	if settings.technique == .World_Probes && gi_probes_ready(r) {
+		request_ray_scene(f)
+	}
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)
 	gf.constants = {
@@ -201,8 +220,23 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	f.gi = gf
 }
 
+// add_gi_world_probes updates the world probes after the prepass, before the cascades, which read them.
+@(private)
+add_gi_world_probes :: proc(f: ^Frame) {
+	gf := f.gi
+	if gf == nil {
+		return
+	}
+	gf.probes = add_gi_probe_passes(f, gf.settings, gf.lit)
+	if gf.probes != nil {
+		gf.constants.probes = 1
+		gf.constants.probe_grid = gpu.read_index(gf.probes.upload.buffer)
+		gf.constants.probe_grid_offset = gf.probes.upload.offset
+	}
+}
+
 // add_gi_passes adds the cascades' trace, their merges and the gather after the prepass, on the compute queue, and
-// sets Frame.gi_diffuse and Frame.gi_specular, which the forward pass reads.
+// sets Frame.gi_diffuse and Frame.gi_specular, which the forward pass reads. With the world probes, each reads them.
 @(private)
 add_gi_passes :: proc(f: ^Frame) {
 	gf := f.gi
@@ -219,10 +253,12 @@ add_gi_passes :: proc(f: ^Frame) {
 	read(g, p, f.normals)
 	read(g, p, gf.lit.previous)
 	write(g, p, gf.cascades)
+	declare_probe_reads(f, p)
 	for k := int(gf.params.cascades) - 1; k >= 0; k -= 1 {
 		p = add_compute_pass(g, "gi merge", run_gi_merge, new_clone(Gi_Merge{f, u32(k)}, platform.frame_allocator), queue = .Compute)
 		read(g, p, f.depth)
 		write(g, p, gf.cascades)
+		declare_probe_reads(f, p)
 	}
 	p = add_compute_pass(g, "gi gather", run_gi_gather, f, queue = .Compute)
 	read(g, p, gf.cascades)
@@ -233,6 +269,7 @@ add_gi_passes :: proc(f: ^Frame) {
 	read(g, p, gf.specular.previous)
 	write(g, p, gf.diffuse.current)
 	write(g, p, gf.specular.current)
+	declare_probe_reads(f, p)
 	f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
 }
 

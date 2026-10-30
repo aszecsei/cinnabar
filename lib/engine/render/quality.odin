@@ -36,10 +36,14 @@ Ao_Technique :: enum u8 {
 	Hbao,
 }
 
+// The global illumination's techniques, in the order that they were added.
 Gi_Technique :: enum u8 {
 	Off,
 	// Screen-space radiance cascades (see docs/rendering/global-illumination.md#global-illumination).
 	Screen_Cascades,
+	// The cascades, with a world-space probe grid traced with ray queries for the light that the screen does not see
+	// (see docs/rendering/global-illumination.md#world-probes). Needs Ray_Query.
+	World_Probes,
 }
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
@@ -135,14 +139,14 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 	return
 }
 
-// preset_quality is every feature at a preset's level, with traced shadows from High up where the device has them.
-// Custom gives High's.
+// preset_quality is every feature at a preset's level, with traced shadows and the world probes from High up where the
+// device has ray queries. Custom gives High's.
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	return {
 		shadows = {level = level, ray_traced = caps.ray_query && level >= .High},
 		ao = {technique = .Gtao, level = level},
-		gi = {technique = .Screen_Cascades, level = level},
+		gi = {technique = caps.ray_query && level >= .High ? .World_Probes : .Screen_Cascades, level = level},
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,
@@ -176,7 +180,8 @@ default_quality :: proc(caps: Caps) -> Quality {
 }
 
 // clamp_quality turns off what the device cannot do, and puts each enum back in its range, since a settings file or a
-// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too.
+// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too, and the
+// world probes without Ray_Query give the screen-space cascades alone.
 clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q := q
 	clamp_enum :: proc(value: $T, fallback: T) -> T {
@@ -187,6 +192,9 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q.ao.technique = clamp_enum(q.ao.technique, .Off)
 	q.ao.level = clamp_enum(q.ao.level, .High)
 	q.gi.technique = clamp_enum(q.gi.technique, .Off)
+	if q.gi.technique == .World_Probes && !caps.ray_query {
+		q.gi.technique = .Screen_Cascades
+	}
 	q.gi.level = clamp_enum(q.gi.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
 	q.aa = clamp_enum(q.aa, .Off)
@@ -220,6 +228,7 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.ambient_occlusion.technique = q.ao.technique
 	settings.ambient_occlusion.level = q.ao.level
 	settings.ambient_occlusion.off ||= q.ao.technique == .Off
+	settings.gi.technique = q.gi.technique
 	settings.gi.level = q.gi.level
 	settings.gi.off ||= q.gi.technique == .Off
 	settings.fog.level = q.fog

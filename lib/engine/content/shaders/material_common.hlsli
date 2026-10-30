@@ -164,6 +164,16 @@ float3 hash_color(uint id) {
 // also has the moments, and transmittance set, so each surface is dimmed by those in front of it (see
 // material_transparent.hlsli). A compute pass that includes the light loop defines MATERIAL_PUSH as its own push
 // constants, which start with shadow_atlas and shadow_mask.
+//
+// A material's hit pass and hit shading's fallback compile with MATERIAL_HIT 1 (see material_hit.hlsli): their push
+// constants are hit shading's, and a material's textures sample the level that the ray's cone picks.
+#ifndef MATERIAL_HIT
+#define MATERIAL_HIT 0
+#endif
+#if MATERIAL_HIT
+#include "ray_scene.hlsli"
+#define MATERIAL_PUSH Hit_Push
+#endif
 #ifndef MATERIAL_PUSH
 struct Material_Push {
 	uint shadow_atlas;
@@ -383,8 +393,27 @@ float frame_exposure() {
 	return cn_buffer(frame.exposure).Load<float>(0);
 }
 
-// cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a later path that
-// shades without derivatives (a visibility buffer) can give its own.
+#if MATERIAL_HIT
+// At a ray's hit there are no derivatives: each sample takes one level, which the ray's cone picks (see
+// load_hit_triangle). cn_hit_lod is the level for a texture of one texel; a texture's size adds to it.
+static float cn_hit_lod = 0;
+
+float cn_hit_level(uint texture_index) {
+	uint width, height;
+	cn_texture(texture_index).GetDimensions(width, height);
+	return max(cn_hit_lod + 0.5 * log2(float(width) * float(height)), 0);
+}
+
+float4 cn_sample(uint texture_index, float2 uv) {
+	return cn_texture(texture_index).SampleLevel(cn_sampler(frame.sampler_index), uv, cn_hit_level(texture_index));
+}
+
+float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
+	return cn_sample(texture_index, uv);
+}
+#else
+// cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a path that
+// shades without derivatives gives its own, as hit shading does.
 float4 cn_sample(uint texture_index, float2 uv) {
 	return cn_texture(texture_index).Sample(cn_sampler(frame.sampler_index), uv);
 }
@@ -394,6 +423,7 @@ float4 cn_sample(uint texture_index, float2 uv) {
 float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
 	return cn_texture(texture_index).SampleGrad(cn_sampler(frame.sampler_index), uv, uv_dx, uv_dy);
 }
+#endif
 
 // cn_sample_level samples one mip, for a vertex shader, which has no derivatives, or a sample whose level the material
 // chooses.
@@ -444,6 +474,63 @@ float2 unorm16(uint word) {
 
 float4 unpack_unorm8(uint c) {
 	return float4(c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff, c >> 24) / 255.0;
+}
+
+float3 transform_point(float4 rows[3], float3 p) {
+	float4 v = float4(p, 1);
+	return float3(dot(rows[0], v), dot(rows[1], v), dot(rows[2], v));
+}
+
+// The rows' rotation and scale turn a direction. A scale that is not uniform bends normals a little, which the passes
+// do not correct.
+float3 transform_direction(float4 rows[3], float3 d) {
+	return float3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
+}
+
+// A mesh's vertex in its own space, as its buffers hold it.
+struct Mesh_Vertex {
+	float3 local;
+	float3 normal;
+	float3 tangent;
+	float bitangent_sign;
+	float2 uv0;
+	float2 uv1;
+	float4 color;
+};
+
+// mesh_index is the vertex at a corner of the mesh's index buffer.
+uint mesh_index(Mesh_Record m, uint corner) {
+	if (m.flags & MESH_INDEX32) {
+		return cn_buffer(m.indices).Load(corner * 4);
+	}
+	uint word = cn_buffer(m.indices).Load((corner * 2) & ~3u);
+	return (corner & 1) != 0 ? word >> 16 : word & 0xffff;
+}
+
+// read_vertex reads a mesh's vertex: its position, then its attributes, a normal and a tangent folded into the
+// octahedron, uv0, and uv1 and a color when the mesh has them.
+Mesh_Vertex read_vertex(Mesh_Record m, uint index) {
+	Mesh_Vertex v;
+	v.local = cn_buffer(m.positions).Load<float3>(index * 12);
+	ByteAddressBuffer attributes = cn_buffer(m.attributes);
+	uint base = index * m.attribute_stride;
+	v.normal = octahedral(snorm16(attributes.Load(base)));
+	uint tangent_word = attributes.Load(base + 4);
+	v.tangent = octahedral(unorm16(tangent_word) * 2 - 1);
+	// The lowest bit of the tangent's second half is the bitangent's sign.
+	v.bitangent_sign = (tangent_word & 0x10000) != 0 ? -1 : 1;
+	v.uv0 = attributes.Load<float2>(base + 8);
+	uint offset = base + 16;
+	v.uv1 = 0;
+	if (m.flags & MESH_UV1) {
+		v.uv1 = attributes.Load<float2>(offset);
+		offset += 8;
+	}
+	v.color = 1;
+	if (m.flags & MESH_COLOR) {
+		v.color = unpack_unorm8(attributes.Load(offset));
+	}
+	return v;
 }
 
 #include "ltc.hlsli"

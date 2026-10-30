@@ -205,7 +205,7 @@ add_fog_passes :: proc(f: ^Frame) {
 		read(g, p, f.shadows.atlas)
 	}
 	if ff.traced && f.shadows.mask_count > 0 {
-		ff.accel = f.shadows.accel
+		ff.accel = ray_scene_accel(f)
 		read_accel(g, p, ff.accel)
 	}
 	read(g, p, ff.history.previous)

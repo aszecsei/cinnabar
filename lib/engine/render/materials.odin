@@ -94,6 +94,9 @@ Material_Pipeline :: struct {
 	// material, then its front faces. The sorted draws draw with them, and so do the previews of every transparent
 	// material, which have no moments (see docs/rendering/transparency.md#transparency).
 	over:         [2]gpu.Pipeline,
+	// With Ray_Query, the compute pipeline that evaluates the material at ray hits, for an opaque or masked material of
+	// meshes (see docs/rendering/ray-scene.md#hit-shading). Drawing does not wait for it.
+	hit:          gpu.Pipeline,
 }
 
 // material_group is the bins that a material's draws are in: the opaque ones, which the prepass and the forward pass
@@ -119,6 +122,7 @@ material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platfor
 	for pipeline in p.over {
 		platform.gpu_destroy_pipeline(pipeline)
 	}
+	platform.gpu_destroy_pipeline(p.hit)
 }
 
 // The prepass's targets: the surface's normal in the world, folded into the octahedron, and the velocity in UV.
@@ -473,6 +477,8 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		.Impostor_Forward = {},
 		.Impostor_Prepass = {},
 		.Impostor_Depth = {},
+		// A compute pipeline, made below.
+		.Hit = {},
 	}
 	// An impostor's quad faces its view, and its pixels write their own depths, which the shadow maps' bias does not
 	// move, so the impostor's depth pass moves them itself.
@@ -528,6 +534,17 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 			desc.vertex = nil
 		}
 		update_pipeline(platform, &pipeline, desc)
+	}
+	hit := r.caps.ray_query ? format.material_code(data, blob, switches, .Hit, .Compute) : nil
+	if hit == nil {
+		platform.gpu_destroy_pipeline(p.hit)
+		p.hit = {}
+	} else {
+		desc := gpu.Compute_Pipeline_Desc{compute = hit, label = label}
+		if p.hit == {} || !platform.gpu_update_compute_pipeline(p.hit, desc) {
+			platform.gpu_destroy_pipeline(p.hit)
+			p.hit = platform.gpu_create_compute_pipeline(desc)
+		}
 	}
 	p.two_sided = two_sided
 	p.cast_shadows = .Cast_Shadows in blob.flags

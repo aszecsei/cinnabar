@@ -41,17 +41,6 @@ struct Varyings {
 	nointerpolation uint cluster : CLUSTER;
 };
 
-float3 transform_point(float4 rows[3], float3 p) {
-	float4 v = float4(p, 1);
-	return float3(dot(rows[0], v), dot(rows[1], v), dot(rows[2], v));
-}
-
-// The rows' rotation and scale turn a direction. A scale that is not uniform bends normals a little, which the passes
-// do not correct.
-float3 transform_direction(float4 rows[3], float3 d) {
-	return float3(dot(rows[0].xyz, d), dot(rows[1].xyz, d), dot(rows[2].xyz, d));
-}
-
 // axis_scales are how much an instance's rows scale each of the mesh's axes: the lengths of their columns.
 float3 axis_scales(float4 rows[3]) {
 	return sqrt(rows[0].xyz * rows[0].xyz + rows[1].xyz * rows[1].xyz + rows[2].xyz * rows[2].xyz);
@@ -113,12 +102,7 @@ Instance_Record draw_instance(Draw_Record d, uint instance_id) {
 
 // draw_index is the mesh's vertex at a corner of the draw's indices.
 uint draw_index(Draw_Record d, Mesh_Record m, uint vertex_id) {
-	uint corner = d.first + vertex_id;
-	if (m.flags & MESH_INDEX32) {
-		return cn_buffer(m.indices).Load(corner * 4);
-	}
-	uint word = cn_buffer(m.indices).Load((corner * 2) & ~3u);
-	return (corner & 1) != 0 ? word >> 16 : word & 0xffff;
+	return mesh_index(m, d.first + vertex_id);
 }
 
 // finish_vertex places a vertex of the mesh's space by its instance's pose, and moves it by the material's displacement
@@ -167,26 +151,8 @@ Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 lo
 
 // place_vertex is a mesh's vertex, placed by its instance's pose: what both vertex paths draw.
 Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record instance, uint index) {
-	float3 local = cn_buffer(m.positions).Load<float3>(index * 12);
-	ByteAddressBuffer attributes = cn_buffer(m.attributes);
-	uint base = index * m.attribute_stride;
-	float3 normal = octahedral(snorm16(attributes.Load(base)));
-	uint tangent_word = attributes.Load(base + 4);
-	float3 tangent = octahedral(unorm16(tangent_word) * 2 - 1);
-	// The lowest bit of the tangent's second half is the bitangent's sign.
-	float bitangent_sign = (tangent_word & 0x10000) != 0 ? -1 : 1;
-	float2 uv0 = attributes.Load<float2>(base + 8);
-	uint offset = base + 16;
-	float2 uv1 = 0;
-	if (m.flags & MESH_UV1) {
-		uv1 = attributes.Load<float2>(offset);
-		offset += 8;
-	}
-	float4 color = 1;
-	if (m.flags & MESH_COLOR) {
-		color = unpack_unorm8(attributes.Load(offset));
-	}
-	return finish_vertex(d, instance, local, normal, tangent, bitangent_sign, uv0, uv1, color);
+	Mesh_Vertex v = read_vertex(m, index);
+	return finish_vertex(d, instance, v.local, v.normal, v.tangent, v.bitangent_sign, v.uv0, v.uv1, v.color);
 }
 
 #if MATERIAL_PATCHES

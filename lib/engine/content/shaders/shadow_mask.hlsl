@@ -2,6 +2,7 @@
 // four lights, against the GPU scene's acceleration structure. Each channel holds one light's result: 1 lit, 0 in
 // shadow. Pixels with no surface are lit.
 #include "cinnabar.hlsli"
+#include "ray_scene.hlsli"
 
 // Matches Mask_Constants in lib/engine/render/shadows.odin. The view's axes and its projection rebuild each pixel's
 // position relative to the camera from its depth; camera_offset moves it into the acceleration structure's space, which
@@ -120,7 +121,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 				continue;
 			}
 			RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
-			query.TraceRayInline(accel, 0, 0xff, ray);
+			query.TraceRayInline(accel, 0, RAY_MASK_SHADOWS, ray);
 			query.Proceed();
 			result[c] = query.CommittedStatus() == COMMITTED_NOTHING ? 1 : 0;
 		}
