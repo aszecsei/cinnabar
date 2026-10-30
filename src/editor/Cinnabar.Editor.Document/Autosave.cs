@@ -21,11 +21,7 @@ public sealed class Autosave(string directory)
     {
         var full = Path.GetFullPath(scenePath);
         // FNV-1a of the path, without case, as Windows compares paths.
-        var hash = 2166136261u;
-        foreach (var b in Encoding.UTF8.GetBytes(full.ToLowerInvariant()))
-        {
-            hash = (hash ^ b) * 16777619u;
-        }
+        var hash = Fnv.Hash32(Encoding.UTF8.GetBytes(full.ToLowerInvariant()));
         return Path.Combine(Directory, $"{Path.GetFileNameWithoutExtension(full)}.{hash.ToString("x8", CultureInfo.InvariantCulture)}{SceneFile.Extension}");
     }
 

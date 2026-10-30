@@ -153,9 +153,9 @@ sealed class NodeDetails : ScrollViewer
                 line.Children.Add(box);
                 return line;
             case PropertyKind.Text:
-                return ValueBox((value as GraphText)?.Text ?? MaterialFile.Unquote(property.Default) ?? "", "", text => Set(new GraphText(text)));
+                return ValueBox((value as GraphText)?.Text ?? TextQuote.Unquote(property.Default) ?? "", "", text => Set(new GraphText(text)));
             case PropertyKind.Code:
-                var code = ValueBox((value as GraphText)?.Text ?? MaterialFile.Unquote(property.Default) ?? "", "HLSL", text => Set(new GraphText(text)), multiline: true);
+                var code = ValueBox((value as GraphText)?.Text ?? TextQuote.Unquote(property.Default) ?? "", "HLSL", text => Set(new GraphText(text)), multiline: true);
                 ToolTip.SetTip(code, "An expression of a, b, c and d, or a body that returns. Ctrl+Enter applies it.");
                 return code;
             case PropertyKind.Choice:

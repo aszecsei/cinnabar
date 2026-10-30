@@ -29,7 +29,7 @@ public abstract record GraphValue
         switch (text[0])
         {
             case '"':
-                return MaterialFile.Unquote(text) is { } unquoted ? new GraphText(unquoted) : null;
+                return TextQuote.Unquote(text) is { } unquoted ? new GraphText(unquoted) : null;
             case '$':
                 return text.Length == 33 && text[1..].All(Uri.IsHexDigit) ? new GraphAsset(text[1..].ToLowerInvariant()) : null;
             case '@':
@@ -52,7 +52,7 @@ public sealed record GraphLink(int Node, string Output) : GraphValue
 
 public sealed record GraphText(string Text) : GraphValue
 {
-    public override string Write() => MaterialFile.Quote(Text);
+    public override string Write() => TextQuote.Quote(Text);
 }
 
 public sealed record GraphWord(string Word) : GraphValue
@@ -433,7 +433,7 @@ public static class MaterialFile
                 lines.Add($"param {p.Name} {p.Type} = {p.Value}");
                 if (p.Group != "")
                 {
-                    lines.Add($"\tgroup = {Quote(p.Group)}");
+                    lines.Add($"\tgroup = {TextQuote.Quote(p.Group)}");
                 }
             }
             foreach (var s in graph.Switches)
@@ -466,62 +466,4 @@ public static class MaterialFile
 
     public static bool IsIdentifier(string name) =>
         name.Length > 0 && !char.IsAsciiDigit(name[0]) && name.All(c => c == '_' || char.IsAsciiLetterOrDigit(c));
-
-    public static string Quote(string text)
-    {
-        var b = new StringBuilder("\"");
-        foreach (var c in text)
-        {
-            b.Append(c switch
-            {
-                '"' => "\\\"",
-                '\\' => "\\\\",
-                '\n' => "\\n",
-                '\t' => "\\t",
-                _ => c.ToString(),
-            });
-        }
-        return b.Append('"').ToString();
-    }
-
-    public static string? Unquote(string text)
-    {
-        if (text.Length < 2 || text[0] != '"' || text[^1] != '"')
-        {
-            return null;
-        }
-        var b = new StringBuilder();
-        for (var i = 1; i < text.Length - 1; i++)
-        {
-            var c = text[i];
-            if (c == '"')
-            {
-                return null;
-            }
-            if (c != '\\')
-            {
-                b.Append(c);
-                continue;
-            }
-            if (++i == text.Length - 1)
-            {
-                return null;
-            }
-            switch (text[i])
-            {
-                case '"' or '\\':
-                    b.Append(text[i]);
-                    break;
-                case 'n':
-                    b.Append('\n');
-                    break;
-                case 't':
-                    b.Append('\t');
-                    break;
-                default:
-                    return null;
-            }
-        }
-        return b.ToString();
-    }
 }

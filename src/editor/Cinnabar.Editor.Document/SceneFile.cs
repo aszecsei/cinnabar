@@ -45,7 +45,7 @@ public static class SceneFile
             var plain = e.Path == null && e.Prefab == "";
             if (plain ? e.Name.Length > 0 : e.Keys.HasFlag(SceneKeys.Name))
             {
-                sb.Append("name = ").Append(Quote(e.Name)).Append('\n');
+                sb.Append("name = ").Append(TextQuote.Quote(e.Name)).Append('\n');
             }
             if (e.Path == null ? e.Parent != 0 : e.Keys.HasFlag(SceneKeys.Parent))
             {
@@ -121,7 +121,7 @@ public static class SceneFile
         SceneValueKind.Bool => value.Bool ? "true" : "false",
         SceneValueKind.Number when value.Numbers.Count == 1 => FormatNumber(value.Numbers[0]),
         SceneValueKind.Number => "[" + string.Join(", ", value.Numbers.Select(FormatNumber)) + "]",
-        SceneValueKind.String => Quote(value.Text),
+        SceneValueKind.String => TextQuote.Quote(value.Text),
         SceneValueKind.Name => value.Text,
         SceneValueKind.Asset => value.Asset == "" ? "$0" : $"${value.Asset}",
         _ when value.Path != null => "@" + ScenePath.Format(value.Path),
@@ -141,23 +141,6 @@ public static class SceneFile
             ? single.ToString("R", CultureInfo.InvariantCulture)
             : n.Float.ToString("R", CultureInfo.InvariantCulture);
         return text.AsSpan().IndexOfAny(".Ee") >= 0 || !double.IsFinite(n.Float) ? text : text + ".0";
-    }
-
-    static string Quote(string text)
-    {
-        var sb = new StringBuilder("\"");
-        foreach (var c in text)
-        {
-            sb.Append(c switch
-            {
-                '"' => "\\\"",
-                '\\' => "\\\\",
-                '\n' => "\\n",
-                '\t' => "\\t",
-                _ => c.ToString(),
-            });
-        }
-        return sb.Append('"').ToString();
     }
 
     sealed class Parser
