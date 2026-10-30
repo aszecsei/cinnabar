@@ -97,7 +97,7 @@ sealed class ParametersPanel : ScrollViewer
         }
         if (!MaterialFile.IsIdentifier(name) || _editor.Document.Graph.NameTaken(name))
         {
-            _shell.Console.Add(Panels.LogLevel.Warning, $"material: {name} is not a name, or another parameter or switch has it");
+            _shell.Console.Add(Model.LogLevel.Warning, $"material: {name} is not a name, or another parameter or switch has it");
             Rebuild();
             return false;
         }
@@ -168,7 +168,7 @@ sealed class ParametersPanel : ScrollViewer
             }
             else
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, $"material: {p.Name} takes {count} numbers, such as {DefaultOf(p.Type)}");
+                _shell.Console.Add(Model.LogLevel.Warning, $"material: {p.Name} takes {count} numbers, such as {DefaultOf(p.Type)}");
                 Rebuild();
             }
         });

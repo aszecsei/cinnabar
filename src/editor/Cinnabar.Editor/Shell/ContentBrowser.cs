@@ -2,8 +2,8 @@ using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Model;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
-using ConsoleLog = Cinnabar.Editor.Panels.ConsoleLog;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
+using ConsoleLog = Cinnabar.Editor.Model.ConsoleLog;
 using CookFolder = Cinnabar.Editor.Link.Cook.Folder;
 
 namespace Cinnabar.Editor.Shell;

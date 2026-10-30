@@ -3,6 +3,7 @@ using System.Globalization;
 using Avalonia.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Protocol;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 using Operation = Cinnabar.Editor.Document.Operation;

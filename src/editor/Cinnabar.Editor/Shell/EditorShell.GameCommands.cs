@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Commands.Ribbon;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using GameCommandResult = Cinnabar.Editor.Link.Protocol.GameCommandResult;
 using GameCommands = Cinnabar.Editor.Link.Protocol.GameCommands;

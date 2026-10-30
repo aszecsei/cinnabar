@@ -1,6 +1,6 @@
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Shell;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 
 namespace Cinnabar.Editor.Tests;
 

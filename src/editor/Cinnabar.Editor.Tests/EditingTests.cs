@@ -2,7 +2,7 @@ using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 using SceneValue = Cinnabar.Editor.Document.SceneValue;
 
 namespace Cinnabar.Editor.Tests;

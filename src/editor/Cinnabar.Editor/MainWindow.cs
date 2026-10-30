@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;

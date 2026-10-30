@@ -2,6 +2,7 @@ using System.Globalization;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;

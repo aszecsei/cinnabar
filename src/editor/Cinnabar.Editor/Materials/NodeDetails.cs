@@ -136,7 +136,7 @@ sealed class NodeDetails : ScrollViewer
                     }
                     else
                     {
-                        _shell.Console.Add(Panels.LogLevel.Warning, $"material: {property.Name} takes {count} numbers, such as {property.Default}");
+                        _shell.Console.Add(Model.LogLevel.Warning, $"material: {property.Name} takes {count} numbers, such as {property.Default}");
                         _shown = "";
                         Refresh();
                     }
@@ -207,7 +207,7 @@ sealed class NodeDetails : ScrollViewer
             }
             else
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, $"material: {pin.Name} takes a number or up to four, such as 0.5 or [1, 0, 0]");
+                _shell.Console.Add(Model.LogLevel.Warning, $"material: {pin.Name} takes a number or up to four, such as 0.5 or [1, 0, 0]");
                 _shown = "";
                 Refresh();
             }

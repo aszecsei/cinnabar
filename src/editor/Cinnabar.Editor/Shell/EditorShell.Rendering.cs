@@ -2,7 +2,7 @@ using System.Text.Json;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Link.Protocol;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 
 namespace Cinnabar.Editor.Shell;
 

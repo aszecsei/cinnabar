@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 
 namespace Cinnabar.Editor.Shell;

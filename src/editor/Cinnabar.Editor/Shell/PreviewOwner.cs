@@ -63,7 +63,7 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
                 SendSettings();
             };
             Preview.FrameCopied += (generation, frame) => _shell.Host.Send(new PreviewAcknowledged((uint)previewId, generation, frame));
-            Preview.Failed += message => _shell.Console.Add(Panels.LogLevel.Warning, message);
+            Preview.Failed += message => _shell.Console.Add(Model.LogLevel.Warning, message);
         }
     }
 

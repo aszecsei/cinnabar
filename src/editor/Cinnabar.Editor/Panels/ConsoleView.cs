@@ -6,6 +6,8 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using DockSide = Avalonia.Controls.Dock;
 
+using Cinnabar.Editor.Model;
+
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>The console panel: the log, which follows new lines while it is scrolled to the end.</summary>

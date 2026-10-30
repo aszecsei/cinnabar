@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using EditorInput = Cinnabar.Editor.Link.Protocol.EditorInput;
 using EditorMode = Cinnabar.Editor.Link.Protocol.EditorMode;

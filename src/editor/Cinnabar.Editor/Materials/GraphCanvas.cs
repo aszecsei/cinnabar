@@ -486,7 +486,7 @@ public sealed class GraphCanvas : Control
             }
             else if (_detached == null && !_editor.Link(_linkStart.Node, _linkStart.Pin, hit.Node, hit.Pin))
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, "material: that link would make a loop");
+                _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
@@ -495,7 +495,7 @@ public sealed class GraphCanvas : Control
         {
             if (!_editor.Link(hit.Node, hit.Pin, _linkStart.Node, _linkStart.Pin))
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, "material: that link would make a loop");
+                _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
