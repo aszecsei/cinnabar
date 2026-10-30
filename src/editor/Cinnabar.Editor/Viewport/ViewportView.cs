@@ -117,14 +117,14 @@ public sealed class ViewportView : Grid
         {
             if (!_shell.InputGoesToGame && _control.FramePoint(e.GetPosition(this)) is { } pixel)
             {
-                _shell.EnterMeshModeAt(pixel);
+                _shell.Mesh.EnterMeshModeAt(pixel);
             }
         };
         AttachedToVisualTree += (_, _) =>
         {
             _session.ViewChanged += ShowOverlay;
             _shell.ToolsChanged += ShowTools;
-            _shell.MeshModeChanged += ShowTools;
+            _shell.Mesh.MeshModeChanged += ShowTools;
             _shell.Camera.Changed += ShowSpeed;
             _shell.ModeChanged += ShowMode;
             _timer.Start();
@@ -136,7 +136,7 @@ public sealed class ViewportView : Grid
         {
             _session.ViewChanged -= ShowOverlay;
             _shell.ToolsChanged -= ShowTools;
-            _shell.MeshModeChanged -= ShowTools;
+            _shell.Mesh.MeshModeChanged -= ShowTools;
             _shell.Camera.Changed -= ShowSpeed;
             _shell.ModeChanged -= ShowMode;
             _timer.Stop();
@@ -203,7 +203,7 @@ public sealed class ViewportView : Grid
     void ShowTools()
     {
         ShowSpeed();
-        _elements.IsVisible = _shell.InMeshMode;
+        _elements.IsVisible = _shell.Mesh.InMeshMode;
         foreach (var (button, command) in _tools)
         {
             button.IsChecked = _shell.Commands.Get(command).IsChecked;
@@ -222,7 +222,7 @@ public sealed class ViewportView : Grid
     }
 
     void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
-        + (_shell.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.GridSize)}" : "");
+        + (_shell.Mesh.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.Mesh.GridSize)}" : "");
 
     static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
 
@@ -236,7 +236,7 @@ public sealed class ViewportView : Grid
 
     // The prefab that a drag carries, with the frame pixel under it, or null when it carries none.
     (string Guid, Vec2 Pixel)? DraggedPrefab(DragEventArgs e) =>
-        _shell.IsEditing && !_shell.InMeshMode && ContentBrowserView.Dropped(e) is { } guid && _shell.IsPrefab(guid) && _control.FramePoint(e.GetPosition(this)) is { } pixel
+        _shell.IsEditing && !_shell.Mesh.InMeshMode && ContentBrowserView.Dropped(e) is { } guid && _shell.IsPrefab(guid) && _control.FramePoint(e.GetPosition(this)) is { } pixel
             ? (guid, pixel) : null;
 
     void OnDragOver(DragEventArgs e)
@@ -257,10 +257,10 @@ public sealed class ViewportView : Grid
         }
         e.DragEffects = DragDropEffects.Link;
         e.Handled = true;
-        if (_shell.InMeshMode)
+        if (_shell.Mesh.InMeshMode)
         {
             // In mesh mode the editor picks the face itself, so the drag shows at once.
-            _shell.PreviewFaceMaterial(pixel, guid);
+            _shell.Mesh.Texture.PreviewFaceMaterial(pixel, guid);
             return;
         }
         _dragPixel = ((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y));
@@ -318,9 +318,9 @@ public sealed class ViewportView : Grid
             return;
         }
         e.Handled = true;
-        if (_shell.InMeshMode)
+        if (_shell.Mesh.InMeshMode)
         {
-            _shell.DropFaceMaterial(pixel, guid);
+            _shell.Mesh.Texture.DropFaceMaterial(pixel, guid);
             return;
         }
         var generation = _dragGeneration;
@@ -396,7 +396,7 @@ public sealed class ViewportView : Grid
             {
                 _gesture = Gesture.Gizmo;
             }
-            else if (_shell.MeshTool == MeshTool.Create && _control.FramePoint(point.Position) is { } corner && _shell.BeginBlock(corner))
+            else if (_shell.Mesh.MeshTool == MeshTool.Create && _control.FramePoint(point.Position) is { } corner && _shell.Mesh.BeginBlock(corner))
             {
                 _gesture = Gesture.Block;
             }
@@ -430,13 +430,13 @@ public sealed class ViewportView : Grid
                 if (_control.FramePoint(position) is { } hover)
                 {
                     _shell.HoverGizmo(hover);
-                    _shell.HoverMesh(hover);
+                    _shell.Mesh.HoverMesh(hover);
                 }
                 break;
             case Gesture.Block:
                 if (_control.FramePoint(position) is { } corner)
                 {
-                    _shell.DragBlock(corner);
+                    _shell.Mesh.DragBlock(corner);
                 }
                 break;
             case Gesture.Fly:
@@ -490,10 +490,10 @@ public sealed class ViewportView : Grid
                 _shell.ReleaseGizmo();
                 break;
             case Gesture.Block:
-                _shell.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
+                _shell.Mesh.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
             case Gesture.Click:
-                if (_control.FramePoint(position) is { } pixel && !_shell.AddToolPoint(pixel))
+                if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel))
                 {
                     _shell.PickAt(pixel, mode);
                 }
@@ -518,7 +518,7 @@ public sealed class ViewportView : Grid
         }
         if (_gesture == Gesture.Block)
         {
-            _shell.CancelBlock();
+            _shell.Mesh.CancelBlock();
         }
         EndGesture();
     }
@@ -571,19 +571,19 @@ public sealed class ViewportView : Grid
         }
         // The texture tools' keys, on the selected faces (see docs/editor/mesh-editing.md#texture-tools): Shift makes the
         // step ten times and Ctrl a tenth.
-        if (_shell.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
+        if (_shell.Mesh.Texture.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
         {
             var multiplier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
             var ran = e.Key switch
             {
-                Key.Left => _shell.ShiftTexture(1, 0, multiplier),
-                Key.Right => _shell.ShiftTexture(-1, 0, multiplier),
-                Key.Up => _shell.ShiftTexture(0, 1, multiplier),
-                Key.Down => _shell.ShiftTexture(0, -1, multiplier),
-                Key.OemComma => _shell.RotateTexture(1, multiplier),
-                Key.OemPeriod => _shell.RotateTexture(-1, multiplier),
-                Key.OemPlus => _shell.ScaleTexture(1, multiplier),
-                Key.OemMinus => _shell.ScaleTexture(-1, multiplier),
+                Key.Left => _shell.Mesh.Texture.ShiftTexture(1, 0, multiplier),
+                Key.Right => _shell.Mesh.Texture.ShiftTexture(-1, 0, multiplier),
+                Key.Up => _shell.Mesh.Texture.ShiftTexture(0, 1, multiplier),
+                Key.Down => _shell.Mesh.Texture.ShiftTexture(0, -1, multiplier),
+                Key.OemComma => _shell.Mesh.Texture.RotateTexture(1, multiplier),
+                Key.OemPeriod => _shell.Mesh.Texture.RotateTexture(-1, multiplier),
+                Key.OemPlus => _shell.Mesh.Texture.ScaleTexture(1, multiplier),
+                Key.OemMinus => _shell.Mesh.Texture.ScaleTexture(-1, multiplier),
                 _ => (bool?)null,
             };
             if (ran != null)
@@ -607,9 +607,9 @@ public sealed class ViewportView : Grid
             Key.H => EditorCommands.HideSelected,
             // Mesh mode's keys (see docs/editor/mesh-editing.md#mesh-mode).
             Key.Tab => EditorCommands.EditMesh,
-            Key.D1 when _shell.InMeshMode => EditorCommands.MeshVertices,
-            Key.D2 when _shell.InMeshMode => EditorCommands.MeshEdges,
-            Key.D3 when _shell.InMeshMode => EditorCommands.MeshFaces,
+            Key.D1 when _shell.Mesh.InMeshMode => EditorCommands.MeshVertices,
+            Key.D2 when _shell.Mesh.InMeshMode => EditorCommands.MeshEdges,
+            Key.D3 when _shell.Mesh.InMeshMode => EditorCommands.MeshFaces,
             Key.OemOpenBrackets => EditorCommands.MeshGridFiner,
             Key.OemCloseBrackets => EditorCommands.MeshGridCoarser,
             _ => null,
@@ -622,35 +622,35 @@ public sealed class ViewportView : Grid
         }
         else if (e.Key == Key.Escape && _gesture == Gesture.Block)
         {
-            _shell.CancelBlock();
+            _shell.Mesh.CancelBlock();
             EndGesture();
             e.Handled = true;
         }
-        else if (e.Key == Key.Escape && _shell.InMeshMode)
+        else if (e.Key == Key.Escape && _shell.Mesh.InMeshMode)
         {
-            _shell.EscapeMeshMode();
+            _shell.Mesh.EscapeMeshMode();
             e.Handled = true;
         }
-        else if (e.Key == Key.Escape && (_shell.MeshTool != MeshTool.Select || _shell.ToolPointCount > 0))
+        else if (e.Key == Key.Escape && (_shell.Mesh.MeshTool != MeshTool.Select || _shell.Mesh.Tools.ToolPointCount > 0))
         {
-            if (_shell.ToolPointCount > 0)
+            if (_shell.Mesh.Tools.ToolPointCount > 0)
             {
-                _shell.CancelToolPoints();
+                _shell.Mesh.Tools.CancelToolPoints();
             }
             else
             {
-                _shell.SetMeshTool(MeshTool.Select);
+                _shell.Mesh.SetMeshTool(MeshTool.Select);
             }
             e.Handled = true;
         }
-        else if (e.Key is Key.Enter or Key.Return && _shell.ToolPointCount > 0)
+        else if (e.Key is Key.Enter or Key.Return && _shell.Mesh.Tools.ToolPointCount > 0)
         {
-            _shell.ApplyToolPoints();
+            _shell.Mesh.Tools.ApplyToolPoints();
             e.Handled = true;
         }
-        else if (e.Key == Key.Back && _shell.ToolPointCount > 0)
+        else if (e.Key == Key.Back && _shell.Mesh.Tools.ToolPointCount > 0)
         {
-            _shell.RemoveLastToolPoint();
+            _shell.Mesh.Tools.RemoveLastToolPoint();
             e.Handled = true;
         }
         else if (command != null)

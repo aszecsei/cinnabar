@@ -167,7 +167,7 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.Snap, EditorCommands.LocalSpace, EditorCommands.MeshKeepPlanar]),
                     ]),
                     new RibbonGroup("Mode", [new LargeButton(EditorCommands.ObjectMode)]),
-                ]) { Context = EditorShell.MeshContext },
+                ]) { Context = MeshSession.MeshContext },
             ]);
     }
 }

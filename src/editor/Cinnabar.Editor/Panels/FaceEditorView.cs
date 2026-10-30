@@ -37,8 +37,8 @@ public sealed class FaceEditorView : ScrollViewer
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         new ViewSubscriptions(this, attached: Refresh, detached: () => { Unhook(); _structure = null; })
-            .Add(() => _shell.MeshModeChanged += Refresh, () => _shell.MeshModeChanged -= Refresh)
-            .Add(() => _shell.Meshes.Changed += OnMeshChanged, () => _shell.Meshes.Changed -= OnMeshChanged)
+            .Add(() => _shell.Mesh.MeshModeChanged += Refresh, () => _shell.Mesh.MeshModeChanged -= Refresh)
+            .Add(() => _shell.Mesh.Meshes.Changed += OnMeshChanged, () => _shell.Mesh.Meshes.Changed -= OnMeshChanged)
             .Add(() => _shell.Assets.Changed += Refresh, () => _shell.Assets.Changed -= Refresh)
             .Add(() => _shell.SceneChanged += Refresh, () => _shell.SceneChanged -= Refresh);
     }
@@ -57,7 +57,7 @@ public sealed class FaceEditorView : ScrollViewer
     // The panel rebuilds when which faces are selected changes, and shows new values otherwise.
     void Refresh()
     {
-        var structure = _shell.CanRunTextureTool ? string.Join(";", _shell.SelectedFaces.Select(f => $"{f.Guid}:{f.Face}")) : "";
+        var structure = _shell.Mesh.Texture.CanRunTextureTool ? string.Join(";", _shell.Mesh.Texture.SelectedFaces.Select(f => $"{f.Guid}:{f.Face}")) : "";
         if (structure != _structure)
         {
             _structure = structure;
@@ -72,11 +72,11 @@ public sealed class FaceEditorView : ScrollViewer
         _content.Children.Clear();
         _views.Clear();
         _title = null;
-        if (!_shell.CanRunTextureTool)
+        if (!_shell.Mesh.Texture.CanRunTextureTool)
         {
             _content.Children.Add(new TextBlock
             {
-                Text = _shell.InMeshMode ? "Select faces to edit their material and texture." : "In mesh mode, the selected faces' material and texture mapping appear here.",
+                Text = _shell.Mesh.InMeshMode ? "Select faces to edit their material and texture." : "In mesh mode, the selected faces' material and texture mapping appear here.",
                 Classes = { "empty" },
                 TextWrapping = TextWrapping.Wrap,
             });
@@ -85,7 +85,7 @@ public sealed class FaceEditorView : ScrollViewer
         _title = new TextBlock { FontWeight = FontWeight.SemiBold };
         _content.Children.Add(new StackPanel { Classes = { "properties-header" }, Children = { _title } });
 
-        var assets = new AssetContext(_shell.Assets, "material", _shell.Content.RevealAsset) { First = EditorShell.DevMaterials.Select(d => d.Guid).ToHashSet() };
+        var assets = new AssetContext(_shell.Assets, "material", _shell.Content.RevealAsset) { First = TextureMapper.DevMaterials.Select(d => d.Guid).ToHashSet() };
         _content.Children.Add(Group("Material",
         [
             ("Material", "material", new AssetView(assets, new MappingEditor(_shell, MappingField.Material)), null),
@@ -165,7 +165,7 @@ public sealed class FaceEditorView : ScrollViewer
         {
             return;
         }
-        var faces = _shell.SelectedFaces.Select(f => (f.Guid, f.Face, Mesh: _shell.Meshes.Find(f.Guid)?.Data)).Where(f => f.Mesh != null && f.Face < f.Mesh.Faces.Length).ToList();
+        var faces = _shell.Mesh.Texture.SelectedFaces.Select(f => (f.Guid, f.Face, Mesh: _shell.Mesh.Meshes.Find(f.Guid)?.Data)).Where(f => f.Mesh != null && f.Face < f.Mesh.Faces.Length).ToList();
         var meshes = faces.Select(f => f.Guid).Distinct().Count();
         _title.Text = $"{faces.Count} {(faces.Count == 1 ? "Face" : "Faces")} of {meshes} {(meshes == 1 ? "mesh" : "meshes")}";
         if (faces.Count == 0)
@@ -177,15 +177,15 @@ public sealed class FaceEditorView : ScrollViewer
         Show("material", new FieldDisplay(DisplayKind.Asset, materials[0], [], false, 0,
             materials.Count > 1 ? $"The faces have {materials.Count} materials; an edit sets them all." : null));
 
-        var textures = materials.Select(_shell.MaterialTexture).ToList();
+        var textures = materials.Select(_shell.Mesh.Texture.MaterialTexture).ToList();
         var texture = textures.Count == 1 ? textures[0] : null;
         Show("texture", Text(textures.Count > 1 ? "—" : texture is var (guid, width, height)
             ? $"{(_shell.Assets.Find(guid) is { } t ? Cinnabar.Editor.Content.AssetIndex.DisplayName(t) : guid)}, {width} × {height}"
             : "none", texture == null && textures.Count == 1 ? "The material samples no texture that the tools can measure by. A tool_texture line in its source names one." : null));
         var densities = textures.Count == 1 && texture is var (_, w, h)
             ? mappings.Select(m => MeshTexture.Density(m, w, h)).Distinct().ToList() : [];
-        Show("density", Text(densities is [{ } d] ? $"{Number(d.U)} × {Number(d.V)} px/m, project {Number(_shell.TexelDensity)}"
-            : densities.Count > 1 ? "—" : $"project {Number(_shell.TexelDensity)} px/m",
+        Show("density", Text(densities is [{ } d] ? $"{Number(d.U)} × {Number(d.V)} px/m, project {Number(_shell.Mesh.Texture.TexelDensity)}"
+            : densities.Count > 1 ? "—" : $"project {Number(_shell.Mesh.Texture.TexelDensity)} px/m",
             "The faces' texels per meter along u and v, from the scale and the texture's size, and the project's density, which Reset Scale sets."));
 
         Show("u", Text(Same(mappings.Select(m => Axis(m.UAxis))), "The texture's u axis in the mesh's space. Align sets it."));
@@ -201,7 +201,7 @@ public sealed class FaceEditorView : ScrollViewer
         {
             hotspot = "—";
         }
-        else if (_shell.MaterialHotspots(materials[0]) is { Count: > 0 } hotspots)
+        else if (_shell.Mesh.Texture.MaterialHotspots(materials[0]) is { Count: > 0 } hotspots)
         {
             var current = faces.Select(f => MeshTexture.CurrentHotspot(f.Mesh!, f.Face, f.Mesh!.Faces[f.Face].Mapping, hotspots, tw, th)).Distinct().ToList();
             if (current is [{ } index])
@@ -287,7 +287,7 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     const double ShiftStep = 0.01;
     const double DegreeStep = 0.5;
 
-    readonly ScrubSession _scrub = new(shell.EndMappingScrub);
+    readonly ScrubSession _scrub = new(shell.Mesh.Texture.EndMappingScrub);
 
     public bool Commit(int axis, string text)
     {
@@ -300,9 +300,9 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
         return field switch
         {
             MappingField.Scale when value == 0 => Refuse("a scale of 0 would put the whole texture at one point"),
-            MappingField.Scale => shell.SetTextureScale(axis == 1 ? null : value, axis == 0 ? null : value),
-            MappingField.Shift => shell.SetTextureShift(axis == 1 ? null : value, axis == 0 ? null : value),
-            MappingField.Rotation => shell.SetTextureRotation(value),
+            MappingField.Scale => shell.Mesh.Texture.SetTextureScale(axis == 1 ? null : value, axis == 0 ? null : value),
+            MappingField.Shift => shell.Mesh.Texture.SetTextureShift(axis == 1 ? null : value, axis == 0 ? null : value),
+            MappingField.Rotation => shell.Mesh.Texture.SetTextureRotation(value),
             _ => false,
         };
     }
@@ -317,13 +317,13 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     {
         if (field == MappingField.Material)
         {
-            shell.SetFaceMaterial(guid);
+            shell.Mesh.Texture.SetFaceMaterial(guid);
         }
     }
 
     public void BeginScrub(int axis)
     {
-        if (field != MappingField.Material && shell.BeginMappingScrub($"Drag Texture {field}"))
+        if (field != MappingField.Material && shell.Mesh.Texture.BeginMappingScrub($"Drag Texture {field}"))
         {
             _scrub.Begin();
         }
@@ -336,7 +336,7 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
             return;
         }
         var delta = pixels * ScrubSession.Scale(modifiers);
-        shell.PreviewMappings((_, _, m) => field switch
+        shell.Mesh.Texture.PreviewMappings((_, _, m) => field switch
         {
             MappingField.Scale => axis == 0 ? m with { ScaleU = NonZero(m.ScaleU + delta * ScaleStep, m.ScaleU) } : m with { ScaleV = NonZero(m.ScaleV + delta * ScaleStep, m.ScaleV) },
             MappingField.Shift => axis == 0 ? m with { ShiftU = m.ShiftU + delta * ShiftStep } : m with { ShiftV = m.ShiftV + delta * ShiftStep },

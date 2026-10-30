@@ -315,7 +315,7 @@ public sealed partial class EditorShell
         var point = (ray * distance).Offset(Camera.Position);
         if (Snap)
         {
-            var step = GridSize * Pose.Unit;
+            var step = Mesh.GridSize * Pose.Unit;
             point = [.. point.Select(p => (long)(Math.Round(p / step) * step))];
         }
         return point;

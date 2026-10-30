@@ -9,14 +9,19 @@ using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The mesh tools in the shell (see docs/editor/mesh-editing.md#mesh-tools): each runs on the sub-selection of every
+/// The mesh tools (see docs/editor/mesh-editing.md#mesh-tools): each runs on the sub-selection of every
 /// edited mesh as one undo entry. A tool with a distance, such as Extrude, opens the entry and waits for a drag of the
 /// gizmo, whose steps set the distance and replace each other; releasing commits and Escape cancels. Cut and Draw are
 /// tool modes that take points from clicks until Enter. Detach and Extract make a new mesh and entity, and the
 /// primitives fill a dragged rectangle, with parameters that stay editable until the next edit.
 /// </summary>
-public sealed partial class EditorShell
+public sealed class MeshToolRunner
 {
+    readonly MeshSession _session;
+    readonly IMeshHost _shell;
+
+    internal MeshToolRunner(MeshSession session, IMeshHost shell) => (_session, _shell) = (session, shell);
+
     // A tool whose distance the next gizmo drag sets, with its undo entry open: each mesh's snapshot and selection from
     // before it ran, and how to run it at a distance.
     sealed record PendingDistance(string Label, Vec3 Axis, bool Magnitude, Dictionary<string, (MeshData Start, IReadOnlyList<int> Selected)> Meshes,
@@ -36,6 +41,17 @@ public sealed partial class EditorShell
     /// <summary>A tool ran and waits for a drag of the gizmo to set its distance.</summary>
     public bool HasPendingDistance => _pending != null;
 
+    internal string? PendingLabel => _pending?.Label;
+
+    // Any edit but a primitive's own parameter change ends its parameters' editability.
+    internal void ForgetStalePrimitive()
+    {
+        if (!_remaking && _lastPrimitive is { } last && _shell.Scene != null && (_shell.Scene.History.Count != last.Position || _shell.Scene.Position != last.Position))
+        {
+            _lastPrimitive = null;
+        }
+    }
+
     /// <summary>The angle that Recalculate Normals marks edges sharp beyond, in degrees.</summary>
     public double NormalAngle { get; private set; } = 30;
 
@@ -52,31 +68,31 @@ public sealed partial class EditorShell
     /// <summary>The edge of an edited mesh under a pixel, by its mesh and its index, with how far along it the mouse is, or null.</summary>
     (string Guid, int Edge, double T)? EdgeAt(Vec2 pixel)
     {
-        var (width, height) = FrameSize;
-        var ray = Camera.Ray(pixel, width, height);
+        var (width, height) = _shell.FrameSize;
+        var ray = _shell.Camera.Ray(pixel, width, height);
         (string, int, double)? best = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in InMeshMode ? _editedMeshes.Keys.ToList() : [])
+        foreach (var guid in _session.InMeshMode ? _session._editedMeshes.Keys.ToList() : [])
         {
-            if (FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement)
+            if (_session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement)
             {
                 continue;
             }
-            var hit = MeshPick.Face(mesh, placement, ray, SelectThrough);
-            if (MeshPick.Edge(mesh, placement, Camera, pixel, width, height, hit?.Distance) is not { } edge)
+            var hit = MeshPick.Face(mesh, placement, ray, _session.SelectThrough);
+            if (MeshPick.Edge(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance) is not { } edge)
             {
                 continue;
             }
             var e = mesh.Edges[edge];
             var (a, b) = (placement.ToView(mesh.Vertices[e.A]), placement.ToView(mesh.Vertices[e.B]));
-            var distance = hit?.Distance ?? Vec3.Dot(a, Camera.Forward);
+            var distance = hit?.Distance ?? Vec3.Dot(a, _shell.Camera.Forward);
             if (distance < bestDistance)
             {
                 var t = AlongRay(a, b, ray);
-                if (Snap)
+                if (_shell.Snap)
                 {
                     // The point along the edge nearest a grid point.
-                    var snapped = Camera.RelativeTo(SnapToGrid(a + (b - a) * t));
+                    var snapped = _shell.Camera.RelativeTo(_session.SnapToGrid(a + (b - a) * t));
                     t = AlongSegment(a, b, snapped);
                 }
                 best = (guid, edge, t);
@@ -96,49 +112,49 @@ public sealed partial class EditorShell
     /// <summary>With the Cut tool, shows the loop that a click on the edge under the mouse would cut.</summary>
     public void HoverCut(Vec2 pixel)
     {
-        if (MeshTool != MeshTool.Cut || !InMeshMode)
+        if (_session.MeshTool != MeshTool.Cut || !_session.InMeshMode)
         {
             return;
         }
         (string, List<CutPoint.OnEdge>)? preview = null;
-        if (EdgeAt(pixel) is var (guid, edge, t) && FindMeshData(guid) is { } mesh)
+        if (EdgeAt(pixel) is var (guid, edge, t) && _session.FindMeshData(guid) is { } mesh)
         {
             preview = (guid, MeshCut.Loop(mesh, edge, t));
         }
         if (preview?.Item1 != _loopPreview?.Guid || !(preview?.Item2 ?? []).SequenceEqual(_loopPreview?.Points ?? []))
         {
             _loopPreview = preview;
-            SendMeshOverlay();
+            _session.SendMeshOverlay();
         }
     }
 
     /// <summary>A click with the Cut tool: a loop cut from the edge under it, at once.</summary>
     public bool CutAt(Vec2 pixel)
     {
-        if (MeshTool != MeshTool.Cut || !InMeshMode || !IsEditing || Scene == null)
+        if (_session.MeshTool != MeshTool.Cut || !_session.InMeshMode || !_shell.IsEditing || _shell.Scene == null)
         {
             return false;
         }
         CommitPendingDistance();
-        if (EdgeAt(pixel) is not var (guid, edge, t) || FindMeshData(guid) is not { } mesh)
+        if (EdgeAt(pixel) is not var (guid, edge, t) || _session.FindMeshData(guid) is not { } mesh)
         {
             return true;
         }
         var (result, reason) = MeshCut.LoopCut(mesh, edge, t);
         if (reason != null)
         {
-            Console.Add(LogLevel.Warning, $"mesh: {reason}");
+            _shell.Console.Add(LogLevel.Warning, $"mesh: {reason}");
             return true;
         }
         if (result.Mesh.Validate() is { Count: > 0 } problems)
         {
-            Console.Add(LogLevel.Error, $"mesh: cannot cut: {string.Join("; ", problems)}");
+            _shell.Console.Add(LogLevel.Error, $"mesh: cannot cut: {string.Join("; ", problems)}");
             return true;
         }
         _loopPreview = null;
-        if (Edit("Cut", new MeshOperation(guid, mesh, result.Mesh, Meshes)))
+        if (_shell.Edit("Cut", new MeshOperation(guid, mesh, result.Mesh, _session.Meshes)))
         {
-            SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
+            _session.SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
         }
         return true;
     }
@@ -155,7 +171,7 @@ public sealed partial class EditorShell
 
     /// <summary>Whether a tool of an element kind can run now: mesh mode, with that kind selected.</summary>
     public bool CanRunMeshTool(MeshElement? kind = null) =>
-        CanEditInMeshMode && !MeshSelection.IsEmpty && (kind == null || MeshElement == kind);
+        _session.CanEditInMeshMode && !_session.MeshSelection.IsEmpty && (kind == null || _session.MeshElement == kind);
 
     /// <summary>
     /// Runs a tool on the selected elements of each edited mesh, as one undo entry, and selects what it leaves. A
@@ -164,42 +180,42 @@ public sealed partial class EditorShell
     public bool RunMeshTool(string label, Func<MeshData, IEnumerable<int>, ToolResult> run, MeshElement? requires = null)
     {
         CommitPendingDistance();
-        if (!CanRunMeshTool(requires) || Scene == null)
+        if (!CanRunMeshTool(requires) || _shell.Scene == null)
         {
             return false;
         }
         var ops = new List<Operation>();
         var items = new List<MeshItem>();
         MeshElement? kind = null;
-        foreach (var guid in MeshSelection.Guids)
+        foreach (var guid in _session.MeshSelection.Guids)
         {
-            if (FindMeshData(guid) is not { } mesh)
+            if (_session.FindMeshData(guid) is not { } mesh)
             {
                 continue;
             }
-            var result = run(mesh, MeshSelection.Of(guid));
+            var result = run(mesh, _session.MeshSelection.Of(guid));
             if (result.Mesh.Validate() is { Count: > 0 } problems)
             {
-                Console.Add(LogLevel.Error, $"mesh: cannot {label.ToLowerInvariant()}: {string.Join("; ", problems)}");
+                _shell.Console.Add(LogLevel.Error, $"mesh: cannot {label.ToLowerInvariant()}: {string.Join("; ", problems)}");
                 return false;
             }
             if (!ReferenceEquals(result.Mesh, mesh))
             {
-                ops.Add(new MeshOperation(guid, mesh, result.Mesh, Meshes));
+                ops.Add(new MeshOperation(guid, mesh, result.Mesh, _session.Meshes));
             }
             kind = result.Kind;
             items.AddRange(result.Selected.Select(i => new MeshItem(guid, i)));
         }
         if (ops.Count == 0)
         {
-            Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
+            _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
             return false;
         }
-        if (!Edit(label, [.. ops]))
+        if (!_shell.Edit(label, [.. ops]))
         {
             return false;
         }
-        SetMeshSelection(new MeshSelection(kind ?? MeshElement, [.. items]), switchKind: true);
+        _session.SetMeshSelection(new MeshSelection(kind ?? _session.MeshElement, [.. items]), switchKind: true);
         return true;
     }
 
@@ -207,40 +223,40 @@ public sealed partial class EditorShell
     public bool RunWholeMeshTool(string label, Func<MeshData, (MeshData Mesh, IReadOnlyList<string> Problems)> run)
     {
         CommitPendingDistance();
-        if (!InMeshMode || !IsEditing || Scene == null)
+        if (!_session.InMeshMode || !_shell.IsEditing || _shell.Scene == null)
         {
             return false;
         }
         var ops = new List<Operation>();
-        foreach (var (guid, _) in _editedMeshes)
+        foreach (var (guid, _) in _session._editedMeshes)
         {
-            if (FindMeshData(guid) is not { } mesh)
+            if (_session.FindMeshData(guid) is not { } mesh)
             {
                 continue;
             }
             var (result, problems) = run(mesh);
             foreach (var p in problems)
             {
-                Console.Add(LogLevel.Warning, $"mesh: {Meshes.Find(guid)?.Title}: {p}");
+                _shell.Console.Add(LogLevel.Warning, $"mesh: {_session.Meshes.Find(guid)?.Title}: {p}");
             }
             if (!ReferenceEquals(result, mesh) && !result.Faces.SequenceEqual(mesh.Faces))
             {
-                ops.Add(new MeshOperation(guid, mesh, result, Meshes));
+                ops.Add(new MeshOperation(guid, mesh, result, _session.Meshes));
             }
             else if (!ReferenceEquals(result, mesh))
             {
-                ops.Add(new MeshOperation(guid, mesh, result, Meshes));
+                ops.Add(new MeshOperation(guid, mesh, result, _session.Meshes));
             }
         }
         if (ops.Count == 0)
         {
-            Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
+            _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
             return false;
         }
-        var ok = Edit(label, [.. ops]);
+        var ok = _shell.Edit(label, [.. ops]);
         if (ok)
         {
-            SetMeshSelection(MeshSelection.Pruned(FindMeshData));
+            _session.SetMeshSelection(_session.MeshSelection.Pruned(_session.FindMeshData));
         }
         return ok;
     }
@@ -253,21 +269,21 @@ public sealed partial class EditorShell
     public bool BeginDistanceTool(string label, Func<MeshData, IEnumerable<int>, double, ToolResult> run, bool magnitude = false, MeshElement? requires = null)
     {
         CommitPendingDistance();
-        if (!CanRunMeshTool(requires) || Scene is not { InTransaction: false })
+        if (!CanRunMeshTool(requires) || _shell.Scene is not { InTransaction: false })
         {
             return false;
         }
         var meshes = new Dictionary<string, (MeshData, IReadOnlyList<int>)>();
         var axis = Vec3.Zero;
-        foreach (var guid in MeshSelection.Guids)
+        foreach (var guid in _session.MeshSelection.Guids)
         {
-            if (FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement)
+            if (_session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement)
             {
                 continue;
             }
-            var selected = MeshSelection.Of(guid).ToList();
+            var selected = _session.MeshSelection.Of(guid).ToList();
             meshes[guid] = (mesh, selected);
-            foreach (var v in MeshSelection.VerticesOf(mesh, selected))
+            foreach (var v in _session.MeshSelection.VerticesOf(mesh, selected))
             {
                 foreach (var f in mesh.FacesOfVertex(v))
                 {
@@ -280,10 +296,10 @@ public sealed partial class EditorShell
             return false;
         }
         axis = axis.Length > 1e-9 ? axis.Normalized() : Vec3.UnitY;
-        BeginEdit(label);
+        _shell.BeginEdit(label);
         _pending = new PendingDistance(label, axis, magnitude, meshes, run);
-        OnMeshModeChanged();
-        Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()}: drag the gizmo for the {(magnitude ? "width" : "distance")}, or Escape");
+        _session.OnMeshModeChanged();
+        _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()}: drag the gizmo for the {(magnitude ? "width" : "distance")}, or Escape");
         return true;
     }
 
@@ -295,11 +311,11 @@ public sealed partial class EditorShell
             return;
         }
         _pending = null;
-        if (!_gizmo.IsDragging)
+        if (!_shell.Gizmos.IsDragging)
         {
-            CommitEdit();
+            _shell.CommitEdit();
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     /// <summary>Cancels a pending distance tool: the mesh is as before it.</summary>
@@ -310,19 +326,16 @@ public sealed partial class EditorShell
             return;
         }
         _pending = null;
-        _gizmo.Drop();
-        CancelEdit();
-        MeshSelection = MeshSelection.Pruned(FindMeshData);
-        SendGizmo();
-        OnMeshModeChanged();
+        _shell.Gizmos.Drop();
+        _shell.CancelEdit();
+        _session.MeshSelection = _session.MeshSelection.Pruned(_session.FindMeshData);
+        _shell.SendGizmo();
+        _session.OnMeshModeChanged();
     }
-
-    /// <summary>The gizmo while a distance is pending: Move, whatever the tool.</summary>
-    GizmoKind ActiveGizmoKind => InMeshMode && (_pending != null || EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(Tool);
 
     // A gizmo drag with a distance pending: each step runs the tool at the change along the axis, or its length, on
     // every mesh, replacing the step before. Releasing ends the tool; one that ended during the drag ignores it.
-    sealed class DistanceDrag(EditorShell shell) : IGizmoTarget
+    internal sealed class DistanceDrag(MeshToolRunner tools, MeshSession session) : IGizmoTarget
     {
         MeshElement? _kind;
         List<MeshItem> _items = [];
@@ -330,7 +343,7 @@ public sealed partial class EditorShell
 
         public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            if (shell._pending is not { } pending)
+            if (tools._pending is not { } pending)
             {
                 return [];
             }
@@ -338,14 +351,14 @@ public sealed partial class EditorShell
             var distance = pending.Magnitude ? change.Translation.Length : Vec3.Dot(change.Translation, pending.Axis);
             if (snap)
             {
-                distance = Math.Round(distance / shell.GridSize) * shell.GridSize;
+                distance = Math.Round(distance / session.GridSize) * session.GridSize;
             }
             var ops = new List<Operation>();
             (_kind, _items) = (null, []);
             foreach (var (guid, (start, selected)) in pending.Meshes)
             {
                 var result = pending.Run(start, selected, distance);
-                ops.Add(new MeshOperation(guid, shell.FindMeshData(guid) ?? start, result.Mesh, shell.Meshes));
+                ops.Add(new MeshOperation(guid, session.FindMeshData(guid) ?? start, result.Mesh, session.Meshes));
                 _kind = result.Kind;
                 _items.AddRange(result.Selected.Select(i => new MeshItem(guid, i)));
             }
@@ -354,15 +367,15 @@ public sealed partial class EditorShell
 
         public void Previewed()
         {
-            shell.MeshElement = _kind ?? shell.MeshElement;
-            shell.MeshSelection = new MeshSelection(shell.MeshElement, [.. _items]);
-            shell.SendMeshOverlay();
+            session.MeshElement = _kind ?? session.MeshElement;
+            session.MeshSelection = new MeshSelection(session.MeshElement, [.. _items]);
+            session.SendMeshOverlay();
         }
 
         public void Ending()
         {
-            _pending = shell._pending != null;
-            shell._pending = null;
+            _pending = tools._pending != null;
+            tools._pending = null;
         }
 
         public void Ended(bool committed)
@@ -373,29 +386,29 @@ public sealed partial class EditorShell
             }
             if (!committed)
             {
-                shell.MeshSelection = shell.MeshSelection.Pruned(shell.FindMeshData);
+                session.MeshSelection = session.MeshSelection.Pruned(session.FindMeshData);
             }
-            shell.OnMeshModeChanged();
+            session.OnMeshModeChanged();
         }
     }
 
     public void SetNormalAngle(double degrees)
     {
         NormalAngle = Math.Clamp(degrees, 1, 180);
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     public void SetBevelSegments(int segments)
     {
         BevelSegments = Math.Clamp(segments, 1, 16);
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     /// <summary>Extrude: faces out along their average normal with walls, or open edges out as quads, by a dragged distance.</summary>
-    public bool Extrude() => MeshElement switch
+    public bool Extrude() => _session.MeshElement switch
     {
-        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d, ScaleForFaces(m, s)), requires: MeshElement.Faces),
-        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d, ScaleForEdges(m, s)), requires: MeshElement.Edges),
+        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d, _session.Texture.ScaleForFaces(m, s)), requires: MeshElement.Faces),
+        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d, _session.Texture.ScaleForEdges(m, s)), requires: MeshElement.Edges),
         _ => false,
     };
 
@@ -407,7 +420,7 @@ public sealed partial class EditorShell
 
     public bool Outset() => BeginDistanceTool("Outset", (m, s, d) => MeshTools.Inset(m, s, -Math.Abs(d)), magnitude: true, requires: MeshElement.Faces);
 
-    public bool Bevel() => MeshElement switch
+    public bool Bevel() => _session.MeshElement switch
     {
         MeshElement.Vertices => BeginDistanceTool("Bevel", (m, s, d) => MeshBevel.Vertices(m, s, Math.Abs(d)), magnitude: true, requires: MeshElement.Vertices),
         MeshElement.Edges => BeginDistanceTool("Bevel", (m, s, d) => MeshBevel.Edges(m, s, Math.Abs(d), BevelSegments), magnitude: true, requires: MeshElement.Edges),
@@ -416,7 +429,7 @@ public sealed partial class EditorShell
 
     public bool DuplicateFaces() => RunMeshTool("Duplicate", MeshTools.Duplicate, MeshElement.Faces);
 
-    public bool Collapse() => RunMeshTool("Collapse", (m, s) => MeshTools.Collapse(m, MeshElement, s));
+    public bool Collapse() => RunMeshTool("Collapse", (m, s) => MeshTools.Collapse(m, _session.MeshElement, s));
 
     public bool MergeFaces() => RunMeshTool("Merge Faces", MeshTools.MergeFaces, MeshElement.Faces);
 
@@ -432,17 +445,17 @@ public sealed partial class EditorShell
     {
         var cleaned = RunWholeMeshTool("Clean", MeshTools.Clean);
         var reported = new List<MeshItem>();
-        foreach (var guid in _editedMeshes.Keys)
+        foreach (var guid in _session._editedMeshes.Keys)
         {
-            if (FindMeshData(guid) is { } mesh)
+            if (_session.FindMeshData(guid) is { } mesh)
             {
                 reported.AddRange(Enumerable.Range(0, mesh.Edges.Length).Where(e => mesh.FacesOfEdge(mesh.Edges[e]).Count > 2).Select(e => new MeshItem(guid, e)));
             }
         }
         if (reported.Count > 0)
         {
-            SetMeshSelection(new MeshSelection(MeshElement.Edges, [.. reported]), switchKind: true);
-            Console.Add(LogLevel.Warning, $"mesh: clean: {reported.Count} {(reported.Count == 1 ? "edge has" : "edges have")} more than two faces, and {(reported.Count == 1 ? "is" : "are")} selected");
+            _session.SetMeshSelection(new MeshSelection(MeshElement.Edges, [.. reported]), switchKind: true);
+            _shell.Console.Add(LogLevel.Warning, $"mesh: clean: {reported.Count} {(reported.Count == 1 ? "edge has" : "edges have")} more than two faces, and {(reported.Count == 1 ? "is" : "are")} selected");
         }
         return cleaned;
     }
@@ -454,23 +467,23 @@ public sealed partial class EditorShell
     public bool Detach(bool keepSource)
     {
         CommitPendingDistance();
-        if (!CanRunMeshTool(MeshElement.Faces) || Scene == null)
+        if (!CanRunMeshTool(MeshElement.Faces) || _shell.Scene == null)
         {
             return false;
         }
-        var guids = MeshSelection.Guids.Where(g => FindMeshData(g) != null && PlacementOf(g) != null).ToList();
-        if (guids.Count == 0 || Scene.Expanded.Flat.Find(_editedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(Scene.Expanded.Flat, source) is not { } pose)
+        var guids = _session.MeshSelection.Guids.Where(g => _session.FindMeshData(g) != null && _session.PlacementOf(g) != null).ToList();
+        if (guids.Count == 0 || _shell.Scene.Expanded.Flat.Find(_session._editedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, source) is not { } pose)
         {
             return false;
         }
-        var first = PlacementOf(guids[0])!;
+        var first = _session.PlacementOf(guids[0])!;
         MeshData? combined = null;
         var ops = new List<Operation>();
         foreach (var guid in guids)
         {
-            var mesh = FindMeshData(guid)!;
-            var placement = PlacementOf(guid)!;
-            var (extracted, remaining) = MeshTools.Split(mesh, MeshSelection.Of(guid));
+            var mesh = _session.FindMeshData(guid)!;
+            var placement = _session.PlacementOf(guid)!;
+            var (extracted, remaining) = MeshTools.Split(mesh, _session.MeshSelection.Of(guid));
             if (extracted.Faces.Length == 0)
             {
                 continue;
@@ -479,7 +492,7 @@ public sealed partial class EditorShell
             combined = combined == null ? inFirst : Append(combined, inFirst);
             if (!keepSource)
             {
-                ops.Add(new MeshOperation(guid, mesh, remaining, Meshes));
+                ops.Add(new MeshOperation(guid, mesh, remaining, _session.Meshes));
             }
         }
         if (combined == null)
@@ -487,15 +500,15 @@ public sealed partial class EditorShell
             return false;
         }
         var label = keepSource ? "Extract" : "Detach";
-        var name = NewMeshName(label.ToLowerInvariant());
+        var name = _session.NewMeshName(label.ToLowerInvariant());
         var renderer = source.Components.Find(c => c.Id == SceneEdits.MeshRendererId);
         var (create, document) = NewMeshEntity(name, combined, pose, renderer?.Fields.Where(f => f.Name.StartsWith("materials.", StringComparison.Ordinal)).ToList() ?? []);
-        if (!Edit(label, [new CreateMesh(document, Meshes), create, .. ops]))
+        if (!_shell.Edit(label, [new CreateMesh(document, _session.Meshes), create, .. ops]))
         {
             return false;
         }
-        _editedMeshes[document.Guid] = create.Created.Id;
-        SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, combined.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
+        _session._editedMeshes[document.Guid] = create.Created.Id;
+        _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, combined.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
         return true;
     }
 
@@ -513,13 +526,13 @@ public sealed partial class EditorShell
     (CreateEntity Create, MeshDocument Document) NewMeshEntity(string name, MeshData data, Pose pose, IReadOnlyList<SceneField> materials)
     {
         var guid = Convert.ToHexStringLower(Guid.NewGuid().ToByteArray());
-        var directory = Path.Combine(Path.GetDirectoryName(Scene!.Path)!, $"{Path.GetFileNameWithoutExtension(Scene.Path)}_meshes");
+        var directory = Path.Combine(Path.GetDirectoryName(_shell.Scene!.Path)!, $"{Path.GetFileNameWithoutExtension(_shell.Scene.Path)}_meshes");
         var document = new MeshDocument(Path.Combine(directory, name + MeshFile.Extension), guid, data, saved: false);
-        var create = SceneEdits.NewEntity(Scene.Expanded.Flat, pose.Position);
+        var create = SceneEdits.NewEntity(_shell.Scene.Expanded.Flat, pose.Position);
         create.Created.Name = name;
         create.Created.Components[0] = new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(pose));
         var fields = new List<SceneField> { new("mesh", SceneValue.AssetRef(guid)) };
-        fields.AddRange(materials.Count > 0 ? materials : [new SceneField("materials.0", SceneValue.AssetRef(DefaultMeshMaterial))]);
+        fields.AddRange(materials.Count > 0 ? materials : [new SceneField("materials.0", SceneValue.AssetRef(_session.DefaultMeshMaterial))]);
         fields.Add(new SceneField("cast_shadows", SceneValue.Of(true)));
         create.Created.Components.Add(new SceneComponent(SceneEdits.MeshRendererId, "Mesh_Renderer", fields));
         return (create, document);
@@ -529,11 +542,11 @@ public sealed partial class EditorShell
     public void SetPrimitive(PrimitiveKind kind)
     {
         Primitive = kind;
-        if (MeshTool != MeshTool.Create)
+        if (_session.MeshTool != MeshTool.Create)
         {
-            SetMeshTool(MeshTool.Create);
+            _session.SetMeshTool(MeshTool.Create);
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     /// <summary>
@@ -549,7 +562,7 @@ public sealed partial class EditorShell
             _remaking = true;
             try
             {
-                Scene!.Undo();
+                _shell.Scene!.Undo();
                 MakePrimitive(last.Corner, last.Size, last.Axis, last.Mesh);
             }
             finally
@@ -557,50 +570,50 @@ public sealed partial class EditorShell
                 _remaking = false;
             }
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     bool _remaking;
 
     // The last primitive's entry is the last edit, and nothing is open.
     bool CanRemakePrimitive(LastPrimitive last) =>
-        Scene != null && !Scene.InTransaction && Scene.Position == last.Position && Scene.History.Count == last.Position;
+        _shell.Scene != null && !_shell.Scene.InTransaction && _shell.Scene.Position == last.Position && _shell.Scene.History.Count == last.Position;
 
     // The primitive filling a box, as faces of an edited mesh or as a new mesh and entity.
-    void MakePrimitive(long[] corner, Vec3 size, int axis, string? mesh)
+    internal void MakePrimitive(long[] corner, Vec3 size, int axis, string? mesh)
     {
-        if (Scene == null)
+        if (_shell.Scene == null)
         {
             return;
         }
         // The entry goes where the position is: a remake has undone the entry before, which the new one replaces.
-        var position = Scene.Position;
-        if (mesh != null && FindMeshData(mesh) is { } data && PlacementOf(mesh) is { } placement)
+        var position = _shell.Scene.Position;
+        if (mesh != null && _session.FindMeshData(mesh) is { } data && _session.PlacementOf(mesh) is { } placement)
         {
-            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, NewFaceScale(data.Materials[0]), data.Materials[0]);
-            var cornerRelative = Camera.RelativeTo(corner);
+            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.Texture.NewFaceScale(data.Materials[0]), data.Materials[0]);
+            var cornerRelative = _shell.Camera.RelativeTo(corner);
             var local = made.With(vertices: made.Vertices.Select(v => placement.ToLocal(cornerRelative + v)));
             var after = Append(data, local);
-            if (Edit(Primitive.ToString(), new MeshOperation(mesh, data, after, Meshes)))
+            if (_shell.Edit(Primitive.ToString(), new MeshOperation(mesh, data, after, _session.Meshes)))
             {
-                SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(data.Faces.Length, made.Faces.Length).Select(i => new MeshItem(mesh, i))]));
+                _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(data.Faces.Length, made.Faces.Length).Select(i => new MeshItem(mesh, i))]));
                 _lastPrimitive = new LastPrimitive(position + 1, corner, size, axis, mesh);
             }
             return;
         }
-        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, NewFaceScale(DefaultMeshMaterial), DefaultMeshMaterial);
-        var name = NewMeshName(Primitive.ToString().ToLowerInvariant());
+        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.Texture.NewFaceScale(_session.DefaultMeshMaterial), _session.DefaultMeshMaterial);
+        var name = _session.NewMeshName(Primitive.ToString().ToLowerInvariant());
         var (create, document) = NewMeshEntity(name, block, new Pose(corner, Quat.Identity, [1, 1, 1]), []);
-        if (!Edit(Primitive.ToString(), new CreateMesh(document, Meshes), create))
+        if (!_shell.Edit(Primitive.ToString(), new CreateMesh(document, _session.Meshes), create))
         {
             return;
         }
         _lastPrimitive = new LastPrimitive(position + 1, corner, size, axis, null);
-        SelectScene(create.Created.Id);
-        if (InMeshMode)
+        _shell.SelectScene(create.Created.Id);
+        if (_session.InMeshMode)
         {
-            _editedMeshes[document.Guid] = create.Created.Id;
-            SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, block.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
+            _session._editedMeshes[document.Guid] = create.Created.Id;
+            _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, block.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
         }
     }
 
@@ -611,17 +624,17 @@ public sealed partial class EditorShell
     /// </summary>
     public bool AddToolPoint(Vec2 pixel)
     {
-        if (MeshTool == MeshTool.Cut)
+        if (_session.MeshTool == MeshTool.Cut)
         {
             return CutAt(pixel);
         }
-        if (MeshTool != MeshTool.Draw || !IsEditing || Scene == null)
+        if (_session.MeshTool != MeshTool.Draw || !_shell.IsEditing || _shell.Scene == null)
         {
             return false;
         }
-        var (width, height) = FrameSize;
-        var ray = Camera.Ray(pixel, width, height);
-        if (MeshTool == MeshTool.Draw && _planePoints.Count > 0)
+        var (width, height) = _shell.FrameSize;
+        var ray = _shell.Camera.Ray(pixel, width, height);
+        if (_session.MeshTool == MeshTool.Draw && _planePoints.Count > 0)
         {
             return AddPlanePoint(pixel);
         }
@@ -632,23 +645,23 @@ public sealed partial class EditorShell
         int? bestVertex = null;
         int? bestEdge = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in InMeshMode ? _editedMeshes.Keys.ToList() : [])
+        foreach (var guid in _session.InMeshMode ? _session._editedMeshes.Keys.ToList() : [])
         {
-            if (FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement)
+            if (_session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement)
             {
                 continue;
             }
-            var hit = MeshPick.Face(mesh, placement, ray, SelectThrough);
-            var vertex = MeshPick.Vertex(mesh, placement, Camera, pixel, width, height, hit?.Distance);
-            var edge = vertex == null ? MeshPick.Edge(mesh, placement, Camera, pixel, width, height, hit?.Distance) : null;
+            var hit = MeshPick.Face(mesh, placement, ray, _session.SelectThrough);
+            var vertex = MeshPick.Vertex(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance);
+            var edge = vertex == null ? MeshPick.Edge(mesh, placement, _shell.Camera, pixel, width, height, hit?.Distance) : null;
             double? distance = hit?.Distance;
             if (distance == null && vertex is { } v)
             {
-                distance = Vec3.Dot(placement.ToView(mesh.Vertices[v]), Camera.Forward);
+                distance = Vec3.Dot(placement.ToView(mesh.Vertices[v]), _shell.Camera.Forward);
             }
             if (distance == null && edge is { } e)
             {
-                distance = Vec3.Dot(placement.ToView(mesh.Vertices[mesh.Edges[e].A]), Camera.Forward);
+                distance = Vec3.Dot(placement.ToView(mesh.Vertices[mesh.Edges[e].A]), _shell.Camera.Forward);
             }
             if (distance is { } d && d < bestDistance)
             {
@@ -657,16 +670,16 @@ public sealed partial class EditorShell
         }
         if (best == null)
         {
-            return MeshTool == MeshTool.Draw && _toolPoints.Count == 0 && AddPlanePoint(pixel);
+            return _session.MeshTool == MeshTool.Draw && _toolPoints.Count == 0 && AddPlanePoint(pixel);
         }
         if (_toolMesh != null && _toolMesh != best)
         {
-            Console.Add(LogLevel.Warning, "mesh: a cut's points are on one mesh");
+            _shell.Console.Add(LogLevel.Warning, "mesh: a cut's points are on one mesh");
             return true;
         }
-        var data = FindMeshData(best)!;
-        var at = PlacementOf(best)!;
-        if (MeshTool == MeshTool.Draw)
+        var data = _session.FindMeshData(best)!;
+        var at = _session.PlacementOf(best)!;
+        if (_session.MeshTool == MeshTool.Draw)
         {
             // Every corner is on the first click's face, where the ray meets its plane.
             var face = _toolPoints is [CutPoint.OnFace first, ..] ? first.Face
@@ -676,7 +689,7 @@ public sealed partial class EditorShell
             {
                 return true;
             }
-            if (_toolPoints.Count >= 3 && Camera.Project(at.ToView(((CutPoint.OnFace)_toolPoints[0]).Position), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
+            if (_toolPoints.Count >= 3 && _shell.Camera.Project(at.ToView(((CutPoint.OnFace)_toolPoints[0]).Position), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
             {
                 ApplyToolPoints();
                 return true;
@@ -697,7 +710,7 @@ public sealed partial class EditorShell
             _toolPoints.Add(new CutPoint.OnFace(faceHit.Face, at.ToLocal(faceHit.Point)));
         }
         _toolMesh = best;
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
         return true;
     }
 
@@ -715,60 +728,60 @@ public sealed partial class EditorShell
 
     bool AddPlanePoint(Vec2 pixel)
     {
-        var (origin, axis) = GridPlane();
+        var (origin, axis) = _session.GridPlane();
         if (_planePoints.Count > 0)
         {
-            (origin, axis) = (_planePoints[0], MeshGrid.NearestAxis(Camera.Forward));
+            (origin, axis) = (_planePoints[0], MeshGrid.NearestAxis(_shell.Camera.Forward));
         }
-        if (PointOnGrid(pixel, origin, axis) is not { } point)
+        if (_session.PointOnGrid(pixel, origin, axis) is not { } point)
         {
             return false;
         }
-        var (width, height) = FrameSize;
-        if (_planePoints.Count >= 3 && Camera.Project(Camera.RelativeTo(_planePoints[0]), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
+        var (width, height) = _shell.FrameSize;
+        if (_planePoints.Count >= 3 && _shell.Camera.Project(_shell.Camera.RelativeTo(_planePoints[0]), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
         {
             ApplyToolPoints();
             return true;
         }
         _planePoints.Add(point);
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
         return true;
     }
 
     /// <summary>Enter: applies the Cut or the Draw with its points.</summary>
     public void ApplyToolPoints()
     {
-        if (Scene == null)
+        if (_shell.Scene == null)
         {
             return;
         }
         if (_planePoints.Count > 0)
         {
             var points = _planePoints.ToList();
-            var axis = MeshGrid.NearestAxis(Camera.Forward);
+            var axis = MeshGrid.NearestAxis(_shell.Camera.Forward);
             // The plane fronts toward the camera.
-            var front = MeshGrid.AxisVector(axis) * (Vec3.Dot(MeshGrid.AxisVector(axis), Camera.Forward) > 0 ? -1 : 1);
-            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, DefaultMeshMaterial, NewFaceScale(DefaultMeshMaterial));
+            var front = MeshGrid.AxisVector(axis) * (Vec3.Dot(MeshGrid.AxisVector(axis), _shell.Camera.Forward) > 0 ? -1 : 1);
+            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, _session.DefaultMeshMaterial, _session.Texture.NewFaceScale(_session.DefaultMeshMaterial));
             CancelToolPoints();
             if (data == null)
             {
-                Console.Add(LogLevel.Warning, "mesh: a polygon has three or more corners and does not cross itself");
+                _shell.Console.Add(LogLevel.Warning, "mesh: a polygon has three or more corners and does not cross itself");
                 return;
             }
-            var (create, document) = NewMeshEntity(NewMeshName("plane"), data, new Pose(points[0], Quat.Identity, [1, 1, 1]), []);
-            if (Edit("Draw", new CreateMesh(document, Meshes), create))
+            var (create, document) = NewMeshEntity(_session.NewMeshName("plane"), data, new Pose(points[0], Quat.Identity, [1, 1, 1]), []);
+            if (_shell.Edit("Draw", new CreateMesh(document, _session.Meshes), create))
             {
-                SelectScene(create.Created.Id);
+                _shell.SelectScene(create.Created.Id);
             }
             return;
         }
-        if (_toolMesh is not { } guid || FindMeshData(guid) is not { } mesh)
+        if (_toolMesh is not { } guid || _session.FindMeshData(guid) is not { } mesh)
         {
             CancelToolPoints();
             return;
         }
         var toolPoints = _toolPoints.ToList();
-        var tool = MeshTool;
+        var tool = _session.MeshTool;
         CancelToolPoints();
         ToolResult result;
         string? reason;
@@ -786,23 +799,23 @@ public sealed partial class EditorShell
         }
         if (reason != null)
         {
-            Console.Add(LogLevel.Warning, $"mesh: {reason}");
+            _shell.Console.Add(LogLevel.Warning, $"mesh: {reason}");
             return;
         }
         if (result.Mesh.Validate() is { Count: > 0 } problems)
         {
-            Console.Add(LogLevel.Error, $"mesh: cannot {tool.ToString().ToLowerInvariant()}: {string.Join("; ", problems)}");
+            _shell.Console.Add(LogLevel.Error, $"mesh: cannot {tool.ToString().ToLowerInvariant()}: {string.Join("; ", problems)}");
             return;
         }
-        if (Edit(tool.ToString(), new MeshOperation(guid, mesh, result.Mesh, Meshes)))
+        if (_shell.Edit(tool.ToString(), new MeshOperation(guid, mesh, result.Mesh, _session.Meshes)))
         {
-            SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
+            _session.SetMeshSelection(new MeshSelection(result.Kind, [.. result.Selected.Select(i => new MeshItem(guid, i))]), switchKind: true);
         }
     }
 
     // The points of a Draw on a mesh, or of the loop a Cut would make, as the overlay marks them: x, y, z each, in
     // the mesh's space.
-    float[] ToolMarks(string guid, MeshData mesh)
+    internal float[] ToolMarks(string guid, MeshData mesh)
     {
         IEnumerable<CutPoint> points = _loopPreview is { } preview && preview.Guid == guid ? preview.Points : _toolMesh == guid ? _toolPoints : [];
         var marks = new List<float>();
@@ -838,7 +851,7 @@ public sealed partial class EditorShell
                 _toolMesh = null;
             }
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     public void CancelToolPoints()
@@ -847,6 +860,6 @@ public sealed partial class EditorShell
         _planePoints.Clear();
         _toolMesh = null;
         _loopPreview = null;
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 }

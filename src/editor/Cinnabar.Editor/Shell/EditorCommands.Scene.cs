@@ -143,7 +143,7 @@ static partial class EditorCommands
             Description = "Delete the selected entities and their children, or in mesh mode the selected vertices, edges or faces.",
             Icon = "delete",
             Shortcut = "Delete",
-            CanExecuteWhen = () => shell.InMeshMode ? !shell.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
+            CanExecuteWhen = () => shell.Mesh.InMeshMode ? !shell.Mesh.MeshSelection.IsEmpty : shell.SelectedSceneEntities.Count > 0,
         });
     }
 
@@ -153,9 +153,9 @@ static partial class EditorCommands
         var commands = shell.Commands;
         commands.Register(new Command(SelectAll, "Select All", () =>
         {
-            if (shell.InMeshMode)
+            if (shell.Mesh.InMeshMode)
             {
-                shell.SelectAllMeshElements();
+                shell.Mesh.SelectAllMeshElements();
             }
             else
             {

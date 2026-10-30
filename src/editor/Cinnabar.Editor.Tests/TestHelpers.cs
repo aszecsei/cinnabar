@@ -46,7 +46,7 @@ static class MeshFixtures
 {
     public const string MeshGuid = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
 
-    public static MeshData Mesh(EditorShell shell) => shell.Meshes.Find(MeshGuid)!.Data;
+    public static MeshData Mesh(EditorShell shell) => shell.Mesh.Meshes.Find(MeshGuid)!.Data;
 
     /// <summary>The unit cube from the origin.</summary>
     public static MeshData Box() => Primitives.Block(Vec3.Zero, new Vec3(1, 1, 1));

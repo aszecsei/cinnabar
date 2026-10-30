@@ -84,12 +84,12 @@ public sealed partial class EditorShell
     /// <summary>Keeps the previewed material as one undo entry. Returns false when nothing was previewed.</summary>
     public bool CommitMaterial()
     {
-        if (_materialTarget == null && _faceMaterialKey == null)
+        if (_materialTarget == null && Mesh.Texture.FaceMaterialKey == null)
         {
             return false;
         }
         _materialTarget = null;
-        _faceMaterialKey = null;
+        Mesh.Texture.FaceMaterialKey = null;
         if (Scene is not { InTransaction: true })
         {
             return false;
@@ -101,12 +101,12 @@ public sealed partial class EditorShell
     /// <summary>Puts back the slot that the drag previewed a material on.</summary>
     public void CancelMaterial()
     {
-        if (_materialTarget == null && _faceMaterialKey == null)
+        if (_materialTarget == null && Mesh.Texture.FaceMaterialKey == null)
         {
             return;
         }
         _materialTarget = null;
-        _faceMaterialKey = null;
+        Mesh.Texture.FaceMaterialKey = null;
         if (Scene is { InTransaction: true })
         {
             CancelEdit();

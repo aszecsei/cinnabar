@@ -9,52 +9,52 @@ static partial class EditorCommands
     {
         var commands = shell.Commands;
         // The texture tools (see docs/editor/mesh-editing.md#texture-tools), on the selected faces.
-        TextureCommand(shell, TextureShiftLeft, "Shift Left", "move", () => shell.ShiftTexture(1, 0), "Move the texture left on the selected faces by an eighth of a repeat. Left arrow in the viewport; Shift for ten times, Ctrl for a tenth.");
-        TextureCommand(shell, TextureShiftRight, "Shift Right", "move", () => shell.ShiftTexture(-1, 0), "Move the texture right on the selected faces by an eighth of a repeat. Right arrow in the viewport.");
-        TextureCommand(shell, TextureShiftUp, "Shift Up", "move", () => shell.ShiftTexture(0, 1), "Move the texture up on the selected faces by an eighth of a repeat. Up arrow in the viewport.");
-        TextureCommand(shell, TextureShiftDown, "Shift Down", "move", () => shell.ShiftTexture(0, -1), "Move the texture down on the selected faces by an eighth of a repeat. Down arrow in the viewport.");
-        TextureCommand(shell, TextureRotateLeft, "Rotate Left", "rotate", () => shell.RotateTexture(1), "Turn the texture on the selected faces by 15 degrees. , in the viewport.");
-        TextureCommand(shell, TextureRotateRight, "Rotate Right", "rotate", () => shell.RotateTexture(-1), "Turn the texture on the selected faces by 15 degrees the other way. . in the viewport.");
-        TextureCommand(shell, TextureScaleUp, "Scale Up", "scale-tool", () => shell.ScaleTexture(1), "Make the texture larger on the selected faces by a quarter. = in the viewport.");
-        TextureCommand(shell, TextureScaleDown, "Scale Down", "scale-tool", () => shell.ScaleTexture(-1), "Make the texture smaller on the selected faces by a quarter. - in the viewport.");
-        TextureCommand(shell, TextureResetScale, "Reset Scale", "reset", shell.ResetTextureScale, "Set the selected faces' scale from their texture's size at the project's texel density, so the dev grid's lines meet the grid again.");
-        TextureCommand(shell, TextureAlignWorld, "Align World", "world", () => shell.AlignTexture(TextureAlignment.World), "Set the selected faces' texture axes from each face's normal's nearest world axis, so neighbors across a right angle share a seam.");
-        TextureCommand(shell, TextureAlignFace, "Align Face", "mesh", () => shell.AlignTexture(TextureAlignment.Face), "Set the selected faces' texture axes from each face's own plane, with u along its longest edge.");
-        commands.Register(new Command(TextureAlignEdge, "Align to Edge", () => shell.AlignTexture(TextureAlignment.ToEdge))
+        TextureCommand(shell, TextureShiftLeft, "Shift Left", "move", () => shell.Mesh.Texture.ShiftTexture(1, 0), "Move the texture left on the selected faces by an eighth of a repeat. Left arrow in the viewport; Shift for ten times, Ctrl for a tenth.");
+        TextureCommand(shell, TextureShiftRight, "Shift Right", "move", () => shell.Mesh.Texture.ShiftTexture(-1, 0), "Move the texture right on the selected faces by an eighth of a repeat. Right arrow in the viewport.");
+        TextureCommand(shell, TextureShiftUp, "Shift Up", "move", () => shell.Mesh.Texture.ShiftTexture(0, 1), "Move the texture up on the selected faces by an eighth of a repeat. Up arrow in the viewport.");
+        TextureCommand(shell, TextureShiftDown, "Shift Down", "move", () => shell.Mesh.Texture.ShiftTexture(0, -1), "Move the texture down on the selected faces by an eighth of a repeat. Down arrow in the viewport.");
+        TextureCommand(shell, TextureRotateLeft, "Rotate Left", "rotate", () => shell.Mesh.Texture.RotateTexture(1), "Turn the texture on the selected faces by 15 degrees. , in the viewport.");
+        TextureCommand(shell, TextureRotateRight, "Rotate Right", "rotate", () => shell.Mesh.Texture.RotateTexture(-1), "Turn the texture on the selected faces by 15 degrees the other way. . in the viewport.");
+        TextureCommand(shell, TextureScaleUp, "Scale Up", "scale-tool", () => shell.Mesh.Texture.ScaleTexture(1), "Make the texture larger on the selected faces by a quarter. = in the viewport.");
+        TextureCommand(shell, TextureScaleDown, "Scale Down", "scale-tool", () => shell.Mesh.Texture.ScaleTexture(-1), "Make the texture smaller on the selected faces by a quarter. - in the viewport.");
+        TextureCommand(shell, TextureResetScale, "Reset Scale", "reset", shell.Mesh.Texture.ResetTextureScale, "Set the selected faces' scale from their texture's size at the project's texel density, so the dev grid's lines meet the grid again.");
+        TextureCommand(shell, TextureAlignWorld, "Align World", "world", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.World), "Set the selected faces' texture axes from each face's normal's nearest world axis, so neighbors across a right angle share a seam.");
+        TextureCommand(shell, TextureAlignFace, "Align Face", "mesh", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.Face), "Set the selected faces' texture axes from each face's own plane, with u along its longest edge.");
+        commands.Register(new Command(TextureAlignEdge, "Align to Edge", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.ToEdge))
         {
             Description = "Set the texture's u axis of each selected edge's faces along the edge. Select edges first.",
             Icon = "local",
-            CanExecuteWhen = () => shell.CanRunMeshTool(MeshElement.Edges),
+            CanExecuteWhen = () => shell.Mesh.Tools.CanRunMeshTool(MeshElement.Edges),
         });
-        TextureCommand(shell, TextureAlignToFace, "Align to Face", "copy", () => shell.AlignTexture(TextureAlignment.ToFace), "Carry the active face's texture onto the other selected faces, turned around their shared edges, so it flows around a corner without a seam. Click the face to copy from, then Shift-click the others.");
-        TextureCommand(shell, TextureFit, "Fit", "frame", () => shell.FitTexture(true, true), "Scale and shift the texture so one repeat covers each selected face's bounding rectangle.");
-        TextureCommand(shell, TextureFitU, "Fit U", "frame", () => shell.FitTexture(true, false), "Fit the texture across each selected face, along u only.");
-        TextureCommand(shell, TextureFitV, "Fit V", "frame", () => shell.FitTexture(false, true), "Fit the texture down each selected face, along v only.");
-        TextureCommand(shell, TextureJustifyLeft, "Justify Left", "select", () => shell.JustifyTexture(Justification.Left), "Shift the texture so its left edge is on each selected face's left.");
-        TextureCommand(shell, TextureJustifyRight, "Justify Right", "select", () => shell.JustifyTexture(Justification.Right), "Shift the texture so its right edge is on each selected face's right.");
-        TextureCommand(shell, TextureJustifyTop, "Justify Top", "select", () => shell.JustifyTexture(Justification.Top), "Shift the texture so its top edge is on each selected face's top.");
-        TextureCommand(shell, TextureJustifyBottom, "Justify Bottom", "select", () => shell.JustifyTexture(Justification.Bottom), "Shift the texture so its bottom edge is on each selected face's bottom.");
-        TextureCommand(shell, TextureJustifyCenter, "Justify Center", "select", () => shell.JustifyTexture(Justification.Center), "Shift the texture so its center is on each selected face's center.");
-        TextureCommand(shell, TextureFlipU, "Flip U", "undo", () => shell.FlipTexture(true, false), "Mirror the texture across each selected face, left to right.");
-        TextureCommand(shell, TextureFlipV, "Flip V", "redo", () => shell.FlipTexture(false, true), "Mirror the texture across each selected face, top to bottom.");
-        TextureCommand(shell, TextureHotspot, "Hotspot", "texture", () => shell.ApplyHotspot(HotspotChoice.Best), "Map each selected face onto the hotspot rectangle of its material that fits its shape and size best. A material without hotspots gets Fit.");
-        TextureCommand(shell, TextureHotspotNext, "Next Hotspot", "step", () => shell.ApplyHotspot(HotspotChoice.Next), "Map each selected face onto the next best hotspot rectangle after the one it is on.");
-        TextureCommand(shell, TextureHotspotRandom, "Random Hotspot", "snap", () => shell.ApplyHotspot(HotspotChoice.Random), "Map each selected face onto its best hotspot rectangle, flipped or turned at random for variety.");
-        commands.Register(new Command(MeshTransformTexture, "Transform Texture", shell.ToggleTextureGizmo)
+        TextureCommand(shell, TextureAlignToFace, "Align to Face", "copy", () => shell.Mesh.Texture.AlignTexture(TextureAlignment.ToFace), "Carry the active face's texture onto the other selected faces, turned around their shared edges, so it flows around a corner without a seam. Click the face to copy from, then Shift-click the others.");
+        TextureCommand(shell, TextureFit, "Fit", "frame", () => shell.Mesh.Texture.FitTexture(true, true), "Scale and shift the texture so one repeat covers each selected face's bounding rectangle.");
+        TextureCommand(shell, TextureFitU, "Fit U", "frame", () => shell.Mesh.Texture.FitTexture(true, false), "Fit the texture across each selected face, along u only.");
+        TextureCommand(shell, TextureFitV, "Fit V", "frame", () => shell.Mesh.Texture.FitTexture(false, true), "Fit the texture down each selected face, along v only.");
+        TextureCommand(shell, TextureJustifyLeft, "Justify Left", "select", () => shell.Mesh.Texture.JustifyTexture(Justification.Left), "Shift the texture so its left edge is on each selected face's left.");
+        TextureCommand(shell, TextureJustifyRight, "Justify Right", "select", () => shell.Mesh.Texture.JustifyTexture(Justification.Right), "Shift the texture so its right edge is on each selected face's right.");
+        TextureCommand(shell, TextureJustifyTop, "Justify Top", "select", () => shell.Mesh.Texture.JustifyTexture(Justification.Top), "Shift the texture so its top edge is on each selected face's top.");
+        TextureCommand(shell, TextureJustifyBottom, "Justify Bottom", "select", () => shell.Mesh.Texture.JustifyTexture(Justification.Bottom), "Shift the texture so its bottom edge is on each selected face's bottom.");
+        TextureCommand(shell, TextureJustifyCenter, "Justify Center", "select", () => shell.Mesh.Texture.JustifyTexture(Justification.Center), "Shift the texture so its center is on each selected face's center.");
+        TextureCommand(shell, TextureFlipU, "Flip U", "undo", () => shell.Mesh.Texture.FlipTexture(true, false), "Mirror the texture across each selected face, left to right.");
+        TextureCommand(shell, TextureFlipV, "Flip V", "redo", () => shell.Mesh.Texture.FlipTexture(false, true), "Mirror the texture across each selected face, top to bottom.");
+        TextureCommand(shell, TextureHotspot, "Hotspot", "texture", () => shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Best), "Map each selected face onto the hotspot rectangle of its material that fits its shape and size best. A material without hotspots gets Fit.");
+        TextureCommand(shell, TextureHotspotNext, "Next Hotspot", "step", () => shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Next), "Map each selected face onto the next best hotspot rectangle after the one it is on.");
+        TextureCommand(shell, TextureHotspotRandom, "Random Hotspot", "snap", () => shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Random), "Map each selected face onto its best hotspot rectangle, flipped or turned at random for variety.");
+        commands.Register(new Command(MeshTransformTexture, "Transform Texture", shell.Mesh.Texture.ToggleTextureGizmo)
         {
             Description = "The gizmo shifts, turns or scales the selected faces' textures instead of moving their vertices, with the Move, Rotate and Scale tools.",
             Icon = "texture",
-            CanExecuteWhen = () => shell.InMeshMode,
-            IsCheckedWhen = () => shell.TextureGizmo,
+            CanExecuteWhen = () => shell.Mesh.InMeshMode,
+            IsCheckedWhen = () => shell.Mesh.Texture.TextureGizmo,
         });
-        commands.Register(new ChoiceCommand(MeshDevMaterial, "Dev Material", [.. EditorShell.DevMaterials.Select(d => d.Name)],
-            () => EditorShell.DevMaterials.FirstOrDefault(d => shell.SelectedFaces is [var (guid, face), ..] && shell.Meshes.Find(guid)?.Data is { } m && face < m.Faces.Length && m.Materials[m.Faces[face].Slot] == d.Guid)?.Name ?? "Gray",
-            name => shell.SetFaceMaterial(EditorShell.DevMaterials.First(d => d.Name == name).Guid))
+        commands.Register(new ChoiceCommand(MeshDevMaterial, "Dev Material", [.. TextureMapper.DevMaterials.Select(d => d.Name)],
+            () => TextureMapper.DevMaterials.FirstOrDefault(d => shell.Mesh.Texture.SelectedFaces is [var (guid, face), ..] && shell.Mesh.Meshes.Find(guid)?.Data is { } m && face < m.Faces.Length && m.Materials[m.Faces[face].Slot] == d.Guid)?.Name ?? "Gray",
+            name => shell.Mesh.Texture.SetFaceMaterial(TextureMapper.DevMaterials.First(d => d.Name == name).Guid))
         {
             Description = "Give the selected faces one of the engine's dev materials: the measured grid in a color.",
-            CanExecuteWhen = () => shell.CanRunTextureTool,
+            CanExecuteWhen = () => shell.Mesh.Texture.CanRunTextureTool,
         });
-        commands.Register(new ChoiceCommand(MeshTexelDensity, "Density", EditorShell.DensityOptions, () => Nearest(EditorShell.DensityOptions, shell.TexelDensity), v => shell.SetTexelDensity(Number(v)))
+        commands.Register(new ChoiceCommand(MeshTexelDensity, "Density", TextureMapper.DensityOptions, () => Nearest(TextureMapper.DensityOptions, shell.Mesh.Texture.TexelDensity), v => shell.Mesh.Texture.SetTexelDensity(Number(v)))
         {
             Description = "The project's texel density, in texels per meter: what new faces and Reset Scale map the texture at. Saved in the project's settings.",
             CanExecuteWhen = () => shell.IsEditing,
@@ -66,6 +66,6 @@ static partial class EditorCommands
         {
             Description = description,
             Icon = icon,
-            CanExecuteWhen = () => shell.CanRunTextureTool,
+            CanExecuteWhen = () => shell.Mesh.Texture.CanRunTextureTool,
         });
 }
