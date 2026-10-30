@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Mesh;
@@ -48,7 +49,7 @@ public static class MeshTexture
     public static Mapping Shift(Mapping m, double du, double dv) => m with { ShiftU = m.ShiftU + du, ShiftV = m.ShiftV + dv };
 
     /// <summary>Adds to the rotation about the mapping's origin, kept in (-180, 180].</summary>
-    public static Mapping Rotate(Mapping m, double degrees) => m with { Rotation = Wrap(m.Rotation + degrees) };
+    public static Mapping Rotate(Mapping m, double degrees) => m with { Rotation = Angles.Wrap180(m.Rotation + degrees) };
 
     public static Mapping Scale(Mapping m, double factorU, double factorV) =>
         factorU == 0 || factorV == 0 ? m : m with { ScaleU = m.ScaleU * factorU, ScaleV = m.ScaleV * factorV };
@@ -352,11 +353,5 @@ public static class MeshTexture
             (minU, maxU, minV, maxV) = (Math.Min(minU, u), Math.Max(maxU, u), Math.Min(minV, v), Math.Max(maxV, v));
         }
         return (minU, maxU, minV, maxV);
-    }
-
-    static double Wrap(double degrees)
-    {
-        var wrapped = degrees % 360;
-        return wrapped > 180 ? wrapped - 360 : wrapped <= -180 ? wrapped + 360 : wrapped;
     }
 }

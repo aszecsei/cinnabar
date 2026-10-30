@@ -2,7 +2,7 @@ using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 using SceneValue = Cinnabar.Editor.Document.SceneValue;
 
 namespace Cinnabar.Editor.Tests;
@@ -10,20 +10,14 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Editing in the shell, without a host: the document, saving, autosave, and the host's refusals.</summary>
 public sealed class EditingTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-editing-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("editing");
 
     const string Text = "scene 1\n\nentity 0000000000000001\nname = \"Door\"\ncomponent 1 Transform\n\tposition = [2516582400000000000, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n";
 
     EditorShell NewShell(out string scenePath)
     {
-        Directory.CreateDirectory(_directory);
-        scenePath = Path.Combine(_directory, "door.scene");
-        if (!File.Exists(scenePath))
-        {
-            File.WriteAllText(scenePath, Text);
-        }
-        return new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        scenePath = _temp.Combine("door.scene");
+        return TestShell.Open(_temp, "door.scene", File.Exists(scenePath) ? null : Text);
     }
 
     [Fact]
@@ -255,11 +249,5 @@ public sealed class EditingTests : IDisposable
         Assert.Equal("Create Entity", shell.Scene.History[^1].Label);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

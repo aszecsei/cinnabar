@@ -81,12 +81,8 @@ public sealed class CostTable : DockPanel
         };
         var body = new Panel { Children = { _list, _empty } };
         Children.Add(body);
-        AttachedToVisualTree += (_, _) =>
-        {
-            _model.SummaryChanged += Show;
-            Show();
-        };
-        DetachedFromVisualTree += (_, _) => _model.SummaryChanged -= Show;
+        new ViewSubscriptions(this, attached: Show)
+            .Add(() => _model.SummaryChanged += Show, () => _model.SummaryChanged -= Show);
     }
 
     static Control Row(CostRow? row)

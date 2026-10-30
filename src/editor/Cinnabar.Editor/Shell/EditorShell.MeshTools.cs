@@ -1,5 +1,7 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
@@ -153,7 +155,7 @@ public sealed partial class EditorShell
 
     /// <summary>Whether a tool of an element kind can run now: mesh mode, with that kind selected.</summary>
     public bool CanRunMeshTool(MeshElement? kind = null) =>
-        InMeshMode && IsEditing && !MeshSelection.IsEmpty && (kind == null || MeshElement == kind);
+        CanEditInMeshMode && !MeshSelection.IsEmpty && (kind == null || MeshElement == kind);
 
     /// <summary>
     /// Runs a tool on the selected elements of each edited mesh, as one undo entry, and selects what it leaves. A
@@ -302,13 +304,8 @@ public sealed partial class EditorShell
             kind = result.Kind;
             items.AddRange(result.Selected.Select(i => new MeshItem(guid, i)));
         }
-        try
+        if (!PreviewEdit(ops))
         {
-            Scene.Preview(ops);
-        }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: {e.Message}");
             return;
         }
         MeshElement = kind ?? MeshElement;

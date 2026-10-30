@@ -2,7 +2,7 @@ using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 using Cinnabar.Editor.Link.Protocol;
 
-namespace Cinnabar.Editor.Panels;
+namespace Cinnabar.Editor.Model;
 
 public enum LogLevel
 {

@@ -4,6 +4,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 using Cinnabar.Editor.Docking;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Viewport;

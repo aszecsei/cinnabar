@@ -1,3 +1,5 @@
+using Cinnabar.Editor.Maths;
+
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
@@ -215,34 +217,6 @@ public static class SceneEdits
 
     /// <summary>Numbers as the game's f32 fields hold them, so the file shows the short form of each.</summary>
     public static SceneValue Floats(params double[] values) => SceneValue.Of([.. values.Select(v => SceneNumber.Of((double)(float)v))]);
-}
-
-/// <summary>A unit quaternion, x, y, z and w, as the engine stores rotations.</summary>
-public readonly record struct Quat(double X, double Y, double Z, double W)
-{
-    public static Quat Identity => new(0, 0, 0, 1);
-
-    public double Length => Math.Sqrt(X * X + Y * Y + Z * Z + W * W);
-
-    public Quat Normalized()
-    {
-        var l = Length;
-        return new(X / l, Y / l, Z / l, W / l);
-    }
-
-    public Quat Conjugate => new(-X, -Y, -Z, W);
-
-    public static Quat operator *(Quat a, Quat b) => new(
-        a.W * b.X + a.X * b.W + a.Y * b.Z - a.Z * b.Y,
-        a.W * b.Y - a.X * b.Z + a.Y * b.W + a.Z * b.X,
-        a.W * b.Z + a.X * b.Y - a.Y * b.X + a.Z * b.W,
-        a.W * b.W - a.X * b.X - a.Y * b.Y - a.Z * b.Z);
-
-    public double[] Rotate(double[] v)
-    {
-        var r = this * new Quat(v[0], v[1], v[2], 0) * Conjugate;
-        return [r.X, r.Y, r.Z];
-    }
 }
 
 /// <summary>A world pose: a position in raw units of 2^-24 m, a rotation and a scale, as the engine's Transform.</summary>

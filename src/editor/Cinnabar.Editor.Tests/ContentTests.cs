@@ -1,25 +1,21 @@
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Shell;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 
 namespace Cinnabar.Editor.Tests;
 
 /// <summary>The content in the shell, without a cook daemon: the index fills from the daemon's messages.</summary>
 public sealed class ContentTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-content-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("content");
 
     const string DoorScript = "9d2e41c0b7a35f6e81c4d2a90b3e7f15";
     const string UtilScript = "00112233445566778899aabbccddeeff";
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var scenePath = Path.Combine(_directory, "main.scene");
-        File.WriteAllText(scenePath, "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n\nentity 0000000000000002\nname = \"Gate\"\n");
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", scenePath) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
+        var shell = TestShell.Open(_temp, "main.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n\nentity 0000000000000002\nname = \"Gate\"\n");
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", "", 0, [0, 0], "", [], ""),
@@ -40,10 +36,10 @@ public sealed class ContentTests : IDisposable
             new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0, [0, 0], "", [], ""),
         ], [], [], []));
 
-        shell.SelectContent(null, ["10", DoorScript]);
-        Assert.False(shell.SelectionHasSubassets);
-        shell.SelectContent(null, ["10", "11"]);
-        Assert.True(shell.SelectionHasSubassets);
+        shell.Content.SelectContent(null, ["10", DoorScript]);
+        Assert.False(shell.Content.SelectionHasSubassets);
+        shell.Content.SelectContent(null, ["10", "11"]);
+        Assert.True(shell.Content.SelectionHasSubassets);
 
         // A mesh field takes the model's mesh and nothing else. A field without a kind takes any asset.
         var meshes = new Panels.AssetContext(shell.Assets, "mesh", _ => { });
@@ -72,12 +68,12 @@ public sealed class ContentTests : IDisposable
     {
         using var shell = NewShell();
 
-        var (deleted, users) = shell.DeleteEffects([new ContentItem(UtilScript, null)]);
+        var (deleted, users) = shell.Content.DeleteEffects([new ContentItem(UtilScript, null)]);
         Assert.Equal(UtilScript, Assert.Single(deleted).Guid);
         Assert.Equal(DoorScript, Assert.Single(users).Guid);
 
         // A folder takes the assets in it, and what uses each other goes with it.
-        (deleted, users) = shell.DeleteEffects([ContentItem.Of(new ContentFolder("game", "lib")), new ContentItem(DoorScript, null)]);
+        (deleted, users) = shell.Content.DeleteEffects([ContentItem.Of(new ContentFolder("game", "lib")), new ContentItem(DoorScript, null)]);
         Assert.Equal(2, deleted.Count);
         Assert.Empty(users);
     }
@@ -86,12 +82,12 @@ public sealed class ContentTests : IDisposable
     public void ANewAssetIsNamedForWhatItIsAndNoFileHasTheName()
     {
         using var shell = NewShell();
-        shell.SelectContent(new ContentFolder("game", ""), []);
-        File.WriteAllText(Path.Combine(_directory, "new_script.luau"), "");
+        shell.Content.SelectContent(new ContentFolder("game", ""), []);
+        File.WriteAllText(_temp.Combine("new_script.luau"), "");
 
-        Assert.Equal("new_script_2", shell.NewName(AssetTemplate.Script));
-        Assert.Equal("new_behaviour", shell.NewName(AssetTemplate.Behaviour));
-        Assert.Equal("new_folder", shell.NewName(null));
+        Assert.Equal("new_script_2", shell.Content.NewName(AssetTemplate.Script));
+        Assert.Equal("new_behaviour", shell.Content.NewName(AssetTemplate.Behaviour));
+        Assert.Equal("new_folder", shell.Content.NewName(null));
     }
 
     [Fact]
@@ -99,23 +95,23 @@ public sealed class ContentTests : IDisposable
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
 
-        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], EditorShell.WithSetting(settings, [Native], "native", "false"));
+        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ContentBrowser.WithSetting(settings, [Native], "native", "false"));
         Assert.Equal([new Setting("old", "1"), new Setting("native", "false"), new Setting("last", "2")],
-            EditorShell.WithSetting(settings, [], "native", "false"));
-        Assert.Equal([new Setting("native", "true")], EditorShell.WithSetting([], [Native], "native", "true"));
+            ContentBrowser.WithSetting(settings, [], "native", "false"));
+        Assert.Equal([new Setting("native", "true")], ContentBrowser.WithSetting([], [Native], "native", "true"));
     }
 
     [Fact]
     public async Task AnOperationWithoutTheDaemonFailsAndSaysWhy()
     {
         using var shell = NewShell();
-        shell.SelectContent(new ContentFolder("game", ""), [DoorScript]);
+        shell.Content.SelectContent(new ContentFolder("game", ""), [DoorScript]);
         var failures = new List<string>();
-        shell.OperationFailed += failures.Add;
+        shell.Content.OperationFailed += failures.Add;
 
-        Assert.False(shell.CanChangeContent);
+        Assert.False(shell.Content.CanChangeContent);
         Assert.False(shell.Commands.Get(EditorCommands.DuplicateAsset).CanExecute);
-        Assert.False(await shell.Create(AssetTemplate.Script, "x"));
+        Assert.False(await shell.Content.Create(AssetTemplate.Script, "x"));
         Assert.Single(failures);
         Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.StartsWith("content: "));
     }
@@ -156,9 +152,9 @@ public sealed class ContentTests : IDisposable
         shell.OpenSceneFileRequested += asked.Add;
 
         shell.RequestOpenScene(shell.Scene!.Path);
-        shell.RequestOpenScene(Path.Combine(_directory, "other.scene"));
+        shell.RequestOpenScene(_temp.Combine("other.scene"));
 
-        Assert.Equal([Path.Combine(_directory, "other.scene")], asked);
+        Assert.Equal([_temp.Combine("other.scene")], asked);
     }
 
     [Fact]
@@ -196,18 +192,12 @@ public sealed class ContentTests : IDisposable
     [Fact]
     public void TheScriptEditorComesFromTheSettings()
     {
-        var settings = new EditorSettings(Path.Combine(_directory, "settings"));
+        var settings = new EditorSettings(_temp.Combine("settings"));
         Assert.Equal(EditorSettings.DefaultScriptEditor, settings.ScriptEditor());
 
         settings.Write(EditorSettings.SettingsFileName, """{ "scriptEditor": ["notepad", "{file}"] }""");
         Assert.Equal(["notepad", "{file}"], settings.ScriptEditor());
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

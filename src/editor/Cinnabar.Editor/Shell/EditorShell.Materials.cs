@@ -1,8 +1,8 @@
 using Cinnabar.Editor.Docking;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
-using PreviewTarget = Cinnabar.Editor.Link.Protocol.PreviewTarget;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -16,6 +16,8 @@ public sealed partial class EditorShell
     public const int MaxPreviews = 4;
 
     readonly List<MaterialEditor> _materials = [];
+    // A new link knows no previews, and a preview's frames come by its slot.
+    readonly PreviewSlots _previewSlots;
     // The material functions that graphs call, read from their files, by GUID, with the file's time.
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
@@ -58,7 +60,7 @@ public sealed partial class EditorShell
 
     MaterialGraph? ReadFunction(string guid)
     {
-        if (Assets.Find(guid) is not { Kind: AssetKind.MaterialFunction } asset || Assets.FullPath(asset) is not { } path)
+        if (!TryFileOf(guid, AssetKind.MaterialFunction, out var path))
         {
             return null;
         }
@@ -100,10 +102,7 @@ public sealed partial class EditorShell
             return null;
         }
         var (document, problems) = MaterialDocument.Open(path, asset.Guid);
-        foreach (var p in problems)
-        {
-            Console.Add(LogLevel.Error, p.Line > 0 ? $"material: {path}:{p.Line}: {p.Message}" : $"material: {path}: {p.Message}");
-        }
+        Report("material", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
         if (document == null)
         {
             return null;
@@ -111,7 +110,7 @@ public sealed partial class EditorShell
         int? previewId = null;
         if (document.Kind == MaterialFileKind.Material)
         {
-            previewId = FreePreviewId();
+            previewId = _previewSlots.Free();
             if (previewId == null)
             {
                 Console.Add(LogLevel.Warning, $"material: {MaxPreviews} previews are open, so {document.Title} has none");
@@ -201,40 +200,6 @@ public sealed partial class EditorShell
         return true;
     }
 
-    // A new link knows no previews.
-    void SendPreviews()
-    {
-        foreach (var editor in _materials)
-        {
-            editor.SendPreview();
-        }
-        foreach (var effect in _effects)
-        {
-            effect.SendPreview();
-        }
-    }
-
-    void DisconnectPreviews()
-    {
-        foreach (var editor in _materials)
-        {
-            editor.Preview?.Disconnect();
-        }
-        foreach (var effect in _effects)
-        {
-            effect.Preview?.Disconnect();
-        }
-    }
-
-    void OnPreviewTarget(PreviewTarget target)
-    {
-        if (_materials.Find(m => m.PreviewId == (int)target.Id) is { Preview: { } session })
-        {
-            session.Connect(target.Prefix, target.Generation);
-        }
-        else if (_effects.Find(e => e.PreviewId == (int)target.Id) is { Preview: { } effect })
-        {
-            effect.Connect(target.Prefix, target.Generation);
-        }
-    }
+    // The material editors' previews, then the effects'.
+    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects);
 }

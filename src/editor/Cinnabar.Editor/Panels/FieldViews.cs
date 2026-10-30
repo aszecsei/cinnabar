@@ -17,18 +17,26 @@ interface IFieldEditor
     /// <summary>Text typed into a box: the whole value, or one of the three axes. False when it does not parse.</summary>
     bool Commit(int axis, string text);
 
-    void SetFlag(bool value);
+    void SetFlag(bool value)
+    {
+    }
 
     /// <summary>An entity reference, by handle, or 0 for none.</summary>
-    void SetEntity(ulong handle);
+    void SetEntity(ulong handle)
+    {
+    }
 
     /// <summary>An asset reference, by GUID, or "" for none.</summary>
-    void SetAsset(string guid);
+    void SetAsset(string guid)
+    {
+    }
 
     /// <summary>An enum's names, as the panel shows them, for a choice.</summary>
-    IReadOnlyList<string> Options { get; }
+    IReadOnlyList<string> Options => [];
 
-    void Choose(string option);
+    void Choose(string option)
+    {
+    }
 
     /// <summary>A drag on a field's name or an axis marker: one undo entry from begin to end.</summary>
     void BeginScrub(int axis);
@@ -42,7 +50,9 @@ interface IFieldEditor
     /// A number, or a vector's or color's numbers, from a slider or a picker: a step of the scrub while one is open,
     /// and otherwise an edit of its own.
     /// </summary>
-    void SetNumbers(double[] values);
+    void SetNumbers(double[] values)
+    {
+    }
 }
 
 /// <summary>
@@ -353,14 +363,9 @@ sealed class ColorView : FieldView
     public ColorView(IFieldEditor? editor)
     {
         _axes = new AxesView(editor);
-        _swatch = new Border
-        {
-            Width = 22,
-            CornerRadius = new CornerRadius(3),
-            BorderBrush = new SolidColorBrush(Color.Parse("#55555C")),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(0, 1, 4, 1),
-        };
+        _swatch = Kit.SwatchFrame();
+        _swatch.Width = 22;
+        _swatch.Margin = new Thickness(0, 1, 4, 1);
         DockPanel.SetDock(_swatch, Avalonia.Controls.Dock.Left);
         _panel = new DockPanel { Children = { _swatch, _axes.Control } };
         if (editor != null)
@@ -390,9 +395,8 @@ sealed class ColorView : FieldView
 
     static SolidColorBrush Brush(IReadOnlyList<double> linear)
     {
-        static byte Encode(double v) => (byte)Math.Round(LinearColor.ToSrgb(v) * 255);
         var (color, _) = LinearColor.Split(linear);
-        return new SolidColorBrush(Color.FromRgb(Encode(color[0]), Encode(color[1]), Encode(color[2])));
+        return new SolidColorBrush(Kit.SrgbColor(color));
     }
 
     Flyout Picker(IFieldEditor editor)
@@ -540,46 +544,42 @@ sealed class ChoiceView : FieldView
 }
 
 /// <summary>
-/// An entity reference, which selects its entity when clicked. With an editor, it takes an entity dragged from the
-/// outliner, and a button clears it.
+/// A reference to an entity or an asset: the target's name, which is a link while the target exists. With an editor,
+/// the name sits in an editable box with a button that clears the reference, and the box takes a drop.
 /// </summary>
-sealed class EntityView : FieldView
+abstract class ReferenceView : FieldView
 {
-    /// <summary>The drag format of an outliner row: the entity's handle, in decimal.</summary>
-    public static readonly DataFormat<string> EntityFormat = DataFormat.CreateStringApplicationFormat("cinnabar-entity");
-
     readonly TextBlock _text = new() { Text = "…", TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-    readonly Control _control;
-    readonly Func<ulong, string> _label;
-    readonly Button? _clear;
-    ulong _entity;
+    Control _control;
+    Button? _clear;
 
-    public EntityView(Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor = null)
+    protected ReferenceView() => _control = _text;
+
+    protected TextBlock Text => _text;
+
+    public override Control Control => _control;
+
+    /// <summary>
+    /// Puts the name in an editable box, after the clear button and any <paramref name="buttons"/>. <paramref name="take"/>
+    /// gives what a drop does, or null when the box does not take the drop.
+    /// </summary>
+    protected void MakeEditable(Action clear, Func<DragEventArgs, Action?> take, string dropTip, params Button[] buttons)
     {
-        _label = label;
-        _text.PointerPressed += (_, e) =>
-        {
-            if (_entity != 0)
-            {
-                select(_entity);
-                e.Handled = true;
-            }
-        };
-        if (editor == null)
-        {
-            _control = _text;
-            return;
-        }
-        _clear = new Button { Content = "×", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(_clear, "Clear the reference");
-        _clear.Click += (_, _) => editor.SetEntity(0);
+        _clear = Kit.SmallButton("×", "Clear the reference", clear);
         DockPanel.SetDock(_clear, Avalonia.Controls.Dock.Right);
-        var box = new Border { Classes = { "value-box", "editable" }, Child = new DockPanel { Children = { _clear, _text } } };
+        var panel = new DockPanel { Children = { _clear } };
+        foreach (var button in buttons)
+        {
+            DockPanel.SetDock(button, Avalonia.Controls.Dock.Right);
+            panel.Children.Add(button);
+        }
+        panel.Children.Add(_text);
+        var box = new Border { Classes = { "value-box", "editable" }, Child = panel };
         DragDrop.SetAllowDrop(box, true);
         // A drop that the field takes is handled, so the properties panel's own drop does not refuse it.
         box.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
-            if (Dropped(e) != 0)
+            if (take(e) != null)
             {
                 e.DragEffects = DragDropEffects.Link;
                 e.Handled = true;
@@ -587,34 +587,70 @@ sealed class EntityView : FieldView
         });
         box.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (Dropped(e) is var handle and not 0)
+            if (take(e) is { } drop)
             {
-                editor.SetEntity(handle);
+                drop();
                 e.Handled = true;
             }
         });
-        ToolTip.SetTip(box, "Drag an entity here from the outliner");
+        ToolTip.SetTip(box, dropTip);
         _control = box;
+    }
+
+    /// <summary>Shows the name as a link when the target exists, and shows the clear button when the field holds a value.</summary>
+    protected void ShowState(bool linked, bool clearable)
+    {
+        _text.Classes.Set("link", linked);
+        _text.Classes.Set("dim", !linked);
+        _text.Cursor = linked ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
+        if (_clear != null)
+        {
+            _clear.IsVisible = clearable;
+        }
+    }
+}
+
+/// <summary>
+/// An entity reference, which selects its entity when clicked. With an editor, it takes an entity dragged from the
+/// outliner, and a button clears it.
+/// </summary>
+sealed class EntityView : ReferenceView
+{
+    /// <summary>The drag format of an outliner row: the entity's handle, in decimal.</summary>
+    public static readonly DataFormat<string> EntityFormat = DataFormat.CreateStringApplicationFormat("cinnabar-entity");
+
+    readonly Func<ulong, string> _label;
+    ulong _entity;
+
+    public EntityView(Action<ulong> select, Func<ulong, string> label, IFieldEditor? editor = null)
+    {
+        _label = label;
+        Text.PointerPressed += (_, e) =>
+        {
+            if (_entity != 0)
+            {
+                select(_entity);
+                e.Handled = true;
+            }
+        };
+        if (editor != null)
+        {
+            MakeEditable(() => editor.SetEntity(0),
+                e => Dropped(e) is var handle and not 0 ? () => editor.SetEntity(handle) : null,
+                "Drag an entity here from the outliner");
+        }
     }
 
     /// <summary>The entity that a drag carries, or 0.</summary>
     public static ulong Dropped(DragEventArgs e) =>
         e.DataTransfer.TryGetValue(EntityFormat) is { } text && ulong.TryParse(text, out var handle) ? handle : 0;
 
-    public override Control Control => _control;
-
     public override void Show(FieldDisplay value)
     {
         _entity = value.Entity;
-        _text.Text = _entity != 0 ? _label(_entity) : value.Text;
-        SetTooltip(_text, _entity != 0 ? value.Text : null);
-        _text.Classes.Set("link", _entity != 0);
-        _text.Classes.Set("dim", _entity == 0);
-        _text.Cursor = _entity != 0 ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
-        if (_clear != null)
-        {
-            _clear.IsVisible = _entity != 0;
-        }
+        Text.Text = _entity != 0 ? _label(_entity) : value.Text;
+        SetTooltip(Text, _entity != 0 ? value.Text : null);
+        ShowState(linked: _entity != 0, clearable: _entity != 0);
     }
 }
 
@@ -647,18 +683,15 @@ sealed record AssetContext(Content.AssetIndex Index, string Kind, Action<string>
 /// with an editor, a button that picks from the assets of the field's kind, a drop of one from the content browser,
 /// and a button that clears it. An asset that is not in the content shows as missing, with its GUID.
 /// </summary>
-sealed class AssetView : FieldView
+sealed class AssetView : ReferenceView
 {
-    readonly TextBlock _text = new() { Text = "…", TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
-    readonly Control _control;
     readonly AssetContext _assets;
-    readonly Button? _clear;
     string _guid = "";
 
     public AssetView(AssetContext assets, IFieldEditor? editor)
     {
         _assets = assets;
-        _text.PointerPressed += (_, e) =>
+        Text.PointerPressed += (_, e) =>
         {
             if (_guid != "" && assets.Index.Find(_guid) != null)
             {
@@ -668,17 +701,12 @@ sealed class AssetView : FieldView
         };
         if (editor == null)
         {
-            _control = _text;
             return;
         }
-        _clear = new Button { Content = "×", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(_clear, "Clear the reference");
-        _clear.Click += (_, _) => editor.SetAsset("");
-        var pick = new Button { Content = "…", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
-        ToolTip.SetTip(pick, assets.Kind == "" ? "Pick an asset" : $"Pick a {assets.Kind}");
+        Button pick = null!;
         // A new menu for each click, so it has the assets of the latest cook. A MenuFlyout that fills its items in Opening
         // shows empty, as its presenter does not realize items added while it is detached.
-        pick.Click += (_, _) =>
+        void ShowMenu()
         {
             var menu = new MenuFlyout();
             foreach (var asset in assets.Choices)
@@ -693,50 +721,24 @@ sealed class AssetView : FieldView
                 menu.Items.Add(new MenuItem { Header = assets.Kind == "" ? "No assets" : $"No {assets.Kind} assets", IsEnabled = false });
             }
             menu.ShowAt(pick);
-        };
-        DockPanel.SetDock(_clear, Avalonia.Controls.Dock.Right);
-        DockPanel.SetDock(pick, Avalonia.Controls.Dock.Right);
-        var box = new Border { Classes = { "value-box", "editable" }, Child = new DockPanel { Children = { _clear, pick, _text } } };
-        DragDrop.SetAllowDrop(box, true);
-        // A drop that the field takes is handled, so the properties panel's own drop does not refuse it.
-        box.AddHandler(DragDrop.DragOverEvent, (_, e) =>
-        {
-            if (Dropped(e) != null)
-            {
-                e.DragEffects = DragDropEffects.Link;
-                e.Handled = true;
-            }
-        });
-        box.AddHandler(DragDrop.DropEvent, (_, e) =>
-        {
-            if (Dropped(e) is { } guid)
-            {
-                editor.SetAsset(guid);
-                e.Handled = true;
-            }
-        });
-        ToolTip.SetTip(box, assets.Kind == "" ? "Drag an asset here from the content browser" : $"Drag a {assets.Kind} here from the content browser");
-        _control = box;
+        }
+        pick = Kit.SmallButton("…", assets.Kind == "" ? "Pick an asset" : $"Pick a {assets.Kind}", ShowMenu);
+        MakeEditable(() => editor.SetAsset(""),
+            e => Dropped(e) is { } guid ? () => editor.SetAsset(guid) : null,
+            assets.Kind == "" ? "Drag an asset here from the content browser" : $"Drag a {assets.Kind} here from the content browser",
+            pick);
     }
 
     // The dragged asset, if the field takes it.
     string? Dropped(DragEventArgs e) =>
         ContentBrowserView.Dropped(e) is { } guid && _assets.Index.Find(guid) is { } asset && _assets.Takes(asset) ? guid : null;
 
-    public override Control Control => _control;
-
     public override void Show(FieldDisplay value)
     {
         _guid = value.Text;
         var asset = _guid == "" ? null : _assets.Index.Find(_guid);
-        _text.Text = _guid == "" ? "None" : asset != null ? Content.AssetIndex.DisplayName(asset) : "Missing asset";
-        SetTooltip(_text, _guid == "" ? null : asset != null ? $"{asset.Root}/{asset.Path}\n{_guid}" : $"No asset in the content has the GUID {_guid}");
-        _text.Classes.Set("link", asset != null);
-        _text.Classes.Set("dim", asset == null);
-        _text.Cursor = asset != null ? new Cursor(StandardCursorType.Hand) : Cursor.Default;
-        if (_clear != null)
-        {
-            _clear.IsVisible = _guid != "";
-        }
+        Text.Text = _guid == "" ? "None" : asset != null ? Content.AssetIndex.DisplayName(asset) : "Missing asset";
+        SetTooltip(Text, _guid == "" ? null : asset != null ? $"{asset.Root}/{asset.Path}\n{_guid}" : $"No asset in the content has the GUID {_guid}");
+        ShowState(linked: asset != null, clearable: _guid != "");
     }
 }

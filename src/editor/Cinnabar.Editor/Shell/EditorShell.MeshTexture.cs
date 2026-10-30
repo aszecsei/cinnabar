@@ -1,6 +1,8 @@
 using System.Globalization;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
@@ -132,7 +134,7 @@ public sealed partial class EditorShell
             : [];
 
     /// <summary>Whether a texture tool can run: mesh mode with faces selected.</summary>
-    public bool CanRunTextureTool => InMeshMode && IsEditing && MeshElement == MeshElement.Faces && !MeshSelection.IsEmpty;
+    public bool CanRunTextureTool => CanEditInMeshMode && MeshElement == MeshElement.Faces && !MeshSelection.IsEmpty;
 
     // The operations that change the selected faces' mappings from a snapshot of each mesh: none for a change that
     // changes nothing.
@@ -361,7 +363,7 @@ public sealed partial class EditorShell
         });
         foreach (var material in fitted.Distinct())
         {
-            var name = Assets.Find(material) is { } a ? Content.AssetIndex.DisplayName(a) : material;
+            var name = Assets.Find(material) is { } a ? Cinnabar.Editor.Content.AssetIndex.DisplayName(a) : material;
             Console.Add(LogLevel.Info, $"mesh: {name} has no hotspots, so its faces fit the texture instead");
         }
         return ok;
@@ -429,7 +431,7 @@ public sealed partial class EditorShell
     // face under it, with its mesh.
     (string Guid, List<int> Faces)? DropTarget(Vec2 pixel)
     {
-        if (!InMeshMode || !IsEditing)
+        if (!CanEditInMeshMode)
         {
             return null;
         }

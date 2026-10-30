@@ -28,7 +28,7 @@ public sealed class HostLinkTests : IAsyncDisposable
 
     public HostLinkTests()
     {
-        var root = RepositoryRoot();
+        var root = EditorOptions.RepositoryRoot();
         var hostPath = Path.Combine(root, "build", "dev", "host.exe");
         var gamePath = Path.Combine(root, "build", "dev", "mygame.dll");
         if (!File.Exists(hostPath) || !File.Exists(gamePath))
@@ -443,7 +443,7 @@ public sealed class HostLinkTests : IAsyncDisposable
         // An unsaved material comes from the cache's preview area. The checker's own blob stands in for one that the
         // cook daemon cooked there.
         const string Checker = "f7eadea8bd278c0ae71b61b681352a82";
-        var cache = Path.Combine(RepositoryRoot(), "build", "dev", "content");
+        var cache = Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content");
         var unsavedBlob = Path.Combine(cache, "preview", Checker + ".blob");
         Directory.CreateDirectory(Path.GetDirectoryName(unsavedBlob)!);
         File.Copy(Path.Combine(cache, Checker + ".blob"), unsavedBlob, overwrite: true);
@@ -802,18 +802,6 @@ public sealed class HostLinkTests : IAsyncDisposable
         name ??= scene.Entities[0].Name;
         editor.Link.Send(Document.SceneSnapshot.ToMessage(scene));
         return await editor.Next<EntitySnapshot>(s => s.Entities.Any(e => e.Name == name) && s.Entities.Length == scene.Entities.Count);
-    }
-
-    static string RepositoryRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return dir.FullName;
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
     }
 
     static int FreePort()

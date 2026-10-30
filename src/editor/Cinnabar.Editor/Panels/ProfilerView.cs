@@ -83,17 +83,9 @@ public sealed class ProfilerView : DockPanel
         Children.Add(split);
 
         _timeline.SelectionChanged += ShowDetails;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _model.CaptureChanged += ShowCapture;
-            _model.SummaryChanged += ShowStatus;
-            ShowCapture();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _model.CaptureChanged -= ShowCapture;
-            _model.SummaryChanged -= ShowStatus;
-        };
+        new ViewSubscriptions(this, attached: ShowCapture)
+            .Add(() => _model.CaptureChanged += ShowCapture, () => _model.CaptureChanged -= ShowCapture)
+            .Add(() => _model.SummaryChanged += ShowStatus, () => _model.SummaryChanged -= ShowStatus);
     }
 
     void ShowCapture()

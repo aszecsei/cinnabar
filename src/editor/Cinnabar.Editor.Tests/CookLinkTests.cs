@@ -17,7 +17,7 @@ public sealed class CookLinkTests : IDisposable
 
     public CookLinkTests()
     {
-        _cook = Path.Combine(RepositoryRoot(), "build", "tools", "cook.exe");
+        _cook = Path.Combine(EditorOptions.RepositoryRoot(), "build", "tools", "cook.exe");
         _dir = Directory.CreateTempSubdirectory("cook_link_test_").FullName;
         _content = Path.Combine(_dir, "content");
         Write("scripts/util.luau", "return {speed = 2}");
@@ -122,7 +122,7 @@ public sealed class CookLinkTests : IDisposable
     [Fact]
     public async Task TheDaemonDescribesMaterialGraphsAndCooksPreviews()
     {
-        var root = RepositoryRoot();
+        var root = EditorOptions.RepositoryRoot();
         var dxc = Path.Combine(root, "vendor", "dxc", "1.9.2609", "dxc.exe");
         if (!File.Exists(_cook) || !File.Exists(dxc))
         {
@@ -197,18 +197,6 @@ public sealed class CookLinkTests : IDisposable
             }
             await Task.Delay(50, TestContext.Current.CancellationToken);
         }
-    }
-
-    static string RepositoryRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return dir.FullName;
-            }
-        }
-        throw new InvalidOperationException("the tests do not run inside the repository");
     }
 
     public void Dispose()

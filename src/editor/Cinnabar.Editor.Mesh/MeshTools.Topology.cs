@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Mesh;

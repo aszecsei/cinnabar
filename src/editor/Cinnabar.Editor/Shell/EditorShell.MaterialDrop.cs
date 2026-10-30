@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
 using PickResult = Cinnabar.Editor.Link.Protocol.PickResult;

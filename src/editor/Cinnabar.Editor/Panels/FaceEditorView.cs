@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
@@ -23,30 +24,32 @@ public sealed class FaceEditorView : ScrollViewer
     readonly EditorShell _shell;
     readonly StackPanel _content = new() { Classes = { "properties" } };
     readonly Dictionary<string, FieldView> _views = [];
-    readonly HashSet<string> _collapsed = [];
+    readonly SectionExpander _sections = new();
+    // The tool buttons' hooks on their commands, which outlive the panel's rows.
+    readonly List<Action> _unhook = [];
     TextBlock? _title;
-    string _structure = "";
+    // Null when the rows are not built: before the first attach, and after a detach drops the hooks.
+    string? _structure;
 
     public FaceEditorView(EditorShell shell)
     {
         _shell = shell;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
+        new ViewSubscriptions(this, attached: Refresh, detached: () => { Unhook(); _structure = null; })
+            .Add(() => _shell.MeshModeChanged += Refresh, () => _shell.MeshModeChanged -= Refresh)
+            .Add(() => _shell.Meshes.Changed += OnMeshChanged, () => _shell.Meshes.Changed -= OnMeshChanged)
+            .Add(() => _shell.Assets.Changed += Refresh, () => _shell.Assets.Changed -= Refresh)
+            .Add(() => _shell.SceneChanged += Refresh, () => _shell.SceneChanged -= Refresh);
+    }
+
+    void Unhook()
+    {
+        foreach (var unhook in _unhook)
         {
-            _shell.MeshModeChanged += Refresh;
-            _shell.Meshes.Changed += OnMeshChanged;
-            _shell.Assets.Changed += Refresh;
-            _shell.SceneChanged += Refresh;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _shell.MeshModeChanged -= Refresh;
-            _shell.Meshes.Changed -= OnMeshChanged;
-            _shell.Assets.Changed -= Refresh;
-            _shell.SceneChanged -= Refresh;
-        };
+            unhook();
+        }
+        _unhook.Clear();
     }
 
     void OnMeshChanged(MeshDocument document, MeshData data) => Refresh();
@@ -65,6 +68,7 @@ public sealed class FaceEditorView : ScrollViewer
 
     void Rebuild()
     {
+        Unhook();
         _content.Children.Clear();
         _views.Clear();
         _title = null;
@@ -81,7 +85,7 @@ public sealed class FaceEditorView : ScrollViewer
         _title = new TextBlock { FontWeight = FontWeight.SemiBold };
         _content.Children.Add(new StackPanel { Classes = { "properties-header" }, Children = { _title } });
 
-        var assets = new AssetContext(_shell.Assets, "material", _shell.RevealAsset) { First = EditorShell.DevMaterials.Select(d => d.Guid).ToHashSet() };
+        var assets = new AssetContext(_shell.Assets, "material", _shell.Content.RevealAsset) { First = EditorShell.DevMaterials.Select(d => d.Guid).ToHashSet() };
         _content.Children.Add(Group("Material",
         [
             ("Material", "material", new AssetView(assets, new MappingEditor(_shell, MappingField.Material)), null),
@@ -106,26 +110,19 @@ public sealed class FaceEditorView : ScrollViewer
     // A group of rows: a name, a view, and for a number, the editor whose scrub the name drags.
     Control Group(string title, IReadOnlyList<(string Name, string Key, FieldView View, IFieldEditor? Scrub)> fields)
     {
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Classes = { "fields" } };
-        var row = 0;
+        var rows = new FieldRows();
         foreach (var (name, key, view, scrub) in fields)
         {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             var label = new TextBlock { Text = name, Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center };
             if (scrub != null)
             {
                 ToolTip.SetTip(label, $"{name}. Drag to change it.");
                 FieldView.Scrubbable(label, scrub, 0);
             }
-            Grid.SetRow(label, row);
-            Grid.SetRow(view.Control, row);
-            Grid.SetColumn(view.Control, 1);
-            rows.Children.Add(label);
-            rows.Children.Add(view.Control);
+            rows.Add(label, view.Control);
             _views[key] = view;
-            row++;
         }
-        return Expander(title, rows);
+        return _sections.Create(title, rows.Grid);
     }
 
     // The texture tools as buttons, in rows by what they do.
@@ -141,7 +138,9 @@ public sealed class FaceEditorView : ScrollViewer
                 var button = new Button { Content = text, Classes = { "field-button" }, Margin = new Avalonia.Thickness(0, 0, 4, 4), IsEnabled = command.CanExecute };
                 ToolTip.SetTip(button, command.Description);
                 button.Click += (_, _) => command.Execute();
-                command.Changed += () => button.IsEnabled = command.CanExecute;
+                void Enable() => button.IsEnabled = command.CanExecute;
+                command.Changed += Enable;
+                _unhook.Add(() => command.Changed -= Enable);
                 wrap.Children.Add(button);
             }
             panel.Children.Add(new StackPanel
@@ -157,23 +156,7 @@ public sealed class FaceEditorView : ScrollViewer
         Row("Flip", ("U", EditorCommands.TextureFlipU), ("V", EditorCommands.TextureFlipV));
         Row("Hotspot", ("Apply", EditorCommands.TextureHotspot), ("Next", EditorCommands.TextureHotspotNext), ("Random", EditorCommands.TextureHotspotRandom));
         Row("Scale", ("Reset", EditorCommands.TextureResetScale), ("Up", EditorCommands.TextureScaleUp), ("Down", EditorCommands.TextureScaleDown));
-        return Expander("Tools", panel);
-    }
-
-    Control Expander(string title, Control content)
-    {
-        var expander = new Expander
-        {
-            Header = new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center },
-            Content = content,
-            IsExpanded = !_collapsed.Contains(title),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Classes = { "component" },
-        };
-        expander.Expanded += (_, _) => _collapsed.Remove(title);
-        expander.Collapsed += (_, _) => _collapsed.Add(title);
-        return expander;
+        return _sections.Create("Tools", panel);
     }
 
     void ShowValues()
@@ -304,9 +287,7 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     const double ShiftStep = 0.01;
     const double DegreeStep = 0.5;
 
-    bool _scrubbing;
-
-    public IReadOnlyList<string> Options => [];
+    readonly ScrubSession _scrub = new(shell.EndMappingScrub);
 
     public bool Commit(int axis, string text)
     {
@@ -332,14 +313,6 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
         return false;
     }
 
-    public void SetFlag(bool value)
-    {
-    }
-
-    public void SetEntity(ulong handle)
-    {
-    }
-
     public void SetAsset(string guid)
     {
         if (field == MappingField.Material)
@@ -348,26 +321,21 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
         }
     }
 
-    public void Choose(string option)
-    {
-    }
-
     public void BeginScrub(int axis)
     {
-        if (field != MappingField.Material)
+        if (field != MappingField.Material && shell.BeginMappingScrub($"Drag Texture {field}"))
         {
-            _scrubbing = shell.BeginMappingScrub($"Drag Texture {field}");
+            _scrub.Begin();
         }
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (!_scrubbing)
+        if (!_scrub.Active)
         {
             return;
         }
-        var scale = modifiers.HasFlag(KeyModifiers.Shift) ? 10 : modifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
-        var delta = pixels * scale;
+        var delta = pixels * ScrubSession.Scale(modifiers);
         shell.PreviewMappings((_, _, m) => field switch
         {
             MappingField.Scale => axis == 0 ? m with { ScaleU = NonZero(m.ScaleU + delta * ScaleStep, m.ScaleU) } : m with { ScaleV = NonZero(m.ScaleV + delta * ScaleStep, m.ScaleV) },
@@ -380,16 +348,5 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     // A scale that a drag takes through 0 skips it, so the texture never collapses to a point.
     static double NonZero(double value, double was) => Math.Abs(value) < 1e-6 ? Math.CopySign(1e-6, was) : value;
 
-    public void EndScrub()
-    {
-        if (_scrubbing)
-        {
-            _scrubbing = false;
-            shell.EndMappingScrub();
-        }
-    }
-
-    public void SetNumbers(double[] values)
-    {
-    }
+    public void EndScrub() => _scrub.End();
 }

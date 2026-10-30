@@ -43,12 +43,8 @@ public sealed class ResourceMonitorView : Grid
         AddColumn(new ScrollViewer { Content = new StackPanel { Spacing = 4, Children = { Heading("Script memory by module"), _modules } } }, 3);
         Children.Add(_empty);
         SetColumnSpan(_empty, 4);
-        AttachedToVisualTree += (_, _) =>
-        {
-            _stats.Changed += Show;
-            Show();
-        };
-        DetachedFromVisualTree += (_, _) => _stats.Changed -= Show;
+        new ViewSubscriptions(this, attached: Show)
+            .Add(() => _stats.Changed += Show, () => _stats.Changed -= Show);
     }
 
     void AddColumn(Control control, int column)
@@ -140,9 +136,9 @@ public sealed class ResourceMonitorView : Grid
 sealed class FrameGraph : Control
 {
     static readonly IBrush Background = new SolidColorBrush(Color.FromArgb(0x60, 0x10, 0x10, 0x12));
-    static readonly IBrush CpuBrush = new SolidColorBrush(Color.Parse("#E34234"));
+    static readonly IBrush CpuBrush = new SolidColorBrush(Palette.Accent);
     static readonly IBrush GpuBrush = new SolidColorBrush(Color.Parse("#3FB8AF"));
-    static readonly IBrush WaitBrush = new SolidColorBrush(Color.Parse("#D9A441"));
+    static readonly IBrush WaitBrush = new SolidColorBrush(Palette.Wait);
     static readonly IPen Cpu = new Pen(CpuBrush, 1.5);
     static readonly IPen Gpu = new Pen(GpuBrush, 1.5);
     static readonly IPen Wait = new Pen(WaitBrush, 1);

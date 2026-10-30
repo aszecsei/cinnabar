@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
 using GizmoPart = Cinnabar.Editor.Link.Protocol.GizmoPart;

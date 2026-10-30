@@ -9,7 +9,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Captures without a host: the messages a capture sends, the files and the sidecar it writes.</summary>
 public sealed class CaptureModelTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-capture-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("capture");
     readonly List<ILinkMessage> _sent = [];
     int _framesAwaited;
 
@@ -49,7 +49,7 @@ public sealed class CaptureModelTests : IDisposable
     {
         var model = NewModel();
         var settings = EditorShell.DefaultViewportSettings with { NoBloom = true };
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Depth, DebugView.Normals], _directory, null, settings, Context, CancellationToken.None), Written);
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Depth, DebugView.Normals], _temp.Path, null, settings, Context, CancellationToken.None), Written);
 
         Assert.True(outcome.Ok, outcome.Error);
         Assert.False(model.Busy);
@@ -66,7 +66,7 @@ public sealed class CaptureModelTests : IDisposable
         Assert.True(((ViewportSettings)_sent[1]).NoBloom);
 
         Assert.Equal(4, outcome.Files.Count);
-        Assert.All(outcome.Files, f => Assert.StartsWith(_directory, f));
+        Assert.All(outcome.Files, f => Assert.StartsWith(_temp.Path, f));
         Assert.EndsWith(".json", outcome.Sidecar);
         Assert.True(File.Exists(outcome.Sidecar));
         using var json = JsonDocument.Parse(File.ReadAllText(outcome.Sidecar));
@@ -88,8 +88,8 @@ public sealed class CaptureModelTests : IDisposable
     public async Task AGifIsOneRequestAndAGivenPathNamesTheFiles()
     {
         var model = NewModel();
-        var path = Path.Combine(_directory, "clips", "jump");
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Gif, [], _directory, path, EditorShell.DefaultViewportSettings, Context, CancellationToken.None), Written);
+        var path = _temp.Combine("clips", "jump");
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, path, EditorShell.DefaultViewportSettings, Context, CancellationToken.None), Written);
 
         Assert.True(outcome.Ok, outcome.Error);
         var request = Assert.IsType<CaptureRequest>(Assert.Single(_sent));
@@ -104,7 +104,7 @@ public sealed class CaptureModelTests : IDisposable
     public async Task AFailedCaptureStillWritesTheSidecarAndPutsTheSettingsBack()
     {
         var model = NewModel();
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Albedo], _directory, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None),
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Albedo], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None),
             r => new CaptureResult(r.Id, r.Kind, false, "the window is minimized", r.Path, 0, 0, 0, 0, 0, OutputMode.Sdr));
 
         Assert.False(outcome.Ok);
@@ -119,9 +119,9 @@ public sealed class CaptureModelTests : IDisposable
     public async Task OnlyOneCaptureRunsAndStrayResultsAreIgnored()
     {
         var model = NewModel();
-        var first = model.CaptureAsync(CaptureKind.Screenshot, [], _directory, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
+        var first = model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
         Assert.True(model.Busy);
-        var second = await model.CaptureAsync(CaptureKind.Gif, [], _directory, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
+        var second = await model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
         Assert.False(second.Ok);
         Assert.Contains("under way", second.Error);
         Assert.False(model.Apply(new CaptureResult(99, CaptureKind.Screenshot, true, "", "x.png", 0, 0, 0, 0, 0, OutputMode.Sdr)));
@@ -148,11 +148,5 @@ public sealed class CaptureModelTests : IDisposable
         Assert.False(CaptureModel.TryParseView("wireframe", out _));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

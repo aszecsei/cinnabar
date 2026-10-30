@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using EditorInput = Cinnabar.Editor.Link.Protocol.EditorInput;
 using EditorMode = Cinnabar.Editor.Link.Protocol.EditorMode;
@@ -18,6 +20,13 @@ public sealed partial class EditorShell
 
     /// <summary>Edits change the document only in Edit.</summary>
     public bool IsEditing => Mode == EditorMode.Edit;
+
+    /// <summary>Whether a scene is open and edits to it are allowed: not while the game plays.</summary>
+    [MemberNotNullWhen(true, nameof(Scene))]
+    public bool CanEditScene => IsEditing && Scene != null;
+
+    /// <summary>Whether the open scene's meshes are in edit mode and edits are allowed.</summary>
+    public bool CanEditInMeshMode => InMeshMode && IsEditing;
 
     /// <summary>While playing, the viewport flies the editor's camera and the game draws from it, instead of the game's input and camera.</summary>
     public bool FreeCamera { get; private set; }

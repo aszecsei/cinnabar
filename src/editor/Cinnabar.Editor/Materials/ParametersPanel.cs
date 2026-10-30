@@ -4,8 +4,10 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using static Cinnabar.Editor.Materials.MaterialControls;
+using static Cinnabar.Editor.Panels.Kit;
 using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
@@ -21,28 +23,20 @@ sealed class ParametersPanel : ScrollViewer
 
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
-    readonly Func<Tools.Vec2> _middle;
+    readonly Func<Vec2> _middle;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 4 };
     string _shown = "";
 
-    public ParametersPanel(EditorShell shell, MaterialEditor editor, Func<Tools.Vec2> middle)
+    public ParametersPanel(EditorShell shell, MaterialEditor editor, Func<Vec2> middle)
     {
         _shell = shell;
         _editor = editor;
         _middle = middle;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _editor.Changed += Refresh;
-            _shell.Assets.Changed += Rebuild;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _editor.Changed -= Refresh;
-            _shell.Assets.Changed -= Rebuild;
-        };
+        new ViewSubscriptions(this, attached: Refresh)
+            .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
+            .Add(() => _shell.Assets.Changed += Rebuild, () => _shell.Assets.Changed -= Rebuild);
     }
 
     void Rebuild()
@@ -103,7 +97,7 @@ sealed class ParametersPanel : ScrollViewer
         }
         if (!MaterialFile.IsIdentifier(name) || _editor.Document.Graph.NameTaken(name))
         {
-            _shell.Console.Add(Panels.LogLevel.Warning, $"material: {name} is not a name, or another parameter or switch has it");
+            _shell.Console.Add(Model.LogLevel.Warning, $"material: {name} is not a name, or another parameter or switch has it");
             Rebuild();
             return false;
         }
@@ -174,7 +168,7 @@ sealed class ParametersPanel : ScrollViewer
             }
             else
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, $"material: {p.Name} takes {count} numbers, such as {DefaultOf(p.Type)}");
+                _shell.Console.Add(Model.LogLevel.Warning, $"material: {p.Name} takes {count} numbers, such as {DefaultOf(p.Type)}");
                 Rebuild();
             }
         });

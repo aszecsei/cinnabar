@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Mesh;
@@ -86,29 +87,7 @@ public static class MeshPick
             return null;
         }
         var point = ray * t;
-        return Inside(points, normal, point) ? new FaceHit(face, t, point) : null;
-    }
-
-    // Whether a point in a polygon's plane is inside it: an even-odd crossing test in the plane's dominant axes, which
-    // takes the concave faces that Cut leaves.
-    static bool Inside(Vec3[] points, Vec3 normal, Vec3 point)
-    {
-        var (ax, ay, az) = (Math.Abs(normal.X), Math.Abs(normal.Y), Math.Abs(normal.Z));
-        (int u, int v) = ax >= ay && ax >= az ? (1, 2) : ay >= az ? (0, 2) : (0, 1);
-        var inside = false;
-        for (int i = 0, j = points.Length - 1; i < points.Length; j = i++)
-        {
-            var (pi, pj) = (points[i], points[j]);
-            if (pi[v] > point[v] != pj[v] > point[v])
-            {
-                var x = (pj[u] - pi[u]) * (point[v] - pi[v]) / (pj[v] - pi[v]) + pi[u];
-                if (point[u] < x)
-                {
-                    inside = !inside;
-                }
-            }
-        }
-        return inside;
+        return Polygon2D.Inside(points, normal, point) ? new FaceHit(face, t, point) : null;
     }
 
     /// <summary>

@@ -1,11 +1,12 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Tests;
 
 public sealed class DocumentTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-document-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("document");
 
     const string Text = """
         scene 1
@@ -36,7 +37,7 @@ public sealed class DocumentTests : IDisposable
     {
         var (scene, problems) = SceneFile.Parse(Text.ReplaceLineEndings("\n"));
         Assert.True(scene != null, string.Join("\n", problems));
-        var document = new SceneDocument(Path.Combine(_directory, "door.scene"), scene);
+        var document = new SceneDocument(_temp.Combine("door.scene"), scene);
         var sent = new List<Wire.Operation>();
         document.Applied += ops => sent.AddRange(ops.Select(o => o.ToWire()).OfType<Wire.Operation>());
         return (document, sent);
@@ -240,7 +241,7 @@ public sealed class DocumentTests : IDisposable
     {
         var (document, _) = Open();
         document.Save();
-        var autosave = new Autosave(Path.Combine(_directory, "autosave"));
+        var autosave = new Autosave(_temp.Combine("autosave"));
         var now = DateTime.UtcNow;
 
         Assert.False(autosave.WriteIfDue(document, now));
@@ -253,17 +254,11 @@ public sealed class DocumentTests : IDisposable
         var found = autosave.Newer(document.Path);
         Assert.NotNull(found);
         Assert.Contains("name = \"Unsaved\"", File.ReadAllText(found));
-        Assert.NotEqual(autosave.PathOf(Path.Combine(_directory, "other", "door.scene")), found);
+        Assert.NotEqual(autosave.PathOf(_temp.Combine("other", "door.scene")), found);
 
         autosave.Delete(document.Path);
         Assert.Null(autosave.Newer(document.Path));
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, recursive: true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

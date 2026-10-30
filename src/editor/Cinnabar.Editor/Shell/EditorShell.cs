@@ -63,8 +63,12 @@ public sealed partial class EditorShell : IDisposable
     {
         _options = options;
         Settings = settings;
+        _previewSlots = new PreviewSlots(PreviewOwners);
         Host = new HostSession(options);
+        Watches = new EntityWatches(Selection, Host);
+        Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
+        Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll);
         WireCook();
         WireMeshes();
         Autosave = new Autosave(options.AutosaveDirectory);
@@ -100,11 +104,11 @@ public sealed partial class EditorShell : IDisposable
         Selection.Changed += (old, entities) =>
         {
             _selectedSceneIds = [.. entities.Select(e => World.Find(e)?.SceneId ?? 0).Where(id => id != 0)];
-            foreach (var gone in old.Except(entities).Where(e => !_watches.ContainsKey(e)))
+            foreach (var gone in old.Except(entities).Where(e => !Watches.Contains(e)))
             {
                 Host.Send(new UnwatchEntity(gone));
             }
-            foreach (var added in entities.Except(old).Where(e => !_watches.ContainsKey(e)))
+            foreach (var added in entities.Except(old).Where(e => !Watches.Contains(e)))
             {
                 Host.Send(new WatchEntity(added));
             }
@@ -118,16 +122,16 @@ public sealed partial class EditorShell : IDisposable
         {
             SendLiveMeshes();
             ResendMeshOverlay();
-            foreach (var entity in Selection.Entities.Union(_watches.Keys))
+            foreach (var entity in Selection.Entities.Union(Watches.Handles))
             {
                 Host.Send(new WatchEntity(entity));
             }
             SendSelection();
-            ResendHidden();
+            Visibility.Resend();
         };
         World.EntitiesChanged += OnEntitiesChanged;
         // An entity that comes back, as an undone delete does, gets a new handle, which the game must hide again.
-        World.EntitiesChanged += SendHidden;
+        World.EntitiesChanged += Visibility.Send;
         Layout.Changed += Commands.InvalidateAll;
         Layout.ActiveDocumentChanged += OnActiveDocumentChanged;
         Layout.DocumentClosing = OnDocumentClosing;
@@ -186,13 +190,13 @@ public sealed partial class EditorShell : IDisposable
             ResetMode();
             SendScene();
             SendViewportTools();
-            SendPreviews();
+            _previewSlots.SendAll();
         }
         _linked = Host.Linked;
         if (!Host.Linked)
         {
             Viewport.Disconnect();
-            DisconnectPreviews();
+            _previewSlots.DisconnectAll();
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -227,7 +231,20 @@ public sealed partial class EditorShell : IDisposable
         }
     }
 
-    public void SaveLayout() => Settings.Write(EditorSettings.LayoutFileName, Layout.Save().ToJson());
+    public void SaveLayout() => WriteSetting("layout", EditorSettings.LayoutFileName, Layout.Save().ToJson());
+
+    // Writes a settings file. A file that cannot be written is a warning with its path, not a failure of what changed.
+    void WriteSetting(string area, string name, string text)
+    {
+        try
+        {
+            Settings.Write(name, text);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.Add(LogLevel.Warning, $"{area}: cannot write {Path.Combine(Settings.Directory, name)}: {e.Message}");
+        }
+    }
 
     public void Dispose()
     {
@@ -236,9 +253,9 @@ public sealed partial class EditorShell : IDisposable
         Host.Dispose();
         Cook.Dispose();
         Viewport.Dispose();
-        foreach (var editor in _materials)
+        foreach (var owner in PreviewOwners())
         {
-            editor.Dispose();
+            owner.Dispose();
         }
     }
 }

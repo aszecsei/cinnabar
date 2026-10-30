@@ -3,6 +3,7 @@ using System.Globalization;
 using Avalonia.Input;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Protocol;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 using Operation = Cinnabar.Editor.Document.Operation;
@@ -52,11 +53,12 @@ sealed class FieldEditor : IFieldEditor
     readonly SceneValue?[] _currents;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
-    SceneValue?[]? _starts;
+    readonly ScrubSession<SceneValue?[]> _scrub;
 
     FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null)
     {
         _shell = shell;
+        _scrub = new ScrubSession<SceneValue?[]>(shell.CommitEdit);
         _entities = entities;
         _currents = new SceneValue?[entities.Length];
         _label = label;
@@ -306,17 +308,18 @@ sealed class FieldEditor : IFieldEditor
         {
             return;
         }
-        _starts = [.. _currents];
+        _scrub.Begin([.. _currents]);
         _shell.BeginEdit($"Drag {_label["Set ".Length..]}");
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (_starts is not { } starts)
+        if (!_scrub.Active)
         {
             return;
         }
-        var scale = modifiers.HasFlag(KeyModifiers.Shift) ? 10 : modifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
+        var starts = _scrub.Start!;
+        var scale = ScrubSession.Scale(modifiers);
         // Each entity changes by the same amount from its own value.
         SceneValue? Value(SceneValue start) => _kind switch
         {
@@ -349,7 +352,7 @@ sealed class FieldEditor : IFieldEditor
         {
             return;
         }
-        if (_starts != null)
+        if (_scrub.Active)
         {
             _shell.PreviewEdit(Operations(value));
         }
@@ -359,14 +362,7 @@ sealed class FieldEditor : IFieldEditor
         }
     }
 
-    public void EndScrub()
-    {
-        if (_starts != null)
-        {
-            _starts = null;
-            _shell.CommitEdit();
-        }
-    }
+    public void EndScrub() => _scrub.End();
 
     /// <summary>The value that typed text gives the primary entity, or null with the reason.</summary>
     public SceneValue? Parse(int axis, string text, out string? error) => Parse(axis, text, Current, out error);

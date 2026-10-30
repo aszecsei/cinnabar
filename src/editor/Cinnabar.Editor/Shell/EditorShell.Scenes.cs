@@ -126,7 +126,7 @@ public sealed partial class EditorShell
         // Save As keeps what the user hid and locked for the new file.
         if (Scene.Path != old)
         {
-            SaveSceneView();
+            Visibility.Save();
         }
         Console.Add(LogLevel.Info, $"scene: saved {Scene.Path}");
         return meshesSaved;
@@ -182,6 +182,25 @@ public sealed partial class EditorShell
         }
     }
 
+    /// <summary>
+    /// Builds operations and applies them as <see cref="Edit"/> does. A build that does not fit goes to the console as
+    /// "cannot" and a phrase, which is the label in lower case unless <paramref name="cannot"/> gives one.
+    /// </summary>
+    public bool TryEdit(string label, Func<Operation[]> build, string? cannot = null)
+    {
+        Operation[] operations;
+        try
+        {
+            operations = build();
+        }
+        catch (InvalidOperationException e)
+        {
+            Console.Add(LogLevel.Error, $"edit: cannot {cannot ?? label.ToLowerInvariant()}: {e.Message}");
+            return false;
+        }
+        return Edit(label, operations);
+    }
+
     /// <summary>The steps of a drag: <see cref="SceneDocument.Begin"/>, then a preview per step, then commit or cancel.</summary>
     public void BeginEdit(string label)
     {
@@ -191,21 +210,24 @@ public sealed partial class EditorShell
         }
     }
 
-    public void PreviewEdit(Operation op) => PreviewEdit([op]);
+    public bool PreviewEdit(Operation op) => PreviewEdit([op]);
 
-    public void PreviewEdit(IReadOnlyList<Operation> ops)
+    /// <summary>Previews operations in the open drag. One that does not fit goes to the console, and is false.</summary>
+    public bool PreviewEdit(IReadOnlyList<Operation> ops)
     {
         if (Scene is not { InTransaction: true })
         {
-            return;
+            return false;
         }
         try
         {
             Scene.Preview(ops);
+            return true;
         }
         catch (InvalidOperationException e)
         {
             Console.Add(LogLevel.Error, $"edit: {e.Message}");
+            return false;
         }
     }
 
@@ -368,7 +390,7 @@ public sealed partial class EditorShell
         ReportExpansion();
         Commands.InvalidateAll();
         SceneChanged?.Invoke();
-        LoadSceneView();
+        Visibility.Load();
         SendScene();
         FrameScene();
     }
@@ -442,7 +464,7 @@ public sealed partial class EditorShell
                 Captures.Apply(result);
                 return;
             case Link.Protocol.PreviewTarget target:
-                OnPreviewTarget(target);
+                _previewSlots.Route(target);
                 return;
         }
         if (message is not EditProblems problems)
@@ -491,12 +513,16 @@ public sealed partial class EditorShell
         Selection.Set([.. kept, .. sceneIds.Select(id => World.FindScene(id)?.Handle ?? 0).Where(h => h != 0)]);
     }
 
-    void Report(string path, IReadOnlyList<SceneProblem> problems)
+    void Report(string path, IReadOnlyList<SceneProblem> problems) =>
+        Report("scene", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
+
+    // A file's problems to the console, an error or a warning each, with the line where there is one.
+    void Report(string area, string path, IEnumerable<(int Line, string Message, bool IsError)> problems)
     {
-        foreach (var p in problems)
+        foreach (var (line, message, isError) in problems)
         {
-            var location = p.Line > 0 ? $"{path}:{p.Line}" : path;
-            Console.Add(p.IsError ? LogLevel.Error : LogLevel.Warning, $"scene: {location}: {p.Message}");
+            var location = line > 0 ? $"{path}:{line}" : path;
+            Console.Add(isError ? LogLevel.Error : LogLevel.Warning, $"{area}: {location}: {message}");
         }
     }
 }

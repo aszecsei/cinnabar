@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Tools;
 
@@ -6,12 +7,10 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Cut, Draw, Bevel and the primitives.</summary>
 public class MeshCutAndPrimitiveTests
 {
-    static MeshData Box() => Primitives.Block(Vec3.Zero, new Vec3(1, 1, 1));
-
     [Fact]
     public void CutSplitsEveryFaceTheLineCrosses()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // Around the box at half height: a point on each vertical edge slices it into two boxes' worth of faces.
         var (result, reason) = MeshCut.Cut(box,
         [
@@ -56,7 +55,7 @@ public class MeshCutAndPrimitiveTests
     [Fact]
     public void ALoopCutGoesAroundTheQuads()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // From a vertical edge at a third of its height, around the four sides and back.
         var loop = MeshCut.Loop(box, box.EdgeIndex(0, 4), 1.0 / 3);
         Assert.Equal(5, loop.Count);
@@ -88,7 +87,7 @@ public class MeshCutAndPrimitiveTests
     [Fact]
     public void DrawCutsAPolygonIntoAFaceAndMakesPlanesOnNothing()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         Vec3[] door = [new(0.25, 1, 0.25), new(0.75, 1, 0.25), new(0.75, 1, 0.75), new(0.25, 1, 0.75)];
         var (result, reason) = MeshCut.Draw(box, 1, door);
         Assert.Null(reason);
@@ -128,7 +127,7 @@ public class MeshCutAndPrimitiveTests
     [Fact]
     public void BevelReplacesVerticesAndEdges()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // A corner becomes a triangle, and its three faces gain a corner each.
         var (vertex, kind, selected) = MeshBevel.Vertices(box, [6], 0.25);
         Assert.Equal(MeshElement.Faces, kind);

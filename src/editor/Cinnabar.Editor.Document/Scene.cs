@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
@@ -121,14 +123,10 @@ public static class ScenePath
     /// <summary>The scene ID of the entity <paramref name="id"/> inside an instance: FNV-1a over the two IDs' 16 bytes, little-endian, or 1 if that is 0.</summary>
     public static ulong Id(ulong instance, ulong id)
     {
-        var hash = 0xcbf29ce484222325UL;
-        foreach (var value in (ReadOnlySpan<ulong>)[instance, id])
-        {
-            for (var i = 0; i < 8; i++)
-            {
-                hash = (hash ^ (byte)(value >> (8 * i))) * 0x100000001b3UL;
-            }
-        }
+        Span<byte> bytes = stackalloc byte[16];
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes, instance);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes[8..], id);
+        var hash = Fnv.Hash64(bytes);
         return hash == 0 ? 1 : hash;
     }
 

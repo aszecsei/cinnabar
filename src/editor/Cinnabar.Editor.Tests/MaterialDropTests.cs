@@ -7,7 +7,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Dropping a material in the viewport, in the shell without a host: the slot that a pick finds, and its preview.</summary>
 public sealed class MaterialDropTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-material-drop-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("material-drop");
 
     const string Old = "b0de249d5bae464988ec7b909fbcac41";
     const string New = "0123456789abcdef0123456789abcdef";
@@ -22,11 +22,7 @@ public sealed class MaterialDropTests : IDisposable
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        var path = Path.Combine(_directory, "mesh.scene");
-        File.WriteAllText(path, Text);
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", path) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
+        var shell = TestShell.Open(_temp, "mesh.scene", Text);
         shell.OnGameMessage(new EntitySnapshot(
         [
             new EntityInfo(Handle(0), "Mesh", 1, 0, true, [1, 33]),
@@ -98,11 +94,5 @@ public sealed class MaterialDropTests : IDisposable
         Assert.False(shell.Scene.CanUndo);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

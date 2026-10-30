@@ -55,6 +55,15 @@ public class Command
     }
 
     public void Invalidate() => Changed?.Invoke();
+
+    /// <summary>A command that turns something on or off. Running it sets the opposite of what <paramref name="isOn"/> says.</summary>
+    public static Command Toggle(string id, string label, Func<bool> isOn, Action<bool> set, string? description = null, string? icon = null) =>
+        new(id, label, () => set(!isOn()))
+        {
+            Description = description,
+            Icon = icon,
+            IsCheckedWhen = isOn,
+        };
 }
 
 /// <summary>A command that picks one of a list of options, shown as a combo box.</summary>
@@ -73,6 +82,22 @@ public sealed class ChoiceCommand : Command
         Options = options;
         _selected = selected;
         _select = select;
+    }
+
+    /// <summary>
+    /// A choice of an enum's values, each shown by its name or by <paramref name="display"/>, in the enum's order.
+    /// </summary>
+    public static ChoiceCommand ForEnum<T>(string id, string label, Func<T> get, Action<T> set, Func<T, string>? display = null,
+        string? description = null, string? icon = null, Func<bool>? canExecuteWhen = null) where T : struct, Enum
+    {
+        var show = display ?? (value => value.ToString());
+        var values = Enum.GetValues<T>();
+        return new ChoiceCommand(id, label, [.. values.Select(show)], () => show(get()), option => set(values.First(v => show(v) == option)))
+        {
+            Description = description,
+            Icon = icon,
+            CanExecuteWhen = canExecuteWhen,
+        };
     }
 
     public IReadOnlyList<string> Options { get; }

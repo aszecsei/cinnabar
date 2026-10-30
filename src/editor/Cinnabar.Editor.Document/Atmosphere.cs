@@ -1,3 +1,5 @@
+using Cinnabar.Editor.Maths;
+
 namespace Cinnabar.Editor.Document;
 
 /// <summary>
@@ -161,7 +163,7 @@ public static class Atmosphere
         {
             return
             [
-                .. Set(volume, SceneEdits.EnvironmentId, SunAzimuth, SceneEdits.Floats(Wrap(azimuth))),
+                .. Set(volume, SceneEdits.EnvironmentId, SunAzimuth, SceneEdits.Floats(Angles.Wrap360(azimuth))),
                 .. Set(volume, SceneEdits.EnvironmentId, SunElevation, SceneEdits.Floats(Math.Clamp(elevation, -90, 90))),
             ];
         }
@@ -205,10 +207,8 @@ public static class Atmosphere
         var elevation = Math.Asin(Math.Clamp(toward[1], -1, 1)) * 180 / Math.PI;
         // Straight up or down, the azimuth is any, so it stays 0.
         var azimuth = Math.Abs(toward[1]) > 0.999999 ? 0 : Math.Atan2(toward[0], toward[2]) * 180 / Math.PI;
-        return (Wrap(azimuth), elevation);
+        return (Angles.Wrap360(azimuth), elevation);
     }
-
-    static double Wrap(double degrees) => ((degrees % 360) + 360) % 360;
 
     /// <summary>Sets the atmosphere's settings to a sky's, after resetting every setting that a sky sets.</summary>
     public static Operation[] Sky(SceneEntity volume, string name)

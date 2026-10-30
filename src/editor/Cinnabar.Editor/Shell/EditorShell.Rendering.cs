@@ -2,7 +2,7 @@ using System.Text.Json;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Link.Protocol;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -57,14 +57,7 @@ public sealed partial class EditorShell
             }
             _viewportSettings = value;
             SendViewportSettings();
-            try
-            {
-                Settings.Write(EditorSettings.ViewportFileName, JsonSerializer.Serialize(value));
-            }
-            catch (IOException e)
-            {
-                Console.Add(LogLevel.Warning, $"viewport: cannot save its settings: {e.Message}");
-            }
+            WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(value));
             Commands.InvalidateAll();
             ViewportSettingsChanged?.Invoke();
         }
@@ -76,15 +69,6 @@ public sealed partial class EditorShell
     public static IReadOnlyList<string> DebugViewNames { get; } = [.. Enum.GetValues<DebugView>().Select(v => FieldValues.Humanize(SnakeCase(v.ToString())))];
 
     public static string DebugViewName(DebugView view) => DebugViewNames[(int)view];
-
-    public void SetDebugView(string name)
-    {
-        var index = DebugViewNames.ToList().IndexOf(name);
-        if (index >= 0)
-        {
-            ViewportSettings = ViewportSettings with { DebugView = (DebugView)index };
-        }
-    }
 
     public void ChangeExposure(float stops) => ViewportSettings = ViewportSettings with { ExposureOffset = stops == 0 ? 0 : ViewportSettings.ExposureOffset + stops * ExposureStep };
 

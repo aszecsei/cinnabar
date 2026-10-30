@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 
@@ -8,7 +9,7 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>Material graphs in the editor: the file format, the document's undo, the catalog's pins, the canvas's geometry and the material editor.</summary>
 public sealed class MaterialTests : IDisposable
 {
-    readonly string _directory = Path.Combine(Path.GetTempPath(), $"cinnabar-material-tests-{Guid.NewGuid():N}");
+    readonly TempDirectory _temp = new("material");
 
     const string Checker = """
         material 1
@@ -149,8 +150,8 @@ public sealed class MaterialTests : IDisposable
     public void TheDocumentUndoesEachEditAndADragIsOneEntry()
     {
         var graph = MaterialFile.Parse(Text(Checker), MaterialFileKind.Material).Graph!;
-        var path = Path.Combine(_directory, "checker.material");
-        Directory.CreateDirectory(_directory);
+        var path = _temp.Combine("checker.material");
+        Directory.CreateDirectory(_temp.Path);
         var document = MaterialDocument.Of(path, MaterialGuid, graph);
         Assert.False(document.IsDirty);
 
@@ -222,14 +223,13 @@ public sealed class MaterialTests : IDisposable
 
     EditorShell NewShell()
     {
-        Directory.CreateDirectory(_directory);
-        File.WriteAllText(Path.Combine(_directory, "checker.material"), Text(Checker));
-        File.WriteAllText(Path.Combine(_directory, "rim.material_function"), Text(Rim));
-        File.WriteAllText(Path.Combine(_directory, "glow.material"), "material 1\nshading = lit\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n");
-        File.WriteAllText(Path.Combine(_directory, "smoke.effect"), "effect 1\nemitter puffs\n");
-        var shell = new EditorShell(new EditorOptions("host.exe", "game.dll", null) { AutosaveDirectory = Path.Combine(_directory, "autosave") },
-            new EditorSettings(Path.Combine(_directory, "settings")));
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _directory)], [], Nodes));
+        Directory.CreateDirectory(_temp.Path);
+        File.WriteAllText(_temp.Combine("checker.material"), Text(Checker));
+        File.WriteAllText(_temp.Combine("rim.material_function"), Text(Rim));
+        File.WriteAllText(_temp.Combine("glow.material"), "material 1\nshading = lit\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n");
+        File.WriteAllText(_temp.Combine("smoke.effect"), "effect 1\nemitter puffs\n");
+        var shell = TestShell.Open(_temp, null, null);
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], Nodes));
         shell.Assets.Apply(new ShadingModels(Shading));
         shell.Assets.Apply(new AssetSnapshot(
         [
@@ -289,7 +289,7 @@ public sealed class MaterialTests : IDisposable
         Assert.Equal(new GraphText("tint"), editor.Document.Graph.Find(2)!.Get("name"));
         shell.Commands.Get("file.save").Execute();
         Assert.False(editor.Document.IsDirty);
-        Assert.Equal(editor.Document.Text, File.ReadAllText(Path.Combine(_directory, "checker.material")));
+        Assert.Equal(editor.Document.Text, File.ReadAllText(_temp.Combine("checker.material")));
 
         // A function opens without a preview, and its editor is the active one.
         var function = shell.OpenMaterial(shell.Assets.Find(FunctionGuid)!);
@@ -311,7 +311,7 @@ public sealed class MaterialTests : IDisposable
         Assert.Equal(0, material!.PreviewId);
         Assert.Equal(1, effect.PreviewId);
         Assert.False(effect.PicksMesh);
-        Assert.Equal(Path.Combine(_directory, "smoke.effect"), effect.Path);
+        Assert.Equal(_temp.Combine("smoke.effect"), effect.Path);
         // Opening it again shows the same preview.
         Assert.Same(effect, shell.OpenEffect(shell.Assets.Find(EffectGuid)!));
         Assert.Equal("Open Preview", shell.OpenLabel(shell.Assets.Find(EffectGuid)!));
@@ -323,11 +323,5 @@ public sealed class MaterialTests : IDisposable
         Assert.Equal(0, shell.OpenEffect(shell.Assets.Find(EffectGuid)!)!.PreviewId);
     }
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_directory))
-        {
-            Directory.Delete(_directory, true);
-        }
-    }
+    public void Dispose() => _temp.Dispose();
 }

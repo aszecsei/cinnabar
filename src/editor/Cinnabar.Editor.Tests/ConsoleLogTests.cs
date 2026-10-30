@@ -1,4 +1,4 @@
-using Cinnabar.Editor.Panels;
+using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Tests;
 

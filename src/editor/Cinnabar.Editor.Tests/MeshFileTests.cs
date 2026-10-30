@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Tools;
 
@@ -75,7 +76,7 @@ public class MeshFileTests
     [Fact]
     public void TheSampleRoomRoundTrips()
     {
-        var path = Path.Combine(RepositoryRoot(), "samples", "mygame", "content", "meshes", "room.mesh");
+        var path = Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "meshes", "room.mesh");
         var text = File.ReadAllText(path).ReplaceLineEndings("\n");
         var mesh = Parse(text);
         Assert.Equal(text, MeshFile.Write(mesh));
@@ -175,17 +176,5 @@ public class MeshFileTests
         // The copy of the front wall and the zero-scale triangle both use the edge 0 1, with the bottom and the front.
         Assert.Contains(problems, p => p.Face == -1 && p.Message == "the edge 0 1 has 4 faces");
         Assert.Contains(problems, p => p.Face == -1 && p.Message.Contains("sharp edge 0 40"));
-    }
-
-    static string RepositoryRoot()
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
-        {
-            if (File.Exists(Path.Combine(dir.FullName, "justfile")))
-            {
-                return dir.FullName;
-            }
-        }
-        throw new InvalidOperationException("the tests are not under the repository");
     }
 }

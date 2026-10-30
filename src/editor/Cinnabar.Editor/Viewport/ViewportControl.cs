@@ -4,6 +4,8 @@ using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 
+using Cinnabar.Editor.Maths;
+
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
@@ -196,13 +198,13 @@ public sealed class ViewportControl : Control
     }
 
     /// <summary>A point of the control in pixels of the host's frame, from its top left, or null before the first frame.</summary>
-    public Tools.Vec2? FramePoint(Point point)
+    public Vec2? FramePoint(Point point)
     {
         if (_visual == null || Session is not { FrameSize: { Width: > 0, Height: > 0 } frame } || _visual.Size.X <= 0 || _visual.Size.Y <= 0)
         {
             return null;
         }
-        return new Tools.Vec2(
+        return new Vec2(
             (point.X - _visual.Offset.X) * frame.Width / _visual.Size.X,
             (point.Y - _visual.Offset.Y) * frame.Height / _visual.Size.Y);
     }

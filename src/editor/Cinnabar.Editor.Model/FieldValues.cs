@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using Cinnabar.Editor.Link.Protocol;
+using Cinnabar.Editor.Maths;
 
 namespace Cinnabar.Editor.Model;
 
@@ -200,9 +201,8 @@ public static class FieldValues
 
     static double Degrees(double radians)
     {
-        var degrees = radians * 180 / Math.PI;
         // (-180, 180], as the engine gives it.
-        return degrees <= -180 ? degrees + 360 : degrees;
+        return Angles.Wrap180(radians * 180 / Math.PI);
     }
 
     /// <summary>

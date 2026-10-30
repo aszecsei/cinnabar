@@ -62,7 +62,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"mesh: no mesh asset has the GUID {guid}");
             return null;
         }
-        if (Content.AssetIndex.IsSubasset(asset))
+        if (Cinnabar.Editor.Content.AssetIndex.IsSubasset(asset))
         {
             Console.Add(LogLevel.Error, $"mesh: {asset.Subasset} is a mesh of {asset.Path}, a model, which cannot be edited. Build level geometry as a .mesh file.");
             return null;
@@ -72,10 +72,7 @@ public sealed partial class EditorShell
             return null;
         }
         var (document, problems) = MeshDocument.Open(path, guid);
-        foreach (var p in problems)
-        {
-            Console.Add(p.IsError ? LogLevel.Error : LogLevel.Warning, $"mesh: {(p.Line > 0 ? $"{path}:{p.Line}" : path)}: {p.Message}");
-        }
+        Report("mesh", path, problems.Select(p => (p.Line, p.Message, p.IsError)));
         if (document == null)
         {
             Console.Add(LogLevel.Error, $"mesh: cannot open {path}");

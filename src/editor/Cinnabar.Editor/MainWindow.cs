@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Host;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
@@ -65,12 +66,12 @@ public sealed class MainWindow : Window
         shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
-        shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.Content.NewAssetRequested += template => _ = AskNewAsset(template);
         shell.MakePrefabRequested += name => _ = AskMakePrefab(name);
         shell.MakeVariantRequested += name => _ = AskMakeVariant(name);
-        shell.RenameRequested += item => _ = AskRename(item);
-        shell.DeleteRequested += items => _ = ConfirmDelete(items);
-        shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
+        shell.Content.RenameRequested += item => _ = AskRename(item);
+        shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
+        shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.MaterialCloseRequested += editor => _ = AskCloseMaterial(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
@@ -203,7 +204,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakePrefab(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var place = _shell.Content.Folder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Prefab", $"Name the prefab, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -213,7 +214,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakeVariant(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? (folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}") : "the content browser's folder";
+        var place = _shell.Content.Folder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Variant", $"Name the variant, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -223,7 +224,7 @@ public sealed class MainWindow : Window
 
     async Task AskNewAsset(Link.Cook.AssetTemplate? template)
     {
-        if (_shell.ContentFolder is not { } folder)
+        if (_shell.Content.Folder is not { } folder)
         {
             return;
         }
@@ -239,11 +240,11 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Effect => ("New Effect", "effect"),
             _ => ("New Folder", "folder"),
         };
-        var place = folder.Path == "" ? folder.Root : $"{folder.Root}/{folder.Path}";
-        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.NewName(template), "Create");
+        var place = folder.Display;
+        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.Content.NewName(template), "Create");
         if (name != null)
         {
-            await _shell.Create(template, name);
+            await _shell.Content.Create(template, name);
         }
     }
 
@@ -265,13 +266,13 @@ public sealed class MainWindow : Window
         var name = await Dialogs.AskName(this, "Rename", $"Rename {current}. Its .meta file goes with it, so it keeps its GUID.", current, "Rename");
         if (name != null && name != current)
         {
-            await _shell.Rename(item, name);
+            await _shell.Content.Rename(item, name);
         }
     }
 
     async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
     {
-        var (deleted, users) = _shell.DeleteEffects(items);
+        var (deleted, users) = _shell.Content.DeleteEffects(items);
         var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)
             .OfType<string>().ToList();
         if (names.Count == 0)
@@ -293,7 +294,7 @@ public sealed class MainWindow : Window
         }
         if (await Dialogs.Ask(this, "Delete", message, "Delete", "Cancel") == "Delete")
         {
-            await _shell.Delete(items);
+            await _shell.Content.Delete(items);
         }
     }
 
@@ -402,9 +403,9 @@ public sealed class MainWindow : Window
         (_cookStatus.Text, _cookDot.Fill) = cook.State switch
         {
             CookState.Linked => ("Cook: watching", Brush.Parse("#4caf50")),
-            CookState.Starting => ("Cook: starting, linking", Brush.Parse("#e8b04a")),
+            CookState.Starting => ("Cook: starting, linking", Palette.WarningBrush),
             CookState.Stopped => ("Cook: stopped", Brushes.Gray),
-            _ => ($"Cook: exited with code {cook.ExitCode}", Brush.Parse("#f0605a")),
+            _ => ($"Cook: exited with code {cook.ExitCode}", Palette.ErrorBrush),
         };
     }
 
@@ -415,9 +416,9 @@ public sealed class MainWindow : Window
         {
             HostState.Waiting => ("Host: waiting for the viewport", Brushes.Gray),
             HostState.Running when host.Linked => ($"Host: running {host.Game}, linked", Brush.Parse("#4caf50")),
-            HostState.Running => ("Host: starting, linking", Brush.Parse("#e8b04a")),
+            HostState.Running => ("Host: starting, linking", Palette.WarningBrush),
             HostState.Stopped => ("Host: stopped", Brushes.Gray),
-            _ => ($"Host: exited with code {host.ExitCode}", Brush.Parse("#f0605a")),
+            _ => ($"Host: exited with code {host.ExitCode}", Palette.ErrorBrush),
         };
     }
 }

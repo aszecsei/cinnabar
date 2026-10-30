@@ -1,7 +1,8 @@
 using Avalonia.Threading;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Document;
-using LogLevel = Cinnabar.Editor.Panels.LogLevel;
+using Cinnabar.Editor.Model;
+using LogLevel = Cinnabar.Editor.Model.LogLevel;
 
 namespace Cinnabar.Editor.Shell;
 

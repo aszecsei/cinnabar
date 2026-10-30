@@ -5,8 +5,9 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using static Cinnabar.Editor.Materials.MaterialControls;
+using static Cinnabar.Editor.Panels.Kit;
 using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
@@ -29,19 +30,10 @@ sealed class NodeDetails : ScrollViewer
         _editor = editor;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _editor.SelectionChanged += Refresh;
-            _editor.Changed += Refresh;
-            _editor.ProblemsChanged += Refresh;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _editor.SelectionChanged -= Refresh;
-            _editor.Changed -= Refresh;
-            _editor.ProblemsChanged -= Refresh;
-        };
+        new ViewSubscriptions(this, attached: Refresh)
+            .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
+            .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
+            .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh);
     }
 
     // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.
@@ -144,7 +136,7 @@ sealed class NodeDetails : ScrollViewer
                     }
                     else
                     {
-                        _shell.Console.Add(Panels.LogLevel.Warning, $"material: {property.Name} takes {count} numbers, such as {property.Default}");
+                        _shell.Console.Add(Model.LogLevel.Warning, $"material: {property.Name} takes {count} numbers, such as {property.Default}");
                         _shown = "";
                         Refresh();
                     }
@@ -161,9 +153,9 @@ sealed class NodeDetails : ScrollViewer
                 line.Children.Add(box);
                 return line;
             case PropertyKind.Text:
-                return ValueBox((value as GraphText)?.Text ?? MaterialFile.Unquote(property.Default) ?? "", "", text => Set(new GraphText(text)));
+                return ValueBox((value as GraphText)?.Text ?? TextQuote.Unquote(property.Default) ?? "", "", text => Set(new GraphText(text)));
             case PropertyKind.Code:
-                var code = ValueBox((value as GraphText)?.Text ?? MaterialFile.Unquote(property.Default) ?? "", "HLSL", text => Set(new GraphText(text)), multiline: true);
+                var code = ValueBox((value as GraphText)?.Text ?? TextQuote.Unquote(property.Default) ?? "", "HLSL", text => Set(new GraphText(text)), multiline: true);
                 ToolTip.SetTip(code, "An expression of a, b, c and d, or a body that returns. Ctrl+Enter applies it.");
                 return code;
             case PropertyKind.Choice:
@@ -215,7 +207,7 @@ sealed class NodeDetails : ScrollViewer
             }
             else
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, $"material: {pin.Name} takes a number or up to four, such as 0.5 or [1, 0, 0]");
+                _shell.Console.Add(Model.LogLevel.Warning, $"material: {pin.Name} takes a number or up to four, such as 0.5 or [1, 0, 0]");
                 _shown = "";
                 Refresh();
             }

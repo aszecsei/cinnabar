@@ -1,5 +1,7 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 
@@ -97,14 +99,7 @@ public sealed partial class EditorShell
         var ops = PivotOperations(guid, start, placement, pivot, translation);
         if (ops.Count > 0)
         {
-            try
-            {
-                Scene.Preview(ops);
-            }
-            catch (InvalidOperationException e)
-            {
-                Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            }
+            PreviewEdit(ops);
         }
     }
 

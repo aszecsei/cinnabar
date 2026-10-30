@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Docking;
+using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 
 namespace Cinnabar.Editor.Shell;
@@ -26,7 +27,7 @@ public sealed partial class EditorShell
         {
             return null;
         }
-        var previewId = FreePreviewId();
+        var previewId = _previewSlots.Free();
         if (previewId == null)
         {
             Console.Add(LogLevel.Warning, $"effect: {MaxPreviews} previews are open, so {Path.GetFileName(path)} has none");
@@ -40,10 +41,6 @@ public sealed partial class EditorShell
         Layout.OpenDocument(new EffectPreviewDocument(preview, () => new EffectPreviewView(this, preview)));
         return preview;
     }
-
-    /// <summary>The first preview ID that no material editor or effect preview has, or null when every one is in use.</summary>
-    int? FreePreviewId() =>
-        Enumerable.Range(0, MaxPreviews).Cast<int?>().FirstOrDefault(id => !_materials.Any(m => m.PreviewId == id) && !_effects.Any(e => e.PreviewId == id));
 
     void OnEffectClosed(EffectPreview preview)
     {

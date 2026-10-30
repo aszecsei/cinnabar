@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Tools;
 
@@ -6,8 +7,6 @@ namespace Cinnabar.Editor.Tests;
 /// <summary>The mesh tools on a box: Delete of each element kind, moves, the selection's conversions, and the grid.</summary>
 public class MeshToolsTests
 {
-    static MeshData Box() => Primitives.Block(Vec3.Zero, new Vec3(1, 1, 1));
-
     [Fact]
     public void ABlockIsClosedAndFrontsOut()
     {
@@ -34,7 +33,7 @@ public class MeshToolsTests
     [Fact]
     public void DeleteRemovesByKind()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         // A vertex takes its three faces with it, and the other vertices stay.
         var vertex = MeshTools.Delete(box, MeshElement.Vertices, [6]);
         Assert.Equal(7, vertex.Vertices.Length);
@@ -61,7 +60,7 @@ public class MeshToolsTests
     [Fact]
     public void MovesChangeOnlyTheChosenVertices()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         var moved = MeshTools.MoveVertices(box, [4, 5, 6, 7], v => v + new Vec3(0, 1, 0));
         Assert.Equal(2, moved.Vertices[4].Y);
         Assert.Equal(0, moved.Vertices[0].Y);
@@ -72,7 +71,7 @@ public class MeshToolsTests
     [Fact]
     public void SelectionsConvertThroughTheirVertices()
     {
-        var box = Box();
+        var box = MeshFixtures.Box();
         MeshData? Find(string guid) => guid == "a" ? box : null;
         var top = new MeshSelection(MeshElement.Faces, [new MeshItem("a", 1)]);
         var vertices = top.As(MeshElement.Vertices, Find);

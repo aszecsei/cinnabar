@@ -5,6 +5,8 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 
@@ -19,8 +21,6 @@ namespace Cinnabar.Editor.Materials;
 /// </summary>
 public sealed class GraphCanvas : Control
 {
-    // A press that moves less than this, in control units, is a click.
-    const double ClickSlop = 4;
     const double MinZoom = 0.2;
     const double MaxZoom = 2;
 
@@ -30,12 +30,12 @@ public sealed class GraphCanvas : Control
     static readonly IPen MajorGrid = new Pen(new SolidColorBrush(Color.Parse("#2C2C31")), 1);
     static readonly IBrush NodeBody = new SolidColorBrush(Color.Parse("#2A2A2E"));
     static readonly IPen NodeBorder = new Pen(new SolidColorBrush(Color.Parse("#3C3C42")), 1);
-    static readonly IPen SelectedBorder = new Pen(new SolidColorBrush(Color.Parse("#E34234")), 2);
-    static readonly IPen ErrorBorder = new Pen(new SolidColorBrush(Color.Parse("#F0605A")), 2, new DashStyle([3, 2], 0));
+    static readonly IPen SelectedBorder = new Pen(new SolidColorBrush(Palette.Accent), 2);
+    static readonly IPen ErrorBorder = new Pen(new SolidColorBrush(Palette.Error), 2, new DashStyle([3, 2], 0));
     static readonly IBrush Text = new SolidColorBrush(Color.Parse("#E4E4E8"));
     static readonly IBrush DimText = new SolidColorBrush(Color.Parse("#8A8A92"));
     static readonly IBrush BoxFill = new SolidColorBrush(Color.Parse("#22E34234"));
-    static readonly IPen BoxPen = new Pen(new SolidColorBrush(Color.Parse("#E34234")), 1);
+    static readonly IPen BoxPen = new Pen(new SolidColorBrush(Palette.Accent), 1);
 
     enum Gesture
     {
@@ -52,8 +52,7 @@ public sealed class GraphCanvas : Control
     readonly MaterialEditor _editor;
     readonly NodePicker _picker;
     GraphGeometry _geometry;
-    Vec2 _offset = new(-200, -150);
-    double _zoom = 1;
+    Canvas2DView _view = new(new Vec2(-200, -150), 1);
     Gesture _gesture;
     Point _start;
     Point _last;
@@ -109,9 +108,7 @@ public sealed class GraphCanvas : Control
         return size;
     }
 
-    Vec2 ToCanvas(Point p) => new(p.X / _zoom + _offset.X, p.Y / _zoom + _offset.Y);
-
-    Point ToView(Vec2 c) => new((c.X - _offset.X) * _zoom, (c.Y - _offset.Y) * _zoom);
+    Vec2 ToCanvas(Point p) => _view.ToCanvas(p.X, p.Y);
 
     /// <summary>Pans and zooms so the whole graph is in view.</summary>
     public void Frame() => Frame(Bounds.Size);
@@ -123,8 +120,7 @@ public sealed class GraphCanvas : Control
             return;
         }
         const double Margin = 40;
-        _zoom = Math.Clamp(Math.Min((size.Width - 2 * Margin) / extent.Width, (size.Height - 2 * Margin) / extent.Height), MinZoom, 1);
-        _offset = new Vec2(extent.X + extent.Width / 2 - size.Width / 2 / _zoom, extent.Y + extent.Height / 2 - size.Height / 2 / _zoom);
+        _view = Canvas2DView.Fit(extent, size.Width, size.Height, Margin, MinZoom, 1);
         InvalidateVisual();
     }
 
@@ -135,7 +131,7 @@ public sealed class GraphCanvas : Control
     {
         context.FillRectangle(CanvasBrush, new Rect(Bounds.Size));
         DrawGrid(context);
-        using (context.PushTransform(Matrix.CreateTranslation(-_offset.X, -_offset.Y) * Matrix.CreateScale(_zoom, _zoom)))
+        using (context.PushTransform(Matrix.CreateTranslation(-_view.Offset.X, -_view.Offset.Y) * Matrix.CreateScale(_view.Zoom, _view.Zoom)))
         {
             foreach (var link in _geometry.Links)
             {
@@ -164,18 +160,18 @@ public sealed class GraphCanvas : Control
         var step = 20.0;
         var topLeft = ToCanvas(default);
         var bottomRight = ToCanvas(new Point(Bounds.Width, Bounds.Height));
-        if (step * _zoom < 6)
+        if (step * _view.Zoom < 6)
         {
             step = 100;
         }
         for (var x = Math.Floor(topLeft.X / step) * step; x <= bottomRight.X; x += step)
         {
-            var vx = (x - _offset.X) * _zoom;
+            var vx = (x - _view.Offset.X) * _view.Zoom;
             context.DrawLine(Math.Abs(x % 100) < 0.5 ? MajorGrid : MinorGrid, new Point(vx, 0), new Point(vx, Bounds.Height));
         }
         for (var y = Math.Floor(topLeft.Y / step) * step; y <= bottomRight.Y; y += step)
         {
-            var vy = (y - _offset.Y) * _zoom;
+            var vy = (y - _view.Offset.Y) * _view.Zoom;
             context.DrawLine(Math.Abs(y % 100) < 0.5 ? MajorGrid : MinorGrid, new Point(0, vy), new Point(Bounds.Width, vy));
         }
     }
@@ -395,14 +391,14 @@ public sealed class GraphCanvas : Control
         var delta = position - _last;
         _last = position;
         var moved = position - _start;
-        var far = Math.Sqrt(moved.X * moved.X + moved.Y * moved.Y) > ClickSlop;
+        var far = Gestures.MovedPast(moved);
         switch (_gesture)
         {
             case Gesture.PanClick when far:
                 _gesture = Gesture.Pan;
                 break;
             case Gesture.Pan:
-                _offset -= new Vec2(delta.X, delta.Y) * (1 / _zoom);
+                _view = _view.Pan(delta.X, delta.Y);
                 InvalidateVisual();
                 break;
             case Gesture.Click when far:
@@ -418,7 +414,7 @@ public sealed class GraphCanvas : Control
                 }
                 break;
             case Gesture.Move:
-                _editor.MoveSelected(_moveStarts, new Vec2(moved.X, moved.Y) * (1 / _zoom));
+                _editor.MoveSelected(_moveStarts, _view.ToCanvasDelta(moved.X, moved.Y));
                 break;
             case Gesture.Box:
                 InvalidateVisual();
@@ -490,7 +486,7 @@ public sealed class GraphCanvas : Control
             }
             else if (_detached == null && !_editor.Link(_linkStart.Node, _linkStart.Pin, hit.Node, hit.Pin))
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, "material: that link would make a loop");
+                _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
@@ -499,7 +495,7 @@ public sealed class GraphCanvas : Control
         {
             if (!_editor.Link(hit.Node, hit.Pin, _linkStart.Node, _linkStart.Pin))
             {
-                _shell.Console.Add(Panels.LogLevel.Warning, "material: that link would make a loop");
+                _shell.Console.Add(Model.LogLevel.Warning, "material: that link would make a loop");
             }
             return;
         }
@@ -560,9 +556,7 @@ public sealed class GraphCanvas : Control
     {
         base.OnPointerWheelChanged(e);
         var at = e.GetPosition(this);
-        var anchor = ToCanvas(at);
-        _zoom = Math.Clamp(_zoom * Math.Pow(1.15, e.Delta.Y), MinZoom, MaxZoom);
-        _offset = new Vec2(anchor.X - at.X / _zoom, anchor.Y - at.Y / _zoom);
+        _view = _view.ZoomAbout(at.X, at.Y, Math.Pow(Canvas2DView.WheelStep, e.Delta.Y), MinZoom, MaxZoom);
         InvalidateVisual();
         e.Handled = true;
     }
