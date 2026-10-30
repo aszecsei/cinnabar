@@ -328,7 +328,7 @@ public sealed class MeshToolRunner
         _pending = null;
         _shell.Gizmos.Drop();
         _shell.CancelEdit();
-        _session.MeshSelection = _session.MeshSelection.Pruned(_session.FindMeshData);
+        _session.PruneMeshSelection();
         _shell.SendGizmo();
         _session.OnMeshModeChanged();
     }
@@ -367,9 +367,7 @@ public sealed class MeshToolRunner
 
         public void Previewed()
         {
-            session.MeshElement = _kind ?? session.MeshElement;
-            session.MeshSelection = new MeshSelection(session.MeshElement, [.. _items]);
-            session.SendMeshOverlay();
+            session.PreviewMeshSelection(_kind, _items);
         }
 
         public void Ending()
@@ -386,7 +384,7 @@ public sealed class MeshToolRunner
             }
             if (!committed)
             {
-                session.MeshSelection = session.MeshSelection.Pruned(session.FindMeshData);
+                session.PruneMeshSelection();
             }
             session.OnMeshModeChanged();
         }

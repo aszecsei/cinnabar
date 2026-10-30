@@ -42,9 +42,9 @@ public sealed partial class MeshSession
     /// <summary>Whether mesh mode is on and the editor is in its Edit mode.</summary>
     public bool CanEditInMeshMode => InMeshMode && _shell.IsEditing;
 
-    public MeshElement MeshElement { get; internal set; } = MeshElement.Faces;
+    public MeshElement MeshElement { get; private set; } = MeshElement.Faces;
 
-    public MeshSelection MeshSelection { get; internal set; } = MeshSelection.Empty;
+    public MeshSelection MeshSelection { get; private set; } = MeshSelection.Empty;
 
     /// <summary>The edited mesh files, by GUID, with the scene ID of the entity that places each.</summary>
     public IReadOnlyDictionary<string, ulong> EditedMeshes => _editedMeshes;
@@ -310,6 +310,17 @@ public sealed partial class MeshSession
         _shell.CancelGizmo();
         MeshSelection = selection;
         OnMeshModeChanged();
+    }
+
+    /// <summary>Drops the selected elements that the meshes no longer have, without sending anything.</summary>
+    internal void PruneMeshSelection() => MeshSelection = MeshSelection.Pruned(FindMeshData);
+
+    /// <summary>Selects a tool step's result, in its kind if it has one, and sends the overlay.</summary>
+    internal void PreviewMeshSelection(MeshElement? kind, IEnumerable<MeshItem> items)
+    {
+        MeshElement = kind ?? MeshElement;
+        MeshSelection = new MeshSelection(MeshElement, [.. items]);
+        SendMeshOverlay();
     }
 
     /// <summary>Adds a mesh file that a tool made to the edited meshes, with the entity that places it.</summary>
