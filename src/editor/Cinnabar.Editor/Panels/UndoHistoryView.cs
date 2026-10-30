@@ -41,12 +41,8 @@ public sealed class UndoHistoryView : DockPanel
                 _shell.Scene?.MoveTo(row.Position);
             }
         };
-        AttachedToVisualTree += (_, _) =>
-        {
-            _shell.SceneChanged += Rebuild;
-            Rebuild();
-        };
-        DetachedFromVisualTree += (_, _) => _shell.SceneChanged -= Rebuild;
+        new ViewSubscriptions(this, attached: Rebuild)
+            .Add(() => _shell.SceneChanged += Rebuild, () => _shell.SceneChanged -= Rebuild);
     }
 
     void Rebuild()

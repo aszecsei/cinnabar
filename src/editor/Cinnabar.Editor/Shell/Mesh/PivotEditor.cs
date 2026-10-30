@@ -44,11 +44,11 @@ public sealed class PivotEditor
         {
             return null;
         }
-        if (_shell.SelectedSceneEntity is { } selected && _session._editedMeshes.FirstOrDefault(m => m.Value == selected.Id) is { Key: not null } own)
+        if (_shell.SelectedSceneEntity is { } selected && _session.EditedMeshes.FirstOrDefault(m => m.Value == selected.Id) is { Key: not null } own)
         {
             return (own.Key, own.Value);
         }
-        return _session._editedMeshes.Count > 0 ? (_session._editedMeshes.First().Key, _session._editedMeshes.First().Value) : null;
+        return _session.EditedMeshes.Count > 0 ? (_session.EditedMeshes.First().Key, _session.EditedMeshes.First().Value) : null;
     }
 
     // The pivot gizmo's pose: the entity's world position with the world's axes.

@@ -403,7 +403,7 @@ public sealed class TextureMapper
     List<Operation>? MaterialOperations(string meshGuid, IEnumerable<int> faces, string material, out string? reason)
     {
         reason = null;
-        if (_session.FindMeshData(meshGuid) is not { } mesh || !_session._editedMeshes.TryGetValue(meshGuid, out var entity))
+        if (_session.FindMeshData(meshGuid) is not { } mesh || !_session.EditedMeshes.TryGetValue(meshGuid, out var entity))
         {
             return [];
         }
@@ -443,7 +443,7 @@ public sealed class TextureMapper
         var ray = _shell.Camera.Ray(pixel, width, height);
         (string Guid, int Face)? best = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in _session._editedMeshes.Keys)
+        foreach (var guid in _session.EditedMeshes.Keys)
         {
             if (_session.FindMeshData(guid) is { } mesh && _session.PlacementOf(guid) is { } placement && MeshPick.Face(mesh, placement, ray) is { } hit && hit.Distance < bestDistance)
             {
