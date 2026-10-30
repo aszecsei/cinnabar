@@ -58,7 +58,7 @@ The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inp
 
 **World position.** `Material_Inputs.position` is relative to the camera, which is what the passes need, but a pattern made from it would slide with the camera. The World Position node gives `world_position(inputs)`: the position relative to the render origin, `inputs.position + frame.origin_offset`, which stays put while the camera moves and keeps `f32`'s precision, because the origin is within 1.5 cells of the camera. The origin snaps to 1024 m, so a pattern whose period divides 1024 m has no seam when it moves; any other pattern jumps there. In a preview, the origin is the mesh's middle.
 
-**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs, so a material does not depend on how its inputs are made.
+**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs, so a material does not depend on how its inputs are made. At a ray's hit, which has no derivatives, `cn_sample` takes the level of the ray's cone (see [Hit shading](ray-scene.md#hit-shading)). A material's own HLSL that calls `Sample` or `ddx` still compiles there, but its derivatives mean nothing.
 
 ## Parallax occlusion mapping
 
@@ -85,7 +85,7 @@ The cooker compiles each material for each pass and each vertex path:
 
 | Axis | Values |
 |---|---|
-| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps) |
+| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps), and `Hit`, the compute entry `cs_hit` that evaluates an opaque or masked material of meshes at ray hits (see [Hit shading](ray-scene.md#hit-shading)) |
 | Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)) and the impostor path's `vs_impostor_*` with `ps_impostor_*`, as the passes `Impostor_Forward`, `Impostor_Prepass` and `Impostor_Depth` (see [Impostors](gpu-scene.md#impostors)); for a billboard, vertex pulling alone (see [Billboards](gpu-scene.md#billboards)); or for a `patches` material the patch path alone (see [Surfaces](surfaces.md#patches)) |
 | Static switches | Each combination that the material or an instance uses |
 
@@ -106,7 +106,7 @@ At runtime, `render.material_instance(parent)` makes a dynamic instance whose pa
 ## Runtime
 
 - **One table.** Each frame uploads a table with a block for each material or instance that it draws (`Material_Table`, in `lib/engine/render/materials.odin`). A block holds the parameters in the layout that the material's blob gives, with each texture's bindless index written: the resident texture, or the default for its parameter (white, black or a flat normal) until it is resident. Each draw record holds its block's offset.
-- **Pipelines by material.** The renderer creates the pipelines of each material and switch combination that a draw needs, one for each pass, from the material's blob, at most `MAX_MATERIAL_PIPELINES` combinations. With mesh shaders, an opaque material has mesh pipelines for its opaque passes too (see [GPU scene](gpu-scene.md#mesh-shader-path)), and an opaque material of meshes has the impostor passes' pipelines, which cull no faces (`Material_Pipeline.impostor_path`, see [Impostors](gpu-scene.md#impostors)). Instances with the same switches share them. A two-sided material culls no faces. The forward pipeline tests depth `Equal` and does not write it.
+- **Pipelines by material.** The renderer creates the pipelines of each material and switch combination that a draw needs, one for each pass, from the material's blob, at most `MAX_MATERIAL_PIPELINES` combinations. With mesh shaders, an opaque material has mesh pipelines for its opaque passes too (see [GPU scene](gpu-scene.md#mesh-shader-path)), and an opaque material of meshes has the impostor passes' pipelines, which cull no faces (`Material_Pipeline.impostor_path`, see [Impostors](gpu-scene.md#impostors)). Instances with the same switches share them. A two-sided material culls no faces. The forward pipeline tests depth `Equal` and does not write it. With `Ray_Query`, a material with a hit pass also has its compute pipeline (`Material_Pipeline.hit`), which drawing does not wait for.
 - **The default material.** A submesh without a material, or whose material cannot draw (not cooked, or without the variant that its instance needs), draws with the engine's default material, `lib/engine/content/materials/default.material`.
 - **Bins.** Culling writes each visible draw into the bin of its pipeline. Each bin is one indirect draw with a count buffer (see [GPU](../gpu/gpu-driven-and-mesh-shaders.md#gpu-driven-rendering)).
 - **Hot reload.** A new material blob updates its pipelines with `update_graphics_pipeline`, so the old shaders draw until the new ones compile. A new instance blob rewrites its parameter block. Both come through `asset.poll` (see [Content pipeline](../content/blobs-and-loading.md#loading)).

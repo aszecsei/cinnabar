@@ -560,9 +560,15 @@ Scene_Frame :: struct {
 	// Each view's Frame_Constants.
 	view_constants:  []gpu.Upload,
 	cull_constants:  gpu.Upload,
-	// With Ray_Query, the acceleration structure's instance of each instance that casts shadows.
+	// With the ray scene, the acceleration structure's instance of each mesh instance that casts shadows or has a
+	// surface (see docs/rendering/ray-scene.md#ray-scene), the hit table's records of each slot and of their submeshes,
+	// and the bins that its submeshes use.
 	accel_instances: gpu.Upload,
 	accel_count:     int,
+	hit_instances:   gpu.Upload,
+	hit_submeshes:   gpu.Upload,
+	hit_instance_count: int,
+	hit_bins:        []u32,
 	instances:       Buffer,
 	arguments:       Buffer,
 	mesh_arguments:  Buffer,
@@ -635,6 +641,13 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	items := make([dynamic]Cull_Item, r.platform.frame_allocator)
 	records := make([]Instance_Record, MAX_INSTANCES, r.platform.frame_allocator)
 	accel_instances := make([dynamic]gpu.Accel_Instance, r.platform.frame_allocator)
+	// Once a feature has traced, the meshes have acceleration structures, and hit shading needs the hit table.
+	tracing := r.residency.accels
+	hits: Hit_Table
+	if tracing {
+		hits.instances = make([]Hit_Instance, MAX_INSTANCES, r.platform.frame_allocator)
+		hits.submeshes = make([dynamic]Hit_Submesh, r.platform.frame_allocator)
+	}
 
 	it := ecs.query_iter(w, r.meshes.query)
 	for view in ecs.query_next(&it) {
@@ -664,10 +677,18 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 			if is_hidden(hidden, e) {
 				continue
 			}
+			first_item := len(items)
 			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, renderers[i], slot, view_model)
-			if mesh != nil && mesh.accel != {} && renderers[i].cast_shadows && !view_model {
-				reference := r.platform.gpu_accel_reference(mesh.accel)
-				append(&accel_instances, gpu.accel_instance(records[slot].rows, reference, id = slot, flags = {.Force_Opaque}))
+			// The view model's pose is not its place in the world, so rays do not see it.
+			if tracing && mesh != nil && mesh.accel != {} && !view_model {
+				mask: u8 = renderers[i].cast_shadows ? RAY_MASK_SHADOWS : 0
+				if add_hit_entries(&hits, slot, mesh, items[first_item:], r.materials.pipelines[:], hit_pipeline_ready, r.platform) {
+					mask |= RAY_MASK_SURFACES
+				}
+				if mask != 0 {
+					reference := r.platform.gpu_accel_reference(mesh.accel)
+					append(&accel_instances, gpu.accel_instance(records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
+				}
 			}
 		}
 	}
@@ -785,10 +806,18 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	table_upload, table_ok := upload_bytes(platform, table.bytes[:])
 	bin_upload, bins_ok := upload_bytes(platform, slice.to_bytes(sf.bin_offsets))
 	accel_upload, accel_ok := upload_bytes(platform, slice.to_bytes(accel_instances[:]))
+	hit_instance_upload, hit_submesh_upload: gpu.Upload
+	hits_ok := true
+	if tracing {
+		instances_ok, submeshes_ok: bool
+		hit_instance_upload, instances_ok = upload_bytes(platform, slice.to_bytes(hits.instances[:s.high]))
+		hit_submesh_upload, submeshes_ok = upload_bytes(platform, slice.to_bytes(hits.submeshes[:]))
+		hits_ok = instances_ok && submeshes_ok
+	}
 	surface_upload, surfaces_ok := upload_bytes(platform, slice.to_bytes(surfaces[:]))
 	set_upload, sets_ok := upload_bytes(platform, slice.to_bytes(sets[:]))
 	job_upload, jobs_ok := upload_bytes(platform, slice.to_bytes(jobs[:]))
-	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && surfaces_ok && sets_ok && jobs_ok) {
+	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && hits_ok && surfaces_ok && sets_ok && jobs_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
 		return
@@ -796,6 +825,17 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sf.item_upload, sf.mesh_upload, sf.table_upload, sf.bin_upload = item_upload, mesh_upload, table_upload, bin_upload
 	sf.surfaces, sf.surface_upload = surfaces[:], surface_upload
 	sf.accel_instances, sf.accel_count = accel_upload, len(accel_instances)
+	if tracing {
+		sf.hit_instances, sf.hit_submeshes, sf.hit_instance_count = hit_instance_upload, hit_submesh_upload, int(s.high)
+		// The fallback's bin is always dispatched: a hit of a submesh that has no record takes it too.
+		bins := make([dynamic]u32, r.platform.frame_allocator)
+		for used, bin in hits.used {
+			if used || bin == 0 {
+				append(&bins, u32(bin))
+			}
+		}
+		sf.hit_bins = bins[:]
+	}
 	sf.sets, sf.set_upload, sf.job_upload, sf.job_count, sf.set_instances = sets[:], set_upload, job_upload, len(jobs), set_instances
 }
 

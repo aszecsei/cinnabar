@@ -133,7 +133,7 @@ graphs_generate_evaluate_and_switches_keep_one_branch :: proc(t: ^testing.T) {
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		testing.expect_value(t, len(format.material_variants(data, blob)), 34)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 36)
 		// The off branch reads the time, so the material does too.
 		testing.expect(t, .Reads_Time in blob.flags)
 	}
@@ -198,6 +198,11 @@ parallax_and_emission_nodes_generate_and_compile :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(source, "float n3_height = n3_result.z;"))
 	testing.expect(t, strings.contains(source, "* exp2((n6_out));"))
 	testing.expect(t, strings.contains(source, "s.emission = n4_out;"))
+	// At ray hits, the march gives the UV as it is, and the hit pass compiles.
+	data := tree_blob(t, tree, tree_guid(t, tree, "relief.material"))
+	if blob, ok := format.material_view(data); ok {
+		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
+	}
 }
 
 @(private = "file")
@@ -404,7 +409,7 @@ previews_cook_unsaved_text_into_the_preview_area :: proc(t: ^testing.T) {
 	testing.expect(t, err == nil)
 	if blob, view_ok := format.material_view(data); view_ok {
 		// The default switches only.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 17)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 18)
 	}
 	// The material's own blob is not cooked by a preview.
 	testing.expect(t, !os.exists(fmt.tprintf("%s/cache/00112233445566778899aabbccddeeff.blob", tree.dir)))

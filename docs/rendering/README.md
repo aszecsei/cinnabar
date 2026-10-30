@@ -11,6 +11,7 @@ Read them in this order the first time.
 | [Frame](frame.md) | The passes, the `Renderer`, hooks, settings and views. |
 | [Quality](quality.md) | What the frame may cost: each feature's technique and level, the hardware's defaults and limits, and the saved choice. |
 | [GPU scene](gpu-scene.md) | Instance records, the render origin, slots, culling, the acceleration structure, and the mesh shader path, billboards and impostors. |
+| [Ray scene](ray-scene.md) | The acceleration structure that every traced feature shares, and hit shading, which evaluates the materials at ray hits. |
 | [Layers and output](layers-and-output.md) | The world, view model, UI and debug layers, the output pass and HDR output. |
 | [Lighting and shadows](lighting-and-shadows.md) | Clustered forward, the prepass, lights, area lights and shadows. |
 | [Transparency](transparency.md) | Moment-based and sorted transparency, and compute sprites. |
@@ -46,6 +47,7 @@ Read them in this order the first time.
 | `residency.odin` | `Residency`: the GPU resources of texture and mesh assets ([GPU residency](assets.md#gpu-residency)) |
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |
 | `shadows.odin` | Shadow assignment, the atlas, cascades, the ray-traced mask ([Shadows](lighting-and-shadows.md#shadows)) |
+| `ray_scene.odin` | The scene's acceleration structure, its requests and build, the hit table, and hit shading's binning and dispatches ([Ray scene](ray-scene.md#ray-scene)) |
 | `transparency.odin` | Moment-based and sorted transparency ([Transparency](transparency.md#transparency)) |
 | `particles.odin` | `Particle_System`, the pool, the systems' slots and the simulation's passes, the ribbons' build and the mesh particles' draws ([Particles](particles.md#particles)) |
 | `sprites.odin` | Compute sprites: `Sprite`, the records that the CPU and GPU passes write, their tiles, bins and light, and their passes into the moments ([Sprites](transparency.md#sprites)) |
@@ -59,13 +61,13 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `hit_bin`, `hit_default`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 
 | Type | Where it lives | What it is |
 |---|---|---|
-| `Renderer` | `Game_State` | Handles only: the residency table, the texture cache, the debug lines, the extractors, the materials, the GPU scene, the lights' clusters, the shadows' acceleration structure, the volumes' query, and each feature's pipelines |
+| `Renderer` | `Game_State` | Handles only: the residency table, the texture cache, the debug lines, the extractors, the materials, the GPU scene, the lights' clusters, the ray scene's acceleration structure, the volumes' query, and each feature's pipelines |
 | `Frame_Desc` | Frame memory | What the game asks for this frame: the view, the size, the editor's flags, the settings or nil, the hooks, the previews |
 | `Frame` | Frame memory | What the hooks see: the graph, the view and its projections, the targets, the exposure, the jitter, the hooks' `data` |
 | `View` | Either | A camera: pose, projection, viewport, and the view model's projection |

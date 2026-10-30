@@ -107,9 +107,6 @@ Mask_Constants :: struct {
 
 // Shadow_Passes is the shadows' state between frames, in the Renderer.
 Shadow_Passes :: struct {
-	// The GPU scene's top-level acceleration structure, made the first frame that traces (see enable_tracing). It is
-	// kept when tracing turns off, so turning it on again does not make every mesh's again.
-	accel:         gpu.Accel_Struct,
 	mask_pipeline: Shader_Pipeline,
 	sampler:       gpu.Sampler,
 }
@@ -132,9 +129,6 @@ Shadow_Frame :: struct {
 	atlas:          Texture,
 	mask:           Texture,
 	views_upload:   gpu.Upload,
-	// The meshes whose acceleration structures this frame builds.
-	builds:         []^Resident_Mesh,
-	accel:          Accel,
 	mask_constants: gpu.Upload,
 }
 
@@ -144,7 +138,6 @@ shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 }
 
 shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
-	platform.gpu_destroy_accel(s.accel)
 	platform.gpu_destroy_sampler(s.sampler)
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
 }
@@ -175,22 +168,8 @@ assign_shadows :: proc(f: ^Frame) {
 		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
 	}
-	trace := r.caps.ray_query && f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {}
-	if trace {
-		enable_tracing(r)
-	}
+	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
 	assign_shadow_views(f, trace)
-}
-
-// enable_tracing makes the GPU scene's acceleration structure, and has every mesh make its own, the first frame that
-// traces. Each mesh's is built in the frames after (see unbuilt_accels).
-@(private = "file")
-enable_tracing :: proc(r: ^Renderer) {
-	if r.shadows.accel != {} {
-		return
-	}
-	r.shadows.accel = r.platform.gpu_create_accel({kind = .Top, max_instances = MAX_INSTANCES, label = "gpu scene"})
-	residency_enable_accels(&r.residency)
 }
 
 // assign_shadow_views gives the lights their shadows, with the mask's channels first if trace.
@@ -453,8 +432,8 @@ frustum_planes_6 :: proc(m: matrix[4, 4]f32) -> (planes: [6][4]f32) {
 	return
 }
 
-// add_shadow_passes adds the shadow maps' pass, and with traced lights, the acceleration structures' builds and the
-// mask's pass. The maps draw the bins of each shadow view, which the culling filled.
+// add_shadow_passes adds the shadow maps' pass, and with traced lights, the mask's pass, which traces the ray scene
+// (see docs/rendering/ray-scene.md#ray-scene). The maps draw the bins of each shadow view, which the culling filled.
 @(private)
 add_shadow_passes :: proc(f: ^Frame) {
 	sf := f.shadows
@@ -469,48 +448,12 @@ add_shadow_passes :: proc(f: ^Frame) {
 	if sf.mask_count == 0 {
 		return
 	}
-	add_accel_passes(f)
 	sf.mask = create_texture(g, {size = f.size, format = SHADOW_MASK_FORMAT, label = "shadow mask"})
 	p := add_compute_pass(g, "shadow mask", trace_shadow_mask, f)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
-	read_accel(g, p, sf.accel)
+	read_accel(g, p, ray_scene_accel(f))
 	write(g, p, sf.mask)
-}
-
-// add_accel_passes builds the acceleration structures of the meshes that became ready, then the GPU scene's top-level
-// structure from this frame's instances.
-@(private = "file")
-add_accel_passes :: proc(f: ^Frame) {
-	r := f.renderer
-	sf := f.shadows
-	g := f.graph
-	sf.accel = import_accel(g, r.shadows.accel)
-	sf.builds = unbuilt_accels(&r.residency)
-	blases := make([]Accel, len(sf.builds), r.platform.frame_allocator)
-	if len(sf.builds) > 0 {
-		p := add_compute_pass(g, "build mesh accels", proc(ctx: ^Pass_Context) {
-			for m in (^Frame)(ctx.data).shadows.builds {
-				gpu.cmd_build_accel(ctx.cb, m.accel)
-			}
-		}, f)
-		for m, i in sf.builds {
-			build_input(g, p, import_buffer(g, m.positions))
-			build_input(g, p, import_buffer(g, m.indices))
-			blases[i] = import_accel(g, m.accel)
-			build_accel(g, p, blases[i])
-			m.accel_built = true
-		}
-	}
-	p := add_compute_pass(g, "build scene accel", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		instances := f.scene_frame.accel_instances
-		gpu.cmd_build_top_accel(ctx.cb, gpu_accel(ctx.graph, f.shadows.accel), instances.buffer, instances.offset, u32(f.scene_frame.accel_count))
-	}, f)
-	for blas in blases {
-		build_input(g, p, blas)
-	}
-	build_accel(g, p, sf.accel)
 }
 
 @(private = "file")
@@ -547,7 +490,7 @@ trace_shadow_mask :: proc(ctx: ^Pass_Context) {
 		depth         = gpu.read_index(gpu_texture(g, f.depth)),
 		normals       = gpu.read_index(gpu_texture(g, f.normals)),
 		output        = gpu.write_index(gpu_texture(g, sf.mask)),
-		accel         = gpu.read_index(gpu_accel(g, sf.accel)),
+		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
 		lights        = gpu.read_index(f.lights.upload.buffer),
 		lights_offset = f.lights.upload.offset,
 		size          = f.size,

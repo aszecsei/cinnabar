@@ -257,6 +257,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.post.upscalers.motion,
 		&r.scene.select_pipeline,
 		&r.scene.cull_patches_pipeline,
+		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
+		&r.shadows.mask_pipeline,
+		&r.ray_scene.bin_pipeline,
+		&r.ray_scene.fallback,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
@@ -266,6 +270,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky)
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
+		testing.expect(t, r.ray_scene.accel != {} && r.residency.accels, "the traced shadows did not request the ray scene")
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 

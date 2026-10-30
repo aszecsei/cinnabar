@@ -33,6 +33,7 @@ struct Fog_Push {
 // No shading model: the fog needs only the light loop's lookups.
 #define SHADING_NO_LIGHTING 1
 #include "material_lighting.hlsli"
+#include "ray_scene.hlsli"
 
 // Matches FOG_TILE in lib/engine/render/fog.odin.
 static const float FOG_TILE = 16;
@@ -62,7 +63,7 @@ float fog_shadow(Light_Record light, Light reaching, float3 p, float depth) {
 		ray.TMin = 0;
 		ray.TMax = light.type == LIGHT_DIRECTIONAL ? FOG_RAY_DISTANCE : length(light.position - p);
 		RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_SKIP_PROCEDURAL_PRIMITIVES | RAY_FLAG_FORCE_OPAQUE> query;
-		query.TraceRayInline(cn_accel(push.accel), 0, 0xff, ray);
+		query.TraceRayInline(cn_accel(push.accel), 0, RAY_MASK_SHADOWS, ray);
 		query.Proceed();
 		return query.CommittedStatus() == COMMITTED_NOTHING ? 1 : 0;
 #else

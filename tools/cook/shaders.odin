@@ -255,8 +255,8 @@ compile :: proc(options: Cook_Options, s: Asset_Source, target: Target, out_dir:
 
 // compile_file compiles a source file's entry into output, a temporary file that it removes, and gives its bytecode. A
 // failure without a message of its own is a problem of owner, the asset that the source is for, which is the source
-// itself unless it is generated.
-compile_file :: proc(options: Cook_Options, source_path: string, target: Target, output: string, problems: ^Problems, owner_path := "") -> (code: []byte, ok: bool) {
+// itself unless it is generated. defines, as NAME=VALUE, are the entry's own.
+compile_file :: proc(options: Cook_Options, source_path: string, target: Target, output: string, problems: ^Problems, owner_path := "", defines: []string = nil) -> (code: []byte, ok: bool) {
 	defer os.remove(output)
 	owner := owner_path if owner_path != "" else source_path
 	args := make([dynamic]string, context.temp_allocator)
@@ -269,6 +269,9 @@ compile_file :: proc(options: Cook_Options, source_path: string, target: Target,
 	}
 	for dir in options.includes {
 		append(&args, "-I", dir)
+	}
+	for define in defines {
+		append(&args, "-D", define)
 	}
 	append(&args, source_path)
 	state, stdout, stderr, err := run_process(args[:])

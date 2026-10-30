@@ -1030,13 +1030,15 @@ generate_source :: proc(
 	fmt.sbprintfln(&b, "#define MATERIAL_ADDITIVE %d", int(decl.blend == .Additive))
 	fmt.sbprintfln(&b, "#define MATERIAL_CUTOFF %f", decl.cutoff)
 	fmt.sbprintfln(&b, "#define SHADING_NO_LIGHTING %d", int(shading.no_lighting))
-	has_normal, has_base_color := false, false
+	has_normal, has_base_color, has_roughness := false, false, false
 	for input in shading.inputs {
 		has_normal ||= input.name == "normal" && input.type == "float3"
 		has_base_color ||= input.name == "base_color" && input.type == "float3"
+		has_roughness ||= input.name == "roughness" && input.type == "float"
 	}
 	fmt.sbprintfln(&b, "#define SHADING_HAS_NORMAL %d", int(has_normal))
 	fmt.sbprintfln(&b, "#define SHADING_HAS_BASE_COLOR %d", int(has_base_color))
+	fmt.sbprintfln(&b, "#define SHADING_HAS_ROUGHNESS %d", int(has_roughness))
 	for s, i in decl.switches {
 		fmt.sbprintfln(&b, "#define %s %d", s.name, (switches >> u32(i)) & 1)
 	}
@@ -1153,7 +1155,21 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 			Material_Entry{.Impostor_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_depth"}},
 		)
 	}
+	// Rays see the meshes of a material as authored, a billboard's too. A patches or ribbon material draws no meshes.
+	if !decl.patches && !decl.ribbon {
+		append(&entries, Material_Entry{.Hit, {.Compute, "cs_" + SHADER_MODEL, "cs_hit"}})
+	}
 	return entries[:]
+}
+
+// The hit pass compiles with MATERIAL_HIT, which gives material_passes.hlsli its template alone, and the material its
+// push constants and explicit-level sampling (see docs/rendering/ray-scene.md#hit-shading).
+@(private = "file", rodata)
+hit_defines := [?]string{"MATERIAL_HIT=1"}
+
+@(private = "file")
+entry_defines :: proc(entry: Material_Entry) -> []string {
+	return entry.pass == .Hit ? hit_defines[:] : nil
 }
 
 // compile_source compiles a generated source's entries, the main pass's first: an error in evaluate fails it, and
@@ -1194,7 +1210,7 @@ compile_source :: proc(
 		}
 		for entry, i in entries {
 			output := fmt.tprintf("%s.%v.%v.dxil", path, entry.pass, entry.target.stage)
-			code := compile_file(options, path, entry.target, fmt.tprintf("%s.tmp", output), &pass.problems, a.path) or_return
+			code := compile_file(options, path, entry.target, fmt.tprintf("%s.tmp", output), &pass.problems, a.path, entry_defines(entry)) or_return
 			if err := os.write_entire_file(output, code); err != nil {
 				report_error(&pass.problems, a.path, 0, 0, "cannot write %s: %v", output, err)
 				return

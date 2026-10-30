@@ -79,6 +79,8 @@ Renderer :: struct {
 	scene:           Gpu_Scene,
 	lights:          Lights,
 	shadows:         Shadow_Passes,
+	// The GPU scene's acceleration structure and hit shading (see docs/rendering/ray-scene.md#ray-scene).
+	ray_scene:       Ray_Scene,
 	previews:        Previews,
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
@@ -254,6 +256,8 @@ Frame :: struct {
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
+	// The ray scene, when a feature requested it this frame (see request_ray_scene).
+	ray_scene:                ^Ray_Scene_Frame,
 	debug_lines:              gpu.Upload,
 	tested_lines:             int,
 	overlay_lines:            int,
@@ -333,6 +337,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	scene_init(&r.scene, platform)
 	lights_init(&r.lights, platform, w)
 	shadows_init(&r.shadows, platform)
+	ray_scene_init(&r.ray_scene)
 	previews_init(&r.previews, r)
 	ao_init(&r.ao)
 	gi_init(&r.gi)
@@ -379,6 +384,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	scene_destroy(&r.scene, r.platform)
 	lights_destroy(&r.lights, r.platform)
 	shadows_destroy(&r.shadows, r.platform)
+	ray_scene_destroy(&r.ray_scene, r.platform)
 	previews_destroy(&r.previews, r)
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
@@ -457,6 +463,8 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, ambient)
 	add_scene_passes(f, ambient)
+	// Every request for the ray scene came before, so its build is before every pass that traces it.
+	add_ray_scene_passes(f)
 	begin_sprites(f, desc.sprites, &r.sprites.main)
 	begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
 	lines := debug.frame_lines(&r.debug)
@@ -597,6 +605,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_post_pipelines(r, force)
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
+	sync_ray_scene_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_sky_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
