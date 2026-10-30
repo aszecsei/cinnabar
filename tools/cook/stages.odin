@@ -339,6 +339,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	// The meshes and the textures cook at once, the meshes first, as their costs differ the most. Their problems, counts
 	// and files join the pass's after, in order.
 	work := Stage_Work {
+		pass     = pass,
 		options  = options,
 		a        = a^,
 		usd      = usd,
@@ -350,6 +351,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		log      = pass.problems.log,
 		jobs     = make([]Stage_Job, len(parts) + len(textures), context.temp_allocator),
 	}
+	step_begin(pass, .Stage, a.name, len(work.jobs))
 	parallel_for(len(work.jobs), &work, cook_stage_job)
 	for t, i in textures {
 		job := &work.jobs[len(parts) + i]
@@ -923,6 +925,8 @@ stage_watch_layers :: proc(layer: string, manifest: ^Stage_Manifest) {
 // Stage_Work is a stage's meshes and textures, which cook_stage_job cooks at once, one job for each.
 @(private = "file")
 Stage_Work :: struct {
+	// The jobs change only the pass's progress.
+	pass:     ^Pass,
 	options:  Cook_Options,
 	a:        Asset_Source,
 	usd:      ^Cn_Usd,
@@ -961,6 +965,7 @@ cook_stage_job :: proc(data: rawptr, index: int) {
 		cook_stage_texture(w, w.textures[index - len(w.parts)], job)
 	}
 	scratch_keep(&job.scratch, &job.file.path)
+	step_advance(w.pass)
 }
 
 @(private = "file")

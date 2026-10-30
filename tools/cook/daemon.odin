@@ -100,12 +100,25 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	}
 }
 
-// daemon_pass cooks every kind of asset, and updates the index. It logs the problems that changed, says what it
-// cooked, and sends the editor what changed. It cooks the assets in force whatever their keys.
+// daemon_pass cooks every kind of asset, and updates the index. It sends the editor its progress while it cooks, logs
+// the problems that changed, says what it cooked, and sends the editor what changed. It cooks the assets in force
+// whatever their keys.
 @(private = "file")
 daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	start := time.tick_now()
-	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force)
+	progress := Progress {
+		data     = d,
+		delay    = PROGRESS_DELAY,
+		interval = PROGRESS_INTERVAL,
+	}
+	if d.linked_connection != 0 {
+		// The main thread cooks, so the link does not change until the pass is done; server_send takes any thread.
+		progress.report = proc(data: rawptr, p: cook_link.Cook_Progress) {
+			d := (^Daemon)(data)
+			server_send(&d.server, d.linked_connection, p)
+		}
+	}
+	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress)
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
 	changes := index_diff(&d.index, &next)

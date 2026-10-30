@@ -59,7 +59,10 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	}
 	ok := true
 	for kind in ([]format.Asset_Kind{.Prefab, .Scene}) {
-		for i in assets_of(assets, kind) {
+		of_kind := assets_of(assets, kind)
+		step_begin(pass, kind, "", len(of_kind))
+		for i in of_kind {
+			defer step_advance(pass)
 			s := &assets[i]
 			settings_ok := check_settings(s^, problems)
 			scene, scene_ok := parsed[i]

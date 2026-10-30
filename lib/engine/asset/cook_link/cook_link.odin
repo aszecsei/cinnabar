@@ -31,6 +31,7 @@ Message :: union {
 	Shading_Models,
 	Cook_Preview,
 	Preview_Result,
+	Cook_Progress,
 }
 
 // Editor to daemon, first: the editor's protocol version and its name.
@@ -424,6 +425,16 @@ Cook_Preview :: struct {
 Preview_Result :: struct {
 	error:    string,
 	problems: []Problem,
+}
+
+// Daemon to editor, during a pass: how far it has got with the step that it cooks now, the assets of a kind, or a
+// stage's meshes and textures. A pass that is quick sends none, and Cook_Finished follows the last.
+Cook_Progress :: struct {
+	kind:  Asset_Kind,
+	// For a stage's step, the stage's root and path, such as "game/stages/sponza.usdz", otherwise "".
+	name:  string,
+	done:  u32,
+	total: u32,
 }
 
 Header :: wire.Header

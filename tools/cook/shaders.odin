@@ -54,7 +54,9 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		return false
 	}
 	ok := true
+	step_begin(pass, .Shader, "", len(shaders))
 	for i in shaders {
+		defer step_advance(pass)
 		s := &assets[i]
 		inputs, inputs_ok := gather_includes(s.path, s.source, options.includes[:], problems)
 		if !check_settings(s^, problems) || !inputs_ok {

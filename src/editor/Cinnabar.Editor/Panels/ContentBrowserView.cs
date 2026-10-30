@@ -124,6 +124,7 @@ public sealed class ContentBrowserView : DockPanel
             .Add(() => _index.Changed += PostRebuild, () => _index.Changed -= PostRebuild)
             .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
             .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
+            .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus)
             .Add(() => _shell.Content.ContentRevealed += OnRevealed, () => _shell.Content.ContentRevealed -= OnRevealed);
     }
 
@@ -297,6 +298,9 @@ public sealed class ContentBrowserView : DockPanel
         var failed = last is { Failed: > 0 } ? $"{last.Failed} {Plural(last.Failed, "asset")} failed to cook" : "";
         _status.Text = cook.State switch
         {
+            // A stage's step is its meshes and textures; another's is the assets of its kind.
+            CookState.Linked when cook.Progress is { } progress =>
+                $"Cooking {(progress.Name != "" ? progress.Name[(progress.Name.LastIndexOf('/') + 1)..] : KindNoun(progress.Kind) + "s")} {progress.Done}/{progress.Total}",
             CookState.Linked when last is { Cooked.Length: > 0 } =>
                 $"Cooked {string.Join(", ", last.Cooked.Select(c => $"{c.Count} {Plural(c.Count, KindNoun(c.Kind))}"))} in {last.Milliseconds:0} ms"
                 + (failed == "" ? "" : $", {failed}"),

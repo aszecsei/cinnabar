@@ -6,6 +6,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 
 import format "cinnabar:engine/asset/format"
 
@@ -49,6 +50,7 @@ Pass :: struct {
 	// its hash.
 	shadings:   [dynamic]^Shading_Decl,
 	compiled:   map[u64][][]byte,
+	progress:   Progress,
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...
@@ -126,9 +128,19 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 // cook scans the roots and cooks the assets of the kinds whose keys changed. When it writes a blob, it then writes the
 // cache's generation, so a running game swaps the pass's blobs together (see docs/content/blobs-and-loading.md#loading). It
 // logs each problem as it finds it, unless log_problems is false. It cooks the assets in force whatever their keys.
-cook :: proc(options: Cook_Options, kinds: Asset_Kinds, log_problems := true, force: map[format.Guid]bool = nil) -> (pass: Pass) {
+cook :: proc(
+	options: Cook_Options,
+	kinds: Asset_Kinds,
+	log_problems := true,
+	force: map[format.Guid]bool = nil,
+	progress: Progress = {},
+) -> (
+	pass: Pass,
+) {
 	pass.problems.log = log_problems
 	pass.force = force
+	pass.progress = progress
+	pass.progress.start = time.tick_now()
 	scanned: bool
 	pass.assets, pass.folders, pass.shared, scanned = scan(options.roots[:], &pass.problems)
 	pass.ok = scanned

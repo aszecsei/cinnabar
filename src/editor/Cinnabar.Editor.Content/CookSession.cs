@@ -76,6 +76,9 @@ public sealed class CookSession : IDisposable
     /// <summary>The daemon's last cook since the link came up.</summary>
     public CookFinished? LastCook { get; private set; }
 
+    /// <summary>How far the daemon's pass has got, while it cooks one that takes a while, or null.</summary>
+    public CookProgress? Progress { get; private set; }
+
     public event Action? StateChanged;
 
     /// <summary>A line of the daemon's output that did not come over the link, or a line about the daemon from the editor.</summary>
@@ -85,6 +88,8 @@ public sealed class CookSession : IDisposable
     public event Action<Log>? LogReceived;
 
     public event Action<CookFinished>? Cooked;
+
+    public event Action? ProgressChanged;
 
     public void Start()
     {
@@ -228,8 +233,13 @@ public sealed class CookSession : IDisposable
             case Log log:
                 LogReceived?.Invoke(log);
                 break;
+            case CookProgress progress:
+                Progress = progress;
+                ProgressChanged?.Invoke();
+                break;
             case CookFinished finished:
                 LastCook = finished;
+                Progress = null;
                 Cooked?.Invoke(finished);
                 break;
             case OperationResult result:
@@ -303,6 +313,7 @@ public sealed class CookSession : IDisposable
         FailRequests();
         Index.Unlink();
         LastCook = null;
+        Progress = null;
         // Closing the job kills the daemon.
         _process?.Dispose();
         _process = null;

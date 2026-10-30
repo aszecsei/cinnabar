@@ -113,7 +113,9 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	defer type_checker_close(&checker)
 	vm: Schema_VM
 	defer schema_vm_close(&vm)
+	step_begin(pass, .Script, "", len(scripts))
 	for &s, index in scripts {
+		defer step_advance(pass)
 		if s.failed {
 			continue
 		}
