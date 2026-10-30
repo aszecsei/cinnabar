@@ -65,6 +65,7 @@ public sealed partial class EditorShell : IDisposable
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
         Host = new HostSession(options);
+        Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
         WireCook();
@@ -102,11 +103,11 @@ public sealed partial class EditorShell : IDisposable
         Selection.Changed += (old, entities) =>
         {
             _selectedSceneIds = [.. entities.Select(e => World.Find(e)?.SceneId ?? 0).Where(id => id != 0)];
-            foreach (var gone in old.Except(entities).Where(e => !_watches.ContainsKey(e)))
+            foreach (var gone in old.Except(entities).Where(e => !Watches.Contains(e)))
             {
                 Host.Send(new UnwatchEntity(gone));
             }
-            foreach (var added in entities.Except(old).Where(e => !_watches.ContainsKey(e)))
+            foreach (var added in entities.Except(old).Where(e => !Watches.Contains(e)))
             {
                 Host.Send(new WatchEntity(added));
             }
@@ -120,7 +121,7 @@ public sealed partial class EditorShell : IDisposable
         {
             SendLiveMeshes();
             ResendMeshOverlay();
-            foreach (var entity in Selection.Entities.Union(_watches.Keys))
+            foreach (var entity in Selection.Entities.Union(Watches.Handles))
             {
                 Host.Send(new WatchEntity(entity));
             }

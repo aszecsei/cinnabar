@@ -1,7 +1,5 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Panels;
-using UnwatchEntity = Cinnabar.Editor.Link.Protocol.UnwatchEntity;
-using WatchEntity = Cinnabar.Editor.Link.Protocol.WatchEntity;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -11,9 +9,8 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class EditorShell
 {
-    // Entities that a panel other than the properties panel watches, by handle, with how many times, so a change of
-    // the selection does not stop their values.
-    readonly Dictionary<ulong, int> _watches = [];
+    /// <summary>Entities that a panel other than the properties panel watches.</summary>
+    public EntityWatches Watches { get; }
 
     /// <summary>The volume that holds the open scene's atmosphere, or null without one, or while the game plays.</summary>
     public SceneEntity? AtmosphereVolume => CanEditScene ? Atmosphere.Find(Scene.Expanded.Flat) : null;
@@ -109,35 +106,7 @@ public sealed partial class EditorShell
     }
 
     /// <summary>Watches an entity's values for a panel, as the selection's are, until as many <see cref="Unwatch"/>.</summary>
-    public void Watch(ulong handle)
-    {
-        if (handle == 0)
-        {
-            return;
-        }
-        var count = _watches.GetValueOrDefault(handle);
-        _watches[handle] = count + 1;
-        if (count == 0 && !Selection.Contains(handle))
-        {
-            Host.Send(new WatchEntity(handle));
-        }
-    }
+    public void Watch(ulong handle) => Watches.Watch(handle);
 
-    public void Unwatch(ulong handle)
-    {
-        if (!_watches.TryGetValue(handle, out var count))
-        {
-            return;
-        }
-        if (count > 1)
-        {
-            _watches[handle] = count - 1;
-            return;
-        }
-        _watches.Remove(handle);
-        if (!Selection.Contains(handle))
-        {
-            Host.Send(new UnwatchEntity(handle));
-        }
-    }
+    public void Unwatch(ulong handle) => Watches.Unwatch(handle);
 }
