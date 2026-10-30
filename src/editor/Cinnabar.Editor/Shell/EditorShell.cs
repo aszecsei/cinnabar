@@ -64,6 +64,7 @@ public sealed partial class EditorShell : IDisposable
         _options = options;
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
+        _gizmo = new GizmoController(BeginEdit, PreviewEdit, CommitEdit, CancelEdit, SendGizmo);
         Host = new HostSession(options);
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);

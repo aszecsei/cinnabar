@@ -58,7 +58,6 @@ public sealed partial class EditorShell
 
     public static readonly IReadOnlyList<string> DensityOptions = ["32", "64", "128", "256", "512", "1024", "2048"];
 
-    TextureDrag? _textureDrag;
     Dictionary<string, MeshData>? _mappingStarts;
     string? _faceMaterialKey;
     double? _texelDensityOverride;
@@ -531,7 +530,7 @@ public sealed partial class EditorShell
     /// A gizmo drag of the selected faces' mappings: each step moves, turns or scales the texture about the pivot, in
     /// the mesh's space, so the texture follows the gizmo as the vertices would.
     /// </summary>
-    sealed class TextureDrag
+    sealed class TextureDrag : IGizmoTarget
     {
         readonly EditorShell _shell;
         readonly Vec3 _pivot;
@@ -550,6 +549,13 @@ public sealed partial class EditorShell
         }
 
         public bool IsEmpty => _meshes.Count == 0;
+
+        // A shift snaps the texture's offset; turns and scales snap as the entity gizmo's do.
+        public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
+        {
+            var move = _shell.Tool == Tool.Move;
+            return Apply(drag.Update(pixel, snap && !move ? _shell.Snapping : null), snap && move);
+        }
 
         public List<Operation> Apply(GizmoChange change, bool snap)
         {

@@ -35,7 +35,6 @@ public sealed partial class EditorShell
     readonly Dictionary<string, ulong> _editedMeshes = [];
     MeshItem? _hovered;
     string _sentOverlay = "";
-    MeshDrag? _meshDrag;
     BlockDrag? _blockDrag;
 
     public bool InMeshMode { get; private set; }
@@ -358,7 +357,7 @@ public sealed partial class EditorShell
     /// <summary>Highlights the element under the mouse. The game hears of it only when it changes.</summary>
     public void HoverMesh(Vec2 pixel)
     {
-        if (!InMeshMode || _meshDrag != null)
+        if (!InMeshMode || _gizmo.Target is MeshDrag)
         {
             return;
         }
@@ -494,8 +493,7 @@ public sealed partial class EditorShell
             {
                 return false;
             }
-            _drag = new GizmoDrag(GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
-            SendGizmo();
+            _gizmo.Start(new GizmoDrag(GizmoKind.Translate, HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), new DistanceDrag(this), null);
             return true;
         }
         if (EditPivot)
@@ -510,10 +508,8 @@ public sealed partial class EditorShell
             {
                 return false;
             }
-            _drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
-            _textureDrag = textureDrag;
-            BeginEdit($"{Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
-            SendGizmo();
+            _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
+                $"{Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
             return true;
         }
         var drag = new MeshDrag(this, pivot, axes);
@@ -521,49 +517,10 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        _drag = new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
-        _meshDrag = drag;
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        BeginEdit($"{verb} {ElementsLabel(MeshSelection.Count)}");
-        SendGizmo();
+        _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
+            $"{verb} {ElementsLabel(MeshSelection.Count)}");
         return true;
-    }
-
-    void DragMeshGizmo(Vec2 pixel, bool invertSnap)
-    {
-        if (_pending != null)
-        {
-            DragDistance(pixel, invertSnap);
-            return;
-        }
-        if (_drag == null || Scene is not { InTransaction: true })
-        {
-            return;
-        }
-        if (_pivotDrag != null)
-        {
-            DragPivotGizmo(pixel, invertSnap);
-            return;
-        }
-        if (_textureDrag != null)
-        {
-            var textureChange = _drag.Update(pixel, Snap != invertSnap && Tool != Tool.Move ? Snapping : null);
-            PreviewEdit(_textureDrag.Apply(textureChange, Snap != invertSnap && Tool == Tool.Move));
-            return;
-        }
-        if (_meshDrag == null)
-        {
-            return;
-        }
-        var snapping = Snap != invertSnap;
-        // A move snaps each vertex's world position to the grid, not the drag's delta; turns and scales snap as the
-        // entity gizmo's do.
-        var change = _drag.Update(pixel, snapping && Tool != Tool.Move ? Snapping : null);
-        var ops = _meshDrag.Apply(change, snapping && Tool == Tool.Move);
-        if (ops.Count > 0)
-        {
-            PreviewEdit(ops);
-        }
     }
 
     /// <summary>Deletes the selected elements of each edited mesh, as one undo entry.</summary>
@@ -751,7 +708,7 @@ public sealed partial class EditorShell
     /// A gizmo drag of the sub-selection: the selected vertices of each edited mesh from the start of the drag, which
     /// each step moves, turns or scales about the pivot, in world space, and puts back into the mesh's space.
     /// </summary>
-    sealed class MeshDrag
+    sealed class MeshDrag : IGizmoTarget
     {
         readonly EditorShell _shell;
         readonly long[] _pivot;
@@ -775,6 +732,14 @@ public sealed partial class EditorShell
         }
 
         public bool IsEmpty => _meshes.Count == 0;
+
+        // A move snaps each vertex's world position to the grid, not the drag's delta; turns and scales snap as the
+        // entity gizmo's do.
+        public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
+        {
+            var move = _shell.Tool == Tool.Move;
+            return Apply(drag.Update(pixel, snap && !move ? _shell.Snapping : null), snap && move);
+        }
 
         public List<Operation> Apply(GizmoChange change, bool snapToGrid)
         {
