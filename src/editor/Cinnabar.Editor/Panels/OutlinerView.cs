@@ -25,9 +25,6 @@ public sealed class OutlinerView : DockPanel
     static readonly HashSet<string> Structural = ["Parent", "Previous_Transform", "Inactive", "Disabled", "Name", "Scene_Entity"];
     const double Indent = 14;
 
-    // A press must move this far, in pixels, before it starts a drag.
-    const double DragThreshold = 4;
-
     readonly EditorShell _shell;
     readonly WorldModel _world;
     readonly Selection _selection;
@@ -89,23 +86,12 @@ public sealed class OutlinerView : DockPanel
         };
         _filter.TextChanged += (_, _) => Rebuild();
 
-        AttachedToVisualTree += (_, _) =>
-        {
-            _world.EntitiesChanged += Rebuild;
-            _world.TypesChanged += Rebuild;
-            _selection.Changed += OnSelectionChanged;
-            _shell.ProblemsChanged += Rebuild;
-            _shell.VisibilityChanged += Rebuild;
-            Rebuild();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _world.EntitiesChanged -= Rebuild;
-            _world.TypesChanged -= Rebuild;
-            _selection.Changed -= OnSelectionChanged;
-            _shell.ProblemsChanged -= Rebuild;
-            _shell.VisibilityChanged -= Rebuild;
-        };
+        new ViewSubscriptions(this, attached: Rebuild)
+            .Add(() => _world.EntitiesChanged += Rebuild, () => _world.EntitiesChanged -= Rebuild)
+            .Add(() => _world.TypesChanged += Rebuild, () => _world.TypesChanged -= Rebuild)
+            .Add(() => _selection.Changed += OnSelectionChanged, () => _selection.Changed -= OnSelectionChanged)
+            .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
+            .Add(() => _shell.VisibilityChanged += Rebuild, () => _shell.VisibilityChanged -= Rebuild);
     }
 
     void Rebuild()
@@ -248,7 +234,7 @@ public sealed class OutlinerView : DockPanel
                 return;
             }
             var moved = e.GetPosition(view) - press.GetPosition(view);
-            if (Math.Abs(moved.X) + Math.Abs(moved.Y) < DragThreshold)
+            if (!Gestures.MovedPastAcrossAndDown(moved))
             {
                 return;
             }

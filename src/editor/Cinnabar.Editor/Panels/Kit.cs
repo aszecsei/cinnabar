@@ -5,10 +5,13 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 
-namespace Cinnabar.Editor.Materials;
+namespace Cinnabar.Editor.Panels;
 
-/// <summary>The material editor's small controls, which look like the properties panel's field editors.</summary>
-static class MaterialControls
+/// <summary>
+/// The editor's small controls, which the properties panel's field editors and the material editor's panels share: a
+/// box, a choice, a button, a row of a name and a control.
+/// </summary>
+static class Kit
 {
     /// <summary>
     /// A box that edits text: Enter or leaving it commits, and Escape puts the text back. With
@@ -71,11 +74,40 @@ static class MaterialControls
         return combo;
     }
 
-    public static Button SmallButton(string text, string tip, Action click)
+    /// <summary>A button of a word or a sign. With <paramref name="handled"/>, the click goes no farther up, as to a header that it sits in.</summary>
+    public static Button SmallButton(string text, string tip, Action click, bool handled = false)
     {
         var button = new Button { Content = text, Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
         ToolTip.SetTip(button, tip);
-        button.Click += (_, _) => click();
+        button.Click += (_, e) =>
+        {
+            click();
+            if (handled)
+            {
+                e.Handled = true;
+            }
+        };
+        return button;
+    }
+
+    /// <summary>
+    /// A button across the panel that opens a menu. It is disabled when the menu has no items, unless the menu fills
+    /// itself as it opens.
+    /// </summary>
+    public static Button AddButton(string label, MenuFlyout menu, bool disabledWhenEmpty = true)
+    {
+        var button = new Button
+        {
+            Content = label,
+            Flyout = menu,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            Classes = { "add-component" },
+        };
+        if (disabledWhenEmpty)
+        {
+            button.IsEnabled = menu.Items.Count > 0;
+        }
         return button;
     }
 
@@ -115,20 +147,29 @@ static class MaterialControls
     public static GraphNumbers? Numbers(string text, int count = 0) =>
         GraphNumbers.TryParse(text) is { } n && (count == 0 || n.Values.Count == count) ? n : null;
 
+    /// <summary>The color of a linear color's first three numbers, as the screen shows it.</summary>
+    public static Color SrgbColor(IReadOnlyList<double> linear)
+    {
+        static byte Encode(double v) => (byte)Math.Round(Model.LinearColor.ToSrgb(v) * 255);
+        return Color.FromRgb(Encode(linear[0]), Encode(linear[1]), Encode(linear[2]));
+    }
+
+    /// <summary>The rounded outline of a swatch, to give a size and a color.</summary>
+    public static Border SwatchFrame() => new()
+    {
+        CornerRadius = new CornerRadius(3),
+        BorderBrush = new SolidColorBrush(Palette.SwatchBorder),
+        BorderThickness = new Thickness(1),
+    };
+
     /// <summary>A swatch of a linear color, as the screen shows it.</summary>
     public static Border Swatch(IReadOnlyList<double> rgba)
     {
-        static byte Encode(double linear) => (byte)Math.Round(Model.LinearColor.ToSrgb(linear) * 255);
-        var color = rgba.Count >= 3 ? Color.FromRgb(Encode(rgba[0]), Encode(rgba[1]), Encode(rgba[2])) : Colors.Transparent;
-        return new Border
-        {
-            Width = 18,
-            Height = 18,
-            CornerRadius = new CornerRadius(3),
-            BorderBrush = new SolidColorBrush(Color.Parse("#55555C")),
-            BorderThickness = new Thickness(1),
-            Background = new SolidColorBrush(color),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
+        var swatch = SwatchFrame();
+        swatch.Width = 18;
+        swatch.Height = 18;
+        swatch.Background = new SolidColorBrush(rgba.Count >= 3 ? SrgbColor(rgba) : Colors.Transparent);
+        swatch.VerticalAlignment = VerticalAlignment.Center;
+        return swatch;
     }
 }

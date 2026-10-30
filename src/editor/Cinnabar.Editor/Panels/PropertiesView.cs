@@ -35,7 +35,7 @@ public sealed class PropertiesView : ScrollViewer
     // The rows of the fields, by component ID or behaviour class, and field name.
     readonly FieldGrid _grid;
     // Groups that the user collapsed, by title, which stay collapsed across selections.
-    readonly HashSet<string> _collapsed = [];
+    readonly SectionExpander _sections = new();
     string _structure = "";
 
     public PropertiesView(EditorShell shell)
@@ -58,29 +58,15 @@ public sealed class PropertiesView : ScrollViewer
                 _shell.AddBehaviour(SelectedSceneIds(), script);
             }
         });
-        AttachedToVisualTree += (_, _) =>
-        {
-            _selection.Changed += OnSelectionChanged;
-            _world.EntitiesChanged += Rebuild;
-            _world.TypesChanged += Rebuild;
-            _world.ValuesChanged += OnValuesChanged;
-            _shell.SceneChanged += OnSceneChanged;
-            _shell.ProblemsChanged += Rebuild;
-            _shell.ModeChanged += Rebuild;
-            _shell.Assets.Changed += OnSceneChanged;
-            Rebuild();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _selection.Changed -= OnSelectionChanged;
-            _world.EntitiesChanged -= Rebuild;
-            _world.TypesChanged -= Rebuild;
-            _world.ValuesChanged -= OnValuesChanged;
-            _shell.SceneChanged -= OnSceneChanged;
-            _shell.ProblemsChanged -= Rebuild;
-            _shell.ModeChanged -= Rebuild;
-            _shell.Assets.Changed -= OnSceneChanged;
-        };
+        new ViewSubscriptions(this, attached: Rebuild)
+            .Add(() => _selection.Changed += OnSelectionChanged, () => _selection.Changed -= OnSelectionChanged)
+            .Add(() => _world.EntitiesChanged += Rebuild, () => _world.EntitiesChanged -= Rebuild)
+            .Add(() => _world.TypesChanged += Rebuild, () => _world.TypesChanged -= Rebuild)
+            .Add(() => _world.ValuesChanged += OnValuesChanged, () => _world.ValuesChanged -= OnValuesChanged)
+            .Add(() => _shell.SceneChanged += OnSceneChanged, () => _shell.SceneChanged -= OnSceneChanged)
+            .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
+            .Add(() => _shell.ModeChanged += Rebuild, () => _shell.ModeChanged -= Rebuild)
+            .Add(() => _shell.Assets.Changed += OnSceneChanged, () => _shell.Assets.Changed -= OnSceneChanged);
     }
 
     // A script that the content does not have: deleted, or moved outside the editor without its .meta file. The game
@@ -444,15 +430,7 @@ public sealed class PropertiesView : ScrollViewer
                     .Select(d => new AddComponent(d.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))))]);
             menu.Items.Add(item);
         }
-        return new Button
-        {
-            Content = "Add Component",
-            Flyout = menu,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Classes = { "add-component" },
-            IsEnabled = menu.Items.Count > 0,
-        };
+        return Kit.AddButton("Add Component", menu);
     }
 
     // An entity that the world does not know shows as the engine prints it.
@@ -600,18 +578,7 @@ public sealed class PropertiesView : ScrollViewer
     Control Kept(SceneEntity document, SceneComponent component)
     {
         var title = FieldValues.Humanize(component.Name.Length > 0 ? component.Name : component.Id.ToString());
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Classes = { "fields" } };
-        for (var i = 0; i < component.Fields.Count; i++)
-        {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var name = new TextBlock { Text = FieldValues.Humanize(component.Fields[i].Name), Classes = { "field-name" } };
-            var value = new TextBlock { Text = SceneFile.FormatValue(component.Fields[i].Value), Classes = { "dim" }, TextTrimming = TextTrimming.CharacterEllipsis };
-            Grid.SetRow(name, i);
-            Grid.SetRow(value, i);
-            Grid.SetColumn(value, 1);
-            rows.Children.Add(name);
-            rows.Children.Add(value);
-        }
+        var rows = ValueRows(component.Fields);
         var content = new StackPanel
         {
             Spacing = 4,
@@ -631,19 +598,7 @@ public sealed class PropertiesView : ScrollViewer
         var text = missing
             ? $"Its script, {script}, is not in the content: it was deleted, or moved without its .meta file. Restore it, or remove the behaviour. A running game keeps it until the host restarts."
             : "The game did not attach it. The console says why.";
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*"), Classes = { "fields" } };
-        var fields = behaviour?.Fields ?? [];
-        for (var i = 0; i < fields.Count; i++)
-        {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
-            var name = new TextBlock { Text = FieldValues.Humanize(fields[i].Name), Classes = { "field-name" } };
-            var value = new TextBlock { Text = SceneFile.FormatValue(fields[i].Value), Classes = { "dim" }, TextTrimming = TextTrimming.CharacterEllipsis };
-            Grid.SetRow(name, i);
-            Grid.SetRow(value, i);
-            Grid.SetColumn(value, 1);
-            rows.Children.Add(name);
-            rows.Children.Add(value);
-        }
+        var rows = ValueRows(behaviour?.Fields ?? []);
         var content = new StackPanel
         {
             Spacing = 4,
@@ -653,18 +608,25 @@ public sealed class PropertiesView : ScrollViewer
             remove: document != null && behaviour != null ? () => _shell.Edit($"Remove {title}", new RemoveBehaviour(document.Id, script)) : null);
     }
 
+    // The fields of a component or behaviour that the game does not have, as the scene writes their values.
+    static Grid ValueRows(IReadOnlyList<SceneField> fields)
+    {
+        var rows = new FieldRows();
+        foreach (var field in fields)
+        {
+            var name = new TextBlock { Text = FieldValues.Humanize(field.Name), Classes = { "field-name" } };
+            var value = new TextBlock { Text = SceneFile.FormatValue(field.Value), Classes = { "dim" }, TextTrimming = TextTrimming.CharacterEllipsis };
+            rows.Add(name, value);
+        }
+        return rows.Grid;
+    }
+
     Control Expander(string title, Control content, string? badge, bool disabled, Action? remove)
     {
         var header = new DockPanel();
         if (remove != null)
         {
-            var button = new Button { Content = "×", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Center };
-            ToolTip.SetTip(button, $"Remove {title}");
-            button.Click += (_, e) =>
-            {
-                remove();
-                e.Handled = true;
-            };
+            var button = Kit.SmallButton("×", $"Remove {title}", remove, handled: true);
             DockPanel.SetDock(button, Avalonia.Controls.Dock.Right);
             header.Children.Add(button);
         }
@@ -674,21 +636,8 @@ public sealed class PropertiesView : ScrollViewer
             DockPanel.SetDock(tag, Avalonia.Controls.Dock.Right);
             header.Children.Add(tag);
         }
-        header.Children.Add(new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center });
-
-        var expander = new Expander
-        {
-            Header = header,
-            Content = content,
-            IsExpanded = !_collapsed.Contains(title),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Classes = { "component" },
-            Opacity = disabled ? 0.6 : 1,
-        };
-        expander.Expanded += (_, _) => _collapsed.Remove(title);
-        expander.Collapsed += (_, _) => _collapsed.Add(title);
-        return expander;
+        header.Children.Add(SectionExpander.Title(title));
+        return _sections.Create(title, content, header, disabled ? 0.6 : 1);
     }
 
     // The component types that the game registers and the entity lacks, in a menu.
@@ -702,15 +651,7 @@ public sealed class PropertiesView : ScrollViewer
                 new AddComponent(document.Id, new SceneComponent(type.Id, type.Name, DefaultFields(type.Id))));
             menu.Items.Add(item);
         }
-        return new Button
-        {
-            Content = "Add Component",
-            Flyout = menu,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Classes = { "add-component" },
-            IsEnabled = menu.Items.Count > 0,
-        };
+        return Kit.AddButton("Add Component", menu);
     }
 
     // The scripts that define a behaviour and that the entity lacks, from the cook daemon's index, in a menu that is
@@ -735,14 +676,8 @@ public sealed class PropertiesView : ScrollViewer
                 menu.Items.Add(new MenuItem { Header = why, IsEnabled = false });
             }
         };
-        return new Button
-        {
-            Content = "Add Behaviour",
-            Flyout = menu,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Center,
-            Classes = { "add-component" },
-        };
+        // The menu fills when it opens, so the button is enabled while it is empty.
+        return Kit.AddButton("Add Behaviour", menu, disabledWhenEmpty: false);
     }
 
     // Zero is no rotation and no size, so the pose components start as the identity.

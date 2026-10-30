@@ -88,11 +88,9 @@ sealed class FieldGrid(EditorShell shell)
     /// <summary>A grid of rows, one for each field.</summary>
     public Grid Rows(IEnumerable<FieldRow> fields)
     {
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Classes = { "fields" } };
-        var row = 0;
+        var rows = new FieldRows("Auto,*,Auto");
         foreach (var field in fields)
         {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             var name = new TextBlock
             {
                 Text = field.Label ?? FieldValues.Humanize(field.Field),
@@ -122,29 +120,21 @@ sealed class FieldGrid(EditorShell shell)
             {
                 label = OverrideLabel(field, name, view);
             }
-            Grid.SetRow(label, row);
-            Grid.SetRow(view.Control, row);
-            Grid.SetColumn(view.Control, 1);
-            rows.Children.Add(label);
-            rows.Children.Add(view.Control);
+            Button? reset = null;
             if (field.IsSet != null)
             {
-                var reset = new Button { Content = "↺", Classes = { "field-button" }, IsVisible = field.IsSet(), VerticalAlignment = VerticalAlignment.Center };
-                ToolTip.SetTip(reset, field.Overridden != null ? "Revert to the prefab's value" : "Reset to the default");
-                reset.Click += (_, _) => field.Reset();
-                Grid.SetRow(reset, row);
-                Grid.SetColumn(reset, 2);
-                rows.Children.Add(reset);
+                reset = Kit.SmallButton("↺", field.Overridden != null ? "Revert to the prefab's value" : "Reset to the default", field.Reset);
+                reset.IsVisible = field.IsSet();
                 _resets.Add((reset, field.IsSet));
             }
+            rows.Add(label, view.Control, reset);
             Views[(field.Owner, field.Field)] = view;
             if (field.Editor != null)
             {
                 Editors[(field.Owner, field.Field)] = field.Editor;
             }
-            row++;
         }
-        return rows;
+        return rows.Grid;
     }
 
     /// <summary>Shows a component's values from the host in the rows of an owner, and gives their editors the values.</summary>

@@ -23,8 +23,6 @@ namespace Cinnabar.Editor.Viewport;
 /// </summary>
 public sealed class ViewportView : Grid
 {
-    // A press that moves less than this, in control units, is a click.
-    const double ClickSlop = 4;
     // Wheel notches per pixel of an Alt and right button drag.
     const double DollyPerPixel = 1.0 / 40;
 
@@ -459,7 +457,7 @@ public sealed class ViewportView : Grid
                 }
                 break;
             case Gesture.Click:
-                if ((position - _start) is var moved && Math.Sqrt(moved.X * moved.X + moved.Y * moved.Y) > ClickSlop)
+                if ((position - _start) is var moved && Gestures.MovedPast(moved))
                 {
                     _gesture = Gesture.Box;
                     ShowBox(position);

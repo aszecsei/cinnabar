@@ -4,8 +4,9 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using static Cinnabar.Editor.Materials.MaterialControls;
+using static Cinnabar.Editor.Panels.Kit;
 using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
@@ -32,17 +33,9 @@ sealed class ParametersPanel : ScrollViewer
         _middle = middle;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _editor.Changed += Refresh;
-            _shell.Assets.Changed += Rebuild;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _editor.Changed -= Refresh;
-            _shell.Assets.Changed -= Rebuild;
-        };
+        new ViewSubscriptions(this, attached: Refresh)
+            .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
+            .Add(() => _shell.Assets.Changed += Rebuild, () => _shell.Assets.Changed -= Rebuild);
     }
 
     void Rebuild()

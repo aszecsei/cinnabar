@@ -24,7 +24,7 @@ public sealed class AtmosphereView : ScrollViewer
     readonly StackPanel _content = new() { Classes = { "properties" } };
     readonly FieldGrid _grid;
     // Groups that the user collapsed, by title.
-    readonly HashSet<string> _collapsed = [];
+    readonly SectionExpander _sections = new();
     // The sun's angles' views, which show what the document has, and the handles that the panel watches.
     readonly List<(FieldView View, bool Elevation)> _angles = [];
     ulong[] _watched = [];
@@ -37,25 +37,16 @@ public sealed class AtmosphereView : ScrollViewer
         _grid = new FieldGrid(shell);
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _world.EntitiesChanged += Refresh;
-            _world.TypesChanged += Refresh;
-            _world.ValuesChanged += OnValuesChanged;
-            _shell.SceneChanged += Refresh;
-            _shell.ModeChanged += Refresh;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _world.EntitiesChanged -= Refresh;
-            _world.TypesChanged -= Refresh;
-            _world.ValuesChanged -= OnValuesChanged;
-            _shell.SceneChanged -= Refresh;
-            _shell.ModeChanged -= Refresh;
-            Watch([]);
-            _structure = "";
-        };
+        new ViewSubscriptions(this, attached: Refresh, detached: () =>
+            {
+                Watch([]);
+                _structure = "";
+            })
+            .Add(() => _world.EntitiesChanged += Refresh, () => _world.EntitiesChanged -= Refresh)
+            .Add(() => _world.TypesChanged += Refresh, () => _world.TypesChanged -= Refresh)
+            .Add(() => _world.ValuesChanged += OnValuesChanged, () => _world.ValuesChanged -= OnValuesChanged)
+            .Add(() => _shell.SceneChanged += Refresh, () => _shell.SceneChanged -= Refresh)
+            .Add(() => _shell.ModeChanged += Refresh, () => _shell.ModeChanged -= Refresh);
     }
 
     void OnValuesChanged(ulong entity)
@@ -223,11 +214,9 @@ public sealed class AtmosphereView : ScrollViewer
     // The sun's azimuth and elevation, which a drag or a slider changes as one undo entry.
     Grid Angles()
     {
-        var rows = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Classes = { "fields" } };
-        var row = 0;
+        var rows = new FieldRows("Auto,*,Auto");
         foreach (var (label, elevation, range) in new[] { ("Azimuth", false, (0.0, 360.0)), ("Elevation", true, (-90.0, 90.0)) })
         {
-            rows.RowDefinitions.Add(new RowDefinition(GridLength.Auto));
             var editor = new SunAngleEditor(_shell, elevation);
             var name = new TextBlock { Text = label, Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center };
             ToolTip.SetTip(name, elevation
@@ -235,15 +224,10 @@ public sealed class AtmosphereView : ScrollViewer
                 : "Degrees from +z toward +x. Drag to change it.");
             FieldView.Scrubbable(name, editor, 0);
             var view = FieldView.Create(DisplayKind.Number, _shell.Selection.Select, EntityNode.Format, editor, range: range);
-            Grid.SetRow(name, row);
-            Grid.SetRow(view.Control, row);
-            Grid.SetColumn(view.Control, 1);
-            rows.Children.Add(name);
-            rows.Children.Add(view.Control);
+            rows.Add(name, view.Control);
             _angles.Add((view, elevation));
-            row++;
         }
-        return rows;
+        return rows.Grid;
     }
 
     void ShowValues()
@@ -291,18 +275,7 @@ public sealed class AtmosphereView : ScrollViewer
         {
             content = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = note, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap }, content } };
         }
-        var expander = new Expander
-        {
-            Header = new TextBlock { Text = title, FontWeight = FontWeight.SemiBold, VerticalAlignment = VerticalAlignment.Center },
-            Content = content,
-            IsExpanded = !_collapsed.Contains(title),
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Classes = { "component" },
-        };
-        expander.Expanded += (_, _) => _collapsed.Remove(title);
-        expander.Collapsed += (_, _) => _collapsed.Add(title);
-        return expander;
+        return _sections.Create(title, content);
     }
 
     static TextBlock Empty(string text) => new() { Text = text, Classes = { "empty" }, TextWrapping = TextWrapping.Wrap };
@@ -323,12 +296,9 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
 {
     const double DegreeStep = 0.5;
 
-    (double Azimuth, double Elevation) _start;
-    bool _scrubbing;
+    readonly ScrubSession<(double Azimuth, double Elevation)> _scrub = new(shell.CommitEdit);
 
     string Label => elevation ? "Set Sun Elevation" : "Set Sun Azimuth";
-
-    public IReadOnlyList<string> Options => [];
 
     (double Azimuth, double Elevation)? Current =>
         shell.Scene is { } document && shell.AtmosphereVolume is { } volume ? Atmosphere.SunAngles(document.Expanded.Flat, volume) : null;
@@ -355,51 +325,28 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
         return Current is { } current && shell.Edit(Label, Aim(current, value));
     }
 
-    public void SetFlag(bool value)
-    {
-    }
-
-    public void SetEntity(ulong handle)
-    {
-    }
-
-    public void SetAsset(string guid)
-    {
-    }
-
-    public void Choose(string option)
-    {
-    }
-
     public void BeginScrub(int axis)
     {
         if (Current is not { } current || !shell.IsEditing)
         {
             return;
         }
-        _start = current;
-        _scrubbing = true;
+        _scrub.Begin(current);
         shell.BeginEdit(Label);
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (!_scrubbing)
+        if (!_scrub.Active)
         {
             return;
         }
-        var step = DegreeStep * (modifiers.HasFlag(KeyModifiers.Shift) ? 10 : modifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1);
-        shell.PreviewEdit(Aim(_start, (elevation ? _start.Elevation : _start.Azimuth) + pixels * step));
+        var start = _scrub.Start;
+        var step = DegreeStep * ScrubSession.Scale(modifiers);
+        shell.PreviewEdit(Aim(start, (elevation ? start.Elevation : start.Azimuth) + pixels * step));
     }
 
-    public void EndScrub()
-    {
-        if (_scrubbing)
-        {
-            _scrubbing = false;
-            shell.CommitEdit();
-        }
-    }
+    public void EndScrub() => _scrub.End();
 
     public void SetNumbers(double[] values)
     {
@@ -407,9 +354,9 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
         {
             return;
         }
-        if (_scrubbing)
+        if (_scrub.Active)
         {
-            shell.PreviewEdit(Aim(_start, values[0]));
+            shell.PreviewEdit(Aim(_scrub.Start, values[0]));
         }
         else if (Current is { } current)
         {

@@ -5,8 +5,9 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
-using static Cinnabar.Editor.Materials.MaterialControls;
+using static Cinnabar.Editor.Panels.Kit;
 using AssetIndex = Cinnabar.Editor.Content.AssetIndex;
 using DockSide = Avalonia.Controls.Dock;
 
@@ -29,19 +30,10 @@ sealed class NodeDetails : ScrollViewer
         _editor = editor;
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AttachedToVisualTree += (_, _) =>
-        {
-            _editor.SelectionChanged += Refresh;
-            _editor.Changed += Refresh;
-            _editor.ProblemsChanged += Refresh;
-            Refresh();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _editor.SelectionChanged -= Refresh;
-            _editor.Changed -= Refresh;
-            _editor.ProblemsChanged -= Refresh;
-        };
+        new ViewSubscriptions(this, attached: Refresh)
+            .Add(() => _editor.SelectionChanged += Refresh, () => _editor.SelectionChanged -= Refresh)
+            .Add(() => _editor.Changed += Refresh, () => _editor.Changed -= Refresh)
+            .Add(() => _editor.ProblemsChanged += Refresh, () => _editor.ProblemsChanged -= Refresh);
     }
 
     // The panel builds again only when what it shows changed, so a box keeps its focus while a drag moves the node.

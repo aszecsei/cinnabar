@@ -402,9 +402,9 @@ public sealed class MainWindow : Window
         (_cookStatus.Text, _cookDot.Fill) = cook.State switch
         {
             CookState.Linked => ("Cook: watching", Brush.Parse("#4caf50")),
-            CookState.Starting => ("Cook: starting, linking", Brush.Parse("#e8b04a")),
+            CookState.Starting => ("Cook: starting, linking", Palette.WarningBrush),
             CookState.Stopped => ("Cook: stopped", Brushes.Gray),
-            _ => ($"Cook: exited with code {cook.ExitCode}", Brush.Parse("#f0605a")),
+            _ => ($"Cook: exited with code {cook.ExitCode}", Palette.ErrorBrush),
         };
     }
 
@@ -415,9 +415,9 @@ public sealed class MainWindow : Window
         {
             HostState.Waiting => ("Host: waiting for the viewport", Brushes.Gray),
             HostState.Running when host.Linked => ($"Host: running {host.Game}, linked", Brush.Parse("#4caf50")),
-            HostState.Running => ("Host: starting, linking", Brush.Parse("#e8b04a")),
+            HostState.Running => ("Host: starting, linking", Palette.WarningBrush),
             HostState.Stopped => ("Host: stopped", Brushes.Gray),
-            _ => ($"Host: exited with code {host.ExitCode}", Brush.Parse("#f0605a")),
+            _ => ($"Host: exited with code {host.ExitCode}", Palette.ErrorBrush),
         };
     }
 }

@@ -3,9 +3,10 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;
-using static Cinnabar.Editor.Materials.MaterialControls;
+using static Cinnabar.Editor.Panels.Kit;
 using DockSide = Avalonia.Controls.Dock;
 
 namespace Cinnabar.Editor.Materials;

@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Profiler;
@@ -21,8 +22,6 @@ public sealed class FrameTimeline : Control
     const double RowHeight = 18;
     const double LaneGap = 8;
     const double LaneHeader = 16;
-    // A press must move this far, in pixels, before it pans instead of selecting.
-    const double ClickSlop = 4;
     const double LabelMinWidth = 28;
 
     static readonly IBrush Background = new SolidColorBrush(Color.Parse("#1B1B1E"));
@@ -445,7 +444,7 @@ public sealed class FrameTimeline : Control
         if (_press is { } press)
         {
             var moved = position - press;
-            if (!_panning && Math.Sqrt(moved.X * moved.X + moved.Y * moved.Y) > ClickSlop)
+            if (!_panning && Gestures.MovedPast(moved))
             {
                 _panning = true;
             }

@@ -32,8 +32,6 @@ public sealed class ContentBrowserView : DockPanel
     public static readonly DataFormat<string> AssetFormat = DataFormat.CreateStringApplicationFormat("cinnabar-asset");
 
     const double Indent = 14;
-    // A press must move this far, in pixels, before it starts a drag.
-    const double DragThreshold = 4;
 
     readonly EditorShell _shell;
     readonly AssetIndex _index;
@@ -122,21 +120,11 @@ public sealed class ContentBrowserView : DockPanel
         KeyDown += OnKeyDown;
         _search.TextChanged += (_, _) => ShowAssets();
 
-        AttachedToVisualTree += (_, _) =>
-        {
-            _index.Changed += PostRebuild;
-            _shell.Cook.StateChanged += ShowStatus;
-            _shell.Cook.Cooked += OnCooked;
-            _shell.ContentRevealed += OnRevealed;
-            Rebuild();
-        };
-        DetachedFromVisualTree += (_, _) =>
-        {
-            _index.Changed -= PostRebuild;
-            _shell.Cook.StateChanged -= ShowStatus;
-            _shell.Cook.Cooked -= OnCooked;
-            _shell.ContentRevealed -= OnRevealed;
-        };
+        new ViewSubscriptions(this, attached: Rebuild)
+            .Add(() => _index.Changed += PostRebuild, () => _index.Changed -= PostRebuild)
+            .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
+            .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
+            .Add(() => _shell.ContentRevealed += OnRevealed, () => _shell.ContentRevealed -= OnRevealed);
     }
 
     // Tells the shell the folder and the selection, which the asset commands act on.
@@ -463,7 +451,7 @@ public sealed class ContentBrowserView : DockPanel
             {
                 Text = place + p.Text,
                 Classes = { p.Error ? "error" : "warning" },
-                Foreground = p.Error ? Brush.Parse("#F0605A") : Brush.Parse("#E8B04A"),
+                Foreground = p.Error ? Palette.ErrorBrush : Palette.WarningBrush,
                 TextWrapping = TextWrapping.Wrap,
             };
             if (p.File != "")
@@ -667,7 +655,7 @@ public sealed class ContentBrowserView : DockPanel
         }
         if (asset.Errors > 0 || asset.Status == AssetStatus.Failed)
         {
-            line.Children.Add(new TextBlock { Text = asset.Errors > 0 ? $"✖ {asset.Errors}" : "✖ failed", Foreground = Brush.Parse("#F0605A") });
+            line.Children.Add(new TextBlock { Text = asset.Errors > 0 ? $"✖ {asset.Errors}" : "✖ failed", Foreground = Palette.ErrorBrush });
         }
         if (asset.Warnings > 0)
         {
@@ -693,7 +681,7 @@ public sealed class ContentBrowserView : DockPanel
                 return;
             }
             var moved = e.GetPosition(view) - press.GetPosition(view);
-            if (Math.Abs(moved.X) + Math.Abs(moved.Y) < DragThreshold)
+            if (!Gestures.MovedPastAcrossAndDown(moved))
             {
                 return;
             }
