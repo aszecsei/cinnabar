@@ -23,6 +23,8 @@ Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
+	// The exposure's histogram counts the background, which the sky drew.
+	sky_background:                                     bool,
 	temporal, upscaled, display:                        bool,
 	size, output_size, scene_size:                      [2]u32,
 	world_pieces:                                       int,
@@ -188,7 +190,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
-				rec.sky = f.sky != nil
+				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
 				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
 				// The editor's tools read the IDs and the depth after the debug lines.
@@ -274,11 +276,18 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky)
+		testing.expect(t, record.sky_background, "the histogram does not count the sky")
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
 		testing.expect(t, r.ray_scene.accel != {} && r.residency.accels, "the traced shadows did not request the ray scene")
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// A Flat background is the clear color, which is not pre-exposed, so the histogram does not count it.
+	ecs.get(w, mist, Environment).mode = {true, .Flat}
+	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+	testing.expect(t, !record.sky && !record.sky_background, "the histogram counts a Flat background")
+	ecs.get(w, mist, Environment).mode = {true, .Atmosphere}
 
 	// Each ambient occlusion technique that the quality chooses draws the occlusion, and Off draws none.
 	for technique in Ao_Technique {

@@ -161,6 +161,8 @@ Post_Frame :: struct {
 	// The exposure pass runs, and with exposure_auto, the histogram before it.
 	exposure:         bool,
 	exposure_auto:    bool,
+	// The sky drew the background, pre-exposed, so the histogram counts it.
+	background:       bool,
 	history:          History,
 	reproject:        matrix[4, 4]f32,
 	// The scenes that temporal AA and bloom read.
@@ -257,6 +259,9 @@ Histogram_Push :: struct {
 	inverse_range: f32,
 	// The depth's pixels for each of the scene's, less than 1 after temporal AA upscales the scene.
 	depth_scale:   [2]f32,
+	// The sky drew where nothing else did, so those pixels count.
+	background:    u32,
+	padding:       u32,
 }
 
 // Exposure_Push matches Push in exposure_adapt.hlsl.
@@ -444,6 +449,7 @@ add_post_passes :: proc(f: ^Frame) {
 	if pf.exposure {
 		pf.reset = !p.adapted
 		p.adapted = true
+		pf.background = sky_draws(f)
 		pf.histogram = import_buffer(g, p.histogram_bins)
 		if pf.exposure_auto {
 			pass := add_compute_pass(g, "exposure histogram", run_histogram, f)
@@ -570,6 +576,7 @@ run_histogram :: proc(ctx: ^Pass_Context) {
 		min_log       = HISTOGRAM_MIN_LOG,
 		inverse_range = 1.0 / (HISTOGRAM_MAX_LOG - HISTOGRAM_MIN_LOG),
 		depth_scale   = {f32(f.size.x) / f32(f.scene_size.x), f32(f.size.y) / f32(f.scene_size.y)},
+		background    = u32(f.post.background),
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.post.histogram.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

@@ -11,6 +11,7 @@ The world's surroundings: the background where nothing draws, and the ambient li
 - **Atmosphere:** the background is the sky of a planet's air, which the sun and the moon light. It is pre-exposed, as the rest of the scene is. The ambient light comes from the same sky.
 - **Texture:** the background is an hdr texture of the light from every direction, such as a captured sky, and the ambient light comes from it (see [Texture](#texture)).
 - **`ambient_intensity`** multiplies the ambient light in either mode (1 by default).
+- **The auto exposure** counts the sky that `Atmosphere` and `Texture` draw, so it adapts to a bright day sky and a dark night one. It does not count Flat's `background`, or a sky's while it draws the `background` color (see [Post-processing](post-processing.md#post-processing)).
 - **Missing shaders:** an `Atmosphere` whose pipelines do not exist yet, because their shaders are not cooked, draws the `background` color. Its ambient light, which the CPU makes, is still the sky's.
 
 ## The atmosphere
@@ -34,7 +35,7 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 
 - **The moon** is at `night.moon_azimuth` and `night.moon_elevation`, `night.moon_disc_size` degrees across, with `night.moon_illuminance` times `night.moon_color` when full. It is a sphere that the sun lights, with darker seas from noise, so its phase follows the angle between them: it is full when it is opposite the sun. It lights the sky and the ambient light at that phase, and nothing else. An illuminance of 0 leaves it out.
 - **The stars** are procedural: at most one in each cell of a grid on each face of a cube around the camera, in about `night.star_density` of the cells, with random places, brightnesses and colors from blue to orange. `night.star_intensity` is the brightest star's light. The air in front of them dims them, and the day's sky outshines them, so they show only at night. An intensity of 0 leaves them out.
-- The night's light is very dim beside the day's. The auto exposure adapts to it (see [Post-processing](post-processing.md#post-processing)).
+- The night's light is very dim beside the day's. The auto exposure adapts to it, the night sky's light included (see [Post-processing](post-processing.md#post-processing)).
 
 ## Texture
 

@@ -356,6 +356,13 @@ add_sky_background :: proc(f: ^Frame) {
 	write(g, p, f.scene)
 }
 
+// sky_draws is whether the atmosphere or a texture sky draws the frame's background, pre-exposed, so the world pass
+// clears to black under it and the exposure's histogram counts it.
+@(private)
+sky_draws :: proc(f: ^Frame) -> bool {
+	return f.sky != nil || sky_texture_draws(f)
+}
+
 @(private = "file")
 sky_push :: proc(ctx: ^Pass_Context, f: ^Frame) -> Sky_Push {
 	gpu.cmd_set_pass_constants(ctx.cb, f.sky.upload)
