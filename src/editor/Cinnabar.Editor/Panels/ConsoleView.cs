@@ -37,12 +37,8 @@ public sealed class ConsoleView : DockPanel
             }),
         };
         Children.Add(_list);
-        AttachedToVisualTree += (_, _) =>
-        {
-            _log.Lines.CollectionChanged += OnLinesChanged;
-            ScrollToEnd();
-        };
-        DetachedFromVisualTree += (_, _) => _log.Lines.CollectionChanged -= OnLinesChanged;
+        new ViewSubscriptions(this, attached: ScrollToEnd)
+            .Add(() => _log.Lines.CollectionChanged += OnLinesChanged, () => _log.Lines.CollectionChanged -= OnLinesChanged);
     }
 
     void OnLinesChanged(object? sender, NotifyCollectionChangedEventArgs e)
