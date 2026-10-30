@@ -511,7 +511,7 @@ public sealed class PropertiesView : ScrollViewer
             ToolTip.SetTip(link, "Show the prefab in the content browser");
             link.PointerPressed += (_, e) =>
             {
-                _shell.RevealAsset(prefab);
+                _shell.Content.RevealAsset(prefab);
                 e.Handled = true;
             };
             var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };

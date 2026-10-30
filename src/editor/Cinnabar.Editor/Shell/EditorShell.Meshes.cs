@@ -62,7 +62,7 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"mesh: no mesh asset has the GUID {guid}");
             return null;
         }
-        if (Content.AssetIndex.IsSubasset(asset))
+        if (Cinnabar.Editor.Content.AssetIndex.IsSubasset(asset))
         {
             Console.Add(LogLevel.Error, $"mesh: {asset.Subasset} is a mesh of {asset.Path}, a model, which cannot be edited. Build level geometry as a .mesh file.");
             return null;

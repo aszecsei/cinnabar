@@ -103,7 +103,7 @@ sealed class FieldGrid(EditorShell shell)
             {
                 FieldView.Scrubbable(name, field.Editor, 0);
             }
-            var view = FieldView.Create(field.Kind, shell.Selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(shell.Assets, field.AssetKind, shell.RevealAsset), field.Axes, field.Range);
+            var view = FieldView.Create(field.Kind, shell.Selection.Select, Label, field.Editor, field.IsEnum, new AssetContext(shell.Assets, field.AssetKind, shell.Content.RevealAsset), field.Axes, field.Range);
             Control label = name;
             if (field.Overridden is { } overridden)
             {

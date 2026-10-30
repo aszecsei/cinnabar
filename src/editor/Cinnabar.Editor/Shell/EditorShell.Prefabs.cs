@@ -201,7 +201,7 @@ public sealed partial class EditorShell
     // The file of a new prefab of a name in the content browser's folder, or null with a line in the console.
     string? NewPrefabPath(string name)
     {
-        var folder = ContentFolder ?? (Assets.FindRoot("game") is { } game ? new ContentFolder(game.Name, "") : null);
+        var folder = Content.Folder ?? (Assets.FindRoot("game") is { } game ? new ContentFolder(game.Name, "") : null);
         if (folder?.Directory(Assets) is not { } dir)
         {
             Console.Add(LogLevel.Error, "edit: a new prefab goes in the content browser's folder. Choose one first.");
@@ -484,7 +484,7 @@ public sealed partial class EditorShell
     {
         if (SelectedSceneEntity is { } entity && InstanceOf(entity.Id) is { } info && Scene?.Scene.Find(info.Instance)?.Prefab is { Length: > 0 } guid)
         {
-            RevealAsset(info.Prefab != "" ? info.Prefab : guid);
+            Content.RevealAsset(info.Prefab != "" ? info.Prefab : guid);
         }
     }
 }

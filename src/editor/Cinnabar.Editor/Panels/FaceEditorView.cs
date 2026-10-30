@@ -84,7 +84,7 @@ public sealed class FaceEditorView : ScrollViewer
         _title = new TextBlock { FontWeight = FontWeight.SemiBold };
         _content.Children.Add(new StackPanel { Classes = { "properties-header" }, Children = { _title } });
 
-        var assets = new AssetContext(_shell.Assets, "material", _shell.RevealAsset) { First = EditorShell.DevMaterials.Select(d => d.Guid).ToHashSet() };
+        var assets = new AssetContext(_shell.Assets, "material", _shell.Content.RevealAsset) { First = EditorShell.DevMaterials.Select(d => d.Guid).ToHashSet() };
         _content.Children.Add(Group("Material",
         [
             ("Material", "material", new AssetView(assets, new MappingEditor(_shell, MappingField.Material)), null),

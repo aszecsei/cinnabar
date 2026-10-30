@@ -65,12 +65,12 @@ public sealed class MainWindow : Window
         shell.OpenSceneFileRequested += path => _ = OpenSceneFile(path);
         shell.SaveAsRequested += () => _ = PickSaveAs();
         shell.RestoreOffered += () => _ = OfferRestore();
-        shell.NewAssetRequested += template => _ = AskNewAsset(template);
+        shell.Content.NewAssetRequested += template => _ = AskNewAsset(template);
         shell.MakePrefabRequested += name => _ = AskMakePrefab(name);
         shell.MakeVariantRequested += name => _ = AskMakeVariant(name);
-        shell.RenameRequested += item => _ = AskRename(item);
-        shell.DeleteRequested += items => _ = ConfirmDelete(items);
-        shell.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
+        shell.Content.RenameRequested += item => _ = AskRename(item);
+        shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
+        shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.MaterialCloseRequested += editor => _ = AskCloseMaterial(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
@@ -203,7 +203,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakePrefab(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? folder.Display : "the content browser's folder";
+        var place = _shell.Content.Folder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Prefab", $"Name the prefab, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -213,7 +213,7 @@ public sealed class MainWindow : Window
 
     async Task AskMakeVariant(string suggested)
     {
-        var place = _shell.ContentFolder is { } folder ? folder.Display : "the content browser's folder";
+        var place = _shell.Content.Folder is { } folder ? folder.Display : "the content browser's folder";
         var name = await Dialogs.AskName(this, "Make Variant", $"Name the variant, which the next save writes in {place}.", suggested, "Make");
         if (name != null)
         {
@@ -223,7 +223,7 @@ public sealed class MainWindow : Window
 
     async Task AskNewAsset(Link.Cook.AssetTemplate? template)
     {
-        if (_shell.ContentFolder is not { } folder)
+        if (_shell.Content.Folder is not { } folder)
         {
             return;
         }
@@ -240,10 +240,10 @@ public sealed class MainWindow : Window
             _ => ("New Folder", "folder"),
         };
         var place = folder.Display;
-        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.NewName(template), "Create");
+        var name = await Dialogs.AskName(this, title, $"Name the new {what} in {place}.", _shell.Content.NewName(template), "Create");
         if (name != null)
         {
-            await _shell.Create(template, name);
+            await _shell.Content.Create(template, name);
         }
     }
 
@@ -265,13 +265,13 @@ public sealed class MainWindow : Window
         var name = await Dialogs.AskName(this, "Rename", $"Rename {current}. Its .meta file goes with it, so it keeps its GUID.", current, "Rename");
         if (name != null && name != current)
         {
-            await _shell.Rename(item, name);
+            await _shell.Content.Rename(item, name);
         }
     }
 
     async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
     {
-        var (deleted, users) = _shell.DeleteEffects(items);
+        var (deleted, users) = _shell.Content.DeleteEffects(items);
         var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)
             .OfType<string>().ToList();
         if (names.Count == 0)
@@ -293,7 +293,7 @@ public sealed class MainWindow : Window
         }
         if (await Dialogs.Ask(this, "Delete", message, "Delete", "Cancel") == "Delete")
         {
-            await _shell.Delete(items);
+            await _shell.Content.Delete(items);
         }
     }
 

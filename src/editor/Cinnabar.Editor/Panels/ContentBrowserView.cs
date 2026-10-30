@@ -124,12 +124,12 @@ public sealed class ContentBrowserView : DockPanel
             .Add(() => _index.Changed += PostRebuild, () => _index.Changed -= PostRebuild)
             .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
             .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
-            .Add(() => _shell.ContentRevealed += OnRevealed, () => _shell.ContentRevealed -= OnRevealed);
+            .Add(() => _shell.Content.ContentRevealed += OnRevealed, () => _shell.Content.ContentRevealed -= OnRevealed);
     }
 
     // Tells the shell the folder and the selection, which the asset commands act on.
     void Publish() =>
-        _shell.SelectContent(_folder is { } f ? new ContentFolder(f.Root, f.Path) : null, [.. _selection]);
+        _shell.Content.SelectContent(_folder is { } f ? new ContentFolder(f.Root, f.Path) : null, [.. _selection]);
 
     // F2, Ctrl+D and Delete act on the selected assets while the browser has focus, and not while a box has it.
     void OnKeyDown(object? sender, KeyEventArgs e)
@@ -408,14 +408,14 @@ public sealed class ContentBrowserView : DockPanel
             };
             editor = list;
         }
-        editor.IsEnabled = _shell.CanChangeContent;
+        editor.IsEnabled = _shell.Content.CanChangeContent;
         ToolTip.SetTip(editor, info.Description);
         return editor;
     }
 
     async Task SetSetting(string guid, string key, string value)
     {
-        if (!await _shell.SetImportSetting(guid, key, value))
+        if (!await _shell.Content.SetImportSetting(guid, key, value))
         {
             // The editor shows the asset's settings as they are.
             ShowDetails();
@@ -535,14 +535,14 @@ public sealed class ContentBrowserView : DockPanel
         DragDrop.SetAllowDrop(view, true);
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
-            e.DragEffects = DroppedAll(e) is { Count: > 0 } guids && _shell.CanMoveAssets(guids, folder) ? DragDropEffects.Move : DragDropEffects.None;
+            e.DragEffects = DroppedAll(e) is { Count: > 0 } guids && _shell.Content.CanMoveAssets(guids, folder) ? DragDropEffects.Move : DragDropEffects.None;
             e.Handled = true;
         });
         view.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (DroppedAll(e) is { Count: > 0 } guids && _shell.CanMoveAssets(guids, folder))
+            if (DroppedAll(e) is { Count: > 0 } guids && _shell.Content.CanMoveAssets(guids, folder))
             {
-                _ = _shell.MoveAssets(guids, folder);
+                _ = _shell.Content.MoveAssets(guids, folder);
             }
             e.Handled = true;
         });
@@ -569,7 +569,7 @@ public sealed class ContentBrowserView : DockPanel
         menu.Opening += (_, _) =>
         {
             menu.Items.Clear();
-            var linked = _shell.CanChangeContent && (row != null || _folder != null);
+            var linked = _shell.Content.CanChangeContent && (row != null || _folder != null);
             foreach (var (label, template) in new (string, AssetTemplate?)[]
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
@@ -585,7 +585,7 @@ public sealed class ContentBrowserView : DockPanel
                     Command = new RelayCommand(() =>
                     {
                         Open();
-                        _shell.RequestNewAsset(template);
+                        _shell.Content.RequestNewAsset(template);
                     }),
                 });
             }
@@ -602,8 +602,8 @@ public sealed class ContentBrowserView : DockPanel
             }
             if (row.Path != "")
             {
-                menu.Items.Add(new MenuItem { Header = "Rename", IsEnabled = _shell.CanChangeContent, Command = new RelayCommand(() => _shell.RequestRename(ContentItem.Of(folder))) });
-                menu.Items.Add(new MenuItem { Header = "Delete", IsEnabled = _shell.CanChangeContent, Command = new RelayCommand(() => _shell.RequestDelete([ContentItem.Of(folder)])) });
+                menu.Items.Add(new MenuItem { Header = "Rename", IsEnabled = _shell.Content.CanChangeContent, Command = new RelayCommand(() => _shell.Content.RequestRename(ContentItem.Of(folder))) });
+                menu.Items.Add(new MenuItem { Header = "Delete", IsEnabled = _shell.Content.CanChangeContent, Command = new RelayCommand(() => _shell.Content.RequestDelete([ContentItem.Of(folder)])) });
             }
         };
         // Avalonia shows no menu without items, so it starts with one.

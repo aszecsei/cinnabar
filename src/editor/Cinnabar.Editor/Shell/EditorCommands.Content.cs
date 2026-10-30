@@ -18,36 +18,36 @@ static partial class EditorCommands
         NewAssetCommand(shell, NewPrefab, Link.Cook.AssetTemplate.Prefab, "New Prefab", "prefab", "Add a prefab, an entity that scenes place as instances, to the content browser's folder.");
         NewAssetCommand(shell, NewEffect, Link.Cook.AssetTemplate.Effect, "New Effect", "effect", "Add an effect, emitters of particles that a Particle_System places, to the content browser's folder.");
         NewAssetCommand(shell, NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
-        commands.Register(new Command(RenameAsset, "Rename Asset", shell.RequestRenameSelected)
+        commands.Register(new Command(RenameAsset, "Rename Asset", shell.Content.RequestRenameSelected)
         {
             Description = "Rename the asset selected in the content browser, with its .meta file. F2 in the content browser.",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count == 1 && !shell.SelectionHasSubassets,
+            CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count == 1 && !shell.Content.SelectionHasSubassets,
         });
-        commands.Register(new Command(DuplicateAsset, "Duplicate Asset", () => _ = shell.DuplicateSelectedAssets())
+        commands.Register(new Command(DuplicateAsset, "Duplicate Asset", () => _ = shell.Content.DuplicateSelectedAssets())
         {
             Description = "Copy the assets selected in the content browser, each with a new GUID. Ctrl+D in the content browser.",
             Icon = "copy",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
+            CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count > 0 && !shell.Content.SelectionHasSubassets,
         });
-        commands.Register(new Command(DeleteAsset, "Delete Asset", shell.RequestDeleteSelected)
+        commands.Register(new Command(DeleteAsset, "Delete Asset", shell.Content.RequestDeleteSelected)
         {
             Description = "Send the assets selected in the content browser to the Recycle Bin, after showing what uses them. Delete in the content browser.",
             Icon = "delete",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
+            CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count > 0 && !shell.Content.SelectionHasSubassets,
         });
-        commands.Register(new Command(Reimport, "Re-import", () => _ = shell.ReimportSelectedAssets())
+        commands.Register(new Command(Reimport, "Re-import", () => _ = shell.Content.ReimportSelectedAssets())
         {
             Description = "Cook the assets selected in the content browser again, also when they are up to date.",
             Icon = "restart",
-            CanExecuteWhen = () => shell.CanChangeContent && shell.SelectedAssets.Count > 0 && !shell.SelectionHasSubassets,
+            CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count > 0 && !shell.Content.SelectionHasSubassets,
         });
     }
 
     static void NewAssetCommand(EditorShell shell, string id, Link.Cook.AssetTemplate? template, string label, string icon, string description) =>
-        shell.Commands.Register(new Command(id, label, () => shell.RequestNewAsset(template))
+        shell.Commands.Register(new Command(id, label, () => shell.Content.RequestNewAsset(template))
         {
             Description = description,
             Icon = icon,
-            CanExecuteWhen = () => shell.CanChangeContent && shell.ContentFolder != null,
+            CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.Folder != null,
         });
 }

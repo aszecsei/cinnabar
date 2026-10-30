@@ -36,10 +36,10 @@ public sealed class ContentTests : IDisposable
             new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0, [0, 0], "", [], ""),
         ], [], [], []));
 
-        shell.SelectContent(null, ["10", DoorScript]);
-        Assert.False(shell.SelectionHasSubassets);
-        shell.SelectContent(null, ["10", "11"]);
-        Assert.True(shell.SelectionHasSubassets);
+        shell.Content.SelectContent(null, ["10", DoorScript]);
+        Assert.False(shell.Content.SelectionHasSubassets);
+        shell.Content.SelectContent(null, ["10", "11"]);
+        Assert.True(shell.Content.SelectionHasSubassets);
 
         // A mesh field takes the model's mesh and nothing else. A field without a kind takes any asset.
         var meshes = new Panels.AssetContext(shell.Assets, "mesh", _ => { });
@@ -68,12 +68,12 @@ public sealed class ContentTests : IDisposable
     {
         using var shell = NewShell();
 
-        var (deleted, users) = shell.DeleteEffects([new ContentItem(UtilScript, null)]);
+        var (deleted, users) = shell.Content.DeleteEffects([new ContentItem(UtilScript, null)]);
         Assert.Equal(UtilScript, Assert.Single(deleted).Guid);
         Assert.Equal(DoorScript, Assert.Single(users).Guid);
 
         // A folder takes the assets in it, and what uses each other goes with it.
-        (deleted, users) = shell.DeleteEffects([ContentItem.Of(new ContentFolder("game", "lib")), new ContentItem(DoorScript, null)]);
+        (deleted, users) = shell.Content.DeleteEffects([ContentItem.Of(new ContentFolder("game", "lib")), new ContentItem(DoorScript, null)]);
         Assert.Equal(2, deleted.Count);
         Assert.Empty(users);
     }
@@ -82,12 +82,12 @@ public sealed class ContentTests : IDisposable
     public void ANewAssetIsNamedForWhatItIsAndNoFileHasTheName()
     {
         using var shell = NewShell();
-        shell.SelectContent(new ContentFolder("game", ""), []);
+        shell.Content.SelectContent(new ContentFolder("game", ""), []);
         File.WriteAllText(_temp.Combine("new_script.luau"), "");
 
-        Assert.Equal("new_script_2", shell.NewName(AssetTemplate.Script));
-        Assert.Equal("new_behaviour", shell.NewName(AssetTemplate.Behaviour));
-        Assert.Equal("new_folder", shell.NewName(null));
+        Assert.Equal("new_script_2", shell.Content.NewName(AssetTemplate.Script));
+        Assert.Equal("new_behaviour", shell.Content.NewName(AssetTemplate.Behaviour));
+        Assert.Equal("new_folder", shell.Content.NewName(null));
     }
 
     [Fact]
@@ -95,23 +95,23 @@ public sealed class ContentTests : IDisposable
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
 
-        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], EditorShell.WithSetting(settings, [Native], "native", "false"));
+        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ContentBrowser.WithSetting(settings, [Native], "native", "false"));
         Assert.Equal([new Setting("old", "1"), new Setting("native", "false"), new Setting("last", "2")],
-            EditorShell.WithSetting(settings, [], "native", "false"));
-        Assert.Equal([new Setting("native", "true")], EditorShell.WithSetting([], [Native], "native", "true"));
+            ContentBrowser.WithSetting(settings, [], "native", "false"));
+        Assert.Equal([new Setting("native", "true")], ContentBrowser.WithSetting([], [Native], "native", "true"));
     }
 
     [Fact]
     public async Task AnOperationWithoutTheDaemonFailsAndSaysWhy()
     {
         using var shell = NewShell();
-        shell.SelectContent(new ContentFolder("game", ""), [DoorScript]);
+        shell.Content.SelectContent(new ContentFolder("game", ""), [DoorScript]);
         var failures = new List<string>();
-        shell.OperationFailed += failures.Add;
+        shell.Content.OperationFailed += failures.Add;
 
-        Assert.False(shell.CanChangeContent);
+        Assert.False(shell.Content.CanChangeContent);
         Assert.False(shell.Commands.Get(EditorCommands.DuplicateAsset).CanExecute);
-        Assert.False(await shell.Create(AssetTemplate.Script, "x"));
+        Assert.False(await shell.Content.Create(AssetTemplate.Script, "x"));
         Assert.Single(failures);
         Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.StartsWith("content: "));
     }

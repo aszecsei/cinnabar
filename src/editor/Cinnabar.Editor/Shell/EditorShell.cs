@@ -68,6 +68,7 @@ public sealed partial class EditorShell : IDisposable
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
+        Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll);
         WireCook();
         WireMeshes();
         Autosave = new Autosave(options.AutosaveDirectory);

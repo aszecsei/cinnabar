@@ -113,7 +113,7 @@ public sealed partial class EditorShell
         {
             return guid;
         }
-        return Assets.Find(guid) is { Kind: AssetKind.Mesh } asset && !Content.AssetIndex.IsSubasset(asset) ? guid : null;
+        return Assets.Find(guid) is { Kind: AssetKind.Mesh } asset && !Cinnabar.Editor.Content.AssetIndex.IsSubasset(asset) ? guid : null;
     }
 
     /// <summary>Enters mesh mode with the selected entities' mesh files, or says in the console why it cannot.</summary>

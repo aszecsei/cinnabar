@@ -361,7 +361,7 @@ public sealed partial class EditorShell
         });
         foreach (var material in fitted.Distinct())
         {
-            var name = Assets.Find(material) is { } a ? Content.AssetIndex.DisplayName(a) : material;
+            var name = Assets.Find(material) is { } a ? Cinnabar.Editor.Content.AssetIndex.DisplayName(a) : material;
             Console.Add(LogLevel.Info, $"mesh: {name} has no hotspots, so its faces fit the texture instead");
         }
         return ok;
