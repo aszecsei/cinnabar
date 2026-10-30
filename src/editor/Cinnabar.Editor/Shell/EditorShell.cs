@@ -63,6 +63,7 @@ public sealed partial class EditorShell : IDisposable
     {
         _options = options;
         Settings = settings;
+        _previewSlots = new PreviewSlots(PreviewOwners);
         Host = new HostSession(options);
         Cook = new CookSession(options.Cook, Assets);
         WireCook();
@@ -186,13 +187,13 @@ public sealed partial class EditorShell : IDisposable
             ResetMode();
             SendScene();
             SendViewportTools();
-            SendPreviews();
+            _previewSlots.SendAll();
         }
         _linked = Host.Linked;
         if (!Host.Linked)
         {
             Viewport.Disconnect();
-            DisconnectPreviews();
+            _previewSlots.DisconnectAll();
             if (Stats.Host != null || Stats.Game != null)
             {
                 Stats.Clear();
@@ -249,13 +250,9 @@ public sealed partial class EditorShell : IDisposable
         Host.Dispose();
         Cook.Dispose();
         Viewport.Dispose();
-        foreach (var editor in _materials)
+        foreach (var owner in PreviewOwners())
         {
-            editor.Dispose();
-        }
-        foreach (var effect in _effects)
-        {
-            effect.Dispose();
+            owner.Dispose();
         }
     }
 }

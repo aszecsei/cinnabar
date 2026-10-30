@@ -2,11 +2,7 @@ using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
-using ClosePreviewMessage = Cinnabar.Editor.Link.Protocol.ClosePreview;
-using OpenPreviewMessage = Cinnabar.Editor.Link.Protocol.OpenPreview;
-using PreviewAcknowledged = Cinnabar.Editor.Link.Protocol.PreviewAcknowledged;
 using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
-using PreviewSettings = Cinnabar.Editor.Link.Protocol.PreviewSettings;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -19,64 +15,45 @@ public sealed record GraphProblem(int? Node, string Text, bool Error);
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.
 /// </summary>
-public sealed class MaterialEditor : IPreviewOwner, IDisposable
+public sealed class MaterialEditor : PreviewOwner
 {
     // The preview cooks this long after the last change, so typing or a drag cooks once.
     static readonly TimeSpan CookDelay = TimeSpan.FromMilliseconds(250);
-    // The preview's camera starts here, and its pitch stays short of looking straight down or up.
+    // The preview's camera starts here.
     const float StartYaw = 0.6f;
     const float StartPitch = 0.35f;
     const float StartDistance = 1.9f;
-    const float MaxPitch = 1.45f;
+    const float MaxDistance = 20f;
 
-    readonly EditorShell _shell;
     readonly HashSet<int> _selection = [];
     readonly List<GraphProblem> _problems = [];
     int _cookVersion;
     bool _cooking;
     bool _cookAgain;
 
+    PreviewMesh _mesh = PreviewMesh.Sphere;
+
     internal MaterialEditor(EditorShell shell, MaterialDocument document, int? previewId)
+        : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
-        _shell = shell;
         Document = document;
-        PreviewId = previewId;
         Document.Changed += OnDocumentChanged;
-        if (previewId != null)
-        {
-            Preview = new ViewportSession();
-            Preview.SizeRequested += size =>
-            {
-                Size = (Math.Clamp(size.Width, 16, 1024), Math.Clamp(size.Height, 16, 1024));
-                SendSettings();
-            };
-            Preview.FrameCopied += (generation, frame) => _shell.Host.Send(new PreviewAcknowledged((uint)previewId, generation, frame));
-            Preview.Failed += message => _shell.Console.Add(Panels.LogLevel.Warning, message);
-        }
     }
 
     public MaterialDocument Document { get; }
 
-    public string Guid => Document.Guid;
+    public override string Guid => Document.Guid;
 
-    /// <summary>The preview's ID, or null for a material function, or when every preview is in use.</summary>
-    public int? PreviewId { get; }
+    public override PreviewMesh Mesh => _mesh;
 
-    /// <summary>The preview's frames, or null without a preview.</summary>
-    public ViewportSession? Preview { get; }
+    public override bool PicksMesh => true;
 
-    public PreviewMesh Mesh { get; private set; } = PreviewMesh.Sphere;
-
-    public bool PicksMesh => true;
-
-    public string Waiting => "The preview draws once the material cooks.";
-    public float Yaw { get; private set; } = StartYaw;
-    public float Pitch { get; private set; } = StartPitch;
-    public float Distance { get; private set; } = StartDistance;
-    public (int Width, int Height) Size { get; private set; } = (256, 256);
+    public override string Waiting => "The preview draws once the material cooks.";
 
     /// <summary>The preview shows the unsaved graph, which the daemon cooked into the cache's preview area.</summary>
     public bool ShowsUnsaved { get; private set; }
+
+    protected override bool ShowsUnsavedText => ShowsUnsaved;
 
     public IReadOnlyCollection<int> Selection => _selection;
 
@@ -381,54 +358,11 @@ public sealed class MaterialEditor : IPreviewOwner, IDisposable
 
     // The preview.
 
-    public void SetMesh(PreviewMesh mesh)
+    public override void SetMesh(PreviewMesh mesh)
     {
-        Mesh = mesh;
+        _mesh = mesh;
         SendSettings();
         Changed?.Invoke();
-    }
-
-    /// <summary>Turns the preview's camera by pixels of mouse movement.</summary>
-    public void Orbit(double dx, double dy)
-    {
-        Yaw += (float)(dx * 0.01);
-        Pitch = Math.Clamp(Pitch + (float)(dy * 0.01), -MaxPitch, MaxPitch);
-        SendSettings();
-    }
-
-    /// <summary>Moves the preview's camera nearer or farther by wheel notches.</summary>
-    public void Zoom(double notches)
-    {
-        Distance = Math.Clamp(Distance * (float)Math.Pow(0.9, notches), 0.6f, 20f);
-        SendSettings();
-    }
-
-    /// <summary>Tells the game what the preview shows, as when the host links.</summary>
-    internal void SendPreview()
-    {
-        if (PreviewId is not { } id)
-        {
-            return;
-        }
-        _shell.Host.Send(new OpenPreviewMessage((uint)id, Convert.FromHexString(Guid), ShowsUnsaved));
-        SendSettings();
-    }
-
-    void SendSettings()
-    {
-        if (PreviewId is { } id)
-        {
-            _shell.Host.Send(new PreviewSettings((uint)id, Mesh, new byte[16], Yaw, Pitch, Distance, Size.Width, Size.Height));
-        }
-    }
-
-    internal void ClosePreview()
-    {
-        if (PreviewId is { } id)
-        {
-            _shell.Host.Send(new ClosePreviewMessage((uint)id));
-            Preview?.Disconnect();
-        }
     }
 
     // The preview's cook: a moment after the last change, the daemon cooks the unsaved text. Only one cook runs at a
@@ -502,9 +436,9 @@ public sealed class MaterialEditor : IPreviewOwner, IDisposable
         ProblemsChanged?.Invoke();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
         Document.Changed -= OnDocumentChanged;
-        Preview?.Dispose();
+        base.Dispose();
     }
 }

@@ -464,7 +464,7 @@ public sealed partial class EditorShell
                 Captures.Apply(result);
                 return;
             case Link.Protocol.PreviewTarget target:
-                OnPreviewTarget(target);
+                _previewSlots.Route(target);
                 return;
         }
         if (message is not EditProblems problems)

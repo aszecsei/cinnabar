@@ -70,15 +70,6 @@ public sealed partial class EditorShell
 
     public static string DebugViewName(DebugView view) => DebugViewNames[(int)view];
 
-    public void SetDebugView(string name)
-    {
-        var index = DebugViewNames.ToList().IndexOf(name);
-        if (index >= 0)
-        {
-            ViewportSettings = ViewportSettings with { DebugView = (DebugView)index };
-        }
-    }
-
     public void ChangeExposure(float stops) => ViewportSettings = ViewportSettings with { ExposureOffset = stops == 0 ? 0 : ViewportSettings.ExposureOffset + stops * ExposureStep };
 
     void SendViewportSettings()
