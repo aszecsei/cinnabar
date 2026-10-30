@@ -1,7 +1,6 @@
-using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Maths;
 
-namespace Cinnabar.Editor.Tools;
+namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// Moves, turns or scales entities of a scene by a gizmo's change, about a pivot (see docs/editor/viewport.md#viewport). It
