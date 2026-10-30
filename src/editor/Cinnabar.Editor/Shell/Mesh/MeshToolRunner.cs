@@ -72,7 +72,7 @@ public sealed class MeshToolRunner
         var ray = _shell.Camera.Ray(pixel, width, height);
         (string, int, double)? best = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in _session.InMeshMode ? _session._editedMeshes.Keys.ToList() : [])
+        foreach (var guid in _session.InMeshMode ? _session.EditedMeshes.Keys.ToList() : [])
         {
             if (_session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement)
             {
@@ -228,7 +228,7 @@ public sealed class MeshToolRunner
             return false;
         }
         var ops = new List<Operation>();
-        foreach (var (guid, _) in _session._editedMeshes)
+        foreach (var (guid, _) in _session.EditedMeshes)
         {
             if (_session.FindMeshData(guid) is not { } mesh)
             {
@@ -445,7 +445,7 @@ public sealed class MeshToolRunner
     {
         var cleaned = RunWholeMeshTool("Clean", MeshTools.Clean);
         var reported = new List<MeshItem>();
-        foreach (var guid in _session._editedMeshes.Keys)
+        foreach (var guid in _session.EditedMeshes.Keys)
         {
             if (_session.FindMeshData(guid) is { } mesh)
             {
@@ -472,7 +472,7 @@ public sealed class MeshToolRunner
             return false;
         }
         var guids = _session.MeshSelection.Guids.Where(g => _session.FindMeshData(g) != null && _session.PlacementOf(g) != null).ToList();
-        if (guids.Count == 0 || _shell.Scene.Expanded.Flat.Find(_session._editedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, source) is not { } pose)
+        if (guids.Count == 0 || _shell.Scene.Expanded.Flat.Find(_session.EditedMeshes[guids[0]]) is not { } source || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, source) is not { } pose)
         {
             return false;
         }
@@ -507,7 +507,7 @@ public sealed class MeshToolRunner
         {
             return false;
         }
-        _session._editedMeshes[document.Guid] = create.Created.Id;
+        _session.AddEditedMesh(document.Guid, create.Created.Id);
         _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, combined.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
         return true;
     }
@@ -612,7 +612,7 @@ public sealed class MeshToolRunner
         _shell.SelectScene(create.Created.Id);
         if (_session.InMeshMode)
         {
-            _session._editedMeshes[document.Guid] = create.Created.Id;
+            _session.AddEditedMesh(document.Guid, create.Created.Id);
             _session.SetMeshSelection(new MeshSelection(MeshElement.Faces, [.. Enumerable.Range(0, block.Faces.Length).Select(i => new MeshItem(document.Guid, i))]));
         }
     }
@@ -645,7 +645,7 @@ public sealed class MeshToolRunner
         int? bestVertex = null;
         int? bestEdge = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in _session.InMeshMode ? _session._editedMeshes.Keys.ToList() : [])
+        foreach (var guid in _session.InMeshMode ? _session.EditedMeshes.Keys.ToList() : [])
         {
             if (_session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement)
             {

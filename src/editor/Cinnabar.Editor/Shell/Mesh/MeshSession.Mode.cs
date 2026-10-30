@@ -32,7 +32,7 @@ public sealed partial class MeshSession
     public const string MeshContext = "mode.mesh";
 
     // The edited meshes: each mesh file's GUID and the entity that places it, by scene ID.
-    internal readonly Dictionary<string, ulong> _editedMeshes = [];
+    readonly Dictionary<string, ulong> _editedMeshes = [];
     MeshItem? _hovered;
     string _sentOverlay = "";
     BlockDrag? _blockDrag;
@@ -311,6 +311,9 @@ public sealed partial class MeshSession
         MeshSelection = selection;
         OnMeshModeChanged();
     }
+
+    /// <summary>Adds a mesh file that a tool made to the edited meshes, with the entity that places it.</summary>
+    internal void AddEditedMesh(string guid, ulong sceneId) => _editedMeshes[guid] = sceneId;
 
     /// <summary>Select Linked: everything the selected elements reach through their neighbors.</summary>
     public void SelectLinked() => SetMeshSelection(MeshSelection.Linked(FindMeshData));
