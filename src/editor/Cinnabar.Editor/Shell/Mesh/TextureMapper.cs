@@ -30,13 +30,18 @@ public enum HotspotChoice
 public sealed record DevMaterial(string Name, string Guid);
 
 /// <summary>
-/// The texture tools in the session (see docs/editor/mesh-editing.md#texture-tools): each runs on the selected faces of
+/// The texture tools (see docs/editor/mesh-editing.md#texture-tools): each runs on the selected faces of
 /// every edited mesh as one undo entry, and the Face panel's drags run them as a scrub. The project's texel density
 /// and each material's tool texture, from the cook index, give new faces their scale and the Face panel its density.
 /// Transform Texture turns the gizmo onto the selected faces' mappings instead of their vertices.
 /// </summary>
-public sealed partial class MeshSession
+public sealed class TextureMapper
 {
+    readonly MeshSession _session;
+    readonly IMeshHost _shell;
+
+    internal TextureMapper(MeshSession session, IMeshHost shell) => (_session, _shell) = (session, shell);
+
     /// <summary>The project setting of the texture tools' density, in texels per meter.</summary>
     public const string TexelDensityKey = "mesh.texel_density";
 
@@ -47,7 +52,7 @@ public sealed partial class MeshSession
     /// <summary>The dev materials, gray first, as the Texture group's dropdown and the Face panel's picker offer them.</summary>
     public static readonly IReadOnlyList<DevMaterial> DevMaterials =
     [
-        new("Gray", DevGrayMaterial),
+        new("Gray", MeshSession.DevGrayMaterial),
         new("Blue", "6b2d4f809c3e5a718b2d4f6a8c0d2e3f"),
         new("Orange", "7c3e5a91ad4f6b829c3e5a7b9d1e3f40"),
         new("Green", "8d4f6ba2be507c93ad4f6b8cae2f4051"),
@@ -63,7 +68,7 @@ public sealed partial class MeshSession
     double? _texelDensityOverride;
 
     /// <summary>The face last clicked in the Faces kind, which Align to Face copies from, or null.</summary>
-    public MeshItem? ActiveFace { get; private set; }
+    public MeshItem? ActiveFace { get; internal set; }
 
     /// <summary>The gizmo drags the selected faces' mappings instead of their vertices.</summary>
     public bool TextureGizmo { get; private set; }
@@ -90,7 +95,7 @@ public sealed partial class MeshSession
             _shell.Console.Add(LogLevel.Warning, $"project: cannot write {_shell.ProjectPath}: {e.Message}; the density holds for this session");
             _texelDensityOverride = density;
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     /// <summary>
@@ -120,7 +125,7 @@ public sealed partial class MeshSession
     internal double ScaleForFaces(MeshData mesh, IEnumerable<int> faces)
     {
         var first = faces.FirstOrDefault(f => f < mesh.Faces.Length, -1);
-        return NewFaceScale(first >= 0 ? mesh.Materials[mesh.Faces[first].Slot] : DefaultMeshMaterial);
+        return NewFaceScale(first >= 0 ? mesh.Materials[mesh.Faces[first].Slot] : _session.DefaultMeshMaterial);
     }
 
     internal double ScaleForEdges(MeshData mesh, IEnumerable<int> edges) =>
@@ -128,12 +133,12 @@ public sealed partial class MeshSession
 
     /// <summary>The selected faces, by mesh, in the Faces kind; none in another kind.</summary>
     public IReadOnlyList<(string Guid, int Face)> SelectedFaces =>
-        InMeshMode && MeshElement == MeshElement.Faces
-            ? [.. MeshSelection.Items.Where(i => FindMeshData(i.Guid) is { } m && i.Index < m.Faces.Length).OrderBy(i => i.Guid).ThenBy(i => i.Index).Select(i => (i.Guid, i.Index))]
+        _session.InMeshMode && _session.MeshElement == MeshElement.Faces
+            ? [.. _session.MeshSelection.Items.Where(i => _session.FindMeshData(i.Guid) is { } m && i.Index < m.Faces.Length).OrderBy(i => i.Guid).ThenBy(i => i.Index).Select(i => (i.Guid, i.Index))]
             : [];
 
     /// <summary>Whether a texture tool can run: mesh mode with faces selected.</summary>
-    public bool CanRunTextureTool => CanEditInMeshMode && MeshElement == MeshElement.Faces && !MeshSelection.IsEmpty;
+    public bool CanRunTextureTool => _session.CanEditInMeshMode && _session.MeshElement == MeshElement.Faces && !_session.MeshSelection.IsEmpty;
 
     // The operations that change the selected faces' mappings from a snapshot of each mesh: none for a change that
     // changes nothing.
@@ -142,7 +147,7 @@ public sealed partial class MeshSession
         var ops = new List<Operation>();
         foreach (var group in SelectedFaces.GroupBy(f => f.Guid))
         {
-            if (starts(group.Key) is not { } start || FindMeshData(group.Key) is not { } current)
+            if (starts(group.Key) is not { } start || _session.FindMeshData(group.Key) is not { } current)
             {
                 continue;
             }
@@ -152,7 +157,7 @@ public sealed partial class MeshSession
             {
                 continue;
             }
-            ops.Add(new MeshOperation(group.Key, current, start.With(faces: faces), Meshes));
+            ops.Add(new MeshOperation(group.Key, current, start.With(faces: faces), _session.Meshes));
         }
         return ops;
     }
@@ -160,12 +165,12 @@ public sealed partial class MeshSession
     /// <summary>Runs a texture tool on the selected faces of every edited mesh, as one undo entry.</summary>
     public bool EditMappings(string label, Func<MeshData, int, Mapping, Mapping> change)
     {
-        Tools.CommitPendingDistance();
+        _session.Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
         }
-        var ops = MappingOperations(FindMeshData, change);
+        var ops = MappingOperations(_session.FindMeshData, change);
         if (ops.Count == 0)
         {
             _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()} changed nothing");
@@ -183,19 +188,19 @@ public sealed partial class MeshSession
         {
             return false;
         }
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
         return true;
     }
 
     /// <summary>Starts a drag of the Face panel's mapping fields: one undo entry until <see cref="EndMappingScrub"/>.</summary>
     public bool BeginMappingScrub(string label)
     {
-        Tools.CommitPendingDistance();
+        _session.Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
         }
-        _mappingStarts = SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => FindMeshData(g)!);
+        _mappingStarts = SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => _session.FindMeshData(g)!);
         _shell.BeginEdit(label);
         return true;
     }
@@ -222,7 +227,7 @@ public sealed partial class MeshSession
         }
         _mappingStarts = null;
         _shell.CommitEdit();
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     /// <summary>Shift: moves the texture by steps of an eighth of a repeat along the mapping's axes, as it shows on the face.</summary>
@@ -271,7 +276,7 @@ public sealed partial class MeshSession
             case TextureAlignment.ToEdge:
                 return AlignTextureToEdges();
             default:
-                if (ActiveFace is not { } active || !MeshSelection.Contains(active.Guid, active.Index) || FindMeshData(active.Guid) is not { } source || active.Index >= source.Faces.Length)
+                if (ActiveFace is not { } active || !_session.MeshSelection.Contains(active.Guid, active.Index) || _session.FindMeshData(active.Guid) is not { } source || active.Index >= source.Faces.Length)
                 {
                     _shell.Console.Add(LogLevel.Info, "mesh: click the face to copy the texture from, then Shift-click the faces to carry it onto");
                     return false;
@@ -287,21 +292,21 @@ public sealed partial class MeshSession
     // Align to Edge runs in the Edges kind: each selected edge's faces take u along it.
     bool AlignTextureToEdges()
     {
-        Tools.CommitPendingDistance();
-        if (!Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
+        _session.Tools.CommitPendingDistance();
+        if (!_session.Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
         {
             _shell.Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
             return false;
         }
         var ops = new List<Operation>();
-        foreach (var guid in MeshSelection.Guids)
+        foreach (var guid in _session.MeshSelection.Guids)
         {
-            if (FindMeshData(guid) is not { } mesh)
+            if (_session.FindMeshData(guid) is not { } mesh)
             {
                 continue;
             }
             var faces = mesh.Faces.ToArray();
-            foreach (var e in MeshSelection.Of(guid).Where(e => e < mesh.Edges.Length))
+            foreach (var e in _session.MeshSelection.Of(guid).Where(e => e < mesh.Edges.Length))
             {
                 var edge = mesh.Edges[e];
                 foreach (var f in mesh.FacesOfEdge(edge))
@@ -311,7 +316,7 @@ public sealed partial class MeshSession
             }
             if (!faces.SequenceEqual(mesh.Faces))
             {
-                ops.Add(new MeshOperation(guid, mesh, mesh.With(faces: faces), Meshes));
+                ops.Add(new MeshOperation(guid, mesh, mesh.With(faces: faces), _session.Meshes));
             }
         }
         return ops.Count > 0 && _shell.Edit("Align Texture to Edge", [.. ops]);
@@ -371,7 +376,7 @@ public sealed partial class MeshSession
     /// <summary>Sets the selected faces' material: the mesh's slot, and the entity's Mesh_Renderer slot that draws it, as one undo entry.</summary>
     public bool SetFaceMaterial(string guid)
     {
-        Tools.CommitPendingDistance();
+        _session.Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
         {
             return false;
@@ -398,7 +403,7 @@ public sealed partial class MeshSession
     List<Operation>? MaterialOperations(string meshGuid, IEnumerable<int> faces, string material, out string? reason)
     {
         reason = null;
-        if (FindMeshData(meshGuid) is not { } mesh || !_editedMeshes.TryGetValue(meshGuid, out var entity))
+        if (_session.FindMeshData(meshGuid) is not { } mesh || !_session._editedMeshes.TryGetValue(meshGuid, out var entity))
         {
             return [];
         }
@@ -411,7 +416,7 @@ public sealed partial class MeshSession
         var ops = new List<Operation>();
         if (!ReferenceEquals(after, mesh) && !after.Faces.SequenceEqual(mesh.Faces) || !after.Materials.SequenceEqual(mesh.Materials))
         {
-            ops.Add(new MeshOperation(meshGuid, mesh, after, Meshes));
+            ops.Add(new MeshOperation(meshGuid, mesh, after, _session.Meshes));
         }
         var slot = after.Materials.IndexOf(material);
         if (slot >= 0 && _shell.Scene?.Expanded.Flat.Find(entity) is { } document)
@@ -430,7 +435,7 @@ public sealed partial class MeshSession
     // face under it, with its mesh.
     (string Guid, List<int> Faces)? DropTarget(Vec2 pixel)
     {
-        if (!CanEditInMeshMode)
+        if (!_session.CanEditInMeshMode)
         {
             return null;
         }
@@ -438,9 +443,9 @@ public sealed partial class MeshSession
         var ray = _shell.Camera.Ray(pixel, width, height);
         (string Guid, int Face)? best = null;
         var bestDistance = double.MaxValue;
-        foreach (var guid in _editedMeshes.Keys)
+        foreach (var guid in _session._editedMeshes.Keys)
         {
-            if (FindMeshData(guid) is { } mesh && PlacementOf(guid) is { } placement && MeshPick.Face(mesh, placement, ray) is { } hit && hit.Distance < bestDistance)
+            if (_session.FindMeshData(guid) is { } mesh && _session.PlacementOf(guid) is { } placement && MeshPick.Face(mesh, placement, ray) is { } hit && hit.Distance < bestDistance)
             {
                 (best, bestDistance) = ((guid, hit.Face), hit.Distance);
             }
@@ -449,9 +454,9 @@ public sealed partial class MeshSession
         {
             return null;
         }
-        if (MeshElement == MeshElement.Faces && MeshSelection.Contains(meshGuid, face))
+        if (_session.MeshElement == MeshElement.Faces && _session.MeshSelection.Contains(meshGuid, face))
         {
-            return (meshGuid, MeshSelection.Of(meshGuid).ToList());
+            return (meshGuid, _session.MeshSelection.Of(meshGuid).ToList());
         }
         return (meshGuid, [face]);
     }
@@ -500,18 +505,18 @@ public sealed partial class MeshSession
     {
         TextureGizmo = !TextureGizmo;
         _shell.CancelGizmo();
-        OnMeshModeChanged();
+        _session.OnMeshModeChanged();
     }
 
     // The gizmo's axes with the texture gizmo on: the active face's mapping axes, u, v and across, in view space.
-    Quat? TextureGizmoAxes()
+    internal Quat? TextureGizmoAxes()
     {
-        if (!TextureGizmo || MeshElement != MeshElement.Faces)
+        if (!TextureGizmo || _session.MeshElement != MeshElement.Faces)
         {
             return null;
         }
-        var face = ActiveFace is { } active && MeshSelection.Contains(active.Guid, active.Index) ? active : MeshSelection.Items.OrderBy(i => i.Guid).ThenBy(i => i.Index).FirstOrDefault();
-        if (FindMeshData(face.Guid) is not { } mesh || face.Index >= mesh.Faces.Length || PlacementOf(face.Guid) is not { } placement)
+        var face = ActiveFace is { } active && _session.MeshSelection.Contains(active.Guid, active.Index) ? active : _session.MeshSelection.Items.OrderBy(i => i.Guid).ThenBy(i => i.Index).FirstOrDefault();
+        if (_session.FindMeshData(face.Guid) is not { } mesh || face.Index >= mesh.Faces.Length || _session.PlacementOf(face.Guid) is not { } placement)
         {
             return null;
         }
@@ -530,7 +535,7 @@ public sealed partial class MeshSession
     /// A gizmo drag of the selected faces' mappings: each step moves, turns or scales the texture about the pivot, in
     /// the mesh's space, so the texture follows the gizmo as the vertices would.
     /// </summary>
-    sealed class TextureDrag : IGizmoTarget
+    internal sealed class TextureDrag : IGizmoTarget
     {
         readonly MeshSession _session;
         readonly Vec3 _pivot;
@@ -539,7 +544,7 @@ public sealed partial class MeshSession
         public TextureDrag(MeshSession session, long[] pivot)
         {
             (_session, _pivot) = (session, session.Shell.Camera.RelativeTo(pivot));
-            foreach (var group in session.SelectedFaces.GroupBy(f => f.Guid))
+            foreach (var group in session.Texture.SelectedFaces.GroupBy(f => f.Guid))
             {
                 if (session.FindMeshData(group.Key) is { } mesh && session.PlacementOf(group.Key) is { } placement)
                 {

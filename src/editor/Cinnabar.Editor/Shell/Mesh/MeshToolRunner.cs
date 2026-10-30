@@ -9,7 +9,7 @@ using GizmoKind = Cinnabar.Editor.Link.Protocol.GizmoKind;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// The mesh tools in the session (see docs/editor/mesh-editing.md#mesh-tools): each runs on the sub-selection of every
+/// The mesh tools (see docs/editor/mesh-editing.md#mesh-tools): each runs on the sub-selection of every
 /// edited mesh as one undo entry. A tool with a distance, such as Extrude, opens the entry and waits for a drag of the
 /// gizmo, whose steps set the distance and replace each other; releasing commits and Escape cancels. Cut and Draw are
 /// tool modes that take points from clicks until Enter. Detach and Extract make a new mesh and entity, and the
@@ -407,8 +407,8 @@ public sealed class MeshToolRunner
     /// <summary>Extrude: faces out along their average normal with walls, or open edges out as quads, by a dragged distance.</summary>
     public bool Extrude() => _session.MeshElement switch
     {
-        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d, _session.ScaleForFaces(m, s)), requires: MeshElement.Faces),
-        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d, _session.ScaleForEdges(m, s)), requires: MeshElement.Edges),
+        MeshElement.Faces => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.Extrude(m, s, d, _session.Texture.ScaleForFaces(m, s)), requires: MeshElement.Faces),
+        MeshElement.Edges => BeginDistanceTool("Extrude", (m, s, d) => MeshTools.ExtrudeEdges(m, s, d, _session.Texture.ScaleForEdges(m, s)), requires: MeshElement.Edges),
         _ => false,
     };
 
@@ -590,7 +590,7 @@ public sealed class MeshToolRunner
         var position = _shell.Scene.Position;
         if (mesh != null && _session.FindMeshData(mesh) is { } data && _session.PlacementOf(mesh) is { } placement)
         {
-            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.NewFaceScale(data.Materials[0]), data.Materials[0]);
+            var made = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.Texture.NewFaceScale(data.Materials[0]), data.Materials[0]);
             var cornerRelative = _shell.Camera.RelativeTo(corner);
             var local = made.With(vertices: made.Vertices.Select(v => placement.ToLocal(cornerRelative + v)));
             var after = Append(data, local);
@@ -601,7 +601,7 @@ public sealed class MeshToolRunner
             }
             return;
         }
-        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.NewFaceScale(_session.DefaultMeshMaterial), _session.DefaultMeshMaterial);
+        var block = Primitives.Make(Primitive, Vec3.Zero, size, axis, PrimitiveParameters, _session.Texture.NewFaceScale(_session.DefaultMeshMaterial), _session.DefaultMeshMaterial);
         var name = _session.NewMeshName(Primitive.ToString().ToLowerInvariant());
         var (create, document) = NewMeshEntity(name, block, new Pose(corner, Quat.Identity, [1, 1, 1]), []);
         if (!_shell.Edit(Primitive.ToString(), new CreateMesh(document, _session.Meshes), create))
@@ -761,7 +761,7 @@ public sealed class MeshToolRunner
             var axis = MeshGrid.NearestAxis(_shell.Camera.Forward);
             // The plane fronts toward the camera.
             var front = MeshGrid.AxisVector(axis) * (Vec3.Dot(MeshGrid.AxisVector(axis), _shell.Camera.Forward) > 0 ? -1 : 1);
-            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, _session.DefaultMeshMaterial, _session.NewFaceScale(_session.DefaultMeshMaterial));
+            var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, _session.DefaultMeshMaterial, _session.Texture.NewFaceScale(_session.DefaultMeshMaterial));
             CancelToolPoints();
             if (data == null)
             {

@@ -381,7 +381,7 @@ public sealed partial class MeshSession
         if (MeshElement == MeshElement.Faces)
         {
             // The face clicked last is the active one, which Align to Face copies from and the texture gizmo aligns to.
-            ActiveFace = hit;
+            Texture.ActiveFace = hit;
         }
         ApplyMeshPick(items, mode);
     }
@@ -448,7 +448,7 @@ public sealed partial class MeshSession
         {
             return null;
         }
-        if (!Tools.HasPendingDistance && TextureGizmoAxes() is { } textureAxes)
+        if (!Tools.HasPendingDistance && Texture.TextureGizmoAxes() is { } textureAxes)
         {
             return ((sum / count).Offset(origin), textureAxes);
         }
@@ -506,10 +506,10 @@ public sealed partial class MeshSession
         {
             return PressPivotGizmo(pixel, pivot);
         }
-        if (TextureGizmo && MeshElement == MeshElement.Faces)
+        if (Texture.TextureGizmo && MeshElement == MeshElement.Faces)
         {
             // Transform Texture: the drag moves, turns or scales the selected faces' textures about the pivot.
-            var textureDrag = new TextureDrag(this, pivot);
+            var textureDrag = new TextureMapper.TextureDrag(this, pivot);
             if (textureDrag.IsEmpty)
             {
                 return false;

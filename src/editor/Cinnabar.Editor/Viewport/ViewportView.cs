@@ -260,7 +260,7 @@ public sealed class ViewportView : Grid
         if (_shell.Mesh.InMeshMode)
         {
             // In mesh mode the editor picks the face itself, so the drag shows at once.
-            _shell.Mesh.PreviewFaceMaterial(pixel, guid);
+            _shell.Mesh.Texture.PreviewFaceMaterial(pixel, guid);
             return;
         }
         _dragPixel = ((int)Math.Floor(pixel.X), (int)Math.Floor(pixel.Y));
@@ -320,7 +320,7 @@ public sealed class ViewportView : Grid
         e.Handled = true;
         if (_shell.Mesh.InMeshMode)
         {
-            _shell.Mesh.DropFaceMaterial(pixel, guid);
+            _shell.Mesh.Texture.DropFaceMaterial(pixel, guid);
             return;
         }
         var generation = _dragGeneration;
@@ -571,19 +571,19 @@ public sealed class ViewportView : Grid
         }
         // The texture tools' keys, on the selected faces (see docs/editor/mesh-editing.md#texture-tools): Shift makes the
         // step ten times and Ctrl a tenth.
-        if (_shell.Mesh.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
+        if (_shell.Mesh.Texture.CanRunTextureTool && (e.KeyModifiers & ~(KeyModifiers.Shift | KeyModifiers.Control)) == 0)
         {
             var multiplier = e.KeyModifiers.HasFlag(KeyModifiers.Shift) ? 10 : e.KeyModifiers.HasFlag(KeyModifiers.Control) ? 0.1 : 1;
             var ran = e.Key switch
             {
-                Key.Left => _shell.Mesh.ShiftTexture(1, 0, multiplier),
-                Key.Right => _shell.Mesh.ShiftTexture(-1, 0, multiplier),
-                Key.Up => _shell.Mesh.ShiftTexture(0, 1, multiplier),
-                Key.Down => _shell.Mesh.ShiftTexture(0, -1, multiplier),
-                Key.OemComma => _shell.Mesh.RotateTexture(1, multiplier),
-                Key.OemPeriod => _shell.Mesh.RotateTexture(-1, multiplier),
-                Key.OemPlus => _shell.Mesh.ScaleTexture(1, multiplier),
-                Key.OemMinus => _shell.Mesh.ScaleTexture(-1, multiplier),
+                Key.Left => _shell.Mesh.Texture.ShiftTexture(1, 0, multiplier),
+                Key.Right => _shell.Mesh.Texture.ShiftTexture(-1, 0, multiplier),
+                Key.Up => _shell.Mesh.Texture.ShiftTexture(0, 1, multiplier),
+                Key.Down => _shell.Mesh.Texture.ShiftTexture(0, -1, multiplier),
+                Key.OemComma => _shell.Mesh.Texture.RotateTexture(1, multiplier),
+                Key.OemPeriod => _shell.Mesh.Texture.RotateTexture(-1, multiplier),
+                Key.OemPlus => _shell.Mesh.Texture.ScaleTexture(1, multiplier),
+                Key.OemMinus => _shell.Mesh.Texture.ScaleTexture(-1, multiplier),
                 _ => (bool?)null,
             };
             if (ran != null)

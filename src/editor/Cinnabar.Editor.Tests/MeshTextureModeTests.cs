@@ -82,11 +82,11 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.Equal(before.ShiftU, MeshFixtures.Mesh(shell).Faces[(front + 2) % 6].Mapping.ShiftU);
         Assert.Equal(2, shell.Mesh.MeshSelection.Count);
         // Shift makes the step ten times, as the viewport's keys ask.
-        Assert.True(shell.Mesh.ShiftTexture(0, -1, 10));
+        Assert.True(shell.Mesh.Texture.ShiftTexture(0, -1, 10));
         Assert.Equal(before.ShiftV - 10 * MeshTexture.ShiftStep, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 9);
-        Assert.True(shell.Mesh.RotateTexture(1));
+        Assert.True(shell.Mesh.Texture.RotateTexture(1));
         Assert.Equal(15, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation);
-        Assert.True(shell.Mesh.ScaleTexture(1));
+        Assert.True(shell.Mesh.Texture.ScaleTexture(1));
         Assert.Equal(1.25, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU, 9);
         shell.Scene.Undo();
         Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
@@ -99,16 +99,16 @@ public sealed class MeshTextureModeTests : IDisposable
     public void TheDensityComesFromTheProjectAndSetsNewFacesScale()
     {
         using var shell = NewShell();
-        Assert.Equal(MeshTexture.DefaultDensity, shell.Mesh.TexelDensity);
+        Assert.Equal(MeshTexture.DefaultDensity, shell.Mesh.Texture.TexelDensity);
         // A dev material measures by the engine's grid before the index knows it: 1024 texels at 256 per meter is 4 m.
-        Assert.Equal(4, shell.Mesh.NewFaceScale(MeshSession.DevGrayMaterial));
-        shell.Mesh.SetTexelDensity(512);
-        Assert.Equal("512", ProjectSettings.Get(ProjectPath, MeshSession.TexelDensityKey));
-        Assert.Equal(512, shell.Mesh.TexelDensity);
-        Assert.Equal(2, shell.Mesh.NewFaceScale(MeshSession.DevGrayMaterial));
+        Assert.Equal(4, shell.Mesh.Texture.NewFaceScale(MeshSession.DevGrayMaterial));
+        shell.Mesh.Texture.SetTexelDensity(512);
+        Assert.Equal("512", ProjectSettings.Get(ProjectPath, TextureMapper.TexelDensityKey));
+        Assert.Equal(512, shell.Mesh.Texture.TexelDensity);
+        Assert.Equal(2, shell.Mesh.Texture.NewFaceScale(MeshSession.DevGrayMaterial));
         // A material whose texture the index gives measures by it; one it does not know takes the default.
-        Assert.Equal(2, shell.Mesh.NewFaceScale(MaterialGuid));
-        Assert.Equal(Mapping.DefaultScale, shell.Mesh.NewFaceScale("00112233445566778899aabbccddeeff"));
+        Assert.Equal(2, shell.Mesh.Texture.NewFaceScale(MaterialGuid));
+        Assert.Equal(Mapping.DefaultScale, shell.Mesh.Texture.NewFaceScale("00112233445566778899aabbccddeeff"));
         // Reset Scale puts the selected faces at the density.
         var front = Front(shell);
         SelectFaces(shell, front);
@@ -133,8 +133,8 @@ public sealed class MeshTextureModeTests : IDisposable
         using var shell = NewShell();
         var front = Front(shell);
         SelectFaces(shell, front);
-        var blue = MeshSession.DevMaterials.First(d => d.Name == "Blue").Guid;
-        Assert.True(shell.Mesh.SetFaceMaterial(blue));
+        var blue = TextureMapper.DevMaterials.First(d => d.Name == "Blue").Guid;
+        Assert.True(shell.Mesh.Texture.SetFaceMaterial(blue));
         Assert.Single(shell.Scene!.History);
         Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Slot);
         Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[1]);
@@ -150,21 +150,21 @@ public sealed class MeshTextureModeTests : IDisposable
         // A drop shows the material on the face under the mouse while the drag is over it, and the drop keeps it.
         shell.Mesh.SetMeshSelection(shell.Mesh.MeshSelection.Clear());
         var pixel = PixelOf(shell, new Vec3(0.1, 0.1, -0.5));
-        shell.Mesh.PreviewFaceMaterial(pixel, blue);
+        shell.Mesh.Texture.PreviewFaceMaterial(pixel, blue);
         Assert.True(shell.Scene.InTransaction);
         Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
-        shell.Mesh.PreviewFaceMaterial(null, blue);
+        shell.Mesh.Texture.PreviewFaceMaterial(null, blue);
         Assert.False(shell.Scene.InTransaction);
         Assert.Equal(MeshSession.DevGrayMaterial, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
-        Assert.True(shell.Mesh.DropFaceMaterial(pixel, blue));
+        Assert.True(shell.Mesh.Texture.DropFaceMaterial(pixel, blue));
         Assert.Equal(blue, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[front].Slot]);
         Assert.Single(shell.Scene.History);
         // A drop over a selected face sets every selected face.
         SelectFaces(shell, front, (front + 1) % 6);
-        var red = MeshSession.DevMaterials.First(d => d.Name == "Red").Guid;
-        Assert.True(shell.Mesh.DropFaceMaterial(pixel, red));
+        var red = TextureMapper.DevMaterials.First(d => d.Name == "Red").Guid;
+        Assert.True(shell.Mesh.Texture.DropFaceMaterial(pixel, red));
         Assert.Equal(red, MeshFixtures.Mesh(shell).Materials[MeshFixtures.Mesh(shell).Faces[(front + 1) % 6].Slot]);
-        Assert.False(shell.Mesh.DropFaceMaterial(new Vec2(5, 5), red));
+        Assert.False(shell.Mesh.Texture.DropFaceMaterial(new Vec2(5, 5), red));
     }
 
     [Fact]
@@ -173,9 +173,9 @@ public sealed class MeshTextureModeTests : IDisposable
         using var shell = NewShell();
         var front = Front(shell);
         SelectFaces(shell, front);
-        Assert.True(shell.Mesh.SetFaceMaterial(MaterialGuid));
-        Assert.Equal((TextureGuid, 1024.0, 1024.0), shell.Mesh.MaterialTexture(MaterialGuid));
-        Assert.Equal(2, shell.Mesh.MaterialHotspots(MaterialGuid).Count);
+        Assert.True(shell.Mesh.Texture.SetFaceMaterial(MaterialGuid));
+        Assert.Equal((TextureGuid, 1024.0, 1024.0), shell.Mesh.Texture.MaterialTexture(MaterialGuid));
+        Assert.Equal(2, shell.Mesh.Texture.MaterialHotspots(MaterialGuid).Count);
         // The 1 m face is 256 texels at the project's density: the square rectangle.
         Assert.True(shell.Commands.Get(EditorCommands.TextureHotspot).Execute());
         var (minU, maxU, minV, maxV) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
@@ -184,11 +184,11 @@ public sealed class MeshTextureModeTests : IDisposable
         (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0.25, 0.75), (Math.Round(minU, 6), Math.Round(maxU, 6)));
         // Random keeps the best rectangle in one of its symmetries.
-        Assert.True(shell.Mesh.ApplyHotspot(HotspotChoice.Random, new Random(3)));
-        Assert.Equal(0, MeshTexture.CurrentHotspot(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping, shell.Mesh.MaterialHotspots(MaterialGuid), 1024, 1024));
+        Assert.True(shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Random, new Random(3)));
+        Assert.Equal(0, MeshTexture.CurrentHotspot(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping, shell.Mesh.Texture.MaterialHotspots(MaterialGuid), 1024, 1024));
         // A material without hotspots fits instead.
-        Assert.True(shell.Mesh.SetFaceMaterial(MeshSession.DevGrayMaterial));
-        Assert.True(shell.Mesh.ApplyHotspot(HotspotChoice.Best));
+        Assert.True(shell.Mesh.Texture.SetFaceMaterial(MeshSession.DevGrayMaterial));
+        Assert.True(shell.Mesh.Texture.ApplyHotspot(HotspotChoice.Best));
         (minU, maxU, _, _) = MeshTexture.UvBounds(MeshFixtures.Mesh(shell), front, MeshFixtures.Mesh(shell).Faces[front].Mapping);
         Assert.Equal((0, 1), (Math.Round(minU, 6), Math.Round(maxU, 6)));
     }
@@ -201,7 +201,7 @@ public sealed class MeshTextureModeTests : IDisposable
         SelectFaces(shell, front);
         shell.SetTool(Tool.Move);
         Assert.True(shell.Commands.Get(EditorCommands.MeshTransformTexture).Execute());
-        Assert.True(shell.Mesh.TextureGizmo);
+        Assert.True(shell.Mesh.Texture.TextureGizmo);
         // The gizmo's x axis is the face's u axis, +x.
         var (pivot, axes) = shell.GizmoPose()!.Value;
         Assert.Equal(1, Vec3.Dot(axes.Rotate(Vec3.UnitX), Vec3.UnitX), 6);
@@ -219,7 +219,7 @@ public sealed class MeshTextureModeTests : IDisposable
         Assert.Equal(0, MeshFixtures.Mesh(shell).Faces[front].Mapping.ShiftV, 6);
         // Off again, and a drag moves the vertices.
         Assert.True(shell.Commands.Get(EditorCommands.MeshTransformTexture).Execute());
-        Assert.False(shell.Mesh.TextureGizmo);
+        Assert.False(shell.Mesh.Texture.TextureGizmo);
         Assert.True(shell.PressGizmo(Along(0.5 * size)));
         shell.DragGizmo(Along(0.5 * size + 0.5), invertSnap: false);
         shell.ReleaseGizmo();
@@ -232,17 +232,17 @@ public sealed class MeshTextureModeTests : IDisposable
         using var shell = NewShell();
         var front = Front(shell);
         SelectFaces(shell, front);
-        Assert.True(shell.Mesh.BeginMappingScrub("Drag Texture Scale"));
-        shell.Mesh.PreviewMappings((_, _, m) => m with { ScaleU = 2 });
-        shell.Mesh.PreviewMappings((_, _, m) => m with { ScaleU = 3 });
+        Assert.True(shell.Mesh.Texture.BeginMappingScrub("Drag Texture Scale"));
+        shell.Mesh.Texture.PreviewMappings((_, _, m) => m with { ScaleU = 2 });
+        shell.Mesh.Texture.PreviewMappings((_, _, m) => m with { ScaleU = 3 });
         Assert.Equal(3, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
-        shell.Mesh.EndMappingScrub();
+        shell.Mesh.Texture.EndMappingScrub();
         Assert.Single(shell.Scene!.History);
         shell.Scene.Undo();
         Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
-        Assert.True(shell.Mesh.SetTextureScale(null, 0.5));
+        Assert.True(shell.Mesh.Texture.SetTextureScale(null, 0.5));
         Assert.Equal((1.0, 0.5), (MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleV));
-        Assert.True(shell.Mesh.SetTextureRotation(400));
+        Assert.True(shell.Mesh.Texture.SetTextureRotation(400));
         Assert.Equal(40, MeshFixtures.Mesh(shell).Faces[front].Mapping.Rotation, 9);
     }
 
