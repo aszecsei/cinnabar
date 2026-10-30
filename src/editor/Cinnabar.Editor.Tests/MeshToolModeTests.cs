@@ -2,6 +2,7 @@ using Avalonia;
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;

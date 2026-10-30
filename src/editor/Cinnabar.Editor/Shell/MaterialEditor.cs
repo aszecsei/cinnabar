@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 using Cinnabar.Editor.Viewport;
 using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;

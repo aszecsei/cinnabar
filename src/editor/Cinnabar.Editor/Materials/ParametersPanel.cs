@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using static Cinnabar.Editor.Panels.Kit;
@@ -22,11 +23,11 @@ sealed class ParametersPanel : ScrollViewer
 
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
-    readonly Func<Tools.Vec2> _middle;
+    readonly Func<Vec2> _middle;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 4 };
     string _shown = "";
 
-    public ParametersPanel(EditorShell shell, MaterialEditor editor, Func<Tools.Vec2> middle)
+    public ParametersPanel(EditorShell shell, MaterialEditor editor, Func<Vec2> middle)
     {
         _shell = shell;
         _editor = editor;

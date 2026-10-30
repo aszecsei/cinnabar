@@ -4,6 +4,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;

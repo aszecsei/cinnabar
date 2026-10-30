@@ -3,6 +3,7 @@
     <RootNamespace>Cinnabar.Editor.Document</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Cinnabar.Editor.Math\Cinnabar.Editor.Math.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
   </ItemGroup>
 </Project>

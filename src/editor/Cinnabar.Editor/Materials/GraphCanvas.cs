@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;

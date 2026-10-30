@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Wire = Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Tests;

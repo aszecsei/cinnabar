@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Mesh;

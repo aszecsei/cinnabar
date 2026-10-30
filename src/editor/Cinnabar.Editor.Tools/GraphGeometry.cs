@@ -1,5 +1,6 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Maths;
 
 namespace Cinnabar.Editor.Tools;
 

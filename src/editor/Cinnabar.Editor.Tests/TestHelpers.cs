@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;

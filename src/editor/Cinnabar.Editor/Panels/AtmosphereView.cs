@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 using FieldInfo = Cinnabar.Editor.Link.Protocol.FieldInfo;

@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Ribbon;
 using Cinnabar.Editor.Shell;

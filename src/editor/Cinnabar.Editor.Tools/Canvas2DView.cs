@@ -1,3 +1,5 @@
+using Cinnabar.Editor.Maths;
+
 namespace Cinnabar.Editor.Tools;
 
 /// <summary>

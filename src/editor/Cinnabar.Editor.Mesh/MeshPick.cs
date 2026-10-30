@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Mesh;

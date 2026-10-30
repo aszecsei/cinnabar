@@ -1,5 +1,6 @@
 using Avalonia.Input;
 using Cinnabar.Editor.Link.Protocol;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 
 namespace Cinnabar.Editor.Viewport;

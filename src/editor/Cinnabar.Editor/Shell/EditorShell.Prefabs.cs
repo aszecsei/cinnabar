@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Tools;
