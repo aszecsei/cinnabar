@@ -493,7 +493,7 @@ public sealed class ViewportView : Grid
                 _shell.Mesh.EndBlock(forceEntity: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
             case Gesture.Click:
-                if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.AddToolPoint(pixel))
+                if (_control.FramePoint(position) is { } pixel && !_shell.Mesh.Tools.AddToolPoint(pixel))
                 {
                     _shell.PickAt(pixel, mode);
                 }
@@ -631,11 +631,11 @@ public sealed class ViewportView : Grid
             _shell.Mesh.EscapeMeshMode();
             e.Handled = true;
         }
-        else if (e.Key == Key.Escape && (_shell.Mesh.MeshTool != MeshTool.Select || _shell.Mesh.ToolPointCount > 0))
+        else if (e.Key == Key.Escape && (_shell.Mesh.MeshTool != MeshTool.Select || _shell.Mesh.Tools.ToolPointCount > 0))
         {
-            if (_shell.Mesh.ToolPointCount > 0)
+            if (_shell.Mesh.Tools.ToolPointCount > 0)
             {
-                _shell.Mesh.CancelToolPoints();
+                _shell.Mesh.Tools.CancelToolPoints();
             }
             else
             {
@@ -643,14 +643,14 @@ public sealed class ViewportView : Grid
             }
             e.Handled = true;
         }
-        else if (e.Key is Key.Enter or Key.Return && _shell.Mesh.ToolPointCount > 0)
+        else if (e.Key is Key.Enter or Key.Return && _shell.Mesh.Tools.ToolPointCount > 0)
         {
-            _shell.Mesh.ApplyToolPoints();
+            _shell.Mesh.Tools.ApplyToolPoints();
             e.Handled = true;
         }
-        else if (e.Key == Key.Back && _shell.Mesh.ToolPointCount > 0)
+        else if (e.Key == Key.Back && _shell.Mesh.Tools.ToolPointCount > 0)
         {
-            _shell.Mesh.RemoveLastToolPoint();
+            _shell.Mesh.Tools.RemoveLastToolPoint();
             e.Handled = true;
         }
         else if (command != null)

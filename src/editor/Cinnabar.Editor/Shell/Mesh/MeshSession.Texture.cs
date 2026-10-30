@@ -117,13 +117,13 @@ public sealed partial class MeshSession
         MaterialTexture(material) is var (_, width, _) ? MeshTexture.ScaleFor(width, TexelDensity) : Mapping.DefaultScale;
 
     // The scale of the walls that a tool pulls out of some faces: their first face's material's.
-    double ScaleForFaces(MeshData mesh, IEnumerable<int> faces)
+    internal double ScaleForFaces(MeshData mesh, IEnumerable<int> faces)
     {
         var first = faces.FirstOrDefault(f => f < mesh.Faces.Length, -1);
         return NewFaceScale(first >= 0 ? mesh.Materials[mesh.Faces[first].Slot] : DefaultMeshMaterial);
     }
 
-    double ScaleForEdges(MeshData mesh, IEnumerable<int> edges) =>
+    internal double ScaleForEdges(MeshData mesh, IEnumerable<int> edges) =>
         ScaleForFaces(mesh, edges.Where(e => e < mesh.Edges.Length).SelectMany(e => mesh.FacesOfEdge(mesh.Edges[e])));
 
     /// <summary>The selected faces, by mesh, in the Faces kind; none in another kind.</summary>
@@ -160,7 +160,7 @@ public sealed partial class MeshSession
     /// <summary>Runs a texture tool on the selected faces of every edited mesh, as one undo entry.</summary>
     public bool EditMappings(string label, Func<MeshData, int, Mapping, Mapping> change)
     {
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
@@ -190,7 +190,7 @@ public sealed partial class MeshSession
     /// <summary>Starts a drag of the Face panel's mapping fields: one undo entry until <see cref="EndMappingScrub"/>.</summary>
     public bool BeginMappingScrub(string label)
     {
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
         {
             return false;
@@ -287,8 +287,8 @@ public sealed partial class MeshSession
     // Align to Edge runs in the Edges kind: each selected edge's faces take u along it.
     bool AlignTextureToEdges()
     {
-        CommitPendingDistance();
-        if (!CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
+        Tools.CommitPendingDistance();
+        if (!Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
         {
             _shell.Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
             return false;
@@ -371,7 +371,7 @@ public sealed partial class MeshSession
     /// <summary>Sets the selected faces' material: the mesh's slot, and the entity's Mesh_Renderer slot that draws it, as one undo entry.</summary>
     public bool SetFaceMaterial(string guid)
     {
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
         {
             return false;

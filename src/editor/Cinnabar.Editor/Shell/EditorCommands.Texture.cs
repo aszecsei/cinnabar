@@ -24,7 +24,7 @@ static partial class EditorCommands
         {
             Description = "Set the texture's u axis of each selected edge's faces along the edge. Select edges first.",
             Icon = "local",
-            CanExecuteWhen = () => shell.Mesh.CanRunMeshTool(MeshElement.Edges),
+            CanExecuteWhen = () => shell.Mesh.Tools.CanRunMeshTool(MeshElement.Edges),
         });
         TextureCommand(shell, TextureAlignToFace, "Align to Face", "copy", () => shell.Mesh.AlignTexture(TextureAlignment.ToFace), "Carry the active face's texture onto the other selected faces, turned around their shared edges, so it flows around a corner without a seam. Click the face to copy from, then Shift-click the others.");
         TextureCommand(shell, TextureFit, "Fit", "frame", () => shell.Mesh.FitTexture(true, true), "Scale and shift the texture so one repeat covers each selected face's bounding rectangle.");

@@ -57,7 +57,7 @@ public sealed partial class MeshSession
 
     // The pivot gizmo's pose: the entity's world position with the world's axes.
     (long[] Pivot, Quat Axes)? PivotGizmoPose() =>
-        EditPivot && _pending == null && PivotMesh() is var (_, entity) && _shell.Scene?.Expanded.Flat.Find(entity) is { } document && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, document) is { } pose
+        EditPivot && !Tools.HasPendingDistance && PivotMesh() is var (_, entity) && _shell.Scene?.Expanded.Flat.Find(entity) is { } document && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, document) is { } pose
             ? (pose.Position, Quat.Identity) : null;
 
     bool PressPivotGizmo(Vec2 pixel, long[] pivot)
@@ -122,7 +122,7 @@ public sealed partial class MeshSession
     // Moves the pivot mesh's entity by a translation in view space, as one undo entry.
     bool MovePivot(string label, Func<MeshData, MeshPlacement, Vec3, Vec3> translation)
     {
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         if (PivotMesh() is not var (guid, entity) || FindMeshData(guid) is not { } mesh || PlacementOf(guid) is not { } placement || _shell.Scene is not { InTransaction: false }
             || _shell.Scene.Expanded.Flat.Find(entity) is not { } document || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, document) is not { } pose)
         {

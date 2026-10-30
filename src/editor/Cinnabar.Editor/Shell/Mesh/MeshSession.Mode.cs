@@ -32,7 +32,7 @@ public sealed partial class MeshSession
     public const string MeshContext = "mode.mesh";
 
     // The edited meshes: each mesh file's GUID and the entity that places it, by scene ID.
-    readonly Dictionary<string, ulong> _editedMeshes = [];
+    internal readonly Dictionary<string, ulong> _editedMeshes = [];
     MeshItem? _hovered;
     string _sentOverlay = "";
     BlockDrag? _blockDrag;
@@ -42,9 +42,9 @@ public sealed partial class MeshSession
     /// <summary>Whether mesh mode is on and the editor is in its Edit mode.</summary>
     public bool CanEditInMeshMode => InMeshMode && _shell.IsEditing;
 
-    public MeshElement MeshElement { get; private set; } = MeshElement.Faces;
+    public MeshElement MeshElement { get; internal set; } = MeshElement.Faces;
 
-    public MeshSelection MeshSelection { get; private set; } = MeshSelection.Empty;
+    public MeshSelection MeshSelection { get; internal set; } = MeshSelection.Empty;
 
     /// <summary>The edited mesh files, by GUID, with the scene ID of the entity that places each.</summary>
     public IReadOnlyDictionary<string, ulong> EditedMeshes => _editedMeshes;
@@ -70,16 +70,16 @@ public sealed partial class MeshSession
         {
             if (!InMeshMode)
             {
-                return ToolPointCount > 0 ? $"{MeshTool}: {ToolPointCount} points, Enter applies" : "";
+                return Tools.ToolPointCount > 0 ? $"{MeshTool}: {Tools.ToolPointCount} points, Enter applies" : "";
             }
             var status = $"{MeshElement}: {MeshSelection.Count} of {_editedMeshes.Count} {(_editedMeshes.Count == 1 ? "mesh" : "meshes")}";
-            if (_pending != null)
+            if (Tools.HasPendingDistance)
             {
-                status += $"  ·  {_pending.Label}: drag the gizmo";
+                status += $"  ·  {Tools.PendingLabel}: drag the gizmo";
             }
-            else if (ToolPointCount > 0)
+            else if (Tools.ToolPointCount > 0)
             {
-                status += $"  ·  {MeshTool}: {ToolPointCount} points, Enter applies";
+                status += $"  ·  {MeshTool}: {Tools.ToolPointCount} points, Enter applies";
             }
             return status;
         }
@@ -162,10 +162,10 @@ public sealed partial class MeshSession
         {
             return;
         }
-        CancelPendingDistance();
+        Tools.CancelPendingDistance();
         _shell.CancelGizmo();
         CancelBlock();
-        CancelToolPoints();
+        Tools.CancelToolPoints();
         InMeshMode = false;
         MeshTool = MeshTool.Select;
         MeshSelection = new MeshSelection(MeshElement, []);
@@ -195,13 +195,13 @@ public sealed partial class MeshSession
         {
             CancelBlock();
         }
-        else if (_pending != null)
+        else if (Tools.HasPendingDistance)
         {
-            CancelPendingDistance();
+            Tools.CancelPendingDistance();
         }
-        else if (ToolPointCount > 0)
+        else if (Tools.ToolPointCount > 0)
         {
-            CancelToolPoints();
+            Tools.CancelToolPoints();
         }
         else if (MeshTool != MeshTool.Select)
         {
@@ -248,7 +248,7 @@ public sealed partial class MeshSession
         {
             return;
         }
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         _shell.CancelGizmo();
         MeshElement = kind;
         MeshSelection = MeshSelection.As(kind, FindMeshData);
@@ -259,7 +259,7 @@ public sealed partial class MeshSession
     public void SetMeshTool(MeshTool tool)
     {
         CancelBlock();
-        CancelToolPoints();
+        Tools.CancelToolPoints();
         MeshTool = tool;
         OnMeshModeChanged();
     }
@@ -298,7 +298,7 @@ public sealed partial class MeshSession
     /// <summary>Sets the sub-selection, converted to the current kind, or with <paramref name="switchKind"/>, switching to its kind as a tool's result does.</summary>
     public void SetMeshSelection(MeshSelection selection, bool switchKind = false)
     {
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         if (switchKind)
         {
             MeshElement = selection.Kind;
@@ -312,13 +312,13 @@ public sealed partial class MeshSession
         OnMeshModeChanged();
     }
 
-    MeshData? FindMeshData(string guid) => Meshes.Find(guid)?.Data;
+    internal MeshData? FindMeshData(string guid) => Meshes.Find(guid)?.Data;
 
     // "3 Faces", or "1 Face", for the undo history.
     string ElementsLabel(int count) => $"{count} {(count == 1 ? MeshElement.ToString().TrimEnd('s') : MeshElement.ToString())}";
 
     // The placement of an edited mesh relative to the camera, from its entity's pose in the document.
-    MeshPlacement? PlacementOf(string guid) =>
+    internal MeshPlacement? PlacementOf(string guid) =>
         _shell.Scene != null && _editedMeshes.TryGetValue(guid, out var id) && _shell.Scene.Expanded.Flat.Find(id) is { } entity && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, entity) is { } pose
             ? MeshPlacement.Of(pose, _shell.Camera.Position) : null;
 
@@ -364,7 +364,7 @@ public sealed partial class MeshSession
         {
             return;
         }
-        HoverCut(pixel);
+        Tools.HoverCut(pixel);
         var hovered = MeshElementAt(pixel);
         if (hovered != _hovered)
         {
@@ -413,6 +413,9 @@ public sealed partial class MeshSession
         });
     }
 
+    /// <summary>The gizmo while a distance is pending: Move, whatever the tool.</summary>
+    internal GizmoKind ActiveGizmoKind => InMeshMode && (Tools.HasPendingDistance || EditPivot) ? GizmoKind.Translate : Gizmo.KindOf(_shell.Tool);
+
     /// <summary>The gizmo's pivot and axes in mesh mode: the selected vertices' centroid, with the primary mesh's axes in local space.</summary>
     internal (long[] Pivot, Quat Axes)? MeshGizmoPose()
     {
@@ -445,17 +448,17 @@ public sealed partial class MeshSession
         {
             return null;
         }
-        if (_pending == null && TextureGizmoAxes() is { } textureAxes)
+        if (!Tools.HasPendingDistance && TextureGizmoAxes() is { } textureAxes)
         {
             return ((sum / count).Offset(origin), textureAxes);
         }
-        var local = _pending == null && (_shell.Space == Space.Local || _shell.Tool == Tool.Scale);
+        var local = !Tools.HasPendingDistance && (_shell.Space == Space.Local || _shell.Tool == Tool.Scale);
         return ((sum / count).Offset(origin), local ? primary ?? Quat.Identity : Quat.Identity);
     }
 
     // The grid's plane: through the sub-selection's centroid, the selected entity or the camera's pivot, facing the
     // camera's nearest world axis.
-    (long[] Origin, int Axis) GridPlane()
+    internal (long[] Origin, int Axis) GridPlane()
     {
         long[] origin = MeshGizmoPose()?.Pivot ?? (_shell.SelectedSceneEntity is { } entity && _shell.Scene != null && SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, entity) is { } pose ? pose.Position : _shell.Camera.Pivot);
         return (SnapRaw(origin), MeshGrid.NearestAxis(_shell.Camera.Forward));
@@ -469,7 +472,7 @@ public sealed partial class MeshSession
     }
 
     /// <summary>A position in meters relative to the camera, snapped to the world's grid, as a raw World_Position.</summary>
-    long[] SnapToGrid(Vec3 relative)
+    internal long[] SnapToGrid(Vec3 relative)
     {
         // Snapping happens near a grid point, in small doubles, since world positions are too large for them.
         var anchor = SnapRaw(relative.Offset(_shell.Camera.Position));
@@ -480,9 +483,9 @@ public sealed partial class MeshSession
     internal bool PressMeshGizmo(Vec2 pixel, bool extrude)
     {
         // Shift at the start of a Move drag extrudes first, as in Hammer; the drag then sets the distance.
-        if (extrude && _pending == null && _shell.Tool == Tool.Move && MeshElement != MeshElement.Vertices)
+        if (extrude && !Tools.HasPendingDistance && _shell.Tool == Tool.Move && MeshElement != MeshElement.Vertices)
         {
-            Extrude();
+            Tools.Extrude();
             _shell.HoverGizmo(pixel);
         }
         if (MeshGizmoPose() is not var (pivot, axes) || _shell.Scene == null)
@@ -490,13 +493,13 @@ public sealed partial class MeshSession
             return false;
         }
         var (width, height) = _shell.FrameSize;
-        if (_pending != null)
+        if (Tools.HasPendingDistance)
         {
             if (_shell.HotPart == GizmoPart.None)
             {
                 return false;
             }
-            _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new DistanceDrag(this), null);
+            _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new MeshToolRunner.DistanceDrag(Tools, this), null);
             return true;
         }
         if (EditPivot)
@@ -554,7 +557,7 @@ public sealed partial class MeshSession
         {
             return false;
         }
-        CommitPendingDistance();
+        Tools.CommitPendingDistance();
         var (origin, axis) = GridPlane();
         if (PointOnGrid(pixel, origin, axis) is not { } start)
         {
@@ -595,7 +598,7 @@ public sealed partial class MeshSession
         var max = new Vec3(Math.Max(size.X, 0), Math.Max(size.Y, 0), Math.Max(size.Z, 0)) + up;
         var corner = min.Offset(drag.Start);
         var primary = InMeshMode && !forceEntity ? _editedMeshes.Keys.FirstOrDefault(g => FindMeshData(g) != null && PlacementOf(g) != null) : null;
-        MakePrimitive(corner, max - min, drag.Axis, primary);
+        Tools.MakePrimitive(corner, max - min, drag.Axis, primary);
     }
 
     public void CancelBlock()
@@ -610,7 +613,7 @@ public sealed partial class MeshSession
     /// <summary>The block being dragged: its footprint's corners as raw positions, or null.</summary>
     public (long[] Start, long[] Corner)? BlockFootprint => _blockDrag is { } d ? (d.Start, d.Corner) : null;
 
-    long[]? PointOnGrid(Vec2 pixel, long[] origin, int axis)
+    internal long[]? PointOnGrid(Vec2 pixel, long[] origin, int axis)
     {
         var (width, height) = _shell.FrameSize;
         var ray = _shell.Camera.Ray(pixel, width, height);
@@ -622,7 +625,7 @@ public sealed partial class MeshSession
     }
 
     // A name that no entity of the scene and no open mesh has: block, block_2 and on.
-    string NewMeshName(string stem)
+    internal string NewMeshName(string stem)
     {
         for (var n = 1; ; n++)
         {
@@ -634,13 +637,9 @@ public sealed partial class MeshSession
         }
     }
 
-    void OnMeshModeChanged()
+    internal void OnMeshModeChanged()
     {
-        // Any edit but a primitive's own parameter change ends its parameters' editability.
-        if (!_remaking && _lastPrimitive is { } last && _shell.Scene != null && (_shell.Scene.History.Count != last.Position || _shell.Scene.Position != last.Position))
-        {
-            _lastPrimitive = null;
-        }
+        Tools.ForgetStalePrimitive();
         _shell.Commands.InvalidateAll();
         _shell.SendGizmo();
         SendMeshOverlay();
@@ -649,7 +648,7 @@ public sealed partial class MeshSession
 
     // The overlay as the game draws it, sent when it changes: the mode's kind, each edited mesh's selected and hovered
     // elements, and the grid.
-    void SendMeshOverlay()
+    internal void SendMeshOverlay()
     {
         var message = new Wire.MeshOverlay(false, Wire.MeshElement.Faces, [], false, 0, [0, 0, 0], 0);
         if (CanEditInMeshMode)
@@ -676,7 +675,7 @@ public sealed partial class MeshSession
                     hoveredEdge is { } he ? new Wire.LiveEdge((uint)he.A, (uint)he.B) : new Wire.LiveEdge(0, 0),
                     hoveredEdge != null,
                     MeshElement == MeshElement.Faces ? hovered : -1,
-                    ToolMarks(guid, mesh)));
+                    Tools.ToolMarks(guid, mesh)));
             }
             var (origin, axis) = GridPlane();
             message = new Wire.MeshOverlay(true, (Wire.MeshElement)MeshElement, [.. meshes], ShowGrid, (float)GridSize, origin, (byte)axis);

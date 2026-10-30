@@ -16,9 +16,16 @@ public sealed partial class MeshSession
 {
     readonly IMeshHost _shell;
 
-    internal MeshSession(IMeshHost shell) => _shell = shell;
+    internal MeshSession(IMeshHost shell)
+    {
+        _shell = shell;
+        Tools = new MeshToolRunner(this, shell);
+    }
 
     internal IMeshHost Shell => _shell;
+
+    /// <summary>The mesh tools: Extrude and the others, the Cut and Draw tools, and the primitives.</summary>
+    public MeshToolRunner Tools { get; }
 
     /// <summary>The open mesh documents of the scene, by GUID.</summary>
     public MeshSet Meshes { get; } = new();

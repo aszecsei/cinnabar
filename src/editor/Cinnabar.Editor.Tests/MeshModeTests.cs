@@ -247,7 +247,7 @@ public sealed class MeshModeTests : IDisposable
         // A second block gets the next name, and in mesh mode a block joins the edited mesh instead.
         shell.Selection.Select(Handle(0));
         shell.Mesh.EnterMeshMode();
-        shell.Mesh.SetPrimitive(PrimitiveKind.Block);
+        shell.Mesh.Tools.SetPrimitive(PrimitiveKind.Block);
         Assert.True(shell.Mesh.BeginBlock(Center + new Vec2(-50, -50)));
         shell.Mesh.DragBlock(Center + new Vec2(50, 50));
         shell.Mesh.EndBlock();
