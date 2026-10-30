@@ -78,7 +78,9 @@ cook_effects :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		}
 	}
 	ok := true
+	step_begin(pass, .Effect, "", len(effects))
 	for i in effects {
+		defer step_advance(pass)
 		if !cook_effect(&assets[i], out_dir, pass) {
 			assets[i].failed = true
 			ok = false

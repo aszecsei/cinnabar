@@ -98,6 +98,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		}
 	}
 	work := Texture_Work {
+		pass    = pass,
 		options = options,
 		assets  = assets,
 		out_dir = out_dir,
@@ -126,6 +127,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	for s, i in by_size {
 		work.order[i] = s.job
 	}
+	step_begin(pass, .Texture, "", len(work.jobs))
 	parallel_for(len(work.jobs), &work, cook_texture_job)
 	for &job in work.jobs {
 		a := &assets[job.asset]
@@ -139,9 +141,10 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 }
 
 // Texture_Work is the textures that cook_textures cooks: a job for each, in the assets' order, and the order that
-// parallel_for takes them in.
+// parallel_for takes them in. The jobs change only the pass's progress.
 @(private = "file")
 Texture_Work :: struct {
+	pass:    ^Pass,
 	options: Cook_Options,
 	assets:  []Asset_Source,
 	out_dir: string,
@@ -165,6 +168,7 @@ Texture_Job :: struct {
 cook_texture_job :: proc(data: rawptr, index: int) {
 	w := (^Texture_Work)(data)
 	job := &w.jobs[w.order[index]]
+	defer step_advance(w.pass)
 	defer scratch_keep(&job.scratch)
 	a := w.assets[job.asset]
 	key := texture_key(w.options, a)

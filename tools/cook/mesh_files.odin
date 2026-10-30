@@ -60,7 +60,9 @@ cook_mesh_files :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pa
 		}
 	}
 	ok := true
+	step_begin(pass, .Mesh, "", len(meshes))
 	for i in meshes {
+		defer step_advance(pass)
 		if !cook_mesh_file(options, &assets[i], out_dir, pass) {
 			assets[i].failed = true
 			ok = false

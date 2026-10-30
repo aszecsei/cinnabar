@@ -234,7 +234,9 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 			return false
 		}
 	}
+	step_begin(pass, .Material, "", len(materials) + len(instances))
 	for guid, decl in materials {
+		defer step_advance(pass)
 		a := &assets[decl.asset]
 		a.tool_texture, a.hotspots = resolved[guid].tool_texture, decl.hotspots[:]
 		shading, found := set.shadings[decl.shading]
@@ -263,6 +265,7 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 		ok &&= !a.failed
 	}
 	for guid, decl in instances {
+		defer step_advance(pass)
 		a := &assets[decl.asset]
 		if decl.parent != {} {
 			append(&a.dependencies, decl.parent)

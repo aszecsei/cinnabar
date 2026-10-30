@@ -112,7 +112,9 @@ cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 		}
 	}
 	ok := true
+	step_begin(pass, .Model, "", len(models))
 	for i in models {
+		defer step_advance(pass)
 		if !cook_model(options, &assets[i], out_dir, pass) {
 			assets[i].failed = true
 			ok = false

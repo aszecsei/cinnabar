@@ -44,6 +44,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Set_Import_Settings{guid = "01", settings = {{"native", "true"}}},
 		Reimport{guids = {"01"}},
 		Operation_Result{error = "exists", guids = {"03"}},
+		Cook_Progress{kind = .Stage, name = "game/stages/sponza.usdz", done = 412, total = 1088},
 	}
 	for message in messages {
 		buf: [dynamic]byte
@@ -63,7 +64,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 @(test)
 the_schema_names_every_message :: proc(t: ^testing.T) {
 	text := schema(context.temp_allocator)
-	for name in ([]string{"Hello", "Asset_Snapshot", "Asset_Problems", "Cook_Finished", "Asset_Kind", "Problem", "Create_Asset", "Operation_Result", "Setting_Info"}) {
+	for name in ([]string{"Hello", "Asset_Snapshot", "Asset_Problems", "Cook_Finished", "Cook_Progress", "Asset_Kind", "Problem", "Create_Asset", "Operation_Result", "Setting_Info"}) {
 		testing.expectf(t, strings.contains(text, name), "the schema lacks %s", name)
 	}
 	// The editor link and the cook link have their own versions.
