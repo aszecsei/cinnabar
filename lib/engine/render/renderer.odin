@@ -494,6 +494,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		desc.hooks.after_prepass(f)
 	}
 	add_ao_passes(f, settings.ambient_occlusion)
+	add_gi_world_probes(f)
 	add_gi_passes(f)
 	add_cluster_passes(f)
 	add_shadow_passes(f)

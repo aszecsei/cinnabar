@@ -11,6 +11,7 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.shadows.level, Quality_Level.Ultra)
 	testing.expect(t, settings.shadows.ray_traced)
 	testing.expect_value(t, settings.fog.level, Quality_Level.Ultra)
+	testing.expect_value(t, settings.gi.technique, Gi_Technique.World_Probes)
 	q.aa = .Smaa
 	apply_quality(&settings, q)
 	testing.expect_value(t, settings.post.aa, Aa_Technique.Smaa)
@@ -33,12 +34,16 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	q := preset_quality(.Ultra, {ray_query = true})
 	testing.expect(t, q.shadows.ray_traced)
 	testing.expect(t, !clamp_quality(q, {}).shadows.ray_traced, "without Ray_Query, the shadows are maps")
+	// Without Ray_Query, the world probes are the screen-space cascades alone.
+	testing.expect_value(t, q.gi.technique, Gi_Technique.World_Probes)
+	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
 	testing.expect_value(t, clamp_quality(q, {ray_query = true}), q)
 
 	// A settings file or a script may give any number.
 	bad := q
 	bad.shadows.level = Quality_Level(200)
 	bad.ao.technique = Ao_Technique(200)
+	bad.gi.technique = Gi_Technique(200)
 	bad.aa = Aa_Technique(200)
 	bad.render_scale = 0.1
 	clamped := clamp_quality(bad, {})
@@ -57,6 +62,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, preset_quality(.Ultra, {}).lod_error, LOD_ERRORS[.Ultra])
 	testing.expect_value(t, clamped.shadows.level, Quality_Level.High)
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
+	testing.expect_value(t, clamped.gi.technique, Gi_Technique.Off)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
 
 	// An upscaler that the device does not run gives temporal AA, which upscales too.
@@ -76,9 +82,12 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 	testing.expect_value(t, quality_preset(default_quality(gigabytes(16)), gigabytes(16)), Quality_Preset.Ultra)
 	// Unknown memory, as on an adapter that shares the CPU's, is High.
 	testing.expect_value(t, quality_preset(default_quality({}), {}), Quality_Preset.High)
-	// Traced shadows from High up, where the device has them.
+	// Traced shadows and the world probes from High up, where the device has them.
 	testing.expect(t, !default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced)
 	testing.expect(t, default_quality({ray_query = true}).shadows.ray_traced)
+	testing.expect_value(t, default_quality({ray_query = true, video_memory = 3 << 30}).gi.technique, Gi_Technique.Screen_Cascades)
+	testing.expect_value(t, default_quality({ray_query = true}).gi.technique, Gi_Technique.World_Probes)
+	testing.expect_value(t, default_quality({}).gi.technique, Gi_Technique.Screen_Cascades)
 }
 
 @(test)

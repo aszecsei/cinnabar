@@ -1,6 +1,6 @@
 # Ray scene
 
-The GPU scene's top-level acceleration structure, which every feature that traces shares, and hit shading, which evaluates the materials at a feature's ray hits (`lib/engine/render/ray_scene.odin`). Both need `Ray_Query`. The traced shadow mask and the traced fog injection trace the structure. Read [GPU scene](gpu-scene.md#gpu-scene) and [GPU: Ray tracing](../gpu/ray-tracing.md#ray-tracing) first.
+The GPU scene's top-level acceleration structure, which every feature that traces shares, and hit shading, which evaluates the materials at a feature's ray hits (`lib/engine/render/ray_scene.odin`). Both need `Ray_Query`. The traced shadow mask and the traced fog injection trace the structure, and the global illumination's [world probes](global-illumination.md#world-probes) trace it and shade their hits. Read [GPU scene](gpu-scene.md#gpu-scene) and [GPU: Ray tracing](../gpu/ray-tracing.md#ray-tracing) first.
 
 ## Acceleration structure
 

@@ -1,7 +1,8 @@
 // The radiance cascades' rays (see docs/rendering/global-illumination.md#global-illumination): a thread for each texel of every cascade,
 // a probe and a direction. It marches its cascade's interval through the depth buffer from the probe's surface. Where
 // the ray passes behind a surface, it takes that surface's light in last frame's lit scene, and nothing from beyond;
-// otherwise everything from beyond gets through, which the merge adds.
+// otherwise everything from beyond gets through, which the merge adds. With the world probes, a ray that leaves the
+// screen takes the probes' light where it left, and nothing from beyond.
 #include "gi_common.hlsli"
 
 [numthreads(8, 8, 1)]
@@ -36,12 +37,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	for (uint s = 0; s < steps; s++) {
 		float3 p = origin + direction * (start + (s + noise.x) * step);
 		float3 view = float3(dot(p, constants.right.xyz), dot(p, constants.up.xyz), dot(p, constants.forward.xyz));
-		if (view.z <= constants.projection.z) {
-			break;
-		}
-		float2 ndc = view.xy * constants.projection.xy / view.z;
-		// A ray that leaves the screen sees what lies beyond its interval: the screen cannot say what blocks it.
-		if (any(abs(ndc) >= 1)) {
+		float2 ndc = view.xy * constants.projection.xy / max(view.z, 1e-6);
+		// A ray that leaves the screen sees what lies beyond its interval: the screen cannot say what blocks it. The
+		// world probes can.
+		if (view.z <= constants.projection.z || any(abs(ndc) >= 1)) {
+			if (constants.probes != 0) {
+				result = float4(beyond_light(p, normal, direction), 0);
+			}
 			break;
 		}
 		int2 at = int2((ndc * float2(0.5, -0.5) + 0.5) * float2(constants.size));

@@ -19,15 +19,15 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
-| `gi.technique` | `Off`, `Screen_Cascades` | The [global illumination](global-illumination.md#global-illumination) |
-| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`) |
+| `gi.technique` | `Off`, `Screen_Cascades`, `World_Probes` | The [global illumination](global-illumination.md#global-illumination), and with `World_Probes` its [world probes](global-illumination.md#world-probes). `World_Probes` needs `Ray_Query` |
+| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`), and the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
 - **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
-- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows from High up where the device has them. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
+- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows and the world probes from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
 ## Order in the frame
@@ -56,6 +56,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
 - **The shadow filter** is `Frame_Constants.shadow_filter`, a `Shadow_Filter`. `shadow_map` in `material_lighting.hlsli` branches on it. Every pixel takes the same branch, so it costs no material permutation.
 - **The ambient occlusion's levels** are each technique's own (see [Techniques](ambient-occlusion.md#techniques)); GTAO's are XeGTAO's presets. The samples and steps are in the search's constants, and its loops are no longer unrolled.
+- **The world probes' levels** (`GI_PROBE_PARAMS`): Low has 2 levels from 2 m with 32 rays and 1024 probes a frame; Medium 3 levels from 1 m with 64 rays and 2048; High 4096; Ultra 4 levels and 8192. At High, the probes trace 262 144 rays a frame and every probe updates within 12 frames.
 - **GI's levels** trade probes for cascades: each cascade's interval is four times as long as the one before, from a length that scales with the spacing, so sparser probes need fewer cascades to reach as far. Sparser probes are noisier, so their histories average over more frames. The spacing and the steps are in `Gi_Constants`.
 - **Fog's slices** reach the injection in `Fog_Push.grid.z` and the forward pass in `Frame_Constants.fog_slices`.
 
@@ -64,7 +65,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 `Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, `mesh_shaders`, which the [mesh shader path](gpu-scene.md#mesh-shader-path) needs, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
 
 - **Defaults:** `default_quality(caps)` picks a preset by the video memory: Low below 4 GiB, Medium below 6 GiB, High below 10 GiB, Ultra above, and High when the memory is unknown, as on an adapter that shares the CPU's.
-- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
+- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives the screen cascades alone for the world probes without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
 - `CINNABAR_DISABLE_FEATURES=Ray_Query` hides the feature, as it does everywhere, to try the fallback on hardware that has it.
 
 ## Changing quality while the game runs
@@ -87,7 +88,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.shadows.ray_traced` | `true`, `false` |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
-| `quality.gi` | `Off`, `Screen_Cascades` |
+| `quality.gi` | `Off`, `Screen_Cascades`, `World_Probes` |
 | `quality.gi.level` | `Low` … `Ultra` |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |

@@ -3,12 +3,14 @@
 // every spacing << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
 // so every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long
 // as the cascade before's, and its texels hold the light that they found and the share of light from beyond that gets
-// through. The cascades are one texture, each in its own rows.
+// through. The cascades are one texture, each in its own rows. With the world probes, what lies beyond the screen and
+// beyond the last cascade is the probes' light, not the ambient light's.
 #ifndef GI_COMMON_HLSLI
 #define GI_COMMON_HLSLI
 
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
+#include "gi_probes.hlsli"
 
 // Matches Gi_Constants in lib/engine/render/gi.odin. previous maps a position relative to the camera to last frame's
 // clip space, the camera's motion included. right, up and forward are the view's axes in the world; projection holds
@@ -47,6 +49,11 @@ struct Gi_Constants {
 	// The level's probe spacing, and each ray's steps (see GI_PARAMS).
 	uint spacing;
 	uint steps;
+	// Whether the world probes are on, and their Probe_Grid in the upload ring.
+	uint probes;
+	uint probe_grid;
+	uint probe_grid_offset;
+	uint probe_padding;
 };
 CN_PASS_CONSTANTS(Gi_Constants, constants);
 
@@ -99,6 +106,26 @@ float3 direction_of(uint2 texel, uint directions, float2 within) {
 // The ambient light from a direction.
 float3 sky_light(float3 direction) {
 	return ambient_light(constants.ambient, direction);
+}
+
+// beyond_light is the light from a direction that reaches a point relative to the camera, with its surface's normal,
+// from beyond what the cascades trace: the world probes' radiance, or the ambient light without them.
+float3 beyond_light(float3 p, float3 normal, float3 direction) {
+	float3 light;
+	if (constants.probes != 0 && sample_probes(load_probe_grid(constants.probe_grid, constants.probe_grid_offset), p, normal, direction, true, light)) {
+		return light;
+	}
+	return sky_light(direction);
+}
+
+// surrounding_light is the cosine-weighted mean light around a normal at a point relative to the camera: the world
+// probes', or the ambient light's along the normal without them.
+float3 surrounding_light(float3 p, float3 normal) {
+	float3 light;
+	if (constants.probes != 0 && sample_probes(load_probe_grid(constants.probe_grid, constants.probe_grid_offset), p, normal, normal, false, light)) {
+		return light;
+	}
+	return sky_light(normal);
 }
 
 float interleaved_noise(float2 pixel) {
