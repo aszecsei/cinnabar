@@ -3,6 +3,7 @@ package render
 import "core:math"
 import "core:math/bits"
 import "core:math/linalg"
+import "core:strings"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
@@ -463,7 +464,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	ray_count := u32(len(pf.jobs)) * params.rays
 
 	step :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, pass: Probe_Pass, ray_count: u32) -> ^Probe_Step {
-		return new_clone(Probe_Step{f, pf, pass, ray_count}, f.renderer.platform.frame_allocator)
+		return new_clone(Probe_Step{f, pf, pass, ray_count, pf.hits, pf.surfaces, pf.rays}, f.renderer.platform.frame_allocator)
 	}
 	pass := add_compute_pass(g, "gi probe reset", run_probe_pass, step(f, pf, .Reset, ray_count), queue = .Compute)
 	write(g, pass, pf.states)
@@ -472,28 +473,40 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	write(g, pass, pf.hits)
 	// hit_shading_ready said that it can.
 	add_hit_shading(f, {hits = pf.hits, surfaces = pf.surfaces, count = ray_count}, .Compute)
-	pass = add_compute_pass(g, "gi probe light", run_probe_pass, step(f, pf, .Light, ray_count), queue = .Compute)
-	read_accel(g, pass, ray_scene_accel(f))
-	read(g, pass, pf.hits)
-	read(g, pass, pf.surfaces)
-	read(g, pass, pf.radiance)
-	read(g, pass, pf.irradiance)
-	read(g, pass, pf.states)
-	write(g, pass, pf.rays)
-	if lit.valid {
-		pass = add_compute_pass(g, "gi probe screen", run_probe_pass, step(f, pf, .Screen, ray_count), queue = .Compute)
-		read(g, pass, pf.hits)
-		read(g, pass, pf.surfaces)
-		read(g, pass, f.depth)
-		read(g, pass, lit.previous)
-		write(g, pass, pf.rays)
-	}
+	add_hit_light_passes(f, pf, "gi probe", pf.hits, pf.surfaces, pf.rays, ray_count)
 	pass = add_compute_pass(g, "gi probe update", run_probe_pass, step(f, pf, .Update, ray_count), queue = .Compute)
 	read(g, pass, pf.rays)
 	write(g, pass, pf.radiance)
 	write(g, pass, pf.irradiance)
 	write(g, pass, pf.states)
 	return pf
+}
+
+// add_hit_light_passes lights a batch of hits after its hit shading, into a float4 for each ray in rays: the hits'
+// light (gi_probe_light.hlsl), then, with a lit scene of last frame, the light there of the hits that the screen shows
+// (gi_probe_screen.hlsl), in a pass of its own. The world probes' rays and the split cascades' take their light so.
+@(private)
+add_hit_light_passes :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, name: string, hits, surfaces, rays: Buffer, ray_count: u32) {
+	g := f.graph
+	allocator := f.renderer.platform.frame_allocator
+	light_name := strings.concatenate({name, " light"}, allocator)
+	pass := add_compute_pass(g, light_name, run_probe_pass, new_clone(Probe_Step{f, pf, .Light, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+	read_accel(g, pass, ray_scene_accel(f))
+	read(g, pass, hits)
+	read(g, pass, surfaces)
+	read(g, pass, pf.radiance)
+	read(g, pass, pf.irradiance)
+	read(g, pass, pf.states)
+	write(g, pass, rays)
+	if pf.lit.valid {
+		screen_name := strings.concatenate({name, " screen"}, allocator)
+		pass = add_compute_pass(g, screen_name, run_probe_pass, new_clone(Probe_Step{f, pf, .Screen, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+		read(g, pass, hits)
+		read(g, pass, surfaces)
+		read(g, pass, f.depth)
+		read(g, pass, pf.lit.previous)
+		write(g, pass, rays)
+	}
 }
 
 @(private = "file")
@@ -510,13 +523,17 @@ Probe_Pass :: enum {
 	Update,
 }
 
-// Probe_Step is one probe pass's data, in frame memory.
+// Probe_Step is one probe pass's data, in frame memory: the rays' buffers are the probes', or another batch's whose
+// hits the probes' light pass lights.
 @(private = "file")
 Probe_Step :: struct {
 	frame:     ^Frame,
 	probes:    ^Gi_Probe_Frame,
 	pass:      Probe_Pass,
 	ray_count: u32,
+	hits:      Buffer,
+	surfaces:  Buffer,
+	rays:      Buffer,
 }
 
 // run_probe_pass dispatches a probe pass: a thread for each probe of each level, or for each ray, or a group for each
@@ -529,12 +546,12 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	pf := step.probes
 	probes := &f.renderer.gi.probes
 	g := ctx.graph
-	hits, rays := gpu_buffer(g, pf.hits), gpu_buffer(g, pf.rays)
+	hits, rays := gpu_buffer(g, step.hits), gpu_buffer(g, step.rays)
 	push := Probe_Push {
 		grid          = gpu.read_index(pf.upload.buffer),
 		grid_offset   = pf.upload.offset,
 		hits          = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
-		surfaces      = gpu.read_index(gpu_buffer(g, pf.surfaces)),
+		surfaces      = gpu.read_index(gpu_buffer(g, step.surfaces)),
 		rays          = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
 		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
 		lights        = gpu.read_index(pf.lights.buffer),

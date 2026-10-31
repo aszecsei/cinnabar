@@ -19,8 +19,8 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
-| `gi.technique` | `Off`, `Screen_Cascades`, `World_Probes` | The [global illumination](global-illumination.md#global-illumination), and with `World_Probes` its [world probes](global-illumination.md#world-probes). `World_Probes` needs `Ray_Query` |
-| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), and the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`) |
+| `gi.technique` | `Off`, `Screen_Cascades`, `World_Probes` | The [global illumination](global-illumination.md#global-illumination), and with `World_Probes` its [world probes](global-illumination.md#world-probes) and [split cascades](global-illumination.md#split-cascades). `World_Probes` needs `Ray_Query` |
+| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), and the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |

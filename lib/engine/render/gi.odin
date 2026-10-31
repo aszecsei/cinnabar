@@ -10,7 +10,8 @@ import "cinnabar:core/gpu"
 // scene, merge from the last cascade to the first with the ambient sky beyond, and each pixel gathers its diffuse and
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After
 // the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With World_Probes, the world
-// probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place.
+// probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place, and
+// the split cascades (gi_split.odin) take the screen cascades' place.
 
 // The engine's global illumination shaders, by their .meta files.
 GI_TRACE_SHADER :: #load("../content/shaders/gi_trace.hlsl.meta", string)
@@ -67,6 +68,7 @@ Gi_Passes :: struct {
 	// Counts the frames, for the noise.
 	frame:  u32,
 	probes: Gi_Probes,
+	split:  Gi_Split,
 }
 
 // Gi_Constants matches Gi_Constants in gi_common.hlsli.
@@ -140,6 +142,7 @@ gi_init :: proc(gi: ^Gi_Passes) {
 	gi.gather = shader_pipeline(GI_GATHER_SHADER)
 	gi.lit = shader_pipeline(GI_LIT_SHADER)
 	gi_probes_init(&gi.probes)
+	gi_split_init(&gi.split)
 }
 
 gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
@@ -147,6 +150,7 @@ gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 		destroy_shader_pipeline(p, platform)
 	}
 	gi_probes_destroy(&gi.probes, platform)
+	gi_split_destroy(&gi.split, platform)
 }
 
 @(private)
@@ -158,6 +162,7 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&gi.gather, r.platform, assets, {label = "gi gather"}, force)
 	sync_compute_pipeline(&gi.lit, r.platform, assets, {label = "gi lit"}, force)
 	sync_gi_probe_pipelines(r, force)
+	sync_gi_split_pipelines(r, force)
 }
 
 // gi_region is the size of one cascade's rows: the most texels that a cascade's probes and directions take.
@@ -255,7 +260,8 @@ add_gi_world_probes :: proc(f: ^Frame) {
 }
 
 // add_gi_passes adds the cascades' trace, their merges and the gather after the prepass, on the compute queue, and
-// sets Frame.gi_diffuse and Frame.gi_specular, which the forward pass reads. With the world probes, each reads them.
+// sets Frame.gi_diffuse and Frame.gi_specular, which the forward pass reads. With the world probes, each reads them,
+// and the split cascades take their place when they can.
 @(private)
 add_gi_passes :: proc(f: ^Frame) {
 	gf := f.gi
@@ -266,6 +272,11 @@ add_gi_passes :: proc(f: ^Frame) {
 	platform := f.renderer.platform
 	// Last frame's projection is known once the scene's constants are written.
 	gf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
+	// With the world probes, the split cascades take the screen cascades' place.
+	if add_gi_split_passes(f) {
+		f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
+		return
+	}
 	gf.cascades = create_texture(g, {size = {gf.region.x, gf.region.y * gf.params.cascades}, format = GI_FORMAT, label = "gi cascades"})
 	p := add_compute_pass(g, "gi trace", run_gi_trace, f, queue = .Compute)
 	read(g, p, f.depth)
@@ -308,7 +319,7 @@ add_gi_lit :: proc(f: ^Frame) {
 }
 
 // gi_constants are the frame's constants with the textures that exist once the passes record.
-@(private = "file")
+@(private)
 gi_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Gi_Constants {
 	gf := f.gi
 	g := ctx.graph
@@ -321,7 +332,7 @@ gi_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Gi_Constants {
 	return c
 }
 
-@(private = "file")
+@(private)
 upload_gi_constants :: proc(ctx: ^Pass_Context, f: ^Frame, c: Gi_Constants) -> bool {
 	upload, ok := f.renderer.platform.gpu_upload(size_of(Gi_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {

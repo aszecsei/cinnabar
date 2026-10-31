@@ -269,6 +269,12 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.gi.probes.light,
 		&r.gi.probes.screen,
 		&r.gi.probes.update,
+		// The split cascades, which take the screen cascades' place with the world probes.
+		&r.gi.split.table,
+		&r.gi.split.trace,
+		&r.gi.split.deposit,
+		&r.gi.split.merge,
+		&r.gi.split.gather,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})

@@ -19,7 +19,7 @@ Read them in this order the first time.
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
 | [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
-| [Global illumination](global-illumination.md) | Screen-space radiance cascades, and world probes traced with ray queries. |
+| [Global illumination](global-illumination.md) | Screen-space radiance cascades, and world probes and split radiance cascades traced with ray queries. |
 | [Volumetric fog](fog.md) | The froxel volume. |
 | [Sky](sky.md) | The Environment: the Flat background, the atmosphere's sky, its sun, moon and stars, and the ambient light. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
@@ -54,6 +54,7 @@ Read them in this order the first time.
 | `ambient_occlusion.odin` | GTAO, HBAO or SSAO on the compute queue ([Ambient occlusion](ambient-occlusion.md#ambient-occlusion)) |
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `gi_probes.odin` | The world probes: their levels, schedule, storage and passes ([World probes](global-illumination.md#world-probes)) |
+| `gi_split.odin` | The split radiance cascades: their windows, tables, storage and passes ([Split cascades](global-illumination.md#split-cascades)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |

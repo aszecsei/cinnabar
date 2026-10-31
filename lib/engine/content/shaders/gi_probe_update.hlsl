@@ -18,22 +18,6 @@ static const float BACKFACE_SHARE = 0.25;
 groupshared float4 g_rays[MAX_PROBE_RAYS];
 groupshared float3 g_directions[MAX_PROBE_RAYS];
 
-// interior_of is the interior texel that a texel of the tile shows: itself, or for the border, the interior texel
-// across the octahedron's fold.
-int2 interior_of(int2 t) {
-	int last = PROBE_INTERIOR - 1;
-	int2 i = t - 1;
-	if (i.x < 0 || i.x > last) {
-		i.y = last - i.y;
-		i.x = clamp(i.x, 0, last);
-	}
-	if (i.y < 0 || i.y > last) {
-		i.x = last - i.x;
-		i.y = clamp(i.y, 0, last);
-	}
-	return clamp(i, 0, last);
-}
-
 [numthreads(PROBE_TILE, PROBE_TILE, 1)]
 void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID, uint index : SV_GroupIndex) {
 	Probe_Grid grid = frame_probe_grid();
