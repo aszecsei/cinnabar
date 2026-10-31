@@ -51,7 +51,10 @@ struct Cull_Constants {
 	// The camera's tally (see Cull_Stats in lib/engine/render/occlusion.odin): its draws, early and late, and its
 	// items that the depth pyramid hides.
 	uint stats;
-	uint3 padding;
+	// What select_meshlets.hlsl picked for each ITEM_HIERARCHY item: its range of the selected meshlets, from the
+	// eighth byte, whose count is SELECTION_NONE for an item that tests all of its meshlets.
+	uint selections;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -91,6 +94,8 @@ static const uint ITEM_RIBBON = 128;
 static const uint ITEM_PARTICLES = 256;
 // An Instanced_Mesh_Renderer's item, whose entry is its set's and list its set's list that it draws.
 static const uint ITEM_INSTANCED = 512;
+// An item whose meshlets select_meshlets.hlsl walked the hierarchy of.
+static const uint ITEM_HIERARCHY = 1024;
 struct Item {
 	uint instance;
 	uint mesh;
@@ -115,7 +120,10 @@ static const uint MESHLETS_PER_GROUP = 32;
 // Match DRAW_INSTANCES, DRAW_INSTANCE_SHIFT, INSTANCE_LISTS, INSTANCE_GROUP_ROW and MAX_MESH_GROUPS in
 // lib/engine/render/scene.odin.
 static const uint DRAW_INSTANCES = 2;
+static const uint DRAW_SELECTED = 4;
 static const uint DRAW_INSTANCE_SHIFT = 8;
+// Matches SELECTION_NONE in lib/engine/render/meshlet_select.odin.
+static const uint SELECTION_NONE = 0xffffffffu;
 static const uint INSTANCE_LISTS = 9;
 static const uint INSTANCE_GROUP_ROW = 32768;
 static const uint MAX_MESH_GROUPS = 1u << 22;
@@ -196,10 +204,21 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (view_index == VIEW_CAMERA || (view.flags & VIEW_LATE) != 0) {
 		cn_rw_buffer(cull.stats).InterlockedAdd((view.flags & VIEW_LATE) != 0 ? 4 : 0, 1);
 	}
+	// An item whose hierarchy was walked tests the meshlets that the walk picked, in its range of the frame's list.
+	uint first = item.first;
+	uint count = item.count;
+	if ((item.flags & ITEM_HIERARCHY) != 0) {
+		uint2 selection = cn_buffer(cull.selections).Load2(8 + id.x * 8);
+		if (selection.y != SELECTION_NONE) {
+			first = selection.x;
+			count = selection.y;
+			flags |= DRAW_SELECTED;
+		}
+	}
 	uint slot;
 	cn_rw_buffer(cull.counts).InterlockedAdd((view_index * cull.bin_count + item.bin) * 4, 1, slot);
 	uint index = view.first_draw + cn_buffer(cull.bin_offsets).Load(cull.bin_offsets_offset + item.bin * 4) + slot;
-	uint groups = (item.count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP;
+	uint groups = (count + MESHLETS_PER_GROUP - 1) / MESHLETS_PER_GROUP;
 	if ((item.flags & (ITEM_MESH_PATH | ITEM_INSTANCED)) == (ITEM_MESH_PATH | ITEM_INSTANCED)) {
 		// The meshlets along z and the instances along x and y, as many as a dispatch may have, and the count of
 		// instances in the flags, which tells as_cluster where the last row ends.
@@ -217,8 +236,8 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	// Draw_Record: instance, mesh with the submesh above ID_ENTITY_BITS, first, material, then count, the bound, the
 	// flags and an instanced draw's list.
-	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), item.first, item.material));
-	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(item.count, asuint(item.bound), flags, visible));
+	cn_rw_buffer(cull.draws).Store4(index * 32, uint4(item.instance, item.mesh | (item.submesh << ID_ENTITY_BITS), first, item.material));
+	cn_rw_buffer(cull.draws).Store4(index * 32 + 16, uint4(count, asuint(item.bound), flags, visible));
 }
 
 // item_visible is whether a view draws an item: its sphere, moved by its instance's rows, is in the view's frustum, and

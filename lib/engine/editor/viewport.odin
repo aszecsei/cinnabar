@@ -126,6 +126,7 @@ render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
 		.Shadows           = s.no_shadows,
 		.Post_Effects      = s.no_post_effects,
 		.Occlusion_Culling = s.no_occlusion_culling,
+		.Meshlet_Hierarchy = s.no_meshlet_hierarchy,
 	}
 	for off, feature in flags {
 		if off {

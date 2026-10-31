@@ -28,6 +28,9 @@ Resident_Mesh :: struct {
 	meshlets:          gpu.Buffer,
 	meshlet_vertices:  gpu.Buffer,
 	meshlet_triangles: gpu.Buffer,
+	// The trees over each level's groups of meshlets, which select meshlets walks (see
+	// docs/rendering/gpu-scene.md#mesh-shader-path), for a mesh cooked with them.
+	meshlet_nodes:     gpu.Buffer,
 	// The impostor's atlas, for a mesh cooked with one, the side of its frames in texels, and how far it may be from the
 	// mesh, in meters (see docs/rendering/gpu-scene.md#impostors).
 	impostor:          gpu.Buffer,
@@ -54,11 +57,16 @@ Resident_Mesh :: struct {
 	accel_built:       bool,
 }
 
+// Resident_Submesh is a submesh's ranges of its mesh's indices, meshlets and meshlet nodes, the first root_count of
+// which are its levels' roots.
 Resident_Submesh :: struct {
 	first_index:   u32,
 	index_count:   u32,
 	first_meshlet: u32,
 	meshlet_count: u32,
+	first_node:    u32,
+	node_count:    u32,
+	root_count:    u32,
 }
 
 // Resident_Instance_Set is an instance set asset's GPU buffers, its instances and its cells, and what culling them
@@ -114,8 +122,8 @@ Resident_Entry :: struct {
 	pending:       Resident_Resources,
 	pending_version: u32,
 	streaming:     bool,
-	// A mesh's six streams and its impostor, a texture's one, or an instance set's two.
-	transfers:     [7]gpu.Transfer,
+	// A mesh's seven streams and its impostor, a texture's one, or an instance set's two.
+	transfers:     [8]gpu.Transfer,
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
 	failed_at:     u64,
@@ -356,7 +364,7 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	submeshes := format.mesh_submeshes(data, blob)
 	m.submesh_count = u32(min(len(submeshes), MAX_SUBMESHES))
 	for s, i in submeshes[:m.submesh_count] {
-		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count}
+		m.submeshes[i] = {s.first_index, s.index_count, s.first_meshlet, s.meshlet_count, s.first_node, s.node_count, s.root_count}
 		m.submesh_bounds[i] = s.bounds
 	}
 	mesh_levels(m, format.mesh_meshlets(data, blob))
@@ -366,6 +374,10 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	m.meshlets = stream_buffer(r, e, format.blob_bytes(data, blob.meshlets), {}, "meshlets") or_return
 	m.meshlet_vertices = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_vertices), {}, "meshlet vertices") or_return
 	m.meshlet_triangles = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_triangles), {}, "meshlet triangles") or_return
+	m.meshlet_nodes = {}
+	if blob.meshlet_nodes.size > 0 {
+		m.meshlet_nodes = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_nodes), {}, "meshlet nodes") or_return
+	}
 	m.impostor, m.impostor_size, m.impostor_error = {}, 0, 0
 	if blob.impostor.size > 0 {
 		m.impostor = stream_buffer(r, e, format.blob_bytes(data, blob.impostor), {}, "mesh impostor") or_return
@@ -558,6 +570,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		r.platform.gpu_destroy_buffer(m.meshlets)
 		r.platform.gpu_destroy_buffer(m.meshlet_vertices)
 		r.platform.gpu_destroy_buffer(m.meshlet_triangles)
+		if m.meshlet_nodes != {} {
+			r.platform.gpu_destroy_buffer(m.meshlet_nodes)
+		}
 		if m.impostor != {} {
 			r.platform.gpu_destroy_buffer(m.impostor)
 		}

@@ -60,9 +60,10 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 	}
 }
 
-// mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment.
+// mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment, with a hierarchy
+// over its one meshlet when nodes.
 @(private = "file")
-mesh_bytes :: proc(guid: format.Guid, vertex_count: u32) -> []byte {
+mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false) -> []byte {
 	stride := int(format.mesh_attribute_stride({}))
 	indices := []u16{0, 1, 2}
 	contents := format.Mesh_Contents {
@@ -76,6 +77,10 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32) -> []byte {
 		meshlets     = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
 		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+	}
+	if nodes {
+		contents.submeshes[0].node_count, contents.submeshes[0].root_count = 1, 1
+		contents.meshlet_nodes = {{radius = 1, error = max(f32), count = 1 | format.MESHLET_NODE_LEAF}}
 	}
 	written := format.mesh_write(contents, context.temp_allocator)
 	aligned, _ := mem.alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)
@@ -162,6 +167,43 @@ resident_meshes_swap_only_when_their_new_data_is_in :: proc(t: ^testing.T) {
 	context.logger = log.nil_logger()
 	_, ready = resident_mesh(r, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
 	testing.expect(t, !ready)
+}
+
+@(test)
+a_mesh_with_a_hierarchy_streams_its_nodes :: proc(t: ^testing.T) {
+	fake: Fake_GPU
+	context.user_ptr = &fake
+	frame: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
+	defer virtual.arena_destroy(&frame)
+	platform := fake_platform(&frame)
+	dir, err := os.make_directory_temp("", "residency_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	guid := format.guid_parse("4f0c9a6e2b8d47a1b3e5c7d9f1a2b3c4") or_else {}
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3, nodes = true)) == nil)
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Residency)
+	defer free(r)
+	residency_init(r, &platform, &assets)
+	defer residency_destroy(r)
+
+	// The nodes are a seventh stream, which the mesh waits for as it waits for the rest.
+	_, ready := resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.live_buffers, 7)
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	mesh, now_ready := resident_mesh(r, guid)
+	testing.expect(t, now_ready)
+	testing.expect(t, mesh.meshlet_nodes != {})
+	testing.expect_value(t, mesh.submeshes[0].node_count, 1)
+	testing.expect_value(t, mesh.submeshes[0].root_count, 1)
 }
 
 @(test)

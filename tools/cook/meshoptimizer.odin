@@ -97,6 +97,15 @@ Clod_Group :: struct {
 	simplified: Clod_Bounds,
 }
 
+// Clod_Node is a node of clod_build_hierarchy's trees. Its bounds hold every group's below it, with their largest error.
+// A leaf has its group's index, and an internal node -1 and its children at child_offset.
+Clod_Node :: struct {
+	bounds:       Clod_Bounds,
+	group:        c.int,
+	child_offset: c.uint,
+	child_count:  c.uint,
+}
+
 // Clod_Output gets each group with its clusters, in order, and returns the ID that clusters simplified from it get.
 Clod_Output :: #type proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]Clod_Cluster, cluster_count: c.size_t) -> c.int
 
@@ -108,6 +117,12 @@ foreign clusterlod {
 	clod_build :: proc(config: Clod_Config, mesh: Clod_Mesh, output_context: rawptr, output_callback: Clod_Output) ---
 	@(link_name = "clodLocalIndices")
 	clod_local_indices :: proc(vertices: [^]c.uint, triangles: [^]u8, indices: [^]c.uint, index_count: c.size_t) -> c.size_t ---
+	@(link_name = "clodBuildHierarchyBound")
+	clod_build_hierarchy_bound :: proc(group_count: c.size_t, node_width: c.size_t, level_count: c.size_t) -> c.size_t ---
+	// clod_build_hierarchy builds a tree over each level's groups: nodes 0 to level_count - 1 are the levels' roots.
+	// Every level below level_count must have a group.
+	@(link_name = "clodBuildHierarchy")
+	clod_build_hierarchy :: proc(nodes: [^]Clod_Node, groups: [^]Clod_Group, group_count: c.size_t, node_width: c.size_t, level_count: c.size_t) -> c.size_t ---
 }
 
 @(default_calling_convention = "c")

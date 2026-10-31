@@ -335,6 +335,93 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 	}
 }
 
+// projected_error is an error at a sphere in pixels, as select_meshlets.hlsl and as_cluster project it from an eye.
+@(private = "file")
+projected_error :: proc(center: [3]f32, radius, error: f32, eye: [3]f32, lod_scale: f32) -> f32 {
+	return error / max(linalg.distance(center, eye) - radius, 1e-3) * lod_scale
+}
+
+@(test)
+meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
+	grid, ok := cook_grid(t, "guid = 00112233445566778899aabbccddeeff\n")
+	if !ok {
+		return
+	}
+	s := format.mesh_submeshes(grid.data, grid.blob)[0]
+	nodes := format.mesh_meshlet_nodes(grid.data, grid.blob)[s.first_node:][:s.node_count]
+	meshlets := grid.meshlets[s.first_meshlet:][:s.meshlet_count]
+	testing.expect_value(t, int(s.root_count), int(meshlets[len(meshlets) - 1].depth) + 1)
+	testing.expect(t, s.node_count > s.root_count)
+
+	// Each meshlet is under one leaf, of its own level's tree, whose bounds are its group's.
+	leaves := make([]int, len(meshlets), context.temp_allocator)
+	visit :: proc(t: ^testing.T, nodes: []format.Meshlet_Node, meshlets: []format.Meshlet, leaves: []int, level: u16, i: u32) {
+		n := nodes[i]
+		count := n.count & ~format.MESHLET_NODE_LEAF
+		testing.expect(t, count > 0)
+		if n.count & format.MESHLET_NODE_LEAF != 0 {
+			for m, k in meshlets[n.first:][:count] {
+				leaves[int(n.first) + k] += 1
+				testing.expect_value(t, m.depth, level)
+				testing.expect(t, m.parent_center == n.center && m.parent_radius == n.radius && m.parent_error == n.error)
+			}
+			return
+		}
+		for c in nodes[n.first:][:count] {
+			testing.expectf(t, c.error <= n.error, "node %d's error %v is under its child's %v", i, n.error, c.error)
+			testing.expectf(t, linalg.distance(c.center, n.center) + c.radius <= n.radius * (1 + 1e-6), "node %d does not hold its child", i)
+		}
+		for k in n.first ..< n.first + count {
+			visit(t, nodes, meshlets, leaves, level, k)
+		}
+	}
+	for root in 0 ..< s.root_count {
+		visit(t, nodes, meshlets, leaves, u16(root), root)
+	}
+	for count, i in leaves {
+		testing.expectf(t, count == 1, "meshlet %d is under %d leaves", i, count)
+	}
+
+	// From near and far, at many levels of detail, the walk finds each meshlet that the view draws, and fewer than all.
+	walk :: proc(nodes: []format.Meshlet_Node, roots: u32, eye: [3]f32, lod_scale: f32, found: []bool) {
+		queue := make([dynamic]u32, context.temp_allocator)
+		for root in 0 ..< roots {
+			append(&queue, root)
+		}
+		for len(queue) > 0 {
+			n := nodes[pop(&queue)]
+			if projected_error(n.center, n.radius, n.error, eye, lod_scale) <= 1 {
+				continue
+			}
+			count := n.count & ~format.MESHLET_NODE_LEAF
+			for k in n.first ..< n.first + count {
+				if n.count & format.MESHLET_NODE_LEAF != 0 {
+					found[k] = true
+				} else {
+					append(&queue, k)
+				}
+			}
+		}
+	}
+	center, radius := s.bounds.center, s.bounds.radius
+	fewest := len(meshlets)
+	for distance in ([]f32{0, 0.1, 1, 4, 20}) {
+		for lod_scale in ([]f32{1, 10, 100, 1e3, 1e4, 1e5}) {
+			eye := center + {0.3, 1, 0.2} * radius * distance
+			found := make([]bool, len(meshlets), context.temp_allocator)
+			walk(nodes, s.root_count, eye, lod_scale, found)
+			candidates := 0
+			for m, i in meshlets {
+				drawn := projected_error(m.error_center, m.error_radius, m.error, eye, lod_scale) <= 1 && projected_error(m.parent_center, m.parent_radius, m.parent_error, eye, lod_scale) > 1
+				testing.expectf(t, !drawn || found[i], "from %v at %v, the walk misses meshlet %d", distance, lod_scale, i)
+				candidates += int(found[i])
+			}
+			fewest = min(fewest, candidates)
+		}
+	}
+	testing.expectf(t, fewest < len(meshlets) / 2, "the walk found at least %d of %d meshlets", fewest, len(meshlets))
+}
+
 @(test)
 without_cluster_lod_meshlets_are_the_mesh_itself :: proc(t: ^testing.T) {
 	grid, ok := cook_grid(t, "guid = 00112233445566778899aabbccddeeff\ncluster_lod = false\n")
@@ -347,4 +434,5 @@ without_cluster_lod_meshlets_are_the_mesh_itself :: proc(t: ^testing.T) {
 		triangles += int(m.triangle_count)
 	}
 	testing.expect_value(t, triangles, int(grid.blob.index_count / 3))
+	testing.expect_value(t, format.mesh_submeshes(grid.data, grid.blob)[0].node_count, 0)
 }

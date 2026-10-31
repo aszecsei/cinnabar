@@ -15,7 +15,7 @@ public sealed partial class EditorShell
 {
     /// <summary>The settings of a viewport that shows the lit scene, with every feature, the icons and the selection's shapes.</summary>
     public static readonly ViewportSettings DefaultViewportSettings =
-        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, 0);
+        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, 0);
 
     /// <summary>The viewport's choice that keeps the game's quality.</summary>
     public const string GameQualityLabel = "Game's";

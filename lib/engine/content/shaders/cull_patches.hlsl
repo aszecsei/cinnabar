@@ -36,7 +36,8 @@ struct Cull_Constants {
 	uint occlusion_offset;
 	uint view_first;
 	uint stats;
-	uint3 padding;
+	uint selections;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 

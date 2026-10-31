@@ -64,6 +64,9 @@ Feature :: enum u8 {
 	Post_Effects,
 	// Two-phase occlusion culling, without which the camera's view is culled by its frustum only.
 	Occlusion_Culling,
+	// The walk of the hierarchy over meshlets, without which each amplification shader tests every meshlet of every
+	// level of its submesh. Both draw the same meshlets.
+	Meshlet_Hierarchy,
 }
 
 Features :: bit_set[Feature;u16]

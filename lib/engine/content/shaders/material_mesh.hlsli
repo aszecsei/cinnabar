@@ -7,6 +7,7 @@
 #define MATERIAL_MESH_HLSLI
 
 #include "material_vertex.hlsli"
+#include "meshlet_lod.hlsli"
 #include "occlusion.hlsli"
 
 // Match MESHLET_MAX_VERTICES and MESHLET_MAX_TRIANGLES in lib/engine/asset/format/mesh.odin. A mesh group's threads
@@ -53,11 +54,10 @@ groupshared Cluster_Payload cluster_payload;
 groupshared uint cluster_count;
 
 // projected_error is an error within a sphere of the mesh, seen from the camera at its nearest, over the threshold:
-// above 1 shows. The camera is at 0, since positions are relative to it.
+// above 1 shows (see lod_error).
 float projected_error(float4 rows[3], float scale, float4 sphere, float error) {
 	float3 center = transform_point(rows, sphere.xyz) - frame.camera_offset.xyz;
-	float distance = max(length(center) - sphere.w * scale, frame.lod_near);
-	return error * scale / distance * frame.lod_scale;
+	return lod_error(center, sphere.w, error, scale, frame.lod_near, frame.lod_scale);
 }
 
 // lod_selected is whether a meshlet is its part of the mesh's level for the camera: fine enough, and its group's
@@ -108,7 +108,7 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 }
 
 // as_cluster is every opaque pass's amplification shader. The draw's meshlets are its draw record's first and count,
-// MESHLETS_PER_GROUP to a group along x. An instanced draw's groups are its meshlets along z and its instances along x
+// or with DRAW_SELECTED those of the selected meshlets' list, MESHLETS_PER_GROUP to a group along x. An instanced draw's groups are its meshlets along z and its instances along x
 // and y (see docs/rendering/gpu-scene.md#instanced-meshes).
 [numthreads(MESHLETS_PER_GROUP, 1, 1)]
 void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
@@ -134,7 +134,11 @@ void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	GroupMemoryBarrierWithGroupSync();
 	uint local = chunk * MESHLETS_PER_GROUP + thread;
 	if (listed && local < d.count) {
+		// A draw with DRAW_SELECTED has the indices of the meshlets that select_meshlets.hlsl picked.
 		uint meshlet = d.first + local;
+		if ((d.flags & DRAW_SELECTED) != 0) {
+			meshlet = cn_buffer(frame.selected_meshlets).Load(meshlet * 4);
+		}
 		Mesh_Record m = load_mesh(d);
 		Meshlet c = cn_buffer(m.meshlets).Load<Meshlet>(meshlet * sizeof(Meshlet));
 		Instance_Record instance = load_instance(d);

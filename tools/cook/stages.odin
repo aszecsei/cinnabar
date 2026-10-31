@@ -25,7 +25,7 @@ import "core:time"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
-STAGE_COOK_VERSION :: "stages 4"
+STAGE_COOK_VERSION :: "stages 5"
 // Changing what a stage's prefab or material instances hold, or which sub-assets it makes, changes this. It is in the
 // stage's key alone, so every stage converts again but keeps its meshes, textures and instance sets that are current.
 STAGE_PREFAB_VERSION :: "prefab 2"
