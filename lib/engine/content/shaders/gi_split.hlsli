@@ -44,7 +44,8 @@ static const float SPLIT_TAU = 6.28318531;
 static const float SPLIT_SQRT_SPHERE = 3.54490770;
 
 // Matches Split_Push in lib/engine/render/gi_split.odin. phase is the table's phase, and cascade the merge's cascade.
-// Each pass binds the tables for writing where it writes them.
+// Each pass binds the tables for writing where it writes them. With view, the gather draws the probes into view_output
+// for the Gi_Probes debug view.
 struct Split_Push {
 	uint grid;
 	uint grid_offset;
@@ -64,8 +65,8 @@ struct Split_Push {
 	uint rays;
 	uint accel;
 	uint exposure;
-	uint padding0;
-	uint padding1;
+	uint view;
+	uint view_output;
 };
 CN_PUSH_CONSTANTS(Split_Push, push);
 

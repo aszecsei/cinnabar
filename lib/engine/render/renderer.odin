@@ -408,6 +408,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_update(&r.residency)
 	read_cull_stats(r)
+	read_gi_split_stats(r)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
@@ -577,6 +578,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	ok := execute(&g)
 	if ok {
 		finish_cull_stats(f)
+		finish_gi_split_stats(r)
 	}
 	debug.end_frame(&r.debug)
 	return ok

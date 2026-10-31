@@ -150,7 +150,8 @@ Split_Push :: struct {
 	rays:        u32,
 	accel:       u32,
 	exposure:    u32,
-	padding:     [2]u32,
+	view:        u32,
+	view_output: u32,
 }
 
 #assert(size_of(Split_Push) <= 128)
@@ -163,6 +164,23 @@ Split_Layout :: struct {
 	entries:  u32,
 	bins:     u32,
 }
+
+// Gi_Split_Stats are the split cascades' tables a frame or two ago, which the editor shows: each cascade's probes that
+// rays reached, its slots, and the keys that found no room, in a full table or past the probing's reach. count is 0
+// when the split cascades did not run.
+Gi_Split_Stats :: struct {
+	cascades: [MAX_SPLIT_CASCADES]Split_Cascade_Stats,
+	count:    u32,
+}
+
+Split_Cascade_Stats :: struct {
+	active:  u32,
+	slots:   u32,
+	dropped: u32,
+}
+
+// The tables' counters' copies that the CPU reads, a frame or more apart, so a read never waits for a frame in flight.
+SPLIT_STATS_COPIES :: 3
 
 // Split_Window is a level of detail's window between frames: its first cell, of World_Position.
 Split_Window :: struct {
@@ -198,11 +216,20 @@ Gi_Split :: struct {
 	// Whether the storage is new since the last frame, so its slots and accumulators must be cleared.
 	fresh:        bool,
 	frame:        u32,
+	// The counters' copies, whether each holds a frame's that has not been read, the next copy to write, whether this
+	// frame wrote one, whether the split ran last frame, and the last stats that came back.
+	stats_copies:  [SPLIT_STATS_COPIES]gpu.Buffer,
+	stats_written: [SPLIT_STATS_COPIES]bool,
+	stats_next:    int,
+	stats_copying: bool,
+	ran:           bool,
+	last_stats:    Gi_Split_Stats,
 }
 
 // Gi_Split_Frame is one frame's split cascades, in frame memory.
 @(private)
 Gi_Split_Frame :: struct {
+	frame:     ^Frame,
 	grid:      Split_Grid,
 	upload:    gpu.Upload,
 	fresh:     bool,
@@ -238,6 +265,58 @@ gi_split_destroy :: proc(s: ^Gi_Split, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	s.hits, s.surfaces, s.rays, s.ray_capacity = {}, {}, {}, 0
+	for &b in s.stats_copies {
+		platform.gpu_destroy_buffer(b)
+		b = {}
+	}
+}
+
+// gi_split_stats is the split cascades' tables, a frame or two ago (see Gi_Split_Stats).
+gi_split_stats :: proc(r: ^Renderer) -> Gi_Split_Stats {
+	return r.gi.split.last_stats
+}
+
+// read_gi_split_stats takes each counters' copy that has come back, the newest last, and keeps it with the cascades'
+// slots. Without the split cascades last frame, the stats are empty, whatever older copies came back.
+@(private)
+read_gi_split_stats :: proc(r: ^Renderer) {
+	s := &r.gi.split
+	defer {
+		if !s.ran {
+			s.last_stats = {}
+		}
+		s.ran = false
+	}
+	for k in 0 ..< SPLIT_STATS_COPIES {
+		i := (s.stats_next + k) % SPLIT_STATS_COPIES
+		if !s.stats_written[i] {
+			continue
+		}
+		data, ok := r.platform.gpu_read_buffer(s.stats_copies[i])
+		if !ok || len(data) < MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE {
+			continue
+		}
+		s.stats_written[i] = false
+		counters := ([^]u32)(raw_data(data))
+		stats := Gi_Split_Stats{count = s.layout.count}
+		for c in 0 ..< int(s.layout.count) {
+			// Each cascade's counters: its free slots, the slots taken, its active slots and its dropped keys.
+			stats.cascades[c] = {active = counters[c * 4 + 2], slots = s.layout.cascades[c].slots, dropped = counters[c * 4 + 3]}
+		}
+		s.last_stats = stats
+	}
+}
+
+// finish_gi_split_stats moves on to the next copy, once the frame has copied into this one.
+@(private)
+finish_gi_split_stats :: proc(r: ^Renderer) {
+	s := &r.gi.split
+	if !s.stats_copying {
+		return
+	}
+	s.stats_copying = false
+	s.stats_written[s.stats_next] = true
+	s.stats_next = (s.stats_next + 1) % SPLIT_STATS_COPIES
 }
 
 @(private = "file")
@@ -498,7 +577,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	s := &r.gi.split
 	g := f.graph
 	sf := new(Gi_Split_Frame, platform.frame_allocator)
-	sf.upload, sf.fresh = upload, s.fresh
+	sf.frame, sf.upload, sf.fresh = f, upload, s.fresh
 	s.fresh = false
 	sf.slots = import_buffer(g, s.slots)
 	sf.deposits = import_buffer(g, s.deposits)
@@ -513,6 +592,9 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	sf.hits = import_buffer(g, s.hits)
 	sf.surfaces = import_buffer(g, s.surfaces)
 	sf.rays = import_buffer(g, s.rays)
+	if f.debug_view == .Gi_Probes {
+		gf.probe_view = create_texture(g, {size = f.size, format = GI_FORMAT, label = "gi probe view"})
+	}
 
 	s.frame += 1
 	grid := &sf.grid
@@ -628,8 +710,36 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	read(g, p, sf.atlas)
 	write(g, p, gf.diffuse.current)
 	write(g, p, gf.specular.current)
+	if gf.probe_view != 0 {
+		write(g, p, gf.probe_view)
+	}
 	declare_probe_reads(f, p)
+	add_split_stats_copy(f, sf)
+	s.ran = true
 	return true
+}
+
+// add_split_stats_copy copies the tables' counters to their next copy, after the merge, for read_gi_split_stats to
+// take once it is back.
+@(private = "file")
+add_split_stats_copy :: proc(f: ^Frame, sf: ^Gi_Split_Frame) {
+	s := &f.renderer.gi.split
+	platform := f.renderer.platform
+	if s.stats_copies[0] == {} {
+		for &b in s.stats_copies {
+			b = platform.gpu_create_buffer({size = MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, usage = {.Readback}, label = "gi split stats readback"}, nil)
+		}
+	}
+	g := f.graph
+	copy := import_buffer(g, s.stats_copies[s.stats_next])
+	p := add_compute_pass(g, "gi split stats", proc(ctx: ^Pass_Context) {
+		sf := (^Gi_Split_Frame)(ctx.data)
+		s := &sf.frame.renderer.gi.split
+		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, sf.counters), 0, s.stats_copies[s.stats_next], 0, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE)
+	}, sf, queue = .Compute)
+	copy_source(g, p, sf.counters)
+	copy_dest(g, p, copy)
+	s.stats_copying = true
 }
 
 @(private = "file")
@@ -709,6 +819,9 @@ run_split_pass :: proc(ctx: ^Pass_Context) {
 		hits        = bind(g, sf.hits, .Hits, written),
 		rays        = bind(g, sf.rays, .Rays, written),
 		exposure    = gpu.read_index(gpu_buffer(g, f.exposure)),
+	}
+	if step.pass == .Gather && gf.probe_view != 0 {
+		push.view, push.view_output = 1, gpu.write_index(gpu_texture(g, gf.probe_view))
 	}
 	if step.pass == .Trace {
 		push.accel = gpu.read_index(gpu_accel(g, ray_scene_accel(f)))

@@ -2,6 +2,7 @@ package render
 
 import "base:runtime"
 import "core:math"
+import "core:mem"
 import "core:mem/virtual"
 import "core:sync"
 import "core:testing"
@@ -326,11 +327,11 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
 
-	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, instances, exposure: gpu.Buffer, settings: Gi_Settings, camera: ecs.World_Position) -> (passes: map[string]int) {
+	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, instances, exposure: gpu.Buffer, settings: Gi_Settings, camera: ecs.World_Position, view := Debug_View.Lit) -> (passes: map[string]int) {
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = camera}}
+		f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
@@ -362,6 +363,13 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		read(&g, p, f.gi_diffuse)
 		read(&g, p, f.gi_specular)
 		keep_pass(&g, p)
+		// The debug view reads the probes' view, which the gather draws only while the view is on.
+		testing.expect_value(t, f.gi.probe_view != 0, view == .Gi_Probes && passes_split(&g))
+		if f.gi.probe_view != 0 {
+			p = add_compute_pass(&g, "debug view", proc(_: ^Pass_Context) {}, nil)
+			read(&g, p, f.gi.probe_view)
+			keep_pass(&g, p)
+		}
 		passes = make(map[string]int, platform.frame_allocator)
 		for node in g.passes {
 			passes[node.name] += 1
@@ -379,14 +387,22 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		testing.expect_value(t, passes["gi split clear"], frame == 0 ? 1 : 0)
 		testing.expect_value(t, passes["gi split merge"], int(GI_SPLIT_PARAMS[.Low].cascades))
 		testing.expect_value(t, passes["gi split light"], 1)
+		testing.expect_value(t, passes["gi split stats"], 1)
 		testing.expect_value(t, passes["gi trace"], 0)
 		free_all(platform.frame_allocator)
+		finish_gi_split_stats(r)
 	}
+	testing.expect_value(t, split.stats_next, 3 % SPLIT_STATS_COPIES)
+
+	// With the Gi_Probes debug view, the gather draws the probes too.
+	passes := run_frame(t, r, &cache, instances, exposure, settings, meters(16, 2, -3), .Gi_Probes)
+	testing.expect_value(t, passes["gi split gather"], 1)
+	free_all(platform.frame_allocator)
 	testing.expect_value(t, split.params, GI_SPLIT_PARAMS[.Low])
 
 	// Another level makes its own storage, which is cleared.
 	settings.level = .High
-	passes := run_frame(t, r, &cache, instances, exposure, settings, meters(0, 0, 0))
+	passes = run_frame(t, r, &cache, instances, exposure, settings, meters(0, 0, 0))
 	testing.expect_value(t, passes["gi split gather"], 1)
 	testing.expect_value(t, passes["gi split clear"], 1)
 	testing.expect_value(t, split.params, GI_SPLIT_PARAMS[.High])
@@ -398,4 +414,66 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 	testing.expect_value(t, passes["gi split gather"], 0)
 	testing.expect_value(t, passes["gi trace"], 1)
 	free_all(platform.frame_allocator)
+}
+
+// passes_split is whether a graph has the split cascades' gather.
+@(private = "file")
+passes_split :: proc(g: ^Graph) -> bool {
+	for node in g.passes {
+		if node.name == "gi split gather" {
+			return true
+		}
+	}
+	return false
+}
+
+@(test)
+the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		heap_allocator       = runtime.heap_allocator(),
+		gpu_create_buffer    = null.create_buffer,
+		gpu_destroy_buffer   = null.destroy_buffer,
+		gpu_destroy_texture  = null.destroy_texture,
+		gpu_read_buffer      = null.read_buffer,
+		gpu_destroy_pipeline = null.destroy_pipeline,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	s := &r.gi.split
+	defer gi_split_destroy(s, &platform)
+	s.layout = split_layout(GI_SPLIT_PARAMS[.High])
+	for &b in s.stats_copies {
+		b = platform.gpu_create_buffer({size = MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, usage = {.Readback}, label = "test"}, nil)
+	}
+
+	// Each cascade's counters: free slots, slots taken, active slots and dropped keys.
+	tally :: proc(s: ^Gi_Split, i: int, active, dropped: u32) {
+		data, _ := null.read_buffer(s.stats_copies[i])
+		counters := mem.slice_data_cast([]u32, data)
+		for c in 0 ..< MAX_SPLIT_CASCADES {
+			counters[c * 4 + 2], counters[c * 4 + 3] = active + u32(c), dropped
+		}
+		s.stats_written[i] = true
+	}
+	// Two frames' copies, the older first: the newer is the one kept, with each cascade's slots.
+	s.ran = true
+	s.stats_next = 1
+	tally(s, 1, 50, 0)
+	tally(s, 2, 70, 3)
+	s.stats_next = 0
+	read_gi_split_stats(r)
+	stats := gi_split_stats(r)
+	testing.expect_value(t, stats.count, 4)
+	testing.expect_value(t, stats.cascades[0], Split_Cascade_Stats{active = 70, slots = 16384, dropped = 3})
+	testing.expect_value(t, stats.cascades[3], Split_Cascade_Stats{active = 73, slots = 256, dropped = 3})
+	testing.expect(t, !s.stats_written[1] && !s.stats_written[2])
+
+	// A frame without the split cascades empties them, even when an older copy comes back then.
+	tally(s, 0, 90, 0)
+	read_gi_split_stats(r)
+	testing.expect_value(t, gi_split_stats(r), Gi_Split_Stats{})
 }

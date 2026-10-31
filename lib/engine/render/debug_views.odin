@@ -45,6 +45,9 @@ Debug_View :: enum u8 {
 	Lod_Depth,
 	// The shading model's emission alone.
 	Emission,
+	// The split cascades' first probes: each in a color of its own, as bright as its confidence, red where a pixel's
+	// cell has no probe, and grey past the last level of detail (see docs/rendering/global-illumination.md#split-cascades).
+	Gi_Probes,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -142,6 +145,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.gi_diffuse
 	case .Gi_Specular:
 		source = f.gi_specular
+	case .Gi_Probes:
+		source = f.gi != nil ? f.gi.probe_view : 0
 	case .Shadow_Mask:
 		source = f.shadows != nil ? f.shadows.mask : 0
 	case .Entity_Ids:

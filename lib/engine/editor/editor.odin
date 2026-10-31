@@ -238,6 +238,12 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			c := render.cull_stats(e.renderer)
 			stats.early_items, stats.late_items, stats.hidden_items = c.early_items, c.late_items, c.hidden_items
 			stats.early_instances, stats.late_instances, stats.hidden_instances = c.early_instances, c.late_instances, c.hidden_instances
+			gi := render.gi_split_stats(e.renderer)
+			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
+			for &cascade, k in cascades {
+				cascade = {active = gi.cascades[k].active, slots = gi.cascades[k].slots, dropped = gi.cascades[k].dropped}
+			}
+			stats.gi_cascades = cascades
 		}
 		link.write_message(out, stats)
 	}
