@@ -18,30 +18,34 @@ GI_MERGE_SHADER :: #load("../content/shaders/gi_merge.hlsl.meta", string)
 GI_GATHER_SHADER :: #load("../content/shaders/gi_gather.hlsl.meta", string)
 GI_LIT_SHADER :: #load("../content/shaders/gi_lit.hlsl.meta", string)
 
-// Cascade k has a probe every spacing << k pixels, the level's spacing, with (GI_DIRECTIONS << k)^2 directions.
-// GI_DIRECTIONS matches gi_common.hlsli.
-GI_DIRECTIONS :: 4
 GI_FORMAT :: gpu.Format.RGBA16_Float
-// The first cascade's interval is this many probe spacings long, at the probe's depth.
+// The first cascade's interval is this many probe spacings long, at the probe's depth, with 4 directions across. A
+// direction's texel is narrower with more directions, so the interval grows with them, and reaches as far.
 GI_INTERVAL_SCALE :: 2
+// The cascades' texture is at most this large on each side, Direct3D 12's limit.
+GI_MAX_TEXTURE_SIZE :: 16384
 
-// Gi_Params are the cascades at a level. Each cascade's interval is four times as long as the one before, from a
-// length that scales with the spacing, so fewer probes need fewer cascades to reach as far. steps are each ray's
-// steps through the depth buffer. The histories average at most history_frames frames, so the light follows a change
-// within a few; fewer probes average over more.
+// Gi_Params are the cascades at a level. Cascade k has a probe every spacing << k pixels, with (directions << k)^2
+// directions. Each cascade's interval is four times as long as the one before, from a length that scales with the
+// spacing and the directions, so fewer probes need fewer cascades to reach as far. steps are each ray's steps through
+// the depth buffer. The histories average at most history_frames frames, so the light follows a change within a few;
+// fewer probes average over more.
 Gi_Params :: struct {
 	cascades:       u32,
 	spacing:        u32,
+	directions:     u32,
 	steps:          u32,
 	history_frames: f32,
 }
 
 @(rodata)
 GI_PARAMS := [Quality_Level]Gi_Params {
-	.Low    = {cascades = 4, spacing = 16, steps = 4, history_frames = 16},
-	.Medium = {cascades = 5, spacing = 8, steps = 6, history_frames = 12},
-	.High   = {cascades = 5, spacing = 8, steps = 8, history_frames = 12},
-	.Ultra  = {cascades = 6, spacing = 4, steps = 12, history_frames = 10},
+	.Low    = {cascades = 4, spacing = 16, directions = 4, steps = 4, history_frames = 16},
+	.Medium = {cascades = 5, spacing = 8, directions = 4, steps = 6, history_frames = 12},
+	.High   = {cascades = 5, spacing = 8, directions = 4, steps = 8, history_frames = 12},
+	// Ultra's probes are as far apart as High's, with four times the directions: 8 across at spacing 4 would be four
+	// times the texels, past the texture's size at 4K.
+	.Ultra  = {cascades = 5, spacing = 8, directions = 8, steps = 12, history_frames = 10},
 }
 
 // Gi_Settings are a frame's global illumination, in Frame_Settings, from the Global_Illumination settings.
@@ -102,7 +106,7 @@ Gi_Constants :: struct {
 	probes:           u32,
 	probe_grid:       u32,
 	probe_grid_offset: u32,
-	probe_padding:    u32,
+	directions:       u32,
 }
 
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
@@ -159,11 +163,25 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 // gi_region is the size of one cascade's rows: the most texels that a cascade's probes and directions take.
 gi_region :: proc(size: [2]u32, params: Gi_Params) -> (region: [2]u32) {
 	for k in u32(0) ..< params.cascades {
-		spacing, directions := params.spacing << k, u32(GI_DIRECTIONS) << k
+		spacing, directions := params.spacing << k, params.directions << k
 		probes := (size + spacing - 1) / spacing
 		region = {max(region.x, probes.x * directions), max(region.y, probes.y * directions)}
 	}
 	return
+}
+
+// gi_fit drops a level's last cascades while the cascades' texture would be larger than GI_MAX_TEXTURE_SIZE, so a
+// very large view still has its nearer cascades.
+gi_fit :: proc(size: [2]u32, params: Gi_Params) -> Gi_Params {
+	p := params
+	for p.cascades > 1 {
+		region := gi_region(size, p)
+		if region.x <= GI_MAX_TEXTURE_SIZE && region.y * p.cascades <= GI_MAX_TEXTURE_SIZE {
+			break
+		}
+		p.cascades -= 1
+	}
+	return p
 }
 
 // begin_gi decides whether the frame has global illumination, before the scene's constants are written, which say so.
@@ -184,7 +202,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	g := f.graph
 	gf := new(Gi_Frame, platform.frame_allocator)
 	gf.lit_size = (f.size + 1) / 2
-	gf.params = GI_PARAMS[settings.level]
+	gf.params = gi_fit(f.size, GI_PARAMS[settings.level])
 	gf.region = gi_region(f.size, gf.params)
 	gf.lit = history_texture(g, {size = gf.lit_size, format = GI_FORMAT, label = "gi lit scene"})
 	gf.diffuse = history_texture(g, {size = f.size, format = GI_FORMAT, label = "gi diffuse"})
@@ -212,10 +230,11 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		size           = f.size,
 		lit_size       = gf.lit_size,
 		region         = gf.region,
-		interval_scale = GI_INTERVAL_SCALE,
+		interval_scale = GI_INTERVAL_SCALE * f32(gf.params.directions) / 4,
 		max_frames     = gf.params.history_frames,
 		spacing        = gf.params.spacing,
 		steps          = gf.params.steps,
+		directions     = gf.params.directions,
 	}
 	f.gi = gf
 }
@@ -336,7 +355,7 @@ run_gi_merge :: proc(ctx: ^Pass_Context) {
 	c := gi_constants(ctx, f)
 	c.cascades = gpu.write_index(gpu_texture(ctx.graph, gf.cascades))
 	c.cascade = m.cascade
-	spacing, directions := gf.params.spacing << m.cascade, u32(GI_DIRECTIONS) << m.cascade
+	spacing, directions := gf.params.spacing << m.cascade, gf.params.directions << m.cascade
 	texels := (f.size + spacing - 1) / spacing * directions
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.gi.merge.pipeline)
 	if upload_gi_constants(ctx, f, c) {

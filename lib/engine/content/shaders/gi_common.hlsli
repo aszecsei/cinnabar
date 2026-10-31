@@ -1,7 +1,7 @@
 // What the global illumination's shaders share (see docs/rendering/global-illumination.md#global-illumination): their constants, the
 // cascades' layout and the probes' positions. The cascades are screen-space radiance cascades. Cascade k has a probe
-// every spacing << k pixels, each with (GI_DIRECTIONS << k)^2 directions over the sphere, folded into an octahedron,
-// so every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long
+// every spacing << k pixels, each with (directions << k)^2 directions over the sphere, folded into an octahedron, so
+// every cascade has about as many texels as the others. Its rays trace one interval of distance, four times as long
 // as the cascade before's, and its texels hold the light that they found and the share of light from beyond that gets
 // through. The cascades are one texture, each in its own rows. With the world probes, what lies beyond the screen and
 // beyond the last cascade is the probes' light, not the ambient light's.
@@ -53,12 +53,12 @@ struct Gi_Constants {
 	uint probes;
 	uint probe_grid;
 	uint probe_grid_offset;
-	uint probe_padding;
+	// The level's directions across the first cascade's octahedron.
+	uint directions;
 };
 CN_PASS_CONSTANTS(Gi_Constants, constants);
 
-// Match GI_DIRECTIONS in lib/engine/render/gi.odin, and VIEW_MODEL_STENCIL in renderer.odin.
-static const uint GI_DIRECTIONS = 4;
+// Matches VIEW_MODEL_STENCIL in lib/engine/render/renderer.odin.
 static const uint VIEW_MODEL_STENCIL = 1;
 
 uint cascade_spacing(uint k) {
@@ -66,7 +66,7 @@ uint cascade_spacing(uint k) {
 }
 
 uint cascade_directions(uint k) {
-	return GI_DIRECTIONS << k;
+	return constants.directions << k;
 }
 
 uint2 cascade_probes(uint k) {
@@ -79,13 +79,19 @@ uint2 cascade_texel(uint k, uint2 probe, uint2 direction) {
 	return probe * cascade_directions(k) + direction + uint2(0, k * constants.region.y);
 }
 
-float3 octahedral(float2 p) {
+// octahedral_point is the point on the octahedron |x| + |y| + |z| = 1 at a place in the folded square, before it is
+// normalized into a direction.
+float3 octahedral_point(float2 p) {
 	float3 n = float3(p, 1 - abs(p.x) - abs(p.y));
 	if (n.z < 0) {
 		float2 sign_xy = float2(n.x >= 0 ? 1 : -1, n.y >= 0 ? 1 : -1);
 		n.xy = (1 - abs(n.yx)) * sign_xy;
 	}
-	return normalize(n);
+	return n;
+}
+
+float3 octahedral(float2 p) {
+	return normalize(octahedral_point(p));
 }
 
 float2 octahedral_encode(float3 n) {
@@ -101,6 +107,20 @@ float2 octahedral_encode(float3 n) {
 // direction_of is the direction in the world at a place in a direction texel, each coordinate in [0, 1).
 float3 direction_of(uint2 texel, uint directions, float2 within) {
 	return octahedral((float2(texel) + within) / directions * 2 - 1);
+}
+
+// direction_weight is how much a direction texel's light counts in the cosine-weighted mean around a normal, up to a
+// factor that every texel shares. With 6 or more directions across, it is the cosine at the texel's center times the
+// solid angle there, which is the square's area over |p|^3. With 4, the cosine alone is nearer the true mean: the
+// texels are so large that the cosine and the light vary across each, and the solid angle makes the error larger
+// (see gi_test.odin).
+float direction_weight(uint2 texel, uint directions, float3 normal) {
+	float3 p = octahedral_point((float2(texel) + 0.5) / directions * 2 - 1);
+	if (directions < 6) {
+		return saturate(dot(normalize(p), normal));
+	}
+	float l2 = dot(p, p);
+	return max(dot(p, normal), 0) / (l2 * l2);
 }
 
 // The ambient light from a direction.
