@@ -559,6 +559,7 @@ Debug_View :: enum u8 {
 	Meshlets,
 	Lod_Depth,
 	Emission,
+	Gi_Probes,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -895,6 +896,17 @@ Game_Stats :: struct {
 	early_instances:  u32,
 	late_instances:   u32,
 	hidden_instances: u32,
+	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
+	// docs/rendering/global-illumination.md#split-cascades).
+	gi_cascades:      []Gi_Cascade_Stats,
+}
+
+// Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no
+// room this frame.
+Gi_Cascade_Stats :: struct {
+	active:  u32,
+	slots:   u32,
+	dropped: u32,
 }
 
 // Game commands (see docs/editor/shell-and-panels.md#commands).

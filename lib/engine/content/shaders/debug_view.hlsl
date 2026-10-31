@@ -27,6 +27,7 @@ static const uint DEBUG_SHADOW_MASK = 14;
 static const uint DEBUG_ENTITY_IDS = 15;
 static const uint DEBUG_LUMINANCE = 16;
 static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
+static const uint DEBUG_GI_PROBES = 21;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -93,6 +94,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	case DEBUG_GI_DIFFUSE:
 	case DEBUG_GI_SPECULAR:
 		color = cn_texture(push.source).Load(pixel).rgb * exposure;
+		break;
+	case DEBUG_GI_PROBES:
+		// The split cascades' gather drew the colors.
+		color = cn_texture(push.source).Load(pixel).rgb;
 		break;
 	case DEBUG_SHADOW_MASK: {
 		// Each light's channel in its own color: red, green, blue and yellow. A channel without a light is black.

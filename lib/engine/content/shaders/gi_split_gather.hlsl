@@ -5,7 +5,9 @@
 // weight, by whether it is in front of the surface, and by its confidence, and the levels blend by the pixel's
 // distance. The world probes' light counts too, a little everywhere, so a place that no probe has reached yet fades in
 // from it, and fully past the last level. The probes keep their light from frame to frame in world space, so no
-// history follows the pixels and nothing smears. The view model's pixels take the light around the camera.
+// history follows the pixels and nothing smears. The view model's pixels take the light around the camera. With the
+// Gi_Probes debug view, it also draws the probe of each pixel's cell at its nearer level of detail into a texture of
+// its own, not into the light, which the lit scene keeps for the next frames' rays.
 #include "gi_split.hlsli"
 
 // The world probes' light counts this much against a probe's, so it shows only where the split probes have little.
@@ -22,6 +24,23 @@ float facing(float3 center, float3 p, float3 normal) {
 	float distance = length(to_probe);
 	float f = (dot(distance > 1e-4 ? to_probe / distance : normal, normal) + 1) * 0.5;
 	return f * f + 0.05;
+}
+
+// probe_color is how the Gi_Probes debug view shows the probe of a point's cell: in a color of its own, as bright as
+// its confidence, red where the cell has no probe, and grey past the last level.
+float3 probe_color(Split_Grid g, float3 p) {
+	Split_Lod lod = split_lod(g, chebyshev(p));
+	if (lod.level >= g.level_count) {
+		return 0.1;
+	}
+	int3 u = split_cell(g.levels[lod.level], p);
+	uint slot = split_inside(u, 0) ? split_find(g.cascades[0], split_key(lod.level, uint3(u))) : SPLIT_NO_SLOT;
+	if (slot == SPLIT_NO_SLOT) {
+		return float3(1, 0, 0);
+	}
+	uint h = split_hash(slot + 1);
+	float3 color = float3(h & 0xff, (h >> 8) & 0xff, (h >> 16) & 0xff) / 255.0 * 0.7 + 0.3;
+	return color * (0.2 + 0.8 * probe_confidence(g, slot));
 }
 
 float2 atlas_uv(Split_Grid g, uint local, float3 n) {
@@ -86,12 +105,18 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (depth <= 0) {
 		out_diffuse[pixel] = 0;
 		out_specular[pixel] = 0;
+		if (push.view != 0) {
+			cn_rw_texture(push.view_output)[pixel] = 0;
+		}
 		return;
 	}
 	float3 normal = octahedral_normal(pixel);
 	float3 position;
 	float z;
 	if (!surface_at(pixel, position, z)) {
+		if (push.view != 0) {
+			cn_rw_texture(push.view_output)[pixel] = 0.1;
+		}
 		float3 reflected = reflect(normalize(position), normal);
 		out_diffuse[pixel] = float4(surrounding_light(0, normal), 0);
 		out_specular[pixel] = float4(beyond_light(0, normal, reflected), 0);
@@ -99,6 +124,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	float3 reflected = reflect(normalize(position), normal);
 	Split_Grid g = split_grid();
+	if (push.view != 0) {
+		cn_rw_texture(push.view_output)[pixel] = float4(probe_color(g, position), 1);
+	}
 	Split_Lod lod = split_lod(g, chebyshev(position));
 	float4 diffuse = 0;
 	float4 specular = 0;

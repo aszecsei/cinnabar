@@ -42,6 +42,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Transparent_Overdraw` | `debug_view.hlsl` | The transparent layers at each pixel, sprites included, which the moments passes count, as heat colors from 1 to 8 | No |
 | `Meshlets`, `Lod_Depth` | The forward pass | The [mesh shader path](gpu-scene.md#mesh-shader-path)'s meshlets, and the [patch surfaces](surfaces.md#patches)' patches, each in a color of its own, and their levels of detail as heat colors up to 8, which an [impostor](gpu-scene.md#impostors) is | No |
 | `Emission` | The forward pass | The shading model's emission alone, of opaque and transparent surfaces (see [Materials](materials.md#shading-models)) | Yes |
+| `Gi_Probes` | The [split cascades](global-illumination.md#split-cascades)' gather, then `debug_view.hlsl` | The first cascade's probe of each pixel's cell at its nearer level: each in a color of its own, as bright as its confidence, red where the cell has no probe, and grey past the last level or without a surface. Black without the split cascades | No |
 
 - **In the forward pass:** `Frame_Constants.debug_view` drives a dynamic branch in the forward template, so the views need no permutations. The cooker defines `SHADING_HAS_BASE_COLOR` for a shading model with a `float3 base_color` input.
 - **From the frame's textures:** a compute pass after the `before_post` hook writes the view into a new scene color. A texture that the frame does not have, such as the global illumination's when it is off, gives black.

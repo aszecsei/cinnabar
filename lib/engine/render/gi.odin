@@ -127,6 +127,8 @@ Gi_Frame :: struct {
 	settings:  Gi_Settings,
 	// The world probes, once add_gi_world_probes has updated them, or nil.
 	probes:    ^Gi_Probe_Frame,
+	// The split cascades' probes as the Gi_Probes debug view shows them, which their gather draws when the view is on.
+	probe_view: Texture,
 }
 
 // Gi_Merge is one merge pass, of one cascade.
