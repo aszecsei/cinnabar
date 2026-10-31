@@ -214,7 +214,12 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			case .Ao_Level:
 				ok = enum_value(problems, line, key, value, &q.ao.level)
 			case .Gi:
-				ok = enum_value(problems, line, key, value, &q.gi.technique)
+				// World_Probes was the split cascades' technique's name, and older files keep it.
+				if value == "World_Probes" {
+					q.gi.technique, ok = .Split_Cascades, true
+				} else {
+					ok = enum_value(problems, line, key, value, &q.gi.technique)
+				}
 			case .Gi_Level:
 				ok = enum_value(problems, line, key, value, &q.gi.level)
 			case .Fog:

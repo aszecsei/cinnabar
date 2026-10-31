@@ -112,6 +112,21 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T) {
+	// World_Probes was Split_Cascades' name: a file that a build before the rename saved reads without a problem, and
+	// is written with the new name.
+	caps := render.Caps{ray_query = true}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.gi = World_Probes\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	q := quality(s, caps)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Split_Cascades)
+	testing.expect_value(t, quality_values(q, caps)[.Gi], "Split_Cascades")
+	free_all(context.temp_allocator)
+}
+
+@(test)
 setting_a_value_keeps_the_files_other_lines :: proc(t: ^testing.T) {
 	text := "# The player's.\noutput = Sdr\nquality.fog = Low\n\nquality.fog = High\n"
 	testing.expect_value(t, set_value(text, "quality.fog", "Ultra"), "# The player's.\noutput = Sdr\n\nquality.fog = Ultra\n")
