@@ -122,6 +122,22 @@ float3 probe_ray_direction(Probe_Grid grid, uint ray) {
 	return normalize(float3(dot(grid.rotation[0].xyz, d), dot(grid.rotation[1].xyz, d), dot(grid.rotation[2].xyz, d)));
 }
 
+// interior_of is the interior texel that a texel of a tile shows: itself, or for the border, the interior texel
+// across the octahedron's fold.
+int2 interior_of(int2 t) {
+	int last = PROBE_INTERIOR - 1;
+	int2 i = t - 1;
+	if (i.x < 0 || i.x > last) {
+		i.y = last - i.y;
+		i.x = clamp(i.x, 0, last);
+	}
+	if (i.y < 0 || i.y > last) {
+		i.x = last - i.x;
+		i.y = clamp(i.y, 0, last);
+	}
+	return clamp(i, 0, last);
+}
+
 // probe_uv is where a direction is in a probe's tile, in the atlas's UV, for a bilinear sample within its interior.
 float2 probe_uv(Probe_Grid grid, uint level, uint storage, float3 direction) {
 	uint width, height;

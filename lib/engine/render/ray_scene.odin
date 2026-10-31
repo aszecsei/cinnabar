@@ -20,6 +20,9 @@ MAX_HIT_BINS :: MAX_MATERIAL_PIPELINES + 1
 #assert(MAX_HIT_BINS == 257)
 // A frame shades at most this many clients' hits.
 MAX_HIT_BATCHES :: 4
+// A batch has at most this many rays: the binning and each bin's shading dispatch a group for each HIT_GROUP_SIZE
+// rays, and a dispatch has at most 65535 groups along x.
+MAX_HIT_RAYS :: 65535 * HIT_GROUP_SIZE
 // A Hit_Submesh's bin has this for a transparent or additive material's submesh, which the fallback shades.
 HIT_TRANSLUCENT :: 1 << 24
 HIT_BIN_MASK :: HIT_TRANSLUCENT - 1
@@ -310,13 +313,13 @@ hit_shading_ready :: proc(f: ^Frame) -> bool {
 
 // add_hit_shading evaluates the materials at a client's hits, after the client's pass that writes them: it bins the
 // hits by their materials, then dispatches each bin's material on its rays, indirectly by the bin's count. It is false,
-// and adds nothing, when hit_shading_ready is not, or the batch has no rays.
+// and adds nothing, when hit_shading_ready is not, or the batch has no rays or more than MAX_HIT_RAYS.
 add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics) -> bool {
 	r := f.renderer
 	rf := f.ray_scene
 	sf := f.scene_frame
 	platform := r.platform
-	if !hit_shading_ready(f) || batch.count == 0 {
+	if !hit_shading_ready(f) || batch.count == 0 || batch.count > MAX_HIT_RAYS {
 		return false
 	}
 	scratch := ensure_hit_scratch(r, rf.batches, int(batch.count))
