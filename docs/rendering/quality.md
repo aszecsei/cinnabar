@@ -20,7 +20,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades`, `World_Probes` | The [global illumination](global-illumination.md#global-illumination), and with `World_Probes` its [world probes](global-illumination.md#world-probes). `World_Probes` needs `Ray_Query` |
-| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing, the rays' steps and the history's length (`GI_PARAMS`), and the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`) |
+| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), and the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
@@ -45,12 +45,12 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 
 ## Levels
 
-| Level | Shadow atlas | Cascades | Shadow filter | GTAO slices × steps | GI cascades, spacing, steps | Fog slices |
+| Level | Shadow atlas | Cascades | Shadow filter | GTAO slices × steps | GI cascades, spacing, directions, steps | Fog slices |
 |---|---|---|---|---|---|---|
-| Low | 2048, cells of 1024 | 2 | 1 tap (2x2) | 1 × 2 | 4, 16 px, 4 | 32 |
-| Medium | 4096, cells of 1024 | 3 | 4 taps (3x3) | 2 × 2 | 5, 8 px, 6 | 48 |
-| High | 4096, cells of 1024 | 4 | 4 taps (3x3) | 3 × 3 | 5, 8 px, 8 | 64 |
-| Ultra | 8192, cells of 2048 | 4 | 9 taps (4x4) | 9 × 3 | 6, 4 px, 12 | 96 |
+| Low | 2048, cells of 1024 | 2 | 1 tap (2x2) | 1 × 2 | 4, 16 px, 4, 4 | 32 |
+| Medium | 4096, cells of 1024 | 3 | 4 taps (3x3) | 2 × 2 | 5, 8 px, 4, 6 | 48 |
+| High | 4096, cells of 1024 | 4 | 4 taps (3x3) | 3 × 3 | 5, 8 px, 4, 8 | 64 |
+| Ultra | 8192, cells of 2048 | 4 | 9 taps (4x4) | 9 × 3 | 5, 8 px, 8, 12 | 96 |
 
 - **Before levels,** the frame drew High's shadows and GI, Ultra's GTAO, and High's fog.
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
