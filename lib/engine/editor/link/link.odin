@@ -603,6 +603,7 @@ Viewport_Settings :: struct {
 	no_shadows:           bool,
 	no_post_effects:      bool,
 	no_occlusion_culling: bool,
+	no_meshlet_hierarchy: bool,
 	// Stops added to the exposure.
 	exposure_offset:      f32,
 	// Icons for the lights, volumes and cameras, which pick them.
@@ -896,6 +897,10 @@ Game_Stats :: struct {
 	early_instances:  u32,
 	late_instances:   u32,
 	hidden_instances: u32,
+	// Of the items whose meshlets have a hierarchy, their meshlets, and those that the walk of the hierarchy gave the
+	// amplification shaders to test (see docs/rendering/gpu-scene.md#mesh-shader-path).
+	hierarchy_meshlets: u32,
+	selected_meshlets:  u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:      []Gi_Cascade_Stats,

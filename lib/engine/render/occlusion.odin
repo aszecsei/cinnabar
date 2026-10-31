@@ -50,18 +50,24 @@ Hzb_Push :: struct {
 
 // Cull_Stats are what the camera drew in a frame, which the editor shows: its items, as indirect draws, and its
 // instance sets' instances, each drawn in the early view or the late one, and those that the depth pyramid hid. Without
-// occlusion culling, everything is early.
+// occlusion culling, everything is early. Of the items whose submeshes have a hierarchy over their meshlets, it has
+// their meshlets of every level, and those that select meshlets picked, which each view that draws them tests in their
+// place: an item that tests all of its meshlets counts them all (see meshlet_select.odin).
 Cull_Stats :: struct {
-	early_items:      u32,
-	late_items:       u32,
-	hidden_items:     u32,
-	early_instances:  u32,
-	late_instances:   u32,
-	hidden_instances: u32,
+	early_items:        u32,
+	late_items:         u32,
+	hidden_items:       u32,
+	early_instances:    u32,
+	late_instances:     u32,
+	hidden_instances:   u32,
+	hierarchy_meshlets: u32,
+	selected_meshlets:  u32,
 }
 
-// The words of the GPU's tally, which cull_draws.hlsl and cull_instances.hlsl add to, in Cull_Stats' order.
-CULL_STATS_WORDS :: 6
+// The words of the GPU's tally, which cull_draws.hlsl, cull_instances.hlsl and select_meshlets.hlsl add to, in
+// Cull_Stats' order.
+CULL_STATS_WORDS :: 8
+#assert(size_of(Cull_Stats) == CULL_STATS_WORDS * 4)
 // The tally's copies that the CPU reads, a frame or more apart, so a read never waits for a frame in flight.
 CULL_STATS_COPIES :: 3
 
@@ -283,6 +289,9 @@ add_occlusion_passes :: proc(f: ^Frame) {
 	write(g, p, of.slot_seen_next)
 	if len(sf.sets) > 0 {
 		read(g, p, sf.instance_counters)
+	}
+	if sf.meshlet_select.selections != 0 {
+		read(g, p, sf.meshlet_select.selections)
 	}
 	write(g, p, sf.arguments)
 	write(g, p, sf.mesh_arguments)

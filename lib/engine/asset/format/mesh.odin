@@ -31,7 +31,8 @@ Mesh_Bounds :: struct {
 	radius:   f32,
 }
 
-// Mesh_Submesh is the part of a mesh that one material draws. Its indices and meshlets are ranges of the mesh's.
+// Mesh_Submesh is the part of a mesh that one material draws. Its indices, meshlets and meshlet nodes are ranges of the
+// mesh's. Its first root_count nodes are the roots of its levels' trees; a submesh without a hierarchy has none.
 Mesh_Submesh :: struct {
 	// The material slot's name: the glTF material's.
 	name:          Slice,
@@ -39,6 +40,9 @@ Mesh_Submesh :: struct {
 	index_count:   u32,
 	first_meshlet: u32,
 	meshlet_count: u32,
+	first_node:    u32,
+	node_count:    u32,
+	root_count:    u32,
 	bounds:        Mesh_Bounds,
 }
 
@@ -73,6 +77,25 @@ Meshlet :: struct {
 }
 
 #assert(size_of(Meshlet) == 80)
+
+// Meshlet_Node is a node of the tree over one level's groups of meshlets (see docs/content/kinds/meshes.md#meshlets).
+// Its sphere holds every group's below it, and its error is the largest of theirs, so a node whose error does not show
+// has no meshlet below it that a view draws. An internal node's children are count nodes from first, relative to its
+// submesh's first_node. A leaf, whose count has MESHLET_NODE_LEAF, is one group: count meshlets from first, relative to
+// its submesh's first_meshlet, whose parent bounds are the node's. Shaders read it as it is: matches Meshlet_Node in
+// meshlet_lod.hlsli.
+Meshlet_Node :: struct {
+	center:  [3]f32,
+	radius:  f32,
+	error:   f32,
+	first:   u32,
+	count:   u32,
+	padding: u32,
+}
+
+#assert(size_of(Meshlet_Node) == 32)
+
+MESHLET_NODE_LEAF :: u32(1) << 31
 
 // The attribute stream's layout, in order. Normals and tangents are octahedral: a unit vector folded onto a square.
 // The tangent's second component keeps the bitangent's sign in its lowest bit: set means -1.
@@ -177,6 +200,8 @@ Mesh_Blob :: struct {
 	meshlet_vertices:  Slice,
 	// u32 per meshlet triangle: its three indices into its meshlet's vertices in the low three bytes.
 	meshlet_triangles: Slice,
+	// Meshlet_Node records.
+	meshlet_nodes:     Slice,
 	// The mesh's name in its model, and the model's path, prefixed with its root's name.
 	name:              Slice,
 	source_path:       Slice,
@@ -196,7 +221,7 @@ Mesh_Blob :: struct {
 }
 
 mesh_layout :: proc() -> u64 {
-	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521
+	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521 ~ layout.hash(Meshlet_Node) * 28629151
 }
 
 // mesh_view checks a mesh blob: its header, its layout, its slices, and that its streams have the sizes that its
@@ -215,6 +240,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		blob.meshlets,
 		blob.meshlet_vertices,
 		blob.meshlet_triangles,
+		blob.meshlet_nodes,
 		blob.name,
 		blob.source_path,
 		blob.collision_positions,
@@ -235,6 +261,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
 	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
 	     blob.meshlet_vertices.size % 4 != 0 || blob.meshlet_triangles.size % 4 != 0,
+	     blob.meshlet_nodes.size % size_of(Meshlet_Node) != 0 || blob.meshlet_nodes.offset % align_of(Meshlet_Node) != 0,
 	     blob.collision_positions.size % 12 != 0 || blob.collision_triangles.size % 12 != 0,
 	     blob.collision_submeshes.size != blob.collision_triangles.size / 12 * 2,
 	     blob.impostor.offset % align_of(Impostor_Texel) != 0,
@@ -249,11 +276,22 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		}
 	}
 	meshlet_count := blob.meshlets.size / size_of(Meshlet)
+	nodes := mesh_meshlet_nodes(data, blob)
 	for s in mesh_submeshes(data, blob) {
 		if u64(s.name.offset) + u64(s.name.size) > u64(len(data)) ||
 		   u64(s.first_index) + u64(s.index_count) > u64(blob.index_count) ||
-		   u64(s.first_meshlet) + u64(s.meshlet_count) > u64(meshlet_count) {
+		   u64(s.first_meshlet) + u64(s.meshlet_count) > u64(meshlet_count) ||
+		   u64(s.first_node) + u64(s.node_count) > u64(len(nodes)) ||
+		   s.root_count > s.node_count {
 			return nil, false
+		}
+		// Every node stays in its submesh, so a walk cannot read past it.
+		for n in nodes[s.first_node:][:s.node_count] {
+			count := n.count & ~MESHLET_NODE_LEAF
+			limit := n.count & MESHLET_NODE_LEAF != 0 ? s.meshlet_count : s.node_count
+			if u64(n.first) + u64(count) > u64(limit) {
+				return nil, false
+			}
 		}
 	}
 	return blob, true
@@ -297,12 +335,20 @@ mesh_meshlets :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshle
 	return ([^]Meshlet)(raw_data(bytes))[:len(bytes) / size_of(Meshlet)]
 }
 
+mesh_meshlet_nodes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet_Node {
+	bytes := blob_bytes(data, blob.meshlet_nodes)
+	return ([^]Meshlet_Node)(raw_data(bytes))[:len(bytes) / size_of(Meshlet_Node)]
+}
+
 Submesh_Entry :: struct {
 	name:          string,
 	first_index:   u32,
 	index_count:   u32,
 	first_meshlet: u32,
 	meshlet_count: u32,
+	first_node:    u32,
+	node_count:    u32,
+	root_count:    u32,
 	bounds:        Mesh_Bounds,
 }
 
@@ -320,6 +366,7 @@ Mesh_Contents :: struct {
 	meshlets:          []Meshlet,
 	meshlet_vertices:  []byte,
 	meshlet_triangles: []byte,
+	meshlet_nodes:     []Meshlet_Node,
 	name:              string,
 	source_path:       string,
 	collision_positions: [][3]f32,
@@ -345,6 +392,7 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 	meshlets := stream(&buffer, mem.slice_to_bytes(contents.meshlets))
 	meshlet_vertices := stream(&buffer, contents.meshlet_vertices)
 	meshlet_triangles := stream(&buffer, contents.meshlet_triangles)
+	meshlet_nodes := stream(&buffer, mem.slice_to_bytes(contents.meshlet_nodes))
 	collision_positions := stream(&buffer, mem.slice_to_bytes(contents.collision_positions))
 	collision_triangles := stream(&buffer, mem.slice_to_bytes(contents.collision_triangles))
 	collision_submeshes := stream(&buffer, mem.slice_to_bytes(contents.collision_submeshes))
@@ -358,6 +406,9 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 			index_count   = s.index_count,
 			first_meshlet = s.first_meshlet,
 			meshlet_count = s.meshlet_count,
+			first_node    = s.first_node,
+			node_count    = s.node_count,
+			root_count    = s.root_count,
 			bounds        = s.bounds,
 		}
 		mem.copy(&buffer[submeshes.offset + u32(i * size_of(Mesh_Submesh))], &record, size_of(record))
@@ -375,6 +426,7 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		meshlets = meshlets,
 		meshlet_vertices = meshlet_vertices,
 		meshlet_triangles = meshlet_triangles,
+		meshlet_nodes = meshlet_nodes,
 		name = name,
 		source_path = source_path,
 		collision_positions = collision_positions,

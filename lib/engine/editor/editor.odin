@@ -238,6 +238,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			c := render.cull_stats(e.renderer)
 			stats.early_items, stats.late_items, stats.hidden_items = c.early_items, c.late_items, c.hidden_items
 			stats.early_instances, stats.late_instances, stats.hidden_instances = c.early_instances, c.late_instances, c.hidden_instances
+			stats.hierarchy_meshlets, stats.selected_meshlets = c.hierarchy_meshlets, c.selected_meshlets
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {

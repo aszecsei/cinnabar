@@ -251,8 +251,9 @@ Frame :: struct {
 	sky:                      ^Sky_Frame,
 	// nil without a Texture sky whose texture is resident.
 	sky_texture:              ^Sky_Texture_Frame,
-	// Frame_Desc.disable has occlusion culling.
+	// Frame_Desc.disable has occlusion culling, or the hierarchy over meshlets.
 	no_occlusion:             bool,
+	no_meshlet_hierarchy:     bool,
 	scene_frame:              ^Scene_Frame,
 	lights:                   ^Light_Frame,
 	shadows:                  ^Shadow_Frame,
@@ -449,6 +450,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	f.shadow_settings = settings.shadows
 	f.no_occlusion = .Occlusion_Culling in desc.disable
+	f.no_meshlet_hierarchy = .Meshlet_Hierarchy in desc.disable
 	r.last_sky_mode = settings.sky.mode
 	build_scene(f, w, desc.hidden)
 	f.lights = extract_lights(f, w, desc.hidden)

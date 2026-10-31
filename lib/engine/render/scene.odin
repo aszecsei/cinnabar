@@ -135,6 +135,9 @@ Frame_Constants :: struct {
 	// against (see occlusion.odin): the buffer's read index plus 1, and 0 in every other view.
 	occlusion:                u32,
 	occlusion_offset:         u32,
+	// The meshlets that select meshlets picked, which a draw with DRAW_SELECTED reads (see meshlet_select.odin).
+	selected_meshlets:        u32,
+	padding:                  [3]u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -161,7 +164,9 @@ Material_Push :: struct {
 // its submesh once for each of its emitter's living particles, whose instances start at instance in
 // Frame_Constants.particle_instances (see docs/rendering/particles.md#mesh-particles). A draw with DRAW_INSTANCES draws
 // its submesh once for each of its instance set's instances that its view sees, whose list starts at visible in
-// Frame_Constants.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes).
+// Frame_Constants.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes). A draw with DRAW_SELECTED has
+// its meshlets' indices, from first, in Frame_Constants.selected_meshlets, which select meshlets picked from its
+// submesh's hierarchy (see docs/rendering/gpu-scene.md#mesh-shader-path).
 Draw_Record :: struct {
 	instance: u32,
 	mesh:     u32,
@@ -173,9 +178,11 @@ Draw_Record :: struct {
 	visible:  u32,
 }
 
-// Match DRAW_PARTICLES and DRAW_INSTANCES in material_common.hlsli, cull_draws.hlsl and particle_meshes.hlsl.
+// Match DRAW_PARTICLES, DRAW_INSTANCES and DRAW_SELECTED in material_common.hlsli, cull_draws.hlsl and
+// particle_meshes.hlsl.
 DRAW_PARTICLES :: 1
 DRAW_INSTANCES :: 2
+DRAW_SELECTED :: 4
 // An instanced draw's flags have its count of instances above this bit, and on the mesh shader path its groups have
 // its instances in rows of INSTANCE_GROUP_ROW, at most MAX_MESH_GROUPS in all, as D3D12 allows a mesh dispatch (see
 // docs/rendering/gpu-scene.md#instanced-meshes).
@@ -187,9 +194,9 @@ MESH_RECORD_INDEX32 :: 1
 MESH_RECORD_UV1 :: 2
 MESH_RECORD_COLOR :: 4
 
-// Mesh_Record matches Mesh_Record in material_common.hlsli: a resident mesh's buffers, as bindless indices, and its
-// impostor's atlas, the side of its frames and the sphere that they see, for a mesh with one (see
-// docs/rendering/gpu-scene.md#impostors).
+// Mesh_Record matches Mesh_Record in material_common.hlsli and select_meshlets.hlsl: a resident mesh's buffers, as
+// bindless indices, its meshlet nodes for a mesh with them, and its impostor's atlas, the side of its frames and the
+// sphere that they see, for a mesh with one (see docs/rendering/gpu-scene.md#impostors).
 Mesh_Record :: struct {
 	positions:         u32,
 	attributes:        u32,
@@ -201,7 +208,8 @@ Mesh_Record :: struct {
 	meshlet_triangles: u32,
 	impostor:          u32,
 	impostor_size:     u32,
-	padding:           [2]u32,
+	meshlet_nodes:     u32,
+	padding:           u32,
 	impostor_sphere:   [4]f32,
 }
 
@@ -245,6 +253,9 @@ ITEM_PARTICLES :: 256
 // view sees in its list. Its entry is its set's in Scene_Frame.sets, and its list is a level bucket, or
 // INSTANCE_IMPOSTOR_LIST.
 ITEM_INSTANCED :: 512
+// An item on the mesh shader path whose submesh has a hierarchy over its meshlets, which select meshlets walks (see
+// meshlet_select.odin): its entry is its submesh's first meshlet node, and its list its count of roots.
+ITEM_HIERARCHY :: 1024
 // The items that sort_bins gives bins of their own, apart from their pipelines' others.
 ITEM_BIN_KINDS :: ITEM_IMPOSTOR | ITEM_PARTICLES
 // The vertices of an impostor's quad.
@@ -268,9 +279,10 @@ Cull_Item :: struct {
 	sphere:   [4]f32,
 	bound:    f32,
 	impostor_error: f32,
-	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles, or an ITEM_INSTANCED item's set in Scene_Frame.sets.
+	// An ITEM_PARTICLES item's entry in Scene_Frame.mesh_particles, an ITEM_INSTANCED item's set in Scene_Frame.sets, or
+	// an ITEM_HIERARCHY item's first meshlet node.
 	entry:    u32,
-	// An ITEM_INSTANCED item's list of its set's instances.
+	// An ITEM_INSTANCED item's list of its set's instances, or an ITEM_HIERARCHY item's count of roots.
 	list:     u32,
 	lod_sphere: [4]f32,
 }
@@ -333,7 +345,9 @@ Cull_Constants :: struct {
 	view_first:         u32,
 	// The camera's tally (see Cull_Stats), as its write index.
 	stats:              u32,
-	padding:            [3]u32,
+	// What select meshlets picked for each ITEM_HIERARCHY item (see meshlet_select.odin), as its read index.
+	selections:         u32,
+	padding:            [2]u32,
 }
 
 // Instance_Set_Record matches Instance_Set_Record in cull_instances.hlsl: an Instanced_Mesh_Renderer's set this frame.
@@ -422,7 +436,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 688 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 704 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -462,6 +476,8 @@ Gpu_Scene :: struct {
 	patch_counts:             gpu.Buffer,
 	select_pipeline:          Shader_Pipeline,
 	cull_patches_pipeline:    Shader_Pipeline,
+	// What select meshlets picks each frame, and the pass (see meshlet_select.odin).
+	meshlet_select:           Meshlet_Select,
 	// Each Instanced_Mesh_Renderer's slot's range of the instance sets' cells, the free ranges in order, and the end of
 	// the used ones.
 	slot_cells:               [MAX_INSTANCES]Cell_Range,
@@ -576,6 +592,7 @@ Scene_Frame :: struct {
 	counts:          Buffer,
 	patches:         Buffer,
 	patch_counts:    Buffer,
+	meshlet_select:  Meshlet_Select_Frame,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -590,6 +607,7 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.cell_free = make([dynamic]Cell_Range, platform.heap_allocator)
 	s.instance_pipeline = shader_pipeline(INSTANCE_CULL_SHADER)
 	occlusion_init(&s.occlusion)
+	meshlet_select_init(&s.meshlet_select, platform)
 }
 
 scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -602,6 +620,7 @@ scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&s.cull_pipeline, platform)
 	destroy_shader_pipeline(&s.instance_pipeline, platform)
 	occlusion_destroy(&s.occlusion, platform)
+	meshlet_select_destroy(&s.meshlet_select, platform)
 	destroy_shader_pipeline(&s.select_pipeline, platform)
 	destroy_shader_pipeline(&s.cull_patches_pipeline, platform)
 }
@@ -631,6 +650,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sync_compute_pipeline(&s.cull_patches_pipeline, r.platform, r.residency.assets, {label = "cull patches"}, r.reloaded)
 	sync_compute_pipeline(&s.instance_pipeline, r.platform, r.residency.assets, {label = "cull instances"}, r.reloaded)
 	sync_compute_pipeline(&s.occlusion.pipeline, r.platform, r.residency.assets, {label = "depth pyramid"}, r.reloaded)
+	sync_compute_pipeline(&s.meshlet_select.pipeline, r.platform, r.residency.assets, {label = "select meshlets"}, r.reloaded)
 
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
@@ -796,6 +816,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 		}
 	}
 	sf.ribbons, sf.mesh_particles = ribbons, mesh_particles
+	sf.meshlet_select.items = meshlet_select_items(r, items[:], f.no_meshlet_hierarchy, r.platform.frame_allocator)
 
 	platform := r.platform
 	ok := true
@@ -1069,6 +1090,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		shadow_filter            = u32(shadows.params.filter),
 		lod_scale                = lod_scale(f.view, f.size.y, f.lod_error),
 		lod_near                 = f.view.near,
+		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
 	if f.fog != nil {
@@ -1164,6 +1186,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		camera             = constants.camera_offset,
 		lod_scale          = constants.lod_scale,
 		lod_near           = constants.lod_near,
+		selections         = gpu.read_index(s.meshlet_select.selections),
 	}
 	if ensure_cull_stats(r) {
 		cull.stats = gpu.write_index(s.occlusion.stats)
@@ -1203,6 +1226,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		return
 	}
 	(^Cull_Constants)(raw_data(sf.cull_constants.data))^ = cull
+	if !meshlet_select_constants(f, cull) {
+		sf.items = nil
+		return
+	}
 	if sf.occluding {
 		late := cull
 		late.view_first = u32(sf.late_view)
@@ -1226,10 +1253,17 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if sf.stats != 0 {
 		copy_dest(g, p, sf.stats)
 	}
+	if sf.meshlet_select.selections != 0 {
+		copy_dest(g, p, sf.meshlet_select.selections)
+	}
 	add_select_patches_pass(f)
+	add_meshlet_select_pass(f)
 	add_instance_passes(f)
 	p = add_compute_pass(g, "cull draws", cull_draws, f)
 	read(g, p, sf.instances)
+	if sf.meshlet_select.selections != 0 {
+		read(g, p, sf.meshlet_select.selections)
+	}
 	if len(sf.sets) > 0 {
 		read(g, p, sf.instance_counters)
 	}
@@ -1267,6 +1301,9 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	}
 	if sf.visible_instances != 0 {
 		read(g, p, sf.visible_instances)
+	}
+	if sf.meshlet_select.selected != 0 {
+		read(g, p, sf.meshlet_select.selected)
 	}
 }
 
@@ -1533,7 +1570,8 @@ add_items :: proc(
 		// The opaque draws of a material with mesh pipelines draw meshlets.
 		first, count := submesh.first_index, submesh.index_count
 		pipeline := &r.materials.pipelines[use.pipeline]
-		if pipeline.mesh_path && material_group(pipeline) == .Opaque {
+		mesh_path := pipeline.mesh_path && material_group(pipeline) == .Opaque
+		if mesh_path {
 			flags |= ITEM_MESH_PATH
 			first, count = submesh.first_meshlet, submesh.meshlet_count
 		}
@@ -1552,6 +1590,12 @@ add_items :: proc(
 			submesh  = u32(min(s, ID_MAX_SUBMESH)),
 			sphere   = {b.center.x, b.center.y, b.center.z, b.radius},
 			bound    = pipeline.displacement_bound,
+		}
+		// The view model's level of detail is its own view's, which the selection does not take, so its amplification
+		// shaders test every meshlet. The impostor's item below is made from flags, without the hierarchy.
+		if mesh_path && submesh.node_count > 0 && !view_model {
+			item.flags |= ITEM_HIERARCHY
+			item.entry, item.list = submesh.first_node, submesh.root_count
 		}
 		// The view model is near the camera, where its impostor never draws.
 		if mesh.impostor != {} && pipeline.impostor_path && material_group(pipeline) == .Opaque && !view_model {
@@ -1594,6 +1638,7 @@ mesh_record :: proc(mesh: ^Resident_Mesh) -> Mesh_Record {
 		meshlet_triangles = gpu.read_index(mesh.meshlet_triangles),
 		impostor = mesh.impostor != {} ? gpu.read_index(mesh.impostor) : 0,
 		impostor_size = mesh.impostor_size,
+		meshlet_nodes = mesh.meshlet_nodes != {} ? gpu.read_index(mesh.meshlet_nodes) : 0,
 		impostor_sphere = {mesh.bounds.center.x, mesh.bounds.center.y, mesh.bounds.center.z, mesh.bounds.radius},
 	}
 }
@@ -1806,6 +1851,10 @@ update_scene :: proc(ctx: ^Pass_Context) {
 	}
 	if sf.stats != 0 {
 		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.stats), 0, CULL_STATS_WORDS * 4)
+	}
+	// The counter of the selected meshlets' list.
+	if sf.meshlet_select.selections != 0 {
+		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.meshlet_select.selections), 0, 4)
 	}
 }
 

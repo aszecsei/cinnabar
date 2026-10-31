@@ -111,6 +111,9 @@ struct Frame_Constants {
 	// against (see occlusion.hlsli): the buffer's index plus 1, and 0 in every other view.
 	uint occlusion;
 	uint occlusion_offset;
+	// The meshlets that select_meshlets.hlsl picked, which a draw with DRAW_SELECTED reads.
+	uint selected_meshlets;
+	uint3 padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -202,9 +205,12 @@ static const uint ID_ENTITY_MASK = (1u << ID_ENTITY_BITS) - 1;
 // draw with DRAW_PARTICLES draws its submesh once for each of its emitter's living particles, whose instances start at
 // instance in frame.particle_instances (see docs/rendering/particles.md#mesh-particles). A draw with DRAW_INSTANCES
 // draws its submesh once for each of its instance set's instances that its view sees, whose indices start at visible
-// in frame.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes).
+// in frame.visible_instances (see docs/rendering/gpu-scene.md#instanced-meshes). A draw with DRAW_SELECTED has its
+// meshlets' indices, from first, in frame.selected_meshlets, which select_meshlets.hlsl picked from its submesh's
+// hierarchy (see docs/rendering/gpu-scene.md#mesh-shader-path).
 static const uint DRAW_PARTICLES = 1;
 static const uint DRAW_INSTANCES = 2;
+static const uint DRAW_SELECTED = 4;
 struct Draw_Record {
 	uint instance;
 	uint mesh;
@@ -216,9 +222,9 @@ struct Draw_Record {
 	uint visible;
 };
 
-// Matches Mesh_Record in lib/engine/render/scene.odin. impostor is the impostor's atlas, impostor_size a frame's side
-// in texels, and impostor_sphere the sphere in the mesh's space that the atlas's frames see (see
-// material_impostor.hlsli).
+// Matches Mesh_Record in lib/engine/render/scene.odin. meshlet_nodes is the trees over the meshlets' groups, which
+// select_meshlets.hlsl walks. impostor is the impostor's atlas, impostor_size a frame's side in texels, and
+// impostor_sphere the sphere in the mesh's space that the atlas's frames see (see material_impostor.hlsli).
 static const uint MESH_INDEX32 = 1;
 static const uint MESH_UV1 = 2;
 static const uint MESH_COLOR = 4;
@@ -233,7 +239,8 @@ struct Mesh_Record {
 	uint meshlet_triangles;
 	uint impostor;
 	uint impostor_size;
-	uint2 padding;
+	uint meshlet_nodes;
+	uint padding;
 	float4 impostor_sphere;
 };
 

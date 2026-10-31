@@ -168,13 +168,14 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 		flags             = {.Color},
 		vertex_count      = 3,
 		index_count       = 3,
-		submeshes         = {{name = "stone", index_count = 3, meshlet_count = 1}},
+		submeshes         = {{name = "stone", index_count = 3, meshlet_count = 1, node_count = 1, root_count = 1}},
 		positions         = positions,
 		attributes        = attributes,
 		indices           = mem.slice_to_bytes(indices),
 		meshlets          = meshlets,
 		meshlet_vertices  = mem.slice_to_bytes([]u32{0, 1, 2}),
 		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+		meshlet_nodes     = []Meshlet_Node{{radius = 1, count = 1 | MESHLET_NODE_LEAF}},
 		name              = "Door",
 		source_path       = "game/door.glb",
 	}
@@ -191,6 +192,8 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(submeshes), 1)
 	testing.expect_value(t, blob_string(data, submeshes[0].name), "stone")
 	testing.expect_value(t, mesh_meshlets(data, blob)[0].triangle_count, 1)
+	testing.expect_value(t, mesh_meshlet_nodes(data, blob)[0].count, 1 | MESHLET_NODE_LEAF)
+	testing.expect_value(t, submeshes[0].root_count, 1)
 	testing.expect_value(t, blob_string(data, blob.name), "Door")
 
 	// A submesh past the mesh's indices is not a mesh.
@@ -198,6 +201,13 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 	_, ok = mesh_view(data)
 	testing.expect(t, !ok)
 	(^Mesh_Submesh)(&data[blob.submeshes.offset]).index_count = 3
+
+	// A leaf past its submesh's meshlets is not a mesh, so a walk of the nodes stays in the submesh.
+	node := &mesh_meshlet_nodes(data, blob)[0]
+	node.count = 2 | MESHLET_NODE_LEAF
+	_, ok = mesh_view(data)
+	testing.expect(t, !ok)
+	node.count = 1 | MESHLET_NODE_LEAF
 
 	// Meshlet triangles are whole u32s, which shaders load.
 	blob.meshlet_triangles.size = 3

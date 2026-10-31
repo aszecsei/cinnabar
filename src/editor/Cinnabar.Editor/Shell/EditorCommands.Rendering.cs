@@ -59,6 +59,7 @@ static partial class EditorCommands
         Feature(shell, Shadows, "Shadows", "Draw the lights' shadows in the viewport.", s => s.NoShadows, (s, v) => s with { NoShadows = v });
         Feature(shell, PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
         Feature(shell, OcclusionCulling, "Occlusion Culling", "Leave out what other surfaces hide, by last frame's depth and this one's; off, only what is outside the view.", s => s.NoOcclusionCulling, (s, v) => s with { NoOcclusionCulling = v });
+        Feature(shell, MeshletHierarchy, "Meshlet Hierarchy", "Walk each mesh's hierarchy of meshlets to find the ones that its level of detail may draw; off, every meshlet of every level is tested. Both draw the same meshlets.", s => s.NoMeshletHierarchy, (s, v) => s with { NoMeshletHierarchy = v });
         commands.Register(Command.Toggle(Icons, "Icons", () => shell.ViewportSettings.ShowIcons, on => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = on },
             "Show icons for the lights, volumes and cameras, which select them when clicked.", "visible"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.HelperMode>(Helpers, "Shapes", () => shell.ViewportSettings.Helpers,

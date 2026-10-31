@@ -93,6 +93,8 @@ public sealed class ResourceMonitorView : Grid
                 ("Draws hidden", $"{g.HiddenItems:N0}"),
                 ("Instances drawn", $"{g.EarlyInstances + g.LateInstances:N0} ({g.LateInstances:N0} late)"),
                 ("Instances hidden", $"{g.HiddenInstances:N0}"),
+                // The walk of the meshlets' hierarchy: the meshlets that the amplification shaders test, of every level's.
+                ("Meshlets tested", $"{g.SelectedMeshlets:N0} / {g.HierarchyMeshlets:N0}"),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
                 ("Behaviours", $"{g.Behaviours:N0}"),

@@ -22,11 +22,13 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 4"
+MODEL_COOK_VERSION :: "models 5"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
 MESHLET_CONE_WEIGHT :: 0.25
+// How many children each node of a level's tree over its groups has, as meshoptimizer's demo builds it.
+MESHLET_NODE_WIDTH :: 8
 // How much simplification weighs each component of the normal against the positions, as meshoptimizer's demo does.
 LOD_NORMAL_WEIGHT :: 0.5
 
@@ -420,16 +422,21 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
 	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
 	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
+	meshlet_nodes := make([dynamic]format.Meshlet_Node, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(ranges), context.temp_allocator)
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
-		build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_vertices, &meshlet_triangles)
+		first_node := len(meshlet_nodes)
+		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_vertices, &meshlet_triangles, &meshlet_nodes)
 		submeshes[s] = {
 			name          = m.names[s],
 			first_index   = u32(r.x),
 			index_count   = u32(r.y - r.x),
 			first_meshlet = u32(first_meshlet),
 			meshlet_count = u32(len(meshlets) - first_meshlet),
+			first_node    = u32(first_node),
+			node_count    = u32(len(meshlet_nodes) - first_node),
+			root_count    = u32(roots),
 			bounds        = bounds_of(vertices, indices[r.x:r.y]),
 		}
 	}
@@ -484,6 +491,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		meshlets          = meshlets[:],
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
 		meshlet_triangles = mem.slice_to_bytes(meshlet_triangles[:]),
+		meshlet_nodes     = meshlet_nodes[:],
 		name              = m.name,
 		source_path       = m.source_path,
 	}
@@ -616,13 +624,15 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^
 
 // build_meshlets splits a submesh's triangles into meshlets, appended with their offsets into the mesh's arrays. With
 // lod, they are clusterlod's hierarchy, level by level: the submesh's own triangles, then each simplification of groups
-// of the level below (see docs/content/kinds/meshes.md#meshlets). Without it, they are the submesh's own triangles,
-// clustered with a weight on their cones.
+// of the level below (see docs/content/kinds/meshes.md#meshlets), with a tree over each level's groups appended to the
+// nodes, whose roots it returns the count of. Without it, they are the submesh's own triangles, clustered with a weight
+// on their cones, without nodes.
 @(private = "file")
-build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
+build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32, nodes: ^[dynamic]format.Meshlet_Node) -> (roots: int) {
 	if len(indices) == 0 {
 		return
 	}
+	first_meshlet := len(meshlets)
 	stride := c.size_t(size_of(Vertex))
 	if !lod {
 		bound := int(meshopt_buildMeshletsBound(c.size_t(len(indices)), format.MESHLET_MAX_VERTICES, format.MESHLET_MAX_TRIANGLES))
@@ -677,8 +687,15 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 		clusters = make([dynamic]Lod_Cluster, context.temp_allocator),
 	}
 	clod_build(config, mesh, &output, lod_output)
-	// clodBuild gives the groups level by level, so the meshlets are in order of depth.
+	// clodBuild gives the groups level by level, so the meshlets are in order of depth, and each group's clusters
+	// together, so a group's meshlets are a range.
+	group_meshlets := make([][2]u32, len(output.groups), context.temp_allocator)
 	for cluster in output.clusters {
+		range := &group_meshlets[cluster.group]
+		if range.y == 0 {
+			range.x = u32(len(meshlets) - first_meshlet)
+		}
+		range.y += 1
 		local_vertices := make([]c.uint, len(cluster.indices), context.temp_allocator)
 		local_triangles := make([]u8, len(cluster.indices), context.temp_allocator)
 		vertex_count := int(clod_local_indices(&local_vertices[0], &local_triangles[0], &cluster.indices[0], c.size_t(len(cluster.indices))))
@@ -686,6 +703,60 @@ build_meshlets :: proc(indices: []c.uint, vertices: []Vertex, lod: bool, meshlet
 		group := output.groups[cluster.group]
 		append_meshlet(local_vertices[:vertex_count], local_triangles, vertices, int(group.depth), made, group.simplified, meshlets, meshlet_vertices, meshlet_triangles)
 	}
+	return build_meshlet_nodes(output.groups[:], group_meshlets, nodes)
+}
+
+// build_meshlet_nodes appends clusterlod's tree over each level's groups, whose leaves are the groups' ranges of
+// meshlets, and returns how many roots it has: one for each level. Each node's sphere is grown to hold its children's,
+// and its error raised to theirs, so that a node whose error does not show has no group below it whose error does.
+@(private = "file")
+build_meshlet_nodes :: proc(groups: []Clod_Group, group_meshlets: [][2]u32, nodes: ^[dynamic]format.Meshlet_Node) -> int {
+	levels := 0
+	for g in groups {
+		levels = max(levels, int(g.depth) + 1)
+	}
+	// clodBuildHierarchy needs a group on every level, which clodBuild gives: each level's groups simplify into the next.
+	present := make([]bool, levels, context.temp_allocator)
+	for g in groups {
+		present[g.depth] = true
+	}
+	for p in present {
+		assert(p, "a level of the meshlet hierarchy has no group")
+	}
+	built := make([]Clod_Node, clod_build_hierarchy_bound(c.size_t(len(groups)), MESHLET_NODE_WIDTH, c.size_t(levels)), context.temp_allocator)
+	count := int(clod_build_hierarchy(&built[0], &groups[0], c.size_t(len(groups)), MESHLET_NODE_WIDTH, c.size_t(levels)))
+	built = built[:count]
+	conservative :: proc(built: []Clod_Node, i: int) {
+		n := &built[i]
+		if n.group >= 0 {
+			return
+		}
+		for k in n.child_offset ..< n.child_offset + n.child_count {
+			conservative(built, int(k))
+			child := built[k].bounds
+			n.bounds.error = max(n.bounds.error, child.error)
+			n.bounds.radius = max(n.bounds.radius, linalg.distance(n.bounds.center, child.center) + child.radius)
+		}
+	}
+	for i in 0 ..< levels {
+		conservative(built, i)
+	}
+	for n in built {
+		record := format.Meshlet_Node {
+			center = n.bounds.center,
+			radius = n.bounds.radius,
+			error  = n.bounds.error,
+			first  = n.child_offset,
+			count  = n.child_count,
+		}
+		if n.group >= 0 {
+			range := group_meshlets[n.group]
+			record.first = range.x
+			record.count = range.y | format.MESHLET_NODE_LEAF
+		}
+		append(nodes, record)
+	}
+	return levels
 }
 
 // Lod_Output is what clodBuild gave: each group, and each cluster with its group and the group it was simplified from.
