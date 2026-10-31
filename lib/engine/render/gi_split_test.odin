@@ -370,7 +370,7 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		return
 	}
 
-	settings := Gi_Settings{technique = .World_Probes, level = .Low}
+	settings := Gi_Settings{technique = .Split_Cascades, level = .Low}
 	for frame in 0 ..< 3 {
 		camera := meters(10.5 + 3 * f64(frame), 2, -3)
 		passes := run_frame(t, r, &cache, instances, exposure, settings, camera)

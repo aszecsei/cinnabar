@@ -174,7 +174,7 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 	defer platform.gpu_destroy_texture(lit_texture)
 
 	settings := Gi_Settings {
-		technique = .World_Probes,
+		technique = .Split_Cascades,
 		level     = .Low,
 	}
 	camera := meters(10.5, 2, -3)

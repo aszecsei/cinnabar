@@ -11,7 +11,7 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.shadows.level, Quality_Level.Ultra)
 	testing.expect(t, settings.shadows.ray_traced)
 	testing.expect_value(t, settings.fog.level, Quality_Level.Ultra)
-	testing.expect_value(t, settings.gi.technique, Gi_Technique.World_Probes)
+	testing.expect_value(t, settings.gi.technique, Gi_Technique.Split_Cascades)
 	q.aa = .Smaa
 	apply_quality(&settings, q)
 	testing.expect_value(t, settings.post.aa, Aa_Technique.Smaa)
@@ -35,7 +35,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect(t, q.shadows.ray_traced)
 	testing.expect(t, !clamp_quality(q, {}).shadows.ray_traced, "without Ray_Query, the shadows are maps")
 	// Without Ray_Query, the world probes are the screen-space cascades alone.
-	testing.expect_value(t, q.gi.technique, Gi_Technique.World_Probes)
+	testing.expect_value(t, q.gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
 	testing.expect_value(t, clamp_quality(q, {ray_query = true}), q)
 
@@ -86,7 +86,7 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 	testing.expect(t, !default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced)
 	testing.expect(t, default_quality({ray_query = true}).shadows.ray_traced)
 	testing.expect_value(t, default_quality({ray_query = true, video_memory = 3 << 30}).gi.technique, Gi_Technique.Screen_Cascades)
-	testing.expect_value(t, default_quality({ray_query = true}).gi.technique, Gi_Technique.World_Probes)
+	testing.expect_value(t, default_quality({ray_query = true}).gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, default_quality({}).gi.technique, Gi_Technique.Screen_Cascades)
 }
 

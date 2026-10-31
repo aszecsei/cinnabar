@@ -263,7 +263,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.shadows.mask_pipeline,
 		&r.ray_scene.bin_pipeline,
 		&r.ray_scene.fallback,
-		// The world probes, which the quality's World_Probes runs on the traced scene.
+		// The world probes, which the quality's Split_Cascades runs on the traced scene.
 		&r.gi.probes.reset,
 		&r.gi.probes.trace,
 		&r.gi.probes.light,

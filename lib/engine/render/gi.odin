@@ -9,7 +9,7 @@ import "cinnabar:core/gpu"
 // on the compute queue, the cascades' probes trace their intervals through the depth buffer into last frame's lit
 // scene, merge from the last cascade to the first with the ambient sky beyond, and each pixel gathers its diffuse and
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After
-// the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With World_Probes, the world
+// the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With Split_Cascades, the world
 // probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place, and
 // the split cascades (gi_split.odin) take the screen cascades' place.
 
@@ -53,7 +53,7 @@ GI_PARAMS := [Quality_Level]Gi_Params {
 Gi_Settings :: struct {
 	// Without it, the indirect light is the Environment's ambient light.
 	off:       bool,
-	// World_Probes adds the world probes to the cascades.
+	// Split_Cascades adds the world probes and the split cascades.
 	technique: Gi_Technique,
 	// The cascades' GI_PARAMS, and the world probes' GI_PROBE_PARAMS.
 	level:     Quality_Level,
@@ -190,7 +190,7 @@ gi_fit :: proc(size: [2]u32, params: Gi_Params) -> Gi_Params {
 }
 
 // begin_gi decides whether the frame has global illumination, before the scene's constants are written, which say so.
-// With World_Probes and the probes' pipelines, it requests the ray scene, which the probes trace.
+// With Split_Cascades and the probes' pipelines, it requests the ray scene, which the probes trace.
 @(private)
 begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	r := f.renderer
@@ -217,7 +217,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	}
 	gi.frame += 1
 	gf.settings = settings
-	if settings.technique == .World_Probes && gi_probes_ready(r) {
+	if settings.technique == .Split_Cascades && gi_probes_ready(r) {
 		request_ray_scene(f)
 	}
 	right, up, forward := view_axes(f.view)
