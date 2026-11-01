@@ -16,7 +16,7 @@ public sealed record GraphProblem(int? Node, string Text, bool Error);
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.
 /// </summary>
-public sealed class MaterialEditor : PreviewOwner
+public sealed class MaterialEditor : PreviewOwner, IGraphEditor
 {
     // The preview cooks this long after the last change, so typing or a drag cooks once.
     static readonly TimeSpan CookDelay = TimeSpan.FromMilliseconds(250);
@@ -42,6 +42,10 @@ public sealed class MaterialEditor : PreviewOwner
     }
 
     public MaterialDocument Document { get; }
+
+    IGraphDocument IGraphEditor.Document => Document;
+
+    public string Noun => "material";
 
     public override string Guid => Document.Guid;
 

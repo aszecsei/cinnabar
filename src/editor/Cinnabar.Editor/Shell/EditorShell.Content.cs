@@ -160,11 +160,12 @@ public sealed partial class EditorShell
         {
             if (Cook.State == CookState.Linked)
             {
-                foreach (var editor in _materials)
+                foreach (var editor in GraphEditors)
                 {
                     _ = editor.CookNow();
                 }
             }
         };
+        Assets.Changed += FollowMovedGraphs;
     }
 }

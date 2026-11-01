@@ -72,7 +72,7 @@ public sealed class MainWindow : Window
         shell.Content.RenameRequested += item => _ = AskRename(item);
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
-        shell.MaterialCloseRequested += editor => _ = AskCloseMaterial(editor);
+        shell.GraphCloseRequested += editor => _ = AskCloseGraph(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -124,7 +124,7 @@ public sealed class MainWindow : Window
             return;
         }
         e.Cancel = true;
-        if (await ConfirmDiscardMaterials() && await ConfirmDiscard("closing"))
+        if (await ConfirmDiscardGraphs() && await ConfirmDiscard("closing"))
         {
             _closing = true;
             _shell.SaveLayout();
@@ -132,25 +132,25 @@ public sealed class MainWindow : Window
         }
     }
 
-    /// <summary>Asks about a material editor's unsaved changes when its document closes.</summary>
-    async Task AskCloseMaterial(Shell.MaterialEditor editor)
+    /// <summary>Asks about a graph editor's unsaved changes when its document closes.</summary>
+    async Task AskCloseGraph(Shell.IGraphEditor editor)
     {
         var answer = await Dialogs.Ask(this, "Unsaved changes", $"{editor.Document.Title} has changes that are not saved. Save them before closing it?",
             "Save", "Don't Save", "Cancel");
         if (answer is "Save" or "Don't Save")
         {
-            _shell.CloseMaterial(editor, discard: answer == "Don't Save");
+            _shell.CloseGraph(editor, discard: answer == "Don't Save");
         }
     }
 
-    // Asks about each material editor's unsaved changes before the editor closes, and returns whether to go on.
-    async Task<bool> ConfirmDiscardMaterials()
+    // Asks about each graph editor's unsaved changes before the editor closes, and returns whether to go on.
+    async Task<bool> ConfirmDiscardGraphs()
     {
-        foreach (var editor in _shell.Materials.Where(m => m.Document.IsDirty).ToList())
+        foreach (var editor in _shell.GraphEditors.Where(g => g.Document.IsDirty).ToList())
         {
             var answer = await Dialogs.Ask(this, "Unsaved changes", $"{editor.Document.Title} has changes that are not saved. Save them before closing?",
                 "Save", "Don't Save", "Cancel");
-            if (answer == "Cancel" || answer == null || (answer == "Save" && !_shell.SaveMaterial(editor)))
+            if (answer == "Cancel" || answer == null || (answer == "Save" && !_shell.SaveGraph(editor)))
             {
                 return false;
             }

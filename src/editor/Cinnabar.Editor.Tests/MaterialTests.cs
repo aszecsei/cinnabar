@@ -296,8 +296,27 @@ public sealed class MaterialTests : IDisposable
         Assert.NotNull(function);
         Assert.Null(function.PreviewId);
         Assert.Same(function, shell.ActiveMaterial);
-        shell.CloseMaterial(function, discard: true);
+        shell.CloseGraph(function, discard: true);
         Assert.Single(shell.Materials);
+    }
+
+    [Fact]
+    public void AnOpenMaterialFollowsItsFileAndSavesWhereItMoved()
+    {
+        using var shell = NewShell();
+        var editor = shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!;
+        editor.AddNode("multiply", 0, 200);
+
+        // The content browser renames the file, and the index gives the asset its new path.
+        File.Move(_temp.Combine("checker.material"), _temp.Combine("tiles.material"));
+        shell.Assets.Apply(new AssetDelta(
+            [new Asset(MaterialGuid, AssetKind.Material, "game", "tiles.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", [], "")], [], [], []));
+        Assert.Equal(Path.GetFullPath(_temp.Combine("tiles.material")), editor.Document.Path);
+        Assert.Equal("tiles.material", editor.Document.Title);
+
+        shell.Commands.Get("file.save").Execute();
+        Assert.False(File.Exists(_temp.Combine("checker.material")));
+        Assert.Equal(editor.Document.Text, File.ReadAllText(_temp.Combine("tiles.material")));
     }
 
     [Fact]
@@ -319,7 +338,7 @@ public sealed class MaterialTests : IDisposable
         // Closing its document frees its preview for the next one.
         shell.Layout.CloseDocument(effect);
         Assert.Empty(shell.Effects);
-        shell.CloseMaterial(material, discard: true);
+        shell.CloseGraph(material, discard: true);
         Assert.Equal(0, shell.OpenEffect(shell.Assets.Find(EffectGuid)!)!.PreviewId);
     }
 

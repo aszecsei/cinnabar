@@ -53,24 +53,25 @@ public abstract class EditorDocument : Dock.Model.Mvvm.Controls.Document
     public Control CreateView() => _createView();
 }
 
-/// <summary>
-/// A material or a material function in the material editor (see docs/editor/material-editor.md#material-editor): a document beside the
-/// viewport, which closes, and asks first when it has unsaved changes.
-/// </summary>
-public sealed class MaterialEditorDocument : EditorDocument
+/// <summary>A graph in its editor: a document beside the viewport, which closes, and asks first when it has unsaved changes.</summary>
+public abstract class GraphEditorDocument : EditorDocument
 {
-    public MaterialEditorDocument(Shell.MaterialEditor editor, Func<Control> createView) : base(editor, createView)
+    protected GraphEditorDocument(Shell.IGraphEditor editor, string id, Func<Control> createView) : base(editor, createView)
     {
-        Editor = editor;
-        Id = $"material.{editor.Guid}";
+        GraphEditor = editor;
+        Id = id;
         Title = editor.Document.Title;
         CanFloat = false;
         CanPin = false;
-        editor.Changed += () => Title = editor.Document.IsDirty ? $"{editor.Document.Title} •" : editor.Document.Title;
+        editor.Document.Changed += () => Title = editor.Document.IsDirty ? $"{editor.Document.Title} •" : editor.Document.Title;
     }
 
-    public Shell.MaterialEditor Editor { get; }
+    public Shell.IGraphEditor GraphEditor { get; }
 }
+
+/// <summary>A material or a material function in the material editor (see docs/editor/material-editor.md#material-editor).</summary>
+public sealed class MaterialEditorDocument(Shell.MaterialEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"material.{editor.Guid}", createView);
 
 /// <summary>An effect's preview (see docs/rendering/particles.md#previews): a document beside the viewport, which closes.</summary>
 public sealed class EffectPreviewDocument : EditorDocument

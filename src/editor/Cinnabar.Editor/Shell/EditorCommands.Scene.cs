@@ -20,13 +20,13 @@ static partial class EditorCommands
             Icon = "assets",
             Shortcut = "Ctrl+O",
         });
-        // Save, Undo and Redo act on the material editor whose document is active, and on the scene otherwise.
-        commands.Register(new Command(Save, "Save", () => _ = shell.ActiveMaterial is { } material ? shell.SaveMaterial(material) : shell.SaveScene())
+        // Save, Undo and Redo act on the graph editor whose document is active, and on the scene otherwise.
+        commands.Register(new Command(Save, "Save", () => _ = shell.ActiveGraphEditor is { } graph ? shell.SaveGraph(graph) : shell.SaveScene())
         {
-            Description = "Write the scene, or the material that the material editor shows, to its file.",
+            Description = "Write the scene, or the graph that the active graph editor shows, to its file.",
             Icon = "save",
             Shortcut = "Ctrl+S",
-            CanExecuteWhen = () => shell.ActiveMaterial != null || shell.Scene != null,
+            CanExecuteWhen = () => shell.ActiveGraphEditor != null || shell.Scene != null,
         });
         commands.Register(new Command(SaveAs, "Save As", shell.RequestSaveAs)
         {
@@ -37,9 +37,9 @@ static partial class EditorCommands
         });
         commands.Register(new Command(Undo, "Undo", () =>
         {
-            if (shell.ActiveMaterial is { } material)
+            if (shell.ActiveGraphEditor is { } graph)
             {
-                material.Document.Undo();
+                graph.Document.Undo();
             }
             else
             {
@@ -50,13 +50,13 @@ static partial class EditorCommands
             Description = "Undo the last edit.",
             Icon = "undo",
             Shortcut = "Ctrl+Z",
-            CanExecuteWhen = () => shell.ActiveMaterial is { } material ? material.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
+            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanUndo : shell.IsEditing && shell.Scene?.CanUndo == true,
         });
         commands.Register(new Command(Redo, "Redo", () =>
         {
-            if (shell.ActiveMaterial is { } material)
+            if (shell.ActiveGraphEditor is { } graph)
             {
-                material.Document.Redo();
+                graph.Document.Redo();
             }
             else
             {
@@ -67,7 +67,7 @@ static partial class EditorCommands
             Description = "Apply the last undone edit again.",
             Icon = "redo",
             Shortcut = "Ctrl+Y",
-            CanExecuteWhen = () => shell.ActiveMaterial is { } material ? material.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
+            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? graph.Document.CanRedo : shell.IsEditing && shell.Scene?.CanRedo == true,
         });
         commands.Register(new Command(CreateEntity, "New Entity", shell.CreateEntity)
         {
