@@ -9,7 +9,7 @@ The animation graph poses a skeleton from clips. It takes at most one transition
 
 Read [World: Time](../world/time.md#fixed-and-variable-rate) and [Content: Animation graphs](../content/kinds/animation-graphs.md#animation-graphs) first.
 
-**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion) · [The ECS](#the-ecs) · [Events in the world](#events-in-the-world)
+**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion) · [The ECS](#the-ecs) · [Events in the world](#events-in-the-world) · [Scripts](#scripts) · [The sample](#the-sample)
 
 ## Design
 
@@ -141,4 +141,35 @@ The frame code calls the package around the ticks:
   - `frame_events` are every tick's since `begin_frame`, which `Update` and `Late` systems see.
   - A tick that raised nothing makes `tick_events` empty.
 - **Scripts.** `send_events` sends each event to its entity's behaviours as `on_animation_event(name, ...)`, with the event's arguments. `script.fixed_events` delivers them in the same tick, after physics's. Each event goes through one handler, so an authored name never meets an engine event's, such as `collision_enter`. `wait_event(entity, "animation_event")` resumes on them too.
+
+## Scripts
+
+`anim.register_scripts(r, &state)`, which the game's `Register_Proc` calls, defines the `Animation` library and exposes `Animator` and `Root_Motion` (read-only):
+
+| Call | What it does |
+|---|---|
+| `Animation.set_float(entity, name, value)`, `set_bool` | Sets a float or a bool parameter, which the next tick reads. |
+| `Animation.trigger(entity, name)`, `reset_trigger` | Sets a trigger for the next tick, or clears it. |
+| `Animation.get_float(entity, name)`, `get_bool` | A parameter's value. |
+| `Animation.state(entity)` | The current state's name, or `nil` without a graph. |
+| `Animation.root_motion(entity)` | The last tick's root motion in the world, by the entity's `Transform`, and its turn about y in radians, for the script to apply. |
+
+- **Errors.** An entity without an `Animator`, a name that the graph does not have, and a parameter of another kind raise errors.
+- **Loading.** While a graph loads, a call does nothing, and the graph starts with its defaults.
+- **Names.** The calls find a parameter by its name's hash in the frame's table, so they run between `prepare` and the frame's end, as all script phases do.
+- **Events.** A behaviour gets the graph's events as `on_animation_event(name, ...)`, with the event's arguments.
+
+## The sample
+
+The sample's animation scene, which F7 cycles to, has two foxes:
+- **The walking fox** plays `models/fox/fox.animation_graph`:
+  - `idle` looks about.
+  - `move` blends the walk at 1 m/s and the run at 3 m/s by `speed`, with footstep markers where each hind foot is lowest.
+  - The `look` trigger stops it to look about once.
+- **`fox_walker.luau`**, the walking fox's behaviour:
+  - It ramps `speed` from standing to a run and back over each cycle, and pulls `look` partway up.
+  - It moves the fox along its facing by `speed` while the graph is in `move`.
+  - It logs the events.
+- **The Khronos Fox's clips are in place**, so the graph names no root motion joint: the behaviour, not the clips, moves the fox.
+- **The running fox** plays its clip without a graph.
 

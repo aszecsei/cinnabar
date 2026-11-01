@@ -1,6 +1,7 @@
 package anim
 
 import "base:runtime"
+import "core:c"
 import "core:fmt"
 import "core:math"
 import "core:mem/virtual"
@@ -10,9 +11,12 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/jobs"
+import "cinnabar:core/luau"
+import script_host "cinnabar:core/script"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/script"
 
 // The scheduler is a singleton, and the test runner runs tests on several threads.
 @(private = "file")
@@ -35,6 +39,11 @@ Fixture :: struct {
 	cache:     string,
 	assets:    asset.Assets,
 	animation: State,
+	// With scripts: the runtime, the entity that Test.entity gives, and what Test.report reported, with the tick.
+	scripts:   bool,
+	runtime:   script.Runtime,
+	entity:    ecs.Entity,
+	reports:   [dynamic]string,
 }
 
 @(private = "file")
@@ -52,7 +61,7 @@ near :: proc(a, b: f32) -> bool {
 // a clip of a second that moves Root 2 m along z with markers at 0.5 s; an idle that stands; and a graph of the
 // two, idle then walk while speed > 0.1.
 @(private = "file")
-setup :: proc(t: ^testing.T) -> ^Fixture {
+setup :: proc(t: ^testing.T, scripts := false) -> ^Fixture {
 	sync.lock(&lock)
 	testing.expect(t, jobs.init())
 	f := new(Fixture)
@@ -76,6 +85,11 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 		file_read = core.file_read,
 		file_modified = core.file_modified,
 		time_seconds = proc() -> f64 {return 0},
+		script_open = script_host.open,
+		script_close = script_host.close,
+		script_push_binding = script_host.push_binding,
+		script_atom = script_host.atom,
+		script_direct_access = script_host.direct_access,
 	}
 	testing.expect(t, ecs.init(&f.world, &f.platform))
 	ecs.register_engine_components(&f.world.registry)
@@ -85,6 +99,13 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	f.cache = cache
 	asset.init(&f.assets, &f.platform, asset.loose_cache(f.cache))
 	register(&f.animation, &f.world, &f.assets)
+	if scripts {
+		f.scripts = true
+		f.reports = make([dynamic]string)
+		script.register_components(&f.world.registry)
+		context.user_ptr = f
+		testing.expect(t, script.init(&f.runtime, &f.platform, &f.world, nil, register_test_scripts))
+	}
 
 	write_blob(t, f, SKIN, format.skin_write({guid = guid(SKIN), key = 1, joints = {{name = "Root", parent = -1, inverse_bind = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, 1}}}}, context.temp_allocator))
 	write_blob(t, f, WALK, format.animation_write({
@@ -123,8 +144,34 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 	return f
 }
 
+// register_test_scripts defines the Animation library, Test.entity, and Test.report, which keeps its arguments and the
+// tick that it ran in.
+@(private = "file")
+register_test_scripts :: proc(r: ^script.Runtime) {
+	f := (^Fixture)(context.user_ptr)
+	register_scripts(r, &f.animation)
+	script.define(r, "Test.entity", proc(L: ^luau.State) -> c.int {
+		script.push_entity(L, (^Fixture)(context.user_ptr).entity)
+		return 1
+	})
+	script.define(r, "Test.report", proc(L: ^luau.State) -> c.int {
+		f := (^Fixture)(context.user_ptr)
+		report := fmt.tprintf("%d", f.world.clock.tick)
+		for i in 1 ..= luau.gettop(L) {
+			report = fmt.tprintf("%s %s", report, string(cstring(luau.L_tolstring(L, i, nil))))
+			luau.pop(L, 1)
+		}
+		append(&f.reports, report)
+		return 0
+	})
+}
+
 @(private = "file")
 teardown :: proc(t: ^testing.T, f: ^Fixture) {
+	if f.scripts {
+		script.destroy(&f.runtime)
+		delete(f.reports)
+	}
 	destroy(&f.animation)
 	asset.destroy(&f.assets)
 	os.remove_all(f.cache)
@@ -155,7 +202,15 @@ frame :: proc(f: ^Fixture, n: int) {
 	it := ecs.begin_ticks(&f.world, end - clock.time)
 	for ecs.next_tick(&it) {
 		ecs.run_tick_systems(&it, f)
+		if f.scripts {
+			context.user_ptr = f
+			script.fixed_update(&f.runtime, &it, {})
+		}
 		ecs.update_transforms(&f.world)
+		if f.scripts {
+			send_events(&f.animation, &f.world, &f.runtime)
+			script.fixed_events(&f.runtime)
+		}
 	}
 }
 
@@ -303,4 +358,45 @@ a_changed_graph_starts_again_with_the_parameters_that_it_still_has :: proc(t: ^t
 	testing.expect_value(t, animator.instance.key, 4)
 	testing.expect_value(t, animator.state, 0)
 	testing.expect(t, near(animator.instance.parameters[index], 0.05))
+}
+
+@(test)
+a_behaviour_gets_the_graphs_events_in_the_tick_that_raises_them :: proc(t: ^testing.T) {
+	f := setup(t, scripts = true)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.graph = guid(GRAPH)
+	f.entity = spawn(f, a)
+	context.user_ptr = f
+	_, ok := script.spawn_source(&f.runtime, "=listener", `
+local Listener = Behaviour.define("Listener")
+function Listener:fixed_update(dt)
+	if not self.set then
+		self.set = true
+		Animation.set_float(self.entity, "speed", 1)
+		Test.report("set", Animation.get_float(self.entity, "speed"), Animation.state(self.entity))
+		Test.report("unknown", (pcall(Animation.set_float, self.entity, "jump", 1)))
+		Test.report("kind", (pcall(Animation.trigger, self.entity, "speed")))
+	end
+end
+function Listener:on_animation_event(name, side, count)
+	Test.report(name, side, count, Animation.state(self.entity))
+end
+Test.entity():add(Listener)
+`)
+	testing.expect(t, ok)
+	// The behaviour sets speed in the first tick's fixed step, so walk starts in the second tick, a tick into its clip,
+	// and its marker at 0.5 s is in the tick that reaches it.
+	start := f.world.clock.tick
+	ticks := int(math.ceil(0.5 / tick_seconds(f)))
+	for _ in 0 ..< ticks + 2 {
+		frame(f, 1)
+	}
+	testing.expect_value(t, len(f.reports), 4)
+	if len(f.reports) == 4 {
+		testing.expect_value(t, f.reports[0], fmt.tprintf("%d set 1 idle", start))
+		testing.expect_value(t, f.reports[1], fmt.tprintf("%d unknown false", start))
+		testing.expect_value(t, f.reports[2], fmt.tprintf("%d kind false", start))
+		testing.expect_value(t, f.reports[3], fmt.tprintf("%d footstep left 2 walk", start + u64(ticks)))
+	}
 }

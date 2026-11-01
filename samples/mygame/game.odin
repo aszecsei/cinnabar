@@ -471,6 +471,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	// script_types, outside any Game_State, never does.
 	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
+	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
