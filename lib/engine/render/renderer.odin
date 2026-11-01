@@ -105,6 +105,8 @@ Renderer :: struct {
 	transparency_composite: Shader_Pipeline,
 	// The compute sprites' pipelines and buffers (see docs/rendering/transparency.md#sprites).
 	sprites:         Sprites,
+	// The forward pass's measurements, which the editor shows (see Shading_Stats).
+	shading:         Shading,
 	// The particle systems' pool and state (see docs/rendering/particles.md#particles).
 	particles:       Particles,
 	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
@@ -139,6 +141,9 @@ Frame_Desc :: struct {
 	debug_view:        Debug_View,
 	disable:           Features,
 	exposure_offset:   f32,
+	// Count the forward pass's quads and their pixels for shading_stats, which costs the forward pass a little (see
+	// docs/rendering/lighting-and-shadows.md#quad-overdraw).
+	shading_stats:     bool,
 	hooks:             Frame_Hooks,
 	// The editor's material previews that the frame also draws, each into its own target (see
 	// docs/rendering/materials.md#material-previews). draw_frame sets each one's complete.
@@ -259,6 +264,8 @@ Frame :: struct {
 	shadows:                  ^Shadow_Frame,
 	// The ray scene, when a feature requested it this frame (see request_ray_scene).
 	ray_scene:                ^Ray_Scene_Frame,
+	// nil when the frame measures nothing (see Shading_Frame).
+	shading:                  ^Shading_Frame,
 	debug_lines:              gpu.Upload,
 	tested_lines:             int,
 	overlay_lines:            int,
@@ -392,6 +399,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	fog_destroy(&r.fog, r.platform)
 	sky_destroy(&r.sky, r)
 	sprites_destroy(&r.sprites, r.platform)
+	shading_destroy(&r.shading, r.platform)
 	particles_destroy(&r.particles, r.platform)
 	post_destroy(&r.post, r.platform)
 	for &p in r.output_pipelines {
@@ -410,6 +418,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	residency_update(&r.residency)
 	read_cull_stats(r)
 	read_gi_split_stats(r)
+	read_shading_stats(r)
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
 	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
 	g := begin(r.platform, &r.textures)
@@ -479,6 +488,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.before_world != nil {
 		desc.hooks.before_world(f)
 	}
+	begin_shading(f, desc.shading_stats)
 	// The view model first, which sets its stencil bit, then the world, which draws only where the bit is clear.
 	p := add_render_pass(&g, "prepass", proc(ctx: ^Pass_Context) {
 		draw_scene_view((^Frame)(ctx.data), ctx.cb, VIEW_VIEW_MODEL, .Prepass)
@@ -517,9 +527,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	depth(&g, p, f.depth, .Load, store = keep_depth ? .Store : .Discard)
 	declare_scene_draws(f, p)
 	declare_lighting(f, p, opaque = true)
+	declare_shading(f, p)
 	if desc.hooks.world_uses != nil {
 		desc.hooks.world_uses(f, p)
 	}
+	add_shading_stats_copy(f)
 	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
 	// illumination's lit scene, which keeps only the opaque surfaces.
 	add_sky_background(f)
@@ -581,6 +593,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if ok {
 		finish_cull_stats(f)
 		finish_gi_split_stats(r)
+		finish_shading_stats(r)
 	}
 	debug.end_frame(&r.debug)
 	return ok

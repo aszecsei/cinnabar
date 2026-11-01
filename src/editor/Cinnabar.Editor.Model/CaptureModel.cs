@@ -14,7 +14,10 @@ public sealed record CaptureOutcome(bool Ok, string? Error, IReadOnlyList<string
 /// <summary>The editor's camera at a capture: a raw World_Position and the same in meters, the angles in radians.</summary>
 public sealed record CameraInfo(long[] Position, double[] PositionMeters, double Yaw, double Pitch, double VerticalFov, double Near);
 
-/// <summary>Everything the sidecar records of the editor's state at a capture (see docs/editor/capture.md#sidecar).</summary>
+/// <summary>
+/// Everything the sidecar records of the editor's state at a capture (see docs/editor/capture.md#sidecar). Profile is
+/// the host's last profile summary, whose costs have each render pass's GPU time.
+/// </summary>
 public sealed record CaptureContext(
     string Mode,
     bool FreeCamera,
@@ -23,6 +26,7 @@ public sealed record CaptureContext(
     ViewportSettings Settings,
     HostStats? HostStats,
     GameStats? GameStats,
+    ProfileSummary? Profile,
     string? Game,
     int? HostPid,
     string[] HostArguments,

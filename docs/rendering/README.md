@@ -45,6 +45,7 @@ Read them in this order the first time.
 | `materials.odin` | `Material_Table`, pipelines by material, bins, the default material, the substitutes for pipelines that compile ([Runtime](materials.md#runtime)) |
 | `shaders.odin` | `Shader_Pipeline` and the `sync_*_pipeline` procedures that compile from shader assets ([GPU residency](assets.md#gpu-residency)) |
 | `residency.odin` | `Residency`: the GPU resources of texture and mesh assets ([GPU residency](assets.md#gpu-residency)) |
+| `shading.odin` | The forward pass's quad counts and `Shading_Stats` ([Quad overdraw](lighting-and-shadows.md#quad-overdraw)) |
 | `lights.odin` | Light extraction, the cluster pass, the area lights' tables ([Lights and clusters](lighting-and-shadows.md#lights-and-clusters)) |
 | `shadows.odin` | Shadow assignment, the atlas, cascades, the ray-traced mask ([Shadows](lighting-and-shadows.md#shadows)) |
 | `ray_scene.odin` | The scene's acceleration structure, its requests and build, the hit table, and hit shading's binning and dispatches ([Ray scene](ray-scene.md#ray-scene)) |
@@ -90,6 +91,7 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 | Question | Decision | Why |
 |---|---|---|
 | Shading path | Clustered forward, with a depth and normal prepass | See [Clustered forward](lighting-and-shadows.md#clustered-forward). |
+| Visibility buffer | Not the shading path | A prototype on the mesh shader path was measured in Sponza and Jungle Ruins. It removed the forward pass's quad overdraw, 40 to 70 % helper lanes on dense meshes, but there that shading costs a tenth of a millisecond or less. Its visibility pass cost 1.5 to 2 times the prepass that it replaced, so Sponza was 2 to 12 % slower, and Jungle Ruins, which its geometry bounds, was no faster than the forward pass's best runs. See [Visibility buffer](lighting-and-shadows.md#visibility-buffer). |
 | Depth | Reversed infinite Z: depth is `near / z`, test `Greater`, clear 0 | `D32_Float` has its precision near 0. Reversing puts that precision in the distance instead of at the near plane, where nothing needs it. See Reed in [References](#references). |
 | Scene color | `RGBA16_Float`, linear, pre-exposed | Bloom, exposure and tone mapping need HDR. Pre-exposure keeps bright values inside the half-float range. |
 | View model | A second view drawn into the scene's targets, not a separate target | See [View model](layers-and-output.md#view-model). |
@@ -108,6 +110,7 @@ Each entry names the section that follows it.
 - Cedrick Münstermann, Stefan Krumpen, Reinhard Klein, Christoph Peters, [*Moment-Based Order-Independent Transparency*](https://momentsingraphics.de/I3D2018.html), I3D 2018: the four power moments of [Transparency](transparency.md#transparency).
 - Johan Köhler, [*Practical Order Independent Transparency*](https://research.activision.com/content/dam/atvi/activision/atvi-touchui/research/tech-reports/docs/PracticalOIT.pdf), Treyarch: compute sprites, their tiles and their particle lightmap, which [Sprites](transparency.md#sprites) rasterizes into the moments.
 - Eric Heitz, Jonathan Dupuy, Stephen Hill, David Neubelt, [*Real-Time Polygonal-Light Shading with Linearly Transformed Cosines*](https://eheitzresearch.wordpress.com/415-2/), SIGGRAPH 2016, and Eric Heitz, Stephen Hill, [*Real-Time Line- and Disk-Light Shading with Linearly Transformed Cosines*](https://blog.selfshadow.com/publications/s2017-shading-course/), SIGGRAPH 2017 course: [Area lights](lighting-and-shadows.md#area-lights), including the horizon-clipped sphere table.
+- Christopher Burns, Warren Hunt, [*The Visibility Buffer: A Cache-Friendly Approach to Deferred Shading*](https://jcgt.org/published/0002/02/04/), JCGT 2013: the [Visibility buffer](lighting-and-shadows.md#visibility-buffer) that was measured against clustered forward.
 - Ola Olsson, Markus Billeter, Ulf Assarsson, [*Clustered Deferred and Forward Shading*](https://efficientshading.com/2012/01/01/clustered-deferred-and-forward-shading/), HPG 2012: [Lights and clusters](lighting-and-shadows.md#lights-and-clusters).
 - Nathan Reed, [*Depth Precision Visualized*](https://developer.nvidia.com/content/depth-precision-visualized), 2015: the reversed infinite Z in [Decisions](#decisions).
 - Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013: the `Lit` shading model's GGX, Smith visibility, Schlick Fresnel and the environment BRDF fit in [Shading models](materials.md#shading-models).

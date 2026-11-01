@@ -89,6 +89,7 @@ public sealed partial class EditorShell
             ViewportSettings,
             Stats.Host,
             Stats.Game,
+            Profiler.Summary,
             Host.Game,
             Host.ProcessId,
             _options.HostArguments(),

@@ -20,7 +20,9 @@ public sealed class CaptureModelTests : IDisposable
     });
 
     static CaptureContext Context() => new("Edit", false, "E:/scenes/door.scene", new CameraInfo([0, 1 << 24, 0], [0, 1, 0], 0.5, -0.1, 1.05, 0.05),
-        EditorShell.DefaultViewportSettings, null, null, "mygame", 1234, ["mygame.dll"], Environment.ProcessId);
+        EditorShell.DefaultViewportSettings, null, null,
+        new ProfileSummary(10, 25, 16, 15, 9, 12, 20, 1, 2, 7.5f, 9, 22, 0, true, [new ProfileCost(ProfileCostKind.Pass, "world", ProfileCallback.None, 0, 1, 3.25f, 4)]),
+        "mygame", 1234, ["mygame.dll"], Environment.ProcessId);
 
     /// <summary>Answers every request that waits, as the host would, until the capture ends.</summary>
     async Task<CaptureOutcome> Drive(CaptureModel model, Task<CaptureOutcome> capture, Func<CaptureRequest, CaptureResult> answer)
@@ -82,6 +84,10 @@ public sealed class CaptureModelTests : IDisposable
         Assert.Equal(1, context.GetProperty("camera").GetProperty("positionMeters")[1].GetDouble());
         Assert.Equal("Lit", context.GetProperty("settings").GetProperty("debugView").GetString());
         Assert.Equal(1234, context.GetProperty("hostPid").GetInt32());
+        // Each render pass's GPU time, from the host's last profile summary.
+        var pass = context.GetProperty("profile").GetProperty("costs")[0];
+        Assert.Equal("world", pass.GetProperty("name").GetString());
+        Assert.Equal(3.25f, pass.GetProperty("msAverage").GetSingle());
     }
 
     [Fact]

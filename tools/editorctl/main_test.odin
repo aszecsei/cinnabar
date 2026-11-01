@@ -1,5 +1,6 @@
 package editorctl
 
+import "core:encoding/json"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -34,6 +35,30 @@ arguments_are_read_and_checked :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(view_problem, "--view"))
 	_, out_problem := parse_args({"status", "--out", "x"})
 	testing.expect(t, strings.contains(out_problem, "--out"))
+
+	// viewport changes settings by name, and camera places the camera.
+	viewport, viewport_problem := parse_args({"viewport", "--set", "shadingStats=true", "--set", "renderScale=0.5", "--set", "debugView=QuadOverdraw"})
+	defer delete(viewport.settings)
+	testing.expect_value(t, viewport_problem, "")
+	on, _ := viewport.settings["shadingStats"].(json.Boolean)
+	scale, _ := viewport.settings["renderScale"].(json.Float)
+	view, _ := viewport.settings["debugView"].(json.String)
+	testing.expect(t, bool(on))
+	testing.expect_value(t, f64(scale), 0.5)
+	testing.expect_value(t, string(view), "QuadOverdraw")
+	_, empty := parse_args({"viewport"})
+	testing.expect(t, strings.contains(empty, "--set"))
+	camera, camera_problem := parse_args({"camera", "--position", "1, 2.5,-3", "--yaw", "0.5"})
+	testing.expect_value(t, camera_problem, "")
+	testing.expect_value(t, len(camera.position), 3)
+	testing.expect_value(t, camera.position[2], -3)
+	testing.expect_value(t, camera.yaw.? or_else 0, 0.5)
+	_, no_position := parse_args({"camera", "--yaw", "1"})
+	testing.expect(t, strings.contains(no_position, "--position"))
+	_, two := parse_args({"camera", "--position", "1,2"})
+	testing.expect(t, strings.contains(two, "three numbers"))
+	_, stray := parse_args({"status", "--yaw", "1"})
+	testing.expect(t, strings.contains(stray, "camera"))
 }
 
 @(test)
