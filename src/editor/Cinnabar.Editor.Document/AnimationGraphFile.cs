@@ -135,6 +135,15 @@ public sealed class AnimationGraphNode(int id, AnimationGraphNodeKind kind) : An
         Lines.Insert(at, new AnimationGraphLine($"{indent}{key} = {value}", ""));
     }
 
+    /// <summary>Gives a field's line another key, as a blend's inputs do when one before them goes.</summary>
+    public void RenameField(string key, string renamed)
+    {
+        if (FieldLines.FirstOrDefault(l => l.Key == key) is { } line)
+        {
+            line.SetCode($"{renamed} = {line.Value}");
+        }
+    }
+
     /// <summary>Where the file puts the node, or null when it does not, or its position is not two numbers.</summary>
     public (double X, double Y)? Position =>
         Get("position") is { } text && GraphNumbers.TryParse(text) is { Values: [var x, var y] } ? (x, y) : null;
