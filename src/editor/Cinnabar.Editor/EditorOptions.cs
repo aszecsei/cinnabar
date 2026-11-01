@@ -5,7 +5,7 @@ namespace Cinnabar.Editor;
 /// <summary>
 /// The command line: <c>editor [--host &lt;host.exe&gt;] [--game &lt;game.dll&gt;] [--scene &lt;file.scene&gt;]
 /// [--cook &lt;cook.exe&gt;] [--cache &lt;dir&gt;] [--definitions &lt;file&gt;] [--dxc &lt;dxc.exe&gt;] [--include &lt;dir&gt;]...
-/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
+/// [--root &lt;name&gt;=&lt;dir&gt;]... [--material &lt;file&gt;]... [--effect &lt;file&gt;]... [--animation-graph &lt;file&gt;]... [--project &lt;project.settings&gt;]</c>. The daemon
 /// cooks shaders only with <c>--dxc</c>. Each <c>--material</c> opens in the material editor, and each <c>--effect</c> in an
 /// effect preview, once the cook daemon's index has it.
 /// Paths on the command line are relative to the working directory. The defaults are the repository's build layout
@@ -21,6 +21,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
 
     /// <summary>Effects to open in effect previews, by their files' full paths.</summary>
     public IReadOnlyList<string> EffectPaths { get; init; } = [];
+
+    /// <summary>Animation graphs to open in the animation graph editor, by their files' full paths.</summary>
+    public IReadOnlyList<string> AnimationGraphPaths { get; init; } = [];
 
     /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
     public string ProjectPath { get; init; } = InRepository("samples", "mygame", "project.settings");
@@ -79,6 +82,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<string> includes = [];
         List<string> materials = [];
         List<string> effects = [];
+        List<string> animationGraphs = [];
         string? project = null;
         for (var i = 0; i < args.Count; i++)
         {
@@ -117,6 +121,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--effect" when i + 1 < args.Count:
                     effects.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--animation-graph" when i + 1 < args.Count:
+                    animationGraphs.Add(Path.GetFullPath(args[++i]));
+                    break;
                 case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
                     var root = args[++i];
                     var equals = root.IndexOf('=');
@@ -134,7 +141,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects };
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs };
         return project != null ? options with { ProjectPath = project } : options;
     }
 }
