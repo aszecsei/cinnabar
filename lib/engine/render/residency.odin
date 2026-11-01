@@ -31,6 +31,9 @@ Resident_Mesh :: struct {
 	// The trees over each level's groups of meshlets, which select meshlets walks (see
 	// docs/rendering/gpu-scene.md#mesh-shader-path), for a mesh cooked with them.
 	meshlet_nodes:     gpu.Buffer,
+	// For a mesh cooked with a skin stream, each vertex's joints and weights, which skin_meshes.hlsl poses the vertices
+	// by (see docs/rendering/gpu-scene.md#skinned-meshes).
+	skin:              gpu.Buffer,
 	// The impostor's atlas, for a mesh cooked with one, the side of its frames in texels, and how far it may be from the
 	// mesh, in meters (see docs/rendering/gpu-scene.md#impostors).
 	impostor:          gpu.Buffer,
@@ -122,8 +125,8 @@ Resident_Entry :: struct {
 	pending:       Resident_Resources,
 	pending_version: u32,
 	streaming:     bool,
-	// A mesh's seven streams and its impostor, a texture's one, or an instance set's two.
-	transfers:     [8]gpu.Transfer,
+	// A mesh's seven streams, its impostor and its skin, a texture's one, or an instance set's two.
+	transfers:     [9]gpu.Transfer,
 	transfer_count: int,
 	// The frame of the last failure, which was logged, or 0.
 	failed_at:     u64,
@@ -378,6 +381,10 @@ stream_mesh :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool {
 	if blob.meshlet_nodes.size > 0 {
 		m.meshlet_nodes = stream_buffer(r, e, format.blob_bytes(data, blob.meshlet_nodes), {}, "meshlet nodes") or_return
 	}
+	m.skin = {}
+	if .Skinned in blob.flags {
+		m.skin = stream_buffer(r, e, format.blob_bytes(data, blob.skin), {}, "mesh skin") or_return
+	}
 	m.impostor, m.impostor_size, m.impostor_error = {}, 0, 0
 	if blob.impostor.size > 0 {
 		m.impostor = stream_buffer(r, e, format.blob_bytes(data, blob.impostor), {}, "mesh impostor") or_return
@@ -572,6 +579,9 @@ destroy_resources :: proc(r: ^Residency, kind: format.Asset_Kind, resources: ^Re
 		r.platform.gpu_destroy_buffer(m.meshlet_triangles)
 		if m.meshlet_nodes != {} {
 			r.platform.gpu_destroy_buffer(m.meshlet_nodes)
+		}
+		if m.skin != {} {
+			r.platform.gpu_destroy_buffer(m.skin)
 		}
 		if m.impostor != {} {
 			r.platform.gpu_destroy_buffer(m.impostor)

@@ -156,6 +156,9 @@ Frame_Desc :: struct {
 	delta:             f32,
 	// The Particle_Systems that step by the host's time while delta is 0: those that the editor plays, its selection.
 	playing:           []ecs.Entity,
+	// The pose of each skinned entity this frame, by entity (see Skin_Pose and docs/rendering/gpu-scene.md#skinned-meshes).
+	// A Mesh_Renderer with no pose here, or whose mesh has no skin stream, draws at rest.
+	skins:             []Skin_Pose,
 }
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
@@ -461,7 +464,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.no_occlusion = .Occlusion_Culling in desc.disable
 	f.no_meshlet_hierarchy = .Meshlet_Hierarchy in desc.disable
 	r.last_sky_mode = settings.sky.mode
-	build_scene(f, w, desc.hidden)
+	build_scene(f, w, desc.hidden, desc.skins)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {
 		for &casts in f.lights.casts {

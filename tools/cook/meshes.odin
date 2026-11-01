@@ -22,7 +22,7 @@ import "vendor:cgltf"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks models changes this, which invalidates every cooked mesh.
-MODEL_COOK_VERSION :: "models 5"
+MODEL_COOK_VERSION :: "models 6"
 MODEL_EXTENSIONS :: []string{".gltf", ".glb"}
 // How much meshoptimizer weighs a meshlet's normal cone against its size, without cluster_lod: some, so culling by cone
 // works.
@@ -86,16 +86,19 @@ Vertex :: struct {
 	uv0:      [2]f32,
 	uv1:      [2]f32,
 	color:    [4]f32,
+	// With the Skinned flag: the joints, in the skin's order, and their weights in unorm16 (see skin_weights).
+	joints:   [4]u16,
+	weights:  [4]u16,
 }
 
 // Model_Mesh is one mesh that a model makes: its glTF primitives, each with the transform that places it.
-@(private = "file")
+@(private)
 Model_Mesh :: struct {
 	name:  string,
 	parts: [dynamic]Model_Part,
 }
 
-@(private = "file")
+@(private)
 Model_Part :: struct {
 	primitive: ^cgltf.primitive,
 	transform: matrix[4, 4]f32,
@@ -144,12 +147,35 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	if len(meshes) == 0 {
 		report_warning(problems, a.path, 0, 0, "has no meshes")
 	}
-	force := pass.force[a.meta.guid]
-	wanted := make([]Subasset, len(meshes), context.temp_allocator)
-	for m, i in meshes {
-		wanted[i] = {kind = .Mesh, name = m.name}
+	// A combined mesh has its nodes baked in, so it has no skin to pose it.
+	scale := f32(strconv.parse_f64(model_setting(a^, "scale")) or_else 1)
+	skins: []Model_Skin
+	mesh_skins := make([]int, len(meshes), context.temp_allocator)
+	slice.fill(mesh_skins, -1)
+	animations: []Model_Animation
+	if combine {
+		if len(data.skins) > 0 || len(data.animations) > 0 {
+			report_warning(problems, a.path, 0, 0, "with combine = true, its skins and animations are left out")
+		}
+	} else {
+		skins, mesh_skins = model_skins(data, meshes, problems, a.path)
+		animations = model_animations(data, skins, problems, a.path)
 	}
-	assign_subassets(a, wanted, force, problems) or_return
+	force := pass.force[a.meta.guid]
+	wanted := make([dynamic]Subasset, 0, len(meshes) + len(skins) + len(animations), context.temp_allocator)
+	for m in meshes {
+		append(&wanted, Subasset{kind = .Mesh, name = m.name})
+	}
+	for s in skins {
+		append(&wanted, Subasset{kind = .Skin, name = s.name})
+	}
+	for anim in animations {
+		append(&wanted, Subasset{kind = .Animation, name = anim.name})
+	}
+	assign_subassets(a, wanted[:], force, problems) or_return
+	// The sub-assets are the meshes', then the skins', then the animations', in the order of wanted.
+	skin_guids := a.subassets[len(meshes):][:len(skins)]
+	animation_guids := a.subassets[len(meshes) + len(skins):][:len(animations)]
 
 	key, key_ok := model_key(options, a^, data, problems)
 	if !key_ok {
@@ -159,7 +185,16 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	for s in a.subassets {
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.guid, &buffer))
-		current &&= cooked_key(output, .Mesh, format.mesh_layout()) == key
+		layout: u64
+		#partial switch s.kind {
+		case .Skin:
+			layout = format.skin_layout()
+		case .Animation:
+			layout = format.animation_layout()
+		case:
+			layout = format.mesh_layout()
+		}
+		current &&= cooked_key(output, s.kind, layout) == key
 	}
 	if current {
 		pass.current[.Model] += 1
@@ -171,14 +206,41 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		report_error(problems, a.path, 0, 0, "cannot load the glTF file's buffers: %v", result)
 		return false
 	}
-	// Every mesh cooks before any blob is written, so a model never has some new meshes and some old.
-	blobs := make([][]byte, len(meshes), context.temp_allocator)
+	skin_read_binds(skins, scale)
+	// Every sub-asset cooks before any blob is written, so a model never has some new and some old. The meshes go
+	// first, since a skin's spheres are about its meshes' vertices.
+	blobs := make([][]byte, len(a.subassets), context.temp_allocator)
 	for m, i in meshes {
-		blob, built := build_mesh(a^, m, a.subassets[i].guid, key, problems)
+		skin := &skins[mesh_skins[i]] if mesh_skins[i] >= 0 else nil
+		blob, built := build_mesh(a^, m, skin, a.subassets[i].guid, key, problems)
 		if !built {
 			return false
 		}
 		blobs[i] = blob
+	}
+	for s, i in skins {
+		blobs[len(meshes) + i] = format.skin_write({
+			guid        = skin_guids[i].guid,
+			key         = key,
+			joints      = skin_contents(s, scale),
+			name        = s.name,
+			source_path = a.name,
+		}, context.temp_allocator)
+	}
+	for anim, i in animations {
+		channels, times, values, duration := animation_contents(anim, skins[anim.skin], scale, problems, a.path)
+		blobs[len(meshes) + len(skins) + i] = format.animation_write({
+			guid        = animation_guids[i].guid,
+			key         = key,
+			skin        = skin_guids[anim.skin].guid,
+			joint_count = u32(len(skins[anim.skin].nodes)),
+			duration    = duration,
+			channels    = channels,
+			times       = times,
+			values      = values,
+			name        = anim.name,
+			source_path = a.name,
+		}, context.temp_allocator)
 	}
 	for blob, i in blobs {
 		buffer: [32]u8
@@ -187,7 +249,9 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		}
 	}
 	pass.cooked[.Model] += 1
-	pass.cooked[.Mesh] += len(blobs)
+	pass.cooked[.Mesh] += len(meshes)
+	pass.cooked[.Skin] += len(skins)
+	pass.cooked[.Animation] += len(animations)
 	return true
 }
 
@@ -281,7 +345,7 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 // the cooker writes them: a mesh's GUID is its blob's name instead.
 @(private = "file")
 model_key :: proc(options: Cook_Options, a: Asset_Source, data: ^cgltf.data, problems: ^Problems) -> (key: u64, ok: bool) {
-	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout()))
+	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961))
 	key = hash.fnv64a(a.source, key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -304,15 +368,25 @@ model_key :: proc(options: Cook_Options, a: Asset_Source, data: ^cgltf.data, pro
 	return key, true
 }
 
-// build_mesh cooks one mesh into its blob.
+// build_mesh cooks one mesh into its blob. A mesh with a skin has a skin stream, and adds its vertices to the points of
+// the skin's joints.
 @(private = "file")
-build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+build_mesh :: proc(a: Asset_Source, m: Model_Mesh, skin: ^Model_Skin, guid: format.Guid, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
 	scale := f32(strconv.parse_f64(model_setting(a, "scale")) or_else 1)
 	generate := model_setting(a, "tangents") == "generate"
 	lod := model_setting(a, "cluster_lod") == "true"
 	collision := model_setting(a, "collision") == "true"
 	impostor := model_setting(a, "impostor") == "true" ? (strconv.parse_int(model_setting(a, "impostor_size")) or_else 64) : 0
 	flags: format.Mesh_Flags
+	// The skin stream is all of the mesh's or none of it: a primitive without joints is bound to the skin's first.
+	if skin != nil {
+		flags += {.Skinned}
+		// An impostor would show the rest pose.
+		if impostor > 0 {
+			report_warning(problems, a.path, 0, 0, "mesh %s has a skin, so it bakes no impostor", m.name)
+			impostor = 0
+		}
+	}
 
 	// The primitives are grouped by material, and each group is a submesh, in the order of their first use.
 	materials := make([dynamic]^cgltf.material, context.temp_allocator)
@@ -329,7 +403,7 @@ build_mesh :: proc(a: Asset_Source, m: Model_Mesh, guid: format.Guid, key: u64, 
 			if part.primitive.material != material {
 				continue
 			}
-			read_primitive(a, part, scale, &corners, &flags, &generate, problems) or_return
+			read_primitive(a, part, scale, skin, &corners, &flags, &generate, problems) or_return
 		}
 		ranges[s].y = len(corners)
 	}
@@ -477,6 +551,13 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		}
 		index_bytes = mem.slice_to_bytes(narrow)
 	}
+	skin: []format.Mesh_Skin_Vertex
+	if .Skinned in flags {
+		skin = make([]format.Mesh_Skin_Vertex, vertex_count, context.temp_allocator)
+		for v, i in vertices {
+			skin[i] = {joints = v.joints, weights = v.weights}
+		}
+	}
 	contents := format.Mesh_Contents {
 		guid              = guid,
 		key               = key,
@@ -487,6 +568,7 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		submeshes         = submeshes,
 		positions         = positions,
 		attributes        = attributes,
+		skin              = skin,
 		indices           = index_bytes,
 		meshlets          = meshlets[:],
 		meshlet_vertices  = mem.slice_to_bytes(meshlet_vertices[:]),
@@ -541,13 +623,14 @@ collision_of :: proc(vertices: []Vertex, indices: []c.uint, submeshes: []format.
 // faces clockwise on screen, as lib/core/gpu takes them. A primitive without normals gets its faces' normals, as glTF
 // says. A primitive without tangents makes generate true.
 @(private = "file")
-read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^[dynamic]Vertex, flags: ^format.Mesh_Flags, generate: ^bool, problems: ^Problems) -> bool {
+read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, skin: ^Model_Skin, corners: ^[dynamic]Vertex, flags: ^format.Mesh_Flags, generate: ^bool, problems: ^Problems) -> bool {
 	p := part.primitive
 	if p.type != .triangles {
 		report_warning(problems, a.path, 0, 0, "a primitive of %v is not triangles, and is left out", p.type)
 		return true
 	}
 	position, normal, tangent, uv0, uv1, color: ^cgltf.accessor
+	joints, weights: [2]^cgltf.accessor
 	for attribute in p.attributes {
 		switch {
 		case attribute.type == .position:
@@ -564,6 +647,10 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^
 		case attribute.type == .color && attribute.index == 0:
 			color = attribute.data
 			flags^ += {.Color}
+		case attribute.type == .joints && attribute.index < 2:
+			joints[attribute.index] = attribute.data
+		case attribute.type == .weights && attribute.index < 2:
+			weights[attribute.index] = attribute.data
 		}
 	}
 	if position == nil {
@@ -608,6 +695,21 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, corners: ^
 			if color != nil {
 				components := cgltf.num_components(color.type)
 				_ = cgltf.accessor_read_float(color, index, &v.color[0], components)
+			}
+			if skin != nil {
+				influence_joints: [8]u32
+				influence_weights: [8]f32
+				influences := 0
+				for set in 0 ..< 2 {
+					if joints[set] == nil || weights[set] == nil {
+						continue
+					}
+					_ = cgltf.accessor_read_uint(joints[set], index, &influence_joints[influences], 4)
+					_ = cgltf.accessor_read_float(weights[set], index, &influence_weights[influences], 4)
+					influences += 4
+				}
+				v.joints, v.weights = skin_weights(skin, influence_joints[:influences], influence_weights[:influences])
+				skin_point(skin, v.position, v.joints, v.weights)
 			}
 			triangle[k] = v
 		}

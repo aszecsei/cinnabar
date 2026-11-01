@@ -1,0 +1,79 @@
+# The animation scene, which F7 in mygame cycles to: two of the Khronos Fox, skinned, on a white floor in the sun. The
+# near one walks and the far one runs, each with an Animator that plays one of the model's clips in fixed ticks (see
+# docs/content/kinds/skins-and-animations.md#playback). They face +x, so the camera sees them from the side. Positions
+# are raw World_Position values in units of 2^-24 m. The editor writes this file; see
+# docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 756af5ffd7784831
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 8388608, -50331648]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+
+entity dafd9cfe80c870c1
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 67108864, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity b0c4ebae327ef7b5
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.32, 0.5, 0.78]
+
+entity fca2d017d655edbc
+name = "Floor"
+component 1 Transform
+	position = [2516582400000000000, -838861, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 0.1, 8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+
+entity 79cea6d7586e3f48
+name = "Walking Fox"
+component 1 Transform
+	position = [2516582399989933670, 0, 0]
+	rotation = [0, 0.7071068, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $e049cf90c64cbdc7eec588c7120cbabb
+	materials.0 = $edcc00e87401ff420e0a68dc5f84449c
+	cast_shadows = true
+component 80 Animator
+	clip = $dea303d3f0374a9e56b0bb58f4a85315
+	speed = 1
+	loop = true
+	playing = true
+
+entity 76b64f812f12cecf
+name = "Running Fox"
+component 1 Transform
+	position = [2516582400010066330, 0, 25165824]
+	rotation = [0, 0.7071068, 0, 0.7071068]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $e049cf90c64cbdc7eec588c7120cbabb
+	materials.0 = $edcc00e87401ff420e0a68dc5f84449c
+	cast_shadows = true
+component 80 Animator
+	clip = $cf6a8cd8cc1591bd3e6e09437d5754a1
+	speed = 1
+	loop = true
+	playing = true

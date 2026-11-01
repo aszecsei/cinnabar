@@ -13,6 +13,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/ecs"
 
 // A fake GPU that counts buffers, and whose transfers are done only when the test says so. Each test has its own,
 // in its context's user pointer, so the tests can run at the same time.
@@ -61,9 +62,9 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 }
 
 // mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment, with a hierarchy
-// over its one meshlet when nodes.
+// over its one meshlet when nodes, and a skin stream when skinned.
 @(private = "file")
-mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false) -> []byte {
+mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned := false) -> []byte {
 	stride := int(format.mesh_attribute_stride({}))
 	indices := []u16{0, 1, 2}
 	contents := format.Mesh_Contents {
@@ -77,6 +78,13 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false) -> []by
 		meshlets     = {{vertex_count = 3, triangle_count = 1}},
 		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
 		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+	}
+	if skinned {
+		contents.flags += {.Skinned}
+		contents.skin = make([]format.Mesh_Skin_Vertex, int(vertex_count), context.temp_allocator)
+		for &v in contents.skin {
+			v.weights[0] = 65535
+		}
 	}
 	if nodes {
 		contents.submeshes[0].node_count, contents.submeshes[0].root_count = 1, 1
@@ -283,4 +291,103 @@ live_meshes_draw_from_memory_in_place_of_the_asset :: proc(t: ^testing.T) {
 	residency_update(r)
 	mesh, _ = resident_mesh(r, guid)
 	testing.expect_value(t, mesh.vertex_count, 3)
+}
+
+@(test)
+a_skinned_mesh_streams_its_skin :: proc(t: ^testing.T) {
+	fake: Fake_GPU
+	context.user_ptr = &fake
+	frame: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
+	defer virtual.arena_destroy(&frame)
+	platform := fake_platform(&frame)
+	dir, err := os.make_directory_temp("", "residency_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	guid := format.guid_parse("7a1d3c5e9b2f4086a1b2c3d4e5f60718") or_else {}
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3, skinned = true)) == nil)
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Residency)
+	defer free(r)
+	residency_init(r, &platform, &assets)
+	defer residency_destroy(r)
+
+	// The skin is a stream of its own, which the mesh waits for as it waits for the rest.
+	_, ready := resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.live_buffers, 7)
+	testing.expect_value(t, r.entries[0].transfer_count, 7)
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	mesh, now_ready := resident_mesh(r, guid)
+	testing.expect(t, now_ready)
+	testing.expect(t, mesh.skin != {})
+	testing.expect(t, .Skinned in mesh.flags)
+}
+
+@(test)
+skinned_instances_keep_their_buffers_while_their_mesh_stays :: proc(t: ^testing.T) {
+	fake: Fake_GPU
+	context.user_ptr = &fake
+	frame: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
+	defer virtual.arena_destroy(&frame)
+	platform := fake_platform(&frame)
+	state: Skin_State
+	state.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
+	defer delete(state.instances)
+	rest := transmute(gpu.Buffer)[2]u32{100, 1}
+	other := transmute(gpu.Buffer)[2]u32{101, 1}
+	entity := ecs.Entity(7)
+
+	// The first use makes the three buffers, and starts the pose from rest.
+	instance, reset, ok := skin_instance(&state, &platform, 1, 3, entity, rest, 5, 16)
+	testing.expect(t, ok && reset)
+	testing.expect(t, instance.positions != {} && instance.previous != {} && instance.attributes != {})
+	testing.expect_value(t, fake.live_buffers, 3)
+	// The next frame uses them as they are: no new buffers, and the pose goes on from last frame's.
+	again: Skinned_Instance
+	again, reset, ok = skin_instance(&state, &platform, 2, 3, entity, rest, 5, 16)
+	testing.expect(t, ok && !reset)
+	testing.expect_value(t, again.positions, instance.positions)
+	testing.expect_value(t, fake.live_buffers, 3)
+	// A frame that no pose used leaves a gap in the previous positions, and another entity in the slot is not the one.
+	_, reset, _ = skin_instance(&state, &platform, 4, 3, entity, rest, 5, 16)
+	testing.expect(t, reset)
+	_, reset, _ = skin_instance(&state, &platform, 5, 3, ecs.Entity(8), rest, 5, 16)
+	testing.expect(t, reset)
+	testing.expect_value(t, fake.live_buffers, 3)
+	// A mesh that streamed anew, with other rest positions, gives new buffers in place of the old.
+	again, reset, ok = skin_instance(&state, &platform, 6, 3, ecs.Entity(8), other, 5, 16)
+	testing.expect(t, ok && reset)
+	testing.expect(t, again.positions != instance.positions)
+	testing.expect_value(t, fake.live_buffers, 3)
+	// So do another vertex count and another attribute stride.
+	_, reset, _ = skin_instance(&state, &platform, 7, 3, ecs.Entity(8), other, 6, 16)
+	testing.expect(t, reset)
+	_, reset, _ = skin_instance(&state, &platform, 8, 3, ecs.Entity(8), other, 6, 28)
+	testing.expect(t, reset)
+	testing.expect_value(t, fake.live_buffers, 3)
+
+	// An entity that a frame did not use gives its buffers back, and the one that it used keeps them.
+	_, _, _ = skin_instance(&state, &platform, 8, 4, entity, rest, 5, 16)
+	testing.expect_value(t, fake.live_buffers, 6)
+	sweep_skins(&state, &platform, 9)
+	testing.expect_value(t, len(state.instances), 0)
+	testing.expect_value(t, fake.live_buffers, 0)
+	_, _, _ = skin_instance(&state, &platform, 9, 4, entity, rest, 5, 16)
+	_, _, _ = skin_instance(&state, &platform, 9, 3, entity, rest, 5, 16)
+	sweep_skins(&state, &platform, 9)
+	testing.expect_value(t, len(state.instances), 2)
+	for _, &i in state.instances {
+		platform.gpu_destroy_buffer(i.positions)
+		platform.gpu_destroy_buffer(i.previous)
+		platform.gpu_destroy_buffer(i.attributes)
+	}
+	testing.expect_value(t, fake.live_buffers, 0)
 }

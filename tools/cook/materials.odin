@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 8"
+MATERIAL_COOK_VERSION :: "materials 9"
 
 
 Shading_Input :: struct {

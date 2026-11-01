@@ -14,6 +14,7 @@ Read them in this order the first time.
 | [Shaders](kinds/shaders.md) | HLSL shaders. |
 | [Textures](kinds/textures.md) | Textures and block compression. |
 | [Meshes](kinds/meshes.md) | glTF models, mesh sub-assets and mesh files. |
+| [Skins and animations](kinds/skins-and-animations.md) | glTF skins and clips, the skin stream, and playing a clip. |
 | [Stages](kinds/stages.md) | USD stages: their meshes, textures, material instances and prefab. |
 | [Materials](kinds/materials.md) | Shading models, materials, instances, functions and graphs. |
 | [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
@@ -54,7 +55,8 @@ The code is in three places:
 | | `scenes.odin` | Scenes: the syntax check and the blob |
 | | `shaders.odin` | Shaders: DXC as a child process, includes, problems from its messages |
 | | `textures.odin`, `compressonator.odin` | Textures: decoding, resizing, mips, block compression through `CMP_Core` |
-| | `meshes.odin`, `meshoptimizer.odin` | Models and meshes: glTF through cgltf, the two vertex streams, meshoptimizer |
+| | `meshes.odin`, `meshoptimizer.odin` | Models and meshes: glTF through cgltf, the vertex streams, meshoptimizer |
+| | `skins.odin` | A model's skins and animations: joints in order, the axes, the skin stream's weights, the joints' spheres, clips' channels |
 | | `stages.odin`, `usd.odin`, `usd/cn_usd.cpp` | USD stages: composition and conversion through LightUSD, each sub-asset's cook, the generated material instances and prefab, the manifest |
 | | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half. The game bakes the same files live while the editor edits them (see [Mesh editing](../editor/mesh-editing.md#live-meshes)) |
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
@@ -62,7 +64,7 @@ The code is in three places:
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
 | `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, the `Source` union, whose one arm is `Loose_Cache` |
-| `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `material.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.

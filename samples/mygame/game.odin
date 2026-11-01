@@ -15,6 +15,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
 import "cinnabar:core/luau"
 import "cinnabar:engine/asset"
+import "cinnabar:engine/anim"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
@@ -54,6 +55,8 @@ ROOM_SCENE_META :: #load("content/scenes/room.scene.meta", string)
 // The billboards scene, sprites, foliage cards and towers that draw as impostors far away (see
 // docs/rendering/gpu-scene.md#billboards).
 BILLBOARDS_SCENE_META :: #load("content/scenes/billboards.scene.meta", string)
+// The animation scene, two skinned foxes that play their clips (see docs/content/kinds/skins-and-animations.md#playback).
+ANIMATION_SCENE_META :: #load("content/scenes/animation.scene.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -234,6 +237,8 @@ Game_State :: struct {
 	world:              ecs.World,
 	// The physics world, which the fixed ticks step (see docs/physics/design.md#the-physics-tick).
 	physics:            physics.State,
+	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
+	animation:          anim.State,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:             ecs.Entity,
 	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
@@ -379,6 +384,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	scene.register_components(r)
 	volume.register_components(r)
 	physics.register_components(r)
+	anim.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
@@ -441,6 +447,7 @@ register_world :: proc(s: ^Game_State) {
 	w := &s.world
 	register_components(&w.registry)
 	physics.register(&s.physics, w)
+	anim.register(&s.animation, w, &s.assets)
 	ecs.register_system(w, {name = "spin", stage = .Fixed, procedure = spin, terms = {ecs.write(w, ecs.Transform), ecs.read(w, Spin)}})
 	s.triangles = render.extractor(w, {ecs.read(w, Triangle)})
 }
@@ -502,6 +509,8 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
 	script.set_quiet(&s.scripts, !run)
+	// The Animators' clips load before the ticks, so the animate system's jobs only read them.
+	anim.prepare(&s.animation, &s.world)
 	s.frame_step = 0
 	if run {
 		s.elapsed += step
@@ -666,6 +675,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		delta           = s.frame_step,
 		// The editor's selected systems play while the world stands still.
 		playing         = editor.playing(&s.editor),
+		// The skinned entities' poses, between the last two ticks.
+		skins           = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
 		hooks           = {
 			data         = frame,
 			before_world = before_world,
@@ -949,14 +960,15 @@ update_output :: proc(s: ^Game_State) {
 	}
 }
 
-// switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, then
-// the main scene again, when F7 is pressed. A linked editor owns the scene, so the key does nothing then.
+// switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
+// animation scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key does
+// nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
