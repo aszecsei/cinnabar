@@ -90,6 +90,8 @@ Message :: union {
 	Mesh_Overlay,
 	Sky_Sun_Request,
 	Sky_Sun,
+	Animator_View,
+	Set_Animator_Parameter,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -658,6 +660,45 @@ Sky_Sun_State :: enum u8 {
 Sky_Sun :: struct {
 	state:     Sky_Sun_State,
 	direction: [3]f32,
+}
+
+// Animator_Parameter_Kind matches format.Animation_Graph_Parameter_Kind.
+Animator_Parameter_Kind :: enum u8 {
+	Float,
+	Bool,
+	Trigger,
+}
+
+// Animator_Parameter is a parameter of an Animator's graph and its value: a number, 1 or 0 for a bool, and 1 for a
+// trigger that the next tick will see.
+Animator_Parameter :: struct {
+	name:  string,
+	kind:  Animator_Parameter_Kind,
+	value: f32,
+}
+
+// Game to editor: what a watched entity's Animator plays, which its component's bytes do not say (see
+// docs/editor/animation-graph-editor.md#live-view). It goes out when it changes. States and transitions are by their node IDs in
+// the graph's text, or 0: source is 0 in an interrupted fade too, which has no one state that it fades from. Without
+// a graph that is ready, graph is zero and the rest is too, which tells the editor that it has gone.
+Animator_View :: struct {
+	entity:        u64,
+	graph:         [16]u8,
+	state:         u32,
+	source:        u32,
+	transition:    u32,
+	fade:          f32,
+	fade_duration: f32,
+	progress:      f32,
+	parameters:    []Animator_Parameter,
+}
+
+// Editor to game: sets a parameter of an entity's Animator by its name, as a script's Animation.set_float does, in
+// Play or Paused: a number, 1 or 0 for a bool, and for a trigger, anything but 0 pulls it and 0 resets it.
+Set_Animator_Parameter :: struct {
+	entity: u64,
+	name:   string,
+	value:  f32,
 }
 
 // A key or a mouse button, as core.Key has them.
