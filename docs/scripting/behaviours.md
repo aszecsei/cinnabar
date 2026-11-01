@@ -92,7 +92,7 @@ Unity has two switches, and so does cinnabar:
 
 ### Events
 
-- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors, entities or world positions. Call it from the frame code: the queue is not safe for jobs. Physics contacts arrive this way as `on_collision_enter`, `on_trigger_enter` and the rest, sent by `physics.send_events` in each tick ([Physics: Events](../physics/design.md#events)).
+- Native code queues an event with `script.send(r, entity, name, args...)`, whose arguments are numbers, booleans, strings, vectors, entities or world positions. Call it from the frame code: the queue is not safe for jobs. Physics contacts arrive this way as `on_collision_enter`, `on_trigger_enter` and the rest, sent by `physics.send_events` in each tick ([Physics: Events](../physics/design.md#events)). An animation graph's events arrive as `on_animation_event(name, ...)`, sent by `anim.send_events` in each tick ([Animation: Events in the world](../animation/design.md#events-in-the-world)).
 - `entity:send(name, ...)` queues a script event, like Unity's `SendMessage`. It is delivered in the same script phase: events are delivered before `update` and again after the coroutines. Events that handlers send are delivered in the next round, for up to 16 rounds.
 - The script phase calls `on_<name>` on every enabled instance on the entity that defines it, in the order that the instances were added. An inactive entity gets no events.
 - An error in a handler logs the message with a traceback. The other handlers still run.

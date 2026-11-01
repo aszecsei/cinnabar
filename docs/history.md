@@ -107,3 +107,13 @@ The order in which physics was built.
 5. **Constraints:** the boundary's joints and the Jolt constraints for seven kinds, with limits, springs, motors and breaking; the joint components and their sync; `on_joint_break`, `Physics.set_motor` and `set_joint_enabled`; joint drawing; and the sample's chain.
 6. **Mesh colliders:** welded collision data in the mesh blob with the `collision` import setting, `create_mesh_shape` for triangle meshes and convex hulls, `Mesh` and `Convex_Mesh` colliders with a dynamic body's hull, hot reload by the mesh's version, mesh bounds in the editor, and the room scene's level mesh as its collider.
 7. **Plugins:** the layout signature and boundary version 7, the plugin loader for the development host and game DLL, `physics.backend` and `--physics`, the null backend for `none` and for a backend that does not load, features gating components, and the backend author's document.
+
+## Animation
+The order in which animation was built (see [Animation](animation/README.md)).
+
+1. **Skins and clips:** glTF skins and animations as sub-assets of models, a third mesh stream of joints and weights, the skinning pass, and an `Animator` that plays one clip in fixed ticks ([Content: Skins and animations](content/kinds/skins-and-animations.md)).
+2. **The pose core:** `lib/engine/anim/graph`, which samples, blends and composes poses, and reads nothing of the world.
+3. **Animation graphs:** the `.animation_graph` kind, its blob, its cooker and its editor template ([Content: Animation graphs](content/kinds/animation-graphs.md)).
+4. **The evaluator:** states, transitions, triggers for one tick, fades and freezes, synced 1D blends, markers, root motion and presentation between ticks ([Design](animation/design.md#design)).
+5. **The ECS and scripts:** graphs on `Animator`, `Root_Motion`, events for systems and behaviours, `System_Desc.data`, the `Animation` library, and the sample's walking fox.
+

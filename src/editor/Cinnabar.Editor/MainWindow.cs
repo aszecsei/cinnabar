@@ -238,6 +238,7 @@ public sealed class MainWindow : Window
             Link.Cook.AssetTemplate.Mesh => ("New Mesh", "mesh, a 1 m box,"),
             Link.Cook.AssetTemplate.Prefab => ("New Prefab", "prefab"),
             Link.Cook.AssetTemplate.Effect => ("New Effect", "effect"),
+            Link.Cook.AssetTemplate.AnimationGraph => ("New Animation Graph", "animation graph"),
             _ => ("New Folder", "folder"),
         };
         var place = folder.Display;

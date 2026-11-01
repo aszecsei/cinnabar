@@ -218,7 +218,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects
+build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt
@@ -324,6 +324,11 @@ stages config="dev": cook
 effects config="dev": cook
     "./{{tools_dir}}/cook.exe" effects --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
+# Cook the game's animation graphs into the loose cache of the configuration (see
+# docs/content/kinds/animation-graphs.md#animation-graphs). A graph without a .meta file gets one: commit it.
+animation_graphs config="dev": cook
+    "./{{tools_dir}}/cook.exe" animation_graphs --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+
 # Cook the game's shaders and the engine's into the loose cache of the configuration: each <name>.hlsl becomes one blob
 # with an entry for each stage. A shader without a .meta file gets one: commit it.
 shaders config="dev": install-dxc cook
@@ -408,7 +413,7 @@ edit: build editor
 
 # Build the statically linked release executable into build/release, with its content and project settings beside it,
 # so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release")
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed

@@ -32,6 +32,8 @@ System_Context :: struct {
 	world:       ^World,
 	// The data that the stage was run with, usually the Game_State.
 	user:        rawptr,
+	// The system's own data, from its System_Desc.
+	data:        rawptr,
 	query:       Query,
 	first_chunk: int,
 	chunk_count: int,
@@ -79,6 +81,9 @@ System_Desc :: struct {
 	after:        []string,
 	// Chunks per job. Zero means DEFAULT_BATCH_CHUNKS.
 	batch_chunks: int,
+	// What the system's jobs get as ctx.data, such as an engine package's state in Game_State, which the package's
+	// systems cannot otherwise find, as user is the game's.
+	data:         rawptr,
 }
 
 // Clock schedules the fixed ticks. Its arithmetic is integer, so it never drifts. The state after tick n is the
@@ -120,6 +125,7 @@ System :: struct {
 	stage:        Stage,
 	query:        Query,
 	batch_chunks: int,
+	data:         rawptr,
 	reads:        [MAX_SYSTEM_ACCESS]Component_Id,
 	read_count:   int,
 	writes:       [MAX_SYSTEM_ACCESS]Component_Id,
@@ -148,6 +154,7 @@ register_system :: proc(w: ^World, desc: System_Desc) -> bool {
 		stage        = desc.stage,
 		batch_chunks = desc.batch_chunks > 0 ? desc.batch_chunks : DEFAULT_BATCH_CHUNKS,
 		after_count  = len(desc.after),
+		data         = desc.data,
 	}
 	copy(sys.after[:], desc.after)
 	for term in desc.terms {
@@ -420,6 +427,7 @@ run_systems :: proc(w: ^World, stage: Stage, dt: f32, user: rawptr, first_tick: 
 			b.ctx = {
 				world       = w,
 				user        = user,
+				data        = sys.data,
 				query       = sys.query,
 				first_chunk = i * sys.batch_chunks,
 				chunk_count = sys.batch_chunks,

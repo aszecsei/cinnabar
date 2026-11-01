@@ -117,6 +117,7 @@ Asset_Kind :: enum u8 {
 	Instance_Set,
 	Skin,
 	Animation,
+	Animation_Graph,
 }
 
 Asset_Status :: enum u8 {
@@ -248,6 +249,8 @@ Asset_Template :: enum u8 {
 	Prefab,
 	// An effect with one emitter of soft puffs.
 	Effect,
+	// An animation graph with a speed parameter and one state, which plays a clip that the author fills in.
+	Animation_Graph,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

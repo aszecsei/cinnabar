@@ -1,8 +1,8 @@
 # The animation scene, which F7 in mygame cycles to: two of the Khronos Fox, skinned, on a white floor in the sun. The
-# near one walks and the far one runs, each with an Animator that plays one of the model's clips in fixed ticks (see
-# docs/content/kinds/skins-and-animations.md#playback). They face +x, so the camera sees them from the side. Positions
-# are raw World_Position values in units of 2^-24 m. The editor writes this file; see
-# docs/editor/document-and-scenes.md#scenes.
+# near one plays fox.animation_graph, which its fox_walker behaviour sets the speed of and moves it by, and whose
+# footsteps it logs (see docs/animation/design.md#the-ecs); the far one runs, with an Animator that plays the run clip
+# alone. They face +x, so the camera sees them from the side. Positions are raw World_Position values in units of
+# 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 756af5ffd7784831
@@ -52,15 +52,17 @@ component 1 Transform
 	position = [2516582399989933670, 0, 0]
 	rotation = [0, 0.7071068, 0, 0.7071068]
 	scale = [1, 1, 1]
+component 4 Previous_Transform
 component 33 Mesh_Renderer
 	mesh = $e049cf90c64cbdc7eec588c7120cbabb
 	materials.0 = $edcc00e87401ff420e0a68dc5f84449c
 	cast_shadows = true
 component 80 Animator
-	clip = $dea303d3f0374a9e56b0bb58f4a85315
+	graph = $71f3481642654d8590e42837f2565d58
 	speed = 1
 	loop = true
 	playing = true
+behaviour 7c1653518e5744aaa99a52909dd7ab4a
 
 entity 76b64f812f12cecf
 name = "Running Fox"

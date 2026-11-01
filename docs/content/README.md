@@ -18,6 +18,7 @@ Read them in this order the first time.
 | [Stages](kinds/stages.md) | USD stages: their meshes, textures, material instances and prefab. |
 | [Materials](kinds/materials.md) | Shading models, materials, instances, functions and graphs. |
 | [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
+| [Animation graphs](kinds/animation-graphs.md) | Parameters, clips with their events, and the states, blends and transitions that an Animator plays. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 

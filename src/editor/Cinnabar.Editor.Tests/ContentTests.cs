@@ -91,6 +91,18 @@ public sealed class ContentTests : IDisposable
     }
 
     [Fact]
+    public void ANewAnimationGraphIsNamedForItsKindAndOpensAsText()
+    {
+        using var shell = NewShell();
+        shell.Content.SelectContent(new ContentFolder("game", ""), []);
+        Assert.Equal("new_animation_graph", shell.Content.NewName(AssetTemplate.AnimationGraph));
+
+        var graph = new Asset("44445555666677778888999900001111", AssetKind.AnimationGraph, "game", "fox.animation_graph", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "");
+        Assert.True(EditorShell.CanOpen(graph));
+        Assert.Equal("Open in Script Editor", shell.OpenLabel(graph));
+    }
+
+    [Fact]
     public void AnImportSettingAtItsDefaultLeavesTheMetaFile()
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];

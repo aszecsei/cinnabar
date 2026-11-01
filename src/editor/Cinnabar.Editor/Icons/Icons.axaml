@@ -56,6 +56,8 @@
     <!-- Not from Fluent: a skin, a chain of three joints; an animation, keys on a timeline. -->
     <StreamGeometry x:Key="Icon.skin">F1 M5 16A3 3 0 1 1 5 22A3 3 0 1 1 5 16ZM5 17.5A1.5 1.5 0 1 0 5 20.5A1.5 1.5 0 1 0 5 17.5ZM12 9A3 3 0 1 1 12 15A3 3 0 1 1 12 9ZM12 10.5A1.5 1.5 0 1 0 12 13.5A1.5 1.5 0 1 0 12 10.5ZM19 2A3 3 0 1 1 19 8A3 3 0 1 1 19 2ZM19 3.5A1.5 1.5 0 1 0 19 6.5A1.5 1.5 0 1 0 19 3.5ZM6.6 16.3L9.8 13.1L10.9 14.2L7.7 17.4ZM13.6 9.3L16.8 6.1L17.9 7.2L14.7 10.4Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.animation">F1 M2 11.25H22V12.75H2ZM6 7.5L10.5 12L6 16.5L1.5 12ZM18 7.5L22.5 12L18 16.5L13.5 12Z</StreamGeometry>
+    <!-- Not from Fluent: an animation graph, two states and a transition from one to the other. -->
+    <StreamGeometry x:Key="Icon.animation-graph">F0 M1.5 8H9V16H1.5ZM3 9.5V14.5H7.5V9.5ZM15 8H22.5V16H15ZM16.5 9.5V14.5H21V9.5ZM9 11.25H12V12.75H9ZM11.5 9.25L14.25 12L11.5 14.75Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.mesh">F0 M12 2.5L22 20H2ZM12 5.5L4.6 18.5H19.4Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.model">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM12 7L17.5 17H6.5Z</StreamGeometry>
     <!-- Not from Fluent: a stage, a whole USD scene, a frame around two triangles. -->

@@ -36,11 +36,7 @@ A skinned mesh has the `Skinned` flag and a third stream beside its positions an
 
 ## Playback
 
-`lib/engine/anim` plays one clip at a time on an entity:
+An `Animator` (component 80) plays an animation graph on an entity, or without one, a clip, looping or held, and the entity's `Mesh_Renderer` draws the clip's skin's mesh. [Animation](../../animation/design.md#the-ecs) describes the ticks, the presentation between them, events and root motion.
 
-- **`Animator`** (component 80) has a clip, a speed, `loop` and `playing`, and the clip's time, which the editor shows. The entity's `Mesh_Renderer` draws the clip's skin's mesh.
-- **Fixed ticks:** `anim.prepare` loads every Animator's clip in the frame code, before the ticks, and the `animate` system, in the `Fixed` stage, moves each Animator's time by its speed times the tick and keeps the step. With `loop` the time wraps; without it, it holds at either end.
-- **Presentation:** `anim.present` samples each Animator's clip at its time less the step times 1 - `alpha`, between the last two ticks, so a clip is up to one tick late, as every presented pose is (see [World: Time](../../world/time.md#fixed-and-variable-rate)). It composes the joints, parents first, into a palette of joint matrices, each a joint's posed matrix times its inverse bind matrix, and posed spheres into the bound. Sampling and composing are in `lib/engine/anim/graph`, which reads only the blobs and poses that it is given, so a pose depends on its inputs alone; it also blends poses by weight, with each rotation on the side of the sum that it joins, so a rotation and its negation do not cancel. `Frame_Desc.skins` takes the poses, and the renderer skins the entity's mesh with them (see [Rendering: Skinned meshes](../../rendering/gpu-scene.md#skinned-meshes)).
-- **Without a pose,** an entity whose clip or skin is not loaded, or a skinned mesh without an Animator, draws in its rest pose.
-
-Blending, state machines, animation events in scripts and a script API wait for the animation system (#26).
+- **The palette.** Presentation samples each of the entity's clips over the skin's rest pose and blends them. It composes the joints, parents first, into a palette of joint matrices: each a joint's posed matrix times its inverse bind matrix. It poses the joints' spheres into the bound. `Frame_Desc.skins` takes the poses, and the renderer skins the entity's mesh with them (see [Rendering: Skinned meshes](../../rendering/gpu-scene.md#skinned-meshes)).
+- **Without a pose,** a skinned mesh draws in its rest pose. That is the case for an entity whose graph, clips or skin are not loaded, whose clips are not of one skin, or that has no Animator.

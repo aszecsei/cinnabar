@@ -471,6 +471,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	// script_types, outside any Game_State, never does.
 	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
+	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -509,7 +510,7 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
 	script.set_quiet(&s.scripts, !run)
-	// The Animators' clips load before the ticks, so the animate system's jobs only read them.
+	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.
 	anim.prepare(&s.animation, &s.world)
 	s.frame_step = 0
 	if run {
@@ -520,12 +521,14 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		// docs/physics/design.md#scripts-in-fixed-ticks).
 		ticks := ecs.begin_ticks(&s.world, step)
 		physics.begin_frame(&s.physics)
+		anim.begin_frame(&s.animation)
 		for ecs.next_tick(&ticks) {
 			ecs.run_tick_systems(&ticks, s)
 			script.fixed_update(&s.scripts, &ticks, input)
 			ecs.update_transforms(&s.world)
 			physics.tick(&s.physics, &s.world)
 			physics.send_events(&s.physics, &s.world, &s.scripts)
+			anim.send_events(&s.animation, &s.world, &s.scripts)
 			script.fixed_events(&s.scripts)
 			ecs.update_transforms(&s.world)
 		}
@@ -922,6 +925,7 @@ shutdown :: proc(state: rawptr) {
 	render.renderer_destroy(&s.renderer)
 	asset.destroy(&s.assets)
 	physics.destroy(&s.physics)
+	anim.destroy(&s.animation)
 	ecs.destroy(&s.world)
 	destroy_pipelines(s.platform, &s.pipelines)
 	s.platform.gpu_destroy_sampler(s.nearest)

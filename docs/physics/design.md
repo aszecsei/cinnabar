@@ -114,12 +114,14 @@ The game's frame code drives the ticks one at a time, so the order of systems, s
 ```odin
 ticks := ecs.begin_ticks(&s.world, dt)
 physics.begin_frame(&s.physics)
+anim.begin_frame(&s.animation)
 for ecs.next_tick(&ticks) {
     ecs.run_tick_systems(&ticks, s)                       // Previous_Transform, the Fixed systems, apply
     script.fixed_update(&s.scripts, &ticks, input)        // fixed_update, its events and structural changes
     ecs.update_transforms(&s.world)
     physics.tick(&s.physics, &s.world)                    // sync, step, write-back
     physics.send_events(&s.physics, &s.world, &s.scripts) // the tick's contacts and broken joints
+    anim.send_events(&s.animation, &s.world, &s.scripts)  // the tick's animation events
     script.fixed_events(&s.scripts)                       // delivers them, then the wait_fixed coroutines
     ecs.update_transforms(&s.world)
 }

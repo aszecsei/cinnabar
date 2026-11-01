@@ -332,6 +332,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.InstanceSet => "instance set",
         AssetKind.Skin => "skin",
         AssetKind.Animation => "animation",
+        AssetKind.AnimationGraph => "animation graph",
         _ => "script",
     };
 
@@ -581,6 +582,7 @@ public sealed class ContentBrowserView : DockPanel
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
                     ("New Material", AssetTemplate.Material), ("New Material Function", AssetTemplate.MaterialFunction), ("New Mesh", AssetTemplate.Mesh),
                     ("New Prefab", AssetTemplate.Prefab), ("New Effect", AssetTemplate.Effect),
+                    ("New Animation Graph", AssetTemplate.AnimationGraph),
                     ("New Folder", null),
                 })
             {
