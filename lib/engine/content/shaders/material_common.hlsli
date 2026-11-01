@@ -134,6 +134,12 @@ static const uint DEBUG_MESHLETS = 18;
 static const uint DEBUG_LOD_DEPTH = 19;
 // The shading model's emission alone, exposed as the scene is.
 static const uint DEBUG_EMISSION = 20;
+// From the frame's textures, but the forward pass counts its quads for it.
+static const uint DEBUG_QUAD_OVERDRAW = 22;
+
+// Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
+static const uint SHADING_STATS_FORWARD_QUADS = 0;
+static const uint SHADING_STATS_FORWARD_PIXELS = 4;
 
 // load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
 // default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
@@ -188,6 +194,10 @@ struct Material_Push {
 	uint moments_zeroth;
 	uint moments;
 	uint transmittance;
+	// The forward pass's measurements, each a write index plus 1, and 0 when the frame does not count them (see
+	// count_quad in material_forward.hlsli).
+	uint quad_counts;
+	uint shading_stats;
 };
 #define MATERIAL_PUSH Material_Push
 #endif

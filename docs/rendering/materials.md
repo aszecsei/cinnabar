@@ -58,7 +58,11 @@ The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inp
 
 **World position.** `Material_Inputs.position` is relative to the camera, which is what the passes need, but a pattern made from it would slide with the camera. The World Position node gives `world_position(inputs)`: the position relative to the render origin, `inputs.position + frame.origin_offset`, which stays put while the camera moves and keeps `f32`'s precision, because the origin is within 1.5 cells of the camera. The origin snaps to 1024 m, so a pattern whose period divides 1024 m has no seam when it moves; any other pattern jumps there. In a preview, the origin is the mesh's middle.
 
-**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs, so a material does not depend on how its inputs are made. At a ray's hit, which has no derivatives, `cn_sample` takes the level of the ray's cone (see [Hit shading](ray-scene.md#hit-shading)). A material's own HLSL that calls `Sample` or `ddx` still compiles there, but its derivatives mean nothing.
+**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, so a material does not depend on how its inputs are made. `Material_Inputs` has no derivatives: each path gives `cn_sample` its own.
+
+- **In a pixel shader,** `cn_sample` is `Sample`, with the hardware's derivatives of its UV.
+- **At a ray's hit,** which has no derivatives, it takes the level of the ray's cone (see [Hit shading](ray-scene.md#hit-shading)). A material's own HLSL that calls `Sample` or `ddx` still compiles there, but its derivatives mean nothing.
+- **A path that shades in compute,** such as the [visibility buffer](lighting-and-shadows.md#visibility-buffer) that was measured, gives the derivatives of a 2x2 quad of threads. They are exact only where one triangle covers the quad, because the derivatives of a UV that a material computes cannot be found from the inputs alone.
 
 ## Parallax occlusion mapping
 

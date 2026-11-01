@@ -105,6 +105,8 @@ Render_Overrides :: struct {
 	debug_view:      render.Debug_View,
 	disable:         render.Features,
 	exposure_offset: f32,
+	// Count the forward pass's quads for render.shading_stats.
+	shading_stats:   bool,
 }
 
 // render_overrides gives the viewport's debug view, the features that it turns off and its exposure offset while an
@@ -116,6 +118,7 @@ render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
 	s := e.viewport.settings
 	o.debug_view = render.Debug_View(s.debug_view)
 	o.exposure_offset = s.exposure_offset
+	o.shading_stats = s.shading_stats
 	flags := [render.Feature]bool {
 		.Temporal_Aa       = s.no_temporal_aa,
 		.Bloom             = s.no_bloom,

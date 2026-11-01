@@ -95,6 +95,8 @@ public sealed class ResourceMonitorView : Grid
                 ("Instances hidden", $"{g.HiddenInstances:N0}"),
                 // The walk of the meshlets' hierarchy: the meshlets that the amplification shaders test, of every level's.
                 ("Meshlets tested", $"{g.SelectedMeshlets:N0} / {g.HierarchyMeshlets:N0}"),
+                // With the viewport's shading stats: the forward pass's 2x2 quads, and the share of their lanes that cover a pixel.
+                .. ShadingRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
                 ("Behaviours", $"{g.Behaviours:N0}"),
@@ -102,6 +104,16 @@ public sealed class ResourceMonitorView : Grid
                 ("Engine's part", ResourceStats.Bytes(g.ScriptBytes - Math.Min(modules, g.ScriptBytes))),
             ]);
             Rows(_modules, [.. g.Modules.OrderByDescending(m => m.Bytes).Select(m => (m.Name, ResourceStats.Bytes(m.Bytes)))]);
+        }
+    }
+
+    // The shading's row, none while the viewport's shading stats are off: the forward pass's quads with the share of their
+    // lanes that cover a pixel (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
+    internal static IEnumerable<(string Name, string Value)> ShadingRows(Link.Protocol.GameStats g)
+    {
+        if (g.ForwardQuads > 0)
+        {
+            yield return ("Forward quads", $"{g.ForwardQuads:N0} ({g.ForwardPixels * 100.0 / (4.0 * g.ForwardQuads):0}% covered)");
         }
     }
 

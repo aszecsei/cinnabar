@@ -48,6 +48,9 @@ Debug_View :: enum u8 {
 	// The split cascades' first probes: each in a color of its own, as bright as its confidence, red where a pixel's
 	// cell has no probe, and grey past the last level of detail (see docs/rendering/global-illumination.md#split-cascades).
 	Gi_Probes,
+	// The times that the forward pass shaded each 2x2 quad of the screen, as heat colors from 1 to 4, which its pixel
+	// shader counts (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
+	Quad_Overdraw,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -158,6 +161,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.scene
 	case .Transparent_Overdraw:
 		source = f.moments_zeroth
+	case .Quad_Overdraw:
+		source = f.shading != nil ? f.shading.quad_counts : 0
 	}
 	g := f.graph
 	dv := new(Debug_View_Frame, r.platform.frame_allocator)

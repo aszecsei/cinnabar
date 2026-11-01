@@ -658,6 +658,7 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		debug_view      = overrides.debug_view,
 		disable         = overrides.disable,
 		exposure_offset = overrides.exposure_offset,
+		shading_stats   = overrides.shading_stats,
 		quality         = viewport_quality ? &quality : nil,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
 		previews        = editor.previews(&s.editor),

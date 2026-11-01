@@ -6,8 +6,20 @@ using System.Text.Json.Serialization;
 
 namespace Cinnabar.Editor.Model;
 
-/// <summary>A request from a tool: its id, which the response repeats, the command, and the command's arguments.</summary>
-public sealed record AutomationRequest(long Id, string? Command, string[]? Views = null, string? Path = null);
+/// <summary>
+/// A request from a tool: its id, which the response repeats, the command, and the command's arguments: a capture's
+/// views and path, the viewport settings that <c>viewport</c> changes by their names in the sidecar, and the position in
+/// meters and the angles in radians that <c>camera</c> places the editor's camera at.
+/// </summary>
+public sealed record AutomationRequest(
+    long Id,
+    string? Command,
+    string[]? Views = null,
+    string? Path = null,
+    Dictionary<string, JsonElement>? Settings = null,
+    double[]? Position = null,
+    double? Yaw = null,
+    double? Pitch = null);
 
 /// <summary>What <c>status</c> answers: the host and the scene.</summary>
 public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid);

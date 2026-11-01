@@ -125,7 +125,40 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 }
 
 #if !MATERIAL_TRANSPARENT
+// count_quad counts the pixel shader's 2x2 quad and its lanes that cover a pixel, when the frame measures them (see
+// docs/rendering/lighting-and-shadows.md#quad-overdraw): one lane of each quad adds 1 to the quad's count, for the
+// Quad_Overdraw view, and each wave adds its quads and pixels to the stats. The wave's operations leave helper lanes
+// out, but the quad's reads take them, so the quad's lanes that cover a pixel are found with quad reads.
+void count_quad(float4 position) {
+	if (push.quad_counts == 0) {
+		return;
+	}
+	uint2 pixel = uint2(position.xy);
+	uint lane = (pixel.x & 1) | (pixel.y & 1) << 1;
+	uint bit = IsHelperLane() ? 0 : 1u << lane;
+	uint live = bit | QuadReadAcrossX(bit) | QuadReadAcrossY(bit) | QuadReadAcrossDiagonal(bit);
+	// The quad's first lane that covers a pixel counts it.
+	bool leader = bit != 0 && (live & (bit - 1)) == 0;
+	if (leader) {
+		RWTexture2D<uint> counts = ResourceDescriptorHeap[push.quad_counts - 1];
+		InterlockedAdd(counts[pixel / 2], 1);
+	}
+	if (push.shading_stats != 0) {
+		uint quads = WaveActiveCountBits(leader);
+		uint pixels = WaveActiveCountBits(bit != 0);
+		if (WaveIsFirstLane()) {
+			RWByteAddressBuffer stats = cn_rw_buffer(push.shading_stats - 1);
+			stats.InterlockedAdd(SHADING_STATS_FORWARD_QUADS, quads);
+			stats.InterlockedAdd(SHADING_STATS_FORWARD_PIXELS, pixels);
+		}
+	}
+}
+
+// The prepass's depth decides what shows, and the pass writes none, so its depth test can come first although it
+// writes the measurements: only the pixels that it shades count.
+[earlydepthstencil]
 Targets ps_forward(Varyings i, bool front : SV_IsFrontFace) {
+	count_quad(i.position);
 	Material_Inputs inputs = material_inputs(i, front);
 	Surface s = evaluate(inputs);
 #if MATERIAL_MASKED

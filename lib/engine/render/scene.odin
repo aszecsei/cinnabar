@@ -155,6 +155,10 @@ Material_Push :: struct {
 	moments_zeroth:    u32,
 	moments:           u32,
 	transmittance:     u32,
+	// The forward pass's measurements, each a write index plus 1, and 0 when the frame does not count them (see
+	// Shading_Frame).
+	quad_counts:       u32,
+	shading_stats:     u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -1967,5 +1971,6 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	if f.shadows.mask != 0 {
 		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
 	}
+	shading_push(f, &push.quad_counts, &push.shading_stats)
 	return push
 }

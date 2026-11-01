@@ -52,3 +52,4 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(int(render.Debug_View.Lod_Depth) == int(link.Debug_View.Lod_Depth))
 #assert(int(render.Debug_View.Emission) == int(link.Debug_View.Emission))
 #assert(int(render.Debug_View.Gi_Probes) == int(link.Debug_View.Gi_Probes))
+#assert(int(render.Debug_View.Quad_Overdraw) == int(link.Debug_View.Quad_Overdraw))

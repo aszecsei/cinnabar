@@ -1,8 +1,8 @@
 # Lighting and shadows
 
-Why the renderer is clustered forward with a prepass, the prepass's outputs, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps or traced masks.
+Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows)
 
 ## Clustered forward
 
@@ -20,6 +20,48 @@ The renderer has one shading path: forward shading with a prepass.
 - **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
 - The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
 - The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
+
+### Quad overdraw
+
+A pixel shader runs on 2x2 quads of pixels, so it has derivatives. A triangle that covers part of a quad still runs all four lanes, and the lanes outside it are helper lanes, whose work is lost. Small triangles leave most of their quads' lanes as helpers.
+
+- **Counting.** With `Frame_Desc.shading_stats` (the editor viewport's Shading Stats), `count_quad` in the forward pixel shader counts each quad and its lanes that cover a pixel (`lib/engine/render/shading.odin`). A lane of each quad adds 1 to the quad's texel of `Shading_Frame.quad_counts`, at half the scene's size, which the `Quad_Overdraw` debug view shows as heat colors from 1 to 4 (see [Debug views](post-processing.md#debug-views)). Each wave adds its quads and its pixels to `Shading_Stats`, which comes back through three readback copies, as the culling stats do, and which the Resource Monitor shows as the quads' efficiency: the pixels over four times the quads. The rest are helper lanes.
+- **Which pixels.** Wave operations leave helper lanes out, but quad reads take them, so `count_quad` finds the quad's covering lanes with quad reads. The forward pixel shader has `[earlydepthstencil]`, which it may have since the pass writes no depth, so only the pixels that pass the `Equal` test count, and the counting's writes do not move the test after the shader.
+- **The cost.** Without the stats or the view, the push constants' indices are 0, and the shader's first branch leaves.
+- **Measuring.** A capture's sidecar has the last profile summary, with each pass's GPU time, and `editorctl`'s `viewport` and `camera` commands set the viewport's settings and its camera, so a script can measure each view of a scene with each setting (see [Capture](../editor/capture.md#editorctl)).
+
+### Visibility buffer
+
+A visibility buffer writes each pixel's triangle in a pass of its own, then shades the pixels in compute, so no pixel shader runs on mostly empty quads (see Burns and Hunt in the [References](README.md#references)). One was built as a prototype on the [mesh shader path](gpu-scene.md#mesh-shader-path) and measured against clustered forward. The decision is in the README's [Decisions](README.md#decisions): clustered forward stays the shading path, and the prototype is not in the engine.
+
+**The prototype.**
+
+- **The visibility pass,** after the prepass, and a late one after the late prepass, drew the camera's opaque bins on the mesh shader path in place of the prepass. It wrote the prepass's normal and velocity, and an `RGBA32_Uint` target: the draw's index, the instance ID, the meshlet, and the triangle with whether it is a front face and the pipeline that drew it. The mesh shader gave these to each triangle as a per-primitive attribute. A stencil bit kept the forward pass off its pixels.
+- **Binning:** four compute passes, as [hit shading](ray-scene.md#hit-shading)'s: each 2x2 quad went into the bin of each material pipeline that one of its pixels had, and each bin's dispatch was indirect.
+- **Shading:** each material compiled a compute entry that shaded its bin, a 2x2 quad of threads for each quad of pixels. A thread rebuilt its pixel's triangle with `place_vertex`, as the mesh shaders place it, and took its barycentrics where the camera's ray through the pixel's center meets the triangle's plane. It filled `Material_Inputs` as the forward pass does, ran `evaluate`, and lit the pixel with the forward pass's lighting at the prepass's depth.
+- **Derivatives.** A pixel of the quad that was not the material's took the quad's first triangle of the material, so where one triangle covered the quad, `ddx` and `ddy` of the real UV were exact. Where two triangles of the material shared the quad, the quad was mixed, and `cn_sample` took the analytic derivatives of `uv0` instead. These are wrong for a material that scales or computes its UVs, or samples with `uv1`.
+
+**Measurements.** On an RTX 5090 at 1320x800, High quality with temporal AA, in the Intel sample (see `samples/intel/README.md`), measured with the tools of [Quad overdraw](#quad-overdraw). Each value is the median of five captures, or three for Jungle Ruins, in at least two runs. The pass times are the profiler's GPU spans, which can overlap their neighbours (see [Profiling](../core/profiling.md#gpu-timestamps)). The forward pass's cost is its prepass and its world pass. The visibility buffer's is what was left of the prepass with the visibility passes, the binning, the shading, and what was left of the world pass.
+
+| View | Forward quad efficiency | Visibility buffer's mixed quads | Forward prepass + world (ms) | Visibility buffer: visibility + binning + shading + world (ms) | GPU frame, forward → visibility buffer (ms) |
+|---|---|---|---|---|---|
+| S1: Sponza's nave, the scene's camera | 56 % | 45 % | 0.13 + 0.14 | 0.23–0.25 + 0.09 + 0.11 | 4.23 → 4.46–4.73 |
+| S2: Sponza's upper gallery, looking down | 59 % | 36 % | 0.12 + 0.13 | 0.22 + 0.11 + 0.11 | 3.99–4.10 → 4.23–4.64 |
+| S3: Sponza's outer wall, large triangles | 99 % | 1 % | 0.06 + 0.06 | 0.11 + 0.04 + 0.06 | 2.10 → 2.14–2.22 |
+| S4: Sponza's curtains, close | 59 % | 43 % | 0.07 + 0.08 | 0.10 + 0.07 + 0.10 | 3.89–3.93 → 4.08–4.14 |
+| J1: Jungle Ruins, the scene's camera | 33 % | 60 % | 21.1–31.7 + 20.1–27.0 | 39.5–39.8 + 0.24 + 0.18 + 2.5 | 46.3–63.6 → 47.2–47.6 |
+| J2: Jungle Ruins' ground cover, close | 35 % | 59 % | 6.3–8.4 + 6.8–8.0 | 9.6–10.1 + 0.29 + 0.27 + 2.2 | 17.9–21.1 → 17.2–17.6 |
+| J3: Jungle Ruins from above | 30 % | 57 % | 96–150 + 90–126 | 182–183 + 0.29 + 0.18 + 2.8 | 190.9–280.6 → 190.2–191.0 |
+
+What they show:
+
+- **Quad overdraw is real.** The forward pass's lanes are 40 to 70 % helper lanes wherever triangles are small: Sponza's curtains and Jungle Ruins' foliage, at the level of detail's 1 pixel of error. The visibility buffer shaded 1.6 to 2.1 times fewer quads there.
+- **Shading is not where the frame's time goes.** In Sponza, the forward pass's world pass is 0.08 to 0.14 ms. The visibility buffer's shading of the same pixels was 0.06 to 0.11 ms, a fifth cheaper on the nave and dearer on the curtains, where it rebuilt a triangle for each pixel. The binning added 0.04 to 0.12 ms, so the shading as a whole was not cheaper.
+- **The visibility pass cost more than the prepass that it replaced:** 1.5 to 2 times the prepass of the same bins in Sponza, and in Jungle Ruins against the forward pass's faster runs. Writing constants in place of the per-primitive IDs cost the same, so the IDs' attribute was not the cause. So every Sponza view was 2 to 12 % slower with the visibility buffer.
+- **Jungle Ruins is bound by geometry.** The forward path draws its millions of meshlets twice, once in the prepass and once in the world pass. The visibility buffer drew them once, but its visibility pass cost about as much as both. Its frame was the same as the forward pass's best runs, and up to a third faster than the slowest. The forward pass's times on Jungle Ruins came in two groups from one run to the next, with the same draws and the same image, and the visibility buffer's did not. The cause is not known.
+- **Mixed quads are common:** 36 to 45 % of the visibility buffer's quads in Sponza's dense views, and 57 to 60 % in Jungle Ruins. Their samples took `uv0`'s analytic derivatives, so the dense foliage's texture levels differed a little from the forward pass's, and it was slightly greyer. Sponza's images matched the forward pass's.
+
+**The decision.** Clustered forward stays the shading path. A visibility buffer removes the quad overdraw, but in these scenes the overdraw is not the cost: Sponza's shading is a tenth of a millisecond, and Jungle Ruins' frame is its geometry. It is worth measuring again if a visibility pass can cost no more than the prepass, or for content that the forward pass's second pass over the geometry bounds.
 
 ### Lights and clusters
 

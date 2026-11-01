@@ -149,6 +149,7 @@ static partial class EditorCommands
     public const string PostEffects = "view.postEffects";
     public const string OcclusionCulling = "view.occlusionCulling";
     public const string MeshletHierarchy = "view.meshletHierarchy";
+    public const string ShadingStats = "view.shadingStats";
     public const string Icons = "view.icons";
     public const string Helpers = "view.helpers";
     public const string ExposureUp = "view.exposureUp";

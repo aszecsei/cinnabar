@@ -55,7 +55,7 @@ public sealed partial class EditorShell
         _automation = null;
     }
 
-    /// <summary>Runs a request on the UI thread: the captures and the status are the shell's.</summary>
+    /// <summary>Runs a request on the UI thread: the captures, the status, the viewport's settings and the camera are the shell's.</summary>
     public async Task<AutomationResponse> HandleAutomation(AutomationRequest request, CancellationToken cancel)
     {
         switch (request.Command)
@@ -76,8 +76,26 @@ public sealed partial class EditorShell
                 return Response(request.Id, await Screenshot(views, request.Path));
             case "gif":
                 return Response(request.Id, await Gif(request.Path));
+            case "viewport":
+                if (request.Settings is not { Count: > 0 } changes)
+                {
+                    return new AutomationResponse(request.Id, false, Error: "viewport takes settings to change");
+                }
+                if (!ViewportSettingsPatch.TryApply(ViewportSettings, changes, out var settings, out var error))
+                {
+                    return new AutomationResponse(request.Id, false, Error: error);
+                }
+                ViewportSettings = settings;
+                return new AutomationResponse(request.Id, true);
+            case "camera":
+                if (request.Position is not { Length: 3 } meters)
+                {
+                    return new AutomationResponse(request.Id, false, Error: "camera takes a position of three numbers, in meters");
+                }
+                Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? Camera.Yaw, request.Pitch ?? Camera.Pitch);
+                return new AutomationResponse(request.Id, true);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot and gif");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport and camera");
         }
     }
 
