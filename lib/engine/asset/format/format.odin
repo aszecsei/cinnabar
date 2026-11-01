@@ -93,6 +93,10 @@ subasset_kind_of :: proc(kind: string) -> Asset_Kind {
 		return .Prefab
 	case INSTANCE_SET_KIND:
 		return .Instance_Set
+	case SKIN_KIND:
+		return .Skin
+	case ANIMATION_KIND:
+		return .Animation
 	}
 	return .None
 }
@@ -203,6 +207,10 @@ Asset_Kind :: enum u32 {
 	Stage,
 	// The poses of a USD point instancer's points, which an Instanced_Mesh_Renderer draws a mesh at.
 	Instance_Set,
+	// A glTF skin's joints, which pose a skinned mesh.
+	Skin,
+	// A glTF animation's keys for the joints of a skin.
+	Animation,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

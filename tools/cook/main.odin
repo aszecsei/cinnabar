@@ -134,6 +134,11 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	if kind == .Scene {
 		log.infof("cook: %d %s cooked, %d up to date", pass.cooked[.Prefab], kind_plural(.Prefab), pass.current[.Prefab])
 	}
+	if kind == .Model {
+		for sub in ([]format.Asset_Kind{.Mesh, .Skin, .Animation}) {
+			log.infof("cook: %d %s of models cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
+		}
+	}
 	if kind == .Stage {
 		for sub in ([]format.Asset_Kind{.Mesh, .Texture, .Instance_Set}) {
 			log.infof("cook: %d %s of stages cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
@@ -175,6 +180,10 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "stages"
 	case .Instance_Set:
 		return "instance sets"
+	case .Skin:
+		return "skins"
+	case .Animation:
+		return "animations"
 	}
 	return "assets"
 }

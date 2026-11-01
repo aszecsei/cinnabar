@@ -107,7 +107,7 @@ opaque_materials_draw_meshlets_where_the_device_has_mesh_shaders :: proc(t: ^tes
 	f.scene_frame = sf
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
 	sf.items[0].flags = ITEM_MESH_PATH
-	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles = {0}, {0}, {false}, {false}
+	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles, sf.bin_skinned = {0}, {0}, {false}, {false}, {false}
 	sf.groups[.Opaque] = {0, 1}
 	sf.bin_offsets, sf.bin_counts = {0}, {1}
 	sf.view_count = 1
@@ -128,4 +128,84 @@ opaque_materials_draw_meshlets_where_the_device_has_mesh_shaders :: proc(t: ^tes
 	keep_pass(&g, pass)
 	// The null backend checks that the bin's mesh draw has a mesh pipeline bound, and the indirect buffers' barriers.
 	testing.expect(t, execute(&g), "the mesh shader path's prepass did not execute")
+}
+
+// A skinned entity's bin draws with vertex pulling, though its material has the mesh shader path: its posed vertices are
+// in buffers that only the vertex shaders read (see skinning.odin). The draws it records are indirect draws of
+// vertices, and a bin of the same material that is not skinned still records a mesh draw.
+@(test)
+skinned_bins_draw_with_vertex_pulling :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator              = virtual.arena_allocator(&arena),
+		heap_allocator               = runtime.heap_allocator(),
+		jobs_run                     = jobs.run,
+		jobs_wait                    = jobs.wait,
+		gpu_frame_target             = null.frame_target,
+		gpu_submit                   = null.submit,
+		gpu_upload                   = null.upload,
+		gpu_create_texture           = null.create_texture,
+		gpu_destroy_texture          = null.destroy_texture,
+		gpu_create_buffer            = null.create_buffer,
+		gpu_destroy_buffer           = null.destroy_buffer,
+		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
+		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
+		gpu_destroy_pipeline         = null.destroy_pipeline,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	r.caps.mesh_shaders = true
+	data := opaque_blob(true)
+	blob, _ := format.material_view(data)
+	make_pipelines(r, &r.materials.pipelines[0], data, blob, 0)
+	r.materials.pipeline_count = 1
+	p := &r.materials.pipelines[0]
+	defer material_pipeline_destroy(p, &platform)
+	testing.expect(t, p.mesh_path)
+
+	arguments := platform.gpu_create_buffer({size = 1024, usage = {.Storage, .Indirect}, label = "arguments"}, nil)
+	defer platform.gpu_destroy_buffer(arguments)
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+	g := begin(&platform, &cache)
+	f := new(Frame, platform.frame_allocator)
+	f^ = {renderer = r, graph = &g, size = {64, 32}}
+	sf := new(Scene_Frame, platform.frame_allocator)
+	f.scene_frame = sf
+	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
+	sf.bin_pipelines, sf.bin_draws, sf.bin_impostors, sf.bin_particles = {0}, {0}, {false}, {false}
+	sf.groups[.Opaque] = {0, 1}
+	sf.bin_offsets, sf.bin_counts = {0}, {1}
+	sf.view_count, sf.draw_views = 1, 1
+	sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)
+	sf.view_constants[0], _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	sf.arguments, sf.mesh_arguments = import_buffer(&g, arguments), import_buffer(&g, arguments)
+	sf.counts = import_buffer(&g, arguments)
+
+	for skinned in ([]bool{false, true}) {
+		sf.bin_skinned = {skinned}
+		sf.items[0].flags = skinned ? ITEM_SKINNED : ITEM_MESH_PATH
+		cb := gpu.command_buffer(platform.frame_allocator)
+		draw_scene_view(f, &cb, VIEW_CAMERA, .Prepass)
+		meshes, vertices: int
+		it := gpu.packet_iterator(cb)
+		for packet in gpu.next_packet(&it) {
+			#partial switch packet.kind {
+			case .Draw_Mesh_Indirect:
+				meshes += 1
+			case .Draw_Indirect:
+				vertices += 1
+			}
+		}
+		testing.expect_value(t, meshes, skinned ? 0 : 1)
+		testing.expect_value(t, vertices, skinned ? 1 : 0)
+	}
 }

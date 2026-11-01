@@ -330,6 +330,8 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Effect => "effect",
         AssetKind.Stage => "stage",
         AssetKind.InstanceSet => "instance set",
+        AssetKind.Skin => "skin",
+        AssetKind.Animation => "animation",
         _ => "script",
     };
 

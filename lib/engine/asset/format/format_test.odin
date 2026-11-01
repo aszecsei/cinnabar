@@ -265,3 +265,45 @@ material_blobs_round_trip :: proc(t: ^testing.T) {
 	_, ok = material_view(aligned(material_write(contents, context.temp_allocator)))
 	testing.expect(t, !ok)
 }
+
+@(test)
+skins_and_animations_round_trip :: proc(t: ^testing.T) {
+	skin := skin_write({
+		joints = {
+			{name = "Root", parent = -1, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0, 0, -1}},
+			{name = "Tip", parent = 0, translation = {0, 1, 0}, rotation = {0, 0, 0, 1}, scale = 1, sphere = {0, 0.5, 0, 0.5}},
+		},
+		name = "Stick",
+	}, context.temp_allocator)
+	skin_aligned := aligned(skin)
+	blob, ok := skin_view(skin_aligned)
+	testing.expect(t, ok)
+	if ok {
+		joints := skin_joints(skin_aligned, blob)
+		testing.expect_value(t, len(joints), 2)
+		testing.expect_value(t, blob_string(skin_aligned, joints[1].name), "Tip")
+	}
+
+	// A joint whose parent comes after it is refused.
+	bad := skin_write({joints = {{parent = 1}, {parent = -1}}}, context.temp_allocator)
+	bad_aligned := aligned(bad)
+	_, bad_ok := skin_view(bad_aligned)
+	testing.expect(t, !bad_ok)
+
+	clip := animation_write({
+		joint_count = 2,
+		duration = 1,
+		channels = {{joint = 1, path = .Rotation, interpolation = .Linear, key_count = 2}},
+		times = {0, 1},
+		values = {0, 0, 0, 1, 0, 0, 1, 0},
+	}, context.temp_allocator)
+	clip_aligned := aligned(clip)
+	_, clip_ok := animation_view(clip_aligned)
+	testing.expect(t, clip_ok)
+
+	// A channel of a joint that the skin does not have is refused.
+	stray := animation_write({joint_count = 1, channels = {{joint = 1, path = .Scale, key_count = 1}}, times = {0}, values = {1, 1, 1}}, context.temp_allocator)
+	stray_aligned := aligned(stray)
+	_, stray_ok := animation_view(stray_aligned)
+	testing.expect(t, !stray_ok)
+}

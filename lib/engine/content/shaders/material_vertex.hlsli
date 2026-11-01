@@ -109,15 +109,16 @@ uint draw_index(Draw_Record d, Mesh_Record m, uint vertex_id) {
 // when it has one (see docs/rendering/materials.md#vertex-displacement): what the vertex paths and the patch path all
 // draw. A billboard's pose faces the camera first, this frame's and last frame's each its own camera. The
 // displacement is read at this frame's time for this frame's pose and at last frame's for the previous, so an offset
-// that moves gives a velocity.
-Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 local, float3 normal, float3 tangent, float bitangent_sign, float2 uv0, float2 uv1, float4 color) {
+// that moves gives a velocity. previous_local is where the vertex was in the mesh's space last frame, which differs from
+// local only for a skinned mesh, whose vertices move without their instance.
+Material_Vertex finish_vertex_moved(Draw_Record d, Instance_Record instance, float3 local, float3 previous_local, float3 normal, float3 tangent, float bitangent_sign, float2 uv0, float2 uv1, float4 color) {
 #if MATERIAL_BILLBOARD
 	billboard_rows(instance.rows, frame.camera_offset.xyz, frame.camera_right.xyz, frame.camera_up.xyz);
 	billboard_rows(instance.previous_rows, frame.previous_camera_offset.xyz, frame.previous_camera_right.xyz, frame.previous_camera_up.xyz);
 #endif
 	Material_Vertex v;
 	v.world = transform_point(instance.rows, local) - frame.camera_offset.xyz;
-	v.previous = transform_point(instance.previous_rows, local) - frame.previous_camera_offset.xyz;
+	v.previous = transform_point(instance.previous_rows, previous_local) - frame.previous_camera_offset.xyz;
 	v.local = local;
 	v.normal = transform_direction(instance.rows, normal);
 	v.tangent = float4(transform_direction(instance.rows, tangent), bitangent_sign);
@@ -141,6 +142,7 @@ Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 lo
 	v.world += displace(now);
 	Vertex_Inputs before = now;
 	before.position = v.previous;
+	before.object_position = previous_local;
 	before.normal = transform_direction(instance.previous_rows, normal);
 	before.tangent = float4(transform_direction(instance.previous_rows, tangent), bitangent_sign);
 	before.time = frame.previous_time;
@@ -149,10 +151,20 @@ Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 lo
 	return v;
 }
 
-// place_vertex is a mesh's vertex, placed by its instance's pose: what both vertex paths draw.
+// finish_vertex places a vertex that did not move within its mesh's space: the patches' and the ribbons'.
+Material_Vertex finish_vertex(Draw_Record d, Instance_Record instance, float3 local, float3 normal, float3 tangent, float bitangent_sign, float2 uv0, float2 uv1, float4 color) {
+	return finish_vertex_moved(d, instance, local, local, normal, tangent, bitangent_sign, uv0, uv1, color);
+}
+
+// place_vertex is a mesh's vertex, placed by its instance's pose: what both vertex paths draw. A skinned mesh's record
+// has the vertex's position from last frame too, in the same place of its own buffer.
 Material_Vertex place_vertex(Draw_Record d, Mesh_Record m, Instance_Record instance, uint index) {
 	Mesh_Vertex v = read_vertex(m, index);
-	return finish_vertex(d, instance, v.local, v.normal, v.tangent, v.bitangent_sign, v.uv0, v.uv1, v.color);
+	float3 previous_local = v.local;
+	if ((m.flags & MESH_SKINNED) != 0) {
+		previous_local = cn_buffer(m.previous_positions).Load<float3>(index * 12);
+	}
+	return finish_vertex_moved(d, instance, v.local, previous_local, v.normal, v.tangent, v.bitangent_sign, v.uv0, v.uv1, v.color);
 }
 
 #if MATERIAL_PATCHES

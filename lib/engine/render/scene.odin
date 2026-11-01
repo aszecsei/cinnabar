@@ -197,10 +197,14 @@ MAX_MESH_GROUPS :: 1 << 22
 MESH_RECORD_INDEX32 :: 1
 MESH_RECORD_UV1 :: 2
 MESH_RECORD_COLOR :: 4
+// A skinned entity's record: its positions, previous_positions and attributes are its own posed copies (see
+// docs/rendering/gpu-scene.md#skinned-meshes).
+MESH_RECORD_SKINNED :: 8
 
 // Mesh_Record matches Mesh_Record in material_common.hlsli and select_meshlets.hlsl: a resident mesh's buffers, as
 // bindless indices, its meshlet nodes for a mesh with them, and its impostor's atlas, the side of its frames and the
-// sphere that they see, for a mesh with one (see docs/rendering/gpu-scene.md#impostors).
+// sphere that they see, for a mesh with one (see docs/rendering/gpu-scene.md#impostors). A skinned entity has a record
+// of its own, whose previous_positions are last frame's posed positions.
 Mesh_Record :: struct {
 	positions:         u32,
 	attributes:        u32,
@@ -213,7 +217,7 @@ Mesh_Record :: struct {
 	impostor:          u32,
 	impostor_size:     u32,
 	meshlet_nodes:     u32,
-	padding:           u32,
+	previous_positions: u32,
 	impostor_sphere:   [4]f32,
 }
 
@@ -260,8 +264,12 @@ ITEM_INSTANCED :: 512
 // An item on the mesh shader path whose submesh has a hierarchy over its meshlets, which select meshlets walks (see
 // meshlet_select.odin): its entry is its submesh's first meshlet node, and its list its count of roots.
 ITEM_HIERARCHY :: 1024
+// A skinned entity's item, whose mesh record is its own posed copy of its mesh (see
+// docs/rendering/gpu-scene.md#skinned-meshes). It draws with vertex pulling whatever its material's pipelines are, so
+// sort_bins gives it a bin of its own.
+ITEM_SKINNED :: 2048
 // The items that sort_bins gives bins of their own, apart from their pipelines' others.
-ITEM_BIN_KINDS :: ITEM_IMPOSTOR | ITEM_PARTICLES
+ITEM_BIN_KINDS :: ITEM_IMPOSTOR | ITEM_PARTICLES | ITEM_SKINNED
 // The vertices of an impostor's quad.
 IMPOSTOR_VERTICES :: 6
 
@@ -482,6 +490,8 @@ Gpu_Scene :: struct {
 	cull_patches_pipeline:    Shader_Pipeline,
 	// What select meshlets picks each frame, and the pass (see meshlet_select.odin).
 	meshlet_select:           Meshlet_Select,
+	// The skinned entities' buffers and the pass that poses them (see skinning.odin).
+	skins:                    Skin_State,
 	// Each Instanced_Mesh_Renderer's slot's range of the instance sets' cells, the free ranges in order, and the end of
 	// the used ones.
 	slot_cells:               [MAX_INSTANCES]Cell_Range,
@@ -530,6 +540,8 @@ Scene_Frame :: struct {
 	// vertex pulling.
 	bin_impostors:   []bool,
 	bin_particles:   []bool,
+	// The bins of skinned entities, which draw with vertex pulling too.
+	bin_skinned:     []bool,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
 	// The draws of one view: the items, with each surface's reserved patches.
@@ -597,6 +609,8 @@ Scene_Frame :: struct {
 	patches:         Buffer,
 	patch_counts:    Buffer,
 	meshlet_select:  Meshlet_Select_Frame,
+	// The skinned entities' jobs this frame.
+	skin:            Skin_Frame,
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -612,6 +626,7 @@ scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	s.instance_pipeline = shader_pipeline(INSTANCE_CULL_SHADER)
 	occlusion_init(&s.occlusion)
 	meshlet_select_init(&s.meshlet_select, platform)
+	skin_init(&s.skins, platform)
 }
 
 scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
@@ -625,6 +640,7 @@ scene_destroy :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&s.instance_pipeline, platform)
 	occlusion_destroy(&s.occlusion, platform)
 	meshlet_select_destroy(&s.meshlet_select, platform)
+	skin_destroy(&s.skins, platform)
 	destroy_shader_pipeline(&s.select_pipeline, platform)
 	destroy_shader_pipeline(&s.cull_patches_pipeline, platform)
 }
@@ -636,9 +652,10 @@ snap_origin :: proc(p: ecs.World_Position) -> ecs.World_Position {
 }
 
 // build_scene writes the GPU scene's records for the frame: every instance, a draw item for each visible submesh with
-// its material's block, the mesh records and the material table. add_scene_passes then culls the items.
+// its material's block, the mesh records and the material table. add_scene_passes then culls the items. An entity that
+// has a pose in skins and a skinned mesh draws posed (see skinning.odin).
 @(private)
-build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
+build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose) {
 	r := f.renderer
 	s := &r.scene
 	s.frame += 1
@@ -655,6 +672,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sync_compute_pipeline(&s.instance_pipeline, r.platform, r.residency.assets, {label = "cull instances"}, r.reloaded)
 	sync_compute_pipeline(&s.occlusion.pipeline, r.platform, r.residency.assets, {label = "depth pyramid"}, r.reloaded)
 	sync_compute_pipeline(&s.meshlet_select.pipeline, r.platform, r.residency.assets, {label = "select meshlets"}, r.reloaded)
+	sync_compute_pipeline(&s.skins.pipeline, r.platform, r.residency.assets, {label = "skin meshes"}, r.reloaded)
 
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
@@ -665,6 +683,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	items := make([dynamic]Cull_Item, r.platform.frame_allocator)
 	records := make([]Instance_Record, MAX_INSTANCES, r.platform.frame_allocator)
 	accel_instances := make([dynamic]gpu.Accel_Instance, r.platform.frame_allocator)
+	// An entity with a pose draws at rest until the skinning pipeline has compiled.
+	skin := skin_build(pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil, r.platform.frame_allocator)
 	// Once a feature has traced, the meshes have acceleration structures, and hit shading needs the hit table.
 	tracing := r.residency.accels
 	hits: Hit_Table
@@ -702,16 +722,25 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 				continue
 			}
 			first_item := len(items)
-			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, renderers[i], slot, view_model)
+			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, &skin, renderers[i], e, slot, view_model)
+			// A skinned entity's rays see its own structure, over its posed positions, which the ray scene refits.
+			skinned := mesh != nil && first_item < len(items) && items[first_item].flags & ITEM_SKINNED != 0
+			blas := mesh != nil ? mesh.accel : {}
+			if skinned {
+				blas = s.skins.instances[slot].accel
+			}
 			// The view model's pose is not its place in the world, so rays do not see it.
-			if tracing && mesh != nil && mesh.accel != {} && !view_model {
+			if tracing && mesh != nil && blas != {} && !view_model {
 				mask: u8 = renderers[i].cast_shadows ? RAY_MASK_SHADOWS : 0
 				if add_hit_entries(&hits, slot, mesh, items[first_item:], r.materials.pipelines[:], hit_pipeline_ready, r.platform) {
 					mask |= RAY_MASK_SURFACES
 				}
 				if mask != 0 {
-					reference := r.platform.gpu_accel_reference(mesh.accel)
+					reference := r.platform.gpu_accel_reference(blas)
 					append(&accel_instances, gpu.accel_instance(records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
+					if skinned {
+						append(&skin.refits, Skin_Refit{slot = slot, indices = mesh.indices})
+					}
 				}
 			}
 		}
@@ -778,6 +807,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	ribbons := add_ribbon_items(f, w, &table, &items, records, hidden)
 	// The mesh particles: an item for each submesh of each mesh emitter, whose draws the GPU writes.
 	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, records, hidden)
+	sweep_skins(&s.skins, r.platform, s.frame)
 	// A slot whose entity has no Mesh_Renderer, Instanced_Mesh_Renderer, Surface_Renderer or particle system any more is
 	// free again, and so are its cells.
 	for slot in 0 ..< s.high {
@@ -805,6 +835,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	sf.bin_draws = bin_draws(r, sf.bin_pipelines)
 	sf.bin_impostors = bin_impostors(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.bin_particles = bin_particles(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
+	sf.bin_skinned = bin_skinned(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.items = items[:]
 	sf.bin_counts, sf.bin_offsets, sf.draws_per_view = bin_sizes(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	// The surfaces' records name their items, now that the bins' order is the items'.
@@ -842,7 +873,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32) {
 	surface_upload, surfaces_ok := upload_bytes(platform, slice.to_bytes(surfaces[:]))
 	set_upload, sets_ok := upload_bytes(platform, slice.to_bytes(sets[:]))
 	job_upload, jobs_ok := upload_bytes(platform, slice.to_bytes(jobs[:]))
-	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && hits_ok && surfaces_ok && sets_ok && jobs_ok) {
+	skin_ok := skin_upload(f, &skin)
+	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && hits_ok && surfaces_ok && sets_ok && jobs_ok && skin_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
 		return
@@ -875,13 +907,14 @@ Sort_Item :: struct {
 
 // sort_bins writes the items in their bins' order, each with its bin, and gives each bin's material pipeline and each
 // group's range of bins: the opaque bins, then moment-based transparency's, a bin for each pipeline, with its
-// impostors' items and its mesh particles' items each in a bin after its own (ITEM_BIN_KINDS), then a bin for each
-// sorted item, the farthest first. The items of a bin keep their order. A frame has tens of thousands of items, which
+// impostors' items, its mesh particles' items and its skinned entities' items each in a bin after its own
+// (ITEM_BIN_KINDS), then a bin for each sorted item, the farthest first. The items of a bin keep their order. A frame has tens of thousands of items, which
 // a counting sort by their bins orders in one pass, and few sorted items, which sort by their distance.
 @(private)
 sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context.allocator) -> (pipelines: []int, groups: [Bin_Group][2]int) {
-	// The kinds of bin that a pipeline has in a group: its own items', its impostors' and its mesh particles'.
-	KINDS :: 3
+	// The kinds of bin that a pipeline has in a group: its own items', its impostors', its mesh particles' and its skinned
+	// entities'.
+	KINDS :: 4
 	KEYS :: (len(Bin_Group) - 1) * MAX_MATERIAL_PIPELINES * KINDS
 	bin_key :: proc(s: Sort_Item) -> int {
 		kind := 0
@@ -889,6 +922,8 @@ sort_bins :: proc(sorting: []Sort_Item, items: []Cull_Item, allocator := context
 			kind = 1
 		} else if s.item.flags & ITEM_PARTICLES != 0 {
 			kind = 2
+		} else if s.item.flags & ITEM_SKINNED != 0 {
+			kind = 3
 		}
 		return (int(s.group) * MAX_MATERIAL_PIPELINES + int(s.item.bin)) * KINDS + kind
 	}
@@ -960,6 +995,16 @@ bin_particles :: proc(items: []Cull_Item, bins: int, allocator := context.alloca
 		particles[item.bin] = item.flags & ITEM_PARTICLES != 0
 	}
 	return particles
+}
+
+// bin_skinned gives whether each bin is of skinned entities, whose items sort_bins gives bins of their own.
+@(private)
+bin_skinned :: proc(items: []Cull_Item, bins: int, allocator := context.allocator) -> []bool {
+	skinned := make([]bool, bins, allocator)
+	for item in items {
+		skinned[item.bin] = item.flags & ITEM_SKINNED != 0
+	}
+	return skinned
 }
 
 // has_mesh_particles is whether any of the frame's bins is of mesh particles.
@@ -1245,6 +1290,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		(^Cull_Constants)(raw_data(sf.occlusion.late_cull.data))^ = late
 	}
 
+	add_skinning_pass(f)
 	p := add_compute_pass(g, "update scene", update_scene, f)
 	copy_dest(g, p, sf.instances)
 	copy_dest(g, p, sf.counts)
@@ -1309,6 +1355,7 @@ declare_scene_draws :: proc(f: ^Frame, p: Pass) {
 	if sf.meshlet_select.selected != 0 {
 		read(g, p, sf.meshlet_select.selected)
 	}
+	declare_skinned_reads(f, p)
 }
 
 @(private)
@@ -1534,7 +1581,9 @@ add_instanced_items :: proc(
 // add_items adds a draw item for each submesh of a Mesh_Renderer whose mesh is resident, with its material's block and
 // pipeline, and gives the mesh, or nil if it is not ready. An item's bin holds its pipeline until build_scene numbers
 // the bins. A submesh of a mesh with an impostor, whose material has the impostor path, has a second item, its
-// impostor's, and culling draws one of the two (see docs/rendering/gpu-scene.md#impostors).
+// impostor's, and culling draws one of the two (see docs/rendering/gpu-scene.md#impostors). The entity of a mesh with a
+// skin stream that has a pose in skins draws posed instead: its items, all ITEM_SKINNED, name a mesh record of its own,
+// and its job poses its vertices this frame (see skinning.odin).
 @(private = "file")
 add_items :: proc(
 	r: ^Renderer,
@@ -1542,7 +1591,9 @@ add_items :: proc(
 	meshes: ^[dynamic]Mesh_Record,
 	mesh_indices: ^map[^Resident_Mesh]u32,
 	items: ^[dynamic]Cull_Item,
+	skins: ^Skin_Build,
 	renderer: Mesh_Renderer,
+	entity: ecs.Entity,
 	slot: u32,
 	view_model: bool,
 ) -> ^Resident_Mesh {
@@ -1550,11 +1601,38 @@ add_items :: proc(
 	if !ready {
 		return nil
 	}
-	mesh_index, known := mesh_indices[mesh]
-	if !known {
-		mesh_index = u32(len(meshes))
-		append(meshes, mesh_record(mesh))
-		mesh_indices[mesh] = mesh_index
+	mesh_index: u32
+	pose := skins.poses[entity] if mesh.skin != {} else nil
+	skinned := false
+	if pose != nil {
+		instance, reset, instance_ok := skin_instance(
+			&r.scene.skins,
+			r.platform,
+			r.scene.frame,
+			slot,
+			entity,
+			mesh.positions,
+			mesh.vertex_count,
+			mesh.attribute_stride,
+		)
+		if instance_ok {
+			skinned = true
+			if r.residency.accels {
+				skin_accel(&r.scene.skins, r.platform, slot, mesh)
+			}
+			mesh_index = u32(len(meshes))
+			append(meshes, skinned_mesh_record(mesh, instance))
+			skin_add(skins, mesh, instance, slot, pose, reset)
+		}
+	}
+	if !skinned {
+		known: bool
+		mesh_index, known = mesh_indices[mesh]
+		if !known {
+			mesh_index = u32(len(meshes))
+			append(meshes, mesh_record(mesh))
+			mesh_indices[mesh] = mesh_index
+		}
 	}
 	for submesh, s in mesh.submeshes[:mesh.submesh_count] {
 		material := renderer.materials[s] if s < MAX_MATERIAL_SLOTS else {}
@@ -1571,13 +1649,17 @@ add_items :: proc(
 		if renderer.cast_shadows && r.materials.pipelines[use.pipeline].cast_shadows && !view_model {
 			flags |= ITEM_CASTS_SHADOWS
 		}
-		// The opaque draws of a material with mesh pipelines draw meshlets.
+		// The opaque draws of a material with mesh pipelines draw meshlets, except a skinned entity's, whose posed vertices
+		// only the vertex pulling path reads.
 		first, count := submesh.first_index, submesh.index_count
 		pipeline := &r.materials.pipelines[use.pipeline]
-		mesh_path := pipeline.mesh_path && material_group(pipeline) == .Opaque
+		mesh_path := pipeline.mesh_path && material_group(pipeline) == .Opaque && !skinned
 		if mesh_path {
 			flags |= ITEM_MESH_PATH
 			first, count = submesh.first_meshlet, submesh.meshlet_count
+		}
+		if skinned {
+			flags |= ITEM_SKINNED
 		}
 		if pipeline.billboard {
 			flags |= ITEM_BILLBOARD
@@ -1595,6 +1677,10 @@ add_items :: proc(
 			sphere   = {b.center.x, b.center.y, b.center.z, b.radius},
 			bound    = pipeline.displacement_bound,
 		}
+		// The pose moves the vertices out of their submesh's bounds, so every submesh takes the pose's sphere.
+		if skinned {
+			item.sphere = pose.sphere
+		}
 		// The view model's level of detail is its own view's, which the selection does not take, so its amplification
 		// shaders test every meshlet. The impostor's item below is made from flags, without the hierarchy.
 		if mesh_path && submesh.node_count > 0 && !view_model {
@@ -1602,7 +1688,7 @@ add_items :: proc(
 			item.entry, item.list = submesh.first_node, submesh.root_count
 		}
 		// The view model is near the camera, where its impostor never draws.
-		if mesh.impostor != {} && pipeline.impostor_path && material_group(pipeline) == .Opaque && !view_model {
+		if mesh.impostor != {} && pipeline.impostor_path && material_group(pipeline) == .Opaque && !view_model && !skinned {
 			m := mesh.bounds
 			item.flags |= ITEM_HAS_IMPOSTOR
 			item.lod_sphere = {m.center.x, m.center.y, m.center.z, m.radius}
@@ -1616,6 +1702,19 @@ add_items :: proc(
 		append(items, item)
 	}
 	return mesh
+}
+
+// skinned_mesh_record is a skinned entity's record of its mesh: the mesh's, with the entity's posed copies of its
+// positions and attributes, and last frame's positions. The hierarchy and the impostor are not for a posed mesh.
+@(private)
+skinned_mesh_record :: proc(mesh: ^Resident_Mesh, instance: Skinned_Instance) -> Mesh_Record {
+	record := mesh_record(mesh)
+	record.flags |= MESH_RECORD_SKINNED
+	record.positions = gpu.read_index(instance.positions)
+	record.attributes = gpu.read_index(instance.attributes)
+	record.previous_positions = gpu.read_index(instance.previous)
+	record.impostor, record.impostor_size, record.meshlet_nodes = 0, 0, 0
+	return record
 }
 
 // mesh_record is a resident mesh's record.
@@ -1909,10 +2008,10 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 			pipelines = p.over
 		}
 		// The same test as add_items, of the bin's own material, so the bin's items are all on the path that it draws. A
-		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes, and a mesh
-		// particles' bin with vertex pulling.
+		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes, and the bins
+		// of mesh particles and of skinned entities with vertex pulling.
 		impostors := sf.bin_impostors[bin]
-		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors && !sf.bin_particles[bin]
+		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors && !sf.bin_particles[bin] && !sf.bin_skinned[bin]
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]
 		}

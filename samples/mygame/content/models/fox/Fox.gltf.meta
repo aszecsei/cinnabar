@@ -1,0 +1,10 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+# The Khronos sample Fox: a skinned mesh, its skin, and three clips (see docs/content/kinds/skins-and-animations.md).
+# The file is in centimeters.
+guid = 1903ce0e197a04d3b1a50741ebd93647
+scale = 0.01
+mesh.fox1 = e049cf90c64cbdc7eec588c7120cbabb
+skin.skin_0 = 59113bb8cb93ab4e3bd67d9b2fa99c12
+animation.Survey = 3918fb8bad25fb7d58abb5d2a6f2cadd
+animation.Walk = dea303d3f0374a9e56b0bb58f4a85315
+animation.Run = cf6a8cd8cc1591bd3e6e09437d5754a1

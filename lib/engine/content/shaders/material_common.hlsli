@@ -5,6 +5,7 @@
 
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
+#include "mesh_encoding.hlsli"
 
 // Matches Frame_Constants in lib/engine/render/scene.odin. Positions in the GPU scene are relative to the render
 // origin, and the view's are relative to the camera, which is camera_offset from the origin. A shadow view's copy has
@@ -234,10 +235,14 @@ struct Draw_Record {
 
 // Matches Mesh_Record in lib/engine/render/scene.odin. meshlet_nodes is the trees over the meshlets' groups, which
 // select_meshlets.hlsl walks. impostor is the impostor's atlas, impostor_size a frame's side in texels, and
-// impostor_sphere the sphere in the mesh's space that the atlas's frames see (see material_impostor.hlsli).
+// impostor_sphere the sphere in the mesh's space that the atlas's frames see (see material_impostor.hlsli). A skinned
+// entity's record (MESH_SKINNED) is its own: positions and attributes are the posed copies that skin_meshes.hlsl
+// wrote this frame, and previous_positions is last frame's posed positions, which the velocities take (see
+// docs/rendering/gpu-scene.md#skinned-meshes).
 static const uint MESH_INDEX32 = 1;
 static const uint MESH_UV1 = 2;
 static const uint MESH_COLOR = 4;
+static const uint MESH_SKINNED = 8;
 struct Mesh_Record {
 	uint positions;
 	uint attributes;
@@ -250,7 +255,7 @@ struct Mesh_Record {
 	uint impostor;
 	uint impostor_size;
 	uint meshlet_nodes;
-	uint padding;
+	uint previous_positions;
 	float4 impostor_sphere;
 };
 
@@ -457,36 +462,6 @@ float3 cn_normal_map(uint texture_index, float2 uv) {
 float3 cn_normal_map_level(uint texture_index, float2 uv, float level) {
 	float2 xy = cn_sample_level(texture_index, uv, level).xy * 2 - 1;
 	return float3(xy, sqrt(saturate(1 - dot(xy, xy))));
-}
-
-// octahedral unfolds a unit vector from the square [-1, 1]², as the cooker folded it.
-float3 octahedral(float2 p) {
-	float3 n = float3(p, 1 - abs(p.x) - abs(p.y));
-	if (n.z < 0) {
-		float2 sign_xy = float2(n.x >= 0 ? 1 : -1, n.y >= 0 ? 1 : -1);
-		n.xy = (1 - abs(n.yx)) * sign_xy;
-	}
-	return normalize(n);
-}
-
-// octahedral_encode folds a unit vector into the square [-1, 1]², as octahedral unfolds it.
-float2 octahedral_encode(float3 n) {
-	n /= abs(n.x) + abs(n.y) + abs(n.z);
-	float2 p = n.xy;
-	if (n.z < 0) {
-		float2 sign_xy = float2(p.x >= 0 ? 1 : -1, p.y >= 0 ? 1 : -1);
-		p = (1 - abs(p.yx)) * sign_xy;
-	}
-	return p;
-}
-
-float2 snorm16(uint word) {
-	int2 v = int2(int(word << 16) >> 16, int(word) >> 16);
-	return max(float2(v) / 32767.0, -1.0);
-}
-
-float2 unorm16(uint word) {
-	return float2(word & 0xffff, word >> 16) / 65535.0;
 }
 
 float4 unpack_unorm8(uint c) {

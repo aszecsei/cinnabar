@@ -20,6 +20,9 @@ Mesh_Flag :: enum u32 {
 	Color,
 	// Indices are u32. Otherwise they are u16.
 	Index32,
+	// The mesh has a skin stream: each vertex's joints and weights, which a Skin's joints pose (see
+	// docs/content/kinds/skins-and-animations.md#skins).
+	Skinned,
 }
 
 Mesh_Flags :: bit_set[Mesh_Flag;u32]
@@ -108,6 +111,16 @@ Mesh_Attributes :: struct {
 	// Then, when the flags say, the second UV set as [2]f32 and the color as RGBA8 unorm.
 }
 
+// Mesh_Skin_Vertex is one vertex of the skin stream: up to four joints, which index the joints of the mesh's skin, and
+// their weights in unorm16, which add up to 65535. A joint that does not influence the vertex has a weight of 0.
+// Shaders read it as it is: matches Skin_Vertex in skin_meshes.hlsl.
+Mesh_Skin_Vertex :: struct {
+	joints:  [4]u16,
+	weights: [4]u16,
+}
+
+#assert(size_of(Mesh_Skin_Vertex) == 16)
+
 // mesh_octahedral folds a unit vector onto the square [-1, 1]².
 mesh_octahedral :: proc "contextless" (n: [3]f32) -> [2]f32 {
 	sum := abs(n.x) + abs(n.y) + abs(n.z)
@@ -192,6 +205,8 @@ Mesh_Blob :: struct {
 	positions:         Slice,
 	// mesh_attribute_stride bytes per vertex.
 	attributes:        Slice,
+	// Mesh_Skin_Vertex records, one per vertex with the Skinned flag, or empty.
+	skin:              Slice,
 	// u16 or u32 per index, by the Index32 flag, in triangles whose front faces are clockwise on screen.
 	indices:           Slice,
 	// Meshlet records.
@@ -221,7 +236,7 @@ Mesh_Blob :: struct {
 }
 
 mesh_layout :: proc() -> u64 {
-	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521 ~ layout.hash(Meshlet_Node) * 28629151
+	return layout.hash(Mesh_Blob) ~ layout.hash(Mesh_Submesh) * 31 ~ layout.hash(Meshlet) * 961 ~ layout.hash(Mesh_Attributes) * 29791 ~ layout.hash(Impostor_Texel) * 923521 ~ layout.hash(Meshlet_Node) * 28629151 ~ layout.hash(Mesh_Skin_Vertex) * 887503681
 }
 
 // mesh_view checks a mesh blob: its header, its layout, its slices, and that its streams have the sizes that its
@@ -236,6 +251,7 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 		blob.submeshes,
 		blob.positions,
 		blob.attributes,
+		blob.skin,
 		blob.indices,
 		blob.meshlets,
 		blob.meshlet_vertices,
@@ -257,6 +273,8 @@ mesh_view :: proc(data: []byte) -> (blob: ^Mesh_Blob, ok: bool) {
 	switch {
 	case blob.positions.size != blob.vertex_count * 12,
 	     blob.attributes.size != blob.vertex_count * mesh_attribute_stride(blob.flags),
+	     blob.skin.size != (.Skinned in blob.flags ? blob.vertex_count * size_of(Mesh_Skin_Vertex) : 0),
+	     blob.skin.offset % BLOB_ALIGN != 0,
 	     blob.indices.size != blob.index_count * index_size,
 	     blob.submeshes.size % size_of(Mesh_Submesh) != 0 || blob.submeshes.offset % align_of(Mesh_Submesh) != 0,
 	     blob.meshlets.size % size_of(Meshlet) != 0 || blob.meshlets.offset % align_of(Meshlet) != 0,
@@ -330,6 +348,12 @@ mesh_impostor :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Impost
 	return ([^]Impostor_Texel)(raw_data(bytes))[:len(bytes) / size_of(Impostor_Texel)]
 }
 
+// mesh_skin is a mesh's skin stream, empty for a mesh without the Skinned flag.
+mesh_skin :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_Skin_Vertex {
+	bytes := blob_bytes(data, blob.skin)
+	return ([^]Mesh_Skin_Vertex)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Skin_Vertex)]
+}
+
 mesh_meshlets :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Meshlet {
 	bytes := blob_bytes(data, blob.meshlets)
 	return ([^]Meshlet)(raw_data(bytes))[:len(bytes) / size_of(Meshlet)]
@@ -362,6 +386,8 @@ Mesh_Contents :: struct {
 	submeshes:         []Submesh_Entry,
 	positions:         []byte,
 	attributes:        []byte,
+	// With the Skinned flag, one record per vertex.
+	skin:              []Mesh_Skin_Vertex,
 	indices:           []byte,
 	meshlets:          []Meshlet,
 	meshlet_vertices:  []byte,
@@ -388,6 +414,7 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 	submeshes := reserve_bytes(&buffer, len(contents.submeshes) * size_of(Mesh_Submesh), BLOB_ALIGN)
 	positions := stream(&buffer, contents.positions)
 	attributes := stream(&buffer, contents.attributes)
+	skin := stream(&buffer, mem.slice_to_bytes(contents.skin))
 	indices := stream(&buffer, contents.indices)
 	meshlets := stream(&buffer, mem.slice_to_bytes(contents.meshlets))
 	meshlet_vertices := stream(&buffer, contents.meshlet_vertices)
@@ -422,6 +449,7 @@ mesh_write :: proc(contents: Mesh_Contents, allocator := context.allocator) -> [
 		submeshes = submeshes,
 		positions = positions,
 		attributes = attributes,
+		skin = skin,
 		indices = indices,
 		meshlets = meshlets,
 		meshlet_vertices = meshlet_vertices,

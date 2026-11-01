@@ -13,7 +13,7 @@ import "core:strconv"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks mesh files changes this, which invalidates every cooked mesh file.
-MESH_FILE_COOK_VERSION :: "mesh files 4"
+MESH_FILE_COOK_VERSION :: "mesh files 5"
 
 MESH_SETTINGS := []Setting_Info {
 	{

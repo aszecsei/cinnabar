@@ -115,6 +115,8 @@ Asset_Kind :: enum u8 {
 	Effect,
 	Stage,
 	Instance_Set,
+	Skin,
+	Animation,
 }
 
 Asset_Status :: enum u8 {

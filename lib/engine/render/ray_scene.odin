@@ -242,12 +242,36 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 			m.accel_built = true
 		}
 	}
+	// The skinned entities' structures, built the first time and refit after, over the positions that the skinning pass
+	// wrote this frame.
+	sf := f.scene_frame
+	skinned := make([]Accel, len(sf.skin.refits), r.platform.frame_allocator)
+	if len(sf.items) > 0 && len(sf.skin.refits) > 0 {
+		p := add_compute_pass(g, "refit skinned accels", proc(ctx: ^Pass_Context) {
+			f := (^Frame)(ctx.data)
+			for refit in f.scene_frame.skin.refits {
+				instance := f.renderer.scene.skins.instances[refit.slot]
+				gpu.cmd_build_accel(ctx.cb, instance.accel, update = refit.update)
+			}
+		}, f)
+		for &refit, i in sf.skin.refits {
+			instance := &r.scene.skins.instances[refit.slot]
+			build_input(g, p, import_buffer(g, instance.positions))
+			build_input(g, p, import_buffer(g, refit.indices))
+			skinned[i] = import_accel(g, instance.accel)
+			build_accel(g, p, skinned[i])
+			refit.update, instance.accel_built = instance.accel_built, true
+		}
+	}
 	p := add_compute_pass(g, "build scene accel", proc(ctx: ^Pass_Context) {
 		f := (^Frame)(ctx.data)
 		instances := f.scene_frame.accel_instances
 		gpu.cmd_build_top_accel(ctx.cb, gpu_accel(ctx.graph, f.ray_scene.accel), instances.buffer, instances.offset, u32(f.scene_frame.accel_count))
 	}, f)
 	for blas in blases {
+		build_input(g, p, blas)
+	}
+	for blas in skinned {
 		build_input(g, p, blas)
 	}
 	build_accel(g, p, rf.accel)
@@ -376,6 +400,7 @@ add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics
 	read(g, p, data.bins)
 	indirect_buffer(g, p, data.arguments)
 	read(g, p, sf.instances)
+	declare_skinned_reads(f, p)
 	write(g, p, batch.surfaces)
 	return true
 }

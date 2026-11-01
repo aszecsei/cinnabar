@@ -44,3 +44,26 @@ the_render_origin_snaps_to_cells :: proc(t: ^testing.T) {
 	testing.expect_value(t, snap_origin(p).raw, [3]i64{cell * 3, -cell, cell})
 	testing.expect_value(t, ORIGIN_CELL, 1024)
 }
+
+// A skinned entity's item has a bin of its own after its material's, which draws with vertex pulling, as a mesh
+// particles' does: its posed vertices are not the mesh's that the mesh shader path reads.
+@(test)
+skinned_items_have_bins_of_their_own :: proc(t: ^testing.T) {
+	items := []Cull_Item{{bin = 0, flags = ITEM_SKINNED}, {bin = 0, flags = ITEM_MESH_PATH}, {bin = 0, flags = ITEM_SKINNED}, {bin = 0}}
+	sorting := make([]Sort_Item, len(items), context.temp_allocator)
+	for item, i in items {
+		sorting[i] = {item = item}
+	}
+	pipelines, groups := sort_bins(sorting, items, context.temp_allocator)
+	testing.expect_value(t, len(pipelines), 2)
+	testing.expect_value(t, groups[.Opaque], [2]int{0, 2})
+	skinned := bin_skinned(items, len(pipelines), context.temp_allocator)
+	testing.expect_value(t, skinned[0], false)
+	testing.expect_value(t, skinned[1], true)
+	// The static items keep the first bin, the skinned items share the second, and each keeps its flags.
+	testing.expect_value(t, items[0].bin, 0)
+	testing.expect_value(t, items[1].bin, 0)
+	testing.expect_value(t, items[2].bin, 1)
+	testing.expect_value(t, items[3].bin, 1)
+	testing.expect_value(t, items[2].flags & ITEM_SKINNED, ITEM_SKINNED)
+}

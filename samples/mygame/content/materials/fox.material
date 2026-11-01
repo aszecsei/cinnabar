@@ -1,0 +1,20 @@
+material 1
+# The Fox's material: its texture, lit. The model has no normals, so its faces get their own (see
+# docs/content/kinds/meshes.md#meshes), which suits its low poly look.
+shading = lit
+param roughness float = 0.58
+param albedo texture = $e55e62e151e4a02d608cc21c6ab1c4cb
+
+node 1 output
+	position = [360, -40]
+	base_color = @2.rgba
+	roughness = @3.value
+node 2 texture_sample
+	position = [-240, -40]
+	texture = @4.value
+node 3 parameter
+	position = [60, 60]
+	name = "roughness"
+node 4 parameter
+	position = [-480, -10]
+	name = "albedo"
