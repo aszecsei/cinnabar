@@ -1,5 +1,9 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Link.Protocol;
+using Asset = Cinnabar.Editor.Link.Cook.Asset;
+using Root = Cinnabar.Editor.Link.Cook.Root;
+using Welcome = Cinnabar.Editor.Link.Cook.Welcome;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
@@ -400,6 +404,90 @@ public sealed class AnimationGraphEditorTests : IDisposable
         blend = editor.Document.Graph.Find(10)!;
         Assert.Equal([(0, "walk", "3"), (1, "survey", "4")], AnimationGraphEditor.InputsOf(blend));
         Assert.Contains("\tinput.0 = walk\n\tat.0 = 3\n\tinput.1 = survey\n\tat.1 = 4\n", editor.Document.Text);
+    }
+
+    static byte[] Bytes(string guid) => Convert.FromHexString(guid);
+
+    static AnimatorView View(ulong entity, string graph = Guid, uint state = 2, uint source = 1, uint transition = 20, float fade = 0.1f, float duration = 0.4f) =>
+        new(entity, Bytes(graph), state, source, transition, fade, duration, 1.25f,
+            [new AnimatorParameter("speed", AnimatorParameterKind.Float, 2), new AnimatorParameter("look", AnimatorParameterKind.Trigger, 0)]);
+
+    [Fact]
+    public void WhileTheGamePlaysTheSelectedEntitysAnimatorIsLive()
+    {
+        var (shell, editor) = Open();
+        using var _ = shell;
+        var changes = 0;
+        editor.LiveChanged += () => changes++;
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 0, true, []), new EntityInfo(2, "Other", 2, 0, true, [])]));
+        shell.OnGameMessage(View(1));
+
+        // In Edit, there is nothing to show or to wait for.
+        Assert.Null(editor.Live);
+        Assert.Null(editor.LiveWaiting);
+
+        shell.Play();
+        Assert.Null(editor.Live);
+        Assert.Contains("Select an entity", editor.LiveWaiting);
+
+        shell.Selection.Select(2);
+        Assert.Contains("Other has no Animator", editor.LiveWaiting);
+
+        changes = 0;
+        shell.Selection.Select(1);
+        Assert.Equal(1, changes);
+        var live = editor.Live;
+        Assert.NotNull(live);
+        Assert.Equal((2u, 1u, 20u), (live.State, live.Source, live.Transition));
+        Assert.Null(editor.LiveWaiting);
+        Assert.Equal(0.25, AnimationGraphEditor.FadeOf(live), 3);
+        Assert.Equal(1, AnimationGraphEditor.FadeOf(View(1, fade: 0.4f)));
+        Assert.Equal(1, AnimationGraphEditor.FadeOf(View(1, fade: 0, duration: 0)));
+
+        // Only the selected entity's view changes it.
+        changes = 0;
+        shell.OnGameMessage(View(2));
+        Assert.Equal(0, changes);
+        shell.OnGameMessage(View(1, state: 3, source: 2, transition: 22));
+        Assert.Equal(1, changes);
+        Assert.Equal(3u, editor.Live!.State);
+
+        // Another graph's Animator is not this graph's to show, and the panel says what it plays.
+        shell.OnGameMessage(View(1, graph: Survey));
+        Assert.Null(editor.Live);
+        Assert.Contains($"Fox plays {Survey}", editor.LiveWaiting);
+
+        // An empty view says that the Animator has gone.
+        shell.OnGameMessage(new AnimatorView(1, new byte[16], 0, 0, 0, 0, 0, 0, []));
+        Assert.Null(shell.World.Animator(1));
+        Assert.Contains("Fox has no Animator", editor.LiveWaiting);
+
+        // A view of an entity that has gone stays gone, and so does one that it had.
+        shell.OnGameMessage(View(1));
+        Assert.NotNull(shell.World.Animator(1));
+        shell.OnGameMessage(new EntityDelta([], [1]));
+        Assert.Null(shell.World.Animator(1));
+        shell.OnGameMessage(View(1));
+        Assert.Null(shell.World.Animator(1));
+
+        // Sending with no host is nothing, and so is a parameter with no live view.
+        editor.SetLiveParameter("speed", 1);
+
+        shell.Stop();
+        Assert.Null(editor.LiveWaiting);
+    }
+
+    [Fact]
+    public void AParametersSliderCoversWhatTheGraphComparesItWith()
+    {
+        var (shell, editor) = Open();
+        using var _ = shell;
+        // The blend's inputs are at 1 and 3, the conditions read 0.1 and 0.05, and 0 to 1 is the least.
+        Assert.Equal((0, 3), editor.RangeOf("speed", 0));
+        // What it holds now is in the range too.
+        Assert.Equal((0, 5), editor.RangeOf("speed", 5));
+        Assert.Equal((-2, 3), editor.RangeOf("speed", -2));
+        Assert.Equal((0, 1), editor.RangeOf("grounded", 1));
     }
 
     static PreviewResult Answer(string file, params (uint Line, string Text)[] problems) =>

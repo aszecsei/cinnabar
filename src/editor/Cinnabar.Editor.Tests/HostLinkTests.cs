@@ -321,6 +321,49 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task AWatchedFoxShowsItsStatesAndATriggerFromTheEditorMakesItLookAbout()
+    {
+        const string Graph = "71f3481642654d8590e42837f2565d58";
+        const string Walker = "behaviour 7c1653518e5744aaa99a52909dd7ab4a\n";
+        var root = EditorOptions.RepositoryRoot();
+        if (!File.Exists(Path.Combine(root, "build", "dev", "content", Graph + ".blob")))
+        {
+            Assert.Skip("the sample's content is not cooked");
+        }
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+
+        // The behaviour pulls the trigger itself a quarter of the way through a cycle: 3 seconds into the 12 that it has,
+        // and 15 into these. It reaches move's speed about 3.5 seconds in, so a look before long is the editor's.
+        var text = File.ReadAllText(Path.Combine(root, "samples", "mygame", "content", "scenes", "animation.scene")).ReplaceLineEndings("\n");
+        Assert.Contains(Walker, text);
+        var (scene, problems) = Document.SceneFile.Parse(text.Replace(Walker, Walker + "\tcycle = 60\n"));
+        Assert.Empty(problems);
+        var world = await Load(editor, scene!);
+        var fox = world.Entities.Single(e => e.Name == "Walking Fox").Entity;
+
+        editor.Link.Send(new WatchEntity(fox));
+        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        var idle = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 1);
+        Assert.Equal(Graph, Convert.ToHexStringLower(idle.Graph));
+        Assert.Equal(["speed", "look"], idle.Parameters.Select(p => p.Name));
+        Assert.Equal(AnimatorParameterKind.Trigger, idle.Parameters[1].Kind);
+
+        var move = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 2);
+        Assert.Equal(20u, move.Transition);
+        Assert.Equal(1u, move.Source);
+        Assert.True(move.Parameters[0].Value > 0.1f);
+
+        var pulled = System.Diagnostics.Stopwatch.StartNew();
+        editor.Link.Send(new SetAnimatorParameter(fox, "look", 1));
+        var look = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 3);
+        Assert.True(pulled.Elapsed < TimeSpan.FromSeconds(5), $"it took {pulled.Elapsed}, so it may be the behaviour's own");
+        Assert.Equal(22u, look.Transition);
+        Assert.Equal(0.25f, look.FadeDuration);
+    }
+
+    [Fact]
     public async Task TheHostProfilesItsFramesAndCapturesOne()
     {
         await using var editor = await Connect();

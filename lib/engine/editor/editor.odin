@@ -80,9 +80,9 @@ Known :: struct {
 
 @(private)
 Watched :: struct {
-	entity: ecs.Entity,
+	entity:        ecs.Entity,
 	// The hash of the values that the editor last got, or 0 to send them at the next chance.
-	sent:   u64,
+	sent:          u64,
 	// The same for its Animator's view, where 0 is also that the editor knows of none (see animators.odin).
 	animator_sent: u64,
 }

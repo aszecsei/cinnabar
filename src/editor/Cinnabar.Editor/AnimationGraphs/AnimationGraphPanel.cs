@@ -24,12 +24,14 @@ sealed class AnimationGraphPanel : ScrollViewer
     readonly EditorShell _shell;
     readonly AnimationGraphEditor _editor;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 4 };
+    readonly AnimatorLivePanel _live;
     string _shown = "";
 
     public AnimationGraphPanel(EditorShell shell, AnimationGraphEditor editor)
     {
         _shell = shell;
         _editor = editor;
+        _live = new AnimatorLivePanel(editor);
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         new ViewSubscriptions(this, attached: Refresh)
@@ -59,6 +61,7 @@ sealed class AnimationGraphPanel : ScrollViewer
         }
         _shown = shown;
         _content.Children.Clear();
+        _content.Children.Add(_live);
 
         _content.Children.Add(Heading("Graph"));
         _content.Children.Add(Row("Entry", Choice(_editor.StateNames, Graph.Entry, _editor.SetEntry)));

@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Media;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
@@ -40,6 +41,12 @@ public sealed class AnimationGraphCanvas : Control
     static readonly IBrush LinkBrush = new SolidColorBrush(Color.Parse("#D97AB5"));
     static readonly IPen LinkPen = new Pen(LinkBrush, 2);
     static readonly IBrush GlyphBody = new SolidColorBrush(Color.Parse("#323238"));
+    // The live view: what plays, what it fades from, and the transition between them.
+    static readonly Color LiveColor = Color.Parse("#5BC47F");
+    static readonly IBrush LiveBrush = new SolidColorBrush(LiveColor);
+    static readonly IPen LivePen = new Pen(LiveBrush, 3);
+    static readonly IBrush LastTakenBrush = new SolidColorBrush(LiveColor, 0.45);
+    static readonly IPen LastTakenPen = new Pen(LastTakenBrush, 2);
 
     enum Gesture
     {
@@ -78,7 +85,8 @@ public sealed class AnimationGraphCanvas : Control
         new ViewSubscriptions(this, attached: OnChanged)
             .Add(() => _editor.Changed += OnChanged, () => _editor.Changed -= OnChanged)
             .Add(() => _editor.SelectionChanged += InvalidateVisual, () => _editor.SelectionChanged -= InvalidateVisual)
-            .Add(() => _editor.ProblemsChanged += InvalidateVisual, () => _editor.ProblemsChanged -= InvalidateVisual);
+            .Add(() => _editor.ProblemsChanged += InvalidateVisual, () => _editor.ProblemsChanged -= InvalidateVisual)
+            .Add(() => _editor.LiveChanged += InvalidateVisual, () => _editor.LiveChanged -= InvalidateVisual);
     }
 
     void OnChanged()
@@ -140,11 +148,42 @@ public sealed class AnimationGraphCanvas : Control
             {
                 DrawGlyph(context, t, _editor.Selection.Contains(t.Node.Id), problems.Contains(t.Node.Id));
             }
+            if (_editor.Live is { } live)
+            {
+                DrawLive(context, live);
+            }
             DrawDrag(context);
         }
         if (_gesture == Gesture.Box)
         {
             context.DrawRectangle(BoxFill, BoxPen, new Rect(_start, _last).Normalize());
+        }
+    }
+
+    // The state that plays, with its progress through this play; the state that it fades from, by what is left of the
+    // fade; and the last transition that it took, bright during its fade. A node that the document does not have, as when
+    // it has changed since it cooked, has no place to show.
+    void DrawLive(DrawingContext context, AnimatorView view)
+    {
+        var fade = AnimationGraphEditor.FadeOf(view);
+        if (_geometry.FindTransition((int)view.Transition) is { } taken)
+        {
+            DrawArrow(context, taken, fade < 1 ? LivePen : LastTakenPen, fade < 1 ? LiveBrush : LastTakenBrush);
+            var g = taken.Glyph;
+            context.DrawRectangle(null, fade < 1 ? LivePen : LastTakenPen, new Rect(g.X, g.Y, g.Width, g.Height).Inflate(1), 10, 10);
+        }
+        if (fade < 1 && _geometry.Find((int)view.Source) is { } source)
+        {
+            var b = source.Bounds;
+            context.DrawRectangle(null, new Pen(new SolidColorBrush(LiveColor, 1 - fade), 3), new Rect(b.X, b.Y, b.Width, b.Height).Inflate(2), 6, 6);
+        }
+        if (_geometry.Find((int)view.State) is { } state)
+        {
+            var b = state.Bounds;
+            var pen = fade < 1 ? new Pen(new SolidColorBrush(LiveColor, fade), 3) : LivePen;
+            context.DrawRectangle(null, pen, new Rect(b.X, b.Y, b.Width, b.Height).Inflate(2), 6, 6);
+            var play = view.Progress - Math.Floor(view.Progress);
+            context.FillRectangle(LiveBrush, new Rect(b.X, b.Y + b.Height - 3, b.Width * play, 3));
         }
     }
 

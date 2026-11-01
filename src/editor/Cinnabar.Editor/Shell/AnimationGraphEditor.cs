@@ -1,7 +1,9 @@
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
+using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
+using Asset = Cinnabar.Editor.Link.Cook.Asset;
 
 namespace Cinnabar.Editor.Shell;
 
@@ -30,6 +32,9 @@ public sealed class AnimationGraphEditor : IGraphEditor
         Document = document;
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += GatherProblems;
+        _shell.World.AnimatorChanged += OnAnimatorChanged;
+        _shell.Selection.Changed += OnSelectionChanged;
+        _shell.ModeChanged += OnLiveChanged;
         GatherProblems();
     }
 
@@ -54,6 +59,9 @@ public sealed class AnimationGraphEditor : IGraphEditor
     public event Action? SelectionChanged;
 
     public event Action? ProblemsChanged;
+
+    /// <summary>What the selected entity's Animator plays changed, or the selection or the mode did.</summary>
+    public event Action? LiveChanged;
 
     public AnimationGraphGeometry Geometry() => AnimationGraphGeometry.Of(Document.Graph);
 
@@ -656,5 +664,91 @@ public sealed class AnimationGraphEditor : IGraphEditor
     {
         Document.Changed -= OnDocumentChanged;
         _shell.Assets.Changed -= GatherProblems;
+        _shell.World.AnimatorChanged -= OnAnimatorChanged;
+        _shell.Selection.Changed -= OnSelectionChanged;
+        _shell.ModeChanged -= OnLiveChanged;
+    }
+
+    // The live view: what the selected entity's Animator plays while the game runs.
+
+    void OnAnimatorChanged(ulong entity)
+    {
+        if (entity == _shell.Selection.Entity)
+        {
+            OnLiveChanged();
+        }
+    }
+
+    void OnSelectionChanged(IReadOnlyCollection<ulong> old, IReadOnlyCollection<ulong> entities) => OnLiveChanged();
+
+    void OnLiveChanged() => LiveChanged?.Invoke();
+
+    /// <summary>The selected entity's Animator, while the game runs, when it plays this graph.</summary>
+    public AnimatorView? Live =>
+        !_shell.IsEditing && _shell.World.Animator(_shell.Selection.Entity) is { } view && Convert.ToHexStringLower(view.Graph) == Guid ? view : null;
+
+    /// <summary>Why there is no live view while the game runs, or null in Edit or with one.</summary>
+    public string? LiveWaiting
+    {
+        get
+        {
+            if (_shell.IsEditing || Live != null)
+            {
+                return null;
+            }
+            var entity = _shell.Selection.Entity;
+            if (entity == 0 || _shell.World.Find(entity) is not { } node)
+            {
+                return "Select an entity whose Animator plays this graph.";
+            }
+            if (_shell.World.Animator(entity) is not { } view)
+            {
+                return $"{node.Name} has no Animator whose graph is ready.";
+            }
+            var guid = Convert.ToHexStringLower(view.Graph);
+            var graph = _shell.Assets.Find(guid) is { } asset ? Content.AssetIndex.DisplayName(asset) : guid;
+            return $"{node.Name} plays {graph}.";
+        }
+    }
+
+    /// <summary>How far a live view's fade is, from 0 to 1, which is 1 when it is over.</summary>
+    public static double FadeOf(AnimatorView view) =>
+        view.FadeDuration > 0 && view.Fade < view.FadeDuration ? Math.Clamp(view.Fade / view.FadeDuration, 0, 1) : 1;
+
+    /// <summary>Sets a parameter of the selected entity's Animator, as a script's Animation.set_float does: it lasts until something sets it again.</summary>
+    public void SetLiveParameter(string name, float value)
+    {
+        if (Live is { } view)
+        {
+            _shell.Host.Send(new SetAnimatorParameter(view.Entity, name, value));
+        }
+    }
+
+    /// <summary>
+    /// The range that a parameter's slider covers: what the graph compares it with, what its blends' inputs are at, and
+    /// what it holds now, from 0 to 1 at the least.
+    /// </summary>
+    public (double Min, double Max) RangeOf(string parameter, double value)
+    {
+        var numbers = new List<double> { 0, 1, value };
+        foreach (var node in File.Nodes)
+        {
+            if (node.Kind == AnimationGraphNodeKind.Blend1D && node.Get("parameter") == parameter)
+            {
+                numbers.AddRange(InputsOf(node).Select(i => GraphNumbers.TryParse(i.At ?? "") is { Values: [var at] } ? at : 0));
+            }
+            if (node.Kind == AnimationGraphNodeKind.Transition && node.Get("when") is { } when)
+            {
+                var words = when.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                for (var i = 0; i + 2 < words.Length; i++)
+                {
+                    if (words[i] == parameter && GraphNumbers.TryParse(words[i + 2]) is { Values: [var compared] })
+                    {
+                        numbers.Add(compared);
+                    }
+                }
+            }
+        }
+        return (numbers.Min(), numbers.Max());
     }
 }
