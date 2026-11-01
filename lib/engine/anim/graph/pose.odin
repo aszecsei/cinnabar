@@ -29,29 +29,43 @@ sample :: proc(clip_bytes: []byte, clip: ^format.Animation_Blob, time: f32, loca
 	times := format.animation_times(clip_bytes, clip)
 	values := format.animation_values(clip_bytes, clip)
 	for c in format.animation_channels(clip_bytes, clip) {
-		if int(c.joint) >= len(locals) {
-			continue
+		if int(c.joint) < len(locals) {
+			sample_channel(c, times, values, time, &locals[c.joint])
 		}
-		keys := times[c.first_key:][:c.key_count]
-		width := int(format.animation_path_width(c.path))
-		k, u := find_key(keys, time)
-		if c.interpolation == .Step {
-			u = 0
+	}
+}
+
+// sample_joint is sample for one joint, whose pose it replaces the animated parts of.
+sample_joint :: proc(clip_bytes: []byte, clip: ^format.Animation_Blob, joint: int, time: f32, pose: ^Joint_Pose) {
+	times := format.animation_times(clip_bytes, clip)
+	values := format.animation_values(clip_bytes, clip)
+	for c in format.animation_channels(clip_bytes, clip) {
+		if int(c.joint) == joint {
+			sample_channel(c, times, values, time, pose)
 		}
-		next := min(k + 1, len(keys) - 1)
-		a := values[int(c.first_value) + k * width:][:width]
-		b := values[int(c.first_value) + next * width:][:width]
-		l := &locals[c.joint]
-		switch c.path {
-		case .Translation:
-			l.translation = linalg.lerp([3]f32{a[0], a[1], a[2]}, [3]f32{b[0], b[1], b[2]}, u)
-		case .Scale:
-			l.scale = linalg.lerp([3]f32{a[0], a[1], a[2]}, [3]f32{b[0], b[1], b[2]}, u)
-		case .Rotation:
-			qa := quaternion(real = a[3], imag = a[0], jmag = a[1], kmag = a[2])
-			qb := quaternion(real = b[3], imag = b[0], jmag = b[1], kmag = b[2])
-			l.rotation = linalg.normalize(linalg.quaternion_slerp_f32(qa, qb, u))
-		}
+	}
+}
+
+@(private = "file")
+sample_channel :: proc(c: format.Animation_Channel, times, values: []f32, time: f32, l: ^Joint_Pose) {
+	keys := times[c.first_key:][:c.key_count]
+	width := int(format.animation_path_width(c.path))
+	k, u := find_key(keys, time)
+	if c.interpolation == .Step {
+		u = 0
+	}
+	next := min(k + 1, len(keys) - 1)
+	a := values[int(c.first_value) + k * width:][:width]
+	b := values[int(c.first_value) + next * width:][:width]
+	switch c.path {
+	case .Translation:
+		l.translation = linalg.lerp([3]f32{a[0], a[1], a[2]}, [3]f32{b[0], b[1], b[2]}, u)
+	case .Scale:
+		l.scale = linalg.lerp([3]f32{a[0], a[1], a[2]}, [3]f32{b[0], b[1], b[2]}, u)
+	case .Rotation:
+		qa := quaternion(real = a[3], imag = a[0], jmag = a[1], kmag = a[2])
+		qb := quaternion(real = b[3], imag = b[0], jmag = b[1], kmag = b[2])
+		l.rotation = linalg.normalize(linalg.quaternion_slerp_f32(qa, qb, u))
 	}
 }
 
