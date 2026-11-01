@@ -60,6 +60,8 @@ Instance :: struct {
 	// Seconds into the fade to the current state, and its length; the fade is over at its length.
 	fade:            f32,
 	fade_duration:   f32,
+	// The node ID of the last transition that it took, or 0, which an editor shows it by.
+	transition:      u32,
 	samples:         [MAX_SAMPLES]Sample,
 }
 #assert(size_of(Instance) <= 512)
@@ -369,6 +371,7 @@ take_transition :: proc(g: ^Graph, inst: ^Instance, t: format.Animation_Graph_Tr
 		inst.source, inst.source_progress = inst.state, inst.progress
 	}
 	inst.state = u16(t.to)
+	inst.transition = t.node
 	inst.progress = 0
 	inst.fade, inst.fade_duration = 0, t.duration
 	m := motion_of(g, inst.state)
