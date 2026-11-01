@@ -129,6 +129,18 @@ animation_graphs_parse_into_states_and_transitions :: proc(t: ^testing.T) {
 }
 
 @(test)
+an_unsaved_graphs_problems_name_its_file_and_its_lines :: proc(t: ^testing.T) {
+	problems := animation_graph_check(FOX_GRAPH, "C:/game/fox.animation_graph")
+	testing.expect_value(t, len(problems.list), 0)
+	problems = animation_graph_check("animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n", "C:/game/fox.animation_graph")
+	defer delete(problems.list)
+	testing.expect_value(t, len(problems.list), 2)
+	testing.expect_value(t, problems.list[0].file, "C:/game/fox.animation_graph")
+	testing.expect_value(t, problems.list[0].line, 2)
+	testing.expect_value(t, problems.list[1].line, 3)
+}
+
+@(test)
 the_animation_graph_template_parses :: proc(t: ^testing.T) {
 	g, problems := animation_graph_parse(ANIMATION_GRAPH_TEMPLATE, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)

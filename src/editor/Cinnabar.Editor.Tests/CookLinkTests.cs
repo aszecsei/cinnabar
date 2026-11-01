@@ -1,4 +1,5 @@
 using Cinnabar.Editor.Content;
+using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 
 namespace Cinnabar.Editor.Tests;
@@ -155,6 +156,42 @@ public sealed class CookLinkTests : IDisposable
         var broken = await session.CookPreview(red.Guid, Graph.Replace("@2.value", "@3.value"));
         Assert.NotEqual("", broken.Error);
         Assert.Equal(7u, Assert.Single(broken.Problems).Line);
+    }
+
+    [Fact]
+    public async Task TheDaemonChecksAnUnsavedAnimationGraphAndKeepsItsBlob()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        var fox = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "models", "fox", "fox.animation_graph"));
+        Write("fox.animation_graph", fox);
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.AnimationGraph && a.Status == AssetStatus.Current), session, []);
+        var asset = index.Assets.Values.Single(a => a.Kind == AssetKind.AnimationGraph);
+        var blob = Path.Combine(_dir, "cache", asset.Guid + ".blob");
+        var written = File.GetLastWriteTimeUtc(blob);
+
+        Assert.Equal("", (await session.CookPreview(asset.Guid, fox)).Error);
+
+        // A problem names the file and its line, so the editor finds the node, and the graph's blob stays.
+        var document = AnimationGraphFile.Parse(fox).File!;
+        document.Find(20)!.Set("to", "nowhere");
+        var broken = await session.CookPreview(asset.Guid, document.Text);
+        Assert.NotEqual("", broken.Error);
+        var problem = Assert.Single(broken.Problems);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_content, "fox.animation_graph")), Path.GetFullPath(problem.File), ignoreCase: true);
+        Assert.Equal(20, document.NodeAt((int)problem.Line));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(blob));
+
+        // An edit that the editor writes cooks.
+        document = AnimationGraphFile.Parse(fox).File!;
+        document.Find(1)!.SetPosition(40, 80);
+        Write("fox.animation_graph", document.Text);
+        await Until(() => File.GetLastWriteTimeUtc(blob) != written, session, []);
+        Assert.Equal(AssetStatus.Current, index.Assets[asset.Guid].Status);
     }
 
     [Fact]

@@ -247,6 +247,16 @@ animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (
 	return contents, found[:]
 }
 
+// animation_graph_check gives the problems of an animation graph's text that the editor has not saved, as a cook of the
+// file at this path would, and writes nothing.
+animation_graph_check :: proc(text, path: string) -> (problems: Problems) {
+	_, found := animation_graph_parse(text, context.temp_allocator)
+	for p in found {
+		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	return
+}
+
 // strip_comment is a line without a # and what follows it, outside of quotes.
 @(private = "file")
 strip_comment :: proc(line: string) -> string {

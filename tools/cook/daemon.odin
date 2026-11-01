@@ -247,7 +247,7 @@ handle_messages :: proc(d: ^Daemon) {
 			if connection != d.linked_connection {
 				continue
 			}
-			server_send(&d.server, connection, preview(d.options, msg), m.header.request)
+			server_send(&d.server, connection, preview(d, msg), m.header.request)
 		case:
 			if connection != d.linked_connection {
 				log.warnf("cook: cook link: the editor sent a message of kind %d before its Hello", m.header.kind)
@@ -276,15 +276,29 @@ handle_messages :: proc(d: ^Daemon) {
 	}
 }
 
-// preview cooks a material that the editor has not saved into the cache's preview area (see cook_preview). Its
-// problems go to the editor in the answer, and not to the log: the material editor shows them on its nodes.
+// preview cooks a material that the editor has not saved into the cache's preview area (see cook_preview), or checks an
+// animation graph that it has not saved, which writes nothing. Its problems go to the editor in the answer, and not to
+// the log: the graph's editor shows them on its nodes.
 @(private = "file")
-preview :: proc(options: Cook_Options, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
+preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
 	if !guid_ok {
 		return {error = fmt.tprintf("%q is not a GUID", msg.guid)}
 	}
-	problems, ok := cook_preview(options, guid, msg.text)
+	problems: Problems
+	ok: bool
+	if a, known := d.index.assets[msg.guid]; known && a.kind == .Animation_Graph {
+		path := a.path
+		for r in d.options.roots {
+			if r.name == a.root {
+				path = fmt.tprintf("%s/%s", r.dir, a.path)
+			}
+		}
+		problems = animation_graph_check(msg.text, path)
+		ok = len(problems.list) == 0
+	} else {
+		problems, ok = cook_preview(d.options, guid, msg.text)
+	}
 	result := cook_link.Preview_Result {
 		problems = make([]cook_link.Problem, len(problems.list), context.temp_allocator),
 	}
@@ -292,7 +306,7 @@ preview :: proc(options: Cook_Options, msg: cook_link.Cook_Preview) -> cook_link
 		result.problems[i] = {p.file, u32(p.line), u32(p.column), p.error, p.text}
 	}
 	if !ok {
-		result.error = "the material did not cook"
+		result.error = "the graph did not cook"
 		for p in problems.list {
 			if p.error {
 				result.error = p.text

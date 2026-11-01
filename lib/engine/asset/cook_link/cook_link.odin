@@ -417,16 +417,17 @@ Shading_Models :: struct {
 	models: []Shading_Model_Info,
 }
 
-// Editor to daemon: the text of a material that the editor has not saved, as a request. The daemon cooks it as the
-// material with this GUID, into the preview area of the cache, <cache>/dev/preview/<guid>.blob, which the host's
-// previews load. The material's own blob does not change. A Preview_Result with the request's ID answers it.
+// Editor to daemon: the text of a material or an animation graph that the editor has not saved, as a request. The
+// daemon cooks a material as the material with this GUID, into the preview area of the cache,
+// <cache>/dev/preview/<guid>.blob, which the host's previews load, and only checks a graph, which writes nothing. The
+// asset's own blob does not change. A Preview_Result with the request's ID answers it.
 Cook_Preview :: struct {
 	guid: string,
 	text: string,
 }
 
-// Daemon to editor: the answer to a Cook_Preview. error is "" when the preview cooked, and problems are its errors and
-// warnings, with the lines of the text that it was given.
+// Daemon to editor: the answer to a Cook_Preview. error is "" when the text cooked or checked out, and problems are its
+// errors and warnings, with the lines of the text that it was given.
 Preview_Result :: struct {
 	error:    string,
 	problems: []Problem,
