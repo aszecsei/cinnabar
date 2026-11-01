@@ -43,11 +43,12 @@ struct Meshlet {
 
 // The meshlets that an amplification group launches, and its instance's poses, this frame's and last frame's, which
 // the group places once, an instanced draw's from its entity's and its own, so neither its threads nor its mesh
-// groups' do it again.
+// groups' do it again, and the instance ID, which the visibility pass writes.
 struct Cluster_Payload {
 	uint meshlets[MESHLETS_PER_GROUP];
 	float4 rows[3];
 	float4 previous_rows[3];
+	uint instance_id;
 };
 
 groupshared Cluster_Payload cluster_payload;
@@ -123,6 +124,7 @@ void as_cluster(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	}
 	if (thread == 0) {
 		cluster_count = 0;
+		cluster_payload.instance_id = instance_id;
 		if (listed) {
 			Instance_Record placed = draw_instance(d, instance_id);
 			for (uint k = 0; k < 3; k++) {

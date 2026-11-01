@@ -94,9 +94,9 @@ displacing_materials_compile_every_pass_and_keep_their_bound :: proc(t: ^testing
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		// The same passes as any opaque material, the mesh shader path's, the impostor path's and the hit pass
-		// included, which all but the impostor's and the hit pass place vertices with the displacement.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 18)
+		// The same passes as any opaque material, the mesh shader path's, the impostor path's, the visibility buffer's
+		// and the hit pass included, which all but the impostor's and the hit pass place vertices with the displacement.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 22)
 		testing.expect(t, .Displaces in blob.flags)
 		testing.expect(t, .Reads_Time in blob.flags)
 		testing.expect_value(t, blob.displacement_bound, 0.5)
@@ -140,6 +140,7 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 		// path; no amplification or mesh stages, no impostor passes, and no hit pass, since rays see no patches.
 		testing.expect_value(t, len(format.material_variants(data, blob)), 5)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Shade, .Compute) == nil)
 		testing.expect(t, .Patches in blob.flags)
 		testing.expect(t, .Displaces in blob.flags)
 		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Amplification) == nil)
@@ -190,19 +191,22 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 	if ok {
 		// The material's own switches (none) and its instances' (use_albedo): two variants, each with the forward
 		// pass's and the prepass's two stages, an opaque depth pass's vertex stage, the mesh shader path's
-		// amplification and mesh stages of each of the three, the impostor path's two stages of each, and the hit
-		// pass's compute stage.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 36)
+		// amplification and mesh stages of each of the three, the impostor path's two stages of each, the visibility
+		// pass's amplification, mesh and pixel stages, the visibility buffer's shading's compute stage, and the hit pass's
+		// compute stage.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 44)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Forward, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Prepass, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) == nil)
-		for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
+		for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth, .Visibility}) {
 			testing.expect(t, format.material_code(data, blob, 1, pass, .Amplification) != nil)
 			testing.expect(t, format.material_code(data, blob, 1, pass, .Mesh) != nil)
 		}
+		testing.expect(t, format.material_code(data, blob, 1, .Visibility, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 1, .Shade, .Compute) != nil)
 		testing.expect_value(t, blob.default_switches, 0)
 		// tint, roughness, then the albedo's index: 16 + 4 + 4 bytes, in a block of 32.
 		testing.expect_value(t, len(format.blob_bytes(data, blob.block)), 32)
@@ -290,8 +294,11 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 	data := tree_blob(t, tree, tree_guid(t, tree, "leaf.material"))
 	if blob, ok := format.material_view(data); ok {
 		// The shadow maps discard where the opacity is below the cutoff, so the depth pass has a pixel stage too. Rays
-		// evaluate it as well, and its hit pass marks the holes.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 19)
+		// evaluate it as well, and its hit pass marks the holes. Its visibility pass discards too, so the visibility
+		// buffer has only its opaque pixels.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 23)
+		testing.expect(t, format.material_code(data, blob, 0, .Visibility, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Shade, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
@@ -326,8 +333,10 @@ transparent_materials_cook_their_transparent_passes_only :: proc(t: ^testing.T) 
 		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Vertex) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Prepass, .Vertex) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Vertex) == nil)
-		// Rays pass through no transparent surface, so the fallback shades its hits.
+		// Rays pass through no transparent surface, so the fallback shades its hits. Nor is it in the visibility buffer.
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Visibility, .Mesh) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Shade, .Compute) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Transparent, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Transparent_Ids, .Pixel) != nil)
 		testing.expect(t, .Cast_Shadows not_in blob.flags)
@@ -468,8 +477,8 @@ ribbon_materials_draw_ribbons :: proc(t: ^testing.T) {
 	expect_error(t, &errors, "trail.material:3: a ribbon material's blend is transparent or additive")
 }
 
-// A billboard draws its meshes with vertex pulling only: the opaque passes' stages, without the mesh shader path's or
-// the impostor path's. An axis billboard is a billboard too.
+// A billboard draws its meshes with vertex pulling only: the opaque passes' stages, without the mesh shader path's, the
+// impostor path's or the visibility buffer's. An axis billboard is a billboard too.
 @(test)
 billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
 	evaluate := "---\nSurface evaluate(Material_Inputs inputs) {\n\tSurface s = default_surface();\n\ts.base_color = inputs.uv0.xyx;\n\treturn s;\n}\n"
@@ -509,6 +518,7 @@ billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
 		testing.expect_value(t, blob.flags & {.Billboard, .Billboard_Axis}, c.flags)
 		testing.expect(t, format.material_code(data, blob, 0, .Forward, .Mesh) == nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Impostor_Forward, .Vertex) == nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Shade, .Compute) == nil)
 		// Rays see the billboard's mesh as authored, unturned.
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 	}

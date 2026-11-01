@@ -25,6 +25,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
+| `visibility_buffer` | `bool` | Shade the mesh shader path's opaque surfaces from the [visibility buffer](lighting-and-shadows.md#visibility-buffer), a prototype to measure. No preset turns it on, and it is not a saved key; the editor's viewport turns it on. Needs `mesh_shaders` |
 
 - **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
 - **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
@@ -65,7 +66,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 `Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, `mesh_shaders`, which the [mesh shader path](gpu-scene.md#mesh-shader-path) needs, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
 
 - **Defaults:** `default_quality(caps)` picks a preset by the video memory: Low below 4 GiB, Medium below 6 GiB, High below 10 GiB, Ultra above, and High when the memory is unknown, as on an adapter that shares the CPU's.
-- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives the screen cascades for the split cascades without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
+- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives the screen cascades for the split cascades without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, turns the visibility buffer off without `mesh_shaders`, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
 - `CINNABAR_DISABLE_FEATURES=Ray_Query` hides the feature, as it does everywhere, to try the fallback on hardware that has it.
 
 ## Changing quality while the game runs

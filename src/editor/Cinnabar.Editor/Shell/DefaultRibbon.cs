@@ -77,6 +77,7 @@ static class DefaultRibbon
                         new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
                         new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
                         new SmallStack([EditorCommands.OcclusionCulling, EditorCommands.MeshletHierarchy]),
+                        new SmallStack([EditorCommands.ShadingStats, EditorCommands.VisibilityBuffer]),
                         new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
                     ]),
                     new RibbonGroup("Quality",

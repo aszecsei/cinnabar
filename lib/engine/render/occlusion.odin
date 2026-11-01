@@ -308,6 +308,7 @@ add_occlusion_passes :: proc(f: ^Frame) {
 	color(g, p, f.velocity, .Load)
 	depth(g, p, f.depth, .Load)
 	declare_scene_draws(f, p)
+	add_visibility_pass(f, late = true)
 }
 
 // Hzb_Step is a pyramid level's pass's data, in frame memory.

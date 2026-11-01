@@ -50,7 +50,8 @@ void ms_prepass(
 	}
 }
 
-Prepass_Targets ps_prepass(Prepass_Varyings i, bool front : SV_IsFrontFace) {
+// prepass_targets is what the prepass writes at a pixel, which the visibility pass writes too.
+Prepass_Targets prepass_targets(Prepass_Varyings i, bool front) {
 	Material_Inputs inputs = material_inputs(i.v, front);
 	Surface s = evaluate(inputs);
 #if MATERIAL_MASKED
@@ -62,6 +63,10 @@ Prepass_Targets ps_prepass(Prepass_Varyings i, bool front : SV_IsFrontFace) {
 	float2 previous = i.previous.xy / i.previous.w;
 	o.velocity = (current - previous) * float2(0.5, -0.5);
 	return o;
+}
+
+Prepass_Targets ps_prepass(Prepass_Varyings i, bool front : SV_IsFrontFace) {
+	return prepass_targets(i, front);
 }
 
 #endif

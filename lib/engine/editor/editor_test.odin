@@ -809,11 +809,12 @@ the_viewports_settings_reach_the_frame_while_an_editor_is_linked :: proc(t: ^tes
 
 	step(f)
 	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
-	step(f, 1, link.Viewport_Settings{debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5})
+	step(f, 1, link.Viewport_Settings{debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5, shading_stats = true})
 	o := render_overrides(&f.editor)
 	testing.expect_value(t, o.debug_view, render.Debug_View.Normals)
 	testing.expect_value(t, o.disable, render.Features{.Bloom, .Shadows})
 	testing.expect_value(t, o.exposure_offset, -1.5)
+	testing.expect(t, o.shading_stats)
 	// Without an editor, the frame is the game's own.
 	step(f, 0)
 	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
@@ -851,6 +852,13 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	renderer.caps = {}
 	q, _ = viewport_quality(&f.editor, renderer)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
+	// The visibility buffer is the viewport's choice alone, with mesh shaders.
+	step(f, 1, link.Viewport_Settings{visibility_buffer = true})
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok && !q.visibility_buffer)
+	renderer.caps = {mesh_shaders = true}
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect(t, q.visibility_buffer)
 	step(f, 0)
 	_, ok = viewport_quality(&f.editor, renderer)
 	testing.expect(t, !ok, "without an editor, the game's quality")

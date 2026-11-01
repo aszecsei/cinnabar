@@ -5,6 +5,8 @@
 //   editorctl [--automation <file>] [--json] status
 //   editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--out <path>]
 //   editorctl [--automation <file>] [--json] gif [--out <path>]
+//   editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
+//   editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 package editorctl
 
 import "base:runtime"
@@ -13,6 +15,7 @@ import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
 import win "core:sys/windows"
 
@@ -25,20 +28,33 @@ STILL_ACTIVE :: 259
 // A response longer than this is not read.
 MAX_RESPONSE :: 1 << 20
 
+// Setting is a viewport setting's value: a boolean, a number or a string.
+Setting :: json.Value
+
 Options :: struct {
 	command:    string,
 	views:      [dynamic]string,
 	out:        string,
 	automation: string,
 	json:       bool,
+	// viewport's settings by their sidecar names, each a boolean, a number or a string, and camera's position in
+	// meters and its angles in radians.
+	settings:   map[string]Setting,
+	position:   []f64,
+	yaw:        Maybe(f64),
+	pitch:      Maybe(f64),
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
 Request :: struct {
-	id:      i64 `json:"id"`,
-	command: string `json:"command"`,
-	views:   []string `json:"views"`,
-	path:    string `json:"path"`,
+	id:       i64 `json:"id"`,
+	command:  string `json:"command"`,
+	views:    []string `json:"views"`,
+	path:     string `json:"path"`,
+	settings: map[string]json.Value `json:"settings"`,
+	position: []f64 `json:"position"`,
+	yaw:      Maybe(f64) `json:"yaw"`,
+	pitch:    Maybe(f64) `json:"pitch"`,
 }
 
 // Status matches AutomationStatus.
@@ -72,7 +88,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>]",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]",
 		)
 		os.exit(2)
 	}
@@ -145,6 +161,35 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		case arg == "--out" && i + 1 < len(args):
 			o.out = args[i + 1]
 			i += 1
+		case arg == "--set" && i + 1 < len(args):
+			name, _, value := strings.partition(args[i + 1], "=")
+			if name == "" || value == "" {
+				return o, fmt.tprintf("--set takes <name>=<value>, not %s", args[i + 1])
+			}
+			o.settings[name] = setting_value(value)
+			i += 1
+		case arg == "--position" && i + 1 < len(args):
+			parts := strings.split(args[i + 1], ",", context.temp_allocator)
+			o.position = make([]f64, len(parts), context.temp_allocator)
+			for part, k in parts {
+				v, ok := strconv.parse_f64(strings.trim_space(part))
+				if !ok || len(parts) != 3 {
+					return o, fmt.tprintf("--position takes three numbers, x,y,z in meters, not %s", args[i + 1])
+				}
+				o.position[k] = v
+			}
+			i += 1
+		case (arg == "--yaw" || arg == "--pitch") && i + 1 < len(args):
+			v, ok := strconv.parse_f64(args[i + 1])
+			if !ok {
+				return o, fmt.tprintf("%s takes radians, not %s", arg, args[i + 1])
+			}
+			if arg == "--yaw" {
+				o.yaw = v
+			} else {
+				o.pitch = v
+			}
+			i += 1
 		case strings.has_prefix(arg, "--"):
 			return o, fmt.tprintf("unknown or incomplete option %s", arg)
 		case o.command == "":
@@ -154,19 +199,43 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif":
+	case "status", "screenshot", "gif", "viewport", "camera":
 	case "":
-		return o, "no command: status, screenshot or gif"
+		return o, "no command: status, screenshot, gif, viewport or camera"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot or gif", o.command)
+		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport or camera", o.command)
+	}
+	if (len(o.settings) > 0) != (o.command == "viewport") {
+		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport"
+	}
+	camera_options := o.position != nil || o.yaw != nil || o.pitch != nil
+	if o.command == "camera" && o.position == nil {
+		return o, "camera takes --position <x>,<y>,<z>"
+	}
+	if camera_options && o.command != "camera" {
+		return o, "--position, --yaw and --pitch go with camera"
 	}
 	if len(o.views) > 0 && o.command != "screenshot" {
 		return o, "--view goes with screenshot"
 	}
-	if o.out != "" && o.command == "status" {
+	if o.out != "" && o.command != "screenshot" && o.command != "gif" {
 		return o, "--out goes with screenshot or gif"
 	}
 	return o, ""
+}
+
+// setting_value is a --set value as JSON: true or false, a number, or else a string, such as a debug view's name.
+setting_value :: proc(text: string) -> json.Value {
+	switch text {
+	case "true":
+		return json.Boolean(true)
+	case "false":
+		return json.Boolean(false)
+	}
+	if v, ok := strconv.parse_f64(text); ok {
+		return json.Float(v)
+	}
+	return json.String(text)
 }
 
 // find_automation_file walks up from start_dir to the directory with the root marker, and gives the automation file
@@ -228,10 +297,14 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		}
 	}
 	request := Request {
-		id      = id,
-		command = o.command,
-		views   = o.views[:],
-		path    = path,
+		id       = id,
+		command  = o.command,
+		views    = o.views[:],
+		path     = path,
+		settings = o.settings,
+		position = o.position,
+		yaw      = o.yaw,
+		pitch    = o.pitch,
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)

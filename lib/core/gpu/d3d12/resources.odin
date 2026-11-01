@@ -669,6 +669,8 @@ view_format :: proc(format: gpu.Format) -> dxgi.FORMAT {
 		return .R32G32_FLOAT
 	case .RGBA32_Float:
 		return .R32G32B32A32_FLOAT
+	case .RGBA32_Uint:
+		return .R32G32B32A32_UINT
 	case .D32_Float:
 		return .D32_FLOAT
 	case .D32_Float_S8_Uint:

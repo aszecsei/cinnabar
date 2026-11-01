@@ -72,6 +72,11 @@ Material_Pass :: enum u32 {
 	// A compute stage that evaluates the material at ray hits, for the ray scene's hit shading (see
 	// docs/rendering/ray-scene.md#hit-shading). An opaque or masked material of meshes has it.
 	Hit,
+	// The visibility buffer's passes (see docs/rendering/lighting-and-shadows.md#visibility-buffer): the mesh shader
+	// path's prepass that also writes each pixel's cluster and triangle, and a compute stage that shades the pixels of
+	// the material's clusters from it. An opaque or masked material of meshes that is not a billboard has them.
+	Visibility,
+	Shade,
 }
 
 // material_impostor_pass is the impostor path's pass that stands in for an opaque pass.

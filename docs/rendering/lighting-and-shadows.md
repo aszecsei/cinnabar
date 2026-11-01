@@ -1,8 +1,8 @@
 # Lighting and shadows
 
-Why the renderer is clustered forward with a prepass, the prepass's outputs, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps or traced masks.
+Why the renderer is clustered forward with a prepass, the prepass's outputs, the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows)
 
 ## Clustered forward
 
@@ -20,6 +20,43 @@ The renderer has one shading path: forward shading with a prepass.
 - **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
 - The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
 - The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
+
+### Visibility buffer
+
+A visibility buffer writes each pixel's triangle in a pass of its own, then shades the pixels in compute, so no pixel shader runs on the 2x2 quads that small triangles leave mostly empty (see Burns and Hunt in the [References](README.md#references)). The renderer has one as a prototype on the [mesh shader path](gpu-scene.md#mesh-shader-path), to measure it against the forward pass. `Quality.visibility_buffer` turns it on, and no preset does: the editor's viewport toggle Visibility Buffer does (see [Quality](quality.md#quality)). The decision is in the README's [Decisions](README.md#decisions): clustered forward stays the shading path.
+
+**How it draws** (`lib/engine/render/visibility.odin`):
+
+- **Which bins.** The camera's opaque bins on the mesh shader path whose pipelines have the visibility passes compiled (`begin_visibility`, `Scene_Frame.bin_visibility`). The view model, impostors, billboards, patches, particles, transparent surfaces and a game's own draws stay forward. A material makes its visibility pipelines only after a frame first asks for them, and no bin waits for them.
+- **The visibility pass,** after the prepass, and a late one after the late prepass, draws those bins in place of the prepass with each material's `Visibility` pass (see [Materials](materials.md#permutations)). It writes the prepass's normal and velocity, and `VISIBILITY_FORMAT`, an `RGBA32_Uint` target: the draw's index plus 1, the instance ID, the meshlet, and the triangle with whether it is a front face and the pipeline that drew it. The mesh shader gives these to each triangle as a per-primitive attribute, and the amplification shader's payload carries the instance ID. A masked material discards as in its prepass.
+- **The stencil** keeps the two paths apart. The visibility pass draws with `VISIBILITY_STENCIL` (bit 2) as its reference and sets it. Every other prepass draw clears it, so a pixel that a later draw covers is the forward pass's. The forward pass tests both bits, so it skips the visibility buffer's pixels. Nothing else reads bit 2.
+- **Binning** (`visibility_bin.hlsl`): four compute passes, as hit shading's: clear, count, offsets, scatter. Each 2x2 quad goes into the bin of each pipeline that one of its pixels has, at most four, and each bin's dispatch is indirect.
+- **Shading** (`material_shade.hlsli`, the material's `cs_shade`): a pass clears the scene's colors and IDs, and each pipeline shades its bin, 16x16 threads a group, a 2x2 quad of threads for each quad of pixels. A thread rebuilds its pixel's triangle with `place_vertex`, as the mesh shaders place it, and takes its barycentrics where the camera's ray through the pixel's center meets the triangle's plane, which is the rasterizer's perspective-correct interpolation. It fills `Material_Inputs` as the forward pass does, runs `evaluate`, and shades with `forward_color_at`, the forward pass's lighting, at the prepass's depth. It writes the color and the entity's ID. The world pass then loads both and draws the rest.
+- **Derivatives.** A pixel of the quad that is not the material's takes the quad's first triangle of the material, so where one triangle covers the quad, `ddx` and `ddy` of the real UV are exact. Where two triangles of the material share the quad, the quad is mixed, and `cn_sample` takes the analytic derivatives of `uv0` at the pixel instead, from the barycentrics a pixel to the right and a pixel down. These are wrong for a material that scales or computes its UVs, or samples with `uv1`, in mixed quads only.
+
+**Measuring.** The forward pass counts its quads when the frame asks (`Frame_Desc.shading_stats`, the viewport's Shading Stats): a lane of each quad adds to the quad's count for the `Quad_Overdraw` view, and each wave adds its quads and its pixels to `Shading_Stats`, which comes back as the culling stats do. The pixels over four times the quads are the quads' efficiency, and the rest are helper lanes. The shading counts the same, and its mixed quads. The forward pixel shader has `[earlydepthstencil]`, which writes no depth, so only the pixels that it shades count. The editor shows the counts in the Resource Monitor, and a capture's sidecar has each pass's GPU time (see [Capture](../editor/capture.md#sidecar)). `editorctl`'s `viewport` and `camera` commands set the mode and the view, so a script measures each view in each mode (see [Capture](../editor/capture.md#editorctl)).
+
+**Measurements.** On an RTX 5090 at 1320x800, High quality with temporal AA, in the Intel sample (see `samples/intel/README.md`). Each value is the median of five captures, or three for Jungle Ruins, at least two runs each. The pass times are the profiler's GPU spans, which can overlap their neighbours (see [Profiling](../core/profiling.md#gpu-timestamps)). The forward pass's cost is its prepass and world pass; the visibility buffer's is what is left of the prepass, the visibility passes, the binning, the shading and what is left of the world pass.
+
+| View | Forward quad efficiency | Visibility buffer's mixed quads | Forward prepass + world (ms) | Visibility buffer: visibility + binning + shading + world (ms) | GPU frame, forward → visibility buffer (ms) |
+|---|---|---|---|---|---|
+| S1: Sponza's nave, the scene's camera | 56 % | 45 % | 0.13 + 0.14 | 0.23–0.25 + 0.09 + 0.11 | 4.23 → 4.46–4.73 |
+| S2: Sponza's upper gallery, looking down | 59 % | 36 % | 0.12 + 0.13 | 0.22 + 0.11 + 0.11 | 3.99–4.10 → 4.23–4.64 |
+| S3: Sponza's outer wall, large triangles | 99 % | 1 % | 0.06 + 0.06 | 0.11 + 0.04 + 0.06 | 2.10 → 2.14–2.22 |
+| S4: Sponza's curtains, close | 59 % | 43 % | 0.07 + 0.08 | 0.10 + 0.07 + 0.10 | 3.89–3.93 → 4.08–4.14 |
+| J1: Jungle Ruins, the scene's camera | 33 % | 60 % | 21.1–31.7 + 20.1–27.0 | 39.5–39.8 + 0.24 + 0.18 + 2.5 | 46.3–63.6 → 47.2–47.6 |
+| J2: Jungle Ruins' ground cover, close | 35 % | 59 % | 6.3–8.4 + 6.8–8.0 | 9.6–10.1 + 0.29 + 0.27 + 2.2 | 17.9–21.1 → 17.2–17.6 |
+| J3: Jungle Ruins from above | 30 % | 57 % | 96–150 + 90–126 | 182–183 + 0.29 + 0.18 + 2.8 | 190.9–280.6 → 190.2–191.0 |
+
+What they show:
+
+- **Quad overdraw is real.** The forward pass's lanes are 30 to 60 % helper lanes wherever triangles are small: Sponza's curtains and Jungle Ruins' foliage, at the level of detail's 1 pixel of error. The visibility buffer shades 1.6 to 2.1 times fewer quads there.
+- **Shading is not where the frame's time goes.** In Sponza, the forward pass's world pass is 0.08 to 0.14 ms. The visibility buffer's shading of the same pixels is 0.06 to 0.11 ms, a fifth cheaper on the nave and dearer on the curtains, where it rebuilds a triangle for each pixel. The binning adds 0.04 to 0.12 ms, so the shading as a whole is not cheaper.
+- **The visibility pass costs more than the prepass that it replaces:** 1.5 to 2 times the prepass of the same bins in Sponza and in Jungle Ruins' faster runs. Writing constants in place of the per-primitive IDs costs the same, so the IDs' attribute is not the cause; the extra 16-byte target and the pass's own work are what is left. So every Sponza view is 2 to 12 % slower with the visibility buffer.
+- **Jungle Ruins is bound by geometry,** and there the forward pass draws its millions of meshlets twice, once in the prepass and once in the world pass. The visibility buffer draws them once, but its visibility pass costs about as much as both. The frame is the same as the forward pass's best runs and up to a third faster than its slowest. The forward pass's times on Jungle Ruins came in two groups from one run to the next, with the same draws and the same image; the visibility buffer's did not. The cause is not known.
+- **Mixed quads are common:** 36 to 45 % of the visibility buffer's quads in Sponza's dense views and 57 to 60 % in Jungle Ruins. Their samples take `uv0`'s analytic derivatives, so the dense foliage's texture levels differ a little from the forward pass's: it is slightly greyer. Sponza's images match the forward pass's.
+
+**The decision.** Clustered forward stays the shading path. The visibility buffer removes the quad overdraw, but in these scenes the overdraw is not the cost: Sponza's shading is a tenth of a millisecond, and Jungle Ruins' frame is its geometry. The prototype stays behind its toggle, off, with the measurements, so the comparison can be made again on new content or hardware. It is worth another look when a visibility pass costs no more than the prepass, or when content is bound by the forward pass's second pass over the geometry, which a cheaper geometry pass would help either way.
 
 ### Lights and clusters
 

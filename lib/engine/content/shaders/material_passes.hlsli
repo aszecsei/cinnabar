@@ -2,10 +2,14 @@
 // ps_forward, vs_prepass and ps_prepass, and vs_depth, with ps_depth for a masked material. On the mesh shader path,
 // as_cluster with ms_forward, ms_prepass and ms_depth take the vertex shaders' places. A transparent or additive
 // material has ps_transparent and ps_transparent_ids instead, and a transparent one ps_moments, all with vs_forward.
-// An opaque material of meshes has the impostor path's too, vs_impostor_* and ps_impostor_* for each opaque pass. An
-// opaque or masked material of meshes has cs_hit, which compiles with MATERIAL_HIT and nothing else.
+// An opaque material of meshes has the impostor path's too, vs_impostor_* and ps_impostor_* for each opaque pass, and
+// the visibility buffer's, as_cluster with ms_visibility and ps_visibility, which compile with MATERIAL_VISIBILITY, and
+// cs_shade, which compiles with MATERIAL_SHADE and the forward template alone. An opaque or masked material of meshes
+// has cs_hit, which compiles with MATERIAL_HIT and nothing else.
 #if MATERIAL_HIT
 #include "material_hit.hlsli"
+#elif MATERIAL_SHADE
+#include "material_shade.hlsli"
 #else
 #include "material_forward.hlsli"
 #include "material_prepass.hlsli"
@@ -14,5 +18,6 @@
 #include "material_transparent.hlsli"
 #elif !MATERIAL_PATCHES && !MATERIAL_BILLBOARD
 #include "material_impostor.hlsli"
+#include "material_visibility.hlsli"
 #endif
 #endif

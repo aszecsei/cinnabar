@@ -43,6 +43,7 @@ Beside every capture the editor writes `<name>.json`, so an image can be read ba
 | `context.camera` | The editor's camera: the raw `World_Position`, the same in meters, the yaw and pitch in radians, the vertical field of view and the near plane |
 | `context.settings` | The viewport's `Viewport_Settings`: the debug view, the features turned off, the exposure, the helpers and the quality choices |
 | `context.hostStats`, `gameStats` | The last `Host_Stats` and `Game_Stats`: frame times, memory, resource counts, entities and script memory |
+| `context.profile` | The last `Profile_Summary`: the CPU and GPU frame times, and each system's, script's and render pass's cost, the passes' GPU milliseconds among them (see [Profiling](../core/profiling.md#gpu-timestamps)) |
 | `context.game`, `hostPid`, `hostArguments`, `editorPid` | Which game, which processes |
 
 In play mode the camera is the game's, which the sidecar does not have; `freeCamera` says whether the editor's camera was the one drawn.
@@ -59,6 +60,8 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 | `status` | | `status`: `linked`, `hostState`, `mode`, `scene`, `game`, `hostPid` |
 | `screenshot` | `views`: debug view names; `path`: the PNG's path, absolute | `files`: the images, then the sidecar |
 | `gif` | `path`: the GIF's path, absolute | `files`: the GIF, then the sidecar |
+| `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"visibilityBuffer":true}` | `ok`, or an error that names the settings |
+| `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out | `ok` |
 
 ```
 {"id":1,"command":"screenshot","views":["depth","normals"]}
@@ -75,8 +78,10 @@ A capture that fails answers `ok` false with the reason in `error`, and still li
 editorctl [--automation <file>] [--json] status
 editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--out <path>]
 editorctl [--automation <file>] [--json] gif [--out <path>]
+editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
+editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 ```
 
-It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.
+A `--set` value of `true` or `false` is a boolean, a number is a number, and anything else a string, such as a debug view's name, `QuadOverdraw`. With `viewport` and `camera`, a script measures the same view in each mode: the sidecar's `context.profile` has the passes' times. It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.
 
 An LLM tool working in the repository uses it like this: with the editor open, `just screenshot --view depth` writes the lit frame, the depth view and the sidecar and prints their paths; the tool reads the sidecar for the frame, the camera, the mode and the stats, and the images to look at them. `just gif` shows motion over the last five seconds. `build/tools/editorctl.exe status --json` says whether a host is linked before asking.

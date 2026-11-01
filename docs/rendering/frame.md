@@ -34,6 +34,7 @@ flowchart TB
     DEBUG --> OUT
 ```
 
+- **With the visibility buffer,** which the quality turns on, a visibility pass follows the prepass, and a late one the late prepass. Before the world pass, a pass clears the scene's colors and IDs, the visibility buffer's quads are binned by material, and each material shades its bin. The world pass then loads the scene's colors and IDs, and draws the rest (see [Visibility buffer](lighting-and-shadows.md#visibility-buffer)).
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - With a feature that traces, such as traced shadows, the frame builds the ray scene's acceleration structures after the culling and before the prepass, so every pass after can trace them (see [Ray scene](ray-scene.md#ray-scene)). The global illumination's [world probes](global-illumination.md#world-probes) update after the prepass, on the compute queue, before the cascades, which read them.
 - The ambient occlusion and the global illumination run on the compute queue (see [GPU](../gpu/queues-streaming-readback.md#queues)). They depend only on the prepass and on textures from last frame, so they overlap with the light clusters and the shadow maps. The clusters, the fog volume and the exposure run on the graphics queue: the fog reads the shadow maps, which are drawn just before it, and the exposure is explained in [Post-processing](post-processing.md#post-processing).

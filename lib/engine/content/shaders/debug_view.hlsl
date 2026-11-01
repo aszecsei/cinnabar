@@ -28,6 +28,7 @@ static const uint DEBUG_ENTITY_IDS = 15;
 static const uint DEBUG_LUMINANCE = 16;
 static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 static const uint DEBUG_GI_PROBES = 21;
+static const uint DEBUG_QUAD_OVERDRAW = 22;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -35,6 +36,8 @@ static const float VELOCITY_NONE = 1000;
 static const float DEPTH_FAR = 1000;
 // The transparent overdraw view's count of layers at its hottest color.
 static const float OVERDRAW_HIGH = 8;
+// The quad overdraw view's count of quads at its hottest color.
+static const float QUADS_HIGH = 4;
 // The luminance view's range of EV100, which its heat colors span.
 static const float EV_LOW = -4;
 static const float EV_HIGH = 16;
@@ -117,6 +120,18 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		float3 scene = max(cn_texture(push.source).Load(pixel).rgb, 0) / max(exposure, 1e-12);
 		float luminance = dot(scene, float3(0.2126, 0.7152, 0.0722));
 		color = luminance > 0 ? heat((log2(luminance * 8) - EV_LOW) / (EV_HIGH - EV_LOW)) : 0;
+		break;
+	}
+	case DEBUG_QUAD_OVERDRAW: {
+		// A texel for each 2x2 quad: the quads that shaded it in its low 16 bits, and the visibility buffer's quads with
+		// two triangles above them (see render.QUAD_COUNT_FORMAT).
+		Texture2D<uint> counts = ResourceDescriptorHeap[push.source];
+		uint count = counts.Load(int3(id.xy / 2, 0));
+		uint quads = count & 0xffff;
+		color = quads > 0 ? heat((quads - 1) / (QUADS_HIGH - 1)) : 0;
+		if (count >> 16 != 0) {
+			color = lerp(color, float3(1, 0, 1), 0.6);
+		}
 		break;
 	}
 	case DEBUG_TRANSPARENT_OVERDRAW: {

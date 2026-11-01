@@ -87,6 +87,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		gpu_destroy_buffer           = null.destroy_buffer,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
 		gpu_create_buffer            = null.create_buffer,
+		gpu_read_buffer              = null.read_buffer,
 		gpu_create_sampler           = null.create_sampler,
 		gpu_destroy_sampler          = null.destroy_sampler,
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
@@ -380,6 +381,17 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expectf(t, !record.bloom || view == .Lit, "the %v view has bloom", view)
 	}
 	desc.debug_view = .Lit
+	// With the shading stats, the forward pass counts its quads, and each frame copies its tally for the editor. Without
+	// them, the editor sees none.
+	desc.shading_stats = true
+	for _ in 0 ..< 2 {
+		testing.expect(t, draw_frame(r, w, desc), "the frame with the shading stats did not execute")
+	}
+	testing.expect_value(t, r.shading.stats_next, 2)
+	desc.shading_stats = false
+	testing.expect(t, draw_frame(r, w, desc), "the frame without the shading stats did not execute")
+	testing.expect_value(t, r.shading.stats_next, 2)
+	testing.expect_value(t, shading_stats(r), Shading_Stats{})
 	desc.disable = ~Features{}
 	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")
 	testing.expect(t, !record.bloom && !record.occlusion && !record.fog && !record.gi)

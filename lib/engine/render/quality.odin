@@ -93,6 +93,10 @@ Quality :: struct {
 	// The mesh shader path's level of detail: the largest error, in pixels, that a simplified part of a mesh may show,
 	// from MIN_LOD_ERROR to MAX_LOD_ERROR, 0 giving 1 (see docs/rendering/gpu-scene.md#mesh-shader-path).
 	lod_error:    f32,
+	// Shade the mesh shader path's opaque surfaces in compute from a visibility buffer, in place of the forward pass.
+	// It is a prototype to measure, which no preset turns on and the editor's viewport can (see
+	// docs/rendering/lighting-and-shadows.md#visibility-buffer). It needs mesh shaders.
+	visibility_buffer: bool,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
@@ -208,6 +212,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	// Not a number, or 0, is full resolution.
 	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
 	q.lod_error = q.lod_error > 0 ? clamp(q.lod_error, MIN_LOD_ERROR, MAX_LOD_ERROR) : 1
+	q.visibility_buffer &&= caps.mesh_shaders
 	return q
 }
 

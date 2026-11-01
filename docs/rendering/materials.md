@@ -58,7 +58,11 @@ The cooker turns the graph into an HLSL function, `Surface evaluate(Material_Inp
 
 **World position.** `Material_Inputs.position` is relative to the camera, which is what the passes need, but a pattern made from it would slide with the camera. The World Position node gives `world_position(inputs)`: the position relative to the render origin, `inputs.position + frame.origin_offset`, which stays put while the camera moves and keeps `f32`'s precision, because the origin is within 1.5 cells of the camera. The origin snaps to 1024 m, so a pattern whose period divides 1024 m has no seam when it moves; any other pattern jumps there. In a preview, the origin is the mesh's middle.
 
-**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, which takes the derivatives from the inputs, so a material does not depend on how its inputs are made. At a ray's hit, which has no derivatives, `cn_sample` takes the level of the ray's cone (see [Hit shading](ray-scene.md#hit-shading)). A material's own HLSL that calls `Sample` or `ddx` still compiles there, but its derivatives mean nothing.
+**No raw stage inputs.** Generated code reads attributes only through `Material_Inputs`, and samples textures only through `cn_sample`, so a material does not depend on how its inputs are made. Each path gives `cn_sample` its derivatives:
+
+- **In a pixel shader,** `cn_sample` is `Sample`, with the hardware's derivatives of its UV.
+- **In the visibility buffer's shading,** a compute shader, it is `SampleGrad` with the derivatives of the 2x2 quad of threads. Where the quad's pixels are one triangle's, they are exact. Where two triangles share the quad, it takes the analytic derivatives of `uv0` instead (see [Visibility buffer](lighting-and-shadows.md#visibility-buffer)).
+- **At a ray's hit,** which has no derivatives, it takes the level of the ray's cone (see [Hit shading](ray-scene.md#hit-shading)). A material's own HLSL that calls `Sample` or `ddx` still compiles there, but its derivatives mean nothing.
 
 ## Parallax occlusion mapping
 
@@ -85,7 +89,7 @@ The cooker compiles each material for each pass and each vertex path:
 
 | Axis | Values |
 |---|---|
-| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps), and `Hit`, the compute entry `cs_hit` that evaluates an opaque or masked material of meshes at ray hits (see [Hit shading](ray-scene.md#hit-shading)) |
+| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps), `Hit`, the compute entry `cs_hit` that evaluates an opaque or masked material of meshes at ray hits (see [Hit shading](ray-scene.md#hit-shading)), and the visibility buffer's `Visibility`, the prepass with each pixel's cluster and triangle (`as_cluster`, `ms_visibility` and `ps_visibility`, with `MATERIAL_VISIBILITY`), and `Shade`, the compute entry `cs_shade` that shades its pixels (with `MATERIAL_SHADE`), which an opaque or masked material of meshes that is not a billboard has (see [Visibility buffer](lighting-and-shadows.md#visibility-buffer)) |
 | Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)) and the impostor path's `vs_impostor_*` with `ps_impostor_*`, as the passes `Impostor_Forward`, `Impostor_Prepass` and `Impostor_Depth` (see [Impostors](gpu-scene.md#impostors)); for a billboard, vertex pulling alone (see [Billboards](gpu-scene.md#billboards)); or for a `patches` material the patch path alone (see [Surfaces](surfaces.md#patches)) |
 | Static switches | Each combination that the material or an instance uses |
 

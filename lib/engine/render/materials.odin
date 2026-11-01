@@ -53,6 +53,9 @@ Materials :: struct {
 	// White, black and a flat normal, by Material_Texture_Default.
 	defaults:       [format.Material_Texture_Default]gpu.Texture,
 	sampler:        gpu.Sampler,
+	// A frame has asked for the visibility buffer, so the pipelines have its passes, which they make only from then on
+	// (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+	visibility:     bool,
 }
 
 @(private)
@@ -97,6 +100,10 @@ Material_Pipeline :: struct {
 	// With Ray_Query, the compute pipeline that evaluates the material at ray hits, for an opaque or masked material of
 	// meshes (see docs/rendering/ray-scene.md#hit-shading). Drawing does not wait for it.
 	hit:          gpu.Pipeline,
+	// Once Materials.visibility, with the mesh shader path, the compute pipeline that shades the material's pixels of
+	// the visibility buffer, beside meshes[.Visibility] (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+	// Drawing does not wait for either: the material's bins draw forward until both are ready.
+	shade:        gpu.Pipeline,
 }
 
 // material_group is the bins that a material's draws are in: the opaque ones, which the prepass and the forward pass
@@ -123,12 +130,15 @@ material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platfor
 		platform.gpu_destroy_pipeline(pipeline)
 	}
 	platform.gpu_destroy_pipeline(p.hit)
+	platform.gpu_destroy_pipeline(p.shade)
 }
 
 // The prepass's targets: the surface's normal in the world, folded into the octahedron, and the velocity in UV.
 NORMAL_FORMAT :: gpu.Format.RG16_Float
 VELOCITY_FORMAT :: gpu.Format.RG16_Float
 PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}}
+// The visibility pass's targets: the prepass's, and each pixel's cluster and triangle (see VISIBILITY_FORMAT).
+VISIBILITY_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}, {format = VISIBILITY_FORMAT}}
 
 // Material_Table is one frame's material table: a parameter block for each material or instance that the frame draws,
 // with its textures' bindless indices written. It is in frame memory, and the frame uploads it.
@@ -261,8 +271,9 @@ material_ready :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> b
 			return false
 		}
 	}
-	for pipeline in p.meshes {
-		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
+	// The visibility pass draws only once it is ready, so the material does not wait for it.
+	for pipeline, pass in p.meshes {
+		if pass != .Visibility && pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
 			return false
 		}
 	}
@@ -409,23 +420,35 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	label := format.blob_string(data, blob.source_path)
 	descs := [format.Material_Pass]gpu.Graphics_Pipeline_Desc {
 		// The prepass wrote this depth, so the forward pass shades each pixel once, where the stencil bit is the
-		// reference's.
+		// reference's. The visibility buffer's pixels, whose VISIBILITY_STENCIL is set, are not the forward pass's.
 		.Forward = {
 			colors = WORLD_COLORS,
 			depth_format = DEPTH_FORMAT,
 			depth_compare = .Equal,
-			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL},
+			stencil = {compare = .Equal, read_mask = VIEW_MODEL_STENCIL | VISIBILITY_STENCIL},
 			cull = cull,
 			label = label,
 		},
 		// The view model draws with the bit as its reference, which passes everywhere and sets it. The world draws with
-		// 0, which passes only where the bit is clear (see docs/rendering/layers-and-output.md#view-model).
+		// 0, which passes only where the bit is clear (see docs/rendering/layers-and-output.md#view-model). Each clears
+		// VISIBILITY_STENCIL, so a pixel that it covers is the forward pass's.
 		.Prepass = {
 			colors = PREPASS_COLORS,
 			depth_format = DEPTH_FORMAT,
 			depth_compare = .Greater,
 			depth_write = true,
-			stencil = {compare = .Greater_Equal, pass = .Replace, read_mask = VIEW_MODEL_STENCIL, write_mask = VIEW_MODEL_STENCIL},
+			stencil = {compare = .Greater_Equal, pass = .Replace, read_mask = VIEW_MODEL_STENCIL, write_mask = VIEW_MODEL_STENCIL | VISIBILITY_STENCIL},
+			cull = cull,
+			label = label,
+		},
+		// The prepass with the visibility buffer too, drawn with VISIBILITY_STENCIL as its reference, which passes where
+		// the view model's bit is clear and sets the visibility buffer's.
+		.Visibility = {
+			colors = VISIBILITY_COLORS,
+			depth_format = DEPTH_FORMAT,
+			depth_compare = .Greater,
+			depth_write = true,
+			stencil = {compare = .Greater_Equal, pass = .Replace, read_mask = VIEW_MODEL_STENCIL, write_mask = VIEW_MODEL_STENCIL | VISIBILITY_STENCIL},
 			cull = cull,
 			label = label,
 		},
@@ -477,8 +500,9 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		.Impostor_Forward = {},
 		.Impostor_Prepass = {},
 		.Impostor_Depth = {},
-		// A compute pipeline, made below.
+		// Compute pipelines, made below.
 		.Hit = {},
+		.Shade = {},
 	}
 	// An impostor's quad faces its view, and its pixels write their own depths, which the shadow maps' bias does not
 	// move, so the impostor's depth pass moves them itself.
@@ -511,13 +535,20 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	for pass in ([]format.Material_Pass{.Impostor_Forward, .Impostor_Prepass, .Impostor_Depth}) {
 		p.impostor_path &&= descs[pass].vertex != nil && descs[pass].pixel != nil
 	}
-	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
+	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth, .Visibility}) {
 		desc := &mesh_descs[pass]
 		desc^ = descs[pass]
 		desc.vertex = nil
 		desc.amplification = format.material_code(data, blob, switches, pass, .Amplification)
 		desc.mesh = format.material_code(data, blob, switches, pass, .Mesh)
-		p.mesh_path &&= desc.amplification != nil && desc.mesh != nil
+		if pass != .Visibility {
+			p.mesh_path &&= desc.amplification != nil && desc.mesh != nil
+		}
+	}
+	// The visibility buffer's passes only once a frame has asked for them.
+	visibility := r.materials.visibility && r.caps.mesh_shaders
+	if !visibility {
+		mesh_descs[.Visibility].mesh = nil
 	}
 	for &desc, pass in mesh_descs {
 		if !p.mesh_path {
@@ -536,16 +567,9 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		update_pipeline(platform, &pipeline, desc)
 	}
 	hit := r.caps.ray_query ? format.material_code(data, blob, switches, .Hit, .Compute) : nil
-	if hit == nil {
-		platform.gpu_destroy_pipeline(p.hit)
-		p.hit = {}
-	} else {
-		desc := gpu.Compute_Pipeline_Desc{compute = hit, label = label}
-		if p.hit == {} || !platform.gpu_update_compute_pipeline(p.hit, desc) {
-			platform.gpu_destroy_pipeline(p.hit)
-			p.hit = platform.gpu_create_compute_pipeline(desc)
-		}
-	}
+	update_compute(platform, &p.hit, hit, label)
+	shade := visibility && p.mesh_path ? format.material_code(data, blob, switches, .Shade, .Compute) : nil
+	update_compute(platform, &p.shade, shade, label)
 	p.two_sided = two_sided
 	p.cast_shadows = .Cast_Shadows in blob.flags
 	p.blend, p.sorted = blob.blend, sorted
@@ -553,6 +577,21 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	p.patches = .Patches in blob.flags
 	p.billboard = .Billboard in blob.flags
 	p.ribbon = .Ribbon in blob.flags
+}
+
+// update_compute updates a compute pipeline to its code, creates it, or destroys it without code.
+@(private = "file")
+update_compute :: proc(platform: ^core.Platform_API, pipeline: ^gpu.Pipeline, code: []byte, label: string) {
+	if code == nil {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = {}
+		return
+	}
+	desc := gpu.Compute_Pipeline_Desc{compute = code, label = label}
+	if pipeline^ == {} || !platform.gpu_update_compute_pipeline(pipeline^, desc) {
+		platform.gpu_destroy_pipeline(pipeline^)
+		pipeline^ = platform.gpu_create_compute_pipeline(desc)
+	}
 }
 
 // update_pipeline updates a pipeline to a description, creates it, or destroys it for a description without code.

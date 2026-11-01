@@ -65,6 +65,15 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, clamped.gi.technique, Gi_Technique.Off)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
 
+	// No preset shades from the visibility buffer, which needs mesh shaders.
+	for preset in Quality_Preset {
+		testing.expect(t, !preset_quality(preset, {ray_query = true, mesh_shaders = true}).visibility_buffer)
+	}
+	vb := q
+	vb.visibility_buffer = true
+	testing.expect(t, !clamp_quality(vb, {}).visibility_buffer)
+	testing.expect(t, clamp_quality(vb, {mesh_shaders = true}).visibility_buffer)
+
 	// An upscaler that the device does not run gives temporal AA, which upscales too.
 	q.aa = .Fsr
 	testing.expect_value(t, clamp_quality(q, {}).aa, Aa_Technique.Taa)

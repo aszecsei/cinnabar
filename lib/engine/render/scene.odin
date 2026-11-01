@@ -155,6 +155,12 @@ Material_Push :: struct {
 	moments_zeroth:    u32,
 	moments:           u32,
 	transmittance:     u32,
+	// The forward pass's measurements, each a write index plus 1, and 0 when the frame does not count them (see
+	// Shading_Frame).
+	quad_counts:       u32,
+	shading_stats:     u32,
+	// The visibility pass's pipeline, which its mesh shaders write with each triangle.
+	pipeline:          u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -526,6 +532,9 @@ Scene_Frame :: struct {
 	// vertex pulling.
 	bin_impostors:   []bool,
 	bin_particles:   []bool,
+	// The bins that the visibility buffer draws in the camera's views, in place of the prepass and the forward pass (see
+	// begin_visibility).
+	bin_visibility:  []bool,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
 	// The draws of one view: the items, with each surface's reserved patches.
@@ -1885,12 +1894,14 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	}
 	g := f.graph
 	arguments, mesh_arguments, counts := gpu_buffer(g, sf.arguments), gpu_buffer(g, sf.mesh_arguments), gpu_buffer(g, sf.counts)
-	pushes := pass == .Forward || pass == .Transparent
+	pushes := pass == .Forward || pass == .Transparent || pass == .Visibility
 	push: Material_Push
-	if pushes {
+	if pass == .Forward || pass == .Transparent {
 		push = material_push(f, pass, group)
 	}
-	if pass != .Depth {
+	if pass == .Visibility {
+		gpu.cmd_set_stencil_reference(cb, VISIBILITY_STENCIL)
+	} else if pass != .Depth {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)
@@ -1899,6 +1910,12 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		if filter != .All && sf.bin_particles[bin] != (filter == .Particles) {
 			continue
 		}
+		// The visibility pass draws the visibility buffer's bins, and the camera's prepass and forward pass the rest.
+		visibility := visibility_bin(sf, bin, view)
+		if (pass == .Visibility && !visibility) || (visibility && (pass == .Prepass || pass == .Forward)) {
+			continue
+		}
+		push.pipeline = u32(sf.bin_draws[bin])
 		p := &f.renderer.materials.pipelines[sf.bin_draws[bin]]
 		pipelines := [2]gpu.Pipeline{{}, p.pipelines[pass]}
 		if pass == .Transparent && group == .Sorted {
@@ -1935,6 +1952,13 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	}
 }
 
+// visibility_bin is whether the visibility buffer draws a bin in a view: one of its bins in the camera's views, the
+// early one and the late one. The view model's and the shadow maps' views draw it as they do without it.
+@(private)
+visibility_bin :: proc(sf: ^Scene_Frame, bin, view: int) -> bool {
+	return sf.bin_visibility != nil && sf.bin_visibility[bin] && (view == VIEW_CAMERA || (sf.occluding && view == sf.late_view))
+}
+
 // material_push is the frame's textures for the forward pass or a transparent pass. A transparent surface has no
 // prepass, so its template reads neither the ambient occlusion nor the shadow mask, which belong to the opaque surface
 // behind it. Moment-based transparency's transparent pass reads the moments.
@@ -1967,5 +1991,6 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	if f.shadows.mask != 0 {
 		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
 	}
+	shading_push(f, &push.quad_counts, &push.shading_stats)
 	return push
 }

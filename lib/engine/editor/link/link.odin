@@ -560,6 +560,7 @@ Debug_View :: enum u8 {
 	Lod_Depth,
 	Emission,
 	Gi_Probes,
+	Quad_Overdraw,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -604,6 +605,10 @@ Viewport_Settings :: struct {
 	no_post_effects:      bool,
 	no_occlusion_culling: bool,
 	no_meshlet_hierarchy: bool,
+	// Count the opaque surfaces' quads for Game_Stats, and shade the mesh shader path's opaque surfaces from the
+	// visibility buffer (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+	shading_stats:        bool,
+	visibility_buffer:    bool,
 	// Stops added to the exposure.
 	exposure_offset:      f32,
 	// Icons for the lights, volumes and cameras, which pick them.
@@ -901,6 +906,14 @@ Game_Stats :: struct {
 	// amplification shaders to test (see docs/rendering/gpu-scene.md#mesh-shader-path).
 	hierarchy_meshlets: u32,
 	selected_meshlets:  u32,
+	// What the opaque surfaces' shading cost, with the viewport's shading stats on, a frame or two ago (see
+	// docs/rendering/lighting-and-shadows.md#visibility-buffer): the forward pass's 2x2 quads and their lanes that
+	// cover a pixel, the visibility buffer's, and its quads with two triangles.
+	forward_quads:      u32,
+	forward_pixels:     u32,
+	visibility_quads:   u32,
+	visibility_pixels:  u32,
+	visibility_mixed:   u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:      []Gi_Cascade_Stats,

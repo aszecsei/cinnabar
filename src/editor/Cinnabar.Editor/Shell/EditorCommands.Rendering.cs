@@ -60,6 +60,11 @@ static partial class EditorCommands
         Feature(shell, PostEffects, "Post Effects", "Run the game's post effects in the viewport.", s => s.NoPostEffects, (s, v) => s with { NoPostEffects = v });
         Feature(shell, OcclusionCulling, "Occlusion Culling", "Leave out what other surfaces hide, by last frame's depth and this one's; off, only what is outside the view.", s => s.NoOcclusionCulling, (s, v) => s with { NoOcclusionCulling = v });
         Feature(shell, MeshletHierarchy, "Meshlet Hierarchy", "Walk each mesh's hierarchy of meshlets to find the ones that its level of detail may draw; off, every meshlet of every level is tested. Both draw the same meshlets.", s => s.NoMeshletHierarchy, (s, v) => s with { NoMeshletHierarchy = v });
+        // Measurements, which are off until asked for (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+        commands.Register(Command.Toggle(ShadingStats, "Shading Stats", () => shell.ViewportSettings.ShadingStats, on => shell.ViewportSettings = shell.ViewportSettings with { ShadingStats = on },
+            "Count the opaque surfaces' 2x2 quads and the pixels that they cover, which the Resource Monitor shows. It costs the forward pass a little."));
+        commands.Register(Command.Toggle(VisibilityBuffer, "Visibility Buffer", () => shell.ViewportSettings.VisibilityBuffer, on => shell.ViewportSettings = shell.ViewportSettings with { VisibilityBuffer = on },
+            "Shade the mesh shader path's opaque surfaces in compute from a visibility buffer, in place of the forward pass. A prototype to measure; it needs mesh shaders."));
         commands.Register(Command.Toggle(Icons, "Icons", () => shell.ViewportSettings.ShowIcons, on => shell.ViewportSettings = shell.ViewportSettings with { ShowIcons = on },
             "Show icons for the lights, volumes and cameras, which select them when clicked.", "visible"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.HelperMode>(Helpers, "Shapes", () => shell.ViewportSettings.Helpers,

@@ -167,6 +167,9 @@ Format :: enum u8 {
 	BC6H_Ufloat,
 	BC7_Unorm,
 	BC7_Unorm_Srgb,
+	// Four unsigned integers, for a render target of IDs, such as the visibility buffer's (see
+	// docs/rendering/lighting-and-shadows.md#visibility-buffer). A new format goes at the end.
+	RGBA32_Uint,
 }
 
 // The frame target is written through an sRGB view in the Sdr output mode, as the preview targets always are.
@@ -316,7 +319,7 @@ format_size :: proc(format: Format) -> int {
 		return 4
 	case .RGBA16_Float, .RG32_Float, .D32_Float_S8_Uint, .BC1_Unorm, .BC1_Unorm_Srgb, .BC4_Unorm:
 		return 8
-	case .RGBA32_Float, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
+	case .RGBA32_Float, .RGBA32_Uint, .BC5_Unorm, .BC6H_Ufloat, .BC7_Unorm, .BC7_Unorm_Srgb:
 		return 16
 	}
 	return 0

@@ -134,6 +134,24 @@ static const uint DEBUG_MESHLETS = 18;
 static const uint DEBUG_LOD_DEPTH = 19;
 // The shading model's emission alone, exposed as the scene is.
 static const uint DEBUG_EMISSION = 20;
+// From the frame's textures, but the forward pass and the visibility buffer's shading count its quads.
+static const uint DEBUG_QUAD_OVERDRAW = 22;
+
+// Match the visibility buffer's in lib/engine/render/visibility.odin (see material_visibility.hlsli). A pixel's value
+// is its draw's index plus 1 in x, 0 where the pass drew nothing, the instance ID in y, the meshlet in z, and in w its
+// triangle of the meshlet, whether it is a front face at VIS_FRONT, and the pipeline that drew it above
+// VIS_PIPELINE_SHIFT. VISIBILITY_STENCIL is the stencil bit of the pixels that the visibility buffer shades.
+static const uint VIS_FRONT = 0x80;
+static const uint VIS_TRIANGLE_MASK = 0x7f;
+static const uint VIS_PIPELINE_SHIFT = 8;
+static const uint VISIBILITY_STENCIL = 2;
+
+// Match Shading_Stats in lib/engine/render/visibility.odin: the words of the shading's tally, in bytes.
+static const uint SHADING_STATS_FORWARD_QUADS = 0;
+static const uint SHADING_STATS_FORWARD_PIXELS = 4;
+static const uint SHADING_STATS_VISIBILITY_QUADS = 8;
+static const uint SHADING_STATS_VISIBILITY_PIXELS = 12;
+static const uint SHADING_STATS_VISIBILITY_MIXED = 16;
 
 // load_screen reads a screen-sized texture of the frame at a pixel. In its place, a frame without it pushes a 1x1
 // default texture, such as the white one without ambient occlusion, which a Load outside it would read as 0; the pixel
@@ -177,6 +195,44 @@ float3 hash_color(uint id) {
 #include "ray_scene.hlsli"
 #define MATERIAL_PUSH Hit_Push
 #endif
+// A material's visibility pass compiles with MATERIAL_VISIBILITY 1, and its shading from the visibility buffer with
+// MATERIAL_SHADE 1, whose push constants are Shade_Push (see material_shade.hlsli).
+#ifndef MATERIAL_VISIBILITY
+#define MATERIAL_VISIBILITY 0
+#endif
+#ifndef MATERIAL_SHADE
+#define MATERIAL_SHADE 0
+#endif
+#if MATERIAL_SHADE
+// Matches Shade_Push in lib/engine/render/visibility.odin. It starts with Material_Push's fields, so the forward
+// pass's lighting reads its textures by the same names. Then the visibility buffer and its depth and stencil, the
+// bins and their order of quads, the scene's colors and IDs to write, and the camera's inverse projection in the upload
+// ring.
+struct Shade_Push {
+	uint shadow_atlas;
+	uint shadow_mask;
+	uint ambient_occlusion;
+	uint fog;
+	uint gi_diffuse;
+	uint gi_specular;
+	uint moments_zeroth;
+	uint moments;
+	uint transmittance;
+	uint quad_counts;
+	uint shading_stats;
+	uint pipeline;
+	uint visibility;
+	uint depth;
+	uint stencil;
+	uint bins;
+	uint order;
+	uint scene;
+	uint ids;
+	uint inverse;
+	uint inverse_offset;
+};
+#define MATERIAL_PUSH Shade_Push
+#endif
 #ifndef MATERIAL_PUSH
 struct Material_Push {
 	uint shadow_atlas;
@@ -188,6 +244,12 @@ struct Material_Push {
 	uint moments_zeroth;
 	uint moments;
 	uint transmittance;
+	// The forward pass's measurements, each a write index plus 1, and 0 when the frame does not count them (see
+	// count_quad in material_forward.hlsli).
+	uint quad_counts;
+	uint shading_stats;
+	// The visibility pass's pipeline, which its amplification shaders write with each cluster.
+	uint pipeline;
 };
 #define MATERIAL_PUSH Material_Push
 #endif
@@ -417,6 +479,28 @@ float4 cn_sample(uint texture_index, float2 uv) {
 
 float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
 	return cn_sample(texture_index, uv);
+}
+#elif MATERIAL_SHADE
+// The visibility buffer's shading has the derivatives of a 2x2 quad of threads, one for each of a quad's pixels. They
+// are exact where the quad's pixels shade one triangle, which those that are not the triangle's take too. Where two
+// triangles share the quad they are not, and each sample takes the analytic derivatives of uv0 at its pixel instead
+// (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+static bool cn_quad_exact = true;
+static float2 cn_uv_dx = 0;
+static float2 cn_uv_dy = 0;
+
+float4 cn_sample_grad(uint texture_index, float2 uv, float2 uv_dx, float2 uv_dy) {
+	return cn_texture(texture_index).SampleGrad(cn_sampler(frame.sampler_index), uv, uv_dx, uv_dy);
+}
+
+float4 cn_sample(uint texture_index, float2 uv) {
+	float2 uv_dx = ddx(uv);
+	float2 uv_dy = ddy(uv);
+	if (!cn_quad_exact) {
+		uv_dx = cn_uv_dx;
+		uv_dy = cn_uv_dy;
+	}
+	return cn_sample_grad(texture_index, uv, uv_dx, uv_dy);
 }
 #else
 // cn_sample samples a material's texture with the frame's sampler. A material samples through it, so a path that

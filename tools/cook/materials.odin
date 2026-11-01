@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 8"
+MATERIAL_COOK_VERSION :: "materials 9"
 
 
 Shading_Input :: struct {
@@ -1105,8 +1105,8 @@ Material_Entry :: struct {
 
 // material_entries are the entry points that each variant compiles, the main pass's first. A masked material's
 // depth pass discards in a pixel shader; an opaque one's has none. The opaque passes of a material of meshes have the
-// mesh shader path's entries too, an amplification and a mesh shader each, and the impostor path's, which a
-// billboard has neither of (see docs/rendering/materials.md#permutations). A transparent or
+// mesh shader path's entries too, an amplification and a mesh shader each, the impostor path's, and the visibility
+// buffer's, which a billboard has none of (see docs/rendering/materials.md#permutations). A transparent or
 // additive material has no prepass, forward or depth pass, but the transparent passes; a Transparent one has moments
 // too, which a sorted one draws only in the overdraw debug view.
 @(private = "file")
@@ -1157,6 +1157,15 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 			Material_Entry{.Impostor_Depth, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_depth"}},
 			Material_Entry{.Impostor_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_depth"}},
 		)
+		if !decl.ribbon {
+			append(
+				&entries,
+				Material_Entry{.Visibility, {.Amplification, "as_" + SHADER_MODEL, "as_cluster"}},
+				Material_Entry{.Visibility, {.Mesh, "ms_" + SHADER_MODEL, "ms_visibility"}},
+				Material_Entry{.Visibility, {.Pixel, "ps_" + SHADER_MODEL, "ps_visibility"}},
+				Material_Entry{.Shade, {.Compute, "cs_" + SHADER_MODEL, "cs_shade"}},
+			)
+		}
 	}
 	// Rays see the meshes of a material as authored, a billboard's too. A patches or ribbon material draws no meshes.
 	if !decl.patches && !decl.ribbon {
@@ -1170,9 +1179,25 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 @(private = "file", rodata)
 hit_defines := [?]string{"MATERIAL_HIT=1"}
 
+// The visibility buffer's passes compile with MATERIAL_VISIBILITY, whose amplification shader writes the clusters
+// that it draws, and MATERIAL_SHADE, which gives the material the shading's push constants and its quads' derivatives
+// (see docs/rendering/lighting-and-shadows.md#visibility-buffer).
+@(private = "file", rodata)
+visibility_defines := [?]string{"MATERIAL_VISIBILITY=1"}
+@(private = "file", rodata)
+shade_defines := [?]string{"MATERIAL_SHADE=1"}
+
 @(private = "file")
 entry_defines :: proc(entry: Material_Entry) -> []string {
-	return entry.pass == .Hit ? hit_defines[:] : nil
+	#partial switch entry.pass {
+	case .Hit:
+		return hit_defines[:]
+	case .Visibility:
+		return visibility_defines[:]
+	case .Shade:
+		return shade_defines[:]
+	}
+	return nil
 }
 
 // compile_source compiles a generated source's entries, the main pass's first: an error in evaluate fails it, and
