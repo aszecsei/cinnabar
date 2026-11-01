@@ -73,6 +73,7 @@ public sealed class MainWindow : Window
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.GraphCloseRequested += editor => _ = AskCloseGraph(editor);
+        shell.GraphOverwriteRequested += editor => _ = AskOverwriteGraph(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
@@ -140,6 +141,17 @@ public sealed class MainWindow : Window
         if (answer is "Save" or "Don't Save")
         {
             _shell.CloseGraph(editor, discard: answer == "Don't Save");
+        }
+    }
+
+    /// <summary>Asks whether a save may replace what another program wrote to the graph's file.</summary>
+    async Task AskOverwriteGraph(Shell.IGraphEditor editor)
+    {
+        var answer = await Dialogs.Ask(this, "The file changed", $"Another program changed {editor.Document.Title} since the editor read it. Saving replaces what it wrote.",
+            "Save", "Cancel");
+        if (answer == "Save")
+        {
+            _shell.SaveGraph(editor, overwrite: true);
         }
     }
 

@@ -102,4 +102,4 @@ A state and a transition keep their node's ID, which an editor or a debugger nam
   A graph with a problem keeps its old blob, so the running game keeps the last good version.
 - **The cooker does not read the clips' blobs.** A marker past its clip's end and a root motion joint that the skin does not have are found when the game loads the graph.
 - **The cache key** covers the cooker version, the layout, the source path, the source and the GUID. The graph depends on its clips.
-- **The editor** opens a graph's text in the script editor. **New Animation Graph** makes one from a template: a speed parameter and one state, whose clip's GUID the author fills in.
+- **The editor** opens a graph in the [animation graph editor](../../editor/animation-graph-editor.md#animation-graph-editor). **New Animation Graph** makes one from a template: a speed parameter and one state, whose clip's GUID the author fills in.

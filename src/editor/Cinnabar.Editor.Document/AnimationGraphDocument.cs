@@ -6,8 +6,32 @@ namespace Cinnabar.Editor.Document;
 /// </summary>
 public sealed class AnimationGraphDocument : GraphDocument<AnimationGraphFile>
 {
-    AnimationGraphDocument(string path, string guid, AnimationGraphFile graph, string text) : base(path, guid, graph, text)
+    // The file's text when the document last read or wrote it.
+    string _onDisk;
+
+    AnimationGraphDocument(string path, string guid, AnimationGraphFile graph, string text) : base(path, guid, graph, text) => _onDisk = text;
+
+    /// <summary>Another program changed the file since the document last read or wrote it, or took it away.</summary>
+    public bool ChangedOnDisk
     {
+        get
+        {
+            try
+            {
+                return AnimationGraphFile.Decode(File.ReadAllBytes(Path)) != _onDisk;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+    }
+
+    public override void Save()
+    {
+        var text = Text;
+        base.Save();
+        _onDisk = text;
     }
 
     /// <summary>Reads a file. The document is null, with a problem, when it cannot be read or does not start as a graph does.</summary>

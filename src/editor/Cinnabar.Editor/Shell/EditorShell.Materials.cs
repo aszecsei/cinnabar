@@ -47,7 +47,7 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials;
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -60,6 +60,9 @@ public sealed partial class EditorShell
 
     /// <summary>The user closed a graph editor with unsaved changes. The window asks, and calls <see cref="CloseGraph"/>.</summary>
     public event Action<IGraphEditor>? GraphCloseRequested;
+
+    /// <summary>A save would replace what another program wrote. The window asks, and calls <see cref="SaveGraph"/>.</summary>
+    public event Action<IGraphEditor>? GraphOverwriteRequested;
 
     /// <summary>The kinds of node, the shading models and the material functions, as the material editor shows them.</summary>
     public MaterialCatalog MaterialCatalog => new(Assets.Nodes, Assets.ShadingModels, ReadFunction);
@@ -173,6 +176,10 @@ public sealed partial class EditorShell
             _materials.Remove(material);
             material.ClosePreview();
         }
+        if (editor is AnimationGraphEditor graph)
+        {
+            _animationGraphs.Remove(graph);
+        }
         _discarding.Remove(editor);
         editor.Dispose();
         if (ActiveGraphEditor == editor)
@@ -194,9 +201,17 @@ public sealed partial class EditorShell
         Layout.CloseDocument(editor);
     }
 
-    /// <summary>Writes a graph editor's graph to its file. A failure goes to the console.</summary>
-    public bool SaveGraph(IGraphEditor editor)
+    /// <summary>
+    /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph whose file another
+    /// program changed since it was read is not written, and the window asks, unless <paramref name="overwrite"/> says so.
+    /// </summary>
+    public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
     {
+        if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true })
+        {
+            GraphOverwriteRequested?.Invoke(editor);
+            return false;
+        }
         try
         {
             editor.Document.Save();

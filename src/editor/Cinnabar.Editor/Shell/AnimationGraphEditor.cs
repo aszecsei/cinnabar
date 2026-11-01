@@ -188,6 +188,29 @@ public sealed class AnimationGraphEditor : IGraphEditor
     public void LinkBlend(int blend, int state) => SetField(state, "motion", new GraphLink(blend, "pose").Write());
 
     /// <summary>
+    /// Ends a drag of a blend's link: it links the blend to the state that it ended on, and takes it off the state that
+    /// it came off, in one entry. One that ends on no state and came off one is gone.
+    /// </summary>
+    public void MoveBlendLink(int blend, int? cameOff, int? to)
+    {
+        if (cameOff == to || (cameOff == null && to == null))
+        {
+            return;
+        }
+        Document.Edit($"Link {Label(blend)}", g =>
+        {
+            if (cameOff is { } old)
+            {
+                g.Find(old)?.Set("motion", null);
+            }
+            if (to is { } state)
+            {
+                g.Find(state)?.Set("motion", new GraphLink(blend, "pose").Write());
+            }
+        });
+    }
+
+    /// <summary>
     /// Deletes the selected nodes. A state takes the transitions from it and to it with it, and a blend leaves the
     /// states that played it without a motion, which the cooker reports.
     /// </summary>

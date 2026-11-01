@@ -73,6 +73,10 @@ public abstract class GraphEditorDocument : EditorDocument
 public sealed class MaterialEditorDocument(Shell.MaterialEditor editor, Func<Control> createView)
     : GraphEditorDocument(editor, $"material.{editor.Guid}", createView);
 
+/// <summary>An animation graph in its editor (see docs/editor/animation-graph-editor.md#animation-graph-editor).</summary>
+public sealed class AnimationGraphEditorDocument(Shell.AnimationGraphEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"animation_graph.{editor.Guid}", createView);
+
 /// <summary>An effect's preview (see docs/rendering/particles.md#previews): a document beside the viewport, which closes.</summary>
 public sealed class EffectPreviewDocument : EditorDocument
 {

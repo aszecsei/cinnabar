@@ -183,7 +183,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         WriteGraph();
     }
 
-    public void Save()
+    public virtual void Save()
     {
         SceneDocument.WriteAtomically(Path, Text);
         SavedPosition = Position;

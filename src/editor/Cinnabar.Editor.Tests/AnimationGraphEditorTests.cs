@@ -77,6 +77,102 @@ public sealed class AnimationGraphEditorTests : IDisposable
         return (shell, new AnimationGraphEditor(shell, AnimationGraphDocument.Open(path, Guid).Document!));
     }
 
+    // A shell whose index has the sample's graph, in the test's directory.
+    (EditorShell Shell, Asset Asset, string Text) Fox()
+    {
+        var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "models", "fox", "fox.animation_graph"));
+        var shell = TestShell.Open(_temp, null, null);
+        File.WriteAllText(_temp.Combine("fox.animation_graph"), text);
+        var asset = new Asset(Guid, AssetKind.AnimationGraph, "game", "fox.animation_graph", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "");
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
+        shell.Assets.Apply(new AssetSnapshot([asset], []));
+        return (shell, asset, text);
+    }
+
+    [Fact]
+    public void TheSamplesGraphOpensOnACanvasAndAnEditChangesOnlyItsLines()
+    {
+        var (shell, asset, text) = Fox();
+        using var _ = shell;
+        Assert.True(EditorShell.CanOpen(asset));
+        Assert.Equal("Open in Animation Graph Editor", shell.OpenLabel(asset));
+        shell.OpenAsset(asset);
+        var editor = Assert.Single(shell.AnimationGraphs);
+        Assert.Same(editor, shell.ActiveGraphEditor);
+        Assert.Null(shell.ActiveMaterial);
+        Assert.Contains(editor, shell.GraphEditors);
+        Assert.False(editor.Document.IsDirty);
+        Assert.Equal(text, editor.Document.Text);
+        // Opening it again shows the same editor.
+        Assert.Same(editor, shell.OpenAnimationGraph(asset));
+
+        var geometry = editor.Geometry();
+        Assert.Equal([1, 2, 3, 10], geometry.Nodes.Select(n => n.Node.Id));
+        Assert.Equal([20, 21, 22, 23], geometry.Transitions.Select(t => t.Node.Id));
+        Assert.Equal((10, 2), (geometry.Links[0].Blend, geometry.Links[0].State));
+
+        // A drag writes the one line, and the file is the same but for it.
+        editor.Select([1]);
+        var starts = editor.MoveStarts();
+        editor.BeginMove();
+        editor.MoveSelected(starts, new Vec2(40, 80));
+        editor.EndMove();
+        Assert.True(editor.Document.IsDirty);
+        var expected = text.Replace("position = [0, 0]", "position = [40, 80]");
+        Assert.Equal(expected, editor.Document.Text);
+
+        // Undo, Redo and Save act on the active graph.
+        shell.Commands.Get("edit.undo").Execute();
+        Assert.Equal(text, editor.Document.Text);
+        shell.Commands.Get("edit.redo").Execute();
+        shell.Commands.Get("file.save").Execute();
+        Assert.False(editor.Document.IsDirty);
+        Assert.Equal(expected, File.ReadAllText(_temp.Combine("fox.animation_graph")));
+
+        shell.CloseGraph(editor, discard: true);
+        Assert.Empty(shell.AnimationGraphs);
+        Assert.Null(shell.ActiveGraphEditor);
+    }
+
+    [Fact]
+    public void ASaveDoesNotReplaceWhatAnotherProgramWroteWithoutAsking()
+    {
+        var (shell, asset, _) = Fox();
+        using var __ = shell;
+        var editor = shell.OpenAnimationGraph(asset)!;
+        IGraphEditor? asked = null;
+        shell.GraphOverwriteRequested += e => asked = e;
+        editor.AddState(0, 0);
+        File.AppendAllText(_temp.Combine("fox.animation_graph"), "# Someone's note.\n");
+
+        Assert.False(shell.SaveGraph(editor));
+        Assert.Same(editor, asked);
+        Assert.True(editor.Document.IsDirty);
+        Assert.Contains("Someone's note", File.ReadAllText(_temp.Combine("fox.animation_graph")));
+
+        Assert.True(shell.SaveGraph(editor, overwrite: true));
+        Assert.DoesNotContain("Someone's note", File.ReadAllText(_temp.Combine("fox.animation_graph")));
+        // Now the file is the one that the document wrote.
+        Assert.False(editor.Document.ChangedOnDisk);
+        editor.AddState(0, 0);
+        asked = null;
+        Assert.True(shell.SaveGraph(editor));
+        Assert.Null(asked);
+    }
+
+    [Fact]
+    public void AnOpenGraphFollowsItsFile()
+    {
+        var (shell, asset, _) = Fox();
+        using var __ = shell;
+        var editor = shell.OpenAnimationGraph(asset)!;
+        File.Move(_temp.Combine("fox.animation_graph"), _temp.Combine("vixen.animation_graph"));
+        shell.Assets.Apply(new AssetDelta([asset with { Path = "vixen.animation_graph" }], [], [], []));
+        Assert.Equal("vixen.animation_graph", editor.Document.Title);
+        // The move is no change to the file.
+        Assert.False(editor.Document.ChangedOnDisk);
+    }
+
     [Fact]
     public void TheCanvasFindsStatesPinsAndTransitions()
     {
@@ -194,7 +290,17 @@ public sealed class AnimationGraphEditorTests : IDisposable
         editor.LinkBlend(blend, state);
         Assert.Equal($"@{blend}.pose", editor.Document.Graph.Find(state)!.Get("motion"));
         Assert.Equal(5, editor.Document.History.Count);
-        for (var i = 0; i < 5; i++)
+
+        // A link dragged from one state to another moves in one entry, and one dropped on nothing is gone.
+        editor.MoveBlendLink(blend, state, 1);
+        Assert.Null(editor.Document.Graph.Find(state)!.Get("motion"));
+        Assert.Equal($"@{blend}.pose", editor.Document.Graph.Find(1)!.Get("motion"));
+        editor.MoveBlendLink(blend, 1, null);
+        Assert.Null(editor.Document.Graph.Find(1)!.Get("motion"));
+        // A drag that ends where it began, or that began on no state and ended on none, changes nothing.
+        editor.MoveBlendLink(blend, null, null);
+        Assert.Equal(7, editor.Document.History.Count);
+        for (var i = 0; i < 7; i++)
         {
             editor.Document.Undo();
         }

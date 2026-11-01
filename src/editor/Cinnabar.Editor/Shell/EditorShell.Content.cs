@@ -33,8 +33,8 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Opens an asset as a double click does: a scene in the editor, a material graph or a material function in the
-    /// material editor, and the text assets (scripts, shaders, shading models, HLSL materials and material instances)
-    /// in the script editor. Textures, models and meshes have no editor yet.
+    /// material editor, an animation graph in its editor, and the text assets (scripts, shaders, shading models, HLSL
+    /// materials and material instances) in the script editor. Textures, models and meshes have no editor yet.
     /// </summary>
     public void OpenAsset(Link.Cook.Asset asset)
     {
@@ -56,8 +56,10 @@ public sealed partial class EditorShell
             case AssetKind.Effect:
                 OpenEffect(asset);
                 break;
-            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance
-                or AssetKind.AnimationGraph:
+            case AssetKind.AnimationGraph:
+                OpenAnimationGraph(asset);
+                break;
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance:
                 OpenScript(path);
                 break;
         }
@@ -87,6 +89,7 @@ public sealed partial class EditorShell
         AssetKind.MaterialFunction => "Open in Material Editor",
         AssetKind.Effect => "Open Preview",
         AssetKind.Material when Assets.FullPath(asset) is { } path && !IsHlslMaterial(path) => "Open in Material Editor",
+        AssetKind.AnimationGraph => "Open in Animation Graph Editor",
         _ => "Open in Script Editor",
     };
 
