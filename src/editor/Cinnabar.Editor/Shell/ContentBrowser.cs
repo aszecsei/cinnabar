@@ -121,6 +121,7 @@ public sealed class ContentBrowser(
             AssetTemplate.Mesh => "new_mesh",
             AssetTemplate.Prefab => "new_prefab",
             AssetTemplate.Effect => "new_effect",
+            AssetTemplate.AnimationGraph => "new_animation_graph",
             _ => "new_folder",
         };
         if (Folder?.Directory(assets) is not { } dir)
@@ -135,6 +136,7 @@ public sealed class ContentBrowser(
             AssetTemplate.Mesh => assets.ExtensionOf(AssetKind.Mesh),
             AssetTemplate.Prefab => assets.ExtensionOf(AssetKind.Prefab),
             AssetTemplate.Effect => assets.ExtensionOf(AssetKind.Effect),
+            AssetTemplate.AnimationGraph => assets.ExtensionOf(AssetKind.AnimationGraph),
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),
         };

@@ -22,6 +22,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook textures --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook shaders --cache <dir> --config dev|release --dxc <dxc.exe> [--include <dir>]... --root <name>=<dir> [--root <name>=<dir>]...
        cook effects --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook animation_graphs --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
@@ -63,6 +64,10 @@ main :: proc() {
 	case "effects":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Effect)
+		}
+	case "animation_graphs":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Animation_Graph)
 		}
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -184,6 +189,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "skins"
 	case .Animation:
 		return "animations"
+	case .Animation_Graph:
+		return "animation graphs"
 	}
 	return "assets"
 }

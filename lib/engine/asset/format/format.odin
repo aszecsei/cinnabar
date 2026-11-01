@@ -211,6 +211,8 @@ Asset_Kind :: enum u32 {
 	Skin,
 	// A glTF animation's keys for the joints of a skin.
 	Animation,
+	// Parameters, clips with their events, and a state machine of clips and blends, which an Animator plays.
+	Animation_Graph,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.
