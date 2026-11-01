@@ -4,11 +4,12 @@ The animation graph poses a skeleton from clips. It takes at most one transition
 - what the graph does and does not do;
 - the instance that it keeps for each entity;
 - how it ticks and how a pose is presented between ticks;
-- transitions and fades, blends, events and root motion.
+- transitions and fades, blends, events and root motion;
+- the components and systems that run graphs on entities.
 
 Read [World: Time](../world/time.md#fixed-and-variable-rate) and [Content: Animation graphs](../content/kinds/animation-graphs.md#animation-graphs) first.
 
-**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion)
+**In this document:** [Design](#design) · [The instance](#the-instance) · [Ticks and presentation](#ticks-and-presentation) · [Transitions and fades](#transitions-and-fades) · [Blends](#blends) · [Events](#events) · [Root motion](#root-motion) · [The ECS](#the-ecs) · [Events in the world](#events-in-the-world)
 
 ## Design
 
@@ -105,3 +106,39 @@ With a root joint, which the graph's `root_motion` names, each tick reports:
 Each sample that moved adds its clip's root motion over its step by its share of the weight. Across a wrap, the end of the move and then its start count, turned by the first part's turn, so the root never jumps back. Frozen samples and samples that are gone move nothing.
 
 `remove_root_motion` takes the motion out of a pose before it is composed. The root keeps its rest place along x and z in the model's space, and its rest heading, but keeps its height and tilt. The entity moves instead, if gameplay moves it, so the mesh does not walk away from its entity.
+
+## The ECS
+
+`lib/engine/anim` runs graphs on entities. It copies parameters in and outputs out, and it is the only part that touches the world.
+
+| Component | ID | Fields |
+|---|---|---|
+| `Animator` | 80 | `graph`, an animation graph; `clip`, a clip that plays without a graph; `speed`, which scales each tick; `loop`, for the clip without a graph; `playing`. The editor shows `state` and `time`, the current state's index and its clip's time. The instance is a field that scenes do not save and the inspector does not show. |
+| `Root_Motion` | 81 | Written only by `animate`. `translation` and `yaw` are the last tick's; `frame_translation` and `frame_yaw` are the frame's ticks one after another. An entity with it has the root motion taken out of its pose; one without it keeps the motion in the pose. |
+
+The frame code calls the package around the ticks:
+
+| Call | When | What it does |
+|---|---|---|
+| `prepare` | Before the ticks | Loads each Animator's graph, its clips and their skin into a table in frame memory, so the system's jobs read no assets. An Animator whose graph's key differs from its instance's starts again in the entry state, with `keep_parameters`, and the warnings the cooker could not give: a root motion joint the skin does not have, and markers past their clips' ends. It starts each `Root_Motion`'s frame from nothing. |
+| `begin_frame` | Before the ticks | Clears the frame's events. |
+| `animate` | The `Fixed` system | Moves each playing Animator whose graph is ready by `dt` times `speed`, writes its `Root_Motion`, and records its events in its job's buffer. A stopped Animator holds its pose and keeps its triggers. An Animator spawned during the ticks waits for the next `prepare`. |
+| `send_events` | After each tick's physics events | Sends the tick's events to behaviours (see [Events in the world](#events-in-the-world)). |
+| `present` | At render, after `asset.poll` | Loads the blobs again, since `poll` may have changed them. It poses each Animator whose instance fits its graph's key into a `render.Skin_Pose` for `Frame_Desc.skins`. |
+
+**Gameplay sets parameters, and reads outputs.**
+- A `Fixed` system finds a parameter with `parameter(s, animator, name)` and sets it with `set_parameter` or `fire`. It writes `Animator`, so it does not run beside `animate`, and its registration order or `after` says which tick reads the value. The two systems never run at once.
+- Scripts' `fixed_update` runs after the `Fixed` systems, so what a script sets is read by the next tick. The root motion of a tick is in `Root_Motion` for that tick's `fixed_update`.
+- `root_motion_world(w, e)` turns an entity's last tick of root motion into the world, by the entity's `Transform`. Applying it is gameplay's: move a kinematic body, or a character, by it.
+
+**Hot reload.** The instance is plain data in the component, and the table is remade each frame, so a code reload keeps every Animator's state. A graph's new blob has a new key, so its Animators start again with the parameters that it still has. The system and the job buffer are registrations, made again by `register` in `on_reload`; the system finds the package's state through its `data` (see [World: ECS](../world/ecs.md#systems)).
+
+## Events in the world
+
+- **Recording.** A job of `animate` records its Animators' events in a job buffer. After the tick's `Fixed` systems, the flush takes the buffers in system order, then job order. Within a job, entities are in chunk order. So events never depend on the jobs' timing, and are never ordered by entity handle.
+- **Lists.** The flush turns each event into an `Event`: the entity, the kind, the event's name, the state that raised it, and its arguments. Each `Event` owns its strings, which outlive `asset.poll`.
+  - `tick_events` are the last tick's, which the next tick's `Fixed` systems see.
+  - `frame_events` are every tick's since `begin_frame`, which `Update` and `Late` systems see.
+  - A tick that raised nothing makes `tick_events` empty.
+- **Scripts.** `send_events` sends each event to its entity's behaviours as `on_animation_event(name, ...)`, with the event's arguments. `script.fixed_events` delivers them in the same tick, after physics's. Each event goes through one handler, so an authored name never meets an engine event's, such as `collision_enter`. `wait_event(entity, "animation_event")` resumes on them too.
+

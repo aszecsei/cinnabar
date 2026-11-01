@@ -129,7 +129,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/engine/volume` | Game | Volumes: settings components that change with where a point is, such as the post-processing at the camera (see [World](../world/volumes.md#volumes)). |
 | `lib/engine/project` | Game | The project's settings file and the user's file beside it, which the game reads again when they change (see [Project settings](architecture.md#project-settings)). |
 | `lib/engine/debug` | Game | Immediate-mode debug drawing: lines, boxes, spheres, arrows and axes, in world positions (see [Rendering](../rendering/layers-and-output.md#debug)). |
-| `lib/engine/anim` | Game | Animation on skinned meshes: the `Animator` component, its clock in fixed ticks, and the poses that the renderer skins with (see [Content: Skins and animations](../content/kinds/skins-and-animations.md#playback)). |
+| `lib/engine/anim` | Game | Animation on skinned meshes: `Animator` and `Root_Motion`, the `animate` system in fixed ticks, animation events, and the poses that the renderer skins with (see [Animation](../animation/design.md#the-ecs)). |
 | `lib/engine/anim/graph` | Game | The animation graph: states, fades and blends of clips, events, root motion, and poses sampled, blended and composed into a palette. It imports nothing from the world, scripts or the renderer, so what it gives depends on its inputs alone (see [Animation](../animation/design.md#design)). |
 | `lib/engine/editor/link` | Shared | The editor link's messages, and the schema that the editor's C# is generated from. The host and the game both import it. |
 | `lib/engine/asset/format` | Shared | GUIDs, `.meta` files and blob layouts. `tools/cook` and the runtime both import it. |

@@ -44,6 +44,8 @@ Instance :: struct {
 	// The graph blob's key that the instance was made for, so a new blob makes it again.
 	key:             u64,
 	parameters:      [format.MAX_ANIMATION_GRAPH_PARAMETERS]f32,
+	// Each parameter's name's hash, so a new graph finds the values of the ones that it still has.
+	hashes:          [format.MAX_ANIMATION_GRAPH_PARAMETERS]u32,
 	// A bit for each trigger parameter that is set, which the next tick sees and then clears.
 	triggers:        u32,
 	state:           u16,
@@ -212,6 +214,7 @@ init :: proc(g: ^Graph, inst: ^Instance, key: u64) {
 		inst.state = u16(g.blob.entry)
 		for p, i in format.animation_graph_parameters(g.data, g.blob) {
 			inst.parameters[i] = p.default if p.kind != .Trigger else 0
+			inst.hashes[i] = p.hash
 		}
 	}
 	build_samples(g, inst, 0, 0)
@@ -220,19 +223,20 @@ init :: proc(g: ^Graph, inst: ^Instance, key: u64) {
 	}
 }
 
-// keep_parameters gives a new instance the values of the old one's parameters whose names its graph still has, so a
-// graph that changes while the game runs keeps what gameplay set.
-keep_parameters :: proc(g: ^Graph, inst: ^Instance, old: ^Instance, old_hashes: []u32) {
+// keep_parameters gives a new instance the values of an old one's parameters whose names its graph still has, and
+// their triggers, so a graph that changes while the game runs keeps what gameplay set.
+keep_parameters :: proc(g: ^Graph, inst: ^Instance, old: ^Instance) {
 	if g.blob == nil {
 		return
 	}
 	for p, i in format.animation_graph_parameters(g.data, g.blob) {
-		for h, j in old_hashes {
-			if h == p.hash && j < len(old.parameters) {
+		for h, j in old.hashes {
+			if h == p.hash && h != 0 {
 				inst.parameters[i] = old.parameters[j]
 				if p.kind == .Trigger && old.triggers & (1 << u32(j)) != 0 {
 					inst.triggers |= 1 << u32(i)
 				}
+				break
 			}
 		}
 	}

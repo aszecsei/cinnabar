@@ -14,6 +14,8 @@ Read them in this order the first time.
 | [Render extraction](render-extraction.md) | How rendering reads the world. |
 | [Volumes](volumes.md) | Settings that depend on where a point is. |
 
+Animation runs on the world as physics does, in `Fixed` systems with presentation between ticks: see [Animation](../animation/design.md#the-ecs).
+
 ## Overview
 
 The world is one `ecs.World` in `Game_State`. Its storage is virtual memory that the game reserves itself, so it holds no allocators and no pointers into code, and a code reload keeps it whole.

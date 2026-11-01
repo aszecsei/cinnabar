@@ -7,7 +7,7 @@ Animation graphs are `.animation_graph` text files in the content roots. A graph
 
 Clips are the Animation sub-assets of models (see [Skins and animations](skins-and-animations.md#animations)). `just animation_graphs` runs `cook animation_graphs --cache build/<target>/content --config dev|release --root game=<content root> --root engine=lib/engine/content`. The daemon cooks graphs like any other kind (`tools/cook/animation_graphs.odin`).
 
-The runtime does not play graphs yet; `Animator` plays one clip (see [Playback](skins-and-animations.md#playback)).
+An `Animator` plays a graph (see [Animation](../../animation/design.md#the-ecs)).
 
 ```
 animation_graph 1

@@ -6,14 +6,14 @@ Skeletal animation on skinned meshes: the animation graph that poses a skeleton 
 
 | Document | What it covers |
 |---|---|
-| [Design](design.md) | What the graph does and does not do, the instance and its samples, ticks and presentation, transitions and fades, blends, events and root motion. |
+| [Design](design.md) | What the graph does and does not do, the instance and its samples, ticks and presentation, transitions and fades, blends, events, root motion, and the components and systems that run graphs on entities. |
 
 ## Overview
 
 | Package | Side | Responsibility |
 |---|---|---|
 | `lib/engine/anim/graph` | Game | The graph: from its blob, its clips, an instance and a tick's seconds, it gives the instance's next state, the tick's events and root motion, and the pose between two ticks. It imports nothing from the world, scripts or the renderer. |
-| `lib/engine/anim` | Game | The `Animator` component, its clock in the `Fixed` stage, and the poses that `Frame_Desc.skins` takes. |
+| `lib/engine/anim` | Game | `Animator` and `Root_Motion`, the `animate` system in the `Fixed` stage, the events for systems and scripts, and the poses that `Frame_Desc.skins` takes. |
 
 The data flow: in a fixed tick, the graph moves each instance from its parameters and gives the tick's events and root motion. When a frame is presented, each instance's samples are posed between the last two ticks and blended, and the renderer skins the mesh with the palette.
 
