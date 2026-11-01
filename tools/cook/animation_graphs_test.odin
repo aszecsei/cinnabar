@@ -1,6 +1,9 @@
 package cook
 
 import "core:mem"
+import "core:slice"
+import "core:strconv"
+import "core:strings"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -203,4 +206,48 @@ animation_graphs_cook_to_blobs_that_depend_on_their_clips :: proc(t: ^testing.T)
 	// A second cook finds it up to date.
 	pass = cook(options, {.Animation_Graph}, log_problems = false)
 	testing.expect_value(t, pass.current[.Animation_Graph], 1)
+}
+
+// The files that the editor's reader and writer are tested with too (see AnimationGraphFileTests.cs), so the two agree:
+// a `# problem` comment is on each line that the cooker reports, and `# nodes:` names the file's nodes.
+@(private = "file")
+CORPUS := #load_directory("testdata/animation_graphs")
+
+@(test)
+the_shared_files_have_their_problems_at_their_lines_and_their_nodes :: proc(t: ^testing.T) {
+	testing.expect(t, len(CORPUS) > 0)
+	for file in CORPUS {
+		text := string(file.data)
+		expected := make([dynamic]int, context.temp_allocator)
+		nodes := make([dynamic]u32, context.temp_allocator)
+		for line, i in strings.split_lines(text, context.temp_allocator) {
+			if strings.contains(line, "# problem") {
+				append(&expected, i + 1)
+			}
+			if listed, found := strings.substring_from(line, len("# nodes: ")); found && strings.has_prefix(line, "# nodes: ") {
+				for field in strings.fields(strings.trim_space(listed), context.temp_allocator) {
+					id, ok := strconv.parse_int(field)
+					testing.expect(t, ok)
+					append(&nodes, u32(id))
+				}
+			}
+		}
+		g, problems := animation_graph_parse(text, context.temp_allocator)
+		found := make([dynamic]int, context.temp_allocator)
+		for p in problems {
+			if len(found) == 0 || found[len(found) - 1] != p.line {
+				append(&found, p.line)
+			}
+		}
+		testing.expectf(t, slice.equal(found[:], expected[:]), "%s: problems at %v, expected at %v: %v", file.name, found, expected, problems)
+		// A graph without problems has the nodes that the file names; the blob keeps its states' and transitions'.
+		if len(problems) == 0 {
+			for s in g.states {
+				testing.expectf(t, slice.contains(nodes[:], s.node), "%s: state's node %d", file.name, s.node)
+			}
+			for tr in g.transitions {
+				testing.expectf(t, slice.contains(nodes[:], tr.node), "%s: transition's node %d", file.name, tr.node)
+			}
+		}
+	}
 }
