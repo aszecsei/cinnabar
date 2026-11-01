@@ -195,6 +195,30 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task AModelsSubAssetsHaveTheNamesInItsFile()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        var fox = Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "models", "fox");
+        Directory.CreateDirectory(_content);
+        foreach (var name in new[] { "Fox.gltf", "Fox.bin", "Texture.png" })
+        {
+            File.Copy(Path.Combine(fox, name), Path.Combine(_content, name));
+        }
+        // A model that the cooker parses after the fox, whose text can land in what the fox's parse gave back.
+        File.Copy(Path.Combine(fox, "..", "shapes.gltf"), Path.Combine(_content, "shapes.gltf"));
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Count(a => a.Kind == AssetKind.Animation) == 3, session, []);
+
+        // The index reads them after the model's parse has been freed.
+        Assert.Equal(["Run", "Survey", "Walk"], index.Assets.Values.Where(a => a.Kind == AssetKind.Animation).Select(a => a.Subasset).Order(StringComparer.Ordinal));
+        Assert.Contains(index.Assets.Values, a => a.Kind == AssetKind.Mesh && a.Subasset == "fox1");
+    }
+
+    [Fact]
     public async Task AnOperationWithoutTheDaemonFails()
     {
         using var session = new CookSession(new CookOptions("missing.exe", "cache", null, [], _dir), new AssetIndex());

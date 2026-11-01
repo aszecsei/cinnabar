@@ -474,7 +474,8 @@ assign_subassets :: proc(a: ^Asset_Source, wanted: []Subasset, force: bool, prob
 			changed = true
 		}
 		append(&lines, format.Meta_Subasset{kind, w.name, guid})
-		append(&a.subassets, Subasset{w.kind, w.name, guid})
+		// The pass's index reads the names after the file's parse, which they may point into, is freed.
+		append(&a.subassets, Subasset{w.kind, strings.clone(w.name, context.temp_allocator), guid})
 		current[fmt.tprintf("%s.%s", kind, w.name)] = true
 	}
 	for s in a.meta.subassets {
