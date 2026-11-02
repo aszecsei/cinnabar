@@ -21,12 +21,12 @@ node 1 state
 	name = idle
 	motion = survey
 node 2 state
-	position = [400, 0]
+	position = [408, 2]
 	name = move
-	motion = @10.pose
 	enter_event = started
+	motion = @10.pose
 node 3 state
-	position = [400, 200]
+	position = [406, 203]
 	name = look
 	motion = survey
 	loop = false
@@ -34,7 +34,7 @@ node 3 state
 	exit_event = looked
 
 node 10 blend_1d
-	position = [400, -130]
+	position = [408, -175]
 	parameter = speed
 	input.0 = walk
 	at.0 = 1
