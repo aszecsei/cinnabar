@@ -15,8 +15,8 @@ namespace Cinnabar.Editor.AnimationGraphs;
 /// <summary>
 /// The animation graph editor's canvas (see docs/editor/animation-graph-editor.md#animation-graph-editor): the graph's states and
 /// blends, a link from each blend to the states that play it, and an arrow for each transition, drawn in the canvas's
-/// own units under a pan and a zoom. The left button selects, drags, drags a box, drags a transition from a state's handle
-/// to another state, and drags a link from a blend to a state; a link dragged off a state comes away. The right or middle
+/// own units under a pan and a zoom. The left button selects, drags, drags a box, drags a transition from a state's rim
+/// to another state, and drags a tether from a blend's foot to a state; a tether dragged off a state's chip comes away. The right or middle
 /// button pans, and a right click without a drag, Space or Tab adds a node. The wheel zooms about the mouse. Delete
 /// deletes the selected nodes, and F frames the graph.
 /// </summary>
@@ -25,26 +25,37 @@ public sealed class AnimationGraphCanvas : Control
     const double MinZoom = 0.2;
     const double MaxZoom = 2;
     const double ArrowHead = 8;
+    const double StateCorner = 10;
+    const double BlendCorner = 2;
 
     static readonly IBrush NodeBody = new SolidColorBrush(Color.Parse("#2A2A2E"));
     static readonly IPen NodeBorder = new Pen(new SolidColorBrush(Color.Parse("#3C3C42")), 1);
+    // A state's rim: where its transitions start and end, brighter where a press or a drop would take it.
+    static readonly IBrush Rim = new SolidColorBrush(Color.Parse("#3F4F63"));
+    static readonly IBrush RimHot = new SolidColorBrush(Color.Parse("#8FA9C7"));
+    static readonly IBrush ChipBody = new SolidColorBrush(Color.Parse("#222226"));
     static readonly IPen SelectedBorder = new Pen(new SolidColorBrush(Palette.Accent), 2);
     static readonly IPen ErrorBorder = new Pen(new SolidColorBrush(Palette.Error), 2, new DashStyle([3, 2], 0));
     static readonly IBrush Text = new SolidColorBrush(Color.Parse("#E4E4E8"));
     static readonly IBrush DimText = new SolidColorBrush(Color.Parse("#8A8A92"));
     static readonly IBrush BoxFill = new SolidColorBrush(Color.Parse("#22E34234"));
     static readonly IPen BoxPen = new Pen(new SolidColorBrush(Palette.Accent), 1);
-    static readonly IBrush StateHeader = new SolidColorBrush(Color.Parse("#2E4A66"));
-    static readonly IBrush BlendHeader = new SolidColorBrush(Color.Parse("#4E3E6A"));
+    static readonly IBrush BlendHeader = new SolidColorBrush(Color.Parse("#39303F"));
     static readonly IBrush ArrowBrush = new SolidColorBrush(Color.Parse("#A8A8B0"));
     static readonly IPen ArrowPen = new Pen(ArrowBrush, 1.5);
-    static readonly IBrush LinkBrush = new SolidColorBrush(Color.Parse("#D97AB5"));
-    static readonly IPen LinkPen = new Pen(LinkBrush, 2);
+    // A blend's tether: dotted, and with no head, since nothing travels along it as a transition does.
+    static readonly IBrush TetherBrush = new SolidColorBrush(Color.Parse("#D97AB5"));
+    static readonly IPen TetherPen = new Pen(TetherBrush, 1.5, new DashStyle([1, 3], 0), PenLineCap.Round);
+    static readonly IPen TetherEdge = new Pen(TetherBrush, 1);
+    static readonly IBrush FeedBody = new SolidColorBrush(Color.Parse("#2F2530"));
+    static readonly Cursor CrossCursor = new(StandardCursorType.Cross);
+    static readonly Cursor HandCursor = new(StandardCursorType.Hand);
     static readonly IBrush GlyphBody = new SolidColorBrush(Color.Parse("#323238"));
     // The live view: what plays, what it fades from, and the transition between them.
     static readonly Color LiveColor = Color.Parse("#5BC47F");
     static readonly IBrush LiveBrush = new SolidColorBrush(LiveColor);
     static readonly IPen LivePen = new Pen(LiveBrush, 3);
+    static readonly IPen LiveRim = new Pen(LiveBrush, AnimationGraphGeometry.RimWidth);
     static readonly IBrush LastTakenBrush = new SolidColorBrush(LiveColor, 0.45);
     static readonly IPen LastTakenPen = new Pen(LastTakenBrush, 2);
 
@@ -69,7 +80,9 @@ public sealed class AnimationGraphCanvas : Control
     Point _last;
     int _pressed;
     Dictionary<int, Vec2> _moveStarts = [];
-    // A drag from a state's handle or a blend's output, and the state that a link came off, if any.
+    // The state whose rim the mouse is on.
+    int _rimUnderMouse;
+    // A drag from a state's rim or a blend's feed, and the state that a tether came off, if any.
     int _dragFrom;
     int? _detachedFrom;
     Vec2 _dragEnd;
@@ -136,9 +149,16 @@ public sealed class AnimationGraphCanvas : Control
             {
                 DrawArrow(context, t, ArrowPen, ArrowBrush);
             }
+            // The last transition's arrow goes under its glyph, like the others, so its words stay whole.
+            var live = _editor.Live;
+            if (live != null && _geometry.FindTransition((int)live.Transition) is { } taken)
+            {
+                var fading = AnimationGraphEditor.FadeOf(live) < 1;
+                DrawArrow(context, taken, fading ? LivePen : LastTakenPen, fading ? LiveBrush : LastTakenBrush);
+            }
             foreach (var link in _geometry.Links)
             {
-                DrawCurve(context, link.Start, link.End);
+                DrawLine(context, TetherPen, link.Start, link.End);
             }
             foreach (var node in _geometry.Nodes)
             {
@@ -148,7 +168,7 @@ public sealed class AnimationGraphCanvas : Control
             {
                 DrawGlyph(context, t, _editor.Selection.Contains(t.Node.Id), problems.Contains(t.Node.Id));
             }
-            if (_editor.Live is { } live)
+            if (live != null)
             {
                 DrawLive(context, live);
             }
@@ -161,44 +181,57 @@ public sealed class AnimationGraphCanvas : Control
     }
 
     // The state that plays, with its progress through this play; the state that it fades from, by what is left of the
-    // fade; and the last transition that it took, bright during its fade. A node that the document does not have, as when
-    // it has changed since it cooked, has no place to show.
+    // fade; and the glyph of the last transition that it took, bright during its fade. A node that the document does not
+    // have, as when it has changed since it cooked, has no place to show.
     void DrawLive(DrawingContext context, AnimatorView view)
     {
         var fade = AnimationGraphEditor.FadeOf(view);
         if (_geometry.FindTransition((int)view.Transition) is { } taken)
         {
-            DrawArrow(context, taken, fade < 1 ? LivePen : LastTakenPen, fade < 1 ? LiveBrush : LastTakenBrush);
             var g = taken.Glyph;
             context.DrawRectangle(null, fade < 1 ? LivePen : LastTakenPen, new Rect(g.X, g.Y, g.Width, g.Height).Inflate(1), 10, 10);
         }
         if (fade < 1 && _geometry.Find((int)view.Source) is { } source)
         {
-            var b = source.Bounds;
-            context.DrawRectangle(null, new Pen(new SolidColorBrush(LiveColor, 1 - fade), 3), new Rect(b.X, b.Y, b.Width, b.Height).Inflate(2), 6, 6);
+            DrawLiveRim(context, source, new Pen(new SolidColorBrush(LiveColor, 1 - fade), AnimationGraphGeometry.RimWidth));
         }
         if (_geometry.Find((int)view.State) is { } state)
         {
             var b = state.Bounds;
-            var pen = fade < 1 ? new Pen(new SolidColorBrush(LiveColor, fade), 3) : LivePen;
-            context.DrawRectangle(null, pen, new Rect(b.X, b.Y, b.Width, b.Height).Inflate(2), 6, 6);
+            DrawLiveRim(context, state, fade < 1 ? new Pen(new SolidColorBrush(LiveColor, fade), AnimationGraphGeometry.RimWidth) : LiveRim);
             var play = view.Progress - Math.Floor(view.Progress);
-            context.FillRectangle(LiveBrush, new Rect(b.X, b.Y + b.Height - 3, b.Width * play, 3));
+            context.FillRectangle(LiveBrush, new Rect(b.X + StateCorner, b.Y + b.Height - 3, (b.Width - 2 * StateCorner) * play, 3));
         }
+    }
+
+    static void DrawLiveRim(DrawingContext context, AnimationNodeLayout state, IPen pen)
+    {
+        var half = AnimationGraphGeometry.RimWidth / 2;
+        var b = state.Bounds;
+        context.DrawRectangle(null, pen, new Rect(b.X, b.Y, b.Width, b.Height).Inflate(half), StateCorner + half, StateCorner + half);
     }
 
     void DrawDrag(DrawingContext context)
     {
         if (_gesture == Gesture.Transition && _geometry.Find(_dragFrom) is { } state)
         {
-            DrawLine(context, ArrowPen, state.Handle, _dragEnd);
-            DrawHead(context, state.Handle, _dragEnd, ArrowBrush);
+            // Over another state, it shows where the arrow will land: on the rim, and not on what the state says.
+            var target = StateAt(_dragEnd) is { } over && over != _dragFrom ? _geometry.Find(over) : null;
+            var toward = target == null ? _dragEnd : new Vec2(target.Bounds.X + target.Bounds.Width / 2, target.Bounds.Y + target.Bounds.Height / 2);
+            var start = state.EdgeToward(toward);
+            var end = target?.EdgeToward(start) ?? _dragEnd;
+            DrawLine(context, ArrowPen, start, end);
+            DrawHead(context, start, end, ArrowBrush);
         }
         if (_gesture == Gesture.Link && _geometry.Find(_dragFrom) is { } blend)
         {
-            DrawCurve(context, blend.BlendOutput, _dragEnd);
+            DrawLine(context, TetherPen, blend.EdgeToward(_dragEnd), _dragEnd);
         }
     }
+
+    // Whether a state's rim lights: the mouse is on it, or a transition being dragged would land on it.
+    bool RimIsHot(int state) =>
+        _gesture == Gesture.None ? _rimUnderMouse == state : _gesture == Gesture.Transition && (state == _dragFrom || StateAt(_dragEnd) == state);
 
     static void DrawLine(DrawingContext context, IPen pen, Vec2 a, Vec2 b) => context.DrawLine(pen, new Point(a.X, a.Y), new Point(b.X, b.Y));
 
@@ -237,75 +270,75 @@ public sealed class AnimationGraphCanvas : Control
         context.DrawGeometry(brush, null, geometry);
     }
 
-    static void DrawCurve(DrawingContext context, Vec2 start, Vec2 end)
-    {
-        var bend = Math.Max(40, Math.Abs(end.X - start.X) * 0.5);
-        var geometry = new StreamGeometry();
-        using (var g = geometry.Open())
-        {
-            g.BeginFigure(new Point(start.X, start.Y), false);
-            g.CubicBezierTo(new Point(start.X + bend, start.Y), new Point(end.X - bend, end.Y), new Point(end.X, end.Y));
-            g.EndFigure(false);
-        }
-        context.DrawGeometry(null, LinkPen, geometry);
-    }
-
     void DrawNode(DrawingContext context, AnimationNodeLayout layout, bool selected, bool error)
     {
-        var b = layout.Bounds;
-        var rect = new Rect(b.X, b.Y, b.Width, b.Height);
-        var isState = layout.Node.Kind == AnimationGraphNodeKind.State;
-        var header = isState ? StateHeader : BlendHeader;
-        context.DrawRectangle(NodeBody, NodeBorder, rect, 4, 4);
-        context.DrawRectangle(header, null, new Rect(b.X, b.Y, b.Width, AnimationGraphGeometry.HeaderHeight), 4, 4);
-        context.FillRectangle(header, new Rect(b.X, b.Y + AnimationGraphGeometry.HeaderHeight - 4, b.Width, 4));
-        var name = _editor.Label(layout.Node.Id);
-        var title = isState && layout.Node.Get("name") == _editor.Document.Graph.Entry ? $"▶ {name}" : name;
-        DrawText(context, title, new Point(b.X + 8, b.Y + 5), 12, Text, b.Width - 24, bold: true);
-        var rows = isState ? StateRows(layout.Node) : BlendRows(layout.Node);
-        var y = b.Y + AnimationGraphGeometry.HeaderHeight + 2;
-        foreach (var (row, dim) in rows)
+        if (layout.Node.Kind == AnimationGraphNodeKind.State)
         {
-            DrawText(context, row, new Point(b.X + 12, y), 11, dim ? DimText : Text, b.Width - 20);
-            y += AnimationGraphGeometry.RowHeight;
-        }
-        if (isState)
-        {
-            DrawPin(context, layout.Handle, ArrowBrush, false);
-            DrawPin(context, layout.MotionInput, LinkBrush, _geometry.Links.Any(l => l.State == layout.Node.Id));
+            DrawState(context, layout, selected, error);
         }
         else
         {
-            DrawPin(context, layout.BlendOutput, LinkBrush, _geometry.Links.Any(l => l.Blend == layout.Node.Id));
+            DrawBlend(context, layout, selected, error);
         }
+    }
+
+    // A state is a place in the machine: a rounded body in a rim, which its transitions' arrows land on.
+    void DrawState(DrawingContext context, AnimationNodeLayout layout, bool selected, bool error)
+    {
+        var b = layout.Bounds;
+        var rect = new Rect(b.X, b.Y, b.Width, b.Height);
+        var rim = AnimationGraphGeometry.RimWidth;
+        var outer = rect.Inflate(rim);
+        context.DrawRectangle(RimIsHot(layout.Node.Id) ? RimHot : Rim, null, outer, StateCorner + rim, StateCorner + rim);
+        context.DrawRectangle(NodeBody, null, rect, StateCorner, StateCorner);
+        var name = _editor.Label(layout.Node.Id);
+        var title = layout.Node.Get("name") == _editor.Document.Graph.Entry ? $"▶ {name}" : name;
+        DrawText(context, title, new Point(b.X + 12, b.Y + 5), 13, Text, b.Width - 24, bold: true);
+
+        // What it plays: a clip, or the blend that its tether comes from, in the tether's color.
+        var chip = layout.Chip;
+        var chipRect = new Rect(chip.X, chip.Y, chip.Width, chip.Height);
+        var link = _geometry.Links.FirstOrDefault(l => l.State == layout.Node.Id);
+        var linked = link.Blend != 0;
+        var landing = _gesture == Gesture.Link && StateAt(_dragEnd) == layout.Node.Id;
+        context.DrawRectangle(ChipBody, linked || landing ? TetherEdge : NodeBorder, chipRect, 3, 3);
+        var motion = layout.Node.Get("motion");
+        var chipText = linked ? _editor.Label(link.Blend) : motion ?? "No motion";
+        DrawText(context, chipText, new Point(chip.X + 6, chip.Y + 3), 11, linked ? TetherBrush : motion == null ? DimText : Text, chip.Width - 12);
+
+        var plays = layout.Node.Get("loop") == "false" ? "Plays once" : "Loops";
+        var speed = layout.Node.Get("speed") is { } s ? $"{plays} at {s}×" : plays;
+        DrawText(context, speed, new Point(b.X + 12, chip.Y + chip.Height + 2), 11, DimText, b.Width - 24);
         if (selected || error)
         {
-            context.DrawRectangle(null, error ? ErrorBorder : SelectedBorder, rect.Inflate(1), 5, 5);
+            context.DrawRectangle(null, error ? ErrorBorder : SelectedBorder, outer.Inflate(1), StateCorner + rim + 1, StateCorner + rim + 1);
         }
     }
 
-    static void DrawPin(DrawingContext context, Vec2 at, IBrush brush, bool filled) =>
-        context.DrawEllipse(filled ? brush : NodeBody, new Pen(brush, 1.5), new Point(at.X, at.Y), AnimationGraphGeometry.PinRadius, AnimationGraphGeometry.PinRadius);
-
-    static IEnumerable<(string Text, bool Dim)> StateRows(AnimationGraphNode state)
+    // A blend is not a place in the machine: nothing arrives at it, and it feeds the states that play it from its foot.
+    void DrawBlend(DrawingContext context, AnimationNodeLayout layout, bool selected, bool error)
     {
-        var motion = state.Get("motion");
-        yield return (GraphValue.Parse(motion ?? "") is GraphLink ? "blend" : motion ?? "no motion", motion == null);
-        var details = new List<string>();
-        if (state.Get("speed") is { } speed)
+        var b = layout.Bounds;
+        var rect = new Rect(b.X, b.Y, b.Width, b.Height);
+        context.DrawRectangle(NodeBody, NodeBorder, rect, BlendCorner, BlendCorner);
+        context.FillRectangle(BlendHeader, new Rect(b.X, b.Y, b.Width, AnimationGraphGeometry.HeaderHeight));
+        DrawText(context, _editor.Label(layout.Node.Id), new Point(b.X + 8, b.Y + 5), 12, Text, b.Width - 16, bold: true);
+        var y = b.Y + AnimationGraphGeometry.HeaderHeight + 2;
+        foreach (var (_, clip, at) in AnimationGraphEditor.InputsOf(layout.Node))
         {
-            details.Add($"× {speed}");
+            DrawText(context, clip ?? "No clip", new Point(b.X + 8, y), 11, Text, b.Width / 2);
+            DrawText(context, at == null ? "" : $"at {at}", new Point(b.X + b.Width / 2 + 24, y), 11, DimText, b.Width / 2 - 28);
+            y += AnimationGraphGeometry.RowHeight;
         }
-        details.Add(state.Get("loop") == "false" ? "once" : "loops");
-        yield return (string.Join("  ·  ", details), true);
-    }
 
-    static IEnumerable<(string Text, bool Dim)> BlendRows(AnimationGraphNode blend)
-    {
-        yield return ($"by {blend.Get("parameter") ?? "no parameter"}", true);
-        foreach (var (_, clip, at) in AnimationGraphEditor.InputsOf(blend))
+        var feed = layout.Feed;
+        var states = _geometry.Links.Where(l => l.Blend == layout.Node.Id).Select(l => _editor.Label(l.State)).ToList();
+        context.FillRectangle(FeedBody, new Rect(feed.X + 1, feed.Y, feed.Width - 2, feed.Height - 1));
+        var words = states.Count == 0 ? "Drag to a state" : $"Plays in {string.Join(", ", states)}";
+        DrawText(context, words, new Point(feed.X + 8, feed.Y + 3), 11, TetherBrush, feed.Width - 16);
+        if (selected || error)
         {
-            yield return ($"{clip ?? "no clip"}  at {at ?? "?"}", false);
+            context.DrawRectangle(null, error ? ErrorBorder : SelectedBorder, rect.Inflate(1), BlendCorner, BlendCorner);
         }
     }
 
@@ -319,7 +352,8 @@ public sealed class AnimationGraphCanvas : Control
         {
             label = label == "" ? "any" : $"any: {label}";
         }
-        DrawText(context, label, new Point(g.X + 8, g.Y + 3), 11, Text, g.Width - 14);
+        var inside = g.Width - 14;
+        DrawText(context, label, new Point(g.X + 7 + Math.Max(0, (inside - TextWidth(label, 11)) / 2), g.Y + 3), 11, Text, inside);
         if (selected || error)
         {
             context.DrawRectangle(null, error ? ErrorBorder : SelectedBorder, rect.Inflate(1), 10, 10);
@@ -345,22 +379,22 @@ public sealed class AnimationGraphCanvas : Control
         }
         else if (point.Properties.IsLeftButtonPressed)
         {
-            var hit = _geometry.HitTest(ToCanvas(point.Position));
+            var hit = _geometry.HitTest(ToCanvas(point.Position), _view.Zoom);
             _dragEnd = ToCanvas(point.Position);
             _detachedFrom = null;
             switch (hit.Kind)
             {
-                case AnimationGraphHitKind.StateHandle:
+                case AnimationGraphHitKind.StateRim:
                     (_gesture, _dragFrom) = (Gesture.Transition, hit.Node);
                     break;
-                case AnimationGraphHitKind.BlendOutput:
+                case AnimationGraphHitKind.BlendFeed:
                     (_gesture, _dragFrom) = (Gesture.Link, hit.Node);
                     break;
-                case AnimationGraphHitKind.MotionInput when _geometry.Links.FirstOrDefault(l => l.State == hit.Node) is { Blend: not 0 } link:
-                    // A linked state gives up its link, which the drag then carries from its blend.
+                case AnimationGraphHitKind.MotionChip when _geometry.Links.FirstOrDefault(l => l.State == hit.Node) is { Blend: not 0 } link:
+                    // A state's chip gives up its tether, which the drag then carries from its blend.
                     (_gesture, _dragFrom, _detachedFrom) = (Gesture.Link, link.Blend, hit.Node);
                     break;
-                case AnimationGraphHitKind.Node or AnimationGraphHitKind.Transition or AnimationGraphHitKind.MotionInput:
+                case AnimationGraphHitKind.Node or AnimationGraphHitKind.Transition or AnimationGraphHitKind.MotionChip:
                     if (!_editor.Selection.Contains(hit.Node) || e.KeyModifiers != KeyModifiers.None)
                     {
                         _editor.Select([hit.Node], ModeOf(e.KeyModifiers));
@@ -391,6 +425,9 @@ public sealed class AnimationGraphCanvas : Control
         var far = Gestures.MovedPast(moved);
         switch (_gesture)
         {
+            case Gesture.None:
+                ShowWhatAPressWouldTake(position);
+                break;
             case Gesture.PanClick when far:
                 _gesture = Gesture.Pan;
                 break;
@@ -463,11 +500,40 @@ public sealed class AnimationGraphCanvas : Control
         InvalidateVisual();
     }
 
-    // The state at a point, on its body or a pin of it.
+    // A rim lights and the cursor changes where a press would start a connection, since nothing else there says so.
+    void ShowWhatAPressWouldTake(Point position)
+    {
+        var hit = _geometry.HitTest(ToCanvas(position), _view.Zoom);
+        var rim = hit.Kind == AnimationGraphHitKind.StateRim ? hit.Node : 0;
+        Cursor = hit.Kind switch
+        {
+            AnimationGraphHitKind.StateRim => CrossCursor,
+            AnimationGraphHitKind.BlendFeed => HandCursor,
+            AnimationGraphHitKind.MotionChip when _geometry.Links.Any(l => l.State == hit.Node) => HandCursor,
+            _ => Cursor.Default,
+        };
+        if (rim != _rimUnderMouse)
+        {
+            _rimUnderMouse = rim;
+            InvalidateVisual();
+        }
+    }
+
+    protected override void OnPointerExited(PointerEventArgs e)
+    {
+        base.OnPointerExited(e);
+        if (_rimUnderMouse != 0)
+        {
+            _rimUnderMouse = 0;
+            InvalidateVisual();
+        }
+    }
+
+    // The state at a point, on its body, its chip or its rim.
     int? StateAt(Vec2 at)
     {
-        var hit = _geometry.HitTest(at);
-        return hit.Kind is AnimationGraphHitKind.Node or AnimationGraphHitKind.StateHandle or AnimationGraphHitKind.MotionInput
+        var hit = _geometry.HitTest(at, _view.Zoom);
+        return hit.Kind is AnimationGraphHitKind.Node or AnimationGraphHitKind.StateRim or AnimationGraphHitKind.MotionChip
             && _geometry.Find(hit.Node) is { Node.Kind: AnimationGraphNodeKind.State } ? hit.Node : null;
     }
 

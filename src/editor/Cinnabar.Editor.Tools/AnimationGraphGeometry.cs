@@ -3,17 +3,24 @@ using Cinnabar.Editor.Maths;
 
 namespace Cinnabar.Editor.Tools;
 
-/// <summary>A state or a blend as the canvas draws it. A state has a handle that transitions start from and a motion input; a blend has an output.</summary>
+/// <summary>
+/// A state or a blend as the canvas draws it. A state's rim, around its bounds, is where its transitions start and end,
+/// and its chip names what it plays. A blend is not a place in the state machine: it has no rim, and its feed, along its
+/// foot, is what links it to the states that play it.
+/// </summary>
 public sealed record AnimationNodeLayout(AnimationGraphNode Node, GraphRect Bounds)
 {
-    /// <summary>Where a drag starts a transition from a state.</summary>
-    public Vec2 Handle => new(Bounds.X + Bounds.Width, Bounds.Y + AnimationGraphGeometry.HeaderHeight / 2);
+    /// <summary>The rectangle that a state's rim goes around the outside of.</summary>
+    public GraphRect Outer => Node.Kind == AnimationGraphNodeKind.State ? Bounds.Inflate(AnimationGraphGeometry.RimWidth) : Bounds;
 
-    /// <summary>Where a blend's link ends on a state.</summary>
-    public Vec2 MotionInput => new(Bounds.X, Bounds.Y + AnimationGraphGeometry.HeaderHeight + AnimationGraphGeometry.RowHeight / 2);
+    /// <summary>The row of a state that names what it plays.</summary>
+    public GraphRect Chip => new(Bounds.X + 8, Bounds.Y + AnimationGraphGeometry.HeaderHeight + 2, Bounds.Width - 16, AnimationGraphGeometry.RowHeight);
 
-    /// <summary>Where a blend's link starts.</summary>
-    public Vec2 BlendOutput => new(Bounds.X + Bounds.Width, Bounds.Y + AnimationGraphGeometry.HeaderHeight / 2);
+    /// <summary>The strip along a blend's foot that says which states play it, which a drag links to another.</summary>
+    public GraphRect Feed => new(Bounds.X, Bounds.Y + Bounds.Height - AnimationGraphGeometry.RowHeight, Bounds.Width, AnimationGraphGeometry.RowHeight);
+
+    /// <summary>The point of the node's outside on the way from its middle to another point.</summary>
+    public Vec2 EdgeToward(Vec2 point) => AnimationGraphGeometry.EdgeOf(Outer, point, new Vec2(0, 0));
 }
 
 /// <summary>
@@ -25,7 +32,7 @@ public sealed record TransitionLayout(AnimationGraphNode Node, GraphRect Glyph, 
     public Vec2 Middle => new(Glyph.X + Glyph.Width / 2, Glyph.Y + Glyph.Height / 2);
 }
 
-/// <summary>A link from a blend's output to the motion input of a state that plays it.</summary>
+/// <summary>A tether from a blend to a state that plays it.</summary>
 public readonly record struct MotionLinkLayout(int Blend, int State, Vec2 Start, Vec2 End);
 
 public enum AnimationGraphHitKind
@@ -33,9 +40,9 @@ public enum AnimationGraphHitKind
     None,
     Node,
     Transition,
-    StateHandle,
-    BlendOutput,
-    MotionInput,
+    StateRim,
+    BlendFeed,
+    MotionChip,
 }
 
 /// <summary>What is at a point of the canvas, and the node that it belongs to.</summary>
@@ -51,14 +58,16 @@ public sealed class AnimationGraphGeometry
     public const double NodeWidth = 180;
     public const double HeaderHeight = 24;
     public const double RowHeight = 20;
-    public const double PinRadius = 5;
+    public const double RimWidth = 6;
     public const double GlyphWidth = 104;
     public const double GlyphHeight = 20;
-    // A press this close to a pin's middle takes the pin, and this close to an arrow, its transition.
-    const double PinReach = 9;
+    // A press this close to a state's body, on screen, takes its rim, however far the view is zoomed out.
+    const double RimReach = 8;
+    // A press this close to an arrow takes its transition.
     const double ArrowReach = 5;
-    // Arrows between the same two states are this far apart.
-    const double ArrowLane = 16;
+    // Arrows between the same two states are this far apart, so their glyphs do not touch.
+    const double ArrowLane = GlyphHeight + 6;
+    const double GlyphGap = 4;
     const double UnplacedStep = 220;
     const double UnplacedGap = 60;
 
@@ -102,7 +111,8 @@ public sealed class AnimationGraphGeometry
             if (GraphValue.Parse(state.Node.Get("motion") ?? "") is GraphLink { Output: "pose" } link
                 && nodes.Find(n => n.Node.Id == link.Node && n.Node.Kind == AnimationGraphNodeKind.Blend1D) is { } blend)
             {
-                links.Add(new MotionLinkLayout(blend.Node.Id, state.Node.Id, blend.BlendOutput, state.MotionInput));
+                var (blendMiddle, stateMiddle) = (CenterOf(blend.Bounds), CenterOf(state.Bounds));
+                links.Add(new MotionLinkLayout(blend.Node.Id, state.Node.Id, blend.EdgeToward(stateMiddle), state.EdgeToward(blendMiddle)));
             }
         }
 
@@ -116,7 +126,8 @@ public sealed class AnimationGraphGeometry
             return HeaderHeight + 2 * RowHeight + 6;
         }
         var inputs = node.Fields.Count(f => f.Key.StartsWith("input.", StringComparison.Ordinal));
-        return HeaderHeight + Math.Max(inputs + 1, 2) * RowHeight + 6;
+        // Its inputs and its feed.
+        return HeaderHeight + (Math.Max(inputs, 1) + 1) * RowHeight + 4;
     }
 
     static List<TransitionLayout> LayOutTransitions(AnimationGraphFile file, Dictionary<string, AnimationNodeLayout> states, List<AnimationNodeLayout> nodes)
@@ -163,8 +174,12 @@ public sealed class AnimationGraphGeometry
                 var length = Math.Max(along.Length, 1);
                 var side = new Vec2(-along.Y / length, along.X / length);
                 var list = lanes[pair];
-                offset = side * ((list.IndexOf(t) - (list.Count - 1) / 2.0) * ArrowLane);
-                middle = (CenterOf(from.Bounds) + CenterOf(to.Bounds)) * 0.5 + offset;
+                var turn = list.IndexOf(t) - (list.Count - 1) / 2.0;
+                offset = side * (turn * ArrowLane);
+                // Where the lanes alone do not part two glyphs, as on a slope, the glyphs also step along their arrows.
+                var ahead = along * (1 / length);
+                var step = Math.Abs(ahead.Y) < 0.01 ? 0 : Math.Max(0, GlyphHeight + GlyphGap - Math.Abs(side.Y) * ArrowLane) / Math.Abs(ahead.Y);
+                middle = (CenterOf(from.Bounds) + CenterOf(to.Bounds)) * 0.5 + offset + ahead * (turn * step);
             }
             else if (t.Get("from") == "any" && to != null)
             {
@@ -187,8 +202,8 @@ public sealed class AnimationGraphGeometry
             }
             var glyph = new GraphRect(middle.X - GlyphWidth / 2, middle.Y - GlyphHeight / 2, GlyphWidth, GlyphHeight);
             // An arrow that goes through its own position leaves its lane there.
-            var start = from == null ? (Vec2?)null : EdgeOf(from.Bounds, t.Position != null ? middle : CenterOf(to?.Bounds ?? glyph) + offset, offset);
-            var end = to == null ? (Vec2?)null : EdgeOf(to.Bounds, t.Position != null ? middle : CenterOf(from?.Bounds ?? glyph) + offset, offset);
+            var start = from == null ? (Vec2?)null : EdgeOf(from.Outer, t.Position != null ? middle : CenterOf(to?.Bounds ?? glyph) + offset, offset);
+            var end = to == null ? (Vec2?)null : EdgeOf(to.Outer, t.Position != null ? middle : CenterOf(from?.Bounds ?? glyph) + offset, offset);
             layouts.Add(new TransitionLayout(t, glyph, start, end));
         }
         return layouts;
@@ -197,7 +212,7 @@ public sealed class AnimationGraphGeometry
     static Vec2 CenterOf(GraphRect r) => new(r.X + r.Width / 2, r.Y + r.Height / 2);
 
     // The point of a rectangle's edge on the way from its middle, moved along a lane, to another point.
-    static Vec2 EdgeOf(GraphRect r, Vec2 toward, Vec2 offset)
+    internal static Vec2 EdgeOf(GraphRect r, Vec2 toward, Vec2 offset)
     {
         var center = CenterOf(r) + offset;
         var d = toward - center;
@@ -210,8 +225,11 @@ public sealed class AnimationGraphGeometry
 
     public TransitionLayout? FindTransition(int id) => _transitions.Find(t => t.Node.Id == id);
 
-    /// <summary>The topmost thing at a point: a transition's glyph, a pin, a node, then an arrow.</summary>
-    public AnimationGraphHit HitTest(Vec2 p)
+    /// <summary>
+    /// The topmost thing at a point: a transition's glyph, a node with its chip, feed or rim, then an arrow. The zoom
+    /// keeps a rim as easy to press when the view is far out.
+    /// </summary>
+    public AnimationGraphHit HitTest(Vec2 p, double zoom = 1)
     {
         foreach (var t in Enumerable.Reverse(_transitions))
         {
@@ -220,23 +238,24 @@ public sealed class AnimationGraphGeometry
                 return new AnimationGraphHit(AnimationGraphHitKind.Transition, t.Node.Id);
             }
         }
+        var reach = Math.Max(RimWidth, RimReach / zoom);
         for (var k = _nodes.Count - 1; k >= 0; k--)
         {
             var n = _nodes[k];
             if (n.Node.Kind == AnimationGraphNodeKind.State)
             {
-                if ((n.Handle - p).Length <= PinReach)
+                if (n.Chip.Contains(p))
                 {
-                    return new AnimationGraphHit(AnimationGraphHitKind.StateHandle, n.Node.Id);
+                    return new AnimationGraphHit(AnimationGraphHitKind.MotionChip, n.Node.Id);
                 }
-                if ((n.MotionInput - p).Length <= PinReach)
+                if (!n.Bounds.Contains(p) && n.Bounds.Inflate(reach).Contains(p))
                 {
-                    return new AnimationGraphHit(AnimationGraphHitKind.MotionInput, n.Node.Id);
+                    return new AnimationGraphHit(AnimationGraphHitKind.StateRim, n.Node.Id);
                 }
             }
-            else if ((n.BlendOutput - p).Length <= PinReach)
+            else if (n.Feed.Contains(p))
             {
-                return new AnimationGraphHit(AnimationGraphHitKind.BlendOutput, n.Node.Id);
+                return new AnimationGraphHit(AnimationGraphHitKind.BlendFeed, n.Node.Id);
             }
             if (n.Bounds.Contains(p))
             {

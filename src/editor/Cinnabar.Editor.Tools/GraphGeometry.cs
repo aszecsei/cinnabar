@@ -11,6 +11,8 @@ public readonly record struct GraphRect(double X, double Y, double Width, double
 
     public bool Intersects(GraphRect r) => X < r.X + r.Width && r.X < X + Width && Y < r.Y + r.Height && r.Y < Y + Height;
 
+    public GraphRect Inflate(double by) => new(X - by, Y - by, Width + 2 * by, Height + 2 * by);
+
     public static GraphRect Between(Vec2 a, Vec2 b) => new(Math.Min(a.X, b.X), Math.Min(a.Y, b.Y), Math.Abs(b.X - a.X), Math.Abs(b.Y - a.Y));
 }
 

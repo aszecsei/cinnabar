@@ -57,7 +57,7 @@ sealed class AnimationNodeDetails : ScrollViewer
         _content.Children.Clear();
         if (node == null)
         {
-            _content.Children.Add(Dim("Select a state, a blend or a transition to see its fields. Drag from a state's handle to another state to add a transition."));
+            _content.Children.Add(Dim("Select a state, a blend or a transition to see its fields. Drag from a state's rim to another state to add a transition."));
             return;
         }
         _content.Children.Add(new TextBlock { Text = _editor.Label(node.Id), FontSize = 15, FontWeight = FontWeight.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis });

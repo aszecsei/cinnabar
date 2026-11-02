@@ -189,14 +189,28 @@ public sealed class AnimationGraphEditorTests : IDisposable
         var move = geometry.Find(2)!;
         Assert.Equal(320, move.Bounds.X);
         Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.Node, 2), geometry.HitTest(new Vec2(400, 6)));
-        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.StateHandle, 2), geometry.HitTest(move.Handle));
-        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.MotionInput, 2), geometry.HitTest(move.MotionInput));
-        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.BlendOutput, 10), geometry.HitTest(geometry.Find(10)!.BlendOutput));
+        // A state's whole rim starts a transition, on every side, and more of it when the view is far out, for the same reach on screen.
+        var edge = move.Bounds;
+        foreach (var onRim in new[] { new Vec2(edge.X - 3, edge.Y + 30), new Vec2(edge.X + edge.Width + 3, edge.Y + 30), new Vec2(edge.X + 90, edge.Y - 3), new Vec2(edge.X + 90, edge.Y + edge.Height + 3) })
+        {
+            Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.StateRim, 2), geometry.HitTest(onRim));
+        }
+        var justOutside = new Vec2(edge.X + 90, edge.Y - AnimationGraphGeometry.RimWidth - 10);
+        Assert.Equal(AnimationGraphHitKind.None, geometry.HitTest(justOutside).Kind);
+        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.StateRim, 2), geometry.HitTest(justOutside, zoom: 0.25));
+        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.MotionChip, 2), geometry.HitTest(new Vec2(move.Chip.X + 5, move.Chip.Y + 5)));
+        // A blend has no rim: only its foot links it.
+        var blend = geometry.Find(10)!;
+        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.BlendFeed, 10), geometry.HitTest(new Vec2(blend.Feed.X + 5, blend.Feed.Y + 5)));
+        Assert.Equal(new AnimationGraphHit(AnimationGraphHitKind.Node, 10), geometry.HitTest(new Vec2(blend.Bounds.X + 5, blend.Bounds.Y + 5)));
+        Assert.Equal(blend.Bounds, blend.Outer);
         Assert.Equal(AnimationGraphHitKind.None, geometry.HitTest(new Vec2(-2000, 0)).Kind);
 
-        // A blend's output links to the state that plays it.
+        // A tether joins the outsides of a blend and a state that plays it.
         var link = Assert.Single(geometry.Links);
-        Assert.Equal((10, 2, geometry.Find(10)!.BlendOutput, move.MotionInput), (link.Blend, link.State, link.Start, link.End));
+        Assert.Equal((10, 2), (link.Blend, link.State));
+        Assert.True(Touches(blend.Outer, link.Start));
+        Assert.True(Touches(move.Outer, link.End));
 
         // A transition's glyph and its arrow both find it.
         var there = geometry.FindTransition(20)!;
@@ -207,10 +221,11 @@ public sealed class AnimationGraphEditorTests : IDisposable
         // An arrow and the one back are apart, and each starts at its from state and ends at its to state.
         var back = geometry.FindTransition(21)!;
         Assert.True((there.Middle - back.Middle).Length > 10);
-        Assert.Equal(180, there.Start!.Value.X, 3);
-        Assert.Equal(320, there.End!.Value.X, 3);
-        Assert.Equal(320, back.Start!.Value.X, 3);
-        Assert.Equal(180, back.End!.Value.X, 3);
+        var rim = AnimationGraphGeometry.RimWidth;
+        Assert.Equal(180 + rim, there.Start!.Value.X, 3);
+        Assert.Equal(320 - rim, there.End!.Value.X, 3);
+        Assert.Equal(320 - rim, back.Start!.Value.X, 3);
+        Assert.Equal(180 + rim, back.End!.Value.X, 3);
 
         // From any state, there is an arrow only to its state.
         var any = geometry.FindTransition(23)!;
@@ -221,6 +236,31 @@ public sealed class AnimationGraphEditorTests : IDisposable
         Assert.Contains(1, geometry.InBox(new Vec2(10, 10), new Vec2(20, 20)));
         Assert.NotNull(geometry.Extent());
     }
+
+    [Theory]
+    [InlineData(320, 0)]
+    [InlineData(0, 200)]
+    [InlineData(320, 200)]
+    [InlineData(300, 90)]
+    public void TheGlyphsOfArrowsBetweenTwoStatesDoNotTouchHoweverTheStatesLie(int x, int y)
+    {
+        var text = $"animation_graph 1\nentry = a\nnode 1 state\n\tposition = [0, 0]\n\tname = a\nnode 2 state\n\tposition = [{x}, {y}]\n\tname = b\n"
+            + "node 3 transition\n\tfrom = a\n\tto = b\n\twhen = go\nnode 4 transition\n\tfrom = b\n\tto = a\n\twhen = go\nnode 5 transition\n\tfrom = a\n\tto = b\n\twhen = stop\n";
+        var (shell, editor) = Open(text);
+        using var _ = shell;
+        var glyphs = editor.Geometry().Transitions.Select(t => t.Glyph).ToList();
+        for (var i = 0; i < glyphs.Count; i++)
+        {
+            for (var j = i + 1; j < glyphs.Count; j++)
+            {
+                Assert.False(glyphs[i].Intersects(glyphs[j]), $"glyphs {i} and {j} touch: {glyphs[i]} and {glyphs[j]}");
+            }
+        }
+    }
+
+    // Whether a point is on a rectangle's outline.
+    static bool Touches(GraphRect r, Vec2 p) =>
+        r.Inflate(0.01).Contains(p) && !r.Inflate(-0.01).Contains(p);
 
     [Fact]
     public void NodesWithoutAPositionGetAPlaceThatIsNotWritten()
