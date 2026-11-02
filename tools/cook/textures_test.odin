@@ -122,6 +122,144 @@ resampling_keeps_flat_images_flat :: proc(t: ^testing.T) {
 	}
 }
 
+// write_foliage_image writes a PNG that a masked material's foliage might read: each texel is fully set or clear, as a
+// seeded hash against a density that rises across the image, so filtered alpha approaches the density and little of it
+// stays above 0.5. The density's slant keeps whole columns of texels from crossing a cutoff together in small mips.
+@(private = "file")
+write_foliage_image :: proc(t: ^testing.T, tree: Tree, path: string, size: int) {
+	full := strings.clone_to_cstring(fmt.tprintf("%s/content/%s", tree.dir, path), context.temp_allocator)
+	pixels := make([][4]u8, size * size, context.temp_allocator)
+	state := u32(2166136261)
+	for &p, i in pixels {
+		state = state * 1664525 + 1013904223
+		x, y := f32(i % size) / f32(size), f32(i / size) / f32(size)
+		set := f32(state >> 8) / f32(1 << 24) < 0.55 * (0.7 * x + 0.3 * y)
+		p = {40, 120, 30, set ? 255 : 0}
+	}
+	written := stbi.write_png(full, i32(size), i32(size), 4, raw_data(pixels), i32(size * 4))
+	testing.expectf(t, written != 0, "cannot write %s", path)
+}
+
+// mip_coverages decodes a cooked color texture's mips, and gives the coverage of each at a cutoff, to the last mip that
+// is at least 16 texels wide, where a texel's share of the mip is small beside a test's tolerance.
+@(private = "file")
+mip_coverages :: proc(t: ^testing.T, data: []byte, blob: ^format.Texture_Blob, cutoff: f32) -> []f32 {
+	coverages := make([dynamic]f32, context.temp_allocator)
+	mips := format.blob_bytes(data, blob.mips)
+	width, height := blob.size.x, blob.size.y
+	offset := 0
+	for _ in 0 ..< blob.mip_count {
+		if width < 16 {
+			break
+		}
+		decoded := make([][4]u8, int(width * height), context.temp_allocator)
+		testing.expect_value(t, cn_decompress(.BC7, raw_data(mips[offset:]), width, height, raw_data(decoded)), 0)
+		covered := 0
+		for p in decoded {
+			if f32(p.a) / 255 >= cutoff {
+				covered += 1
+			}
+		}
+		append(&coverages, f32(covered) / f32(len(decoded)))
+		offset += format.texture_mip_size(blob.format, width, height)
+		width, height = max(width / 2, 1), max(height / 2, 1)
+	}
+	return coverages[:]
+}
+
+@(test)
+alpha_coverage_holds_down_the_mips_with_the_setting_on :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/off.png.meta", "guid = 00112233445566778899aabbccddee00\nusage = color\n"},
+			{"content/on.png.meta", "guid = 00112233445566778899aabbccddee01\nusage = color\nalpha_coverage = true\n"},
+			{"content/low.png.meta", "guid = 00112233445566778899aabbccddee02\nusage = color\nalpha_coverage = true\nalpha_cutoff = 0.25\n"},
+		},
+	)
+	defer remove_tree(tree)
+	cases := []struct {
+		name:   string,
+		cutoff: f32,
+		kept:   bool,
+	}{{"off", 0.5, false}, {"on", 0.5, true}, {"low", 0.25, true}}
+	for test in cases {
+		write_foliage_image(t, tree, fmt.tprintf("%s.png", test.name), 256)
+	}
+	testing.expect(t, cook(tree_options(tree), {.Texture}).ok)
+
+	for test in cases {
+		data, blob, ok := texture_blob(t, tree, fmt.tprintf("%s.png", test.name))
+		if !ok {
+			continue
+		}
+		coverages := mip_coverages(t, data, blob, test.cutoff)
+		// 256 to 16.
+		testing.expect_value(t, len(coverages), 5)
+		first, last := coverages[0], coverages[len(coverages) - 1]
+		testing.expectf(t, first > 0.1, "%s: mip 0's coverage is %v", test.name, first)
+		if test.kept {
+			for coverage, mip in coverages {
+				testing.expectf(t, abs(coverage - first) <= 0.02, "%s: mip %d covers %v, and mip 0 %v", test.name, mip, coverage, first)
+			}
+		} else {
+			testing.expectf(t, last < first / 2, "%s: the last mip covers %v, and mip 0 %v", test.name, last, first)
+		}
+	}
+}
+
+@(test)
+the_coverage_search_finds_the_scale :: proc(t: ^testing.T) {
+	// A ramp of alpha from 0 to 0.5: half of its texels reach 0.25, and at a scale of 2, half reach 0.5.
+	ramp := Image{256, 1, make([][4]f32, 256, context.temp_allocator)}
+	for &p, i in ramp.pixels {
+		p = {0, 0, 0, f32(i) / 512}
+	}
+	scale := alpha_coverage_scale(ramp, 0.5, 0.5)
+	testing.expectf(t, abs(alpha_coverage(ramp, 0.5, scale) - 0.5) <= 1.0 / 256, "a scale of %v covers %v", scale, alpha_coverage(ramp, 0.5, scale))
+	testing.expectf(t, abs(scale - 2) < 0.05, "the scale is %v", scale)
+
+	// An opaque image already has its coverage, so its alpha stays.
+	opaque := Image{4, 4, make([][4]f32, 16, context.temp_allocator)}
+	for &p in opaque.pixels {
+		p = {0, 0, 0, 1}
+	}
+	testing.expect_value(t, alpha_coverage_scale(opaque, 0.5, 1), 1)
+
+	testing.expect_value(t, scale_alpha(ramp, 4).pixels[255].a, 1)
+}
+
+@(test)
+alpha_coverage_is_only_for_color_textures :: proc(t: ^testing.T) {
+	a := Asset_Source {
+		meta = {settings = {{"usage", "mask"}, {"alpha_coverage", "true"}, {"alpha_cutoff", "0.25"}}},
+	}
+	testing.expect_value(t, texture_cook_of(a).coverage_cutoff, 0)
+	a.meta.settings[0].value = "color"
+	testing.expect_value(t, texture_cook_of(a).coverage_cutoff, 0.25)
+}
+
+@(test)
+alpha_coverage_settings_are_in_the_key_and_checked :: proc(t: ^testing.T) {
+	META :: "guid = 00112233445566778899aabbccddeeff\nusage = color\n"
+	tree := make_tree(t, {{"content/leaf.png.meta", META}})
+	defer remove_tree(tree)
+	write_test_image(t, tree, "leaf.png", 16, 16)
+	options := tree_options(tree)
+	testing.expect_value(t, cook(options, {.Texture}).cooked[.Texture], 1)
+
+	meta_path := fmt.tprintf("%s/content/leaf.png.meta", tree.dir)
+	testing.expect(t, os.write_entire_file(meta_path, transmute([]byte)string(META + "alpha_coverage = true\n")) == nil)
+	testing.expect_value(t, cook(options, {.Texture}).cooked[.Texture], 1)
+
+	errors: Errors
+	context.logger = capture_errors(&errors)
+	defer release_errors(&errors)
+	testing.expect(t, os.write_entire_file(meta_path, transmute([]byte)string(META + "alpha_cutoff = 2\n")) == nil)
+	testing.expect(t, !cook(options, {.Texture}).ok)
+	expect_error(t, &errors, "alpha_cutoff must be")
+}
+
 @(test)
 compressed_mips_decode_close_to_their_source :: proc(t: ^testing.T) {
 	// A smooth image, as most textures are, in values from 0.1 to 0.9.

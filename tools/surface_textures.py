@@ -1,20 +1,24 @@
-# Writes the sample's generated textures (see docs/rendering/materials.md#parallax-occlusion-mapping and
-# docs/rendering/surfaces.md): 8-bit grayscale PNGs that a pattern makes, so the repository holds no painted art. It
-# uses the standard library only. `just sample-textures` runs it; commit what it writes, with the .meta files.
+# Writes the sample's generated textures (see docs/rendering/materials.md#parallax-occlusion-mapping,
+# docs/rendering/surfaces.md and docs/content/kinds/textures.md#textures): 8-bit grayscale or RGBA PNGs that a pattern
+# makes, so the repository holds no painted art. It uses the standard library only. `just sample-textures` runs it;
+# commit what it writes, with the .meta files.
 import math
+import random
 import struct
 import sys
 import zlib
 
 
+# write_png takes rows of one byte a texel, which is grayscale, or of four, which is RGBA.
 def write_png(path, width, height, rows):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
+    color_type = 6 if len(rows[0]) == width * 4 else 0
     raw = b"".join(b"\x00" + bytes(row) for row in rows)
     png = b"\x89PNG\r\n\x1a\n"
-    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, 0))
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(raw, 9))
     png += chunk(b"IEND", b"")
     with open(path, "wb") as f:
@@ -94,11 +98,42 @@ def dev_grid(size=1024, major=256, minor=64, check=128, major_px=4, minor_px=2):
     return size, size, rows
 
 
+# foliage: a bush for a masked material, a trunk under a crown of thin leaves that are each set or clear, with gaps
+# between them. The crown's alpha averages about 0.26, so its mips lose it at a cutoff of 0.5 unless they keep its
+# coverage (see docs/content/kinds/textures.md#textures). The clear texels hold the leaves' green, so that filtering
+# does not darken their edges. The sample cooks it twice, with and without alpha_coverage, to compare them.
+def foliage(size=256, leaves=350, seed=28):
+    rng = random.Random(seed)
+    texels = [[(45, 95, 35, 0) for _ in range(size)] for _ in range(size)]
+
+    def stamp(cx, cy, length, width, angle, color):
+        c, s = math.cos(angle), math.sin(angle)
+        for y in range(max(int(cy - length), 0), min(int(cy + length) + 1, size)):
+            for x in range(max(int(cx - length), 0), min(int(cx + length) + 1, size)):
+                along = (x - cx) * c + (y - cy) * s
+                across = (y - cy) * c - (x - cx) * s
+                if (along / length) ** 2 + (across / width) ** 2 <= 1:
+                    texels[y][x] = (*color, 255)
+
+    bark = (80, 55, 35)
+    stamp(size * 0.5, size * 0.8, size * 0.2, size * 0.02, math.pi / 2, bark)
+    for _ in range(leaves):
+        # Evenly over an ellipse, the crown.
+        angle, reach = rng.random() * math.tau, math.sqrt(rng.random())
+        x = size * (0.5 + 0.42 * reach * math.cos(angle))
+        y = size * (0.38 + 0.34 * reach * math.sin(angle))
+        shade = 0.7 + 0.5 * rng.random()
+        stamp(x, y, 5 + 3 * rng.random(), 1.2, rng.random() * math.pi, (int(50 * shade), int(120 * shade), int(35 * shade)))
+    return size, size, [[v for texel in row for v in texel] for row in texels]
+
+
 TEXTURES = {
     "lib/engine/content/textures/dev_grid.png": dev_grid,
     "samples/mygame/content/textures/bricks_height.png": bricks_height,
     "samples/mygame/content/textures/terrain_height.png": terrain_height,
     "samples/mygame/content/textures/island_hole.png": island_hole,
+    "samples/mygame/content/textures/foliage.png": foliage,
+    "samples/mygame/content/textures/foliage_coverage.png": foliage,
 }
 
 

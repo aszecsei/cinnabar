@@ -1,0 +1,4 @@
+material_instance 1
+# The foliage card with the texture that keeps its alpha's coverage down its mips.
+parent = $df6c5dff30e64891ad26b57e65e8150d
+albedo = $b41e65db23794464a52be738a5dca3b6
