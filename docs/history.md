@@ -116,4 +116,5 @@ The order in which animation was built (see [Animation](animation/README.md)).
 3. **Animation graphs:** the `.animation_graph` kind, its blob, its cooker and its editor template ([Content: Animation graphs](content/kinds/animation-graphs.md)).
 4. **The evaluator:** states, transitions, triggers for one tick, fades and freezes, synced 1D blends, markers, root motion and presentation between ticks ([Design](animation/design.md#design)).
 5. **The ECS and scripts:** graphs on `Animator`, `Root_Motion`, events for systems and behaviours, `System_Desc.data`, the `Animation` library, and the sample's walking fox.
+6. **The editor:** a canvas for animation graphs, a reader and writer of their text that keep every line, the cooker's problems on their nodes, a preview that plays the graph on a mesh apart from the world, with its parameters on the panel, and the selected entity's Animator live on the canvas ([Editor: Animation graph editor](editor/animation-graph-editor.md)).
 

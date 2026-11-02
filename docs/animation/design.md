@@ -33,6 +33,7 @@ Read [World: Time](../world/time.md#fixed-and-variable-rate) and [Content: Anima
 | `state`, `progress` | The current state, and its plays from its entry: 2.5 is halfway through the third. |
 | `source`, `source_progress` | The state that the current one fades from, or `NONE`. |
 | `fade`, `fade_duration` | Seconds into the fade, and its length. |
+| `transition` | The node ID of the last transition that it took, or 0, which an [editor](../editor/animation-graph-editor.md#animation-graph-editor) shows it by. The blob's order is not the text's, so an index would not name it. |
 | `samples` | Up to `MAX_SAMPLES` (8) samples. |
 
 `init` starts an instance in the entry state, with the parameters at their defaults, and makes its samples, so it presents before its first tick. A graph without a blob plays one clip, looping or held: an `Animator`'s clip without a graph.

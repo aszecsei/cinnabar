@@ -189,6 +189,34 @@ the_bytes_match_the_editor_encoding :: proc(t: ^testing.T) {
 }
 
 @(test)
+an_animators_view_round_trips :: proc(t: ^testing.T) {
+	buf: [dynamic]byte
+	defer delete(buf)
+	sent := Animator_View {
+		entity        = 7,
+		graph         = {0 = 1, 15 = 2},
+		state         = 3,
+		source        = 1,
+		transition    = 20,
+		fade          = 0.25,
+		fade_duration = 0.5,
+		progress      = 1.5,
+		parameters    = {{name = "speed", kind = .Float, value = 2}, {name = "look", kind = .Trigger, value = 1}},
+	}
+	write_message(&buf, sent)
+	header, _ := read_header(buf[:])
+	testing.expect_value(t, header.kind, kind_of(Animator_View))
+	message, ok := decode_message(header.kind, buf[HEADER_SIZE:], context.temp_allocator)
+	testing.expect(t, ok)
+	got := message.(Animator_View)
+	testing.expect_value(t, got.graph, sent.graph)
+	testing.expect_value(t, got.transition, 20)
+	testing.expect_value(t, got.fade_duration, 0.5)
+	testing.expect_value(t, got.parameters[1].name, "look")
+	testing.expect_value(t, got.parameters[1].kind, Animator_Parameter_Kind.Trigger)
+}
+
+@(test)
 kind_of_is_the_index_in_the_union :: proc(t: ^testing.T) {
 	testing.expect_value(t, kind_of(Hello), u16(1))
 	testing.expect_value(t, kind_of(Frame_Acknowledged), u16(8))

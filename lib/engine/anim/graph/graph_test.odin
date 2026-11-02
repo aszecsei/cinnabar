@@ -59,8 +59,8 @@ clip_state :: proc(name: string, clip: u32, loop := true, enter := NO, exit := N
 }
 
 @(private = "file")
-transition :: proc(from, to: u32, conditions: []format.Animation_Graph_Condition = nil, exit_time: f32 = -1, duration: f32 = 0) -> format.Animation_Graph_Transition_Contents {
-	return {from = from, to = to, conditions = conditions, exit_time = exit_time, duration = duration}
+transition :: proc(from, to: u32, conditions: []format.Animation_Graph_Condition = nil, exit_time: f32 = -1, duration: f32 = 0, node: u32 = 0) -> format.Animation_Graph_Transition_Contents {
+	return {from = from, to = to, conditions = conditions, exit_time = exit_time, duration = duration, node = node}
 }
 
 @(private = "file")
@@ -93,9 +93,9 @@ three_states :: proc(fade: f32 = 0) -> Graph {
 	looked := make([]format.Animation_Graph_Condition, 1, context.temp_allocator)
 	looked[0] = {parameter = 1, op = .Trigger}
 	transitions := make([]format.Animation_Graph_Transition_Contents, 3, context.temp_allocator)
-	transitions[0] = transition(NO, 2, looked, duration = fade)
-	transitions[1] = transition(0, 1, faster, duration = fade)
-	transitions[2] = transition(2, 0, exit_time = 1, duration = fade)
+	transitions[0] = transition(NO, 2, looked, duration = fade, node = 30)
+	transitions[1] = transition(0, 1, faster, duration = fade, node = 31)
+	transitions[2] = transition(2, 0, exit_time = 1, duration = fade, node = 32)
 	events := make([]format.Animation_Graph_Event_Contents, 2, context.temp_allocator)
 	events[0] = {name = "left_idle"}
 	events[1] = {name = "started"}
@@ -141,6 +141,37 @@ a_float_condition_takes_its_transition_with_its_events :: proc(t: ^testing.T) {
 	testing.expect_value(t, out.events[1], Fired{.Enter, 1, 1})
 	// The new state starts at its clip's start, and moves by the tick.
 	testing.expect(t, near(inst.progress, 0.25))
+}
+
+@(test)
+an_instance_names_the_last_transition_that_it_took :: proc(t: ^testing.T) {
+	g := three_states(0.5)
+	inst: Instance
+	init(&g, &inst, 0)
+	out: Tick_Output
+	advance(&g, &inst, 0.1, &out)
+	testing.expect_value(t, inst.transition, 0)
+
+	inst.parameters[0] = 0.5
+	advance(&g, &inst, 0.1, &out)
+	testing.expect_value(t, inst.transition, 31)
+
+	// A transition from any state has its node too, and one that interrupts a fade names itself.
+	inst.triggers = 1 << 1
+	advance(&g, &inst, 0.1, &out)
+	testing.expect_value(t, inst.state, 2)
+	testing.expect_value(t, inst.source, NONE)
+	testing.expect_value(t, inst.transition, 30)
+
+	// It stays after its fade is over.
+	for _ in 0 ..< 6 {
+		advance(&g, &inst, 0.1, &out)
+	}
+	testing.expect(t, inst.fade >= inst.fade_duration, "the fade is over")
+	testing.expect_value(t, inst.transition, 30)
+
+	init(&g, &inst, 0)
+	testing.expect_value(t, inst.transition, 0)
 }
 
 @(test)

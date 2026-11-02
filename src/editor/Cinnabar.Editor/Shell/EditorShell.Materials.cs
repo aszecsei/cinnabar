@@ -21,8 +21,8 @@ public sealed partial class EditorShell
     // The material functions that graphs call, read from their files, by GUID, with the file's time.
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
-    readonly HashSet<MaterialEditor> _discarding = [];
-    // The command line's materials and effects, which open once the index has them.
+    readonly HashSet<IGraphEditor> _discarding = [];
+    // The command line's materials, effects and animation graphs, which open once the index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -36,6 +36,10 @@ public sealed partial class EditorShell
                 {
                     OpenEffect(asset);
                 }
+                else if (asset.Kind == AssetKind.AnimationGraph)
+                {
+                    OpenAnimationGraph(asset);
+                }
                 else
                 {
                     OpenMaterial(asset);
@@ -46,14 +50,23 @@ public sealed partial class EditorShell
 
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
-    /// <summary>The material editor whose document is active, or null when the viewport is.</summary>
-    public MaterialEditor? ActiveMaterial { get; private set; }
+    /// <summary>The open graphs of every kind.</summary>
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs);
 
-    /// <summary>A material editor opened, closed or became active.</summary>
-    public event Action? MaterialsChanged;
+    /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
+    public IGraphEditor? ActiveGraphEditor { get; private set; }
 
-    /// <summary>The user closed a material editor with unsaved changes. The window asks, and calls <see cref="CloseMaterial"/>.</summary>
-    public event Action<MaterialEditor>? MaterialCloseRequested;
+    /// <summary>The material editor whose document is active, or null when the viewport or another document is.</summary>
+    public MaterialEditor? ActiveMaterial => ActiveGraphEditor as MaterialEditor;
+
+    /// <summary>A graph editor opened, closed or became active.</summary>
+    public event Action? GraphEditorsChanged;
+
+    /// <summary>The user closed a graph editor with unsaved changes. The window asks, and calls <see cref="CloseGraph"/>.</summary>
+    public event Action<IGraphEditor>? GraphCloseRequested;
+
+    /// <summary>A save would replace what another program wrote. The window asks, and calls <see cref="SaveGraph"/>.</summary>
+    public event Action<IGraphEditor>? GraphOverwriteRequested;
 
     /// <summary>The kinds of node, the shading models and the material functions, as the material editor shows them.</summary>
     public MaterialCatalog MaterialCatalog => new(Assets.Nodes, Assets.ShadingModels, ReadFunction);
@@ -124,30 +137,30 @@ public sealed partial class EditorShell
         }
         _ = editor.CookNow();
         Layout.OpenDocument(new MaterialEditorDocument(editor, () => new global::Cinnabar.Editor.Materials.MaterialEditorView(this, editor)));
-        MaterialsChanged?.Invoke();
+        GraphEditorsChanged?.Invoke();
         return editor;
     }
 
     /// <summary>The document dock's active document changed.</summary>
     void OnActiveDocumentChanged(Dock.Model.Core.IDockable? document)
     {
-        var active = (document as MaterialEditorDocument)?.Editor;
-        if (active != ActiveMaterial)
+        var active = (document as GraphEditorDocument)?.GraphEditor;
+        if (active != ActiveGraphEditor)
         {
-            ActiveMaterial = active;
+            ActiveGraphEditor = active;
             Commands.InvalidateAll();
-            MaterialsChanged?.Invoke();
+            GraphEditorsChanged?.Invoke();
         }
     }
 
-    /// <summary>A material editor's document wants to close. One with unsaved changes asks first.</summary>
+    /// <summary>A graph editor's document wants to close. One with unsaved changes asks first.</summary>
     bool OnDocumentClosing(Dock.Model.Core.IDockable document)
     {
-        if (document is not MaterialEditorDocument { Editor: var editor } || !editor.Document.IsDirty || _discarding.Contains(editor))
+        if (document is not GraphEditorDocument { GraphEditor: var editor } || !editor.Document.IsDirty || _discarding.Contains(editor))
         {
             return true;
         }
-        MaterialCloseRequested?.Invoke(editor);
+        GraphCloseRequested?.Invoke(editor);
         return false;
     }
 
@@ -158,25 +171,34 @@ public sealed partial class EditorShell
             OnEffectClosed(preview);
             return;
         }
-        if (document is not MaterialEditorDocument { Editor: var editor } || !_materials.Remove(editor))
+        if (document is not GraphEditorDocument { GraphEditor: var editor } || !GraphEditors.Contains(editor))
         {
             return;
         }
-        _discarding.Remove(editor);
-        editor.ClosePreview();
-        editor.Dispose();
-        if (ActiveMaterial == editor)
+        if (editor is MaterialEditor material)
         {
-            ActiveMaterial = null;
+            _materials.Remove(material);
+            material.ClosePreview();
+        }
+        if (editor is AnimationGraphEditor graph)
+        {
+            _animationGraphs.Remove(graph);
+            graph.ClosePreview();
+        }
+        _discarding.Remove(editor);
+        editor.Dispose();
+        if (ActiveGraphEditor == editor)
+        {
+            ActiveGraphEditor = null;
         }
         Commands.InvalidateAll();
-        MaterialsChanged?.Invoke();
+        GraphEditorsChanged?.Invoke();
     }
 
-    /// <summary>Closes a material editor. With <paramref name="discard"/>, its unsaved changes are lost; without it, it saves first.</summary>
-    public void CloseMaterial(MaterialEditor editor, bool discard)
+    /// <summary>Closes a graph editor. With <paramref name="discard"/>, its unsaved changes are lost; without it, it saves first.</summary>
+    public void CloseGraph(IGraphEditor editor, bool discard)
     {
-        if (!discard && editor.Document.IsDirty && !SaveMaterial(editor))
+        if (!discard && editor.Document.IsDirty && !SaveGraph(editor))
         {
             return;
         }
@@ -184,22 +206,43 @@ public sealed partial class EditorShell
         Layout.CloseDocument(editor);
     }
 
-    /// <summary>Writes a material editor's graph to its file. A failure goes to the console.</summary>
-    public bool SaveMaterial(MaterialEditor editor)
+    /// <summary>
+    /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph whose file another
+    /// program changed since it was read is not written, and the window asks, unless <paramref name="overwrite"/> says so.
+    /// </summary>
+    public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
     {
+        if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true })
+        {
+            GraphOverwriteRequested?.Invoke(editor);
+            return false;
+        }
         try
         {
             editor.Document.Save();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            Console.Add(LogLevel.Error, $"material: cannot save {editor.Document.Path}: {e.Message}");
+            Console.Add(LogLevel.Error, $"{editor.Noun}: cannot save {editor.Document.Path}: {e.Message}");
             return false;
         }
-        Console.Add(LogLevel.Info, $"material: saved {editor.Document.Path}");
+        Console.Add(LogLevel.Info, $"{editor.Noun}: saved {editor.Document.Path}");
         return true;
     }
 
-    // The material editors' previews, then the effects'.
-    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects);
+    // An open graph's document follows its asset's file, as when the content browser moves or renames it.
+    void FollowMovedGraphs()
+    {
+        foreach (var editor in GraphEditors.ToList())
+        {
+            if (Assets.Find(editor.Guid) is { } asset && Assets.FullPath(asset) is { } path
+                && !string.Equals(path, editor.Document.Path, StringComparison.OrdinalIgnoreCase))
+            {
+                editor.Document.Move(path);
+            }
+        }
+    }
+
+    // The material editors' previews, then the effects', then the animation graphs'.
+    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects).Concat(_animationGraphs);
 }

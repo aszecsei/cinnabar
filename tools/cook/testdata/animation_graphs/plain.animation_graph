@@ -1,0 +1,60 @@
+animation_graph 1
+# nodes: 1 2 3 10 20 21 22 23
+# A graph as the docs write one, with comments in the places that a file has them.
+root_motion = "b_Root_00"
+entry = idle
+
+param speed float 0
+param grounded bool true # set by the character
+param look trigger
+
+clip survey = $00112233445566778899aabbccddeeff
+clip walk = $ffeeddccbbaa99887766554433221100   # its feet
+	event 0.55 footstep "right"
+	event 0.2 footstep "left # front"
+clip run = $0123456789abcdef0123456789abcdef
+	event 0.1 footstep "left" 2
+
+# Where it stands.
+node 1 state
+	position = [0, 0]
+	name = idle
+	motion = survey
+node 2 state
+	name = move # by its speed
+	motion = @10.pose
+	enter_event = started
+node 3 state
+	name = look
+	motion = survey
+	loop = false
+	speed = 1.5
+	exit_event = looked
+
+node 10 blend_1d
+	parameter = speed
+	input.0 = run
+	at.0 = 3
+	input.1 = walk
+	at.1 = 0.4
+
+node 20 transition
+	from = idle
+	to = move
+	when = speed > 0.1 and grounded
+	duration = 0.25
+node 21 transition
+	from = move
+	to = idle
+	when = speed < 0.05
+	duration = 0.3
+node 22 transition
+	from = any
+	to = look
+	when = look
+	duration = 0.2
+node 23 transition
+	from = look
+	to = idle
+	exit_time = 0.95
+	duration = 0.3

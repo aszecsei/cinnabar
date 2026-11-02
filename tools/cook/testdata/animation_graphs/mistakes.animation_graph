@@ -1,0 +1,23 @@
+animation_graph 1
+# nodes: 1 3
+entry = idle
+param speed float 0
+param speed float 1 # problem
+param other kind # problem
+clip c = $00112233445566778899aabbccddeeff
+clip broken = nothing # problem
+	event 0.1 orphan # problem
+node 1 state
+	name = idle
+	motion = c
+	speedy = 2 # problem node 1
+node 1 state # problem
+	name = orphan # problem
+node 0 state # problem
+node 2 widget # problem
+	name = orphan # problem
+node 3 transition
+	from = idle
+	to = nowhere # problem node 3
+	when = speed > 1
+what is this # problem

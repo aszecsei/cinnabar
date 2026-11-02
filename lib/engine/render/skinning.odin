@@ -194,6 +194,16 @@ skin_instance :: proc(
 	return instance, true, true
 }
 
+// skin_release destroys the buffers of an instance slot, if it has any.
+@(private)
+skin_release :: proc(s: ^Skin_State, platform: ^core.Platform_API, slot: u32) {
+	if instance, has := s.instances[slot]; has {
+		copied := instance
+		destroy_skinned_instance(&copied, platform)
+		delete_key(&s.instances, slot)
+	}
+}
+
 // skin_accel makes a skinned entity's bottom-level structure over its positions and its mesh's indices, once the ray
 // scene is in use and the mesh has triangles. The structure refits, so each frame's pose moves it.
 @(private)

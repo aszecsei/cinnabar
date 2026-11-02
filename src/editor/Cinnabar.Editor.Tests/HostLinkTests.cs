@@ -320,6 +320,87 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.Equal(SkySunState.NoTextureSky, sun.State);
     }
 
+    const string FoxGraph = "71f3481642654d8590e42837f2565d58";
+
+    static void SkipWithoutTheFox()
+    {
+        if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", FoxGraph + ".blob")))
+        {
+            Assert.Skip("the sample's content is not cooked");
+        }
+    }
+
+    [Fact]
+    public async Task AWatchedFoxShowsItsStatesAsItsBehaviourDrivesThem()
+    {
+        SkipWithoutTheFox();
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "scenes", "animation.scene")).ReplaceLineEndings("\n");
+        var (scene, problems) = Document.SceneFile.Parse(text);
+        Assert.Empty(problems);
+        var world = await Load(editor, scene!);
+        var fox = world.Entities.Single(e => e.Name == "Walking Fox").Entity;
+
+        editor.Link.Send(new WatchEntity(fox));
+        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        var idle = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 1);
+        Assert.Equal(FoxGraph, Convert.ToHexStringLower(idle.Graph));
+        Assert.Equal(["speed", "look"], idle.Parameters.Select(p => p.Name));
+        Assert.Equal(AnimatorParameterKind.Trigger, idle.Parameters[1].Kind);
+
+        var move = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 2);
+        Assert.Equal(20u, move.Transition);
+        Assert.Equal(1u, move.Source);
+        Assert.True(move.Parameters[0].Value > 0.1f);
+
+        // Its behaviour pulls look a quarter of the way through a cycle.
+        var look = await editor.Next<AnimatorView>(v => v.Entity == fox && v.State == 3);
+        Assert.Equal(22u, look.Transition);
+        Assert.Equal(0.25f, look.FadeDuration);
+    }
+
+    [Fact]
+    public async Task APreviewPlaysAGraphOnItsMeshApartFromTheWorld()
+    {
+        const string FoxMesh = "e049cf90c64cbdc7eec588c7120cbabb";
+        SkipWithoutTheFox();
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+
+        // The mode stays Edit, in which the world stands still.
+        editor.Link.Send(new OpenPreview(0, Convert.FromHexString(FoxGraph), false));
+        editor.Link.Send(new PreviewSettings(0, PreviewMesh.Asset, Convert.FromHexString(FoxMesh), 0, 0, 3, 64, 64));
+        var target = await editor.Next<PreviewTarget>();
+        // It draws while the editor keeps up with its frames, which this one takes as read.
+        editor.Link.Send(new PreviewAcknowledged(0, target.Generation, 1_000_000));
+
+        static bool Preview(AnimatorView v) => v.Entity == 0;
+        var idle = await editor.Next<AnimatorView>(v => Preview(v) && v.State == 1);
+        Assert.Equal(FoxGraph, Convert.ToHexStringLower(idle.Graph));
+        Assert.Equal(0u, idle.Transition);
+
+        // What it is told stays: nothing else sets its parameters, and it plays the state's blend.
+        editor.Link.Send(new SetPreviewParameter(0, "speed", 2));
+        var move = await editor.Next<AnimatorView>(v => Preview(v) && v.State == 2);
+        Assert.Equal(20u, move.Transition);
+        Assert.Equal(2, move.Parameters[0].Value);
+        var later = await editor.Next<AnimatorView>(v => Preview(v) && v.State == 2 && v.Progress > move.Progress + 0.2f);
+        Assert.Equal(2, later.Parameters[0].Value);
+
+        editor.Link.Send(new SetPreviewParameter(0, "look", 1));
+        var look = await editor.Next<AnimatorView>(v => Preview(v) && v.State == 3);
+        Assert.Equal(22u, look.Transition);
+
+        // Restart goes back to the entry, with the parameters at their defaults.
+        editor.Link.Send(new RestartPreview(0));
+        var again = await editor.Next<AnimatorView>(v => Preview(v) && v.State == 1 && v.Transition == 0);
+        Assert.Equal(0, again.Parameters[0].Value);
+        editor.Link.Send(new ClosePreview(0));
+    }
+
     [Fact]
     public async Task TheHostProfilesItsFramesAndCapturesOne()
     {

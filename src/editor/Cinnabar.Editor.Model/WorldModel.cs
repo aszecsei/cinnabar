@@ -48,6 +48,7 @@ public sealed class WorldModel
     readonly Dictionary<ulong, EntityNode> _bySceneId = [];
     readonly List<EntityNode> _roots = [];
     readonly Dictionary<ulong, EntityValues> _values = [];
+    readonly Dictionary<ulong, AnimatorView> _animators = [];
 
     public IReadOnlyDictionary<ulong, ComponentType> Types => _types;
 
@@ -69,6 +70,9 @@ public sealed class WorldModel
 
     public event Action<ulong>? ValuesChanged;
 
+    /// <summary>What a watched entity's Animator plays changed, or it has gone.</summary>
+    public event Action<ulong>? AnimatorChanged;
+
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
 
     /// <summary>The entity that a scene made with this scene ID, or null.</summary>
@@ -78,6 +82,9 @@ public sealed class WorldModel
 
     /// <summary>The newest values of a watched entity, or null before the first.</summary>
     public EntityValues? Values(ulong handle) => _values.GetValueOrDefault(handle);
+
+    /// <summary>What a watched entity's Animator plays, or null without one whose graph is ready.</summary>
+    public AnimatorView? Animator(ulong handle) => _animators.GetValueOrDefault(handle);
 
     /// <summary>The component's name, or its ID in hex for a type that the game has not described.</summary>
     public string TypeName(ulong id) => _types.TryGetValue(id, out var t) ? t.Name : $"0x{id:x16}";
@@ -98,6 +105,7 @@ public sealed class WorldModel
             case EntitySnapshot snapshot:
                 _entities.Clear();
                 _values.Clear();
+                _animators.Clear();
                 foreach (var info in snapshot.Entities)
                 {
                     Update(info);
@@ -112,6 +120,10 @@ public sealed class WorldModel
                 {
                     _entities.Remove(handle);
                     _values.Remove(handle);
+                    if (_animators.Remove(handle))
+                    {
+                        AnimatorChanged?.Invoke(handle);
+                    }
                 }
                 foreach (var info in delta.Changed)
                 {
@@ -127,6 +139,21 @@ public sealed class WorldModel
                     ValuesChanged?.Invoke(values.Entity);
                 }
                 return true;
+            case AnimatorView view:
+                if (_entities.ContainsKey(view.Entity))
+                {
+                    // A view without a graph says that the entity no longer has one to show.
+                    if (view.Graph.AsSpan().IndexOfAnyExcept((byte)0) < 0)
+                    {
+                        _animators.Remove(view.Entity);
+                    }
+                    else
+                    {
+                        _animators[view.Entity] = view;
+                    }
+                    AnimatorChanged?.Invoke(view.Entity);
+                }
+                return true;
             default:
                 return false;
         }
@@ -140,6 +167,7 @@ public sealed class WorldModel
         _roots.Clear();
         _bySceneId.Clear();
         _values.Clear();
+        _animators.Clear();
         HasWorld = false;
         TypesChanged?.Invoke();
         Reset?.Invoke();

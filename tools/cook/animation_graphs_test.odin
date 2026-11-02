@@ -1,6 +1,11 @@
 package cook
 
+import "core:fmt"
 import "core:mem"
+import "core:os"
+import "core:slice"
+import "core:strconv"
+import "core:strings"
 import "core:testing"
 
 import format "cinnabar:engine/asset/format"
@@ -126,6 +131,47 @@ animation_graphs_parse_into_states_and_transitions :: proc(t: ^testing.T) {
 }
 
 @(test)
+an_unsaved_graphs_problems_name_its_file_and_its_lines :: proc(t: ^testing.T) {
+	cache, err := os.make_directory_temp("", "animation_graph_check_*", context.allocator)
+	testing.expect(t, err == nil)
+	defer delete(cache)
+	defer os.remove_all(cache)
+	options := Cook_Options {
+		cache  = cache,
+		config = .Dev,
+	}
+	guid, _ := format.guid_parse("00112233445566778899aabbccddeeff")
+	blob := fmt.tprintf("%s/preview/00112233445566778899aabbccddeeff.blob", config_dir(options))
+
+	problems := animation_graph_check(options, guid, FOX_GRAPH, "C:/game/fox.animation_graph", "game/fox.animation_graph")
+	testing.expect_value(t, len(problems.list), 0)
+	// A text without problems is what the preview plays.
+	read_blob :: proc(path: string) -> (^format.Blob_Header, bool) {
+		read, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil {
+			return nil, false
+		}
+		aligned, _ := mem.alloc_bytes(len(read), format.BLOB_ALIGN, context.temp_allocator)
+		copy(aligned, read)
+		return format.blob_header(aligned)
+	}
+	header, valid := read_blob(blob)
+	testing.expect(t, valid && header.guid == guid && header.kind == .Animation_Graph)
+	before := header.key
+
+	problems = animation_graph_check(options, guid, "animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n", "C:/game/fox.animation_graph", "game/fox.animation_graph")
+	defer delete(problems.list)
+	// A text with problems leaves the last good one.
+	header, valid = read_blob(blob)
+	testing.expect(t, valid)
+	testing.expect_value(t, header.key, before)
+	testing.expect_value(t, len(problems.list), 2)
+	testing.expect_value(t, problems.list[0].file, "C:/game/fox.animation_graph")
+	testing.expect_value(t, problems.list[0].line, 2)
+	testing.expect_value(t, problems.list[1].line, 3)
+}
+
+@(test)
 the_animation_graph_template_parses :: proc(t: ^testing.T) {
 	g, problems := animation_graph_parse(ANIMATION_GRAPH_TEMPLATE, context.temp_allocator)
 	testing.expectf(t, len(problems) == 0, "problems: %v", problems)
@@ -203,4 +249,48 @@ animation_graphs_cook_to_blobs_that_depend_on_their_clips :: proc(t: ^testing.T)
 	// A second cook finds it up to date.
 	pass = cook(options, {.Animation_Graph}, log_problems = false)
 	testing.expect_value(t, pass.current[.Animation_Graph], 1)
+}
+
+// The files that the editor's reader and writer are tested with too (see AnimationGraphFileTests.cs), so the two agree:
+// a `# problem` comment is on each line that the cooker reports, and `# nodes:` names the file's nodes.
+@(private = "file")
+CORPUS := #load_directory("testdata/animation_graphs")
+
+@(test)
+the_shared_files_have_their_problems_at_their_lines_and_their_nodes :: proc(t: ^testing.T) {
+	testing.expect(t, len(CORPUS) > 0)
+	for file in CORPUS {
+		text := string(file.data)
+		expected := make([dynamic]int, context.temp_allocator)
+		nodes := make([dynamic]u32, context.temp_allocator)
+		for line, i in strings.split_lines(text, context.temp_allocator) {
+			if strings.contains(line, "# problem") {
+				append(&expected, i + 1)
+			}
+			if listed, found := strings.substring_from(line, len("# nodes: ")); found && strings.has_prefix(line, "# nodes: ") {
+				for field in strings.fields(strings.trim_space(listed), context.temp_allocator) {
+					id, ok := strconv.parse_int(field)
+					testing.expect(t, ok)
+					append(&nodes, u32(id))
+				}
+			}
+		}
+		g, problems := animation_graph_parse(text, context.temp_allocator)
+		found := make([dynamic]int, context.temp_allocator)
+		for p in problems {
+			if len(found) == 0 || found[len(found) - 1] != p.line {
+				append(&found, p.line)
+			}
+		}
+		testing.expectf(t, slice.equal(found[:], expected[:]), "%s: problems at %v, expected at %v: %v", file.name, found, expected, problems)
+		// A graph without problems has the nodes that the file names; the blob keeps its states' and transitions'.
+		if len(problems) == 0 {
+			for s in g.states {
+				testing.expectf(t, slice.contains(nodes[:], s.node), "%s: state's node %d", file.name, s.node)
+			}
+			for tr in g.transitions {
+				testing.expectf(t, slice.contains(nodes[:], tr.node), "%s: transition's node %d", file.name, tr.node)
+			}
+		}
+	}
 }

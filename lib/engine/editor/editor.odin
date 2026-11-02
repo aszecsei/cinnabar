@@ -80,9 +80,11 @@ Known :: struct {
 
 @(private)
 Watched :: struct {
-	entity: ecs.Entity,
+	entity:        ecs.Entity,
 	// The hash of the values that the editor last got, or 0 to send them at the next chance.
-	sent:   u64,
+	sent:          u64,
+	// The same for its Animator's view, where 0 is also that the editor knows of none (see animators.odin).
+	animator_sent: u64,
 }
 
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
@@ -230,6 +232,8 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	if now - e.last_values >= VALUES_INTERVAL {
 		e.last_values = now
 		send_values(e, w, scripts, out, frame)
+		send_animators(e, w, out, frame)
+		send_preview_views(e, out, frame)
 	}
 	if now - e.last_stats >= STATS_INTERVAL {
 		e.last_stats = now

@@ -1,4 +1,3 @@
-using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -9,6 +8,7 @@ using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
+using static Cinnabar.Editor.Materials.CanvasDrawing;
 
 namespace Cinnabar.Editor.Materials;
 
@@ -24,10 +24,6 @@ public sealed class GraphCanvas : Control
     const double MinZoom = 0.2;
     const double MaxZoom = 2;
 
-    static readonly Typeface Font = new("Inter");
-    static readonly IBrush CanvasBrush = new SolidColorBrush(Color.Parse("#1C1C1F"));
-    static readonly IPen MinorGrid = new Pen(new SolidColorBrush(Color.Parse("#242428")), 1);
-    static readonly IPen MajorGrid = new Pen(new SolidColorBrush(Color.Parse("#2C2C31")), 1);
     static readonly IBrush NodeBody = new SolidColorBrush(Color.Parse("#2A2A2E"));
     static readonly IPen NodeBorder = new Pen(new SolidColorBrush(Color.Parse("#3C3C42")), 1);
     static readonly IPen SelectedBorder = new Pen(new SolidColorBrush(Palette.Accent), 2);
@@ -129,8 +125,7 @@ public sealed class GraphCanvas : Control
 
     public override void Render(DrawingContext context)
     {
-        context.FillRectangle(CanvasBrush, new Rect(Bounds.Size));
-        DrawGrid(context);
+        CanvasDrawing.DrawBackground(context, Bounds.Size, _view);
         using (context.PushTransform(Matrix.CreateTranslation(-_view.Offset.X, -_view.Offset.Y) * Matrix.CreateScale(_view.Zoom, _view.Zoom)))
         {
             foreach (var link in _geometry.Links)
@@ -152,27 +147,6 @@ public sealed class GraphCanvas : Control
         {
             var box = new Rect(_start, _last).Normalize();
             context.DrawRectangle(BoxFill, BoxPen, box);
-        }
-    }
-
-    void DrawGrid(DrawingContext context)
-    {
-        var step = 20.0;
-        var topLeft = ToCanvas(default);
-        var bottomRight = ToCanvas(new Point(Bounds.Width, Bounds.Height));
-        if (step * _view.Zoom < 6)
-        {
-            step = 100;
-        }
-        for (var x = Math.Floor(topLeft.X / step) * step; x <= bottomRight.X; x += step)
-        {
-            var vx = (x - _view.Offset.X) * _view.Zoom;
-            context.DrawLine(Math.Abs(x % 100) < 0.5 ? MajorGrid : MinorGrid, new Point(vx, 0), new Point(vx, Bounds.Height));
-        }
-        for (var y = Math.Floor(topLeft.Y / step) * step; y <= bottomRight.Y; y += step)
-        {
-            var vy = (y - _view.Offset.Y) * _view.Zoom;
-            context.DrawLine(Math.Abs(y % 100) < 0.5 ? MajorGrid : MinorGrid, new Point(0, vy), new Point(Bounds.Width, vy));
         }
     }
 
@@ -210,7 +184,7 @@ public sealed class GraphCanvas : Control
             DrawText(context, label, new Point(at.X + 10, at.Y - 8), 11, Text, b.Width / 2 - 10);
             if (!linked.Contains(pin.Name) && InputValue(layout.Node, pin) is { } value)
             {
-                DrawText(context, value, new Point(at.X + 10 + Measure(label, 11) + 6, at.Y - 8), 11, DimText, b.Width - Measure(label, 11) - 30);
+                DrawText(context, value, new Point(at.X + 10 + TextWidth(label, 11) + 6, at.Y - 8), 11, DimText, b.Width - TextWidth(label, 11) - 30);
             }
         }
         for (var i = 0; i < layout.Outputs.Count; i++)
@@ -219,7 +193,7 @@ public sealed class GraphCanvas : Control
             var at = layout.OutputAt(i);
             DrawPin(context, at, pin.Type, linkedOutputs.Contains(pin.Name));
             var label = layout.Outputs.Count == 1 && pin.Name is "out" or "value" ? TypeName(pin.Type) : pin.Name;
-            DrawText(context, label, new Point(at.X - 10 - Measure(label, 11), at.Y - 8), 11, layout.Outputs.Count == 1 ? DimText : Text, b.Width / 2);
+            DrawText(context, label, new Point(at.X - 10 - TextWidth(label, 11), at.Y - 8), 11, layout.Outputs.Count == 1 ? DimText : Text, b.Width / 2);
         }
         if (selected || error)
         {
@@ -260,21 +234,6 @@ public sealed class GraphCanvas : Control
         var brush = PinBrush(type);
         context.DrawEllipse(linked ? brush : NodeBody, new Pen(brush, 1.5), new Point(at.X, at.Y), GraphGeometry.PinRadius, GraphGeometry.PinRadius);
     }
-
-    static void DrawText(DrawingContext context, string text, Point at, double size, IBrush brush, double maxWidth, bool bold = false)
-    {
-        var formatted = new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight,
-            bold ? new Typeface(Font.FontFamily, FontStyle.Normal, FontWeight.SemiBold) : Font, size, brush)
-        {
-            MaxTextWidth = Math.Max(maxWidth, 1),
-            MaxLineCount = 1,
-            Trimming = TextTrimming.CharacterEllipsis,
-        };
-        context.DrawText(formatted, at);
-    }
-
-    static double Measure(string text, double size) =>
-        new FormattedText(text, CultureInfo.CurrentCulture, FlowDirection.LeftToRight, Font, size, Brushes.White).Width;
 
     public static IBrush PinBrush(PinType type) => type switch
     {

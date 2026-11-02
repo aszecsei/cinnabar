@@ -33,7 +33,7 @@ public sealed class MaterialEditorView : DockPanel
         var toolbar = new DockPanel { Margin = new Thickness(8, 4) };
         var save = new Button { Content = CommandViews.Icon("save", 16), Classes = { "viewport-tool" }, Focusable = false, Margin = new Thickness(0, 0, 8, 0) };
         ToolTip.SetTip(save, "Save (Ctrl+S)");
-        save.Click += (_, _) => shell.SaveMaterial(editor);
+        save.Click += (_, _) => shell.SaveGraph(editor);
         DockPanel.SetDock(save, DockSide.Left);
         toolbar.Children.Add(save);
         DockPanel.SetDock(_status, DockSide.Right);

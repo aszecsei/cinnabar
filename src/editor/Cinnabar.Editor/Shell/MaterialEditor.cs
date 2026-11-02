@@ -7,8 +7,8 @@ using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
 
 namespace Cinnabar.Editor.Shell;
 
-/// <summary>A problem of the preview's cook, on a node of the graph or, with no node, on the material.</summary>
-public sealed record GraphProblem(int? Node, string Text, bool Error);
+/// <summary>A problem of a graph's cook, on a node of the graph or, with no node, on the graph, at a line of its text if it has one.</summary>
+public sealed record GraphProblem(int? Node, string Text, bool Error, int Line = 0);
 
 /// <summary>
 /// An open material or material function in the material editor (see docs/editor/material-editor.md#material-editor): its document, the
@@ -16,7 +16,7 @@ public sealed record GraphProblem(int? Node, string Text, bool Error);
 /// cooks the unsaved text again for the preview, a moment after the last change. The view turns input into calls here,
 /// so tests can drive the editor without a window.
 /// </summary>
-public sealed class MaterialEditor : PreviewOwner
+public sealed class MaterialEditor : PreviewOwner, IGraphEditor
 {
     // The preview cooks this long after the last change, so typing or a drag cooks once.
     static readonly TimeSpan CookDelay = TimeSpan.FromMilliseconds(250);
@@ -42,6 +42,10 @@ public sealed class MaterialEditor : PreviewOwner
     }
 
     public MaterialDocument Document { get; }
+
+    IGraphDocument IGraphEditor.Document => Document;
+
+    public string Noun => "material";
 
     public override string Guid => Document.Guid;
 
