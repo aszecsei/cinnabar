@@ -26,6 +26,10 @@ RELEASE_TEXTURE_QUALITY :: 0.5
 // The resampling filter's radius in its own texels, and the Kaiser window's shape.
 FILTER_RADIUS :: 3.0
 KAISER_BETA :: 4.0
+// The search for a mip's alpha scale: its steps, and the largest scale that it tries. A mip of sparse foliage whose alpha
+// averages under 1/8 needs more than the 4 that NVIDIA Texture Tools stops at, for a cutoff of 0.5.
+COVERAGE_SEARCH_STEPS :: 16
+COVERAGE_MAX_SCALE :: 16.0
 
 TEXTURE_SETTINGS := []Setting_Info {
 	{
@@ -52,6 +56,18 @@ TEXTURE_SETTINGS := []Setting_Info {
 		values = {"kaiser", "box"},
 		default = "kaiser",
 		description = "The mip filter: a Kaiser-windowed sinc, or the plain average of the covered texels, which keeps a mask's mips as the share of its texels that are set.",
+	},
+	{
+		key = "alpha_coverage",
+		values = {"true", "false"},
+		default = "false",
+		description = "Scale each mip's alpha so that the share of its texels at or above alpha_cutoff matches mip 0's, so that a masked material's cut-outs keep their density in the distance. Only for color textures.",
+	},
+	{
+		key = "alpha_cutoff",
+		values = {"0.05", "0.1", "0.15", "0.2", "0.25", "0.3", "0.35", "0.4", "0.45", "0.5", "0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"},
+		default = "0.5",
+		description = "The cutoff that alpha_coverage keeps the coverage at: the cutoff of the masked material that reads the texture.",
 	},
 }
 
@@ -222,18 +238,20 @@ texture_setting :: proc(a: Asset_Source, key: string) -> string {
 // Texture_Cook is how a texture cooks: what a texture asset's settings say, or what a stage's material asks of a texture
 // that it reads (see stages.odin).
 Texture_Cook :: struct {
-	usage:    format.Texture_Usage,
+	usage:           format.Texture_Usage,
 	// Filter the mips with the edges wrapping, and with a box instead of the Kaiser filter.
-	wrap:     bool,
-	box:      bool,
-	mips:     bool,
-	max_size: int,
+	wrap:            bool,
+	box:             bool,
+	mips:            bool,
+	max_size:        int,
 	// For a mask, the source's channel that it keeps, 0 to 3, in red. 0 keeps red as it is.
-	channel:  int,
+	channel:         int,
 	// For a mask, decode the source from sRGB first, as a channel of a color texture is.
-	srgb:     bool,
+	srgb:            bool,
 	// For a normal map, negate y: one made for the other convention.
-	flip_y:   bool,
+	flip_y:          bool,
+	// For a color texture, the cutoff at which each mip's alpha keeps mip 0's coverage. 0 leaves alpha as it filters.
+	coverage_cutoff: f32,
 }
 
 // texture_cook_of is how a texture asset cooks, by its settings.
@@ -251,12 +269,17 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 	case:
 		usage = .Color
 	}
+	coverage_cutoff: f32
+	if usage == .Color && texture_setting(a, "alpha_coverage") == "true" {
+		coverage_cutoff = strconv.parse_f32(texture_setting(a, "alpha_cutoff")) or_else 0.5
+	}
 	return {
 		usage = usage,
 		wrap = texture_setting(a, "wrap") == "repeat",
 		box = texture_setting(a, "filter") == "box",
 		mips = texture_setting(a, "mips") == "true",
 		max_size = strconv.parse_int(texture_setting(a, "max_size")) or_else 16384,
+		coverage_cutoff = coverage_cutoff,
 	}
 }
 
@@ -304,6 +327,7 @@ cook_texture_image :: proc(
 	quality: f32 = options.config == .Dev ? DEV_TEXTURE_QUALITY : RELEASE_TEXTURE_QUALITY
 	offset := 0
 	level := image
+	coverage := alpha_coverage(image, t.coverage_cutoff)
 	for mip in 0 ..< mip_count {
 		if mip > 0 {
 			level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap, box)
@@ -311,8 +335,13 @@ cook_texture_image :: proc(
 				normalize(&level)
 			}
 		}
+		// The next mip filters from level, so only what this mip stores is scaled, and no scale feeds down the chain.
+		stored := level
+		if mip > 0 && t.coverage_cutoff > 0 {
+			stored = scale_alpha(level, alpha_coverage_scale(level, t.coverage_cutoff, coverage))
+		}
 		mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
-		if !encode_mip(level, usage, quality, mips[offset:][:mip_size]) {
+		if !encode_mip(stored, usage, quality, mips[offset:][:mip_size]) {
 			report_error(problems, path, 0, 0, "cannot compress mip %d", mip)
 			return
 		}
@@ -461,6 +490,52 @@ normalize :: proc(image: ^Image) {
 			p.xyz = {0, 0, 1}
 		}
 	}
+}
+
+// alpha_coverage is the share of an image's texels whose alpha, under a scale, is at or above a cutoff: those that a
+// masked material keeps, whose clip discards only what is below it.
+alpha_coverage :: proc(image: Image, cutoff: f32, scale: f32 = 1) -> f32 {
+	covered := 0
+	for p in image.pixels {
+		if p.a * scale >= cutoff {
+			covered += 1
+		}
+	}
+	return f32(covered) / f32(len(image.pixels))
+}
+
+// alpha_coverage_scale searches for the scale of an image's alpha that gives it a coverage at a cutoff, as NVIDIA Texture
+// Tools does: by bisection from a scale of 1, keeping the closest that it finds. A mip's coverage only grows with the
+// scale, so bisection finds it, or the closest that the image's alpha can come.
+alpha_coverage_scale :: proc(image: Image, cutoff, coverage: f32) -> f32 {
+	low, high: f32 = 0, COVERAGE_MAX_SCALE
+	scale, best: f32 = 1, 1
+	best_error := max(f32)
+	for _ in 0 ..< COVERAGE_SEARCH_STEPS {
+		current := alpha_coverage(image, cutoff, scale)
+		if error := abs(current - coverage); error < best_error {
+			best, best_error = scale, error
+		}
+		if current == coverage {
+			break
+		}
+		if current < coverage {
+			low = scale
+		} else {
+			high = scale
+		}
+		scale = (low + high) / 2
+	}
+	return best
+}
+
+// scale_alpha is a copy of an image with its alpha scaled, and clamped to what a texture stores.
+scale_alpha :: proc(image: Image, scale: f32) -> Image {
+	result := Image{image.width, image.height, make([][4]f32, len(image.pixels), context.temp_allocator)}
+	for p, i in image.pixels {
+		result.pixels[i] = {p.r, p.g, p.b, clamp(p.a * scale, 0, 1)}
+	}
+	return result
 }
 
 // resample resizes an image with a Kaiser-windowed sinc filter, one axis after the other. When it shrinks, the filter

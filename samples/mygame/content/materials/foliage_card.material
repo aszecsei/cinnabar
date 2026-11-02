@@ -1,0 +1,19 @@
+material 1
+# A foliage card that turns about its +y (see docs/rendering/gpu-scene.md#billboards), cut out of a card by its texture's
+# alpha, lit. Its instance reads the same texture cooked with alpha_coverage, so the two compare it in the distance (see
+# docs/content/kinds/textures.md#textures).
+shading = lit
+blend = masked
+cutoff = 0.5
+geometry = billboard_axis
+cast_shadows = true
+param albedo texture = $597c3595af2e4ccd982bb4c4949eda1b
+---
+Surface evaluate(Material_Inputs inputs) {
+	Surface s = default_surface();
+	float4 albedo = cn_sample(params.albedo, inputs.uv0);
+	s.base_color = albedo.rgb;
+	s.roughness = 0.8;
+	s.opacity = albedo.a;
+	return s;
+}

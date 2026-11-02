@@ -1,7 +1,9 @@
 # The billboards scene, which F7 in mygame cycles to (see docs/rendering/gpu-scene.md#billboards and #impostors): a
 # row of sprites that face the camera, foliage cards that turn about their +y, and a line of towers from 10 m to
-# 800 m away, whose impostor the farther ones draw as, under the sun. Positions are raw World_Position values in
-# units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+# 800 m away, whose impostor the farther ones draw as, under the sun. Two rows of bushes on cards, from 20 m to 320 m
+# away, compare a masked texture without alpha_coverage, on the left, and with it, on the right (see
+# docs/content/kinds/textures.md#textures). Positions are raw World_Position values in units of 2^-24 m. The editor
+# writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 5c7e000000000001
@@ -314,4 +316,114 @@ component 33 Mesh_Renderer
 	mesh = $6d2f8b4a1c3e4f5a8b7c9d0e1f2a3b46
 	materials.0 = $5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d
 	materials.1 = $7c3e5a91ad4f6b829c3e5a7b9d1e3f40
+	cast_shadows = true
+
+entity 5c7e00000000001d
+name = "Bush 1"
+component 1 Transform
+	position = [2516582399731564544, 0, 335544320]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	cast_shadows = true
+
+entity 5c7e00000000001e
+name = "Bush 2"
+component 1 Transform
+	position = [2516582399731564544, 0, 671088640]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	cast_shadows = true
+
+entity 5c7e00000000001f
+name = "Bush 3"
+component 1 Transform
+	position = [2516582399731564544, 0, 1342177280]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	cast_shadows = true
+
+entity 5c7e000000000020
+name = "Bush 4"
+component 1 Transform
+	position = [2516582399731564544, 0, 2684354560]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	cast_shadows = true
+
+entity 5c7e000000000021
+name = "Bush 5"
+component 1 Transform
+	position = [2516582399731564544, 0, 5368709120]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $df6c5dff30e64891ad26b57e65e8150d
+	cast_shadows = true
+
+entity 5c7e000000000022
+name = "Bush Coverage 1"
+component 1 Transform
+	position = [2516582400268435456, 0, 335544320]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $dd3b994d16de469bbc1d953f91e58e33
+	cast_shadows = true
+
+entity 5c7e000000000023
+name = "Bush Coverage 2"
+component 1 Transform
+	position = [2516582400268435456, 0, 671088640]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $dd3b994d16de469bbc1d953f91e58e33
+	cast_shadows = true
+
+entity 5c7e000000000024
+name = "Bush Coverage 3"
+component 1 Transform
+	position = [2516582400268435456, 0, 1342177280]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $dd3b994d16de469bbc1d953f91e58e33
+	cast_shadows = true
+
+entity 5c7e000000000025
+name = "Bush Coverage 4"
+component 1 Transform
+	position = [2516582400268435456, 0, 2684354560]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $dd3b994d16de469bbc1d953f91e58e33
+	cast_shadows = true
+
+entity 5c7e000000000026
+name = "Bush Coverage 5"
+component 1 Transform
+	position = [2516582400268435456, 0, 5368709120]
+	rotation = [0, 0, 0, 1]
+	scale = [8, 8, 1]
+component 33 Mesh_Renderer
+	mesh = $4c8e1a3f5b7d4e2a9c6f0b8d2e4a6c13
+	materials.0 = $dd3b994d16de469bbc1d953f91e58e33
 	cast_shadows = true
