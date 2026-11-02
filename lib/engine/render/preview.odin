@@ -54,6 +54,10 @@ Preview_Desc :: struct {
 	// If not nil, draw_frame sets it when the mesh, the material's pipelines and its textures were ready, so the
 	// preview shows the material as it is. A preview that is not complete draws again in a later frame.
 	complete: ^bool,
+	// An animation graph's preview (see docs/editor/animation-graph-editor.md#preview): the mesh, in the default material, and
+	// posed by this palette when it has one and the mesh a skin. The palette is in frame memory.
+	animated: bool,
+	palette:  [][3][4]f32,
 }
 
 // Previews is the previews' state between frames, in the Renderer: the records of the one that a frame draws, and the
@@ -63,6 +67,8 @@ Previews :: struct {
 	draws:     gpu.Buffer,
 	arguments: gpu.Buffer,
 	unsaved:   [gpu.MAX_PREVIEW_TARGETS]Material_Pipeline,
+	// Each animated preview's posed copy of its mesh, by the preview's ID.
+	skins:     Skin_State,
 }
 
 // Preview_Frame is what one preview's passes need, in frame memory.
@@ -86,6 +92,11 @@ Preview_Frame :: struct {
 	args_at:     u32,
 	// The camera, relative to the preview's origin.
 	camera:      [3]f32,
+	// A posed preview: its copy of its mesh, the pass's constants, and its buffers in the graph.
+	posed:       bool,
+	skin:        Skinned_Instance,
+	skin_upload: gpu.Upload,
+	skin_buffers: [3]Buffer,
 }
 
 // preview_mesh is the GUID of one of the engine's preview meshes.
@@ -105,6 +116,7 @@ previews_init :: proc(p: ^Previews, r: ^Renderer) {
 	p.instances = platform.gpu_create_buffer({size = size_of(Instance_Record), label = "preview instance"}, nil)
 	p.draws = platform.gpu_create_buffer({size = MAX_SUBMESHES * size_of(Draw_Record), label = "preview draws"}, nil)
 	p.arguments = platform.gpu_create_buffer({size = MAX_SUBMESHES * size_of(gpu.Draw_Indirect_Args), usage = {.Storage, .Indirect}, label = "preview arguments"}, nil)
+	p.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
 }
 
 previews_destroy :: proc(p: ^Previews, r: ^Renderer) {
@@ -115,7 +127,63 @@ previews_destroy :: proc(p: ^Previews, r: ^Renderer) {
 	for &u in p.unsaved {
 		material_pipeline_destroy(&u, platform)
 	}
+	for id in 0 ..< u32(gpu.MAX_PREVIEW_TARGETS) {
+		skin_release(&p.skins, platform, id)
+	}
+	delete(p.skins.instances)
 	p^ = {}
+}
+
+// preview_release gives back what a preview that closed kept between its frames.
+preview_release :: proc(r: ^Renderer, id: int) {
+	skin_release(&r.previews.skins, r.platform, u32(id))
+}
+
+// pose_preview readies a preview's posed copy of its mesh and uploads its one job, once the skinning pipeline has
+// compiled. A preview that cannot draws its mesh at rest.
+@(private = "file")
+pose_preview :: proc(f: ^Frame, pf: ^Preview_Frame, mesh: ^Resident_Mesh) {
+	r := f.renderer
+	platform := r.platform
+	desc := pf.desc
+	if len(desc.palette) == 0 || .Skinned not_in mesh.flags || !pipeline_ready(platform, &r.scene.skins.pipeline) {
+		return
+	}
+	instance, reset, made := skin_instance(&r.previews.skins, platform, r.scene.frame, u32(desc.id), 0, mesh.positions, mesh.vertex_count, mesh.attribute_stride)
+	if !made {
+		return
+	}
+	job := Skin_Job {
+		rest_positions  = gpu.read_index(mesh.positions),
+		rest_attributes = gpu.read_index(mesh.attributes),
+		skin            = gpu.read_index(mesh.skin),
+		attribute_words = mesh.attribute_stride / 4,
+		positions       = gpu.write_index(instance.positions),
+		previous        = gpu.write_index(instance.previous),
+		attributes      = gpu.write_index(instance.attributes),
+		vertex_count    = mesh.vertex_count,
+		joint_count     = u32(len(desc.palette)),
+		flags           = reset ? SKIN_RESET : 0,
+	}
+	jobs, jobs_ok := upload_bytes(platform, slice.bytes_from_ptr(&job, size_of(job)))
+	palette, palette_ok := upload_bytes(platform, slice.to_bytes(desc.palette))
+	if !(jobs_ok && palette_ok) {
+		return
+	}
+	groups := min((mesh.vertex_count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, SKIN_MAX_GROUPS)
+	constants := Skin_Constants {
+		jobs           = gpu.read_index(jobs.buffer),
+		jobs_offset    = jobs.offset,
+		palette        = gpu.read_index(palette.buffer),
+		palette_offset = palette.offset,
+		job_count      = 1,
+		stride         = groups * SKIN_GROUP_SIZE,
+	}
+	upload, ok := upload_bytes(platform, slice.bytes_from_ptr(&constants, size_of(constants)), gpu.PASS_CONSTANTS_ALIGN)
+	if !ok {
+		return
+	}
+	pf.posed, pf.skin, pf.skin_upload = true, instance, upload
 }
 
 // preview_use gives a preview's material as its frame draws it: from its unsaved blob, with the pipelines that the
@@ -151,6 +219,14 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	r := f.renderer
 	g := f.graph
 	platform := r.platform
+	desc := desc
+	if desc.animated {
+		// What an animated preview shows is a mesh's pose, in the default material.
+		animated := new(Preview_Desc, platform.frame_allocator)
+		animated^ = desc^
+		animated.material, animated.data = r.materials.default_guid, nil
+		desc = animated
+	}
 	pf := new(Preview_Frame, platform.frame_allocator)
 	pf.renderer, pf.desc = r, desc
 	size := desc.size
@@ -182,7 +258,10 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		}
 		if desc.complete != nil {
 			// The output pass tone maps with the lookup table only once it is baked.
-			desc.complete^ = ready && !table.waiting && r.post.lut_baked
+			desc.complete^ = ready && !table.waiting && r.post.lut_baked && !desc.animated
+		}
+		if desc.animated && !patches {
+			pose_preview(f, pf, mesh)
 		}
 		write_preview_records(f, pf, patches ? nil : mesh, block, &table, view_projection)
 	}
@@ -197,6 +276,23 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		pf.instances = import_buffer(g, r.previews.instances)
 		pf.draws = import_buffer(g, r.previews.draws)
 		pf.arguments = import_buffer(g, r.previews.arguments)
+		if pf.posed {
+			pf.skin_buffers = {import_buffer(g, pf.skin.positions), import_buffer(g, pf.skin.previous), import_buffer(g, pf.skin.attributes)}
+			skin_pass := add_compute_pass(g, "skin preview", proc(ctx: ^Pass_Context) {
+				pf := (^Preview_Frame)(ctx.data)
+				pipeline := pf.renderer.scene.skins.pipeline.pipeline
+				if pipeline == {} {
+					return
+				}
+				groups := min((pf.skin.vertex_count + SKIN_GROUP_SIZE - 1) / SKIN_GROUP_SIZE, SKIN_MAX_GROUPS)
+				gpu.cmd_set_pipeline(ctx.cb, pipeline)
+				gpu.cmd_set_pass_constants(ctx.cb, pf.skin_upload)
+				gpu.cmd_dispatch(ctx.cb, {max(groups, 1), 1, 1})
+			}, pf)
+			for buffer in pf.skin_buffers {
+				write(g, skin_pass, buffer)
+			}
+		}
 		p := add_compute_pass(g, "update preview", update_preview, pf)
 		copy_dest(g, p, pf.instances)
 		copy_dest(g, p, pf.draws)
@@ -382,7 +478,7 @@ write_preview_records :: proc(
 			draws[s] = {instance = 0, mesh = 0, first = submesh.first_index, material = block, count = submesh.index_count}
 			arguments[s] = {draw_id = s, vertex_count = submesh.index_count, instance_count = 1}
 		}
-		record = mesh_record(mesh)
+		record = pf.posed ? skinned_mesh_record(mesh, pf.skin) : mesh_record(mesh)
 	}
 	// The light comes from over the camera's left shoulder, so it turns with the camera.
 	direction := linalg.normalize(linalg.quaternion128_mul_vector3(desc.rotation, [3]f32{0.55, -0.6, 0.6}))
@@ -465,6 +561,11 @@ declare_preview_draws :: proc(g: ^Graph, p: Pass, pf: ^Preview_Frame) {
 	indirect_buffer(g, p, pf.arguments)
 	read(g, p, pf.draws)
 	read(g, p, pf.instances)
+	if pf.posed {
+		for buffer in pf.skin_buffers {
+			read(g, p, buffer)
+		}
+	}
 }
 
 @(private = "file")

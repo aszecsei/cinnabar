@@ -149,8 +149,9 @@ public sealed class AnimationGraphCanvas : Control
             {
                 DrawArrow(context, t, ArrowPen, ArrowBrush);
             }
-            // The last transition's arrow goes under its glyph, like the others, so its words stay whole.
-            var live = _editor.Live;
+            // What plays, in the preview or the game. The last transition's arrow goes under its glyph, like the others, so
+            // its words stay whole.
+            var live = _editor.ShownView;
             if (live != null && _geometry.FindTransition((int)live.Transition) is { } taken)
             {
                 var fading = AnimationGraphEditor.FadeOf(live) < 1;

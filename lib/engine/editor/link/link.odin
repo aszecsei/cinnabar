@@ -92,6 +92,8 @@ Message :: union {
 	Sky_Sun,
 	Animator_View,
 	Set_Animator_Parameter,
+	Set_Preview_Parameter,
+	Restart_Preview,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -678,7 +680,8 @@ Animator_Parameter :: struct {
 }
 
 // Game to editor: what a watched entity's Animator plays, which its component's bytes do not say (see
-// docs/editor/animation-graph-editor.md#live-view). It goes out when it changes. States and transitions are by their node IDs in
+// docs/editor/animation-graph-editor.md#live-view), or with entity 0, what an animation graph's preview plays. It goes out when
+// it changes. States and transitions are by their node IDs in
 // the graph's text, or 0: source is 0 in an interrupted fade too, which has no one state that it fades from. Without
 // a graph that is ready, graph is zero and the rest is too, which tells the editor that it has gone.
 Animator_View :: struct {
@@ -699,6 +702,19 @@ Set_Animator_Parameter :: struct {
 	entity: u64,
 	name:   string,
 	value:  f32,
+}
+
+// Editor to game: sets a parameter of what an animation graph's preview plays, by its name: a number, 1 or 0 for a bool,
+// and for a trigger, anything but 0 pulls it and 0 resets it. It changes nothing in the world.
+Set_Preview_Parameter :: struct {
+	id:    u32,
+	name:  string,
+	value: f32,
+}
+
+// Editor to game: an animation graph's preview starts again in the entry state, with the parameters at their defaults.
+Restart_Preview :: struct {
+	id: u32,
 }
 
 // A key or a mouse button, as core.Key has them.

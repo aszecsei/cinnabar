@@ -391,6 +391,38 @@ present :: proc(s: ^State, w: ^ecs.World, allocator: mem.Allocator) -> []render.
 	return poses[:]
 }
 
+// preview_pose moves a graph that plays apart from any entity, as the editor's preview plays one, by dt seconds, and
+// gives its pose. The instance is the caller's; it starts again with a new blob, keeping the parameters that the graph
+// still has. data is the graph's blob, which may be one that the editor has not saved, and the clips and the skin load by
+// their GUIDs. The pose leaves out root motion, so the mesh stays in view. It is not ready until they have all loaded.
+preview_pose :: proc(assets: ^asset.Assets, data: []byte, inst: ^anim_graph.Instance, dt: f32, allocator: mem.Allocator) -> (palette: [][3][4]f32, sphere: [4]f32, ok: bool) {
+	s := State {
+		assets = assets,
+	}
+	r := load_graph(&s, &Animator{}, allocator, data)
+	if !r.ready {
+		return
+	}
+	if inst.key != r.key {
+		old := inst^
+		anim_graph.init(&r.graph, inst, r.key)
+		anim_graph.keep_parameters(&r.graph, inst, &old)
+	}
+	out: anim_graph.Tick_Output
+	anim_graph.advance(&r.graph, inst, dt, &out)
+	joints := format.skin_joints(r.skin_data, r.skin)
+	rest := make([]anim_graph.Joint_Pose, len(joints), allocator)
+	scratch := make([]anim_graph.Joint_Pose, len(joints), allocator)
+	locals := make([]anim_graph.Joint_Pose, len(joints), allocator)
+	models := make([]matrix[4, 4]f32, len(joints), allocator)
+	palette = make([][3][4]f32, len(joints), allocator)
+	anim_graph.rest_pose(joints, rest)
+	anim_graph.present(&r.graph, inst, 1, rest, scratch, locals)
+	anim_graph.remove_root_motion(&r.graph, locals)
+	sphere = anim_graph.compose(joints, locals, models, palette)
+	return palette, sphere, true
+}
+
 // resolve is the index in a table of an Animator's graph, which it loads and adds if the table does not have it.
 @(private)
 resolve :: proc(s: ^State, table: ^[dynamic]Resolved, a: ^Animator, allocator: mem.Allocator) -> int {
@@ -404,15 +436,20 @@ resolve :: proc(s: ^State, table: ^[dynamic]Resolved, a: ^Animator, allocator: m
 }
 
 // load_graph loads an Animator's graph and its clips, or its clip without a graph, and their skin, and finds the
-// root motion joint by its name.
+// root motion joint by its name. With graph_bytes, those are the graph's blob, and the Animator names none.
 @(private)
-load_graph :: proc(s: ^State, a: ^Animator, allocator: mem.Allocator) -> (r: Resolved) {
+load_graph :: proc(s: ^State, a: ^Animator, allocator: mem.Allocator, graph_bytes: []byte = nil) -> (r: Resolved) {
 	r = {graph_guid = a.graph, clip_guid = a.clip, loop = a.loop}
 	r.graph.root, r.graph.root_parent, r.graph.root_parent_rotation = -1, 1, 1
 	clips: []anim_graph.Clip
 	ok: bool
-	if a.graph != {} {
-		r.graph.data, r.graph.blob, ok = graph_data(s, a.graph)
+	if a.graph != {} || graph_bytes != nil {
+		if graph_bytes != nil {
+			r.graph.data = graph_bytes
+			r.graph.blob, ok = format.animation_graph_view(graph_bytes)
+		} else {
+			r.graph.data, r.graph.blob, ok = graph_data(s, a.graph)
+		}
 		if !ok {
 			return
 		}

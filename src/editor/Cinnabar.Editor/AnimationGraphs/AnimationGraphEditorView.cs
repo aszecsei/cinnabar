@@ -11,9 +11,9 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.AnimationGraphs;
 
 /// <summary>
-/// The animation graph editor (see docs/editor/animation-graph-editor.md#animation-graph-editor): the graph's settings, parameters
-/// and clips on the left, its canvas, and the selected node's details on the right. Docking can rebuild the view at any
-/// time, so its state is in its <see cref="AnimationGraphEditor"/>.
+/// The animation graph editor (see docs/editor/animation-graph-editor.md#animation-graph-editor): the graph's preview over its
+/// settings, parameters and clips on the left, its canvas, and the selected node's details on the right. Docking can
+/// rebuild the view at any time, so its state is in its <see cref="AnimationGraphEditor"/>.
 /// </summary>
 public sealed class AnimationGraphEditorView : DockPanel
 {
@@ -44,7 +44,15 @@ public sealed class AnimationGraphEditorView : DockPanel
         Children.Add(top);
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("260,4,*,4,280") };
-        grid.Children.Add(new AnimationGraphPanel(shell, editor));
+        var left = new Grid { RowDefinitions = new RowDefinitions("240,4,*") };
+        left.Children.Add(new Materials.PreviewPane(shell, editor));
+        var previewSplit = new GridSplitter { ResizeDirection = GridResizeDirection.Rows };
+        Grid.SetRow(previewSplit, 1);
+        left.Children.Add(previewSplit);
+        var panel = new AnimationGraphPanel(shell, editor);
+        Grid.SetRow(panel, 2);
+        left.Children.Add(panel);
+        grid.Children.Add(left);
         var leftSplit = new GridSplitter { ResizeDirection = GridResizeDirection.Columns };
         Grid.SetColumn(leftSplit, 1);
         grid.Children.Add(leftSplit);

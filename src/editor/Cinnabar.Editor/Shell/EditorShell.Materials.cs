@@ -183,6 +183,7 @@ public sealed partial class EditorShell
         if (editor is AnimationGraphEditor graph)
         {
             _animationGraphs.Remove(graph);
+            graph.ClosePreview();
         }
         _discarding.Remove(editor);
         editor.Dispose();
@@ -242,6 +243,6 @@ public sealed partial class EditorShell
         }
     }
 
-    // The material editors' previews, then the effects'.
-    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects);
+    // The material editors' previews, then the effects', then the animation graphs'.
+    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects).Concat(_animationGraphs);
 }

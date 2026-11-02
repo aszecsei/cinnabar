@@ -276,9 +276,9 @@ handle_messages :: proc(d: ^Daemon) {
 	}
 }
 
-// preview cooks a material that the editor has not saved into the cache's preview area (see cook_preview), or checks an
-// animation graph that it has not saved, which writes nothing. Its problems go to the editor in the answer, and not to
-// the log: the graph's editor shows them on its nodes.
+// preview cooks a material or an animation graph that the editor has not saved into the cache's preview area (see
+// cook_preview and animation_graph_check). Its problems go to the editor in the answer, and not to the log: the graph's
+// editor shows them on its nodes.
 @(private = "file")
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
@@ -294,7 +294,7 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 				path = fmt.tprintf("%s/%s", r.dir, a.path)
 			}
 		}
-		problems = animation_graph_check(msg.text, path)
+		problems = animation_graph_check(d.options, guid, msg.text, path, fmt.tprintf("%s/%s", a.root, a.path))
 		ok = len(problems.list) == 0
 	} else {
 		problems, ok = cook_preview(d.options, guid, msg.text)

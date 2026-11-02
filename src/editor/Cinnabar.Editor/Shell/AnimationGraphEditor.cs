@@ -4,21 +4,27 @@ using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Tools;
 using Asset = Cinnabar.Editor.Link.Cook.Asset;
+using PreviewMesh = Cinnabar.Editor.Link.Protocol.PreviewMesh;
 
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// An open animation graph in its editor (see docs/editor/animation-graph-editor.md#animation-graph-editor): its document, the
-/// selected nodes, and the problems of the last check of its text. Every change of the graph sends the unsaved text to
-/// the cook daemon, a moment after the last change. The view turns input into calls here, so tests can drive the editor
-/// without a window.
+/// selected nodes, the problems of the last check of its text, and its preview, which plays it on a mesh apart from the
+/// world. Every change of the graph sends the unsaved text to the cook daemon, a moment after the last change. The view
+/// turns input into calls here, so tests can drive the editor without a window.
 /// </summary>
-public sealed class AnimationGraphEditor : IGraphEditor
+public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
 {
+    // The preview's camera starts here, for a model of a meter or two.
+    const float StartYaw = 2.4f;
+    const float StartPitch = 0.2f;
+    const float StartDistance = 3f;
+    const float MaxDistance = 40f;
+
     // The daemon checks the text this long after the last change, so typing or a drag checks once.
     static readonly TimeSpan CheckDelay = TimeSpan.FromMilliseconds(250);
 
-    readonly EditorShell _shell;
     readonly HashSet<int> _selection = [];
     readonly List<GraphProblem> _checked = [];
     readonly List<GraphProblem> _problems = [];
@@ -26,9 +32,14 @@ public sealed class AnimationGraphEditor : IGraphEditor
     bool _checking;
     bool _checkAgain;
 
-    internal AnimationGraphEditor(EditorShell shell, AnimationGraphDocument document)
+    // The mesh that the user picked, and whether the game has been told that the daemon cooked the unsaved text.
+    string? _pickedMesh;
+    string? _sentMesh;
+    bool _showsUnsaved;
+
+    internal AnimationGraphEditor(EditorShell shell, AnimationGraphDocument document, int? previewId = null)
+        : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
-        _shell = shell;
         Document = document;
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += GatherProblems;
@@ -44,7 +55,21 @@ public sealed class AnimationGraphEditor : IGraphEditor
 
     public string Noun => "animation graph";
 
-    public string Guid => Document.Guid;
+    public override string Guid => Document.Guid;
+
+    public override bool PicksMesh => false;
+
+    public override PreviewMesh Mesh => PreviewMesh.Asset;
+
+    public override string Waiting => "The preview draws once the graph cooks and a mesh is picked.";
+
+    protected override bool ShowsUnsavedText => _showsUnsaved;
+
+    protected override byte[] MeshAsset => MeshGuid is { } guid ? Convert.FromHexString(guid) : new byte[16];
+
+    public override void SetMesh(PreviewMesh mesh)
+    {
+    }
 
     public IReadOnlyCollection<int> Selection => _selection;
 
@@ -605,7 +630,14 @@ public sealed class AnimationGraphEditor : IGraphEditor
             {
                 _checkAgain = false;
                 var text = Document.Text;
-                ShowProblems(text, await _shell.Cook.CookPreview(Guid, text));
+                var result = await _shell.Cook.CookPreview(Guid, text);
+                // From the first text that cooks, the preview plays what the daemon cooks and not the saved graph.
+                if (result.Error == "" && !_showsUnsaved)
+                {
+                    _showsUnsaved = true;
+                    SendPreview();
+                }
+                ShowProblems(text, result);
             }
             while (_checkAgain);
         }
@@ -640,6 +672,7 @@ public sealed class AnimationGraphEditor : IGraphEditor
     // The check's problems and the clips', which the cooker does not look up: it depends on any GUID that a graph names.
     void GatherProblems()
     {
+        FollowDefaultMesh();
         _problems.Clear();
         _problems.AddRange(_checked);
         if (_shell.Assets.Linked)
@@ -660,8 +693,9 @@ public sealed class AnimationGraphEditor : IGraphEditor
         ProblemsChanged?.Invoke();
     }
 
-    public void Dispose()
+    public override void Dispose()
     {
+        base.Dispose();
         Document.Changed -= OnDocumentChanged;
         _shell.Assets.Changed -= GatherProblems;
         _shell.World.AnimatorChanged -= OnAnimatorChanged;
@@ -715,12 +749,78 @@ public sealed class AnimationGraphEditor : IGraphEditor
     public static double FadeOf(AnimatorView view) =>
         view.FadeDuration > 0 && view.Fade < view.FadeDuration ? Math.Clamp(view.Fade / view.FadeDuration, 0, 1) : 1;
 
-    /// <summary>Sets a parameter of the selected entity's Animator, as a script's Animation.set_float does: it lasts until something sets it again.</summary>
-    public void SetLiveParameter(string name, float value)
+    // The preview.
+
+    /// <summary>What the preview plays, once it has started.</summary>
+    public AnimatorView? PreviewView { get; private set; }
+
+    /// <summary>What the canvas shows: the selected entity's Animator while the game plays this graph on it, and otherwise the preview.</summary>
+    public AnimatorView? ShownView => Live ?? PreviewView;
+
+    /// <summary>The game says what the preview plays.</summary>
+    internal void OnPreviewView(AnimatorView view)
     {
-        if (Live is { } view)
+        PreviewView = view;
+        OnLiveChanged();
+    }
+
+    /// <summary>Sets a parameter of what the preview plays. It changes nothing in the game.</summary>
+    public void SetPreviewParameter(string name, float value)
+    {
+        if (PreviewId is { } id)
         {
-            _shell.Host.Send(new SetAnimatorParameter(view.Entity, name, value));
+            _shell.Host.Send(new SetPreviewParameter((uint)id, name, value));
+        }
+    }
+
+    /// <summary>Starts the preview again in the entry state, with the parameters at their defaults.</summary>
+    public void RestartPreview()
+    {
+        if (PreviewId is { } id)
+        {
+            _shell.Host.Send(new RestartPreview((uint)id));
+        }
+    }
+
+    /// <summary>The meshes that the preview can show, by name.</summary>
+    public IReadOnlyList<Asset> MeshChoices =>
+        [.. _shell.Assets.Assets.Values.Where(a => a.Kind == AssetKind.Mesh).OrderBy(MeshName, StringComparer.OrdinalIgnoreCase)];
+
+    /// <summary>What the panel calls a mesh: its name, and the file that has it when it is a sub-asset.</summary>
+    public static string MeshName(Asset mesh) =>
+        Content.AssetIndex.IsSubasset(mesh) ? $"{Path.GetFileNameWithoutExtension(mesh.Path)} / {Content.AssetIndex.DisplayName(mesh)}" : Content.AssetIndex.DisplayName(mesh);
+
+    /// <summary>The mesh that the preview shows: the one picked, or else the first of the model that the graph's first clip comes from.</summary>
+    public string? MeshGuid => _pickedMesh ?? DefaultMesh();
+
+    string? DefaultMesh()
+    {
+        foreach (var clip in File.Clips)
+        {
+            if (_shell.Assets.Find(clip.Guid) is { Parent: not "" } animation)
+            {
+                return _shell.Assets.Assets.Values.Where(a => a.Kind == AssetKind.Mesh && a.Parent == animation.Parent)
+                    .OrderBy(a => a.Subasset, StringComparer.Ordinal).FirstOrDefault()?.Guid;
+            }
+        }
+        return null;
+    }
+
+    public void SetPreviewMesh(string guid)
+    {
+        _pickedMesh = guid;
+        FollowDefaultMesh();
+    }
+
+    // The game hears of the mesh when it changes, as when the index comes or a clip's animation does.
+    void FollowDefaultMesh()
+    {
+        var mesh = MeshGuid;
+        if (mesh != _sentMesh)
+        {
+            _sentMesh = mesh;
+            SendSettings();
+            OnLiveChanged();
         }
     }
 

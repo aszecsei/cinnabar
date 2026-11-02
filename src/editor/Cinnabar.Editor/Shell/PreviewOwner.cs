@@ -90,6 +90,9 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
     /// <summary>Whether the game shows the unsaved text that the daemon cooked into the cache's preview area.</summary>
     protected virtual bool ShowsUnsavedText => false;
 
+    /// <summary>The mesh asset that the preview shows, when <see cref="Mesh"/> says that it shows one.</summary>
+    protected virtual byte[] MeshAsset => new byte[16];
+
     public abstract void SetMesh(PreviewMesh mesh);
 
     public void Orbit(double dx, double dy)
@@ -120,7 +123,7 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
     {
         if (PreviewId is { } id)
         {
-            _shell.Host.Send(new PreviewSettings((uint)id, Mesh, new byte[16], Yaw, Pitch, Distance, Size.Width, Size.Height));
+            _shell.Host.Send(new PreviewSettings((uint)id, Mesh, MeshAsset, Yaw, Pitch, Distance, Size.Width, Size.Height));
         }
     }
 

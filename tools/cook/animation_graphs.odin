@@ -248,11 +248,28 @@ animation_graph_parse :: proc(text: string, allocator := context.allocator) -> (
 }
 
 // animation_graph_check gives the problems of an animation graph's text that the editor has not saved, as a cook of the
-// file at this path would, and writes nothing.
-animation_graph_check :: proc(text, path: string) -> (problems: Problems) {
-	_, found := animation_graph_parse(text, context.temp_allocator)
+// file at this path would. A text without problems goes in the preview area of the cache, <config>/preview/<guid>.blob,
+// which the editor's preview plays; the graph's own blob does not change. A text with problems leaves the last good one.
+animation_graph_check :: proc(options: Cook_Options, guid: format.Guid, text, path, name: string) -> (problems: Problems) {
+	contents, found := animation_graph_parse(text, context.temp_allocator)
 	for p in found {
 		report_error(&problems, path, p.line, 0, "%s", p.message)
+	}
+	if len(found) > 0 {
+		return
+	}
+	dir := fmt.tprintf("%s/preview", config_dir(options))
+	if err := os.make_directory_all(dir); err != nil && err != .Exist {
+		report_error(&problems, dir, 0, 0, "%v", err)
+		return
+	}
+	contents.guid, contents.source_path = guid, name
+	// The key is of what the graph does, so moving a node or editing a comment, which the blob does not have, does not
+	// start the preview again.
+	contents.key = hash.fnv64a(format.animation_graph_write(contents, context.temp_allocator))
+	buffer: [32]u8
+	if !write_blob(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), format.animation_graph_write(contents, context.temp_allocator)) {
+		report_error(&problems, path, 0, 0, "cannot write its preview")
 	}
 	return
 }

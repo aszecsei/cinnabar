@@ -39,12 +39,18 @@ animator_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity, allocator: 
 	if !ok {
 		return
 	}
+	instance_view(data, blob, &a.instance, a.graph, &view, allocator)
+	return
+}
+
+// instance_view is what an instance of a graph plays, by the nodes of the graph's text and its parameters' names.
+@(private)
+instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^anim_graph.Instance, graph: format.Guid, view: ^link.Animator_View, allocator: runtime.Allocator) {
 	states := format.animation_graph_states(data, blob)
-	inst := &a.instance
 	if int(inst.state) >= len(states) {
 		return
 	}
-	view.graph = ([16]u8)(a.graph)
+	view.graph = ([16]u8)(graph)
 	view.state = states[inst.state].node
 	if inst.source != anim_graph.NONE && int(inst.source) < len(states) {
 		view.source = states[inst.source].node
@@ -60,7 +66,6 @@ animator_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity, allocator: 
 		}
 		view.parameters[i] = {name = format.blob_string(data, p.name), kind = link.Animator_Parameter_Kind(p.kind), value = value}
 	}
-	return
 }
 
 // send_animators sends the view of each watched entity's Animator that changed since the editor last got it, and one
@@ -102,19 +107,27 @@ set_animator_parameter :: proc(e: ^Editor, w: ^ecs.World, message: link.Set_Anim
 	if !ok {
 		return
 	}
-	name_hash := format.animation_graph_hash(message.name)
+	set_instance_parameter(data, blob, &a.instance, message.name, message.value)
+}
+
+// set_instance_parameter sets a parameter of an instance by its name, as a script does: a number, 1 or 0 for a bool, and
+// for a trigger, anything but 0 pulls it and 0 resets it.
+@(private)
+set_instance_parameter :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^anim_graph.Instance, name: string, value: f32) {
+	name_hash := format.animation_graph_hash(name)
 	for p, i in format.animation_graph_parameters(data, blob) {
 		if p.hash != name_hash {
 			continue
 		}
+		bit := u32(1) << u32(i)
 		if p.kind != .Trigger {
-			anim.set_parameter(a, i, message.value)
-		} else if message.value != 0 {
-			anim.fire(a, i)
+			inst.parameters[i] = value
+		} else if value != 0 {
+			inst.triggers |= bit
 		} else {
-			a.instance.triggers &~= 1 << u32(i)
+			inst.triggers &~= bit
 		}
 		return
 	}
-	log.warnf("editor: the Animator's graph has no parameter named %s", message.name)
+	log.warnf("editor: the graph has no parameter named %s", name)
 }

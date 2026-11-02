@@ -466,6 +466,9 @@ public sealed partial class EditorShell
             case Link.Protocol.PreviewTarget target:
                 _previewSlots.Route(target);
                 return;
+            case Link.Protocol.AnimatorView { Entity: 0 } preview:
+                OnPreviewView(preview);
+                return;
         }
         if (message is not EditProblems problems)
         {

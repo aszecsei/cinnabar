@@ -235,6 +235,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		e.last_values = now
 		send_values(e, w, scripts, out, frame)
 		send_animators(e, w, out, frame)
+		send_preview_views(e, out, frame)
 	}
 	if now - e.last_stats >= STATS_INTERVAL {
 		e.last_stats = now

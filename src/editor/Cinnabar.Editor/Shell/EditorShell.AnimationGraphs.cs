@@ -36,11 +36,27 @@ public sealed partial class EditorShell
             OpenScript(path, (uint)problem.Line);
             return null;
         }
-        var editor = new AnimationGraphEditor(this, document);
+        var previewId = _previewSlots.Free();
+        if (previewId == null)
+        {
+            Console.Add(LogLevel.Warning, $"animation graph: {MaxPreviews} previews are open, so {document.Title} has none");
+        }
+        var editor = new AnimationGraphEditor(this, document, previewId);
         _animationGraphs.Add(editor);
+        if (Host.Linked)
+        {
+            editor.SendPreview();
+        }
         _ = editor.CookNow();
         Layout.OpenDocument(new AnimationGraphEditorDocument(editor, () => new AnimationGraphs.AnimationGraphEditorView(this, editor)));
         GraphEditorsChanged?.Invoke();
         return editor;
+    }
+
+    // The game says what an animation graph's preview plays.
+    void OnPreviewView(Link.Protocol.AnimatorView view)
+    {
+        var guid = Convert.ToHexStringLower(view.Graph);
+        _animationGraphs.Find(g => g.Guid == guid)?.OnPreviewView(view);
     }
 }

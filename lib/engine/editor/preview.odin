@@ -1,8 +1,12 @@
 package editor
 
+import "base:runtime"
+import "core:hash"
 import "core:math/linalg"
 
 import "cinnabar:core/gpu"
+import "cinnabar:engine/anim"
+import anim_graph "cinnabar:engine/anim/graph"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/editor/link"
@@ -11,7 +15,9 @@ import "cinnabar:engine/render"
 // Material previews (see docs/rendering/materials.md#material-previews): the editor's material editor shows a material on a mesh,
 // which the game draws into a shared target of its own with the renderer. A preview draws when what it shows changes,
 // or every frame while its material reads the time, and a frame draws at most one preview, in turn. The same previews
-// show effects (see docs/rendering/particles.md#previews), which play, so they draw in every frame that they can.
+// show effects (see docs/rendering/particles.md#previews), which play, so they draw in every frame that they can, and
+// animation graphs on a mesh (see docs/editor/animation-graph-editor.md#preview), which play apart from the world, whatever the
+// editor's mode.
 
 MAX_PREVIEWS :: gpu.MAX_PREVIEW_TARGETS
 
@@ -33,6 +39,15 @@ Preview :: struct {
 	kind_known:      bool,
 	effect:          bool,
 	load_failed:     bool,
+	animation_graph: bool,
+	// An animation graph's instance, which plays apart from any entity; when it last moved; and the hash of the view
+	// that the editor last got, or 0.
+	instance:        anim_graph.Instance,
+	last_tick:       f64,
+	view_sent:       u64,
+	// A graph that could not load, as with a clip's GUID that the content does not have, looks again at this time, so it
+	// does not report it in every frame.
+	retry_at:        f64,
 	// Draw at the next chance. The renderer sets complete when a drawing showed everything; until then, it draws again.
 	dirty:           bool,
 	complete:        bool,
@@ -67,6 +82,19 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id < MAX_PREVIEWS {
 			close_preview(e, int(m.id))
 		}
+	case link.Set_Preview_Parameter:
+		if m.id < MAX_PREVIEWS {
+			p := &e.previews[m.id]
+			if data := preview_graph_data(e, p); data != nil {
+				if blob, ok := format.animation_graph_view(data); ok && blob.header.key == p.instance.key {
+					set_instance_parameter(data, blob, &p.instance, m.name, m.value)
+				}
+			}
+		}
+	case link.Restart_Preview:
+		if m.id < MAX_PREVIEWS {
+			e.previews[m.id].instance = {}
+		}
 	case:
 		return false
 	}
@@ -82,6 +110,9 @@ close_preview :: proc(e: ^Editor, id: int) {
 	free_preview_data(e, p)
 	p^ = {}
 	e.platform.gpu_release_preview_target(id)
+	if e.renderer != nil {
+		render.preview_release(e.renderer, id)
+	}
 }
 
 @(private = "file")
@@ -131,6 +162,10 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
 		descs[0] = preview_desc(p, id, target)
 		descs[0].effect = is_effect(e, p)
+		if p.animation_graph {
+			descs[0].animated = true
+			descs[0].palette = play_animation_graph(e, p)
+		}
 		return descs
 	}
 	return nil
@@ -159,6 +194,74 @@ refresh_preview :: proc(e: ^Editor, p: ^Preview) {
 	}
 }
 
+// preview_graph_data is the blob of the animation graph that a preview shows: its unsaved one, or its cooked one.
+@(private = "file")
+preview_graph_data :: proc(e: ^Editor, p: ^Preview) -> []byte {
+	if !p.open || e.assets == nil {
+		return nil
+	}
+	is_effect(e, p)
+	if !p.animation_graph {
+		return nil
+	}
+	if p.data != nil {
+		return p.data
+	}
+	h, loaded := asset.find(e.assets, p.material)
+	if !loaded {
+		return nil
+	}
+	data, _ := asset.data(e.assets, h)
+	return data
+}
+
+// play_animation_graph moves a preview's graph by the time since it last drew, and gives its pose. A graph can stand
+// still for as long as another preview draws, and it does not leap when it comes back.
+@(private = "file")
+play_animation_graph :: proc(e: ^Editor, p: ^Preview) -> [][3][4]f32 {
+	MAX_STEP :: 0.1
+	data := preview_graph_data(e, p)
+	if data == nil {
+		return nil
+	}
+	now := e.platform.time_seconds()
+	if now < p.retry_at {
+		return nil
+	}
+	step := p.last_tick == 0 ? 0 : min(f32(now - p.last_tick), MAX_STEP)
+	p.last_tick = now
+	palette, _, ok := anim.preview_pose(e.assets, data, &p.instance, step, e.platform.frame_allocator)
+	if !ok {
+		p.retry_at = now + 1
+		return nil
+	}
+	return palette
+}
+
+// send_preview_views tells the editor what each animation graph's preview plays, when it changed.
+@(private)
+send_preview_views :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allocator) {
+	for &p in e.previews {
+		data := preview_graph_data(e, &p)
+		if data == nil {
+			continue
+		}
+		blob, ok := format.animation_graph_view(data)
+		if !ok || blob.header.key != p.instance.key {
+			continue
+		}
+		view: link.Animator_View
+		instance_view(data, blob, &p.instance, p.material, &view, allocator)
+		encoded := make([dynamic]byte, allocator)
+		link.write_message(&encoded, view)
+		h := max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
+		if h != p.view_sent {
+			p.view_sent = h
+			append(out, ..encoded[:])
+		}
+	}
+}
+
 // is_effect is whether a preview shows an effect, by its blob's kind. The first look loads the cooked blob, which the
 // renderer would load anyway. A blob that does not load is not tried again until refresh_preview sees it change,
 // which it does once the renderer, which retries, loads it.
@@ -180,14 +283,15 @@ is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
 		data, _ = asset.data(e.assets, h)
 	}
 	header, ok := format.blob_header(data)
-	p.kind_known, p.effect = ok, ok && header.kind == .Effect
+	p.kind_known, p.effect, p.animation_graph = ok, ok && header.kind == .Effect, ok && header.kind == .Animation_Graph
 	return p.effect
 }
 
-// reads_time is whether the preview changes every frame: an effect, or a material that reads the frame's time.
+// reads_time is whether the preview changes every frame: an effect, an animation graph, or a material that reads the
+// frame's time.
 @(private = "file")
 reads_time :: proc(e: ^Editor, p: ^Preview) -> bool {
-	if is_effect(e, p) {
+	if is_effect(e, p) || p.animation_graph {
 		return true
 	}
 	data := p.data

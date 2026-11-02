@@ -418,9 +418,8 @@ Shading_Models :: struct {
 }
 
 // Editor to daemon: the text of a material or an animation graph that the editor has not saved, as a request. The
-// daemon cooks a material as the material with this GUID, into the preview area of the cache,
-// <cache>/dev/preview/<guid>.blob, which the host's previews load, and only checks a graph, which writes nothing. The
-// asset's own blob does not change. A Preview_Result with the request's ID answers it.
+// daemon cooks it as the asset with this GUID, into the preview area of the cache, <cache>/dev/preview/<guid>.blob,
+// which the host's previews load. The asset's own blob does not change. A Preview_Result with the request's ID answers it.
 Cook_Preview :: struct {
 	guid: string,
 	text: string,

@@ -510,11 +510,78 @@ public sealed class AnimationGraphEditorTests : IDisposable
         shell.OnGameMessage(View(1));
         Assert.Null(shell.World.Animator(1));
 
-        // Sending with no host is nothing, and so is a parameter with no live view.
-        editor.SetLiveParameter("speed", 1);
-
         shell.Stop();
         Assert.Null(editor.LiveWaiting);
+    }
+
+    [Fact]
+    public void TheCanvasShowsThePreviewUnlessTheGamePlaysTheGraphOnTheSelectedEntity()
+    {
+        var (shell, asset, _) = Fox();
+        using var _ = shell;
+        var editor = shell.OpenAnimationGraph(asset)!;
+        Assert.NotNull(editor.PreviewId);
+        Assert.Contains(editor, shell.GraphEditors);
+        var changes = 0;
+        editor.LiveChanged += () => changes++;
+
+        // An entity of 0 is the preview's, which plays this graph whatever the mode.
+        Assert.Null(editor.ShownView);
+        shell.OnGameMessage(View(0, state: 1, source: 0, transition: 0));
+        Assert.Equal(1, changes);
+        Assert.Equal(1u, editor.PreviewView!.State);
+        Assert.Same(editor.PreviewView, editor.ShownView);
+        // It is not a view of an entity, and another graph's preview is not this one's.
+        Assert.Null(shell.World.Animator(0));
+        shell.OnGameMessage(View(0, graph: Survey, state: 3));
+        Assert.Equal(1u, editor.PreviewView!.State);
+
+        // While the game plays this graph on the selected entity, the canvas shows that, and the preview goes on.
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(1, "Fox", 1, 0, true, [])]));
+        shell.OnGameMessage(View(1, state: 2));
+        shell.Selection.Select(1);
+        Assert.Same(editor.PreviewView, editor.ShownView);
+        shell.Play();
+        Assert.Equal(2u, editor.ShownView!.State);
+        Assert.Equal(1u, editor.PreviewView!.State);
+        shell.Stop();
+        Assert.Same(editor.PreviewView, editor.ShownView);
+
+        shell.CloseGraph(editor, discard: true);
+        // Its slot is free again, for a preview of anything.
+        Assert.NotNull(shell.OpenAnimationGraph(asset)!.PreviewId);
+    }
+
+    [Fact]
+    public void ThePreviewShowsTheModelOfTheGraphsClipsUntilAnotherMeshIsPicked()
+    {
+        var (shell, asset, _) = Fox();
+        using var _ = shell;
+        var editor = shell.OpenAnimationGraph(asset)!;
+        Assert.Null(editor.MeshGuid);
+
+        const string Model = "1903ce0e197a04d3b1a50741ebd93647";
+        const string FoxMesh = "e049cf90c64cbdc7eec588c7120cbabb";
+        const string Other = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        var survey = editor.Document.Graph.Clips.First().Guid;
+        Asset Sub(string guid, AssetKind kind, string name, string parent, string path) =>
+            asset with { Guid = guid, Kind = kind, Path = path, Parent = parent, Subasset = name };
+        shell.Assets.Apply(new AssetDelta(
+        [
+            asset,
+            Sub(survey, AssetKind.Animation, "Survey", Model, "models/fox/Fox.gltf"),
+            Sub(FoxMesh, AssetKind.Mesh, "fox1", Model, "models/fox/Fox.gltf"),
+            Sub(Other, AssetKind.Mesh, "Cube", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "models/shapes.gltf"),
+        ], [], [], []));
+
+        Assert.Equal(FoxMesh, editor.MeshGuid);
+        Assert.Equal(["Fox / fox1", "shapes / Cube"], editor.MeshChoices.Select(AnimationGraphEditor.MeshName));
+        editor.SetPreviewMesh(Other);
+        Assert.Equal(Other, editor.MeshGuid);
+        // A preview's controls need no host to be called, and they change no document.
+        editor.SetPreviewParameter("speed", 1);
+        editor.RestartPreview();
+        Assert.False(editor.Document.IsDirty);
     }
 
     [Fact]

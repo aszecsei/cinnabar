@@ -14,7 +14,7 @@ using DockSide = Avalonia.Controls.Dock;
 namespace Cinnabar.Editor.AnimationGraphs;
 
 /// <summary>
-/// An animation graph's entry state and root motion joint, its parameters and its clips, each with the problems on its
+/// An animation graph's preview controls, its entry state and root motion joint, its parameters and its clips, each with the problems on its
 /// line, and the problems on no line that the panel shows otherwise. A new name renames it in what reads it.
 /// </summary>
 sealed class AnimationGraphPanel : ScrollViewer
@@ -24,14 +24,14 @@ sealed class AnimationGraphPanel : ScrollViewer
     readonly EditorShell _shell;
     readonly AnimationGraphEditor _editor;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 4 };
-    readonly AnimatorLivePanel _live;
+    readonly AnimationPreviewPanel _preview;
     string _shown = "";
 
     public AnimationGraphPanel(EditorShell shell, AnimationGraphEditor editor)
     {
         _shell = shell;
         _editor = editor;
-        _live = new AnimatorLivePanel(editor);
+        _preview = new AnimationPreviewPanel(shell, editor);
         Content = _content;
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
         new ViewSubscriptions(this, attached: Refresh)
@@ -61,7 +61,7 @@ sealed class AnimationGraphPanel : ScrollViewer
         }
         _shown = shown;
         _content.Children.Clear();
-        _content.Children.Add(_live);
+        _content.Children.Add(_preview);
 
         _content.Children.Add(Heading("Graph"));
         _content.Children.Add(Row("Entry", Choice(_editor.StateNames, Graph.Entry, _editor.SetEntry)));

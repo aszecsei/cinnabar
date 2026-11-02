@@ -1,6 +1,8 @@
 package cook
 
+import "core:fmt"
 import "core:mem"
+import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
@@ -130,10 +132,39 @@ animation_graphs_parse_into_states_and_transitions :: proc(t: ^testing.T) {
 
 @(test)
 an_unsaved_graphs_problems_name_its_file_and_its_lines :: proc(t: ^testing.T) {
-	problems := animation_graph_check(FOX_GRAPH, "C:/game/fox.animation_graph")
+	cache, err := os.make_directory_temp("", "animation_graph_check_*", context.allocator)
+	testing.expect(t, err == nil)
+	defer delete(cache)
+	defer os.remove_all(cache)
+	options := Cook_Options {
+		cache  = cache,
+		config = .Dev,
+	}
+	guid, _ := format.guid_parse("00112233445566778899aabbccddeeff")
+	blob := fmt.tprintf("%s/preview/00112233445566778899aabbccddeeff.blob", config_dir(options))
+
+	problems := animation_graph_check(options, guid, FOX_GRAPH, "C:/game/fox.animation_graph", "game/fox.animation_graph")
 	testing.expect_value(t, len(problems.list), 0)
-	problems = animation_graph_check("animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n", "C:/game/fox.animation_graph")
+	// A text without problems is what the preview plays.
+	read_blob :: proc(path: string) -> (^format.Blob_Header, bool) {
+		read, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil {
+			return nil, false
+		}
+		aligned, _ := mem.alloc_bytes(len(read), format.BLOB_ALIGN, context.temp_allocator)
+		copy(aligned, read)
+		return format.blob_header(aligned)
+	}
+	header, valid := read_blob(blob)
+	testing.expect(t, valid && header.guid == guid && header.kind == .Animation_Graph)
+	before := header.key
+
+	problems = animation_graph_check(options, guid, "animation_graph 1\nentry = nowhere\nnode 1 state\n\tname = a\n", "C:/game/fox.animation_graph", "game/fox.animation_graph")
 	defer delete(problems.list)
+	// A text with problems leaves the last good one.
+	header, valid = read_blob(blob)
+	testing.expect(t, valid)
+	testing.expect_value(t, header.key, before)
 	testing.expect_value(t, len(problems.list), 2)
 	testing.expect_value(t, problems.list[0].file, "C:/game/fox.animation_graph")
 	testing.expect_value(t, problems.list[0].line, 2)
