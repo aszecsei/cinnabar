@@ -209,8 +209,6 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			if e.mode == .Paused {
 				e.steps += 1
 			}
-		case link.Set_Animator_Parameter:
-			set_animator_parameter(e, w, v)
 		case:
 			if !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)

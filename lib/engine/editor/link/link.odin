@@ -91,7 +91,6 @@ Message :: union {
 	Sky_Sun_Request,
 	Sky_Sun,
 	Animator_View,
-	Set_Animator_Parameter,
 	Set_Preview_Parameter,
 	Restart_Preview,
 }
@@ -694,14 +693,6 @@ Animator_View :: struct {
 	fade_duration: f32,
 	progress:      f32,
 	parameters:    []Animator_Parameter,
-}
-
-// Editor to game: sets a parameter of an entity's Animator by its name, as a script's Animation.set_float does, in
-// Play or Paused: a number, 1 or 0 for a bool, and for a trigger, anything but 0 pulls it and 0 resets it.
-Set_Animator_Parameter :: struct {
-	entity: u64,
-	name:   string,
-	value:  f32,
 }
 
 // Editor to game: sets a parameter of what an animation graph's preview plays, by its name: a number, 1 or 0 for a bool,

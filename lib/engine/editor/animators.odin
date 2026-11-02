@@ -92,25 +92,7 @@ send_animators :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator
 	}
 }
 
-// set_animator_parameter sets a parameter of an entity's Animator by its name, as a script does. Outside Play and Paused,
-// or before the graph is ready, nothing plays that would read it, and a new instance would lose it.
-@(private)
-set_animator_parameter :: proc(e: ^Editor, w: ^ecs.World, message: link.Set_Animator_Parameter) {
-	if e.mode == .Edit {
-		return
-	}
-	a := ecs.get(w, ecs.Entity(message.entity), anim.Animator)
-	if a == nil {
-		return
-	}
-	data, blob, ok := animator_graph(e, a)
-	if !ok {
-		return
-	}
-	set_instance_parameter(data, blob, &a.instance, message.name, message.value)
-}
-
-// set_instance_parameter sets a parameter of an instance by its name, as a script does: a number, 1 or 0 for a bool, and
+// set_instance_parameter sets a parameter of an instance by its name: a number, 1 or 0 for a bool, and
 // for a trigger, anything but 0 pulls it and 0 resets it.
 @(private)
 set_instance_parameter :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^anim_graph.Instance, name: string, value: f32) {

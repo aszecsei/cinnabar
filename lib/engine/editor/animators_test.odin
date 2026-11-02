@@ -50,6 +50,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 			clock += 1
 			return clock
 		},
+		gpu_release_preview_target = proc(id: int) {},
 		memory_reserve = proc(size: int) -> rawptr {
 			data, err := virtual.reserve(uint(size))
 			return err == nil ? raw_data(data) : nil
@@ -212,38 +213,49 @@ an_animator_that_goes_away_says_so_once :: proc(t: ^testing.T) {
 }
 
 @(test)
-the_editor_sets_an_animators_parameters_while_the_game_plays :: proc(t: ^testing.T) {
+a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	e := playing(f)
-	a := ecs.get(&f.world, e, anim.Animator)
+	id: u32 = 1
+	open := link.Open_Preview {
+		id       = id,
+		material = ([16]u8)(f.graph),
+	}
 
-	// In Edit, nothing plays that would read it.
-	views(f, link.Set_Animator_Parameter{u64(e), "speed", 5})
-	testing.expect_value(t, a.instance.parameters[0], 2)
+	// Nothing goes out until it has started, which its first drawing does.
+	testing.expect_value(t, len(views(f, open)), 0)
+	p := &f.editor.previews[id]
+	testing.expect(t, p.open)
+	p.instance.key = KEY
+	p.instance.state, p.instance.source = 1, anim_graph.NONE
 
-	views(f, link.Set_Mode{mode = .Play}, link.Set_Animator_Parameter{u64(e), "speed", 5})
-	testing.expect_value(t, a.instance.parameters[0], 5)
-	views(f, link.Set_Animator_Parameter{u64(e), "grounded", 0})
-	testing.expect_value(t, a.instance.parameters[1], 0)
+	// The mode is Edit, and it plays. An entity of 0 says that the view is a preview's.
+	list := views(f)
+	testing.expect_value(t, len(list), 1)
+	testing.expect_value(t, list[0].entity, 0)
+	testing.expect_value(t, format.Guid(list[0].graph), f.graph)
+	testing.expect_value(t, list[0].state, 2)
+	testing.expect_value(t, len(views(f)), 0)
 
-	// A trigger is pulled, shows in the view until a tick sees it, and can be reset.
-	list := views(f, link.Watch_Entity{u64(e)}, link.Set_Animator_Parameter{u64(e), "look", 1})
-	testing.expect_value(t, a.instance.triggers, 1 << 2)
+	// A float, a bool and a trigger, which shows until a tick sees it and can be reset.
+	views(f, link.Set_Preview_Parameter{id, "speed", 5}, link.Set_Preview_Parameter{id, "grounded", 1})
+	testing.expect_value(t, p.instance.parameters[0], 5)
+	testing.expect_value(t, p.instance.parameters[1], 1)
+	list = views(f, link.Set_Preview_Parameter{id, "look", 1})
+	testing.expect_value(t, p.instance.triggers, 1 << 2)
 	testing.expect_value(t, list[0].parameters[2].value, 1)
-	views(f, link.Set_Animator_Parameter{u64(e), "look", 0})
-	testing.expect_value(t, a.instance.triggers, 0)
+	views(f, link.Set_Preview_Parameter{id, "look", 0})
+	testing.expect_value(t, p.instance.triggers, 0)
 
-	// While paused too, and the trigger waits for the next tick.
-	views(f, link.Set_Mode{mode = .Paused}, link.Set_Animator_Parameter{u64(e), "look", 1})
-	testing.expect_value(t, a.instance.triggers, 1 << 2)
+	// A preview that is not open, or a graph that has not started, is left alone.
+	views(f, link.Set_Preview_Parameter{2, "speed", 9})
+	testing.expect_value(t, f.editor.previews[2].instance.parameters[0], 0)
+	p.instance.key = KEY + 1
+	views(f, link.Set_Preview_Parameter{id, "speed", 9})
+	testing.expect_value(t, p.instance.parameters[0], 5)
 
-	// An entity that is gone, or has no Animator, or a graph that is not ready, is left alone.
-	before := a.instance
-	plain := ecs.spawn(&f.world)
-	views(f, link.Set_Animator_Parameter{u64(plain), "speed", 9}, link.Set_Animator_Parameter{0, "speed", 9})
-	testing.expect_value(t, a.instance.parameters[0], before.parameters[0])
-	a.instance.key = KEY + 1
-	views(f, link.Set_Animator_Parameter{u64(e), "speed", 9})
-	testing.expect_value(t, a.instance.parameters[0], before.parameters[0])
+	// Restart gives it a new instance, which its next drawing starts.
+	views(f, link.Restart_Preview{id})
+	testing.expect_value(t, p.instance.key, 0)
+	testing.expect_value(t, p.instance.parameters[0], 0)
 }
