@@ -82,7 +82,7 @@ A DomeLight is the stage's sky: its image is a texture sub-asset, named `<image>
 
 - **Intensity:** the light's `intensity` times 2 to the power of its `exposure`, times its color's average. The sky's texture has no tint, so a color that is not gray is a warning.
 - **Rotation:** the azimuth that the light's transform turns its +z to, on the engine's axes. The texture's middle column is toward the light's +z, which is the engine's convention; this has not been checked against a USD renderer's.
-- **Left out, with a warning:** a dome without an image, or with one that the cooker cannot decode, such as an OpenEXR image in DWAA.
+- **Left out, with a warning:** a dome without an image, or with one that the cooker cannot decode, such as an OpenEXR image of deep data.
 - Jungle Ruins' dome is its sky, `kloppenheim_06_puresky_8k.hdr`.
 - Other lights are not imported yet.
 

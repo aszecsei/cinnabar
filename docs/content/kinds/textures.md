@@ -2,9 +2,9 @@
 
 Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files, and `.texture_set` files that name such images as the layers of a cube map or an array (see [Cube maps and arrays](#cube-maps-and-arrays)). `just textures` runs `cook textures --cache build/<target>/content --config dev|release` with the roots.
 
-- **Decoders,** picked by a file's first bytes: OpenEXR by TinyEXR, from LightUSD's `src/external`, which `just lightusd` builds into `cn_usd.lib` (`tools/cook/usd/cn_exr.cpp`, bound by `tools/cook/exr.odin`); TIFF by the cooker's own baseline reader (`tools/cook/tiff.odin`); and the rest by `vendor:stb/image`.
+- **Decoders,** picked by a file's first bytes: OpenEXR by `vendor:OpenEXRCore`, which only the cooker links (`tools/cook/exr.odin`); TIFF by the cooker's own baseline reader (`tools/cook/tiff.odin`); and the rest by `vendor:stb/image`.
 - **TIFF:** the first image of the file, in strips, uncompressed, PackBits, LZW or Deflate, with or without the horizontal predictor, of 8- or 16-bit unsigned or 32-bit float samples, gray or RGB, with or without alpha. A tiled TIFF, one with separate planes, another compression or another kind of sample is an error that says which.
-- **OpenEXR:** the first part, as RGBA floats. A single-channel image is gray, and an image without alpha is opaque.
+- **OpenEXR:** the data window of the first part, as RGBA floats, in scanlines or tiles, in any compression, DWAA and DWAB included. A tiled image with mips gives its largest level, and the cooker makes its own mips. Its channels are half or float: `R`, `G` and `B`, and `A` if it has it, or else opaque. Other channels, such as `Z` or another layer's, are ignored. One channel of any name is gray and opaque. Deep data, no plain `R`, `G` and `B`, and a read channel that is `uint` or subsampled are each an error that says which.
 - **Linear images.** An `.exr`, an `.hdr` and a TIFF of floats hold linear values, so a `color` texture takes them as they are, where it decodes an 8- or 16-bit image from sRGB. A `normal` and a `mask` texture treat them as they treat any image's values.
 
 | Setting | Values | Default | Effect |
@@ -33,7 +33,7 @@ Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files, and `.text
 - **Alpha coverage:** filtering pulls a [masked material's](materials.md) thin cut-outs below its cutoff, so foliage thins out in the distance. With `alpha_coverage`, the cooker measures the share of mip 0's texels at or above `alpha_cutoff`, and scales the alpha of each smaller mip so that the same share is. It finds each scale by bisection, as NVIDIA Texture Tools does, from 0 to 16 in 16 steps. Mip 0 stays as it is, and each mip still filters from the one before it unscaled, so no scale feeds down the chain. The cooker cooks a texture without its material, so `alpha_cutoff` should be the `cutoff` of the material that reads it, or the nearest step. Other usages ignore both settings, and so do a [stage's](stages.md) textures, which have no settings of their own. The sample's `scenes/billboards.scene` compares a texture with and without it.
 - **BC6H** interpolates its endpoints' half-float bits, which are close to logarithmic, so a 4×4 block that holds both 0 and bright values has coarse steps between them.
 - **Quality:** development compresses at Compressonator's quality 0.05, and release at 0.5. The configuration is in the key, so release textures cook again in a release cook.
-- **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file. A `.texture_set`'s also covers the bytes of the images that it names.
+- **The cache key** covers the cooker version, the Compressonator and OpenEXRCore versions, the configuration, the source and the `.meta` file. A `.texture_set`'s also covers the bytes of the images that it names.
 
 ## Cube maps and arrays
 
