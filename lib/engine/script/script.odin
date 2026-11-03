@@ -54,6 +54,10 @@ Runtime :: struct {
 	pending_pressed:  core.Keys,
 	pending_released: core.Keys,
 	fixed_ran:        bool,
+	// The same for the gamepads' edges and the typed text.
+	pending_gamepad_pressed:  [core.MAX_GAMEPADS]core.Gamepad_Buttons,
+	pending_gamepad_released: [core.MAX_GAMEPADS]core.Gamepad_Buttons,
+	pending_text:             core.Input_Text,
 	// The script phase's structural changes, in frame memory. See end_phase.
 	commands:         ecs.Commands,
 	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.

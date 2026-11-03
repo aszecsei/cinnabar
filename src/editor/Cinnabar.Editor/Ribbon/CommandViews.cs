@@ -25,6 +25,21 @@ sealed class CommandAdapter : ICommand
     public void Execute(object? parameter) => Command.Execute();
 }
 
+/// <summary>A command as a shortcut: while the game has the keys the shortcut does nothing, except on the function keys, so F5 and Shift+F5 work during play.</summary>
+sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> gameHasKeys) : ICommand
+{
+    public event EventHandler? CanExecuteChanged
+    {
+        add => command.CanExecuteChanged += value;
+        remove => command.CanExecuteChanged -= value;
+    }
+
+    public bool CanExecute(object? parameter) =>
+        (gesture.Key is >= Key.F1 and <= Key.F24 || !gameHasKeys()) && command.CanExecute(parameter);
+
+    public void Execute(object? parameter) => command.Execute(parameter);
+}
+
 /// <summary>What views of commands share: one adapter per command, icons, shortcuts and tooltips.</summary>
 sealed class CommandViews(CommandRegistry commands, KeyBindings keyBindings)
 {

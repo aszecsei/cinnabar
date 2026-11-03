@@ -12,6 +12,7 @@ component 1 Transform
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
 component 32 Camera
+behaviour 79650b8e784445cba714fef3fd88eec6
 
 entity 76b64f812f12cecf
 name = "Running Fox"

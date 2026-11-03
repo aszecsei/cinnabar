@@ -82,7 +82,7 @@ public sealed class MainWindow : Window
         {
             if (views.Gesture(id) is { } gesture)
             {
-                KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = views.Adapter(id) });
+                KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(views.Adapter(id), gesture, () => shell.GameHasKeys) });
             }
             else
             {

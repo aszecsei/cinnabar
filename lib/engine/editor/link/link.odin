@@ -727,19 +727,32 @@ Input_Event_Kind :: enum u8 {
 	Mouse_Move,
 	Scroll,
 	Release_All,
+	Gamepad,
+	Text,
+	Composition,
 }
 
 Input_Event :: struct {
-	kind:     Input_Event_Kind,
-	key:      Input_Key,
+	kind:      Input_Event_Kind,
+	key:       Input_Key,
 	// Mouse_Move: in pixels from the frame's top-left corner.
-	position: [2]f32,
+	position:  [2]f32,
 	// Scroll: wheel notches, positive away from the user.
-	scroll:   f32,
+	scroll:    f32,
+	// Gamepad: what the pad in this slot reports, before the dead zones: core.Gamepad_Buttons, which are the bits of
+	// XInput's wButtons, and the axes in the order of core.Gamepad_Axis.
+	pad:       u8,
+	connected: bool,
+	buttons:   u16,
+	axes:      [6]f32,
+	// Text: the characters typed. Composition: what the IME composes, and empty when it stops.
+	text:      string,
+	// Composition: the bytes of text before the cursor.
+	cursor:    i32,
 }
 
-// Editor to host: keyboard and mouse input while the viewport has focus in play mode. The host gives it to the game as
-// core.Input from the next frame.
+// Editor to host: keyboard, mouse, gamepad and text input while the viewport has focus in play mode. The host gives it
+// to the game as core.Input from the next frame.
 Editor_Input :: struct {
 	events: []Input_Event,
 }

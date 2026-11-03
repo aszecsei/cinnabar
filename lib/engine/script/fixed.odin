@@ -25,8 +25,21 @@ fixed_update :: proc(r: ^Runtime, ticks: ^ecs.Ticks, input: core.Input) {
 		tick_input.pressed += r.pending_pressed
 		tick_input.released += r.pending_released
 		r.pending_pressed, r.pending_released = {}, {}
+		for &pad, i in tick_input.gamepads {
+			pad.pressed += r.pending_gamepad_pressed[i]
+			pad.released += r.pending_gamepad_released[i]
+		}
+		r.pending_gamepad_pressed, r.pending_gamepad_released = {}, {}
+		// The older frames' text comes first.
+		core.input_text_append(&r.pending_text, core.input_text_string(&tick_input.text))
+		tick_input.text = r.pending_text
+		r.pending_text.length = 0
 	} else {
 		tick_input.pressed, tick_input.released = {}, {}
+		for &pad in tick_input.gamepads {
+			pad.pressed, pad.released = {}, {}
+		}
+		tick_input.text.length = 0
 	}
 	begin_fixed(r)
 	set_input(r, tick_input)

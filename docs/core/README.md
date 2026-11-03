@@ -10,7 +10,7 @@ Read them in this order the first time.
 |---|---|
 | [Platform](platform.md) | Platform and backend selection, `Platform_API`, and the frame bracket. |
 | [Jobs and memory](jobs-and-memory.md) | The fiber job system and the memory arenas. |
-| [Input](input.md) | Keyboard and mouse input, and the editor's input. |
+| [Input](input.md) | Keyboard, mouse, gamepads and text with IME composition, and the editor's input. |
 | [Profiling](profiling.md) | The frame profiler: CPU zones, frames, costs and captures. |
 
 ## Overview
@@ -19,7 +19,7 @@ Read them in this order the first time.
 
 | Package | What it holds |
 |---|---|
-| `lib/core` | `api.odin`: `Platform_API` and `Game_API`. `platform.odin`: frame begin and end, the arenas, the DLL loader and reload detection. `input.odin`: `Input` and the queue for the editor's input. `window_windows.odin`: the window and its messages. `file.odin`: file reading and modification times. |
+| `lib/core` | `api.odin`: `Platform_API` and `Game_API`. `platform.odin`: frame begin and end, the arenas, the DLL loader and reload detection. `input.odin`: `Input` and the events that change it. `window_windows.odin`: the window and its messages. `gamepad_windows.odin`: the pads, through XInput. `ime_windows.odin`: what an IME composes. `file.odin`: file reading and modification times. |
 | `lib/core/jobs` | The fiber job system: workers, fibers, counters and the fiber-aware mutex. |
 | `lib/core/profile` | The frame profiler: zones, the frame ring, costs and captures ([Profiling](profiling.md#profiler)). |
 | `lib/core/layout` | The type layout hash that `Game_API.layout_hash` and the blob headers use. |

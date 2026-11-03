@@ -99,6 +99,44 @@ World.spawn():add(Jumper)
 	expect_reports(t, f, {0})
 }
 
+@(test)
+gamepad_edges_and_text_reach_one_tick :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(
+		&f.runtime,
+		"=typist",
+		`
+local Typist = Behaviour.define("Typist")
+function Typist:fixed_update(dt)
+	Test.report(Input.gamepad_was_pressed(1, GamepadButton.A) and 1 or 0)
+	Test.report(Input.gamepad_was_released(1, GamepadButton.B) and 1 or 0)
+	Test.report(#Input.text)
+	Test.report(Input.text == "ab" and 1 or 0)
+end
+World.spawn():add(Typist)
+`,
+	)
+	testing.expect(t, ok)
+	frame_input :: proc(text: string) -> (input: core.Input) {
+		input.gamepads[0].pressed = {.A}
+		input.gamepads[0].released = {.B}
+		core.input_text_append(&input.text, text)
+		return
+	}
+	// The first tick gets them, and the later ticks of the frame do not.
+	game_frame(f, THREE_TICKS, frame_input("ab"))
+	expect_reports(t, f, {1, 1, 2, 1, 0, 0, 0, 0, 0, 0, 0, 0})
+	// A frame with no tick keeps them for the next, in the order they were typed.
+	game_frame(f, NO_TICK, frame_input("a"))
+	expect_reports(t, f, {})
+	game_frame(f, 16 * time.Millisecond, frame_input("b"))
+	expect_reports(t, f, {1, 1, 2, 1})
+	game_frame(f, 17 * time.Millisecond)
+	expect_reports(t, f, {0, 0, 0, 0})
+}
+
 // wait_fixed resumes once at the end of each tick, after fixed_update, and not in a frame without a tick.
 @(test)
 wait_fixed_resumes_each_tick :: proc(t: ^testing.T) {

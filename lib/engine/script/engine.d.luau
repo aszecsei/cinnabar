@@ -95,6 +95,17 @@ declare Input: {
 	mouse_position: vector,
 	mouse_delta: vector,
 	scroll: number,
+	-- Pads are in slots 1 to 4. A slot with no pad has nothing down and every axis at 0.
+	gamepad_connected: (pad: number) -> boolean,
+	gamepad_is_down: (pad: number, button: number) -> boolean,
+	gamepad_was_pressed: (pad: number, button: number) -> boolean,
+	gamepad_was_released: (pad: number, button: number) -> boolean,
+	gamepad_axis: (pad: number, axis: number) -> number,
+	-- The characters typed since the last frame, in UTF-8. Backspace and Enter are keys, not text.
+	text: string,
+	-- What an IME is composing, which is not text yet, and the bytes of it before the cursor.
+	composition: string,
+	composition_cursor: number,
 }
 
 declare Debug: {

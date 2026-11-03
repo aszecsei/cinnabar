@@ -2,6 +2,7 @@
 package core
 
 import win "core:sys/windows"
+import "core:time"
 
 WINDOW_CLASS :: "cinnabar_window"
 
@@ -12,6 +13,9 @@ window: struct {
 	input:           Input,
 	// The mouse position at the last WM_MOUSEMOVE, for the delta. Unknown until the first one.
 	mouse_known:     bool,
+	// The first half of a character that WM_CHAR sends in two.
+	high_surrogate:  u16,
+	gamepads:        Gamepad_Poller,
 }
 
 _window_open :: proc(title: string, width, height: i32, visible := true) -> bool {
@@ -65,6 +69,11 @@ _window_poll :: proc() -> (open: bool) {
 		win.TranslateMessage(&msg)
 		win.DispatchMessageW(&msg)
 	}
+	// XInput answers any process, so the pads belong to this window only while it is in the foreground. A hidden
+	// window never does, and in shared mode the editor's viewport sends the pads.
+	if window.hwnd != nil && win.GetForegroundWindow() == window.hwnd {
+		gamepad_poll(&window.gamepads, &window.input, time.tick_now(), xinput_read)
+	}
 	return !window.close_requested
 }
 
@@ -114,6 +123,14 @@ window_proc :: proc "system" (hwnd: win.HWND, msg: win.UINT, wparam: win.WPARAM,
 			break
 		}
 		return 0
+	case win.WM_CHAR:
+		input_char(input, &window.high_surrogate, u16(wparam))
+		return 0
+	case win.WM_IME_COMPOSITION:
+		// DefWindowProc draws the composition, and turns what the IME commits into WM_CHAR.
+		ime_read_composition(hwnd, input)
+	case win.WM_IME_ENDCOMPOSITION:
+		input_set_composition(input, {}, 0)
 	case win.WM_KILLFOCUS:
 		input_release_all(input)
 	case win.WM_LBUTTONDOWN, win.WM_RBUTTONDOWN, win.WM_MBUTTONDOWN, win.WM_XBUTTONDOWN:

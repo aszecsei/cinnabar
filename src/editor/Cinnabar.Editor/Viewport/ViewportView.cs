@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -52,6 +53,14 @@ public sealed class ViewportView : Grid
     StackPanel _elements = new();
     readonly DispatcherTimer _timer;
     readonly DispatcherTimer _flyTimer;
+    readonly DispatcherTimer _gamepadTimer;
+    readonly GamepadPoller _gamepads = new(GamepadPoller.ReadXInput);
+    bool _pollingGamepads;
+    readonly GameInput.Characters _characters = new();
+    // Above the overlay of the camera's speed.
+    const double CompositionBottom = 44;
+    readonly TextBlock _composition;
+    readonly Border _compositionOverlay;
     readonly HashSet<Key> _held = [];
     Gesture _gesture;
     Point _start;
@@ -107,9 +116,29 @@ public sealed class ViewportView : Grid
 
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => UpdateStats());
         _flyTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => FlyStep());
+        _gamepadTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Input, (_, _) => PollGamepads());
+
+        _composition = new TextBlock { FontSize = 14 };
+        _compositionOverlay = Overlay(_composition, HorizontalAlignment.Left, VerticalAlignment.Bottom);
+        _compositionOverlay.Margin = new Thickness(8, 8, 8, CompositionBottom);
+        _compositionOverlay.IsHitTestVisible = false;
+        _compositionOverlay.IsVisible = false;
+        Children.Add(_compositionOverlay);
+        // The IME is on only while the game has the input. Elsewhere in the viewport a key is a tool's.
+        var textClient = new GameTextClient(this, new Rect(16, CompositionBottom, 0, 16), ShowComposition);
+        TextInputMethodClientRequested += (_, e) =>
+        {
+            if (_shell.InputGoesToGame)
+            {
+                e.Client = textClient;
+            }
+        };
+
+        GotFocus += (_, _) => _shell.ViewportHasFocus = true;
         // Keys that are released elsewhere would keep the camera flying, or stay down in the game.
         LostFocus += (_, _) =>
         {
+            _shell.ViewportHasFocus = false;
             _held.Clear();
             _shell.SendInput(GameInput.ReleaseAll());
         };
@@ -128,6 +157,7 @@ public sealed class ViewportView : Grid
             _shell.Camera.Changed += ShowSpeed;
             _shell.ModeChanged += ShowMode;
             _timer.Start();
+            _gamepadTimer.Start();
             ShowMode();
             ShowTools();
             ShowSpeed();
@@ -141,6 +171,7 @@ public sealed class ViewportView : Grid
             _shell.ModeChanged -= ShowMode;
             _timer.Stop();
             _flyTimer.Stop();
+            _gamepadTimer.Stop();
         };
         UpdateStats();
     }
@@ -218,6 +249,7 @@ public sealed class ViewportView : Grid
         {
             EndGesture();
         }
+        RaiseEvent(new RoutedEventArgs(InputMethod.TextInputMethodClientRequeryRequestedEvent));
         ShowSpeed();
     }
 
@@ -550,6 +582,40 @@ public sealed class ViewportView : Grid
         e.Handled = true;
     }
 
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+        if (_shell.InputGoesToGame && e.Text is { } text && _characters.Join(text) is { Length: > 0 } joined)
+        {
+            _shell.SendInput(GameInput.Text(joined));
+            e.Handled = true;
+        }
+    }
+
+    void ShowComposition(string text, int cursor)
+    {
+        _composition.Text = text;
+        _compositionOverlay.IsVisible = text.Length > 0;
+        _shell.SendInput(GameInput.Composition(text, cursor));
+    }
+
+    // The pads belong to the viewport while it has the game's input and its window is the active one: XInput answers
+    // whichever window asks. A viewport that loses them lets go of everything, and tells the game about them again later.
+    void PollGamepads()
+    {
+        if (_shell.GameHasKeys && TopLevel.GetTopLevel(this) is WindowBase { IsActive: true })
+        {
+            _pollingGamepads = true;
+            _shell.SendInput(_gamepads.Poll(Environment.TickCount64));
+        }
+        else if (_pollingGamepads)
+        {
+            _pollingGamepads = false;
+            _shell.SendInput(GameInput.ReleaseAll());
+            _gamepads.Forget();
+        }
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -559,8 +625,9 @@ public sealed class ViewportView : Grid
             {
                 _shell.SendInput(GameInput.Down(key));
             }
-            // The function keys stay the editor's too, so F5 and Shift+F5 work while the game has the keys.
-            e.Handled = e.Key is not (>= Avalonia.Input.Key.F1 and <= Avalonia.Input.Key.F24);
+            // The function keys stay the editor's too, so F5 and Shift+F5 work while the game has the keys. A key that may
+            // type stays unhandled for its character, and the shortcuts leave it alone by themselves (see ShortcutCommand).
+            e.Handled = e.Key is not (>= Avalonia.Input.Key.F1 and <= Avalonia.Input.Key.F24) && !GameInput.TypesCharacter(e.KeySymbol, e.KeyModifiers);
             return;
         }
         if (_gesture == Gesture.Fly)
