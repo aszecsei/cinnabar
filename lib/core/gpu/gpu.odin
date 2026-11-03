@@ -366,6 +366,9 @@ Texture_Usage :: enum u8 {
 
 Texture_Usages :: bit_set[Texture_Usage;u8]
 
+// MAX_TEXTURE_LAYERS is the most layers that a texture array has, which is what D3D12 allows.
+MAX_TEXTURE_LAYERS :: 2048
+
 // A new texture starts in the layout of its first usage in this order: Render_Target, Depth_Stencil, Storage, Sampled.
 // A texture created with data starts in the sampled layout. See initial_layout.
 Texture_Desc :: struct {
@@ -373,6 +376,11 @@ Texture_Desc :: struct {
 	// A 3D texture's depth in texels. 0 means a 2D texture. A 3D texture has one mip and no data, and is only sampled
 	// and written in shaders.
 	depth:     u32,
+	// An array's layers, at most MAX_TEXTURE_LAYERS. 0 means a texture with no array view, and 1 an array of one layer. An
+	// array's or a cube's usage is Sampled and Streamed, and shaders read it with cn_texture_array or cn_texture_cube.
+	layers:    u32,
+	// A cube map: six square layers, in the order +x, -x, +y, -y, +z, -z.
+	cube:      bool,
 	format:    Format,
 	// 0 means 1.
 	mip_count: u32,
@@ -820,13 +828,14 @@ Stats :: struct {
 // be used. The zero Transfer is always done.
 Transfer :: distinct u64
 
-// mip_chain_size is the size of a texture's mips, each tightly packed, mip 0 first: the data of gpu_stream_texture.
+// mip_chain_size is the size of a texture's mips: each layer's chain, layer 0 first, each mip tightly packed, mip 0
+// first. It is the data of gpu_stream_texture.
 mip_chain_size :: proc(desc: Texture_Desc) -> int {
 	size := 0
 	for mip in 0 ..< max(desc.mip_count, 1) {
 		size += surface_size(desc.format, max(desc.size.x >> mip, 1), max(desc.size.y >> mip, 1))
 	}
-	return size
+	return size * int(max(desc.layers, 1))
 }
 
 // Upload is memory in the frame's upload ring. It is valid until the end of the frame.

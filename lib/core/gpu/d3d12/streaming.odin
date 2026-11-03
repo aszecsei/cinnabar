@@ -112,45 +112,59 @@ stream_texture :: proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
 
 	resource_desc: d3d.RESOURCE_DESC
 	entry.resource->GetDesc(&resource_desc)
-	mips := entry.desc.mip_count
-	footprints: [16]d3d.PLACED_SUBRESOURCE_FOOTPRINT
-	rows: [16]u32
-	row_sizes: [16]u64
+	// Subresources go mip by mip within a layer, and layer by layer, which is the order of the data. An array can have
+	// thousands of them, so each is asked for on its own, at the offset that the last one ended at.
+	subresources := entry.desc.mip_count * max(entry.desc.layers, 1)
 	total: u64
-	dev.device->GetCopyableFootprints(&resource_desc, 0, mips, 0, &footprints[0], &rows[0], &row_sizes[0], &total)
+	dev.device->GetCopyableFootprints(&resource_desc, 0, subresources, 0, nil, nil, nil, &total)
 
 	staging, mapped, ok := create_copy_staging(int(total))
 	if !ok {
 		return {}
 	}
 	source := 0
-	for mip in 0 ..< mips {
-		f := footprints[mip]
-		for row in 0 ..< int(rows[mip]) {
-			copy(mapped[int(f.Offset) + row * int(f.Footprint.RowPitch):], data[source:][:row_sizes[mip]])
-			source += int(row_sizes[mip])
+	offset: u64
+	for subresource in 0 ..< subresources {
+		f, rows, row_size, next := subresource_footprint(&resource_desc, subresource, offset)
+		for row in 0 ..< int(rows) {
+			copy(mapped[int(f.Offset) + row * int(f.Footprint.RowPitch):], data[source:][:row_size])
+			source += int(row_size)
 		}
+		offset = next
 	}
 
 	sync.guard(&dev.stream_mutex)
 	list := open_copy_list()
-	for mip in 0 ..< mips {
+	offset = 0
+	for subresource in 0 ..< subresources {
+		f, _, _, next := subresource_footprint(&resource_desc, subresource, offset)
 		dst := d3d.TEXTURE_COPY_LOCATION {
 			pResource = entry.resource,
 			Type      = .SUBRESOURCE_INDEX,
 		}
-		dst.SubresourceIndex = mip
+		dst.SubresourceIndex = subresource
 		src := d3d.TEXTURE_COPY_LOCATION {
 			pResource = staging,
 			Type      = .PLACED_FOOTPRINT,
 		}
-		src.PlacedFootprint = footprints[mip]
+		src.PlacedFootprint = f
 		list->CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
+		offset = next
 	}
 	defer_release(staging, .None, 0)
 	value := dev.copy_value + 1
 	append(&dev.copy_textures, Streamed_Texture{texture, value})
 	return gpu.Transfer(value)
+}
+
+// subresource_footprint gives where a subresource goes in a staging buffer when it starts at offset, and where the next
+// one starts: after its last row, at the next multiple of the placement alignment.
+@(private = "file")
+subresource_footprint :: proc(desc: ^d3d.RESOURCE_DESC, subresource: u32, offset: u64) -> (f: d3d.PLACED_SUBRESOURCE_FOOTPRINT, rows: u32, row_size, next: u64) {
+	dev.device->GetCopyableFootprints(desc, subresource, 1, offset, &f, &rows, &row_size, nil)
+	end := f.Offset + u64(f.Footprint.RowPitch) * u64(rows - 1) + row_size
+	next = (end + d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) &~ u64(d3d.TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1)
+	return
 }
 
 transfer_done :: proc(transfer: gpu.Transfer) -> bool {

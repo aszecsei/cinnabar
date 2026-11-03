@@ -57,6 +57,10 @@ ROOM_SCENE_META :: #load("content/scenes/room.scene.meta", string)
 BILLBOARDS_SCENE_META :: #load("content/scenes/billboards.scene.meta", string)
 // The animation scene, two skinned foxes that play their clips (see docs/content/kinds/skins-and-animations.md#playback).
 ANIMATION_SCENE_META :: #load("content/scenes/animation.scene.meta", string)
+// The cube map scene, a sphere under a Texture sky whose texture is a cube map (see docs/rendering/sky.md#texture).
+CUBE_SKY_SCENE_META :: #load("content/scenes/cube_sky.scene.meta", string)
+// The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
+TRIANGLE_TINTS_META :: #load("content/textures/cube/tints.texture_set.meta", string)
 
 // Matches numthreads in content/shaders/post.hlsl.
 POST_GROUP_SIZE :: 8
@@ -100,6 +104,9 @@ Scene_Constants :: struct {
 	sampler:         u32,
 	instances:       u32,
 	instance_offset: u32,
+	// The array of tints, and its layers, or 0 until it is resident.
+	tints:           u32,
+	tint_layers:     u32,
 }
 
 // Matches Instance in content/shaders/triangle.hlsl.
@@ -214,7 +221,8 @@ Game_State :: struct {
 	next_project_check: f64,
 	// F8 cycles the output mode for this run, until the settings' files change.
 	output_override:    Maybe(gpu.Output_Request),
-	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene and the billboards scene.
+	// F7 cycles the main scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the animation
+	// scene and the cube map scene.
 	scene_index:        u8,
 	elapsed:            time.Duration,
 	// The time that the world stepped this frame, in seconds, which the particles step by.
@@ -893,6 +901,11 @@ draw_scene :: proc(f: ^render.Frame, ctx: ^render.Pass_Context) {
 		instances       = gpu.read_index(frame.triangles.buffer),
 		instance_offset = frame.triangles.offset,
 	}
+	if guid, guid_ok := format.meta_guid(TRIANGLE_TINTS_META); guid_ok {
+		if tints, ready := render.resident_texture(&f.renderer.residency, guid, .D2_Array); ready {
+			constants.tints, constants.tint_layers = gpu.read_index(tints.texture), tints.layer_count
+		}
+	}
 	gpu.cmd_set_pipeline(cb, frame.state.pipelines.scene.pipeline)
 	gpu.cmd_set_pass_constants(cb, frame.pass_constants)
 	gpu.cmd_push_constants(cb, &constants)
@@ -965,14 +978,14 @@ update_output :: proc(s: ^Game_State) {
 }
 
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
-// animation scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so the key does
-// nothing then.
+// animation scene, the cube map scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
+// the key does nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)

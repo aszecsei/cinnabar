@@ -1,0 +1,36 @@
+# The cube map scene, which F7 in mygame cycles to (see docs/rendering/sky.md#texture): a sphere under a Texture sky
+# whose texture is a cube map from six images, a color for each face (see docs/content/kinds/textures.md#cube-maps-and-arrays),
+# which lights it. textures/cube/sky_small_cube.hdr is a sky with a sun to try in its place. Positions are raw
+# World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity 7a1c000000000001
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 33554432, -83886080]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+behaviour 79650b8e784445cba714fef3fd88eec6
+
+entity 7a1c000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	mode = Texture
+	texture = $c0be0000000000000000000000000010
+
+entity 7a1c000000000003
+name = "Sphere"
+component 1 Transform
+	position = [2516582400000000000, 33554432, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $a120bc6f08344b128690c05eac5a2125

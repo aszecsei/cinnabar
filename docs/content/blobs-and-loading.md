@@ -24,7 +24,7 @@ A scene blob holds a table of entities: the scene ID, the parent's scene ID, the
 
 A shader blob holds a table of entries. Each entry has a stage (`Vertex`, `Pixel`, `Compute`, `Amplification`, `Mesh` or `Library`), a target (`DXIL`) and a slice of bytecode. It ends with the source path.
 
-A texture blob holds the format, the size, the mip count, the usage, and the whole mip chain: each mip tightly packed, mip 0 first. That is the layout that `gpu_stream_texture` takes (see [GPU](../gpu/queues-streaming-readback.md#streaming)), so the blob's data streams without a copy.
+A texture blob holds the format, the usage, the dimension (`D2`, `Cube` or `D2_Array`), the layer count, each layer's size, the mip count, and every layer's whole mip chain: layer 0 first, each mip tightly packed, mip 0 first. A cube's layers are its faces, in the order +x, -x, +y, -y, +z, -z (see [Textures](kinds/textures.md#cube-maps-and-arrays)). That is the layout that `gpu_stream_texture` takes (see [GPU](../gpu/queues-streaming-readback.md#streaming)), so the blob's data streams without a copy.
 
 A material blob holds its flags (two-sided, casts shadows, no lighting, reads time, sorted), its blend and cutoff, its parameters (name, type and offset), its switches' names and defaults, its default parameter block and its textures (each one's offset, its asset or its default), and its variants: each has a switch mask, a pass (`Forward`, `Prepass`, `Depth`, `Moments`, `Transparent` or `Transparent_Ids`) and a stage, and its bytecode. A material instance blob holds its material's GUID, its switches, and its resolved block and textures.
 

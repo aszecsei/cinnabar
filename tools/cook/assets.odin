@@ -19,7 +19,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Script  = {SCRIPT_EXTENSION},
 	.Scene   = {format.SCENE_EXTENSION},
 	.Shader  = {format.SHADER_EXTENSION},
-	.Texture = TEXTURE_EXTENSIONS,
+	.Texture = TEXTURE_SOURCE_EXTENSIONS,
 	.Model   = MODEL_EXTENSIONS,
 	.Mesh    = {format.MESH_EXTENSION},
 	.Shading_Model = {format.SHADING_EXTENSION},

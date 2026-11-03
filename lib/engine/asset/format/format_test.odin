@@ -139,6 +139,66 @@ texture_blobs_round_trip :: proc(t: ^testing.T) {
 }
 
 @(test)
+layered_texture_blobs_hold_a_chain_for_each_layer :: proc(t: ^testing.T) {
+	guid := guid_parse(TEST_GUID) or_else {}
+	chain := texture_chain_size(.BC6H_Ufloat, {8, 8}, 2)
+	cube := aligned(
+		texture_write(
+			{guid = guid, format = .BC6H_Ufloat, usage = .HDR, dimension = .Cube, layer_count = 6, size = {8, 8}, mip_count = 2, mips = make([]byte, chain * 6, context.temp_allocator), source_path = "game/sky.texture_set"},
+			context.temp_allocator,
+		),
+	)
+	blob, ok := texture_view(cube)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, blob.dimension, Texture_Dimension.Cube)
+		testing.expect_value(t, blob.layer_count, 6)
+		testing.expect_value(t, int(blob.mips.size), chain * 6)
+	}
+	// A cube has six layers, and they are square.
+	(^Texture_Blob)(raw_data(cube)).layer_count = 5
+	_, ok = texture_view(cube)
+	testing.expect(t, !ok)
+
+	not_square := aligned(
+		texture_write(
+			{guid = guid, format = .RGBA8_Unorm, dimension = .Cube, layer_count = 6, size = {8, 4}, mip_count = 1, mips = make([]byte, 8 * 4 * 4 * 6, context.temp_allocator)},
+			context.temp_allocator,
+		),
+	)
+	_, ok = texture_view(not_square)
+	testing.expect(t, !ok)
+
+	array := aligned(
+		texture_write(
+			{guid = guid, format = .RGBA8_Unorm, dimension = .D2_Array, layer_count = 3, size = {4, 2}, mip_count = 1, mips = make([]byte, 4 * 2 * 4 * 3, context.temp_allocator)},
+			context.temp_allocator,
+		),
+	)
+	blob, ok = texture_view(array)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, blob.layer_count, 3)
+	}
+	// The data must have every layer.
+	(^Texture_Blob)(raw_data(array)).layer_count = 4
+	_, ok = texture_view(array)
+	testing.expect(t, !ok)
+
+	// A 2D texture has one layer, also when its writer does not say so.
+	plain := aligned(texture_write({guid = guid, format = .RGBA8_Unorm, size = {1, 1}, mip_count = 1, mips = make([]byte, 4, context.temp_allocator)}, context.temp_allocator))
+	blob, ok = texture_view(plain)
+	testing.expect(t, ok)
+	if ok {
+		testing.expect_value(t, blob.layer_count, 1)
+		testing.expect_value(t, blob.dimension, Texture_Dimension.D2)
+	}
+	(^Texture_Blob)(raw_data(plain)).layer_count = 2
+	_, ok = texture_view(plain)
+	testing.expect(t, !ok)
+}
+
+@(test)
 meta_files_name_their_subassets :: proc(t: ^testing.T) {
 	other :: "ffeeddccbbaa99887766554433221100"
 	meta, ok := meta_parse("guid = " + TEST_GUID + "\ncombine = false\nmesh.Door Frame = " + other + "\n", context.temp_allocator)

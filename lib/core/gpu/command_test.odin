@@ -995,6 +995,35 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad.mip_count = 2
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Mip_Count)
 
+	// An array's and a cube's stream has every layer's chain. They are only streamed in and sampled.
+	array := streamed
+	array.layers = 3
+	testing.expect_value(t, validate_texture_desc(array, nil), Desc_Error.None)
+	testing.expect_value(t, mip_chain_size(array), mip_chain_size(streamed) * 3)
+	one_layer := streamed
+	one_layer.layers = 1
+	testing.expect_value(t, validate_texture_desc(one_layer, nil), Desc_Error.None)
+	testing.expect_value(t, mip_chain_size(one_layer), mip_chain_size(streamed))
+	bad = array
+	bad.layers = MAX_TEXTURE_LAYERS + 1
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
+	bad = volume
+	bad.layers = 2
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
+	testing.expect_value(t, validate_texture_desc({size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled}}, nil), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_texture_desc({size = {16, 8}, layers = 2, format = .RGBA8_Unorm, usage = {.Sampled, .Render_Target}}, nil), Desc_Error.Bad_Usage)
+	cube := Texture_Desc{size = {16, 16}, layers = 6, cube = true, format = .RGBA8_Unorm, mip_count = 5, usage = {.Sampled, .Streamed}}
+	testing.expect_value(t, validate_texture_desc(cube, nil), Desc_Error.None)
+	testing.expect_value(t, validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube), allocator)), Desc_Error.None)
+	testing.expect_value(t, validate_stream_texture(cube, false, make([]byte, mip_chain_size(cube) / 6, allocator)), Desc_Error.Bad_Data_Size)
+	bad = cube
+	bad.layers = 5
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
+	bad = cube
+	bad.size = {16, 8}
+	bad.mip_count = 1
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
+
 	data := make([]byte, mip_chain_size(streamed), allocator)
 	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
 	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)

@@ -1,0 +1,4 @@
+# An array from three images, which the sample's triangles pick from.
+layer = $c0be0000000000000000000000000020
+layer = $c0be0000000000000000000000000021
+layer = $c0be0000000000000000000000000022
