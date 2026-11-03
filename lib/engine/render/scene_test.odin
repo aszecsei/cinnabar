@@ -45,6 +45,43 @@ the_render_origin_snaps_to_cells :: proc(t: ^testing.T) {
 	testing.expect_value(t, ORIGIN_CELL, 1024)
 }
 
+@(test)
+instance_runs_cover_the_dirty_slots :: proc(t: ^testing.T) {
+	runs :: proc(dirty: []u32, high: u32, full := false) -> []Instance_Run {
+		bits: [MAX_INSTANCES / 64]u64
+		for slot in dirty {
+			bits[slot / 64] |= 1 << (slot % 64)
+		}
+		return instance_runs(&bits, high, full, context.temp_allocator)
+	}
+	testing.expect_value(t, len(runs({}, 100)), 0)
+	testing.expect_value(t, len(runs({}, 0, full = true)), 0)
+
+	full := runs({}, 100, full = true)
+	testing.expect_value(t, len(full), 1)
+	testing.expect_value(t, full[0], Instance_Run{0, 100})
+
+	// A small gap is crossed, and a large one is not, across the words of the bits.
+	apart := runs({3, 4, 4 + INSTANCE_RUN_GAP + 1, 500}, 1000)
+	testing.expect_value(t, len(apart), 2)
+	testing.expect_value(t, apart[0], Instance_Run{3, INSTANCE_RUN_GAP + 3})
+	testing.expect_value(t, apart[1], Instance_Run{500, 1})
+
+	// Slots at the end of a word and from high on.
+	edge := runs({63, 64, 200}, 200)
+	testing.expect_value(t, len(edge), 1)
+	testing.expect_value(t, edge[0], Instance_Run{63, 2})
+
+	// Too many runs are one.
+	many := make([dynamic]u32, context.temp_allocator)
+	for i in 0 ..< MAX_INSTANCE_RUNS + 1 {
+		append(&many, u32(i) * (INSTANCE_RUN_GAP + 2))
+	}
+	testing.expect_value(t, len(runs(many[:], MAX_INSTANCES)), 1)
+	one := runs(many[:], MAX_INSTANCES)[0]
+	testing.expect_value(t, one, Instance_Run{0, many[len(many) - 1] + 1})
+}
+
 // A skinned entity's item has a bin of its own after its material's, which draws with vertex pulling, as a mesh
 // particles' does: its posed vertices are not the mesh's that the mesh shader path reads.
 @(test)

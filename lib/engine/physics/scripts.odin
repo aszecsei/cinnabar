@@ -98,11 +98,13 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	}, "(entity: Entity) -> ()")
 	script.define(r, "Physics.set_motor", set_motor_binding, "(entity: Entity, mode: \"off\" | \"velocity\" | \"position\", target: number?, max: number?) -> ()")
 	script.define(r, "Physics.set_joint_enabled", proc(L: ^luau.State) -> c.int {
-		j, _, ok := joint_of(script.runtime_of(L).world, script.check_entity(L, 1))
+		w, e := script.runtime_of(L).world, script.check_entity(L, 1)
+		j, kind, ok := joint_of(w, e)
 		if !ok {
 			script.raise(L, "the entity has no joint")
 		}
 		j.enabled = bool(luau.toboolean(L, 2))
+		ecs.mark_changed(w, e, JOINT_IDS[kind])
 		return 0
 	}, "(entity: Entity, enabled: boolean) -> ()")
 	script.define(r, "Physics.is_sleeping", proc(L: ^luau.State) -> c.int {
@@ -284,9 +286,9 @@ set_motor_binding :: proc(L: ^luau.State) -> c.int {
 		script.raise(L, "a motor's mode is off, velocity or position")
 	}
 	motor := Motor{mode, f32(luau.L_optnumber(L, 3, 0)), f32(luau.L_optnumber(L, 4, 0))}
-	if hinge := ecs.get(w, e, Hinge_Joint); hinge != nil {
+	if hinge := ecs.get_write(w, e, Hinge_Joint); hinge != nil {
 		hinge.motor = motor
-	} else if slider := ecs.get(w, e, Slider_Joint); slider != nil {
+	} else if slider := ecs.get_write(w, e, Slider_Joint); slider != nil {
 		slider.motor = motor
 	} else {
 		script.raise(L, "only a hinge or a slider has a motor")

@@ -23,7 +23,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 	script.expose(r, Root_Motion)
 
 	script.define(r, "Animation.set_float", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Float)
+		a, index, ok := parameter_args(L, .Float, write = true)
 		if !ok {
 			return 0
 		}
@@ -31,7 +31,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		return 0
 	}, "(entity: Entity, name: string, value: number) -> ()")
 	script.define(r, "Animation.set_bool", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Bool)
+		a, index, ok := parameter_args(L, .Bool, write = true)
 		if !ok {
 			return 0
 		}
@@ -40,7 +40,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		return 0
 	}, "(entity: Entity, name: string, value: boolean) -> ()")
 	script.define(r, "Animation.trigger", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Trigger)
+		a, index, ok := parameter_args(L, .Trigger, write = true)
 		if !ok {
 			return 0
 		}
@@ -48,7 +48,7 @@ register_scripts :: proc(r: ^script.Runtime, s: ^State) {
 		return 0
 	}, "(entity: Entity, name: string) -> ()")
 	script.define(r, "Animation.reset_trigger", proc(L: ^luau.State) -> c.int {
-		a, index, ok := parameter_args(L, .Trigger)
+		a, index, ok := parameter_args(L, .Trigger, write = true)
 		if !ok {
 			return 0
 		}
@@ -97,14 +97,18 @@ state_of :: proc(L: ^luau.State) -> ^State {
 	return s
 }
 
-// animator_arg reads the entity in the first argument, and raises an error unless it has an Animator.
+// animator_arg reads the entity in the first argument, and raises an error unless it has an Animator. With write, the
+// Animator counts as changed.
 @(private = "file")
-animator_arg :: proc(L: ^luau.State) -> ^Animator {
+animator_arg :: proc(L: ^luau.State, write := false) -> ^Animator {
 	w := script.runtime_of(L).world
 	e := script.check_entity(L, 1)
 	a := ecs.get(w, e, Animator) if w != nil && ecs.is_alive(w, e) else nil
 	if a == nil {
 		script.raise(L, fmt.tprintf("entity %v has no Animator", e))
+	}
+	if write {
+		a = ecs.get_write(w, e, Animator)
 	}
 	return a
 }
@@ -113,8 +117,8 @@ animator_arg :: proc(L: ^luau.State) -> ^Animator {
 // have, or a parameter of another kind. While the graph loads, or if it cannot load, it is not ok, and the call does
 // nothing: the graph starts with its defaults.
 @(private = "file")
-parameter_args :: proc(L: ^luau.State, kind: format.Animation_Graph_Parameter_Kind) -> (a: ^Animator, index: int, ok: bool) {
-	a = animator_arg(L)
+parameter_args :: proc(L: ^luau.State, kind: format.Animation_Graph_Parameter_Kind, write := false) -> (a: ^Animator, index: int, ok: bool) {
+	a = animator_arg(L, write)
 	name := luau.L_checkstring(L, 2)
 	s := state_of(L)
 	if _, ready := ready_graph(s, a); !ready {

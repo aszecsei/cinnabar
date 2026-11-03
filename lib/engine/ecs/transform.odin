@@ -2,6 +2,7 @@ package ecs
 
 import "core:log"
 import "core:math/linalg"
+import "core:slice"
 
 import "cinnabar:core/profile"
 
@@ -106,27 +107,32 @@ teleport :: proc(w: ^World, e: Entity, pose: Transform) -> bool {
 		return false
 	}
 	current^ = pose
+	mark_changed(w, e, TRANSFORM_ID)
 	if previous := (^Transform)(get_raw(w, e, PREVIOUS_TRANSFORM_ID)); previous != nil {
 		previous^ = pose
+		mark_changed(w, e, PREVIOUS_TRANSFORM_ID)
 	}
 	return true
 }
 
-// snapshot_previous copies Transform to Previous_Transform at the start of a tick.
+// snapshot_previous copies Transform to Previous_Transform at the start of a tick. A chunk where they are the same
+// keeps its version, so a chunk that does not move does not count as changed.
 @(private)
 snapshot_previous :: proc(w: ^World) {
 	Copy :: struct {
 		archetype: u32,
 		chunk:     u32,
 		from, to:  u32,
+		column:    int,
 	}
+	w.snapshot_version = take_version(w)
 	copies := make([dynamic]Copy, w.platform.frame_allocator)
 	for index in 0 ..< w.archetype_count {
 		a := archetype(w, index)
 		from := column_index(a, TRANSFORM_ID) or_continue
 		to := column_index(a, PREVIOUS_TRANSFORM_ID) or_continue
 		for chunk in 0 ..< a.chunk_count {
-			append(&copies, Copy{index, chunk, a.offsets[from], a.offsets[to]})
+			append(&copies, Copy{index, chunk, a.offsets[from], a.offsets[to], int(to)})
 		}
 	}
 	parallel_for(w, len(copies), 8, proc(w: ^World, data: rawptr, first, count: int) {
@@ -134,13 +140,18 @@ snapshot_previous :: proc(w: ^World) {
 		for c in copies[first:][:count] {
 			a := archetype(w, c.archetype)
 			rows := min(a.capacity, a.count - c.chunk * a.capacity)
-			data := chunk_data(w, chunk_directory(w, c.archetype)[c.chunk])
-			copy(([^]Transform)(&data[c.to])[:rows], ([^]Transform)(&data[c.from])[:rows])
+			chunk := chunk_directory(w, c.archetype)[c.chunk]
+			data := chunk_data(w, chunk)
+			current, previous := ([^]Transform)(&data[c.from])[:rows], ([^]Transform)(&data[c.to])[:rows]
+			if !slice.equal(slice.to_bytes(current), slice.to_bytes(previous)) {
+				copy(previous, current)
+				stamp(w, chunk, c.column)
+			}
 		}
 	}, &copies)
 }
 
-// propagate writes the Transform of every child, one hierarchy level at a time.
+// propagate writes the Transform of every child whose pose changed, one hierarchy level at a time.
 @(private)
 propagate :: proc(w: ^World) {
 	if registry_find(&w.registry, PARENT_ID) == nil {
@@ -171,7 +182,12 @@ propagate_one :: proc(w: ^World, e: Entity) {
 		return
 	}
 	if pose := (^Transform)(get_raw(w, parent.entity, TRANSFORM_ID)); pose != nil {
-		child^ = compose(pose^, local^)
+		composed := compose(pose^, local^)
+		// Most children did not move, and a chunk that they share must not count as changed.
+		if composed != child^ {
+			child^ = composed
+			mark_changed(w, e, TRANSFORM_ID)
+		}
 	}
 }
 

@@ -295,6 +295,7 @@ set_field :: proc(w: ^ecs.World, entity: ecs.Entity, id: u64, component: u64, f:
 			return false
 		}
 	}
+	ecs.mark_changed(w, entity, ecs.Component_Id(component))
 	if ecs.Component_Id(component) == ecs.TRANSFORM_ID {
 		settle(w, entity)
 	}

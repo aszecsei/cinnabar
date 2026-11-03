@@ -57,7 +57,7 @@ ref_direct_set :: proc(L: ^luau.State, data: rawptr, atom: c.int, cachedslot: ^u
 	// A Transform write on a child also sets its local pose, so it takes the general path.
 	if ref.id != ecs.TRANSFORM_ID {
 		if f := cached_field(r, ref.id, atom, cachedslot); f != nil {
-			set_field(r, L, f, component_data(r, L, ref), 3)
+			set_field(r, L, f, component_write(r, L, ref), 3)
 			return
 		}
 	}

@@ -214,6 +214,52 @@ target = e
 	}
 }
 
+// A script's writes count as changes, and it can ask for them.
+@(test)
+scripts_ask_what_changed_since_a_version :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(t, run(t, f, `
+local a = World.spawn()
+a:add(Health, {value = 1})
+local v = World.version()
+Test.report(#World.changed(v, Health))
+-- A read is not a change.
+Test.report(a:get(Health).value)
+Test.report(#World.changed(v, Health))
+-- World.query is about who has the component, so it does not change.
+Test.report(#World.query(Health))
+a:get(Health).value = 2
+local found = World.changed(v, Health)
+Test.report(#found)
+Test.report(found[1] == a and 1 or 0)
+-- Another component's column is not this one's.
+Test.report(#World.changed(v, Transform))
+v = World.version()
+local pose = a:get(Transform)
+pose.position = pose.position
+Test.report(#World.changed(v, Transform))
+Test.report(#World.changed(v, Health))
+v = World.version()
+a:teleport(pose.position)
+Test.report(#World.changed(v, Transform))
+Test.report(#World.changed(0, Health))
+`))
+	expect_reports(t, f, {0, 1, 0, 1, 1, 1, 0, 1, 0, 1, 1})
+}
+
+@(test)
+World_changed_needs_a_component :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	testing.expect(t, run(t, f, `
+Test.report(pcall(World.changed, 0) and 1 or 0)
+`))
+	expect_reports(t, f, {0})
+}
+
 @(test)
 fields_are_checked :: proc(t: ^testing.T) {
 	f := setup_world(t)

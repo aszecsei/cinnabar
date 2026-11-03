@@ -28,6 +28,13 @@ World :: struct {
 	matches:         Region,
 	schedule:        Schedule,
 	clock:           Clock,
+	// What a write stamps a chunk's column with. See take_version.
+	version:         u64,
+	// The version that the last tick's Previous_Transform copy took. A Transform stamped after it may differ from its
+	// Previous_Transform.
+	snapshot_version: u64,
+	// How many entities were ever despawned, so a tool can tell whether any entity it knows of died.
+	despawned:       u64,
 	// Every child, sorted by depth. See rebuild_hierarchy.
 	hierarchy:       Region,
 	levels:          [MAX_HIERARCHY_DEPTH + 1]u32,
@@ -51,6 +58,8 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 	w^ = {
 		platform = platform,
 		clock = {tick_rate = DEFAULT_TICK_RATE},
+		// A version of 0 is older than every chunk, so it means "everything".
+		version = 1,
 	}
 	ok :=
 		region_init(&w.entities.records, platform, MAX_ENTITIES * size_of(Entity_Record)) &&
@@ -60,6 +69,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 		region_commit(&w.archetype_table, platform, ARCHETYPE_TABLE_SIZE * size_of(u32)) &&
 		region_init(&w.directory, platform, MAX_ARCHETYPES * MAX_ARCHETYPE_CHUNKS * size_of(u32)) &&
 		region_init(&w.chunks.memory, platform, MAX_CHUNKS * CHUNK_SIZE) &&
+		region_init(&w.chunks.versions, platform, MAX_CHUNKS * size_of([CHUNK_VERSIONS]u64)) &&
 		region_init(&w.queries, platform, MAX_QUERIES * size_of(Query_State)) &&
 		region_init(&w.matches, platform, MAX_QUERIES * MAX_ARCHETYPES * size_of(Query_Match)) &&
 		region_init(&w.hierarchy, platform, MAX_ENTITIES * size_of(Entity)) &&
@@ -75,7 +85,7 @@ init :: proc(w: ^World, platform: ^core.Platform_API) -> bool {
 
 // destroy releases the world's storage. Every handle becomes invalid.
 destroy :: proc(w: ^World) {
-	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.queries, &w.matches, &w.hierarchy, &w.log}) {
+	for r in ([]^Region{&w.entities.records, &w.entities.free, &w.archetypes, &w.archetype_table, &w.directory, &w.chunks.memory, &w.chunks.versions, &w.queries, &w.matches, &w.hierarchy, &w.log}) {
 		region_release(r, w.platform)
 	}
 	w^ = {}

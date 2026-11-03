@@ -212,6 +212,14 @@ component_data :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]by
 	return ([^]byte)(data)
 }
 
+// component_write is component_data for a write: the component counts as changed.
+@(private)
+component_write :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref) -> [^]byte {
+	data := component_data(r, L, ref)
+	ecs.mark_changed(r.world, ref.entity, ref.id)
+	return data
+}
+
 @(private)
 push_field :: proc(L: ^luau.State, f: ^Field, data: [^]byte) {
 	p := rawptr(&data[f.offset])
@@ -341,7 +349,7 @@ ref_newindex :: proc(L: ^luau.State) -> c.int {
 		return 0
 	}
 	f := ref_field(r, L, ref, atom, key)
-	set_field(r, L, f, component_data(r, L, ref), 3)
+	set_field(r, L, f, component_write(r, L, ref), 3)
 	return 0
 }
 
@@ -388,7 +396,7 @@ fill_fields :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, x: ^Exposed
 			if f == nil {
 				raise(L, fmt.aprintf("%s has no field %s", exposed_name(x), key, allocator = frame(r)))
 			}
-			set_field(r, L, f, component_data(r, L, ref), luau.absindex(L, -1))
+			set_field(r, L, f, component_write(r, L, ref), luau.absindex(L, -1))
 		}
 		luau.pop(L, 1)
 	}
@@ -451,8 +459,9 @@ transform_newindex :: proc(r: ^Runtime, L: ^luau.State, ref: Component_Ref, key:
 		case:
 			local.scale = check_vector(L, idx)
 		}
+		ecs.mark_changed(r.world, ref.entity, ecs.LOCAL_TRANSFORM_ID)
 		if parent, ok := parent_pose(r, ref.entity); ok {
-			(^ecs.Transform)(component_data(r, L, ref))^ = ecs.compose(parent, local^)
+			(^ecs.Transform)(component_write(r, L, ref))^ = ecs.compose(parent, local^)
 		}
 		return true
 	case "forward", "up", "right":
@@ -487,9 +496,9 @@ parent_pose :: proc(r: ^Runtime, e: ecs.Entity) -> (pose: ecs.Transform, ok: boo
 // set_pose sets an entity's world pose. For a child, it also sets the Local_Transform that gives that pose.
 @(private)
 set_pose :: proc(r: ^Runtime, L: ^luau.State, e: ecs.Entity, pose: ecs.Transform) {
-	(^ecs.Transform)(component_data(r, L, {e, ecs.TRANSFORM_ID}))^ = pose
+	(^ecs.Transform)(component_write(r, L, {e, ecs.TRANSFORM_ID}))^ = pose
 	if parent, ok := parent_pose(r, e); ok {
-		if local := ecs.get(r.world, e, ecs.Local_Transform); local != nil {
+		if local := ecs.get_write(r.world, e, ecs.Local_Transform); local != nil {
 			local^ = local_from_world(parent, pose)
 		}
 	}

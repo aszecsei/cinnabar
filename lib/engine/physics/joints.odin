@@ -375,7 +375,7 @@ note_breaks :: proc(s: ^State, w: ^ecs.World, broken: []core_physics.Joint_Break
 			continue
 		}
 		e := s.joint_records[b.joint.index].entity
-		if pj := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Joint) : nil; pj != nil && pj.joint == b.joint {
+		if pj := ecs.is_alive(w, e) ? ecs.get_write(w, e, Physics_Joint) : nil; pj != nil && pj.joint == b.joint {
 			pj.broken = true
 			append(&s.breaks, Joint_Break{e, b.force, b.torque})
 			log.debugf("physics: the joint of %v broke at %v N and %v N m", e, b.force, b.torque)
