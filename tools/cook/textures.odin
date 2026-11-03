@@ -275,11 +275,11 @@ texture_blob_size :: proc(path: string) -> (size: [2]u32) {
 	return blob.size
 }
 
-// texture_key covers what the blob depends on: the cooker, Compressonator, the configuration, the path, the source, the
-// settings, and a set's images. A set ignores its images' settings, so their .meta files are not in it.
+// texture_key covers what the blob depends on: the cooker, Compressonator, OpenEXRCore, the configuration, the path, the
+// source, the settings, and a set's images. A set ignores its images' settings, so their .meta files are not in it.
 texture_key :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Source, set: Texture_Set) -> u64 {
 	key := hash.fnv64a(
-		transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00", TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, options.config, a.name, format.texture_layout()),
+		transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00", TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), options.config, a.name, format.texture_layout()),
 	)
 	key = hash.fnv64a(a.source, key)
 	for child in set.children {
@@ -556,7 +556,7 @@ convert_image :: proc(image: ^Image, t: Texture_Cook, linear: bool) {
 }
 
 // image_undecodable gives why the cooker cannot decode an image file, or "" when it can: its extension is not a
-// texture's, or it is an OpenEXR image in a compression that TinyEXR does not have, which its header's start says.
+// texture's, or it is an OpenEXR image whose header has a problem, such as channels that a texture cannot hold.
 image_undecodable :: proc(path: string) -> string {
 	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
 	if !slice.contains(TEXTURE_EXTENSIONS, ext) {
@@ -565,14 +565,7 @@ image_undecodable :: proc(path: string) -> string {
 	if ext != ".exr" {
 		return ""
 	}
-	f, err := os.open(path)
-	if err != nil {
-		return "it cannot be opened"
-	}
-	defer os.close(f)
-	head := make([]byte, 64 * 1024, context.temp_allocator)
-	n, _ := os.read(f, head)
-	return exr_undecodable(head[:max(n, 0)])
+	return exr_undecodable(path)
 }
 
 srgb_to_linear :: proc(v: f32) -> f32 {

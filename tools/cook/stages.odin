@@ -234,8 +234,8 @@ stage_setting :: proc(a: Asset_Source, key: string) -> string {
 stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf(
-			"%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
-			STAGE_COOK_VERSION, STAGE_PREFAB_VERSION, LIGHTUSD_VERSION, MESHOPTIMIZER_VERSION, COMPRESSONATOR_VERSION, TEXTURE_COOK_VERSION,
+			"%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00%x\x00",
+			STAGE_COOK_VERSION, STAGE_PREFAB_VERSION, LIGHTUSD_VERSION, MESHOPTIMIZER_VERSION, COMPRESSONATOR_VERSION, openexr_version(), TEXTURE_COOK_VERSION,
 			options.config, a.name, format.mesh_layout(), format.texture_layout(),
 		),
 	)
@@ -993,7 +993,7 @@ cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) {
 		srgb     = t.role.srgb,
 		flip_y   = stage_setting(a, "normal_y") == "flip",
 	}
-	job.blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, w.options.config, format.texture_layout(), path, cook, size, modified))
+	job.blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), w.options.config, format.texture_layout(), path, cook, size, modified))
 	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(t.guid))
 	if cooked_key(output, .Texture, format.texture_layout()) == job.blob_key && !w.force {
 		job.result = .Current
