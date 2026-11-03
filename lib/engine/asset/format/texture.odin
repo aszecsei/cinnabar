@@ -27,15 +27,32 @@ Texture_Usage :: enum u32 {
 	Data,
 }
 
+// Texture_Dimension is what a texture blob's layers are. A cube's six layers are its faces, in the order +x, -x, +y, -y,
+// +z, -z.
+Texture_Dimension :: enum u32 {
+	D2,
+	Cube,
+	D2_Array,
+}
+
+// TEXTURE_SET_EXTENSION is the text source of a cube or an array that names its layers' images by GUID (see
+// docs/content/kinds/textures.md#texture-sets).
+TEXTURE_SET_EXTENSION :: ".texture_set"
+// MAX_TEXTURE_LAYERS is the most layers that an array has, which is what D3D12 allows.
+MAX_TEXTURE_LAYERS :: 2048
+
 // Texture_Blob is the start of a texture blob (see docs/content/blobs-and-loading.md#blob-format).
 Texture_Blob :: struct {
 	header:      Blob_Header,
 	format:      Texture_Format,
 	usage:       Texture_Usage,
+	dimension:   Texture_Dimension,
+	layer_count: u32,
+	// Of each layer.
 	size:        [2]u32,
 	mip_count:   u32,
-	// The whole mip chain, each mip tightly packed, mip 0 first, as gpu_stream_texture takes it. It starts at
-	// BLOB_ALIGN.
+	// Each layer's whole mip chain, layer 0 first, each mip tightly packed, mip 0 first, as gpu_stream_texture takes it.
+	// It starts at BLOB_ALIGN.
 	mips:        Slice,
 	source_path: Slice,
 }
@@ -65,7 +82,7 @@ texture_mip_size :: proc "contextless" (format: Texture_Format, width, height: u
 	return int(width) * int(height) * 4
 }
 
-// texture_chain_size is the size of a mip chain.
+// texture_chain_size is the size of one layer's mip chain.
 texture_chain_size :: proc "contextless" (format: Texture_Format, size: [2]u32, mip_count: u32) -> (total: int) {
 	for mip in 0 ..< mip_count {
 		total += texture_mip_size(format, max(size.x >> mip, 1), max(size.y >> mip, 1))
@@ -73,8 +90,8 @@ texture_chain_size :: proc "contextless" (format: Texture_Format, size: [2]u32, 
 	return
 }
 
-// texture_view checks a texture blob: its header, its layout, its slices, and that its mips are the size that its
-// format, size and mip count give.
+// texture_view checks a texture blob: its header, its layout, its slices, that its layers suit its dimension, and that
+// its mips are the size that its format, size, mip count and layer count give.
 texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 	header := blob_header(data) or_return
 	if header.kind != .Texture || header.layout != texture_layout() || len(data) < size_of(Texture_Blob) {
@@ -89,7 +106,23 @@ texture_view :: proc(data: []byte) -> (blob: ^Texture_Blob, ok: bool) {
 	if blob.format > max(Texture_Format) || blob.mip_count == 0 || blob.size.x == 0 || blob.size.y == 0 {
 		return nil, false
 	}
-	if int(blob.mips.size) != texture_chain_size(blob.format, blob.size, blob.mip_count) {
+	switch blob.dimension {
+	case .D2:
+		if blob.layer_count != 1 {
+			return nil, false
+		}
+	case .Cube:
+		if blob.layer_count != 6 || blob.size.x != blob.size.y {
+			return nil, false
+		}
+	case .D2_Array:
+		if blob.layer_count == 0 || blob.layer_count > MAX_TEXTURE_LAYERS {
+			return nil, false
+		}
+	case:
+		return nil, false
+	}
+	if int(blob.mips.size) != texture_chain_size(blob.format, blob.size, blob.mip_count) * int(blob.layer_count) {
 		return nil, false
 	}
 	return blob, true
@@ -100,9 +133,12 @@ Texture_Contents :: struct {
 	key:         u64,
 	format:      Texture_Format,
 	usage:       Texture_Usage,
+	dimension:   Texture_Dimension,
+	// 0 means 1.
+	layer_count: u32,
 	size:        [2]u32,
 	mip_count:   u32,
-	// The mip chain, as Texture_Blob.mips holds it.
+	// The layers' mip chains, as Texture_Blob.mips holds them.
 	mips:        []byte,
 	source_path: string,
 }
@@ -117,6 +153,8 @@ texture_write :: proc(contents: Texture_Contents, allocator := context.allocator
 		header = {magic = BLOB_MAGIC, kind = .Texture, layout = texture_layout(), key = contents.key, guid = contents.guid},
 		format = contents.format,
 		usage = contents.usage,
+		dimension = contents.dimension,
+		layer_count = max(contents.layer_count, 1),
 		size = contents.size,
 		mip_count = contents.mip_count,
 		mips = mips,

@@ -7,8 +7,8 @@ import "cinnabar:core/gpu"
 import format "cinnabar:engine/asset/format"
 
 // The Texture sky (see docs/rendering/sky.md#texture): an hdr texture of the light from every direction,
-// equirectangular, which a pass draws where nothing drew, pre-exposed. Its ambient light is the same linear function of
-// the direction as the atmosphere's: a pass on the GPU integrates it from a small mip of the texture once for each of
+// equirectangular or a cube map, which a pass draws where nothing drew, pre-exposed. Its ambient light is the same
+// linear function of the direction as the atmosphere's: a pass on the GPU integrates it from a small mip of the texture once for each of
 // the texture's versions, the CPU reads it back, and each frame turns it by the rotation and scales it. Until it is
 // back, and while the texture is not resident, the ambient light and the background are Flat's.
 
@@ -62,7 +62,8 @@ Sky_Texture_State :: struct {
 }
 
 // Sky_Texture_Constants matches Sky_Texture_Constants in sky_texture.hlsl. right and up have the projection's scales in
-// w. turn has the rotation's cosine and sine, the intensity, and the texture's width in w.
+// w. turn has the rotation's cosine and sine, the intensity, and the texture's texels around the horizon in w. cube says
+// that the texture is a cube map.
 @(private = "file")
 Sky_Texture_Constants :: struct {
 	right:         [4]f32,
@@ -72,24 +73,27 @@ Sky_Texture_Constants :: struct {
 	size:          [2]u32,
 	texture:       u32,
 	sampler_index: u32,
+	cube:          u32,
 }
 
 // Sky_Texture_Push matches Sky_Texture_Push in sky_texture.hlsli: the frame's textures for the background, or the
-// integral's mip, its size and the ticket, and the sun's mip and its size.
+// integral's mip, its size and the ticket, the sun's mip and its size, and for a cube, the flag and the sampler that
+// reads it. A cube's sizes are a face's.
 @(private = "file")
 Sky_Texture_Push :: struct {
-	texture:    u32,
-	depth:      u32,
-	output:     u32,
-	exposure:   u32,
-	mip:        u32,
-	ticket:     u32,
-	width:      u32,
-	height:     u32,
-	sun_mip:    u32,
-	sun_width:  u32,
-	sun_height: u32,
-	padding:    u32,
+	texture:       u32,
+	depth:         u32,
+	output:        u32,
+	exposure:      u32,
+	mip:           u32,
+	ticket:        u32,
+	width:         u32,
+	height:        u32,
+	sun_mip:       u32,
+	sun_width:     u32,
+	sun_height:    u32,
+	cube:          u32,
+	sampler_index: u32,
 }
 
 // Sky_Texture_Frame is what one frame's texture sky passes need, in frame memory.
@@ -104,6 +108,7 @@ Sky_Texture_Frame :: struct {
 	sun_mip:   u32,
 	sun_size:  [2]u32,
 	ticket:    u32,
+	cube:      bool,
 	result:    Buffer,
 	readback:  Buffer,
 	scene:     Texture,
@@ -140,10 +145,14 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	s := &r.sky.texture
 	platform := r.platform
 	flat := scale_ambient(flat_ambient(settings.sky, settings.ground), settings.ambient_intensity)
-	t, ready := resident_texture(&r.residency, settings.texture)
+	t, ready := resident_texture_of(&r.residency, settings.texture, .D2, .Cube)
 	if !ready {
 		return flat
 	}
+	// What the mips are chosen by, and the background's filter too: the texels around the horizon, which a cube has four
+	// faces of.
+	cube := t.dimension == .Cube
+	around := cube ? t.size.x * 4 : t.size.x
 	key := Sky_Texture_Key{settings.texture, t.texture}
 	if s.pending {
 		if data, back := platform.gpu_read_buffer(s.readback); back && len(data) >= SKY_AMBIENT_RESULT_SIZE {
@@ -162,18 +171,18 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 		}
 	}
 	sf := new(Sky_Texture_Frame, platform.frame_allocator)
-	sf.texture = t.texture
+	sf.texture, sf.cube = t.texture, cube
 	if (!s.valid || s.key != key) && !s.pending && pipeline_ready(platform, &s.ambient) && ensure_sky_texture_buffers(r) {
 		s.ticket += 1
 		s.pending, s.pending_key, s.pending_frame = true, key, r.scene.frame
 		mip := u32(0)
-		for mip + 1 < t.mip_count && t.size.x >> mip > SKY_AMBIENT_WIDTH {
+		for mip + 1 < t.mip_count && around >> mip > SKY_AMBIENT_WIDTH {
 			mip += 1
 		}
 		sf.integrate, sf.mip, sf.ticket = true, mip, s.ticket
 		sf.mip_size = {max(t.size.x >> mip, 1), max(t.size.y >> mip, 1)}
 		sun_mip := u32(0)
-		for sun_mip + 1 < t.mip_count && t.size.x >> sun_mip > SKY_SUN_WIDTH {
+		for sun_mip + 1 < t.mip_count && around >> sun_mip > SKY_SUN_WIDTH {
 			sun_mip += 1
 		}
 		sf.sun_mip, sf.sun_size = sun_mip, {max(t.size.x >> sun_mip, 1), max(t.size.y >> sun_mip, 1)}
@@ -195,10 +204,11 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 				right         = {right.x, right.y, right.z, scale.x},
 				up            = {up.x, up.y, up.z, scale.y},
 				forward       = {forward.x, forward.y, forward.z, 0},
-				turn          = {math.cos(turn), math.sin(turn), settings.texture_intensity, f32(t.size.x)},
+				turn          = {math.cos(turn), math.sin(turn), settings.texture_intensity, f32(around)},
 				size          = f.size,
 				texture       = gpu.read_index(t.texture),
 				sampler_index = gpu.sampler_index(r.materials.sampler),
+				cube          = u32(cube),
 			}
 			sf.constants = upload
 		}
@@ -313,15 +323,17 @@ run_sky_texture_ambient :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	sf := f.sky_texture
 	push := Sky_Texture_Push {
-		texture    = gpu.read_index(sf.texture),
-		output     = gpu.write_index(gpu_buffer(ctx.graph, sf.result)),
-		mip        = sf.mip,
-		ticket     = sf.ticket,
-		width      = sf.mip_size.x,
-		height     = sf.mip_size.y,
-		sun_mip    = sf.sun_mip,
-		sun_width  = sf.sun_size.x,
-		sun_height = sf.sun_size.y,
+		texture       = gpu.read_index(sf.texture),
+		output        = gpu.write_index(gpu_buffer(ctx.graph, sf.result)),
+		mip           = sf.mip,
+		ticket        = sf.ticket,
+		width         = sf.mip_size.x,
+		height        = sf.mip_size.y,
+		sun_mip       = sf.sun_mip,
+		sun_width     = sf.sun_size.x,
+		sun_height    = sf.sun_size.y,
+		cube          = u32(sf.cube),
+		sampler_index = gpu.sampler_index(f.renderer.materials.sampler),
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.sky.texture.ambient.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)

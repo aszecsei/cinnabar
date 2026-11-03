@@ -719,6 +719,183 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
     }
 
+    // A global volume whose sky is a texture, and nothing else, so the frame is sky.
+    static Document.SceneEntity TextureSky(string texture)
+    {
+        var volume = Entity(1, "Sky");
+        volume.Components.Add(new Document.SceneComponent(VolumeId, "Volume", [Field("shape", Document.SceneValue.Name("Global"))]));
+        volume.Components.Add(new Document.SceneComponent(EnvironmentId, "Environment",
+            [Field("mode", Document.SceneValue.Name("Texture")), Field("texture", Document.SceneValue.AssetRef(texture))]));
+        return volume;
+    }
+
+    static readonly float Half = MathF.Sqrt(0.5f);
+    // The sample's assets in textures/cube.
+    const string CubeFaces = "c0be0000000000000000000000000010";
+    const string SmallSky = "c0be0000000000000000000000000040";
+    const string SmallSkyCube = "c0be0000000000000000000000000041";
+
+    [Fact]
+    public async Task ACubeMapSkyShowsEachFaceInItsDirection()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+        await Load(editor, Scene(TextureSky(CubeFaces)));
+        editor.Link.Send(EditorShell.DefaultViewportSettings);
+
+        // Each direction, with the rotation that turns the camera's +z toward it and the channels that its face's color has
+        // high.
+        (string Name, float[] Rotation, bool R, bool G, bool B)[] looks =
+        [
+            ("+x", [0, Half, 0, Half], true, false, false),
+            ("-x", [0, -Half, 0, Half], false, true, true),
+            ("+y", [-Half, 0, 0, Half], false, true, false),
+            ("-y", [Half, 0, 0, Half], true, false, true),
+            ("+z", [0, 0, 0, 1], false, false, true),
+            ("-z", [0, 1, 0, 0], true, true, false),
+        ];
+        foreach (var look in looks)
+        {
+            editor.Link.Send(new EditorCamera([Origin, 0, 0], look.Rotation, (float)(60 * Math.PI / 180), 0.05f));
+            (byte R, byte G, byte B) color = default;
+            var matches = false;
+            for (var attempt = 0; attempt < 40 && !matches; attempt++)
+            {
+                color = Pixel(device, frames.Texture(await Latest(editor, frames, target)), (int)target.Width / 2, (int)target.Height / 2);
+                // Tone mapping desaturates, so a channel is high when it is nearer to the brightest than to the darkest.
+                var high = Math.Max(color.R, Math.Max(color.G, color.B));
+                var low = Math.Min(color.R, Math.Min(color.G, color.B));
+                var middle = (high + low) / 2;
+                matches = high - low > 40 && (color.R > middle) == look.R && (color.G > middle) == look.G && (color.B > middle) == look.B;
+            }
+            Assert.True(matches, $"looking toward {look.Name}, the sky is {color}");
+        }
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
+    public async Task ASkyIsTheSameAsACubeMap()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+        editor.Link.Send(EditorShell.DefaultViewportSettings);
+
+        // The same image as an equirectangular texture and as a cube, under each a white box that it lights, at the bottom
+        // of the frame, with the sky above it.
+        async Task<(float[] Sun, (byte R, byte G, byte B) Sky, (byte R, byte G, byte B) Lit)> Look(string texture)
+        {
+            var box = Box(2, "Box", 1, 1);
+            await Load(editor, Scene(TextureSky(texture), box));
+            editor.Link.Send(new EditorCamera([Origin, 0, -2 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+            SkySun sun = new(SkySunState.NotReady, [0, 0, 0]);
+            for (var attempt = 0; attempt < 200 && sun.State != SkySunState.Found; attempt++)
+            {
+                await Latest(editor, frames, target);
+                editor.Link.Send(new SkySunRequest());
+                sun = await editor.Next<SkySun>();
+            }
+            Assert.Equal(SkySunState.Found, sun.State);
+            // The exposure adapts over time, so give it a while.
+            for (var i = 0; i < 40; i++)
+            {
+                await Latest(editor, frames, target);
+            }
+            var last = frames.Texture(await Latest(editor, frames, target));
+            return (sun.Direction, Pixel(device, last, (int)target.Width / 2, 2), Pixel(device, last, (int)target.Width / 2, (int)target.Height / 2));
+        }
+        var flat = await Look(SmallSky);
+        var cube = await Look(SmallSkyCube);
+
+        // The sun is 60 degrees of azimuth from +z toward +x and 40 of elevation. Within a texel or two of a small mip.
+        var azimuth = 60 * MathF.PI / 180;
+        var elevation = 40 * MathF.PI / 180;
+        float[] expected = [MathF.Cos(elevation) * MathF.Sin(azimuth), MathF.Sin(elevation), MathF.Cos(elevation) * MathF.Cos(azimuth)];
+        foreach (var sun in new[] { flat.Sun, cube.Sun })
+        {
+            var cosine = sun[0] * expected[0] + sun[1] * expected[1] + sun[2] * expected[2];
+            Assert.True(cosine > MathF.Cos(6 * MathF.PI / 180), $"the sun is toward [{string.Join(", ", sun)}], not [{string.Join(", ", expected)}]");
+        }
+        static void Close((byte R, byte G, byte B) a, (byte R, byte G, byte B) b, string what)
+        {
+            Assert.True(Math.Abs(a.R - b.R) <= 16 && Math.Abs(a.G - b.G) <= 16 && Math.Abs(a.B - b.B) <= 16, $"{what}: {a} from the equirectangular sky, and {b} from the cube");
+        }
+        Close(flat.Sky, cube.Sky, "the background");
+        Close(flat.Lit, cube.Lit, "the lit box");
+        Assert.True(flat.Lit.R + flat.Lit.G + flat.Lit.B > 30, $"the box is {flat.Lit}, which the sky does not light");
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
+    public async Task TheSamplesTrianglesEachReadALayerOfAnArray()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        var target = await editor.Next<FrameTarget>();
+        using var device = new ViewportDevice(_adapter);
+        using var frames = await Open(device, target.Prefix);
+
+        // One triangle in one place, after 0, 1 and 2 other entities. Its entity's index picks its layer, and is all that
+        // differs: at another place in the frame, the lens would change its color too.
+        async Task<(byte R, byte G, byte B)> Look(int before)
+        {
+            var entities = new List<Document.SceneEntity>();
+            for (var i = 0; i < before; i++)
+            {
+                entities.Add(Entity(10 + (ulong)i, $"Other {i}"));
+            }
+            var triangle = Entity(1, "Triangle");
+            triangle.Components.Add(new Document.SceneComponent(TriangleId, "Triangle", [Field("brightness", Document.SceneValue.Of(Number(1.0)))]));
+            entities.Add(triangle);
+            await Load(editor, Scene([.. entities]));
+            editor.Link.Send(new EditorCamera([Origin, 0, -3 * Meter], [0, 0, 0, 1], (float)(60 * Math.PI / 180), 0.05f));
+            editor.Link.Send(EditorShell.DefaultViewportSettings);
+            for (var i = 0; i < 4; i++)
+            {
+                await Latest(editor, frames, target);
+            }
+            return Pixel(device, frames.Texture(await Latest(editor, frames, target)), (int)target.Width / 2, (int)target.Height / 2);
+        }
+        // The hue, which the exposure does not change as it adapts.
+        static bool Differ((byte R, byte G, byte B) a, (byte R, byte G, byte B) b)
+        {
+            float aSum = Math.Max(a.R + a.G + a.B, 1), bSum = Math.Max(b.R + b.G + b.B, 1);
+            return Math.Abs(a.R / aSum - b.R / bSum) > 0.02f || Math.Abs(a.G / aSum - b.G / bSum) > 0.02f || Math.Abs(a.B / aSum - b.B / bSum) > 0.02f;
+        }
+
+        (byte R, byte G, byte B) first = default, second = default, third = default;
+        var differ = false;
+        // The array streams in over a few frames, and draws no tint until then.
+        for (var attempt = 0; attempt < 5 && !differ; attempt++)
+        {
+            (first, second, third) = (await Look(0), await Look(1), await Look(2));
+            differ = Differ(first, second) && Differ(second, third) && Differ(first, third);
+        }
+        Assert.True(differ, $"the triangle is {first}, {second} and {third}");
+        Assert.DoesNotContain(editor.Skipped, m => m is Log { Level: LogLevel.Error });
+    }
+
+    [Fact]
+    public async Task ACubeMapInATexturesPlaceIsLoggedAndNotRead()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        await editor.Next<FrameTarget>();
+        // The array is neither of the sky's two dimensions, so the sky is Flat's and says why.
+        const string Tints = "c0be0000000000000000000000000030";
+        await Load(editor, Scene(TextureSky(Tints)));
+        await editor.Next<Log>(m => m.Level == LogLevel.Error && m.Text.Contains("read as a"));
+    }
+
     [Fact]
     public async Task ALightsIconPicksIt()
     {

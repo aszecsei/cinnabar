@@ -24,6 +24,9 @@ struct Push {
 	uint sampler_index;
 	uint instances;
 	uint instance_offset;
+	uint tints;
+	// The array's layers, or 0 until it is resident.
+	uint tint_layers;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -60,6 +63,10 @@ Varyings vs_main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID)
 Targets ps_main(Varyings i) {
 	Targets o;
 	o.color = cn_texture(push.texture).Sample(cn_sampler(push.sampler_index), i.uv) * i.color;
+	// Each triangle takes a layer of the array of tints.
+	if (push.tint_layers > 0) {
+		o.color.rgb *= cn_texture_array(push.tints).Sample(cn_sampler(push.sampler_index), float3(i.uv, i.id % push.tint_layers)).rgb;
+	}
 	o.color.rgb *= exposure();
 	o.id = i.id;
 	return o;

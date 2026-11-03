@@ -23,6 +23,11 @@ Fake_GPU :: struct {
 	live_buffers:   int,
 	next_transfer:  u64,
 	done_through:   u64,
+	// The last texture that was created, and the size of what streamed into it.
+	next_texture:   u32,
+	live_textures:  int,
+	texture_desc:   gpu.Texture_Desc,
+	streamed_bytes: int,
 }
 
 @(private = "file")
@@ -58,7 +63,114 @@ fake_platform :: proc(frame: ^virtual.Arena) -> core.Platform_API {
 		gpu_transfer_done = proc(transfer: gpu.Transfer) -> bool {
 			return u64(transfer) <= fake_gpu().done_through
 		},
+		gpu_create_texture = proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
+			fake := fake_gpu()
+			fake.next_texture += 1
+			fake.live_textures += 1
+			fake.texture_desc = desc
+			return transmute(gpu.Texture)[2]u32{fake.next_texture, 1}
+		},
+		gpu_destroy_texture = proc(texture: gpu.Texture) {
+			if texture != {} {
+				fake_gpu().live_textures -= 1
+			}
+		},
+		gpu_stream_texture = proc(texture: gpu.Texture, data: []byte) -> gpu.Transfer {
+			fake := fake_gpu()
+			fake.streamed_bytes = len(data)
+			fake.next_transfer += 1
+			return gpu.Transfer(fake.next_transfer)
+		},
 	}
+}
+
+@(test)
+resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
+	fake: Fake_GPU
+	context.user_ptr = &fake
+	frame: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
+	defer virtual.arena_destroy(&frame)
+	platform := fake_platform(&frame)
+	dir, err := os.make_directory_temp("", "residency_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+
+	write_texture :: proc(t: ^testing.T, dir: string, name: string, dimension: format.Texture_Dimension, layers: u32) -> format.Guid {
+		guid := format.guid_parse(name) or_else {}
+		chain := format.texture_chain_size(.BC7_Unorm_Srgb, {8, 8}, 4)
+		blob := format.texture_write(
+			{guid = guid, format = .BC7_Unorm_Srgb, usage = .Color, dimension = dimension, layer_count = layers, size = {8, 8}, mip_count = 4, mips = make([]byte, chain * int(layers), context.temp_allocator)},
+			context.temp_allocator,
+		)
+		buffer: [32]u8
+		testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), blob) == nil)
+		return guid
+	}
+	chain := format.texture_chain_size(.BC7_Unorm_Srgb, {8, 8}, 4)
+	plain := write_texture(t, dir, "00000000000000000000000000000001", .D2, 1)
+	cube := write_texture(t, dir, "00000000000000000000000000000002", .Cube, 6)
+	array := write_texture(t, dir, "00000000000000000000000000000003", .D2_Array, 3)
+
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Residency)
+	defer free(r)
+	residency_init(r, &platform, &assets)
+	defer residency_destroy(r)
+
+	// A 2D texture has no array view.
+	_, ready := resident_texture(r, plain)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.texture_desc.layers, 0)
+	testing.expect(t, !fake.texture_desc.cube)
+	testing.expect_value(t, fake.streamed_bytes, chain)
+
+	_, ready = resident_texture(r, cube, .Cube)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.texture_desc.layers, 6)
+	testing.expect(t, fake.texture_desc.cube)
+	testing.expect_value(t, fake.texture_desc.size, [2]u32{8, 8})
+	testing.expect_value(t, fake.texture_desc.mip_count, 4)
+	testing.expect_value(t, gpu.validate_texture_desc(fake.texture_desc, nil), gpu.Desc_Error.None)
+	testing.expect_value(t, fake.streamed_bytes, chain * 6)
+	testing.expect_value(t, fake.streamed_bytes, gpu.mip_chain_size(fake.texture_desc))
+
+	_, ready = resident_texture(r, array, .D2_Array)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.texture_desc.layers, 3)
+	testing.expect(t, !fake.texture_desc.cube)
+	testing.expect_value(t, gpu.validate_texture_desc(fake.texture_desc, nil), gpu.Desc_Error.None)
+	testing.expect_value(t, fake.streamed_bytes, chain * 3)
+
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	texture, now_ready := resident_texture(r, cube, .Cube)
+	testing.expect(t, now_ready)
+	testing.expect_value(t, texture.dimension, format.Texture_Dimension.Cube)
+	testing.expect_value(t, texture.layer_count, 6)
+	_, now_ready = resident_texture(r, array, .D2_Array)
+	testing.expect(t, now_ready)
+	_, now_ready = resident_texture(r, plain)
+	testing.expect(t, now_ready)
+
+	// A reader of another dimension gets its default: a shader that reads a cube as a 2D texture is undefined. It logs
+	// that once, which is expected here.
+	context.logger = log.nil_logger()
+	_, now_ready = resident_texture(r, cube)
+	testing.expect(t, !now_ready)
+	_, now_ready = resident_texture(r, array, .Cube)
+	testing.expect(t, !now_ready)
+	_, now_ready = resident_texture(r, plain, .Cube)
+	testing.expect(t, !now_ready)
+	// A reader of either of two dimensions takes either, and no other.
+	_, now_ready = resident_texture_of(r, cube, .D2, .Cube)
+	testing.expect(t, now_ready)
+	_, now_ready = resident_texture_of(r, plain, .D2, .Cube)
+	testing.expect(t, now_ready)
+	_, now_ready = resident_texture_of(r, array, .D2, .Cube)
+	testing.expect(t, !now_ready)
 }
 
 // mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment, with a hierarchy

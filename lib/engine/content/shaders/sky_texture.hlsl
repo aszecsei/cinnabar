@@ -4,7 +4,8 @@
 #include "sky_texture.hlsli"
 
 // Matches Sky_Texture_Constants in lib/engine/render/sky_texture.odin. right and up have the projection's scales in w;
-// turn has the rotation's cosine and sine, the intensity, and the texture's width.
+// turn has the rotation's cosine and sine, the intensity, and the texture's texels around the horizon. cube says that the
+// texture is a cube map.
 struct Sky_Texture_Constants {
 	float4 right;
 	float4 up;
@@ -13,6 +14,7 @@ struct Sky_Texture_Constants {
 	uint2 size;
 	uint texture;
 	uint sampler_index;
+	uint cube;
 };
 CN_PASS_CONSTANTS(Sky_Texture_Constants, sky);
 
@@ -30,10 +32,17 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float c = sky.turn.x;
 	float s = sky.turn.y;
 	float3 t = float3(d.x * c - d.z * s, d.y, d.z * c + d.x * s);
-	// A pixel's angle over a texel's, which is 2 pi over the width.
+	// A pixel's angle over a texel's, which is 2 pi over the texels around the horizon.
 	float pixel = 2 / (sky.up.w * sky.size.y);
 	float lod = max(log2(pixel * sky.turn.w / (2 * SKY_TEXTURE_PI)), 0);
-	float3 light = cn_texture(sky.texture).SampleLevel(cn_sampler(sky.sampler_index), texture_uv(t), lod).rgb * sky.turn.z;
+	SamplerState linear_sampler = cn_sampler(sky.sampler_index);
+	float3 light;
+	if (sky.cube != 0) {
+		light = cn_texture_cube(sky.texture).SampleLevel(linear_sampler, t, lod).rgb;
+	} else {
+		light = cn_texture(sky.texture).SampleLevel(linear_sampler, texture_uv(t), lod).rgb;
+	}
+	light *= sky.turn.z;
 	float exposure = cn_buffer(push.exposure).Load<float>(0);
 	cn_rw_texture(push.output)[id.xy] = float4(min(light * exposure, MAX_SCENE), 1);
 }

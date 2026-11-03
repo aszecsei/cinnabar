@@ -1,6 +1,6 @@
 # Textures
 
-Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files. `just textures` runs `cook textures --cache build/<target>/content --config dev|release` with the roots.
+Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files, and `.texture_set` files that name such images as the layers of a cube map or an array (see [Cube maps and arrays](#cube-maps-and-arrays)). `just textures` runs `cook textures --cache build/<target>/content --config dev|release` with the roots.
 
 - **Decoders,** picked by a file's first bytes: OpenEXR by TinyEXR, from LightUSD's `src/external`, which `just lightusd` builds into `cn_usd.lib` (`tools/cook/usd/cn_exr.cpp`, bound by `tools/cook/exr.odin`); TIFF by the cooker's own baseline reader (`tools/cook/tiff.odin`); and the rest by `vendor:stb/image`.
 - **TIFF:** the first image of the file, in strips, uncompressed, PackBits, LZW or Deflate, with or without the horizontal predictor, of 8- or 16-bit unsigned or 32-bit float samples, gray or RGB, with or without alpha. A tiled TIFF, one with separate planes, another compression or another kind of sample is an error that says which.
@@ -16,6 +16,8 @@ Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files. `just text
 | `filter` | `kaiser`, `box` | `kaiser` | The mip filter: the Kaiser-windowed sinc below, or the plain average of the covered texels, whose weights are never negative, so a mask's mips are the share of its texels that are set, which a [surface's hole mask](../../rendering/surfaces.md#holes) needs |
 | `alpha_coverage` | `true`, `false` | `false` | For a `color` texture, keep each mip's alpha coverage at `alpha_cutoff`, see below |
 | `alpha_cutoff` | `0.05` to `0.95`, in steps of `0.05` | `0.5` | The cutoff that `alpha_coverage` keeps the coverage at |
+| `layout` | `2d`, `cube_cross`, `cube_equirect`, `array_strip` | `2d` | How one image holds its layers, see [Cube maps and arrays](#cube-maps-and-arrays) |
+| `standalone` | `true`, `false` | `true` | Cook the image as a texture of its own. Turn it off for an image that only a `.texture_set` reads. |
 
 | Usage | Format | Mips |
 |---|---|---|
@@ -31,4 +33,46 @@ Textures are `.png`, `.jpg`, `.tga`, `.hdr`, `.tif` and `.exr` files. `just text
 - **Alpha coverage:** filtering pulls a [masked material's](materials.md) thin cut-outs below its cutoff, so foliage thins out in the distance. With `alpha_coverage`, the cooker measures the share of mip 0's texels at or above `alpha_cutoff`, and scales the alpha of each smaller mip so that the same share is. It finds each scale by bisection, as NVIDIA Texture Tools does, from 0 to 16 in 16 steps. Mip 0 stays as it is, and each mip still filters from the one before it unscaled, so no scale feeds down the chain. The cooker cooks a texture without its material, so `alpha_cutoff` should be the `cutoff` of the material that reads it, or the nearest step. Other usages ignore both settings, and so do a [stage's](stages.md) textures, which have no settings of their own. The sample's `scenes/billboards.scene` compares a texture with and without it.
 - **BC6H** interpolates its endpoints' half-float bits, which are close to logarithmic, so a 4×4 block that holds both 0 and bright values has coarse steps between them.
 - **Quality:** development compresses at Compressonator's quality 0.05, and release at 0.5. The configuration is in the key, so release textures cook again in a release cook.
-- **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file.
+- **The cache key** covers the cooker version, the Compressonator version, the configuration, the source and the `.meta` file. A `.texture_set`'s also covers the bytes of the images that it names.
+
+## Cube maps and arrays
+
+A texture is 2D, a cube map or an array. A cube map has six square layers, its faces, in the order +x, -x, +y, -y, +z, -z. An array has 1 to 2048 layers of one size. Each layer has its own mip chain and block compression, with the same format and settings. The sample's `textures/cube` has one of each source, and its `scenes/cube_sky.scene` draws a cube map as its sky.
+
+- **A face's orientation** is what a `TextureCube` reads, so a direction in the world reads its own light with no conversion. Looking along +z with +y up, +x is to the right. The side faces go on from there with +y up: +x has -z to its right, -z has -x, and -x has +z. +y has +z at its bottom edge, and -y has +z at its top edge, each with +x to its right.
+- **Mips:** a cube's faces filter with clamped edges, whatever `wrap` says, since a face's edge meets another face and not its own far edge.
+
+**One image** holds its layers by its `layout` setting. The usage and the other settings are the image's.
+
+| `layout` | The image | Makes |
+|---|---|---|
+| `cube_cross` | A cross of square faces. Across, 4 faces by 3: +y above +z, -y below it, and in the middle row -x, +z, +x and -z. Or down, 3 faces by 4: the same with -z below -y, turned by half a turn. | A cube map |
+| `cube_equirect` | An equirectangular image, twice as wide as it is tall, in the [Texture sky's mapping](../../rendering/sky.md#texture). Each face is a quarter of its width, sampled bilinearly. | A cube map |
+| `array_strip` | Square layers, one above the other, layer 0 at the top | An array |
+
+An image of another shape is an error that says what it needs.
+
+### Texture sets
+
+A `.texture_set` is a text file that names the images of a cube map or an array by GUID, as content always refers to content (see [Identity](../identity-and-cooking.md#identity)). It is a texture asset itself, and its blob is what readers use. Blank lines and lines that start with `#` are ignored.
+
+```
+# A cube map: all six faces.
+px = $c0be0000000000000000000000000000
+nx = $c0be0000000000000000000000000001
+py = $c0be0000000000000000000000000002
+ny = $c0be0000000000000000000000000003
+pz = $c0be0000000000000000000000000004
+nz = $c0be0000000000000000000000000005
+```
+
+```
+# An array: its layers in order.
+layer = $c0be0000000000000000000000000020
+layer = $c0be0000000000000000000000000021
+```
+
+- **Settings:** the set's `.meta` file holds `usage`, `mips`, `max_size`, `filter` and the alpha settings, for every layer. An image's own settings do not apply, and changing them does not cook the set again. An image whose `usage` is not the set's is a warning, so that HDR faces do not clamp in a set that is left at `color`. A new set's `usage` is `color`.
+- **Errors**, each naming the file and, where it has one, the line: a key other than the faces' and `layer`, a face named twice or missing, faces with layers, no images, more than 2048 layers, a GUID that no asset has, a name that is not an image or is an image with its own `layout`, images of different sizes, and a cube's faces that are not square. A set with a `layout` other than `2d`, or with `standalone = false`, is also an error.
+- **`standalone`:** an image in a set is still an asset, with a GUID and its own blob, so it compresses twice unless its `.meta` file says `standalone = false`. Then it has no blob, and a blob that it has from before is deleted, so that it cannot keep drawing. Its set reads its source all the same. An image with `standalone = false` that no set names is a warning, since nothing cooks it, and a reader that names it draws its default and logs that it is not cooked.
+- **Dependencies:** a set depends on its images, which the editor's Depends On and Used By show. The editor has no panel for a set's contents: edit its text.

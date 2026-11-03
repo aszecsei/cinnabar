@@ -249,7 +249,7 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 		Dimension        = desc.depth > 0 ? .TEXTURE3D : .TEXTURE2D,
 		Width            = u64(desc.size.x),
 		Height           = desc.size.y,
-		DepthOrArraySize = u16(max(desc.depth, 1)),
+		DepthOrArraySize = u16(max(desc.depth, desc.layers, 1)),
 		MipLevels        = u16(stored.mip_count),
 		Format           = resource_format(desc.format),
 		SampleDesc       = {Count = 1},
@@ -313,6 +313,12 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		if desc.depth > 0 {
 			srv.ViewDimension = .TEXTURE3D
 			srv.Texture3D = {MipLevels = 1}
+		} else if desc.cube {
+			srv.ViewDimension = .TEXTURECUBE
+			srv.TextureCube = {MipLevels = desc.mip_count}
+		} else if desc.layers > 0 {
+			srv.ViewDimension = .TEXTURE2DARRAY
+			srv.Texture2DArray = {MipLevels = desc.mip_count, ArraySize = desc.layers}
 		}
 		dev.device->CreateShaderResourceView(entry.resource, &srv, resource_handle(gpu.texture_read_index(texture)))
 		// The stencil plane's view takes the write slot, which a depth texture does not use (see gpu.stencil_index).

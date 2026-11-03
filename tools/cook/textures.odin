@@ -19,7 +19,10 @@ import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks textures changes this, which invalidates every cooked texture.
 TEXTURE_COOK_VERSION :: "textures 1"
+// The images that the cooker decodes.
 TEXTURE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr"}
+// What a texture asset's source can be: an image, or a set that names images (see texture_layers.odin).
+TEXTURE_SOURCE_EXTENSIONS :: []string{".png", ".jpg", ".jpeg", ".tga", ".hdr", ".tif", ".tiff", ".exr", format.TEXTURE_SET_EXTENSION}
 // Compressonator's quality, from 0 to 1. Development cooks fast, and release cooks well.
 DEV_TEXTURE_QUALITY :: 0.05
 RELEASE_TEXTURE_QUALITY :: 0.5
@@ -68,6 +71,18 @@ TEXTURE_SETTINGS := []Setting_Info {
 		values = {"0.05", "0.1", "0.15", "0.2", "0.25", "0.3", "0.35", "0.4", "0.45", "0.5", "0.55", "0.6", "0.65", "0.7", "0.75", "0.8", "0.85", "0.9", "0.95"},
 		default = "0.5",
 		description = "The cutoff that alpha_coverage keeps the coverage at: the cutoff of the masked material that reads the texture.",
+	},
+	{
+		key = "layout",
+		values = {"2d", "cube_cross", "cube_equirect", "array_strip"},
+		default = "2d",
+		description = "How the image holds its layers: one 2D texture, a cube map from a horizontal or vertical cross or an equirectangular image, or an array from a vertical strip of square layers. A .texture_set takes its layers from the images that it names.",
+	},
+	{
+		key = "standalone",
+		values = {"true", "false"},
+		default = "true",
+		description = "Cook this image as a texture of its own. Turn it off for an image that only a .texture_set reads, so that it does not compress twice.",
 	},
 }
 
@@ -120,6 +135,13 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		out_dir = out_dir,
 		jobs    = make([dynamic]Texture_Job, 0, len(textures), context.temp_allocator),
 	}
+	by_guid := make(map[format.Guid]int, len(assets), context.temp_allocator)
+	for a, i in assets {
+		by_guid[a.meta.guid] = i
+	}
+	// Every set first, so that an image that turns off standalone knows whether one names it.
+	named := make(map[int]bool, context.temp_allocator)
+	sets := make(map[int]Texture_Set, context.temp_allocator)
 	for i in textures {
 		a := &assets[i]
 		if !check_settings(a^, problems) {
@@ -127,7 +149,33 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 			ok = false
 			continue
 		}
-		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], scratch = {problems = {log = problems.log}}})
+		if !is_texture_set(a^) {
+			continue
+		}
+		set, set_ok := parse_texture_set(a^, assets, by_guid, &named, problems)
+		if !set_ok {
+			a.failed = true
+			ok = false
+			continue
+		}
+		sets[i] = set
+		for child in set.children {
+			append(&a.dependencies, assets[child].meta.guid)
+		}
+	}
+	for i in textures {
+		a := &assets[i]
+		if a.failed {
+			continue
+		}
+		if !is_texture_set(a^) && texture_setting(a^, "standalone") == "false" {
+			if !named[i] {
+				report_warning(problems, fmt.tprintf("%s%s", a.path, format.META_EXTENSION), 0, 0, "has standalone = false, but no .texture_set names it, so nothing cooks it")
+			}
+			remove_texture_blob(out_dir, a^, problems)
+			continue
+		}
+		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], set = sets[i], scratch = {problems = {log = problems.log}}})
 	}
 	Sized :: struct {
 		size, job: int,
@@ -168,13 +216,14 @@ Texture_Work :: struct {
 	order:   []int,
 }
 
-// Texture_Job is one texture's cook: its asset's index, whether it cooks also when its blob is up to date, what came
-// of it, the size of the blob that the cache ends up with, cooked now or kept, which the index carries, and the
-// scratch that holds its problems until finish_job.
+// Texture_Job is one texture's cook: its asset's index, whether it cooks also when its blob is up to date, the layers
+// that it takes from other assets if it is a set, what came of it, the size of the blob that the cache ends up with,
+// cooked now or kept, which the index carries, and the scratch that holds its problems until finish_job.
 @(private = "file")
 Texture_Job :: struct {
 	asset:   int,
 	force:   bool,
+	set:     Texture_Set,
 	result:  Cook_Result,
 	size:    [2]u32,
 	scratch: Scratch,
@@ -187,7 +236,7 @@ cook_texture_job :: proc(data: rawptr, index: int) {
 	defer step_advance(w.pass)
 	defer scratch_keep(&job.scratch)
 	a := w.assets[job.asset]
-	key := texture_key(w.options, a)
+	key := texture_key(w.options, a, w.assets, job.set)
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", w.out_dir, format.guid_format(a.meta.guid, &buffer))
 	defer job.size = texture_blob_size(output)
@@ -195,9 +244,19 @@ cook_texture_job :: proc(data: rawptr, index: int) {
 		job.result = .Current
 		return
 	}
-	blob, cooked := cook_texture(w.options, a, key, &job.scratch.problems)
+	blob, cooked := cook_texture(w.options, a, w.assets, job.set, key, &job.scratch.problems)
 	if cooked && write_blob(output, blob) {
 		job.result = .Cooked
+	}
+}
+
+// remove_texture_blob deletes the blob of a texture that no longer cooks one, so that it cannot keep drawing.
+@(private = "file")
+remove_texture_blob :: proc(out_dir: string, a: Asset_Source, problems: ^Problems) {
+	buffer: [32]u8
+	path := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.meta.guid, &buffer))
+	if err := os.remove(path); err != nil && err != .Not_Exist {
+		report_warning(problems, path, 0, 0, "cannot delete: %v", err)
 	}
 }
 
@@ -216,13 +275,16 @@ texture_blob_size :: proc(path: string) -> (size: [2]u32) {
 	return blob.size
 }
 
-// texture_key covers what the blob depends on: the cooker, Compressonator, the configuration, the path, the source and
-// the settings.
-texture_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
+// texture_key covers what the blob depends on: the cooker, Compressonator, the configuration, the path, the source, the
+// settings, and a set's images. A set ignores its images' settings, so their .meta files are not in it.
+texture_key :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Source, set: Texture_Set) -> u64 {
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00%s\x00%x\x00", TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, options.config, a.name, format.texture_layout()),
 	)
 	key = hash.fnv64a(a.source, key)
+	for child in set.children {
+		key = hash.fnv64a(assets[child].source, key)
+	}
 	return hash.fnv64a(transmute([]byte)a.meta_text, key)
 }
 
@@ -252,6 +314,8 @@ Texture_Cook :: struct {
 	flip_y:          bool,
 	// For a color texture, the cutoff at which each mip's alpha keeps mip 0's coverage. 0 leaves alpha as it filters.
 	coverage_cutoff: f32,
+	// How one image holds its layers.
+	layout:          Source_Layout,
 }
 
 // texture_cook_of is how a texture asset cooks, by its settings.
@@ -273,6 +337,15 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 	if usage == .Color && texture_setting(a, "alpha_coverage") == "true" {
 		coverage_cutoff = strconv.parse_f32(texture_setting(a, "alpha_cutoff")) or_else 0.5
 	}
+	layout: Source_Layout
+	switch texture_setting(a, "layout") {
+	case "cube_cross":
+		layout = .Cube_Cross
+	case "cube_equirect":
+		layout = .Cube_Equirect
+	case "array_strip":
+		layout = .Array_Strip
+	}
 	return {
 		usage = usage,
 		wrap = texture_setting(a, "wrap") == "repeat",
@@ -280,18 +353,19 @@ texture_cook_of :: proc(a: Asset_Source) -> Texture_Cook {
 		mips = texture_setting(a, "mips") == "true",
 		max_size = strconv.parse_int(texture_setting(a, "max_size")) or_else 16384,
 		coverage_cutoff = coverage_cutoff,
+		layout = layout,
 	}
 }
 
 // cook_texture decodes, sizes, filters and compresses one texture, and gives its blob.
-cook_texture :: proc(options: Cook_Options, a: Asset_Source, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
+cook_texture :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Source, set: Texture_Set, key: u64, problems: ^Problems) -> (blob: []byte, ok: bool) {
 	t := texture_cook_of(a)
-	image := decode_image_bytes(a.source, a.path, t, problems) or_return
-	return cook_texture_image(options, image, t, a.meta.guid, key, a.name, a.path, problems)
+	layers, dimension := texture_layers(a, assets, set, t, problems) or_return
+	return cook_texture_layers(options, layers, dimension, t, a.meta.guid, key, a.name, a.path, problems)
 }
 
-// cook_texture_image sizes, filters and compresses a decoded texture, and gives its blob. source_path is the name that
-// the blob keeps, and path the file that its problems name.
+// cook_texture_image sizes, filters and compresses one decoded image into a 2D texture, and gives its blob. source_path
+// is the name that the blob keeps, and path the file that its problems name.
 cook_texture_image :: proc(
 	options: Cook_Options,
 	decoded: Image,
@@ -304,54 +378,83 @@ cook_texture_image :: proc(
 	blob: []byte,
 	ok: bool,
 ) {
-	usage, wrap, box := t.usage, t.wrap, t.box
-	image := decoded
-	for max(image.width, image.height) > t.max_size {
-		image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap, box)
-	}
-	tex_format := texture_format_of(usage)
-	// Mip 0 of a block-compressed texture is whole blocks, so a texture that is not is resized up to the next one.
-	if format.texture_format_block(tex_format) != 0 && (image.width % 4 != 0 || image.height % 4 != 0) {
-		image = resample(image, (image.width + 3) / 4 * 4, (image.height + 3) / 4 * 4, wrap, box)
-	}
-	if usage == .Normal {
-		normalize(&image)
-	}
+	layers := []Image{decoded}
+	return cook_texture_layers(options, layers, .D2, t, guid, key, source_path, path, problems)
+}
 
-	mip_count := 1
-	if t.mips {
-		mip_count = int(math.floor(math.log2(f32(max(image.width, image.height))))) + 1
-	}
-	size := [2]u32{u32(image.width), u32(image.height)}
-	mips := make([]byte, format.texture_chain_size(tex_format, size, u32(mip_count)), context.temp_allocator)
+// cook_texture_layers sizes, filters and compresses decoded layers of one size, and gives their blob: each layer's mip
+// chain, one after the other. A cube's faces meet other faces at their edges, not themselves, so their filter clamps
+// whatever the wrap setting says.
+cook_texture_layers :: proc(
+	options: Cook_Options,
+	decoded: []Image,
+	dimension: format.Texture_Dimension,
+	t: Texture_Cook,
+	guid: format.Guid,
+	key: u64,
+	source_path, path: string,
+	problems: ^Problems,
+) -> (
+	blob: []byte,
+	ok: bool,
+) {
+	usage, box := t.usage, t.box
+	wrap := t.wrap && dimension != .Cube
+	tex_format := texture_format_of(usage)
 	quality: f32 = options.config == .Dev ? DEV_TEXTURE_QUALITY : RELEASE_TEXTURE_QUALITY
+	mips: []byte
+	size: [2]u32
+	mip_count := 1
 	offset := 0
-	level := image
-	coverage := alpha_coverage(image, t.coverage_cutoff)
-	for mip in 0 ..< mip_count {
-		if mip > 0 {
-			level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap, box)
-			if usage == .Normal {
-				normalize(&level)
+	for layer, layer_index in decoded {
+		image := layer
+		for max(image.width, image.height) > t.max_size {
+			image = resample(image, max(image.width / 2, 1), max(image.height / 2, 1), wrap, box)
+		}
+		// Mip 0 of a block-compressed texture is whole blocks, so a texture that is not is resized up to the next one.
+		if format.texture_format_block(tex_format) != 0 && (image.width % 4 != 0 || image.height % 4 != 0) {
+			image = resample(image, (image.width + 3) / 4 * 4, (image.height + 3) / 4 * 4, wrap, box)
+		}
+		if usage == .Normal {
+			normalize(&image)
+		}
+		// Every layer is one size, so the first says how much room they all take.
+		if layer_index == 0 {
+			if t.mips {
+				mip_count = int(math.floor(math.log2(f32(max(image.width, image.height))))) + 1
 			}
+			size = {u32(image.width), u32(image.height)}
+			mips = make([]byte, format.texture_chain_size(tex_format, size, u32(mip_count)) * len(decoded), context.temp_allocator)
 		}
-		// The next mip filters from level, so only what this mip stores is scaled, and no scale feeds down the chain.
-		stored := level
-		if mip > 0 && t.coverage_cutoff > 0 {
-			stored = scale_alpha(level, alpha_coverage_scale(level, t.coverage_cutoff, coverage))
+		level := image
+		coverage := alpha_coverage(image, t.coverage_cutoff)
+		for mip in 0 ..< mip_count {
+			if mip > 0 {
+				level = resample(level, max(level.width / 2, 1), max(level.height / 2, 1), wrap, box)
+				if usage == .Normal {
+					normalize(&level)
+				}
+			}
+			// The next mip filters from level, so only what this mip stores is scaled, and no scale feeds down the chain.
+			stored := level
+			if mip > 0 && t.coverage_cutoff > 0 {
+				stored = scale_alpha(level, alpha_coverage_scale(level, t.coverage_cutoff, coverage))
+			}
+			mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
+			if !encode_mip(stored, usage, quality, mips[offset:][:mip_size]) {
+				report_error(problems, path, 0, 0, "cannot compress layer %d's mip %d", layer_index, mip)
+				return
+			}
+			offset += mip_size
 		}
-		mip_size := format.texture_mip_size(tex_format, u32(level.width), u32(level.height))
-		if !encode_mip(stored, usage, quality, mips[offset:][:mip_size]) {
-			report_error(problems, path, 0, 0, "cannot compress mip %d", mip)
-			return
-		}
-		offset += mip_size
 	}
 	contents := format.Texture_Contents {
 		guid        = guid,
 		key         = key,
 		format      = tex_format,
 		usage       = usage,
+		dimension   = dimension,
+		layer_count = u32(len(decoded)),
 		size        = size,
 		mip_count   = u32(mip_count),
 		mips        = mips,

@@ -88,6 +88,9 @@ Resident_Texture :: struct {
 	size:      [2]u32,
 	mip_count: u32,
 	usage:     format.Texture_Usage,
+	// What its layers are, and how many. A shader must read it through the type of its dimension.
+	dimension:   format.Texture_Dimension,
+	layer_count: u32,
 }
 
 // Residency gives the GPU resources of the texture and mesh assets that the renderer draws, by GUID (see
@@ -136,6 +139,8 @@ Resident_Entry :: struct {
 	live_next:     []byte,
 	// The asset's blob must stream again, whatever its version: a live mesh was let go.
 	stale:         bool,
+	// This version of a texture was read as another dimension, which was logged.
+	wrong_dimension_logged: bool,
 }
 
 @(private)
@@ -184,7 +189,7 @@ residency_update :: proc(r: ^Residency) {
 					create_mesh_accel(r, &e.pending.mesh)
 				}
 				e.current, e.version, e.ready = e.pending, e.pending_version, true
-				e.pending, e.streaming = {}, false
+				e.pending, e.streaming, e.wrong_dimension_logged = {}, false, false
 				// The newest live step waited for this one.
 				if e.live_next != nil {
 					stream_live(r, &e, e.live_next)
@@ -215,10 +220,35 @@ resident_instance_set :: proc(r: ^Residency, guid: format.Guid) -> (set: ^Reside
 }
 
 // resident_texture gives a texture asset's resources, and whether they are ready. Until it is ready, use a default
-// for its usage.
-resident_texture :: proc(r: ^Residency, guid: format.Guid) -> (texture: ^Resident_Texture, ready: bool) {
+// for its usage. A shader reads a texture through the type of its dimension, and any other is undefined, so a texture of
+// another dimension is never ready, which is logged once for each of its versions.
+resident_texture :: proc(r: ^Residency, guid: format.Guid, dimension := format.Texture_Dimension.D2) -> (texture: ^Resident_Texture, ready: bool) {
 	e := entry(r, guid, .Texture) or_return
+	if e.ready && e.current.texture.dimension != dimension {
+		log_wrong_dimension(e, dimension)
+		return &e.current.texture, false
+	}
 	return &e.current.texture, e.ready
+}
+
+// resident_texture_of gives a texture asset's resources as resident_texture does, for a reader that takes either of two
+// dimensions and reads the one that it gets.
+resident_texture_of :: proc(r: ^Residency, guid: format.Guid, first, second: format.Texture_Dimension) -> (texture: ^Resident_Texture, ready: bool) {
+	e := entry(r, guid, .Texture) or_return
+	if e.ready && e.current.texture.dimension != first && e.current.texture.dimension != second {
+		log_wrong_dimension(e, first)
+		return &e.current.texture, false
+	}
+	return &e.current.texture, e.ready
+}
+
+@(private = "file")
+log_wrong_dimension :: proc(e: ^Resident_Entry, wanted: format.Texture_Dimension) {
+	if !e.wrong_dimension_logged {
+		e.wrong_dimension_logged = true
+		buffer: [32]u8
+		log.errorf("render: texture %s is a %v, and is read as a %v", format.guid_format(e.guid, &buffer), e.current.texture.dimension, wanted)
+	}
 }
 
 // entry finds an asset's entry, or makes one and starts streaming. An asset that cannot load is tried again after
@@ -527,11 +557,19 @@ stream_texture :: proc(r: ^Residency, e: ^Resident_Entry, data: []byte) -> bool 
 		return false
 	}
 	t := &e.pending.texture
-	t^ = {pixel_format = gpu_format(blob.format), size = blob.size, mip_count = blob.mip_count, usage = blob.usage}
-	t.texture = r.platform.gpu_create_texture(
-		{size = blob.size, format = t.pixel_format, mip_count = blob.mip_count, usage = {.Sampled, .Streamed}, label = "texture asset"},
-		nil,
-	)
+	t^ = {pixel_format = gpu_format(blob.format), size = blob.size, mip_count = blob.mip_count, usage = blob.usage, dimension = blob.dimension, layer_count = blob.layer_count}
+	desc := gpu.Texture_Desc {
+		size      = blob.size,
+		format    = t.pixel_format,
+		mip_count = blob.mip_count,
+		usage     = {.Sampled, .Streamed},
+		label     = "texture asset",
+	}
+	if blob.dimension != .D2 {
+		desc.layers = blob.layer_count
+		desc.cube = blob.dimension == .Cube
+	}
+	t.texture = r.platform.gpu_create_texture(desc, nil)
 	if t.texture == {} {
 		return false
 	}
