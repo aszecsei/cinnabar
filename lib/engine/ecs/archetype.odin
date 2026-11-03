@@ -23,6 +23,11 @@ ARCHETYPE_TABLE_SIZE :: 2 * MAX_ARCHETYPES
 DIRECTORY_PAGE :: 4 * mem.Kilobyte
 @(private)
 NO_CHUNK :: max(u32)
+// A chunk's change versions: one for each column, then one for its entity handles.
+@(private)
+ENTITY_COLUMN :: MAX_ARCHETYPE_COMPONENTS
+@(private)
+CHUNK_VERSIONS :: MAX_ARCHETYPE_COMPONENTS + 1
 
 // Archetype stores the entities that have one set of components. Its rows fill chunks of CHUNK_SIZE in order, and
 // row r is in chunk r / capacity. A chunk is struct-of-arrays: the entity handles at offset 0, then one column per
@@ -45,6 +50,8 @@ Archetype :: struct {
 @(private)
 Chunk_Pool :: struct {
 	memory:    Region,
+	// The change versions of each chunk, beside the chunks so that testing them does not touch a chunk's data.
+	versions:  Region,
 	// The chunks [0, used) were handed out at least once, so they are committed.
 	used:      u32,
 	free_head: u32,
@@ -69,10 +76,20 @@ World_Iterator :: struct {
 	world:     ^World,
 	archetype: u32,
 	row:       u32,
+	// With a version, the iterator skips each chunk whose entity handles and whose columns in ids are no newer.
+	since:     u64,
+	ids:       []Component_Id,
 }
 
 world_iter :: proc "contextless" (w: ^World) -> World_Iterator {
 	return {world = w}
+}
+
+// world_iter_changed walks the entities of the chunks that changed since a version from take_version: where a row was
+// added or moved in, or a column in ids was written. The whole chunk is visited, so it can give entities that did not
+// change. ids must outlive the iterator.
+world_iter_changed :: proc "contextless" (w: ^World, since: u64, ids: []Component_Id) -> World_Iterator {
+	return {world = w, since = since, ids = ids}
 }
 
 // world_next gives the next entity, the index of its archetype, which is the same for every entity with the same
@@ -80,6 +97,9 @@ world_iter :: proc "contextless" (w: ^World) -> World_Iterator {
 world_next :: proc "contextless" (it: ^World_Iterator) -> (e: Entity, archetype_index: u32, components: []Component_Id, ok: bool) {
 	for it.archetype < it.world.archetype_count {
 		a := archetype(it.world, it.archetype)
+		for it.since != 0 && it.row < a.count && it.row % a.capacity == 0 && !world_chunk_changed(it, a) {
+			it.row += a.capacity
+		}
 		if it.row < a.count {
 			e = entity_at(it.world, it.archetype, it.row)^
 			it.row += 1
@@ -89,6 +109,12 @@ world_next :: proc "contextless" (it: ^World_Iterator) -> (e: Entity, archetype_
 		it.row = 0
 	}
 	return
+}
+
+@(private = "file")
+world_chunk_changed :: proc "contextless" (it: ^World_Iterator, a: ^Archetype) -> bool {
+	chunk := chunk_directory(it.world, it.archetype)[it.row / a.capacity]
+	return chunk_version(it.world, chunk, ENTITY_COLUMN) > it.since || columns_changed(it.world, a, chunk, it.ids, it.since)
 }
 
 // add_raw adds a component, or overwrites it if the entity has it. A nil data zeroes the component. Otherwise data
@@ -124,6 +150,7 @@ add_raw :: proc(w: ^World, e: Entity, id: Component_Id, data: []byte) -> bool {
 		move_entity(w, record, target)
 		a = archetype(w, target)
 	}
+	stamp(w, chunk_directory(w, record.archetype)[record.row / a.capacity], column)
 	ptr := component_at(w, record.archetype, u32(column), record.row)
 	size := int(a.sizes[column])
 	if data == nil {
@@ -179,6 +206,19 @@ get_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> rawptr {
 	return component_at(w, record.archetype, u32(column), record.row)
 }
 
+// mark_changed says that a component was written through a pointer, so that its chunk counts as changed. See get_write.
+// It is safe to call from jobs while no structural change runs.
+mark_changed :: proc(w: ^World, e: Entity, id: Component_Id) {
+	record := live_record(w, e)
+	if record == nil {
+		return
+	}
+	a := archetype(w, record.archetype)
+	if column, found := slice.binary_search(archetype_components(a), id); found {
+		stamp(w, chunk_directory(w, record.archetype)[record.row / a.capacity], column)
+	}
+}
+
 has_raw :: proc(w: ^World, e: Entity, id: Component_Id) -> bool {
 	return get_raw(w, e, id) != nil
 }
@@ -198,10 +238,21 @@ remove :: proc(w: ^World, e: Entity, $T: typeid) -> bool {
 	return info != nil && remove_raw(w, e, info.id)
 }
 
-// get returns a pointer to a component, or nil. See get_raw.
+// get returns a pointer to a component, or nil, to read. See get_raw. To write, use get_write: a write through this
+// pointer does not count as a change.
 get :: proc(w: ^World, e: Entity, $T: typeid) -> ^T {
 	info := registry_find_type(&w.registry, T)
 	return info != nil ? (^T)(get_raw(w, e, info.id)) : nil
+}
+
+// get_write returns a pointer to a component, or nil, and marks the component's chunk as changed.
+get_write :: proc(w: ^World, e: Entity, $T: typeid) -> ^T {
+	info := registry_find_type(&w.registry, T)
+	if info == nil {
+		return nil
+	}
+	mark_changed(w, e, info.id)
+	return (^T)(get_raw(w, e, info.id))
 }
 
 has :: proc(w: ^World, e: Entity, $T: typeid) -> bool {
@@ -327,6 +378,7 @@ push_row :: proc(w: ^World, index: u32, e: Entity) -> u32 {
 	row := a.count
 	a.count += 1
 	entity_at(w, index, row)^ = e
+	stamp_chunk(w, a, chunk_directory(w, index)[row / a.capacity])
 	return row
 }
 
@@ -342,6 +394,7 @@ remove_row :: proc(w: ^World, index: u32, row: u32) {
 			mem.copy(component_at(w, index, column, row), component_at(w, index, column, last), int(a.sizes[column]))
 		}
 		records(w)[entity_index(moved)].row = row
+		stamp_chunk(w, a, chunk_directory(w, index)[row / a.capacity])
 	}
 	a.count = last
 	if a.count == (a.chunk_count - 1) * a.capacity {
@@ -376,13 +429,25 @@ chunk_alloc :: proc(w: ^World) -> u32 {
 	if pool.free_head != NO_CHUNK {
 		chunk := pool.free_head
 		pool.free_head = (^u32)(chunk_data(w, chunk))^
+		stamp_all(w, chunk)
 		return chunk
 	}
-	if pool.used == MAX_CHUNKS || !region_commit(&pool.memory, w.platform, int(pool.used + 1) * CHUNK_SIZE) {
+	if pool.used == MAX_CHUNKS ||
+	   !region_commit(&pool.memory, w.platform, int(pool.used + 1) * CHUNK_SIZE) ||
+	   !region_commit(&pool.versions, w.platform, int(pool.used + 1) * size_of([CHUNK_VERSIONS]u64)) {
 		panic("ecs: out of chunk memory")
 	}
 	pool.used += 1
+	stamp_all(w, pool.used - 1)
 	return pool.used - 1
+}
+
+// A new chunk's versions are all new: its last archetype may have had fewer columns, so stamp_chunk would leave some.
+@(private = "file")
+stamp_all :: proc "contextless" (w: ^World, chunk: u32) {
+	for column in 0 ..< CHUNK_VERSIONS {
+		stamp(w, chunk, column)
+	}
 }
 
 @(private = "file")

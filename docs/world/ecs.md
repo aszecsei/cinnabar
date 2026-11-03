@@ -26,16 +26,36 @@ Entities, the component registry, archetype storage, queries, systems and their 
 - Removing an entity moves the last row of its archetype into its place.
 - Tags (zero-size components) select the archetype but take no column space.
 - A chunk is the unit of work for a job.
+- Each chunk has a [change version](#change-versions) for each column and for its entity handles. They are in a table beside the chunks, so a test of them does not touch the chunk's data.
 
 ### Queries
 
 - A query is a set of terms. Each term names a component ID and an access: read, write, optional or excluded.
-- A query caches the archetypes that match it, and the column of each term in each archetype. Archetypes are created only when command buffers are applied, so the cache is updated only then. Iteration only reads, so jobs can iterate at the same time.
+- A query caches the archetypes that match it, and the column of each term in each archetype. Archetypes are created only when command buffers are applied, so the cache is updated only then. Iteration writes only the change versions of the columns that have write access, so jobs can iterate at the same time.
 - Iteration gives chunks. A system gets a typed slice of each column from the chunk. In debug builds, the column type is checked against the term.
 - Iteration can start at a chunk index and stop after a number of chunks. This is how a system divides its work into jobs.
 - Queries are registrations. `reload` clears them, and the game creates them again in `on_reload`.
 - **Inactive entities:** a query excludes the `Inactive` tag unless it names `Inactive` in a term. Render extraction, physics and game systems therefore skip inactive entities without extra terms. `ecs.collect` skips them the same way. `Disabled` marks an entity that was deactivated itself. The world adds `Inactive` to it and to its descendants. `ecs.set_active` updates them at once, and `apply` updates them for the changes in its buffers. Native code that adds or removes `Parent` or `Disabled` directly calls `update_activity` before the next query. Activity is the scripts' `set_active` (see [Scripting](../scripting/behaviours.md#enabled-state)).
 - **The log:** `ecs.watch` makes the world log the removal of chosen components, with their first 8 bytes, and every change of `Inactive`. The script runtime watches `Behaviours`, and drains the log with `take_log` each script phase. A world that nothing watches logs nothing.
+
+### Change versions
+
+Consumers that look at the whole world can ask for only the chunks that changed, as in Unity's DOTS. The editor's deltas and the GPU scene's upload do this.
+
+- **The version.** `ecs.take_version` gives a version, and every later write is newer than it. Call it while no job runs. Each consumer keeps the version that it last took. The version 0 is older than every chunk, so it means everything.
+- **What marks a column.** A query iteration marks the columns of its `write` terms in each chunk that it gives, so a system marks what it runs over. A row that is added, or that moves into a chunk, marks all the chunk's columns and its entity handles. `ecs.add` on a component that the entity has marks its column.
+- **Pointers.** `ecs.get` returns a pointer to read. A write through it, or through a `read` term's column, is not seen. To write through a pointer, use `ecs.get_write`, or call `ecs.mark_changed` after the write. Odin cannot enforce this, so a consumer depends on every writer of its columns doing it.
+- **A chunk, not an entity.** A consumer gets a whole chunk, so it can see entities that did not change. A mark says that a writer had access, not that a value changed: a system with a `write` term marks every chunk that it runs over.
+- **Removal.** A row that leaves marks nothing unless the last row moves into its place. A consumer that needs to know of deaths uses something else: `World.despawned` counts every despawn.
+- **What does not mark.** `propagate` and the copy to `Previous_Transform` run every tick, and they mark a column only when the value changed, so a world that does not move does not look changed. `World.snapshot_version` is the version at the last copy. A `Transform` that is newer can differ from its `Previous_Transform`, so the pose between them moves with the clock's `alpha`.
+- **Simulation state does not depend on versions.** Only derived work is skipped, so a missed mark gives a consumer a stale view, and not a wrong simulation. Physics compares values and does not use versions.
+
+To ask for chunks:
+
+- `ecs.changed(term)` makes a term filter a query. `ecs.query_iter(w, q, since = version)` leaves out each chunk where no `changed` term's column is newer than the version. The chunks that it leaves out still count in `first` and `count`, so jobs split the same chunks. A term that is both `changed` and `write` marks its own column, so every chunk that it gives passes the next time too.
+- `ecs.changed_since(view, term, version)` tests one term of a chunk, for code that visits every chunk but can skip part of its work.
+- `ecs.world_iter_changed(w, version, ids)` walks the entities of the chunks where a row arrived or a column in `ids` was written, inactive ones too.
+- `ecs.collect(w, ids, &out, version)` collects the entities of the chunks where a column in `ids` was written.
 
 ### Systems
 

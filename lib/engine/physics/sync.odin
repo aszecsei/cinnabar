@@ -273,7 +273,7 @@ update_bodies :: proc(s: ^State, w: ^ecs.World, list: ^core_physics.Command_List
 write_back :: proc(s: ^State, w: ^ecs.World, moved: []core_physics.Body_State) {
 	for state in moved {
 		e := ecs.Entity(state.user)
-		pb := ecs.is_alive(w, e) ? ecs.get(w, e, Physics_Body) : nil
+		pb := ecs.is_alive(w, e) ? ecs.get_write(w, e, Physics_Body) : nil
 		if pb == nil || pb.body != state.body {
 			continue
 		}
@@ -282,12 +282,12 @@ write_back :: proc(s: ^State, w: ^ecs.World, moved: []core_physics.Body_State) {
 		if pb.motion != .Dynamic {
 			continue
 		}
-		pose := ecs.get(w, e, ecs.Transform)
+		pose := ecs.get_write(w, e, ecs.Transform)
 		pose.position = ecs.position_offset_f64(s.anchor, state.position)
 		pose.rotation = from_rotation(state.rotation)
 		pb.position, pb.rotation = pose.position, pose.rotation
 		if parent := ecs.get(w, e, ecs.Parent); parent != nil {
-			if local := ecs.get(w, e, ecs.Local_Transform); local != nil {
+			if local := ecs.get_write(w, e, ecs.Local_Transform); local != nil {
 				if parent_pose := ecs.get(w, parent.entity, ecs.Transform); parent_pose != nil {
 					local^ = local_from_world(parent_pose^, pose^, local.scale)
 				}

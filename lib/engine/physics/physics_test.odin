@@ -215,6 +215,33 @@ a_box_falls_and_rests :: proc(t: ^testing.T) {
 	testing.expect_value(t, height(f, g), -0.5)
 }
 
+// Bodies that move write their Transforms in a way that the GPU scene sees, and a body at rest does not.
+@(test)
+moved_bodies_count_as_changed :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	ground(f)
+	b := box(f, {0, 5, 0})
+	ticks(f, 1)
+	poses := ecs.query(&f.world, {ecs.changed(ecs.read(&f.world, ecs.Transform)), ecs.read(&f.world, Rigid_Body)})
+	changed_chunks :: proc(f: ^Fixture, q: ecs.Query, since: u64) -> (n: int) {
+		it := ecs.query_iter(&f.world, q, since = since)
+		for _ in ecs.query_next(&it) {
+			n += 1
+		}
+		return
+	}
+	since := ecs.take_version(&f.world)
+	ticks(f, 1)
+	testing.expect_value(t, changed_chunks(f, poses, since), 1)
+
+	ticks(f, 240)
+	testing.expect(t, ecs.get(&f.world, b, Physics_Body).asleep, "the box fell asleep")
+	since = ecs.take_version(&f.world)
+	ticks(f, 1)
+	testing.expect_value(t, changed_chunks(f, poses, since), 0)
+}
+
 // Writing a dynamic body's Transform teleports it, as in Unity, and it falls from there.
 @(test)
 a_transform_write_teleports :: proc(t: ^testing.T) {

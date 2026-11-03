@@ -221,6 +221,19 @@ Mesh_Record :: struct {
 	impostor_sphere:   [4]f32,
 }
 
+// The clean slots that a run of the instance upload may cross, which costs less than a copy of its own.
+@(private)
+INSTANCE_RUN_GAP :: 16
+// Past this many runs, one run covers them all.
+@(private)
+MAX_INSTANCE_RUNS :: 256
+
+// Instance_Run is a range of slots whose records go to the persistent buffer.
+@(private)
+Instance_Run :: struct {
+	first, count: u32,
+}
+
 // Instance_Record matches Instance_Record in material_common.hlsli and cull_draws.hlsl: the pose relative to the
 // render origin, last frame's, and the entity's value in the ID buffer.
 Instance_Record :: struct {
@@ -458,9 +471,23 @@ Gpu_Scene :: struct {
 	// The slot of each entity with a Mesh_Renderer, in host memory.
 	slots:                    map[ecs.Entity]u32,
 	slot_entities:            [MAX_INSTANCES]ecs.Entity,
-	// Each slot's presented pose in the last frame, and the frame that last wrote it.
+	// Each slot's presented pose as of its last write, and the frame that last saw its entity.
 	previous:                 [MAX_INSTANCES]ecs.Transform,
 	seen:                     [MAX_INSTANCES]u64,
+	// What the persistent buffer holds, or will once this frame's copy runs, and the slots that it does not hold yet.
+	records:                  [MAX_INSTANCES]Instance_Record,
+	dirty:                    [MAX_INSTANCES / 64]u64,
+	// The world of the last frame. The versions of the last two frames' scans, of which the older is what this frame
+	// compares with: a chunk that stopped moving gets one more write, so that last frame's pose catches up.
+	world:                    ^ecs.World,
+	versions:                 [2]u64,
+	// The last alpha, and the frame that it changed.
+	alpha:                    f32,
+	alpha_frame:              u64,
+	// The last frame whose copy into the persistent buffer ran. Any other frame's dirty slots were lost.
+	copied_frame:             u64,
+	// The slots that this frame's upload covers.
+	uploaded_slots:           int,
 	free:                     [dynamic]u32,
 	// Slots below this have been used.
 	high:                     u32,
@@ -583,7 +610,7 @@ Scene_Frame :: struct {
 	// The instance sets' counters this frame, in words, which update_scene zeroes.
 	counter_words:   int,
 	instance_upload: gpu.Upload,
-	instance_bytes:  int,
+	instance_runs:   []Instance_Run,
 	item_upload:     gpu.Upload,
 	mesh_upload:     gpu.Upload,
 	table_upload:    gpu.Upload,
@@ -614,6 +641,8 @@ Scene_Frame :: struct {
 }
 
 scene_init :: proc(s: ^Gpu_Scene, platform: ^core.Platform_API) {
+	// So that a slot that no frame has seen, whose seen is 0, was not seen in the frame before the first.
+	s.frame = 1
 	s.slots = make(map[ecs.Entity]u32, platform.heap_allocator)
 	s.free = make([dynamic]u32, platform.heap_allocator)
 	s.instances = platform.gpu_create_buffer({size = MAX_INSTANCES * size_of(Instance_Record), label = "gpu scene instances"}, nil)
@@ -662,9 +691,25 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf := new(Scene_Frame, r.platform.frame_allocator)
 	f.scene_frame = sf
 
+	// Every slot is written if the persistent buffer may not hold what records does, or if the poses mean something else.
+	full := s.world != w || s.copied_frame != s.frame - 1
+	s.world = w
 	// The origin moves when the camera is far from it, and then every pose is written relative to the new one.
 	if !s.origin_set || max_abs(ecs.position_sub(f.view.position, s.origin)) > REBASE_CELLS * ORIGIN_CELL {
 		s.origin, s.origin_set = snap_origin(f.view.position), true
+		full = true
+	}
+	since := full ? 0 : s.versions[0]
+	s.versions[0], s.versions[1] = s.versions[1], ecs.take_version(w)
+	if w.clock.alpha != s.alpha {
+		s.alpha, s.alpha_frame = w.clock.alpha, s.frame
+	}
+	// A Transform written since the last tick's snapshot differs from its Previous_Transform, so the pose between them
+	// moves with alpha. The frame after alpha stops is that one more write too.
+	poses := Pose_Change {
+		since         = since,
+		snapshot      = w.snapshot_version,
+		interpolating = s.frame - s.alpha_frame <= 1,
 	}
 	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
 	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
@@ -681,7 +726,6 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	meshes := make([dynamic]Mesh_Record, r.platform.frame_allocator)
 	mesh_indices := make(map[^Resident_Mesh]u32, r.platform.frame_allocator)
 	items := make([dynamic]Cull_Item, r.platform.frame_allocator)
-	records := make([]Instance_Record, MAX_INSTANCES, r.platform.frame_allocator)
 	accel_instances := make([dynamic]gpu.Accel_Instance, r.platform.frame_allocator)
 	// An entity with a pose draws at rest until the skinning pipeline has compiled.
 	skin := skin_build(pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil, r.platform.frame_allocator)
@@ -700,24 +744,25 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		previous := ecs.column(view, 1, ecs.Previous_Transform)
 		renderers := ecs.column(view, EXTRACT_TERMS, Mesh_Renderer)
 		view_model := len(ecs.column(view, EXTRACT_TERMS + 1, View_Model)) > 0
+		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
 			slot, slot_ok := scene_slot(s, e)
 			if !slot_ok {
 				continue
 			}
-			pose := current[i]
-			if previous != nil {
-				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
-			}
-			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
 			if view_model {
-				// Relative to the camera, and last frame's relative to last frame's camera.
+				pose := current[i]
+				if previous != nil {
+					pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
+				}
+				last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
+				// Relative to the camera, and last frame's relative to last frame's camera, so it changes without its chunk.
 				last_camera := s.has_previous ? s.previous_position : f.view.position
-				records[slot] = {rows = pose_rows(pose, f.view.position), previous_rows = pose_rows(last, last_camera), id = entity_id(e)}
+				scene_write_record(s, slot, {rows = pose_rows(pose, f.view.position), previous_rows = pose_rows(last, last_camera), id = entity_id(e)})
+				s.previous[slot], s.seen[slot] = pose, s.frame
 			} else {
-				records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
+				scene_write_instance(s, w, e, slot, moved, i, current, previous)
 			}
-			s.previous[slot], s.seen[slot] = pose, s.frame
 			if is_hidden(hidden, e) {
 				continue
 			}
@@ -737,7 +782,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				}
 				if mask != 0 {
 					reference := r.platform.gpu_accel_reference(blas)
-					append(&accel_instances, gpu.accel_instance(records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
+					append(&accel_instances, gpu.accel_instance(s.records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
 					if skinned {
 						append(&skin.refits, Skin_Refit{slot = slot, indices = mesh.indices})
 					}
@@ -756,22 +801,17 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		current := ecs.column(view, 0, ecs.Transform)
 		previous := ecs.column(view, 1, ecs.Previous_Transform)
 		renderers := ecs.column(view, EXTRACT_TERMS, Instanced_Mesh_Renderer)
+		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
 			slot, slot_ok := scene_slot(s, e)
 			if !slot_ok {
 				continue
 			}
-			pose := current[i]
-			if previous != nil {
-				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
-			}
-			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
-			records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
-			s.previous[slot], s.seen[slot] = pose, s.frame
+			scene_write_instance(s, w, e, slot, moved, i, current, previous)
 			if is_hidden(hidden, e) {
 				continue
 			}
-			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot, &records[slot])
+			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot)
 		}
 	}
 	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
@@ -785,28 +825,23 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		current := ecs.column(view, 0, ecs.Transform)
 		previous := ecs.column(view, 1, ecs.Previous_Transform)
 		renderers := ecs.column(view, EXTRACT_TERMS, Surface_Renderer)
+		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
 			slot, slot_ok := scene_slot(s, e)
 			if !slot_ok {
 				continue
 			}
-			pose := current[i]
-			if previous != nil {
-				pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
-			}
-			last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
-			records[slot] = {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e)}
-			s.previous[slot], s.seen[slot] = pose, s.frame
+			scene_write_instance(s, w, e, slot, moved, i, current, previous)
 			if is_hidden(hidden, e) || len(surfaces) >= MAX_SURFACES {
 				continue
 			}
-			add_surface(r, &table, &items, &surfaces, renderers[i], slot, records[slot].rows, camera_offset, lod)
+			add_surface(r, &table, &items, &surfaces, renderers[i], slot, s.records[slot].rows, camera_offset, lod)
 		}
 	}
 	// The particle ribbons: a slot each, at their systems' anchors, and an item each, whose draw the GPU writes.
-	ribbons := add_ribbon_items(f, w, &table, &items, records, hidden)
+	ribbons := add_ribbon_items(f, w, &table, &items, hidden)
 	// The mesh particles: an item for each submesh of each mesh emitter, whose draws the GPU writes.
-	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, records, hidden)
+	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, hidden)
 	sweep_skins(&s.skins, r.platform, s.frame)
 	// A slot whose entity has no Mesh_Renderer, Instanced_Mesh_Renderer, Surface_Renderer or particle system any more is
 	// free again, and so are its cells.
@@ -814,6 +849,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
 			delete_key(&s.slots, s.slot_entities[slot])
 			s.slot_entities[slot] = 0
+			scene_write_record(s, slot, {})
 			free_cells(s, slot)
 			append(&s.free, slot)
 		}
@@ -828,7 +864,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		if sorting[i].group == .Sorted {
 			// The view model's instances are relative to the camera already.
 			eye := item.flags & ITEM_VIEW_MODEL != 0 ? [3]f32{} : camera
-			sorting[i].distance = squared_distance(records[item.instance].rows, item.sphere.xyz, eye)
+			sorting[i].distance = squared_distance(s.records[item.instance].rows, item.sphere.xyz, eye)
 		}
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
@@ -854,9 +890,19 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf.meshlet_select.items = meshlet_select_items(r, items[:], f.no_meshlet_hierarchy, r.platform.frame_allocator)
 
 	platform := r.platform
+	sf.instance_runs = instance_runs(&s.dirty, s.high, full, r.platform.frame_allocator)
+	s.dirty = {}
+	s.uploaded_slots = 0
+	for run in sf.instance_runs {
+		s.uploaded_slots += int(run.count)
+	}
+	packed := make([]Instance_Record, s.uploaded_slots, r.platform.frame_allocator)
+	packed_count := 0
+	for run in sf.instance_runs {
+		packed_count += copy(packed[packed_count:], s.records[run.first:][:run.count])
+	}
 	ok := true
-	sf.instance_bytes = int(s.high) * size_of(Instance_Record)
-	sf.instance_upload, ok = upload_bytes(platform, slice.to_bytes(records[:s.high]))
+	sf.instance_upload, ok = upload_bytes(platform, slice.to_bytes(packed))
 	item_upload, items_ok := upload_bytes(platform, slice.to_bytes(items[:]))
 	mesh_upload, meshes_ok := upload_bytes(platform, slice.to_bytes(meshes[:]))
 	table_upload, table_ok := upload_bytes(platform, table.bytes[:])
@@ -1370,6 +1416,83 @@ is_hidden :: proc(hidden: []u32, e: ecs.Entity) -> bool {
 	return int(index / 32) < len(hidden) && hidden[index / 32] & (1 << (index % 32)) != 0
 }
 
+// Pose_Change is how a frame decides which chunks' poses it computes again.
+@(private)
+Pose_Change :: struct {
+	since, snapshot: u64,
+	interpolating:   bool,
+}
+
+// chunk_poses_changed is true if the presented poses of a chunk may differ from what its slots hold, by its Transform
+// and Previous_Transform, the first two terms of the renderers' queries.
+@(private)
+chunk_poses_changed :: proc "contextless" (view: ecs.Chunk_View, change: Pose_Change, has_previous: bool) -> bool {
+	return(
+		ecs.changed_since(view, 0, change.since) ||
+		ecs.changed_since(view, 1, change.since) ||
+		(has_previous && change.interpolating && ecs.changed_since(view, 0, change.snapshot)) \
+	)
+}
+
+// scene_write_instance writes the record of a row of a chunk, if its pose may have changed or its slot is new, and says
+// that the slot's entity is still there.
+@(private)
+scene_write_instance :: proc(s: ^Gpu_Scene, w: ^ecs.World, e: ecs.Entity, slot: u32, moved: bool, i: int, current: []ecs.Transform, previous: []ecs.Previous_Transform) {
+	if moved || s.seen[slot] != s.frame - 1 {
+		pose := current[i]
+		if previous != nil {
+			pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
+		}
+		last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
+		scene_write_record(s, slot, {rows = pose_rows(pose, s.origin), previous_rows = pose_rows(last, s.origin), id = entity_id(e), instance_set = s.records[slot].instance_set})
+		s.previous[slot] = pose
+	}
+	s.seen[slot] = s.frame
+}
+
+// scene_write_record sets a slot's record, and the slot is dirty if that changed it.
+@(private)
+scene_write_record :: proc "contextless" (s: ^Gpu_Scene, slot: u32, record: Instance_Record) {
+	if s.records[slot] != record {
+		s.records[slot] = record
+		s.dirty[slot / 64] |= 1 << (slot % 64)
+	}
+}
+
+// instance_runs gives the ranges of slots to copy: all of them below high with full, or the dirty ones, in order. Runs
+// cross small gaps, whose records are the same in both places, and many runs become one.
+@(private)
+instance_runs :: proc(dirty: ^[MAX_INSTANCES / 64]u64, high: u32, full: bool, allocator := context.allocator) -> []Instance_Run {
+	runs := make([dynamic]Instance_Run, allocator)
+	if full {
+		if high > 0 {
+			append(&runs, Instance_Run{0, high})
+		}
+		return runs[:]
+	}
+	for slot: u32 = 0; slot < high; slot += 1 {
+		if dirty[slot / 64] == 0 && slot % 64 == 0 {
+			slot += 63
+			continue
+		}
+		if dirty[slot / 64] & (1 << (slot % 64)) == 0 {
+			continue
+		}
+		if n := len(runs); n > 0 && slot - (runs[n - 1].first + runs[n - 1].count) <= INSTANCE_RUN_GAP {
+			runs[n - 1].count = slot + 1 - runs[n - 1].first
+		} else {
+			append(&runs, Instance_Run{slot, 1})
+		}
+	}
+	if len(runs) > MAX_INSTANCE_RUNS {
+		last := runs[len(runs) - 1]
+		first := runs[0].first
+		clear(&runs)
+		append(&runs, Instance_Run{first, last.first + last.count - first})
+	}
+	return runs[:]
+}
+
 // scene_slot gives an entity's slot, and a free one the first time.
 @(private)
 scene_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity) -> (slot: u32, ok: bool) {
@@ -1468,7 +1591,6 @@ add_instanced_items :: proc(
 	jobs: ^[dynamic]u32,
 	renderer: Instanced_Mesh_Renderer,
 	slot: u32,
-	record: ^Instance_Record,
 ) -> int {
 	mesh, mesh_ready := resident_mesh(&r.residency, renderer.mesh)
 	set, set_ready := resident_instance_set(&r.residency, renderer.instances)
@@ -1574,7 +1696,9 @@ add_instanced_items :: proc(
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
 	}
+	record := r.scene.records[slot]
 	record.instance_set = gpu.read_index(set.instances)
+	scene_write_record(&r.scene, slot, record)
 	return int(set.count)
 }
 
@@ -1942,9 +2066,13 @@ update_scene :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	sf := f.scene_frame
 	g := ctx.graph
-	if sf.instance_bytes > 0 {
-		gpu.cmd_copy_buffer(ctx.cb, sf.instance_upload.buffer, sf.instance_upload.offset, gpu_buffer(g, sf.instances), 0, u32(sf.instance_bytes))
+	source := sf.instance_upload.offset
+	for run in sf.instance_runs {
+		size := run.count * size_of(Instance_Record)
+		gpu.cmd_copy_buffer(ctx.cb, sf.instance_upload.buffer, source, gpu_buffer(g, sf.instances), run.first * size_of(Instance_Record), size)
+		source += size
 	}
+	f.renderer.scene.copied_frame = f.renderer.scene.frame
 	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.draw_views * 4))
 	if sf.counter_words > 0 {
 		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.instance_counters), 0, u32(sf.counter_words * 4))

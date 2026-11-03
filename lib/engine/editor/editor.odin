@@ -37,7 +37,9 @@ Editor :: struct {
 	types_sent:  bool,
 	// What the editor knows of each entity slot, by entity index.
 	known:       [dynamic]Known,
-	scan:        u32,
+	// The version that the last scan took, and how many entities the world had despawned at it.
+	scan_version: u64,
+	despawned:   u64,
 	watched:     [dynamic]Watched,
 	// The entity of each scene ID, for the editor's operations (see find_scene_entity).
 	by_scene_id: map[u64]ecs.Entity,
@@ -74,8 +76,6 @@ Known :: struct {
 	active:    bool,
 	// A hash of the name, which scripts and systems can change.
 	name:      u64,
-	// The scan that last saw the entity.
-	seen:      u32,
 }
 
 @(private)
@@ -301,12 +301,27 @@ unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
 
 // scan compares the world with what the editor knows. With full, it describes every entity in a snapshot. Otherwise
 // it describes the changes in a delta, and reports whether there are any.
+//
+// What the editor knows of an entity changes only with its row, which moves with its archetype and its activity, or
+// with its Parent or its Name, so a delta visits only the chunks where those changed since the last scan.
 @(private)
 scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator) -> (message: link.Message, changed: bool) {
-	e.scan += 1
+	since := full ? 0 : e.scan_version
+	e.scan_version = ecs.take_version(w)
 	infos := make([dynamic]link.Entity_Info, allocator)
 	destroyed := make([dynamic]u64, allocator)
-	it := ecs.world_iter(w)
+	// First, so that an entity in the slot of one that died finds the slot empty.
+	if full || e.despawned != w.despawned {
+		e.despawned = w.despawned
+		for &k in e.known {
+			if k.entity != 0 && !ecs.is_alive(w, k.entity) {
+				append(&destroyed, u64(k.entity))
+				k = {}
+			}
+		}
+	}
+	watched := [?]ecs.Component_Id{ecs.PARENT_ID, ecs.NAME_ID}
+	it := ecs.world_iter_changed(w, since, watched[:])
 	for entity, archetype, components in ecs.world_next(&it) {
 		index := int(ecs.entity_index(entity))
 		if index >= len(e.known) {
@@ -318,12 +333,8 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 		}
 		_, inactive := find(components, ecs.INACTIVE_ID)
 		name := ecs.name_of(w, entity)
-		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name), e.scan}
+		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name)}
 		k := &e.known[index]
-		// A new entity in the slot of one that the editor knows: that one died between two scans.
-		if k.entity != 0 && k.entity != entity && !full {
-			append(&destroyed, u64(k.entity))
-		}
 		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active || k.name != now.name {
 			ids := make([]u64, len(components), allocator)
 			for id, i in components {
@@ -346,12 +357,6 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 			)
 		}
 		k^ = now
-	}
-	for &k in e.known {
-		if k.entity != 0 && k.seen != e.scan {
-			append(&destroyed, u64(k.entity))
-			k = {}
-		}
 	}
 	if full {
 		return link.Entity_Snapshot{entities = infos[:]}, true

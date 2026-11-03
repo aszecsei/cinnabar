@@ -144,6 +144,7 @@ despawn_one :: proc(w: ^World, e: Entity) -> bool {
 	}
 	log_despawn(w, e, record)
 	remove_row(w, record.archetype, record.row)
+	w.despawned += 1
 	record.archetype = NO_ARCHETYPE
 	if record.generation == max(u32) {
 		// Retired: the slot is never reused, so no old handle can match it.

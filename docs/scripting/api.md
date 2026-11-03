@@ -47,12 +47,13 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 - `entity:add(T, values?)` and `entity:remove(T)` take effect at once. `values` is a table of field values, and `add` returns the component.
 - `entity:destroy()` is deferred to the end of the script phase, as in Unity's `Destroy`. It goes into the script command buffer, which phase 6 of the frame applies.
 - `World.query(T, ...)` returns an array of the matching entities, collected before the loop starts. Structural changes inside the loop are therefore safe. A query from a script scans every archetype, so performance-critical work belongs in a native system.
+- `World.version()` gives a version, and every later write is newer than it. `World.changed(since, T, ...)` returns an array of the entities in the chunks where a component `T` was written since the version, or that gained a row. It works by chunk (see [ECS: Change versions](../world/ecs.md#change-versions)), so it can give entities that did not change, and it does not report the entities that left. A script's own writes count.
 
 ## Engine libraries
 
 | Global | Contents |
 |---|---|
-| `World` | `spawn`, `query` |
+| `World` | `spawn`, `query`, `version`, `changed` |
 | `Quaternion` | `identity`, `new(x, y, z, w)`, `euler(degrees)`, `angle_axis(degrees, axis)`, `look_rotation(forward, up?)`, `slerp`, `angle`, `rotate_towards(from, to, max_degrees)`. Methods: `inverse`, `normalized`, `euler`, `approx`, `angle_to`, `rotate_towards`, `slerp`. Fields `x`, `y`, `z`, `w`. |
 | `WorldPosition` | `origin`, `from_meters(x, y, z)` (for authoring), `lerp`. Methods: `lerp`, `to_meters` (for display). |
 | `Time` | `delta` (the frame, or the tick in the fixed step), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction), `in_fixed` (true in the fixed step) |

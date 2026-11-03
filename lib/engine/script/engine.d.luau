@@ -58,6 +58,8 @@ end
 declare World: {
 	spawn: ((position: WorldPosition?, rotation: Quaternion?) -> Entity) & ((prefab: Asset, position: WorldPosition?, rotation: Quaternion?) -> Entity),
 	query: (...ComponentType) -> { Entity },
+	version: () -> number,
+	changed: (since: number, ...ComponentType) -> { Entity },
 }
 
 declare Quaternion: {

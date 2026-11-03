@@ -292,8 +292,14 @@ a_setting_that_the_scene_sets_is_overridden :: proc(t: ^testing.T) {
 		hash = format.scene_field_hash("level"),
 		value = {kind = .Number, count = 3, floats = {0.5, 0.5, 0.5, 0}},
 	}
+	knobs := ecs.query(&f.world, {ecs.changed(ecs.read(&f.world, Knob))})
+	since := ecs.take_version(&f.world)
 	testing.expect(t, set_field(&f.world, e, 1, 101, level, false, nil))
 	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){false, {0.5, 0.5, 0.5}})
+	// The edit counts as a change, which is how the editor's scan and the GPU scene see it.
+	changed_it := ecs.query_iter(&f.world, knobs, since = since)
+	_, knob_changed := ecs.query_next(&changed_it)
+	testing.expect(t, knob_changed)
 	level_flag := format.Scene_Field{name = "level.override", hash = format.scene_field_hash("level.override")}
 	testing.expect(t, set_field(&f.world, e, 1, 101, level_flag, true, nil))
 	testing.expect_value(t, ecs.get(&f.world, e, Knob).level, Setting([3]f32){true, {0.5, 0.5, 0.5}})

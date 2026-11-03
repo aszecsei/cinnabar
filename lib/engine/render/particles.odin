@@ -674,10 +674,10 @@ particle_key :: proc(e: ecs.Entity) -> ecs.Entity {
 // anchor_instance writes a system's instance at its anchor, which stays, and gives its slot: what its ribbons'
 // vertices are relative to, and what the sorted draws of its mesh particles sort by.
 @(private = "file")
-anchor_instance :: proc(s: ^Gpu_Scene, slot: ^Particle_Slot, e: ecs.Entity, records: []Instance_Record) -> (instance: u32, ok: bool) {
+anchor_instance :: proc(s: ^Gpu_Scene, slot: ^Particle_Slot, e: ecs.Entity) -> (instance: u32, ok: bool) {
 	instance = scene_slot(s, particle_key(e)) or_return
 	rows := pose_rows({position = slot.anchor, rotation = 1, scale = 1}, s.origin)
-	records[instance] = {rows = rows, previous_rows = rows, id = entity_id(e)}
+	scene_write_record(s, instance, {rows = rows, previous_rows = rows, id = entity_id(e)})
 	s.previous[instance], s.seen[instance] = {}, s.frame
 	return instance, true
 }
@@ -688,7 +688,7 @@ anchor_instance :: proc(s: ^Gpu_Scene, slot: ^Particle_Slot, e: ecs.Entity, reco
 // whose items build_scene sets once the bins are sorted. A system starts in begin_particles, so its ribbons draw from
 // its second frame.
 @(private)
-add_ribbon_items :: proc(f: ^Frame, w: ^ecs.World, table: ^Material_Table, items: ^[dynamic]Cull_Item, records: []Instance_Record, hidden: []u32) -> []Ribbon_Entry {
+add_ribbon_items :: proc(f: ^Frame, w: ^ecs.World, table: ^Material_Table, items: ^[dynamic]Cull_Item, hidden: []u32) -> []Ribbon_Entry {
 	r := f.renderer
 	p := &r.particles
 	s := &r.scene
@@ -722,7 +722,7 @@ add_ribbon_items :: proc(f: ^Frame, w: ^ecs.World, table: ^Material_Table, items
 					continue
 				}
 				if !has_instance {
-					instance, has_instance = anchor_instance(s, slot, e, records)
+					instance, has_instance = anchor_instance(s, slot, e)
 					if !has_instance {
 						break
 					}
@@ -776,7 +776,6 @@ add_mesh_particle_items :: proc(
 	meshes: ^[dynamic]Mesh_Record,
 	mesh_indices: ^map[^Resident_Mesh]u32,
 	items: ^[dynamic]Cull_Item,
-	records: []Instance_Record,
 	hidden: []u32,
 ) -> []Mesh_Particle_Entry {
 	r := f.renderer
@@ -809,7 +808,7 @@ add_mesh_particle_items :: proc(
 				if !ready {
 					continue
 				}
-				anchor := anchor_instance(s, slot, e, records) or_break
+				anchor := anchor_instance(s, slot, e) or_break
 				mesh_index, known := mesh_indices[mesh]
 				if !known {
 					mesh_index = u32(len(meshes))

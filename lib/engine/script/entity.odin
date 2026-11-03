@@ -25,6 +25,8 @@ register_world :: proc(r: ^Runtime) {
 
 	define(r, "World.spawn", world_spawn)
 	define(r, "World.query", world_query)
+	define(r, "World.version", world_version)
+	define(r, "World.changed", world_changed)
 
 	expose(r, ecs.Transform, ecs.TRANSFORM_IDENTITY)
 	expose(r, ecs.Local_Transform, ecs.LOCAL_TRANSFORM_IDENTITY)
@@ -353,12 +355,44 @@ world_query :: proc(L: ^luau.State) -> c.int {
 	}
 	found := make([dynamic]ecs.Entity, frame(r))
 	ecs.collect(w, ids, &found)
+	push_entities(L, found[:])
+	return 1
+}
+
+// world_version gives a version for World.changed: every later write is newer than it.
+@(private = "file")
+world_version :: proc(L: ^luau.State) -> c.int {
+	_, w := world_of(L)
+	luau.pushnumber(L, f64(ecs.take_version(w)))
+	return 1
+}
+
+// world_changed is World.query's list, of only the chunks where a component given was written since a version.
+@(private = "file")
+world_changed :: proc(L: ^luau.State) -> c.int {
+	r, w := world_of(L)
+	since := luau.L_checknumber(L, 1)
+	n := luau.gettop(L) - 1
+	if n <= 0 {
+		raise(L, "World.changed needs at least one component type")
+	}
+	ids := make([]ecs.Component_Id, n, frame(r))
+	for i in 0 ..< n {
+		ids[i] = check_component_type(L, c.int(i + 2))
+	}
+	found := make([dynamic]ecs.Entity, frame(r))
+	ecs.collect(w, ids, &found, u64(since))
+	push_entities(L, found[:])
+	return 1
+}
+
+@(private = "file")
+push_entities :: proc(L: ^luau.State, found: []ecs.Entity) {
 	luau.createtable(L, c.int(len(found)), 0)
 	for e, i in found {
 		push_entity(L, e)
 		luau.rawseti(L, -2, c.int(i + 1))
 	}
-	return 1
 }
 
 // script_commands is the command buffer of the script phase, which the game applies with end_phase's result.

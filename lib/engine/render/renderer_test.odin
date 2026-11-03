@@ -46,18 +46,11 @@ record_problems :: proc(data: rawptr, level: log.Level, text: string, options: l
 	append(&r.problems, strings.clone(text))
 }
 
-@(test)
-a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
-	sync.guard(&backend_lock)
-	arena: virtual.Arena
-	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
-	defer virtual.arena_destroy(&arena)
-	testing.expect(t, jobs.init(2))
-	defer jobs.shutdown()
-	testing.expect(t, null.init(nil, {64, 32}))
-	defer null.shutdown()
-	platform := core.Platform_API {
-		frame_allocator              = virtual.arena_allocator(&arena),
+// The platform of a test's frames, over the null backend.
+@(private = "file")
+test_platform :: proc(arena: ^virtual.Arena) -> core.Platform_API {
+	return {
+		frame_allocator              = virtual.arena_allocator(arena),
 		heap_allocator               = runtime.heap_allocator(),
 		asset_allocator              = runtime.heap_allocator(),
 		file_read                    = core.file_read,
@@ -95,6 +88,19 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		gpu_create_compute_pipeline  = null.create_compute_pipeline,
 		gpu_update_compute_pipeline  = null.update_compute_pipeline,
 	}
+}
+
+@(test)
+a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := test_platform(&arena)
 	record: Hook_Record
 	record.problems = make([dynamic]string)
 	defer {
@@ -410,4 +416,124 @@ ids_keep_the_entity_and_the_submesh :: proc(t: ^testing.T) {
 	testing.expect_value(t, id_submesh(id), ID_MAX_SUBMESH)
 	testing.expect_value(t, id_entity(5 | 3 << ID_ENTITY_BITS), 5)
 	testing.expect_value(t, id_submesh(5), 0)
+}
+
+// A frame writes and uploads only the records that changed, and a change of what they mean writes them all.
+@(test)
+frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := test_platform(&arena)
+	w := new(ecs.World)
+	defer free(w)
+	testing.expect(t, ecs.init(w, &platform))
+	defer ecs.destroy(w)
+	ecs.register_engine_components(&w.registry)
+	volume.register_components(&w.registry)
+	register_components(&w.registry)
+	dir, err := os.make_directory_temp("", "renderer_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Renderer)
+	defer free(r)
+	// The test's cache has no shaders, which is not what this test is about. A test fails through the logger, so only
+	// the renderer's own calls go without it.
+	quiet := context
+	quiet.logger = log.nil_logger()
+	{
+		context = quiet
+		renderer_init(r, &platform, &assets, w)
+	}
+	defer {
+		context = quiet
+		renderer_destroy(r)
+	}
+
+	// Two archetypes, so two chunks: one interpolates between its poses.
+	still := ecs.spawn(w)
+	ecs.add(w, still, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, still, Mesh_Renderer{})
+	mover := ecs.spawn(w)
+	ecs.add(w, mover, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, mover, Mesh_Renderer{})
+	glider := ecs.spawn(w)
+	ecs.add(w, glider, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, glider, ecs.Previous_Transform(ecs.TRANSFORM_IDENTITY))
+	ecs.add(w, glider, Mesh_Renderer{})
+	s := &r.scene
+
+	frame :: proc(r: ^Renderer, w: ^ecs.World, at: ecs.World_Position = {}, copied := true) -> int {
+		context.logger = log.nil_logger()
+		f := new(Frame, r.platform.frame_allocator)
+		f.renderer = r
+		f.view = {position = at, rotation = 1, vertical_fov = 1, near = 0.05}
+		f.size = {64, 32}
+		build_scene(f, w, nil, nil)
+		// The copy of a frame with no draws does not run here, so a test says whether it did.
+		if copied {
+			r.scene.copied_frame = r.scene.frame
+		}
+		return r.scene.uploaded_slots
+	}
+
+	testing.expect_value(t, frame(r, w), 3)
+	testing.expect_value(t, s.high, 3)
+	testing.expect_value(t, frame(r, w), 0)
+	testing.expect_value(t, frame(r, w), 0)
+
+	// A pose written in a chunk: the slots of that chunk's entities that changed, and only those.
+	slot := s.slots[mover]
+	before := s.records[slot].rows
+	ecs.get_write(w, mover, ecs.Transform).position = ecs.position_offset({}, {1, 0, 0})
+	testing.expect_value(t, frame(r, w), 1)
+	testing.expect(t, s.records[slot].rows != before)
+	testing.expect_value(t, s.records[slot].previous_rows, before)
+	// One more write, so that last frame's pose catches up, and then none.
+	testing.expect_value(t, frame(r, w), 1)
+	testing.expect_value(t, s.records[slot].previous_rows, s.records[slot].rows)
+	testing.expect_value(t, frame(r, w), 0)
+
+	// A write of the same pose is a visit and no upload.
+	ecs.get_write(w, mover, ecs.Transform)
+	testing.expect_value(t, frame(r, w), 0)
+
+	// Between ticks, the pose moves with alpha, and no column is written.
+	ecs.get_write(w, glider, ecs.Transform).position = ecs.position_offset({}, {4, 0, 0})
+	w.clock.alpha = 0.25
+	testing.expect_value(t, frame(r, w), 1)
+	w.clock.alpha = 0.75
+	testing.expect_value(t, frame(r, w), 1)
+	// When it stops, one more write for last frame's pose, and then none.
+	testing.expect_value(t, frame(r, w), 1)
+	testing.expect_value(t, frame(r, w), 0)
+
+	// A rebase means something else by every pose, and so does a copy that did not run.
+	far := ecs.position_offset({}, {4 * ORIGIN_CELL, 0, 0})
+	testing.expect_value(t, frame(r, w, far), 3)
+	testing.expect_value(t, frame(r, w, far), 0)
+	testing.expect_value(t, frame(r, w, far, copied = false), 0)
+	testing.expect_value(t, frame(r, w, far), 3)
+	testing.expect_value(t, frame(r, w, far), 0)
+
+	// A freed slot holds nothing, and a new entity takes it, with no help from its old record. The row that moved into
+	// the despawned one's place is written, but it is the same.
+	testing.expect(t, ecs.despawn(w, still))
+	freed := s.slots[still]
+	testing.expect_value(t, frame(r, w, far), 1)
+	testing.expect_value(t, s.records[freed], Instance_Record{})
+	fresh := ecs.spawn(w)
+	ecs.add(w, fresh, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, fresh, Mesh_Renderer{})
+	testing.expect_value(t, frame(r, w, far), 1)
+	testing.expect_value(t, s.slots[fresh], freed)
+	testing.expect_value(t, s.records[freed].id, entity_id(fresh))
 }

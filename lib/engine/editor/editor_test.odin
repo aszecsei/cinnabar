@@ -253,6 +253,70 @@ deltas_carry_only_changes :: proc(t: ^testing.T) {
 	}
 }
 
+// A scan visits only the chunks that changed, so a write that no one marks is not seen until its chunk changes.
+@(test)
+a_scan_skips_chunks_that_did_not_change :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	e := spawn(f, {})
+	ecs.add(&f.world, e, ecs.make_name("door"))
+	step(f)
+
+	ecs.get(&f.world, e, ecs.Name)^ = ecs.make_name("gate")
+	testing.expect_value(t, len(step(f)), 0)
+
+	ecs.mark_changed(&f.world, e, ecs.NAME_ID)
+	delta := step(f)[0].(link.Entity_Delta)
+	testing.expect_value(t, len(delta.changed), 1)
+	testing.expect_value(t, delta.changed[0].name, "gate")
+	testing.expect_value(t, len(step(f)), 0)
+}
+
+// What the editor knows of an entity can change in place, with no move to another archetype.
+@(test)
+deltas_see_names_and_parents_written_in_place :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	door := spawn(f, {})
+	wall := spawn(f, {})
+	hinge := spawn(f, {})
+	ecs.add(&f.world, hinge, ecs.Parent{door})
+	ecs.add(&f.world, hinge, ecs.make_name("hinge"))
+	step(f)
+
+	// Components that the delta does not carry stay out of it.
+	ecs.get_write(&f.world, hinge, Tuned).inner.amount = 2
+	testing.expect_value(t, len(step(f)), 0)
+
+	ecs.add(&f.world, hinge, ecs.Parent{wall})
+	delta := step(f)[0].(link.Entity_Delta)
+	testing.expect_value(t, len(delta.changed), 1)
+	testing.expect_value(t, delta.changed[0].parent, u64(wall))
+
+	ecs.add(&f.world, hinge, ecs.make_name("latch"))
+	delta = step(f)[0].(link.Entity_Delta)
+	testing.expect_value(t, len(delta.changed), 1)
+	testing.expect_value(t, delta.changed[0].name, "latch")
+}
+
+// A new entity in the slot of one that died is one that is gone and one that came.
+@(test)
+a_reused_slot_is_a_death_and_a_birth :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	a := spawn(f, {})
+	step(f)
+
+	ecs.despawn(&f.world, a)
+	b := spawn(f, {})
+	testing.expect_value(t, ecs.entity_index(a), ecs.entity_index(b))
+	delta := step(f)[0].(link.Entity_Delta)
+	testing.expect(t, slice.equal(delta.destroyed, []u64{u64(a)}))
+	testing.expect_value(t, len(delta.changed), 1)
+	testing.expect_value(t, delta.changed[0].entity, u64(b))
+	testing.expect_value(t, len(step(f)), 0)
+}
+
 @(test)
 watched_values_go_out_when_they_change :: proc(t: ^testing.T) {
 	f := setup(t)
