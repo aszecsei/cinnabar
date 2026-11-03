@@ -41,12 +41,13 @@ simple_meshlets_cover_every_triangle_once_within_the_limits :: proc(t: ^testing.
 			corners := [3]u32{packed & 0xff, (packed >> 8) & 0xff, (packed >> 16) & 0xff}
 			for c, k in corners {
 				testing.expect(t, c < u32(m.vertex_count))
-				testing.expect_value(t, vertices[int(m.vertex_offset) + int(c)], indices[total * 3 + k])
+				testing.expect_value(t, format.meshlet_vertex(m, vertices[:], int(c)), indices[total * 3 + k])
 			}
 			// The sphere holds the triangle.
+			center, radius := format.meshlet_sphere(m)
 			for c in corners {
-				p := positions[vertices[int(m.vertex_offset) + int(c)]]
-				testing.expect(t, linalg.length(p - m.center) <= m.radius + 1e-5)
+				p := positions[format.meshlet_vertex(m, vertices[:], int(c))]
+				testing.expect(t, linalg.length(p - center) <= radius)
 			}
 			total += 1
 		}
@@ -76,7 +77,8 @@ simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 	testing.expect_value(t, meshlets[0].cone_cutoff, 127)
 	testing.expect_value(t, meshlets[0].vertex_count, 8)
 	testing.expect_value(t, meshlets[0].triangle_count, 12)
-	testing.expect_value(t, meshlets[0].center, [3]f32{0.5, 0.5, 0.5})
+	center, _ := format.meshlet_sphere(meshlets[0])
+	testing.expect_value(t, center, [3]f32{0.5, 0.5, 0.5})
 
 	// One face's two triangles: the cone is its normal, with no spread, so the cutoff is the smallest step.
 	clear(&meshlets)
@@ -89,4 +91,36 @@ simple_meshlets_cones_are_conservative :: proc(t: ^testing.T) {
 
 	// Nothing makes nothing.
 	testing.expect_value(t, build_simple_meshlets(positions, nil, &meshlets, &vertices, &triangles), 0)
+}
+
+// A meshlet's vertices are refs from its lowest, 16 bits when they all fit, whichever vertices the mesh gives it.
+@(test)
+simple_meshlets_narrow_their_refs_when_they_fit :: proc(t: ^testing.T) {
+	positions := make([][3]f32, 70000, context.temp_allocator)
+	for &p, i in positions {
+		p = {f32(i % 100), f32(i / 100), 0}
+	}
+	build :: proc(positions: [][3]f32, indices: []u32) -> (m: format.Meshlet, stream: [dynamic]u32) {
+		meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
+		triangles := make([dynamic]u32, context.temp_allocator)
+		stream = make([dynamic]u32, context.temp_allocator)
+		build_simple_meshlets(positions, indices, &meshlets, &stream, &triangles)
+		return meshlets[0], stream
+	}
+	near := []u32{69000, 69001, 69002}
+	m, stream := build(positions, near)
+	testing.expect_value(t, m.short_refs, 1)
+	testing.expect_value(t, m.base_vertex, 69000)
+	testing.expect_value(t, len(stream), 2)
+	for v, i in near {
+		testing.expect_value(t, format.meshlet_vertex(m, stream[:], i), v)
+	}
+	far := []u32{69999, 3, 40}
+	m, stream = build(positions, far)
+	testing.expect_value(t, m.short_refs, 0)
+	testing.expect_value(t, m.base_vertex, 3)
+	testing.expect_value(t, len(stream), 3)
+	for v, i in far {
+		testing.expect_value(t, format.meshlet_vertex(m, stream[:], i), v)
+	}
 }

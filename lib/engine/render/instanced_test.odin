@@ -8,7 +8,7 @@ import format "cinnabar:engine/asset/format"
 // level's largest parent error and its parents' reach, F32_MAX past the mesh's last level.
 @(test)
 mesh_levels_bucket_each_submeshs_meshlets :: proc(t: ^testing.T) {
-	meshlet :: proc(depth: u16, parent_error: f32, parent_center: [3]f32 = {}, parent_radius: f32 = 0) -> format.Meshlet {
+	meshlet :: proc(depth: u8, parent_error: f32, parent_center: [3]f32 = {}, parent_radius: f32 = 0) -> format.Meshlet {
 		return {depth = depth, parent_error = parent_error, parent_center = parent_center, parent_radius = parent_radius}
 	}
 	meshlets := []format.Meshlet {
@@ -40,7 +40,7 @@ mesh_levels_bucket_each_submeshs_meshlets :: proc(t: ^testing.T) {
 	// A mesh deeper than the buckets: the last bucket starts at its level, and every level has its errors.
 	deep := make([]format.Meshlet, 12, context.temp_allocator)
 	for &c, depth in deep {
-		c = meshlet(u16(depth), depth == 11 ? max(f32) : f32(depth + 1))
+		c = meshlet(u8(depth), depth == 11 ? max(f32) : f32(depth + 1))
 	}
 	d: Resident_Mesh
 	d.submesh_count = 1

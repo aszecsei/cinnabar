@@ -452,8 +452,8 @@ Cook_Mesh :: struct {
 }
 
 // finish_mesh is the half of a mesh's cook that every importer shares: it welds identical corners into vertices,
-// orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, bakes the
-// impostor, and writes the blob.
+// orders each submesh's triangles for the vertex cache and the vertices for fetching, builds the meshlets, orders a
+// large mesh's vertices by them, bakes the impostor, and writes the blob.
 finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	corners := m.corners
 	ranges := m.ranges
@@ -494,14 +494,15 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 	vertices = vertices[:vertex_count]
 
 	meshlets := make([dynamic]format.Meshlet, context.temp_allocator)
-	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
+	// Each meshlet's vertices as indices into the mesh's, at its vertex_offset, until they are final.
+	meshlet_indices := make([dynamic]u32, context.temp_allocator)
 	meshlet_triangles := make([dynamic]u32, context.temp_allocator)
 	meshlet_nodes := make([dynamic]format.Meshlet_Node, context.temp_allocator)
 	submeshes := make([]format.Submesh_Entry, len(ranges), context.temp_allocator)
 	for r, s in ranges {
 		first_meshlet := len(meshlets)
 		first_node := len(meshlet_nodes)
-		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_vertices, &meshlet_triangles, &meshlet_nodes)
+		roots := build_meshlets(indices[r.x:r.y], vertices, lod, &meshlets, &meshlet_indices, &meshlet_triangles, &meshlet_nodes)
 		submeshes[s] = {
 			name          = m.names[s],
 			first_index   = u32(r.x),
@@ -515,9 +516,15 @@ finish_mesh :: proc(m: Cook_Mesh, guid: format.Guid, key: u64) -> []byte {
 		}
 	}
 
+	// The bounds come first, because a sphere's depends on the order of its points.
 	bounds := bounds_of(vertices, nil)
 	if vertex_count > 65535 {
 		flags += {.Index32}
+		renumber_by_meshlets(vertices, indices, meshlet_indices[:])
+	}
+	meshlet_vertices := make([dynamic]u32, context.temp_allocator)
+	for &meshlet in meshlets {
+		format.meshlet_write_vertices(&meshlet, meshlet_indices[meshlet.vertex_offset:][:meshlet.vertex_count], &meshlet_vertices)
 	}
 	attribute_stride := int(format.mesh_attribute_stride(flags))
 	positions := make([]byte, vertex_count * 12, context.temp_allocator)
@@ -724,6 +731,40 @@ read_primitive :: proc(a: Asset_Source, part: Model_Part, scale: f32, skin: ^Mod
 	return true
 }
 
+// renumber_by_meshlets orders a mesh's vertices by their first use in its meshlets, and any that no meshlet uses after
+// them, so that a meshlet's vertices are close enough for 16-bit refs. Fetch order leaves most of a large mesh's too far
+// apart. A mesh of fewer than 65536 vertices always fits, so only a larger one needs this.
+@(private = "file")
+renumber_by_meshlets :: proc(vertices: []Vertex, indices: []c.uint, meshlet_indices: []u32) {
+	UNSEEN :: max(u32)
+	order := make([]u32, len(vertices), context.temp_allocator)
+	slice.fill(order, UNSEEN)
+	next: u32
+	for v in meshlet_indices {
+		if order[v] == UNSEEN {
+			order[v] = next
+			next += 1
+		}
+	}
+	for &o in order {
+		if o == UNSEEN {
+			o = next
+			next += 1
+		}
+	}
+	moved := make([]Vertex, len(vertices), context.temp_allocator)
+	for v, i in vertices {
+		moved[order[i]] = v
+	}
+	copy(vertices, moved)
+	for &index in indices {
+		index = c.uint(order[index])
+	}
+	for &v in meshlet_indices {
+		v = order[v]
+	}
+}
+
 // build_meshlets splits a submesh's triangles into meshlets, appended with their offsets into the mesh's arrays. With
 // lod, they are clusterlod's hierarchy, level by level: the submesh's own triangles, then each simplification of groups
 // of the level below (see docs/content/kinds/meshes.md#meshlets), with a tree over each level's groups appended to the
@@ -896,6 +937,8 @@ lod_output :: proc "c" (output_context: rawptr, group: Clod_Group, clusters: [^]
 append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices: []Vertex, depth: int, made, parent: Clod_Bounds, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
 	triangle_count := len(local_triangles) / 3
 	b := meshopt_computeMeshletBounds(&local_vertices[0], &local_triangles[0], c.size_t(triangle_count), &vertices[0].position[0], c.size_t(len(vertices)), size_of(Vertex))
+	assert(depth <= int(max(u8)), "a meshlet's level does not fit in its record")
+	center, radius := format.meshlet_encode_sphere(b.center, b.radius)
 	append(
 		meshlets,
 		format.Meshlet {
@@ -903,11 +946,11 @@ append_meshlet :: proc(local_vertices: []c.uint, local_triangles: []u8, vertices
 			triangle_offset = u32(len(meshlet_triangles)),
 			vertex_count = u8(len(local_vertices)),
 			triangle_count = u8(triangle_count),
-			depth = u16(depth),
+			depth = u8(depth),
 			cone_axis = b.cone_axis_s8,
 			cone_cutoff = b.cone_cutoff_s8,
-			center = b.center,
-			radius = b.radius,
+			center = center,
+			radius = radius,
 			error_center = made.center,
 			error_radius = made.radius,
 			parent_center = parent.center,

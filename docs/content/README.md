@@ -73,6 +73,7 @@ The sections below follow the same order: how an asset is identified, how each k
 ## References
 
 - Arseny Kapoulkine, [meshoptimizer](https://github.com/zeux/meshoptimizer): vertex welding, cache and fetch ordering, meshlet building, the cluster LOD builder `clusterlod.h`, and MikkTSpace-compatible tangents in [Meshes](kinds/meshes.md#meshes).
+- Arseny Kapoulkine, [niagara](https://github.com/zeux/niagara): a meshlet's `f16` culling sphere, and its 16-bit refs to its vertices from a base, with a fallback to whole words, in [Meshlets](kinds/meshes.md#meshlets).
 - AMD, [Compressonator](https://github.com/GPUOpen-Tools/compressonator): the `CMP_Core` block encoders for BC1 to BC7 in [Textures](kinds/textures.md#textures).
 - Microsoft, [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler): the compiler that [Shaders](kinds/shaders.md#shaders) and [Materials](kinds/materials.md#materials) drive, and its `-Zi -Qembed_debug` flags.
 - Light Transport Entertainment, [TinyUSDZ](https://github.com/lighttransport/tinyusdz), now LightUSD: the USD reader, composition and Tydra converter behind [Stages](kinds/stages.md#stages).

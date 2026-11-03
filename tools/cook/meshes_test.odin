@@ -275,7 +275,7 @@ meshlet_area :: proc(grid: Grid_Mesh, m: format.Meshlet) -> f32 {
 	area: f32
 	for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
 		corner :: proc(grid: Grid_Mesh, m: format.Meshlet, packed: u32, shift: u32) -> [3]f32 {
-			return grid.positions[grid.vertices[m.vertex_offset + (packed >> shift) & 0xff]]
+			return grid.positions[format.meshlet_vertex(m, grid.vertices, int((packed >> shift) & 0xff))]
 		}
 		a, b, c := corner(grid, m, packed, 0), corner(grid, m, packed, 8), corner(grid, m, packed, 16)
 		area += linalg.length(linalg.cross(b - a, c - a)) / 2
@@ -299,8 +299,13 @@ cluster_lod_builds_a_hierarchy_whose_every_cut_covers_the_mesh :: proc(t: ^testi
 		for packed in grid.triangles[m.triangle_offset:][:m.triangle_count] {
 			testing.expect(t, packed >> 24 == 0 && packed & 0xff < u32(m.vertex_count) && (packed >> 8) & 0xff < u32(m.vertex_count) && (packed >> 16) & 0xff < u32(m.vertex_count))
 		}
-		for v in grid.vertices[m.vertex_offset:][:m.vertex_count] {
+		// A mesh this small always has short refs. The culling sphere holds the meshlet's vertices.
+		testing.expect_value(t, m.short_refs, 1)
+		center, radius := format.meshlet_sphere(m)
+		for k in 0 ..< int(m.vertex_count) {
+			v := format.meshlet_vertex(m, grid.vertices, k)
 			testing.expect(t, v < grid.blob.vertex_count)
+			testing.expectf(t, linalg.distance(grid.positions[v], center) <= radius * (1 + 1e-5), "meshlet %d's sphere does not hold its vertex %d", i, k)
 		}
 		// The submesh's own triangles have no error, and errors grow a level up, so each view draws one level of each
 		// part of the mesh.
@@ -355,7 +360,7 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 
 	// Each meshlet is under one leaf, of its own level's tree, whose bounds are its group's.
 	leaves := make([]int, len(meshlets), context.temp_allocator)
-	visit :: proc(t: ^testing.T, nodes: []format.Meshlet_Node, meshlets: []format.Meshlet, leaves: []int, level: u16, i: u32) {
+	visit :: proc(t: ^testing.T, nodes: []format.Meshlet_Node, meshlets: []format.Meshlet, leaves: []int, level: u8, i: u32) {
 		n := nodes[i]
 		count := n.count & ~format.MESHLET_NODE_LEAF
 		testing.expect(t, count > 0)
@@ -376,7 +381,7 @@ meshlet_nodes_lead_to_every_meshlet_of_each_cut :: proc(t: ^testing.T) {
 		}
 	}
 	for root in 0 ..< s.root_count {
-		visit(t, nodes, meshlets, leaves, u16(root), root)
+		visit(t, nodes, meshlets, leaves, u8(root), root)
 	}
 	for count, i in leaves {
 		testing.expectf(t, count == 1, "meshlet %d is under %d leaves", i, count)
@@ -435,4 +440,72 @@ without_cluster_lod_meshlets_are_the_mesh_itself :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, triangles, int(grid.blob.index_count / 3))
 	testing.expect_value(t, format.mesh_submeshes(grid.data, grid.blob)[0].node_count, 0)
+}
+
+// The 80-byte record and whole u32 vertices that the mesh would take without short refs and the f16 sphere: its streams
+// are smaller than those.
+@(test)
+meshlets_take_less_than_their_wide_layout :: proc(t: ^testing.T) {
+	grid, ok := cook_grid(t, "guid = 00112233445566778899aabbccddeeff\n")
+	if !ok {
+		return
+	}
+	wide := 80 * len(grid.meshlets)
+	for m in grid.meshlets {
+		wide += 4 * int(m.vertex_count)
+	}
+	compact := int(grid.blob.meshlets.size) + int(grid.blob.meshlet_vertices.size)
+	testing.expectf(t, compact * 10 < wide * 7, "the records and vertices take %d bytes, against %d in the wide layout", compact, wide)
+}
+
+// A mesh over 16 bits of vertices gets them in the order that its meshlets use them, so nearly all of its meshlets still
+// have short refs, and its meshlets and its indices still draw the same triangles of the same positions.
+@(test)
+a_large_meshs_vertices_are_in_meshlet_order :: proc(t: ^testing.T) {
+	size := 260
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(size)}, {"content/grid.gltf.meta", "guid = 00112233445566778899aabbccddeeff\ncluster_lod = false\n"}})
+	defer remove_tree(tree)
+	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
+	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")
+	testing.expect(t, found)
+	data, blob, ok := mesh_blob(t, tree, guid)
+	if !ok {
+		return
+	}
+	testing.expectf(t, blob.vertex_count > 65535, "the grid has only %d vertices", blob.vertex_count)
+	testing.expect(t, .Index32 in blob.flags)
+	meshlets := format.mesh_meshlets(data, blob)
+	stream := slice.reinterpret([]u32, format.blob_bytes(data, blob.meshlet_vertices))
+	triangles := slice.reinterpret([]u32, format.blob_bytes(data, blob.meshlet_triangles))
+	indices := slice.reinterpret([]u32, format.blob_bytes(data, blob.indices))
+	positions := slice.reinterpret([][3]f32, format.blob_bytes(data, blob.positions))
+
+	sorted :: proc(a, b, c: u32) -> [3]u32 {
+		t := [3]u32{a, b, c}
+		slice.sort(t[:])
+		return t
+	}
+	drawn := make(map[[3]u32]int, allocator = context.temp_allocator)
+	long := 0
+	for m in meshlets {
+		long += m.short_refs == 0 ? 1 : 0
+		for packed in triangles[m.triangle_offset:][:m.triangle_count] {
+			corner := [3]u32{format.meshlet_vertex(m, stream, int(packed & 0xff)), format.meshlet_vertex(m, stream, int((packed >> 8) & 0xff)), format.meshlet_vertex(m, stream, int((packed >> 16) & 0xff))}
+			drawn[sorted(corner.x, corner.y, corner.z)] += 1
+		}
+	}
+	testing.expectf(t, long * 10 < len(meshlets), "%d of %d meshlets have long refs", long, len(meshlets))
+
+	// A renumbering that left the positions behind would stretch triangles across the grid.
+	quad := 1 / f32(size)
+	area: f32
+	for i := 0; i + 3 <= len(indices); i += 3 {
+		key := sorted(indices[i], indices[i + 1], indices[i + 2])
+		testing.expect(t, drawn[key] > 0)
+		drawn[key] -= 1
+		a, b, c := positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]
+		testing.expect(t, linalg.distance(a, b) < 2 * quad && linalg.distance(b, c) < 2 * quad && linalg.distance(c, a) < 2 * quad)
+		area += linalg.length(linalg.cross(b - a, c - a)) / 2
+	}
+	testing.expectf(t, abs(area - 1) < 0.05, "the grid's area is %v", area)
 }

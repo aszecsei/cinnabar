@@ -51,22 +51,29 @@ Mesh_Submesh :: struct {
 
 // Meshlet is a cluster of at most MESHLET_MAX_VERTICES vertices and MESHLET_MAX_TRIANGLES triangles, at one level of
 // its submesh's LOD hierarchy, with the bounds that culling tests and the errors that pick the level (see
-// docs/content/kinds/meshes.md#meshlets). Its vertices are a range of meshlet_vertices, which index the mesh's vertices,
-// and its triangles a range of meshlet_triangles. Shaders read it as it is: matches Meshlet in material_mesh.hlsli.
+// docs/content/kinds/meshes.md#meshlets). Its vertices are refs in meshlet_vertices, which meshlet_write_vertices writes
+// and meshlet_vertex reads, and its triangles a range of meshlet_triangles. Shaders read it as it is: matches Meshlet in
+// material_mesh.hlsli.
 Meshlet :: struct {
+	// In u32 words of meshlet_vertices.
 	vertex_offset:   u32,
 	triangle_offset: u32,
+	// The lowest of its vertices. Each ref is a vertex's index in the mesh less this.
+	base_vertex:     u32,
 	vertex_count:    u8,
 	triangle_count:  u8,
 	// Its level: 0 for the submesh's own triangles, and one more for each simplification.
-	depth:           u16,
+	depth:           u8,
+	// 1 when its refs are 16 bits, two to a word, lowest half first. 0 when they are one to a word.
+	short_refs:      u8,
 	// The normal cone, in snorm8: decode with x / 127. A meshlet whose cone points away from the view can be culled. A
 	// cutoff of 127 is a cone too wide to cull.
 	cone_axis:       [3]i8,
 	cone_cutoff:     i8,
-	// The sphere that culling tests.
-	center:          [3]f32,
-	radius:          f32,
+	// The sphere that culling tests, from meshlet_encode_sphere, which holds the meshlet's. An infinite radius is a
+	// meshlet too far from the mesh's origin for f16, which culling always keeps.
+	center:          [3]f16,
+	radius:          f16,
 	// The sphere of the simplification that made this meshlet, whose error is error: 0 for the submesh's own triangles.
 	error_center:    [3]f32,
 	error_radius:    f32,
@@ -76,10 +83,96 @@ Meshlet :: struct {
 	parent_radius:   f32,
 	error:           f32,
 	parent_error:    f32,
-	padding:         [2]u32,
 }
 
-#assert(size_of(Meshlet) == 80)
+#assert(size_of(Meshlet) == 68)
+#assert(offset_of(Meshlet, center) == 20)
+#assert(offset_of(Meshlet, error_center) == 28)
+
+// The largest finite f16.
+@(private = "file")
+F16_LARGEST :: 65504
+// The smallest normal f16, 2^-14. A shader's f16tof32 need not keep anything smaller.
+@(private = "file")
+F16_SMALLEST_NORMAL :: 1.0 / 16384.0
+// An infinite f16's bits. Matches MESHLET_RADIUS_INFINITE in material_mesh.hlsli.
+@(private = "file")
+F16_INFINITE_BITS :: u16(0x7c00)
+
+// meshlet_write_vertices appends a meshlet's vertices to the stream as refs from their lowest, two to a word when every
+// ref fits in 16 bits, and sets the meshlet's fields that say so.
+meshlet_write_vertices :: proc(m: ^Meshlet, vertices: []u32, stream: ^[dynamic]u32) {
+	low, high := max(u32), u32(0)
+	for v in vertices {
+		low, high = min(low, v), max(high, v)
+	}
+	m.vertex_offset = u32(len(stream))
+	m.vertex_count = u8(len(vertices))
+	m.base_vertex = low
+	m.short_refs = high - low <= 0xffff ? 1 : 0
+	if m.short_refs == 0 {
+		for v in vertices {
+			append(stream, v - low)
+		}
+		return
+	}
+	for i := 0; i < len(vertices); i += 2 {
+		word := vertices[i] - low
+		if i + 1 < len(vertices) {
+			word |= (vertices[i + 1] - low) << 16
+		}
+		append(stream, word)
+	}
+}
+
+// meshlet_vertex is a meshlet's vertex i, as an index into the mesh's vertices. Matches cluster_vertex in
+// material_mesh.hlsli.
+meshlet_vertex :: proc "contextless" (m: Meshlet, stream: []u32, i: int) -> u32 {
+	if m.short_refs == 0 {
+		return m.base_vertex + stream[int(m.vertex_offset) + i]
+	}
+	word := stream[int(m.vertex_offset) + i / 2]
+	return m.base_vertex + (i % 2 != 0 ? word >> 16 : word & 0xffff)
+}
+
+// meshlet_encode_sphere is the smallest f16 sphere near a sphere that holds it, for culling: the center rounds, and the
+// radius grows by how far it moved and rounds up. A sphere that f16 cannot reach, or that is not a number, has an
+// infinite radius. An f16 under the smallest normal does not stay in either, so that a shader that flushes it to 0 reads
+// the same sphere.
+meshlet_encode_sphere :: proc "contextless" (center: [3]f32, radius: f32) -> (encoded: [3]f16, encoded_radius: f16) {
+	infinite := transmute(f16)F16_INFINITE_BITS
+	for v in ([4]f32{center.x, center.y, center.z, radius}) {
+		if v != v {
+			return {}, infinite
+		}
+	}
+	moved: f64
+	for k in 0 ..< 3 {
+		encoded[k] = f16(clamp(center[k], -F16_LARGEST, F16_LARGEST))
+		if abs(f32(encoded[k])) < F16_SMALLEST_NORMAL {
+			encoded[k] = 0
+		}
+		step := f64(center[k]) - f64(encoded[k])
+		moved += step * step
+	}
+	r := f64(radius) + math.sqrt(moved)
+	if r > F16_LARGEST {
+		return encoded, infinite
+	}
+	encoded_radius = f16(f32(r))
+	for f64(encoded_radius) < r {
+		encoded_radius = transmute(f16)(transmute(u16)encoded_radius + 1)
+	}
+	if r > 0 && f32(encoded_radius) < F16_SMALLEST_NORMAL {
+		encoded_radius = F16_SMALLEST_NORMAL
+	}
+	return
+}
+
+// meshlet_sphere is the sphere that culling tests. Matches cluster_visible in material_mesh.hlsli.
+meshlet_sphere :: proc "contextless" (m: Meshlet) -> (center: [3]f32, radius: f32) {
+	return {f32(m.center.x), f32(m.center.y), f32(m.center.z)}, f32(m.radius)
+}
 
 // Meshlet_Node is a node of the tree over one level's groups of meshlets (see docs/content/kinds/meshes.md#meshlets).
 // Its sphere holds every group's below it, and its error is the largest of theirs, so a node whose error does not show
@@ -211,7 +304,7 @@ Mesh_Blob :: struct {
 	indices:           Slice,
 	// Meshlet records.
 	meshlets:          Slice,
-	// u32 per meshlet vertex.
+	// Each meshlet's refs to its vertices, in u32 words: two to a word, or one when they do not fit in 16 bits.
 	meshlet_vertices:  Slice,
 	// u32 per meshlet triangle: its three indices into its meshlet's vertices in the low three bytes.
 	meshlet_triangles: Slice,

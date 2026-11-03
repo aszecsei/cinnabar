@@ -1,5 +1,6 @@
 package asset_format
 
+import "core:math"
 import "core:mem"
 import "core:testing"
 
@@ -273,6 +274,81 @@ mesh_blobs_round_trip :: proc(t: ^testing.T) {
 	blob.meshlet_triangles.size = 3
 	_, ok = mesh_view(data)
 	testing.expect(t, !ok)
+}
+
+// A meshlet's refs read back as the vertices they were, from each side of the 16 bits that fit, with an odd count that
+// leaves half a word.
+@(test)
+meshlet_vertices_round_trip :: proc(t: ^testing.T) {
+	stream := make([dynamic]u32, context.temp_allocator)
+	cases := [][]u32{{7}, {100000, 100002, 100001}, {70000, 135535}, {5, 65540, 6, 7}, {5, 65541, 6}, {0, max(u32) - 1}}
+	short := []u8{1, 1, 1, 1, 0, 0}
+	words := []int{1, 2, 1, 2, 3, 2}
+	meshlets := make([dynamic]Meshlet, context.temp_allocator)
+	for vertices, i in cases {
+		first := len(stream)
+		m: Meshlet
+		meshlet_write_vertices(&m, vertices, &stream)
+		append(&meshlets, m)
+		testing.expect_value(t, int(m.vertex_offset), first)
+		testing.expect_value(t, int(m.vertex_count), len(vertices))
+		testing.expect_value(t, m.short_refs, short[i])
+		testing.expect_value(t, len(stream) - first, words[i])
+	}
+	// Each reads after the others have written.
+	for vertices, i in cases {
+		for v, k in vertices {
+			testing.expect_value(t, meshlet_vertex(meshlets[i], stream[:], k), v)
+		}
+	}
+}
+
+// A sphere in f16 holds the sphere it came from, whatever rounding did to its center. One that f16 cannot reach is
+// infinite, which culling keeps.
+@(test)
+meshlet_spheres_stay_conservative :: proc(t: ^testing.T) {
+	holds :: proc(t: ^testing.T, center: [3]f32, radius: f32) {
+		encoded, encoded_radius := meshlet_encode_sphere(center, radius)
+		m := Meshlet{center = encoded, radius = encoded_radius}
+		decoded, decoded_radius := meshlet_sphere(m)
+		moved: f64
+		for k in 0 ..< 3 {
+			moved += (f64(center[k]) - f64(decoded[k])) * (f64(center[k]) - f64(decoded[k]))
+		}
+		testing.expectf(t, math.sqrt(moved) + f64(radius) <= f64(decoded_radius), "%v at %v became %v at %v", radius, center, decoded_radius, decoded)
+	}
+	holds(t, {0, 0, 0}, 0)
+	holds(t, {0.1, -0.2, 0.3}, 0.05)
+	holds(t, {1.0 / 3, 2.0 / 3, 5.0 / 3}, 1.0 / 7)
+	holds(t, {1000.1, -2000.2, 4000.3}, 0.001)
+	holds(t, {60000, 60000, -60000}, 3)
+	holds(t, {1e-7, -1e-7, 3e-6}, 1e-7)
+	holds(t, {0, 0, 0}, 1e-9)
+	holds(t, {0, 0, 0}, 65504)
+	holds(t, {65500, 1, 1}, 1)
+	// Past f16's range, the center stops at its end, and the radius reaches back.
+	holds(t, {70000, 0, 0}, 1)
+
+	// What f16 has stays as it is.
+	center, radius := meshlet_encode_sphere({0.5, -2, 1024}, 0.25)
+	testing.expect_value(t, center, [3]f16{0.5, -2, 1024})
+	testing.expect_value(t, radius, 0.25)
+	// Nothing a shader might flush stays in a sphere.
+	center, radius = meshlet_encode_sphere({1e-7, 0, 0}, 1e-9)
+	testing.expect_value(t, center, [3]f16{0, 0, 0})
+	testing.expect(t, f32(radius) >= 1.0 / 16384)
+
+	infinite :: proc(t: ^testing.T, center: [3]f32, radius: f32) {
+		_, encoded_radius := meshlet_encode_sphere(center, radius)
+		testing.expectf(t, transmute(u16)encoded_radius == 0x7c00, "%v at %v became %v", radius, center, encoded_radius)
+	}
+	infinite(t, {0, 0, 0}, 70000)
+	infinite(t, {200000, 0, 0}, 1)
+	infinite(t, {-1e30, 0, 0}, 1)
+	infinite(t, {0, 0, 0}, 65504.5)
+	infinite(t, {math.inf_f32(1), 0, 0}, 1)
+	infinite(t, {math.nan_f32(), 0, 0}, 1)
+	infinite(t, {0, 0, 0}, math.nan_f32())
 }
 
 @(test)

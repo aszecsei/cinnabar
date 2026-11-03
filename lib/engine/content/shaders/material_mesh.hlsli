@@ -23,23 +23,29 @@ static const uint INSTANCE_GROUP_ROW = 32768;
 static const uint DRAW_INSTANCE_SHIFT = 8;
 // Vertex.cluster has the meshlet's level above its index.
 static const uint MESHLET_DEPTH_SHIFT = 24;
+// An infinite f16's bits, in a meshlet's radius: a meshlet too far from the mesh's origin for f16, which culling keeps.
+// Matches F16_INFINITE_BITS in lib/engine/asset/format/mesh.odin.
+static const uint MESHLET_RADIUS_INFINITE = 0x7c00;
 
 // Matches Meshlet in lib/engine/asset/format/mesh.odin. counts has the vertex count in its lowest byte, the triangle
-// count in the next and the level in its high half; cone has the normal cone's axis in its low three bytes and its
-// cutoff in the high one, each snorm8. A meshlet draws when error projects to at most the threshold and parent_error
-// to more, each from its sphere.
+// count in the next, the level in the next, and in the high one 1 when its refs to its vertices are 16 bits; cone has
+// the normal cone's axis in its low three bytes and its cutoff in the high one, each snorm8; sphere has the culling
+// sphere's center and radius as f16s, each word's lowest half first. A meshlet draws when error projects to at most the
+// threshold and parent_error to more, each from its sphere.
 struct Meshlet {
 	uint vertex_offset;
 	uint triangle_offset;
+	uint base_vertex;
 	uint counts;
 	uint cone;
-	float4 sphere;
+	uint2 sphere;
 	float4 error_sphere;
 	float4 parent_sphere;
 	float error;
 	float parent_error;
-	uint2 padding;
 };
+
+_Static_assert(sizeof(Meshlet) == 68, "Meshlet must match lib/engine/asset/format/mesh.odin");
 
 // The meshlets that an amplification group launches, and its instance's poses, this frame's and last frame's, which
 // the group places once, an instanced draw's from its entity's and its own, so neither its threads nor its mesh
@@ -70,15 +76,20 @@ bool lod_selected(Meshlet c, float4 rows[3], float scale) {
 // the material's displacement bound, is in the frustum, and its normal cone does not point away from the view. The
 // cone is not tested for a two-sided material, for a material that displaces its vertices, which may turn them, for
 // an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull. In the late view of
-// occlusion culling, its sphere is not behind the depth pyramid either.
+// occlusion culling, its sphere is not behind the depth pyramid either. A sphere with an infinite radius passes every
+// test, which would otherwise take it through NaNs.
 bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	float3 scales = axis_scales(instance.rows);
 	float scale = max(scales.x, max(scales.y, scales.z));
 	if (!lod_selected(c, instance.rows, scale)) {
 		return false;
 	}
-	float3 center = transform_point(instance.rows, c.sphere.xyz) - frame.camera_offset.xyz;
-	float radius = c.sphere.w * scale + bound;
+	if ((c.sphere.y >> 16) == MESHLET_RADIUS_INFINITE) {
+		return true;
+	}
+	float3 sphere_center = float3(f16tof32(c.sphere.x), f16tof32(c.sphere.x >> 16), f16tof32(c.sphere.y));
+	float3 center = transform_point(instance.rows, sphere_center) - frame.camera_offset.xyz;
+	float radius = f16tof32(c.sphere.y >> 16) * scale + bound;
 	for (uint i = 0; i < 6; i++) {
 		if (dot(frame.planes[i].xyz, center) + frame.planes[i].w < -radius) {
 			return false;
@@ -189,11 +200,19 @@ Cluster load_cluster(uint meshlet, float4 r0, float4 r1, float4 r2, float4 p0, f
 #define LOAD_CLUSTER(clusters, group) load_cluster(clusters.meshlets[group], clusters.rows[0], clusters.rows[1], clusters.rows[2], \
 	clusters.previous_rows[0], clusters.previous_rows[1], clusters.previous_rows[2])
 
-// cluster_vertex is a meshlet's vertex.
+// cluster_vertex is a meshlet's vertex: its ref, 16 bits in a whole word or a whole word, from the meshlet's lowest
+// vertex. Matches meshlet_vertex in lib/engine/asset/format/mesh.odin.
 Material_Vertex cluster_vertex(Cluster c, uint i) {
-	uint index = cn_buffer(c.mesh.meshlet_vertices).Load((c.meshlet.vertex_offset + i) * 4);
-	Material_Vertex v = place_vertex(c.draw, c.mesh, c.instance, index);
-	v.cluster = c.index | (c.meshlet.counts >> 16) << MESHLET_DEPTH_SHIFT;
+	uint words = c.meshlet.vertex_offset * 4;
+	uint ref;
+	if ((c.meshlet.counts >> 24) != 0) {
+		uint word = cn_buffer(c.mesh.meshlet_vertices).Load(words + (i / 2) * 4);
+		ref = (i & 1) != 0 ? word >> 16 : word & 0xffff;
+	} else {
+		ref = cn_buffer(c.mesh.meshlet_vertices).Load(words + i * 4);
+	}
+	Material_Vertex v = place_vertex(c.draw, c.mesh, c.instance, c.meshlet.base_vertex + ref);
+	v.cluster = c.index | ((c.meshlet.counts >> 16) & 0xff) << MESHLET_DEPTH_SHIFT;
 	return v;
 }
 
