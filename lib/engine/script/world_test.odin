@@ -407,3 +407,76 @@ end
 	expect_reports(t, f, {0.032, 0, 40, 3})
 	release(&f.runtime, thread)
 }
+
+@(test)
+scripts_read_gamepads_through_input :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	input: core.Input
+	input.gamepads[1] = {
+		connected = true,
+		down      = {.Y},
+		pressed   = {.Y},
+		released  = {.Start},
+	}
+	input.gamepads[1].axes[.Right_Trigger] = 0.5
+	begin_phase(&f.runtime, 16 * time.Millisecond, input)
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=pads",
+		`
+Test.report(Input.gamepad_connected(1) and 1 or 0)
+Test.report(Input.gamepad_connected(2) and 1 or 0)
+Test.report(Input.gamepad_is_down(2, GamepadButton.Y) and 1 or 0)
+Test.report(Input.gamepad_was_pressed(2, GamepadButton.Y) and 1 or 0)
+Test.report(Input.gamepad_was_released(2, GamepadButton.Start) and 1 or 0)
+Test.report(Input.gamepad_is_down(2, GamepadButton.A) and 1 or 0)
+Test.report(Input.gamepad_axis(2, GamepadAxis.RightTrigger))
+Test.report(Input.gamepad_axis(2, GamepadAxis.LeftX))
+for _, bad in {
+	function() return Input.gamepad_connected(0) end,
+	function() return Input.gamepad_connected(5) end,
+	function() return Input.gamepad_is_down(1, 10) end,
+	function() return Input.gamepad_is_down(1, 16) end,
+	function() return Input.gamepad_axis(1, 6) end,
+} do
+	Test.report(pcall(bad) and 1 or 0)
+end
+`,
+	)
+	testing.expect(t, ok)
+	expect_reports(t, f, {0, 1, 1, 1, 1, 0, 0.5, 0, 0, 0, 0, 0, 0})
+	release(&f.runtime, thread)
+}
+
+@(test)
+scripts_read_text_and_composition_through_input :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	input: core.Input
+	core.input_text_append(&input.text, "日本")
+	core.input_text_append(&input.composition, "ごx")
+	input.composition_cursor = 3
+	begin_phase(&f.runtime, 16 * time.Millisecond, input)
+	thread, ok := spawn_source(
+		&f.runtime,
+		"=typing",
+		`
+while true do
+	Test.report(Input.text == "日本" and 1 or 0)
+	Test.report(#Input.text)
+	Test.report(Input.composition == "ごx" and 1 or 0)
+	Test.report(Input.composition_cursor)
+	coroutine.yield()
+end
+`,
+	)
+	testing.expect(t, ok)
+	expect_reports(t, f, {1, 6, 1, 3})
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
+	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Yielded)
+	expect_reports(t, f, {0, 0, 0, 0})
+	release(&f.runtime, thread)
+}

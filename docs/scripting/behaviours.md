@@ -133,7 +133,7 @@ for ecs.next_tick(&ticks) {
 `script.fixed_update`, after the tick's `Fixed` systems:
 
 1. Set `Time` for the tick: `delta` is the tick's duration, `time` the world time at its end, and `in_fixed` is true.
-2. Set `Input` for the tick. The first tick of a frame gets the frame's edges, with those of earlier frames that ran no tick; the others get none, so `Input.was_pressed` in `fixed_update` sees each press exactly once ([Time](../world/time.md#fixed-and-variable-rate)).
+2. Set `Input` for the tick. The first tick of a frame gets the frame's edges and typed text, with those of earlier frames that ran no tick; the others get none, so `Input.was_pressed`, `Input.gamepad_was_pressed` and `Input.text` in `fixed_update` see each press and each character exactly once ([Time](../world/time.md#fixed-and-variable-rate)).
 3. Drain the world's log, then `awake`, `on_enable` and `start` as in the script phase, so an instance's `start` comes before its first `fixed_update`.
 4. `fixed_update` for the classes that define it, in instance slot order.
 5. Deliver the events that it sent, and apply its structural changes.

@@ -20,6 +20,11 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	if !r.fixed_ran {
 		r.pending_pressed += input.pressed
 		r.pending_released += input.released
+		for pad, i in input.gamepads {
+			r.pending_gamepad_pressed[i] += pad.pressed
+			r.pending_gamepad_released[i] += pad.released
+		}
+		core.input_text_append(&r.pending_text, core.input_text_string(&r.input.text))
 	}
 	r.fixed_ran = false
 	world_time := time.duration_seconds(r.world.clock.time) if r.world != nil else 0
@@ -60,6 +65,11 @@ set_input :: proc(r: ^Runtime, input: core.Input) {
 	push_vector(L, {input.mouse_delta.x, input.mouse_delta.y, 0})
 	luau.rawsetfield(L, -2, "mouse_delta")
 	set_number(L, "scroll", f64(input.scroll))
+	luau.pushodinstring(L, core.input_text_string(&r.input.text))
+	luau.rawsetfield(L, -2, "text")
+	luau.pushodinstring(L, core.input_text_string(&r.input.composition))
+	luau.rawsetfield(L, -2, "composition")
+	set_number(L, "composition_cursor", f64(input.composition_cursor))
 	luau.setreadonly(L, -1, true)
 	luau.pop(L, 1)
 }
@@ -81,8 +91,9 @@ set_number :: proc(L: ^luau.State, key: cstring, value: f64) {
 	luau.rawsetfield(L, -2, key)
 }
 
-// create_frame_values makes the Time, Input and Key tables. Time and Input change every frame, so they are in
-// format.script_mutable_globals, and the compiler reads their fields each time. Key never changes.
+// create_frame_values makes the Time, Input, Key, GamepadButton and GamepadAxis tables. Time and Input change every
+// frame, so they are in format.script_mutable_globals, and the compiler reads their fields each time. The others never
+// change.
 @(private)
 create_frame_values :: proc(r: ^Runtime) {
 	L := r.L
@@ -98,16 +109,25 @@ create_frame_values :: proc(r: ^Runtime) {
 	luau.pop(L, 1)
 	set_path(r, "Input")
 
+	push_enum_values(r, core.Key, skip = 1)
+	set_path(r, "Key")
+	push_enum_values(r, core.Gamepad_Button)
+	set_path(r, "GamepadButton")
+	push_enum_values(r, core.Gamepad_Axis)
+	set_path(r, "GamepadAxis")
+}
+
+// push_enum_values pushes a table of an enum's values by their script names, without the first skip of them.
+@(private = "file")
+push_enum_values :: proc(r: ^Runtime, Enum: typeid, skip := 0) {
+	L := r.L
 	luau.newtable(L)
-	for name, i in reflect.enum_field_names(core.Key) {
-		if i == 0 {
-			continue
-		}
+	values := reflect.enum_field_values(Enum)
+	for name, i in reflect.enum_field_names(Enum)[skip:] {
 		buffer: [32]u8
-		luau.pushnumber(L, f64(reflect.enum_field_values(core.Key)[i]))
+		luau.pushnumber(L, f64(values[i + skip]))
 		luau.rawsetfield(L, -2, cstring_of(r, script_name(name, buffer[:])))
 	}
-	set_path(r, "Key")
 }
 
 @(private)
@@ -124,6 +144,51 @@ register_frame :: proc(r: ^Runtime) {
 		luau.pushboolean(L, b32(check_key(L, 1) in runtime_of(L).input.released))
 		return 1
 	})
+	define(r, "Input.gamepad_connected", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(L, b32(check_gamepad(L, 1).connected))
+		return 1
+	})
+	define(r, "Input.gamepad_is_down", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(L, b32(check_gamepad_button(L, 2) in check_gamepad(L, 1).down))
+		return 1
+	})
+	define(r, "Input.gamepad_was_pressed", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(L, b32(check_gamepad_button(L, 2) in check_gamepad(L, 1).pressed))
+		return 1
+	})
+	define(r, "Input.gamepad_was_released", proc(L: ^luau.State) -> c.int {
+		luau.pushboolean(L, b32(check_gamepad_button(L, 2) in check_gamepad(L, 1).released))
+		return 1
+	})
+	define(r, "Input.gamepad_axis", proc(L: ^luau.State) -> c.int {
+		n := luau.L_checkinteger(L, 2)
+		if n < 0 || n > c.int(max(core.Gamepad_Axis)) {
+			luau.L_argerrorL(L, 2, "a GamepadAxis value expected")
+		}
+		luau.pushnumber(L, f64(check_gamepad(L, 1).axes[core.Gamepad_Axis(n)]))
+		return 1
+	})
+}
+
+// check_gamepad is the pad in a slot, which scripts count from 1.
+@(private = "file")
+check_gamepad :: proc(L: ^luau.State, idx: c.int) -> ^core.Gamepad {
+	n := luau.L_checkinteger(L, idx)
+	if n < 1 || n > core.MAX_GAMEPADS {
+		luau.L_argerrorL(L, idx, "a gamepad slot from 1 to 4 expected")
+	}
+	return &runtime_of(L).input.gamepads[n - 1]
+}
+
+@(private = "file")
+check_gamepad_button :: proc(L: ^luau.State, idx: c.int) -> core.Gamepad_Button {
+	n := luau.L_checkinteger(L, idx)
+	if n < 0 ||
+	   n > c.int(max(core.Gamepad_Button)) ||
+	   core.Gamepad_Button(n) not_in core.GAMEPAD_BUTTONS {
+		luau.L_argerrorL(L, idx, "a GamepadButton value expected")
+	}
+	return core.Gamepad_Button(n)
 }
 
 @(private = "file")

@@ -67,17 +67,23 @@ definitions :: proc(r: ^Runtime, allocator: runtime.Allocator) -> string {
 	strings.write_string(&add, "((Entity, { [any]: any }, { [string]: any }?) -> any)")
 	fmt.sbprintf(&b, ENTITY_DEFINITION, strings.to_string(get), strings.to_string(add))
 
-	strings.write_string(&b, "\ndeclare Key: {\n")
-	for name, i in reflect.enum_field_names(core.Key) {
-		if i > 0 {
-			buffer: [32]u8
-			fmt.sbprintf(&b, "\t%s: number,\n", script_name(name, buffer[:]))
-		}
-	}
-	strings.write_string(&b, "}\n")
+	write_enum_values(&b, "Key", core.Key, skip = 1)
+	write_enum_values(&b, "GamepadButton", core.Gamepad_Button)
+	write_enum_values(&b, "GamepadAxis", core.Gamepad_Axis)
 
 	write_game_bindings(r, &b, allocator)
 	return strings.to_string(b)
+}
+
+// write_enum_values declares the table that push_enum_values makes.
+@(private = "file")
+write_enum_values :: proc(b: ^strings.Builder, global: string, Enum: typeid, skip := 0) {
+	fmt.sbprintf(b, "\ndeclare %s: {{\n", global)
+	for name in reflect.enum_field_names(Enum)[skip:] {
+		buffer: [32]u8
+		fmt.sbprintf(b, "\t%s: number,\n", script_name(name, buffer[:]))
+	}
+	strings.write_string(b, "}\n")
 }
 
 @(private = "file")

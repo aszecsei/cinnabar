@@ -24,6 +24,10 @@ definitions_cover_components_and_game_bindings :: proc(t: ^testing.T) {
 	expect(t, text, "((Entity, TransformType) -> TransformRef?)")
 	expect(t, text, "((Entity, { [any]: any }) -> any)")
 	expect(t, text, "\tSpace: number,\n")
+	expect(t, text, "declare GamepadButton: {\n\tDpadUp: number,\n")
+	expect(t, text, "declare GamepadAxis: {\n\tLeftX: number,\n")
+	expect(t, text, "\tgamepad_axis: (pad: number, axis: number) -> number,")
+	expect(t, text, "\tcomposition: string,")
 	// The game's bindings are declared, and the engine's come from engine.d.luau only once.
 	expect(t, text, "declare Test: {\n\tnative: (...any) -> ...any,\n\treport: (...any) -> ...any,\n}")
 	testing.expect_value(t, strings.count(text, "declare Debug:"), 1)

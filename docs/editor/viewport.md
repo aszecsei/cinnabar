@@ -27,7 +27,7 @@ How the host's frames reach the viewport through shared textures, the editor cam
 - **The game's own window:** the viewport is always SDR, so Run Game (Ctrl+F5) opens the game in its own window, with the scene and content that it loads itself, to see the output mode, such as HDR. The Game Window group sets the project's output mode and quality preset, and this machine's (see [Architecture](../overview/architecture.md#project-settings)), which a running game takes at once. The window closes with the editor, and its output goes to the console.
 - **New Volume** on the Home tab adds an entity with a Global `Volume`, for settings components (see [World](../world/volumes.md#volumes)).
 - **Overlays:** the tool palette, the camera's speed with the tool and space, the box of a box selection and the stats overlay are Avalonia controls over the viewport.
-- **Input:** while the viewport has focus in play mode, the editor sends keyboard and mouse input, and the host gives it to the game as `core.Input` (see [Modes](document-and-scenes.md#modes) and [Core](../core/input.md#input)).
+- **Input:** while the viewport has focus in play mode, the editor sends keyboard, mouse, gamepad and text input, and the host gives it to the game as `core.Input` (see [Modes](document-and-scenes.md#modes) and [Core](../core/input.md#input)). The IME is on while the game has the input, and an overlay in the viewport shows what it composes ([Text and IME](../core/input.md#text-and-ime)).
 - The editor does not reparent the host's window into its own. Windows attaches the input queues of a cross-process parent and child window, so a stall in the game would freeze the editor UI.
 
 ## Quality

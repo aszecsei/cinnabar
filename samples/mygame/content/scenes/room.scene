@@ -13,6 +13,7 @@ component 1 Transform
 	scale = [1, 1, 1]
 component 32 Camera
 	near = 0.01
+behaviour 79650b8e784445cba714fef3fd88eec6
 
 entity 5e0c1d2b3a4f678b
 name = "Global Volume"

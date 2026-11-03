@@ -121,7 +121,7 @@ public sealed partial class EditorShell
         }
     }
 
-    /// <summary>Sends keyboard and mouse input to the game, while it plays without the free camera.</summary>
+    /// <summary>Sends the viewport's input to the game, while it plays without the free camera.</summary>
     public void SendInput(params InputEvent[] events)
     {
         if (Mode == EditorMode.Play && !FreeCamera && events.Length > 0)
@@ -132,4 +132,10 @@ public sealed partial class EditorShell
 
     /// <summary>Whether the viewport's input goes to the game.</summary>
     public bool InputGoesToGame => Mode == EditorMode.Play && !FreeCamera;
+
+    /// <summary>Whether the viewport has the keyboard focus.</summary>
+    public bool ViewportHasFocus { get; set; }
+
+    /// <summary>Whether the keys are the game's, so that the editor's shortcuts leave them alone.</summary>
+    public bool GameHasKeys => InputGoesToGame && ViewportHasFocus;
 }

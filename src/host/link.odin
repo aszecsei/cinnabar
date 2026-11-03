@@ -255,6 +255,10 @@ link_poll :: proc(l: ^Link, game: core.Game_API, state: rawptr) {
 		core.pace_shared_frames(false)
 		// Keys that the editor held stay down otherwise.
 		core.queue_input({{kind = .Release_All}})
+		// And no one reads the pads any more.
+		for pad in 0 ..< core.MAX_GAMEPADS {
+			core.queue_input({{kind = .Gamepad, pad = u8(pad)}})
+		}
 		clear(&l.captures)
 		if l.capture != nil {
 			capture_disconnect(l.capture)
@@ -362,7 +366,21 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if l.linked {
 			events := make([]core.Input_Event, len(m.events), context.temp_allocator)
 			for e, i in m.events {
-				events[i] = {kind = core.Input_Event_Kind(e.kind), key = core.Key(e.key), position = e.position, scroll = e.scroll}
+				events[i] = {
+					kind = core.Input_Event_Kind(e.kind),
+					key = core.Key(e.key),
+					position = e.position,
+					scroll = e.scroll,
+					pad = e.pad,
+					reading = {
+						connected = e.connected,
+						buttons = transmute(core.Gamepad_Buttons)e.buttons,
+						axes = transmute([core.Gamepad_Axis]f32)e.axes,
+					},
+					cursor = e.cursor,
+				}
+				// The event keeps its own copy: the message goes with this poll's arena, before the next frame applies it.
+				core.input_text_append(&events[i].text, e.text)
 			}
 			core.queue_input(events)
 		}
@@ -512,3 +530,6 @@ send_all :: proc(client: net.TCP_Socket, buf: []byte) -> bool {
 #assert(len(link.Input_Key) == len(core.Key))
 #assert(int(link.Input_Key.Mouse_5) == int(core.Key.Mouse_5) && int(link.Input_Key.F1) == int(core.Key.F1))
 #assert(len(link.Input_Event_Kind) == len(core.Input_Event_Kind))
+#assert(int(link.Input_Event_Kind.Release_All) == int(core.Input_Event_Kind.Release_All))
+#assert(int(link.Input_Event_Kind.Composition) == int(core.Input_Event_Kind.Composition))
+#assert(len(core.Gamepad_Axis) == 6 && size_of(core.Gamepad_Buttons) == size_of(u16))

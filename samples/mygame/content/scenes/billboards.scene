@@ -13,6 +13,7 @@ component 1 Transform
 	rotation = [0.0436194, 0, 0, 0.9990482]
 	scale = [1, 1, 1]
 component 32 Camera
+behaviour 79650b8e784445cba714fef3fd88eec6
 
 entity 5c7e000000000002
 name = "Sun"

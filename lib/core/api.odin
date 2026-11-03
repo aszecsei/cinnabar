@@ -38,8 +38,8 @@ Platform_API :: struct {
 	memory_release: proc(ptr: rawptr, size: int),
 
 	time_seconds:     proc() -> f64,
-	// The keyboard and mouse at the start of the frame. In shared mode the window is hidden, so the input is empty
-	// until the editor link sends input.
+	// The keyboard, the mouse, the gamepads and the typed text at the start of the frame. In shared mode the window is
+	// hidden, so the input is empty until the editor link sends input.
 	input:            proc() -> Input,
 	// File I/O for the asset runtime. The game's own files are at content_dir and project_path, which are absolute; a
 	// relative path is relative to the working directory. file_read reads a whole file into

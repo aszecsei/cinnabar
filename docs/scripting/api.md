@@ -56,8 +56,10 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Quaternion` | `identity`, `new(x, y, z, w)`, `euler(degrees)`, `angle_axis(degrees, axis)`, `look_rotation(forward, up?)`, `slerp`, `angle`, `rotate_towards(from, to, max_degrees)`. Methods: `inverse`, `normalized`, `euler`, `approx`, `angle_to`, `rotate_towards`, `slerp`. Fields `x`, `y`, `z`, `w`. |
 | `WorldPosition` | `origin`, `from_meters(x, y, z)` (for authoring), `lerp`. Methods: `lerp`, `to_meters` (for display). |
 | `Time` | `delta` (the frame, or the tick in the fixed step), `time` (world time), `real_time`, `frame`, `fixed_delta`, `alpha` (the interpolation fraction), `in_fixed` (true in the fixed step) |
-| `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches) |
+| `Input` | `is_down(key)`, `was_pressed(key)`, `was_released(key)`, `mouse_position` and `mouse_delta` (vectors in pixels), `scroll` (wheel notches), `gamepad_connected(pad)`, `gamepad_is_down(pad, button)`, `gamepad_was_pressed(pad, button)`, `gamepad_was_released(pad, button)`, `gamepad_axis(pad, axis)` (pads in slots 1 to 4), `text` (the characters typed since the last frame, in UTF-8), `composition` and `composition_cursor` (what an IME composes, and the bytes of it before the cursor). See [Input](../core/input.md#input). |
 | `Key` | `Key.A`, `Key.Num0`, `Key.Space`, `Key.LeftShift`, `Key.MouseLeft` and the other values of `core.Key` |
+| `GamepadButton` | `GamepadButton.A`, `GamepadButton.LeftBumper`, `GamepadButton.DpadUp` and the other values of `core.Gamepad_Button` |
+| `GamepadAxis` | `GamepadAxis.LeftX`, `GamepadAxis.RightY`, `GamepadAxis.LeftTrigger` and the other values of `core.Gamepad_Axis` |
 | `Debug` | `log`, `warn`, `error` |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |

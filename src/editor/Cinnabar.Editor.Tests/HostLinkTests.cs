@@ -276,6 +276,95 @@ public sealed class HostLinkTests : IAsyncDisposable
         Assert.NotEqual(paused, await Values());
     }
 
+    // The sample's main script logs the input that it sees through the Input library, so these go from the editor's
+    // events through core.queue_input to a script.
+    [Fact]
+    public async Task GamepadsAndTextFromTheEditorReachTheGamesScripts()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<EntitySnapshot>();
+        editor.Link.Send(new SetMode(EditorMode.Play, false));
+
+        void Send(params InputEvent[] events) => editor.Link.Send(new EditorInput(events));
+        Task<Log> Logged(string text) => editor.Next<Log>(l => l.Text.Contains(text));
+
+        Send(GameInput.Composition("にほ", 1));
+        await Logged("composing にほ");
+        Send(GameInput.Composition("", 0), GameInput.Text("日本語"));
+        await Logged("typed 日本語");
+
+        Send(GameInput.Pad(1, new GamepadReading(0x1000, 0, 0, 0, 0, 0, 0)));
+        await Logged("gamepad 2 connected");
+        await Logged("gamepad 2 pressed A");
+
+        // A pad that goes while the link stays.
+        Send(GameInput.Pad(1, null));
+        await Logged("gamepad 2 disconnected");
+    }
+
+    // The sample's fly_camera behaviour, on the camera of the scene that the sample starts with. That camera looks along
+    // +z with no turn, so each stick has a direction to check.
+    [Fact]
+    public async Task AGamepadFliesTheSamplesCamera()
+    {
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        var world = await editor.Next<EntitySnapshot>();
+        var camera = world.Entities.Single(e => e.Name == "Camera").Entity;
+
+        // The Transform's bytes: a position of three i64, then a rotation of x, y, z and w as f32.
+        async Task<(long X, long Y, long Z, float TurnX, float TurnY)> Pose()
+        {
+            editor.Link.Send(new WatchEntity(camera));
+            var values = await editor.Next<EntityValues>(v => v.Entity == camera);
+            editor.Link.Send(new UnwatchEntity(camera));
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            editor.Drain();
+            var data = values.Components.Single(c => c.Id == 1).Data;
+            return (BitConverter.ToInt64(data, 0), BitConverter.ToInt64(data, 8), BitConverter.ToInt64(data, 16), BitConverter.ToSingle(data, 24), BitConverter.ToSingle(data, 28));
+        }
+        // Holds a pad's reading for a moment, then lets go of it, and gives the pose that it stops at.
+        async Task<(long X, long Y, long Z, float TurnX, float TurnY)> Hold(GamepadReading reading)
+        {
+            editor.Link.Send(new EditorInput([GameInput.Pad(0, reading)]));
+            await Task.Delay(300, TestContext.Current.CancellationToken);
+            editor.Link.Send(new EditorInput([GameInput.Pad(0, default(GamepadReading))]));
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+            return await Pose();
+        }
+
+        editor.Link.Send(new SetMode(EditorMode.Play, false));
+        // A pad that nothing touches leaves it where it is.
+        var start = await Hold(default);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.Equal(start, await Pose());
+
+        // The left stick pushed up flies it forward, and pushed right flies it right.
+        var forward = await Hold(new GamepadReading(0, 0, 1, 0, 0, 0, 0));
+        Assert.True(forward.Z > start.Z, $"{forward} from {start}");
+        Assert.Equal((start.X, start.Y), (forward.X, forward.Y));
+        var right = await Hold(new GamepadReading(0, 1, 0, 0, 0, 0, 0));
+        Assert.True(right.X > forward.X, $"{right} from {forward}");
+
+        // The right trigger lifts it and the left lowers it.
+        var lifted = await Hold(new GamepadReading(0, 0, 0, 0, 0, 0, 1));
+        Assert.True(lifted.Y > right.Y, $"{lifted} from {right}");
+        var lowered = await Hold(new GamepadReading(0, 0, 0, 0, 0, 1, 0));
+        Assert.True(lowered.Y < lifted.Y, $"{lowered} from {lifted}");
+
+        // It stays where the sticks left it.
+        await Task.Delay(200, TestContext.Current.CancellationToken);
+        Assert.Equal(lowered, await Pose());
+
+        // The right stick pushed right turns it right, around +y, and pushed up tilts it up, against +x.
+        Assert.Equal(0, lowered.TurnY);
+        var turned = await Hold(new GamepadReading(0, 0, 0, 1, 0, 0, 0));
+        Assert.True(turned.TurnY > 0, $"{turned}");
+        var tilted = await Hold(new GamepadReading(0, 0, 0, 0, 1, 0, 0));
+        Assert.True(tilted.TurnX < 0, $"{tilted}");
+    }
+
     [Fact]
     public async Task TheGameDescribesItsCommandsAndSendsStats()
     {
