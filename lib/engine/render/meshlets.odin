@@ -19,9 +19,7 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 	made := 0
 	flush :: proc(positions: [][3]f32, local: []u32, triangles: [][3]u8, meshlets: ^[dynamic]format.Meshlet, meshlet_vertices: ^[dynamic]u32, meshlet_triangles: ^[dynamic]u32) {
 		m := format.Meshlet {
-			vertex_offset   = u32(len(meshlet_vertices)),
 			triangle_offset = u32(len(meshlet_triangles)),
-			vertex_count    = u8(len(local)),
 			triangle_count  = u8(len(triangles)),
 			parent_error    = math.F32_MAX,
 		}
@@ -30,10 +28,12 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 		for v in local {
 			low, high = linalg.min(low, positions[v]), linalg.max(high, positions[v])
 		}
-		m.center = (low + high) / 2
+		center := (low + high) / 2
+		radius: f32
 		for v in local {
-			m.radius = max(m.radius, linalg.length(positions[v] - m.center))
+			radius = max(radius, linalg.length(positions[v] - center))
 		}
+		m.center, m.radius = format.meshlet_encode_sphere(center, radius)
 		// The cone: the area-weighted mean of the triangles' normals, and the sine of the widest angle from it, as
 		// meshoptimizer takes them. A spread of a right angle or more is too wide to cull.
 		axis: [3]f32
@@ -57,8 +57,8 @@ build_simple_meshlets :: proc(positions: [][3]f32, indices: []u32, meshlets: ^[d
 				m.cone_axis[k] = i8(math.round(clamp(axis[k], -1, 1) * 127))
 			}
 		}
+		format.meshlet_write_vertices(&m, local, meshlet_vertices)
 		append(meshlets, m)
-		append(meshlet_vertices, ..local)
 		for t in triangles {
 			append(meshlet_triangles, u32(t[0]) | u32(t[1]) << 8 | u32(t[2]) << 16)
 		}
