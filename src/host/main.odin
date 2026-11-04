@@ -141,10 +141,20 @@ main :: proc() {
 		// End of frame: the job system is drained, so this is the reload point.
 		if game_changed(game) {
 			profile.zone_text("Hot reload", .Editor)
+			reload_start := time.tick_now()
+			audio_before := platform.audio_status()
 			switch next, reload := game_load(source_path, game.version + 1); reload {
 			case .Loaded:
 				kind := link.Reload_Kind.Code if next.api.layout_hash() == game.api.layout_hash() else .Soft_Restart
 				state = game_swap(&game, next, state)
+				audio_after := platform.audio_status()
+				log.debugf(
+					"host: the reload took %v, and left %d of %d audio frames queued, with %d starved",
+					time.tick_since(reload_start),
+					audio_after.queued,
+					audio_before.queued,
+					audio_after.starved - audio_before.starved,
+				)
 				editor.layout_hash = game.api.layout_hash()
 				link_send(&editor, link.Game_Reloaded{kind = kind})
 			case .Refused:

@@ -78,6 +78,16 @@ component 1003 Lens
 	vignette = 1.6
 	chromatic_aberration = 0.0
 
+entity 5e1f0a7d3c9b2468
+name = "Tone Source"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 4 Previous_Transform
+component 1001 Spin
+	speed = 1
+
 entity 7820834ecb6da56e
 name = "Floor"
 component 1 Transform

@@ -14,6 +14,7 @@ import "cinnabar:core"
 import "cinnabar:core/gpu"
 import "cinnabar:core/layout"
 import "cinnabar:core/luau"
+import "cinnabar:engine/audio"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/anim"
 import format "cinnabar:engine/asset/format"
@@ -214,6 +215,8 @@ Pass_Constants :: struct {
 Game_State :: struct {
 	platform:           ^core.Platform_API,
 	frame_count:        u64,
+	// The audio device's test tone, which CINNABAR_TEST_TONE turns on.
+	tone:               audio.Tone,
 	// What the scripts' Render bindings reach: the renderer and the settings file (see quality_keys.luau).
 	script_quality:     project.Script_Quality,
 	// The project's settings, read again when their files change.
@@ -566,6 +569,9 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 
 	find_camera(s)
+	if s.platform.audio_test_tone {
+		audio.tone_update(&s.tone, s.platform, tone_pan(s))
+	}
 	sync_pipelines(s)
 	when DEBUG_AXES {
 		draw_spin_axes(s)
@@ -594,6 +600,23 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
 	return true
+}
+
+// tone_pan is the test tone's pan: how far the first spinning entity's presented X axis points along the view's right.
+// It is 0 in a scene with nothing spinning.
+tone_pan :: proc(s: ^Game_State) -> f32 {
+	spinning := make([dynamic]ecs.Entity, s.platform.frame_allocator)
+	ecs.collect(&s.world, {SPIN_ID}, &spinning)
+	if len(spinning) == 0 {
+		return 0
+	}
+	pose, ok := ecs.presented(&s.world, spinning[0])
+	if !ok {
+		return 0
+	}
+	axis := linalg.quaternion128_mul_vector3(pose.rotation, [3]f32{1, 0, 0})
+	right := linalg.quaternion128_mul_vector3(camera_view(s).rotation, [3]f32{1, 0, 0})
+	return linalg.dot(axis, right)
 }
 
 // draw_spin_axes draws the axes of each spinning entity into the debug layer.

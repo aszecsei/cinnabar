@@ -11,6 +11,7 @@ Read them in this order the first time.
 | [Platform](platform.md) | Platform and backend selection, `Platform_API`, and the frame bracket. |
 | [Jobs and memory](jobs-and-memory.md) | The fiber job system and the memory arenas. |
 | [Input](input.md) | Keyboard, mouse, gamepads and text with IME composition, and the editor's input. |
+| [Audio](audio.md) | The audio device: the queue and its thread, queue depth across a code reload, device loss and the test tone. |
 | [Profiling](profiling.md) | The frame profiler: CPU zones, frames, costs and captures. |
 
 ## Overview
@@ -19,7 +20,7 @@ Read them in this order the first time.
 
 | Package | What it holds |
 |---|---|
-| `lib/core` | `api.odin`: `Platform_API` and `Game_API`. `platform.odin`: frame begin and end, the arenas, the DLL loader and reload detection. `input.odin`: `Input` and the events that change it. `window_windows.odin`: the window and its messages. `gamepad_windows.odin`: the pads, through XInput. `ime_windows.odin`: what an IME composes. `file.odin`: file reading and modification times. |
+| `lib/core` | `api.odin`: `Platform_API` and `Game_API`. `platform.odin`: frame begin and end, the arenas, the DLL loader and reload detection. `input.odin`: `Input` and the events that change it. `window_windows.odin`: the window and its messages. `gamepad_windows.odin`: the pads, through XInput. `ime_windows.odin`: what an IME composes. `audio.odin`: the audio queue and the group's procedures. `audio_windows.odin`: the audio thread, through WASAPI. `file.odin`: file reading and modification times. |
 | `lib/core/jobs` | The fiber job system: workers, fibers, counters and the fiber-aware mutex. |
 | `lib/core/profile` | The frame profiler: zones, the frame ring, costs and captures ([Profiling](profiling.md#profiler)). |
 | `lib/core/layout` | The type layout hash that `Game_API.layout_hash` and the blob headers use. |
