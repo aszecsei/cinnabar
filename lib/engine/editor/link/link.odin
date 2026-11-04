@@ -564,6 +564,7 @@ Debug_View :: enum u8 {
 	Emission,
 	Gi_Probes,
 	Quad_Overdraw,
+	Shadow_Virtual,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -969,6 +970,13 @@ Game_Stats :: struct {
 	// two ago (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
 	forward_quads:      u32,
 	forward_pixels:     u32,
+	// The virtual shadow map's pages a frame or two ago: those that the frame asked for, those that it got, those that the
+	// pool had no room for, and how many the pool holds, 0 without it (see
+	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps).
+	virtual_pages_requested: u32,
+	virtual_pages_allocated: u32,
+	virtual_pages_missed:    u32,
+	virtual_pages_capacity:  u32,
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:      []Gi_Cascade_Stats,

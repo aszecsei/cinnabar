@@ -149,6 +149,10 @@ Pass_Node :: struct {
 	color_textures: [gpu.MAX_COLOR_ATTACHMENTS]Texture,
 	depth:          gpu.Depth_Attachment,
 	depth_texture:  Texture,
+	// What a render pass with no attachments rasterizes in (see rasterize_size).
+	size:           [2]u32,
+	// A render pass's shaders write storage resources.
+	storage_writes: bool,
 	uses:           [dynamic]Use,
 	keep:           bool,
 	live:           bool,
@@ -302,6 +306,14 @@ depth :: proc(g: ^Graph, pass: Pass, texture: Texture, load: gpu.Load_Op, clear:
 	p.depth_texture = texture
 }
 
+// rasterize_size gives a render pass with no attachments the size that it rasterizes in. Its storage writes are its
+// output.
+rasterize_size :: proc(g: ^Graph, pass: Pass, size: [2]u32) {
+	p := &g.passes[pass - 1]
+	assert(p.kind == .Render, "render: a size needs a render pass")
+	p.size = size
+}
+
 // read declares that the pass reads a resource in shaders.
 read :: proc {
 	read_texture,
@@ -320,6 +332,7 @@ read_texture :: proc(g: ^Graph, pass: Pass, texture: Texture) {
 
 write_texture :: proc(g: ^Graph, pass: Pass, texture: Texture) {
 	use_texture(g, pass, texture, .Storage, reads = true)
+	g.passes[pass - 1].storage_writes = true
 }
 
 read_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
@@ -328,6 +341,7 @@ read_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 
 write_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
 	use_buffer(g, pass, buffer, .Storage)
+	g.passes[pass - 1].storage_writes = true
 }
 
 index_buffer :: proc(g: ^Graph, pass: Pass, buffer: Buffer) {
@@ -601,13 +615,16 @@ record_piece :: proc(data: rawptr) {
 			}
 			depth.store = .Store
 		}
+		if pass.storage_writes {
+			flags += {.Storage_Writes}
+		}
 		for c in 0 ..< pass.color_count {
 			colors[c].texture = gpu_texture(g, pass.color_textures[c])
 		}
 		if pass.depth_texture != 0 {
 			depth.texture = gpu_texture(g, pass.depth_texture)
 		}
-		gpu.cmd_begin_pass(cb, colors[:pass.color_count], depth, flags)
+		gpu.cmd_begin_pass(cb, colors[:pass.color_count], depth, flags, pass.size)
 		if split_render {
 			gpu.cmd_begin_marker(cb, pass.name, timed = true)
 		}

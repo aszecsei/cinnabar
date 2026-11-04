@@ -262,6 +262,8 @@ validate_rules :: proc(t: ^testing.T) {
 		{proc(cb: ^Command_Buffer) {cmd_end_pass(cb)}, .End_Pass_Outside_Pass, 0},
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}})}, .Unclosed_Pass, 1},
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {})}, .Bad_Attachment_Count, 0},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {}, size = {64, 64}); cmd_end_pass(cb)}, .None, 2},
+		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = TARGET}}, size = {64, 64})}, .Bad_Attachment_Count, 0},
 		{proc(cb: ^Command_Buffer) {cmd_begin_pass(cb, {{texture = {}}})}, .Invalid_Texture, 0},
 		{proc(cb: ^Command_Buffer) {cmd_end_marker(cb)}, .End_Marker_Without_Begin, 0},
 		{

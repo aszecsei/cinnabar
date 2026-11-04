@@ -164,7 +164,7 @@ translate :: proc(list: ^d3d.IGraphicsCommandList7, cb: gpu.Command_Buffer, fram
 
 @(private = "file")
 begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
-	size: [2]u32
+	size := pass.size
 	targets: [gpu.MAX_COLOR_ATTACHMENTS]d3d.RENDER_PASS_RENDER_TARGET_DESC
 	for color, i in pass.colors[:pass.color_count] {
 		entry := texture_entry(color.texture)
@@ -203,6 +203,9 @@ begin_pass :: proc(list: ^d3d.IGraphicsCommandList7, pass: ^gpu.Begin_Pass) {
 	}
 	if .Resuming in pass.flags {
 		flags += {.RESUMING_PASS}
+	}
+	if .Storage_Writes in pass.flags {
+		flags += {.ALLOW_UAV_WRITES}
 	}
 	list->BeginRenderPass(pass.color_count, &targets[0], depth_ptr, flags)
 

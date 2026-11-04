@@ -172,6 +172,7 @@ declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
 	if f.shadows.atlas != 0 {
 		read(g, p, f.shadows.atlas)
 	}
+	declare_virtual_shadows(f, p)
 	if f.fog_volume != 0 {
 		read(g, p, f.fog_volume)
 	}

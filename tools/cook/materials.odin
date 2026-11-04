@@ -1140,6 +1140,7 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 	if decl.blend == .Masked {
 		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
 	}
+	append(&entries, Material_Entry{.Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_virtual_depth"}})
 	// A patches material has no meshlets to draw, and a billboard draws its own quads.
 	if !decl.patches && decl.billboard == .None {
 		append(
@@ -1156,6 +1157,7 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 			Material_Entry{.Impostor_Prepass, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_prepass"}},
 			Material_Entry{.Impostor_Depth, {.Vertex, "vs_" + SHADER_MODEL, "vs_impostor_depth"}},
 			Material_Entry{.Impostor_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_depth"}},
+			Material_Entry{.Impostor_Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_impostor_virtual_depth"}},
 		)
 	}
 	// Rays see the meshes of a material as authored, a billboard's too. A patches or ribbon material draws no meshes.

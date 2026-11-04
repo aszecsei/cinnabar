@@ -5,6 +5,7 @@
 #define MATERIAL_LIGHTING_HLSLI
 
 #include "material_common.hlsli"
+#include "virtual_shadow.hlsli"
 
 // Match CLUSTER_TILE and CLUSTER_SLICES in lib/engine/render/lights.odin.
 static const uint CLUSTER_TILE = 64;
@@ -133,6 +134,16 @@ int shadow_view(Light_Record light, float3 p, float depth) {
 	return view;
 }
 
+// map_shadow is how lit a point at a view depth is by one light, from its virtual shadow map or its shadow maps, or 1
+// without any.
+float map_shadow(Light_Record light, float3 p, float3 normal, float3 to_light, float depth) {
+	if ((light.flags & LIGHT_VIRTUAL_SHADOW) != 0) {
+		return virtual_shadow(p, normal, to_light);
+	}
+	int view = shadow_view(light, p, depth);
+	return view < 0 ? 1 : shadow_map(uint(view), p, normal, to_light);
+}
+
 // light_shadow is how lit a point is by one light: its channel of the shadow mask, or its shadow maps, or 1. The mask is
 // the opaque surfaces', from the prepass's depth, so a transparent surface is lit by the lights that have a channel.
 // to_light is the direction toward the light, which the shadow maps' lookup offsets along.
@@ -144,8 +155,7 @@ float light_shadow(Light_Record light, float3 p, float3 normal, float3 to_light,
 		return load_screen(push.shadow_mask, position.xy)[light.mask];
 #endif
 	}
-	int view = shadow_view(light, p, frame.near / max(position.z, 1e-7));
-	return view < 0 ? 1 : shadow_map(uint(view), p, normal, to_light);
+	return map_shadow(light, p, normal, to_light, frame.near / max(position.z, 1e-7));
 }
 
 // range_window is 1 near a light and 0 at its range: saturate(1 - (d / range)^4)^2.

@@ -88,17 +88,22 @@ Pass_Flag :: enum u8 {
 	// The pass continues from the previous command buffer. The piece must start its command buffer, load its
 	// attachments, and have the same attachments as the suspended piece.
 	Resuming,
+	// The pass's shaders write storage resources.
+	Storage_Writes,
 }
 
 Pass_Flags :: bit_set[Pass_Flag;u8]
 
 // A pass begins with the viewport and scissor set to the attachment size, and with no pipeline,
 // pass constants or index buffer bound. End_Pass clears the bindings again. Each piece of a split pass does the same.
+// A pass with no attachments rasterizes in size, and its shaders' storage writes are its only output. A pass with
+// attachments leaves size at zero.
 Begin_Pass :: struct {
 	color_count: u32,
 	colors:      [MAX_COLOR_ATTACHMENTS]Color_Attachment,
 	depth:       Depth_Attachment,
 	flags:       Pass_Flags,
+	size:        [2]u32,
 }
 
 End_Pass :: struct {}
@@ -373,11 +378,12 @@ command_buffer :: proc(allocator: runtime.Allocator) -> Command_Buffer {
 	return {allocator = allocator}
 }
 
-cmd_begin_pass :: proc(cb: ^Command_Buffer, colors: []Color_Attachment, depth: Depth_Attachment = {}, flags: Pass_Flags = {}) {
+cmd_begin_pass :: proc(cb: ^Command_Buffer, colors: []Color_Attachment, depth: Depth_Attachment = {}, flags: Pass_Flags = {}, size: [2]u32 = {}) {
 	packet := Begin_Pass {
 		color_count = u32(len(colors)),
 		depth       = depth,
 		flags       = flags,
+		size        = size,
 	}
 	copy(packet.colors[:], colors)
 	push(cb, .Begin_Pass, packet)

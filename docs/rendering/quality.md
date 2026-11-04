@@ -17,6 +17,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 |---|---|---|
 | `shadows.level` | `Low` … `Ultra` | The shadow maps' atlas, cascades and filter (`SHADOW_PARAMS`) |
 | `shadows.ray_traced` | `bool` | Traced shadows for the first `MAX_MASK_LIGHTS` lights (see [Shadows](lighting-and-shadows.md#shadows)). Needs `Ray_Query` |
+| `shadows.virtual` | `bool` | A [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps) in place of the cascades, for a directional light that is not traced. Low has none |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades` | The [global illumination](global-illumination.md#global-illumination), and with `Split_Cascades` its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes). `Split_Cascades` needs `Ray_Query` |
@@ -27,7 +28,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
 - **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
-- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
+- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, a virtual shadow map from Medium up, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
 ## Order in the frame
@@ -52,7 +53,15 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 | High | 4096, cells of 1024 | 4 | 4 taps (3x3) | 3 × 3 | 5, 8 px, 4, 8 | 64 |
 | Ultra | 8192, cells of 2048 | 4 | 9 taps (4x4) | 9 × 3 | 5, 8 px, 8, 12 | 96 |
 
+| Level | Virtual shadow map's levels, reach | Pool in pages, memory | Bias |
+|---|---|---|---|
+| Low | None: cascades | – | – |
+| Medium | 12, 16 km | 32 × 32, 64 MB | 1 level coarser |
+| High | 12, 16 km | 64 × 32, 128 MB | None |
+| Ultra | 13, 32 km | 64 × 64, 256 MB | None |
+
 - **Before levels,** the frame drew High's shadows and GI, Ultra's GTAO, and High's fog.
+- **The virtual shadow map's memory** stays at its pool, whatever the view's reach, with about 880 KB for its page table and requests. The atlas stays too, for spot and point lights, and its first cells take slots in place of cascades.
 - **Shadow cascades:** with fewer than four, `cascade_splits` divides the same reach among them, and repeats the last split in the unused places of `Frame_Constants.cascade_splits`, so no depth looks for a cascade past them. The slots for spot and point lights start after the cascades' cells, so a level with fewer cascades has room for more lights' maps.
 - **The shadow filter** is `Frame_Constants.shadow_filter`, a `Shadow_Filter`. `shadow_map` in `material_lighting.hlsli` branches on it. Every pixel takes the same branch, so it costs no material permutation.
 - **The ambient occlusion's levels** are each technique's own (see [Techniques](ambient-occlusion.md#techniques)); GTAO's are XeGTAO's presets. The samples and steps are in the search's constants, and its loops are no longer unrolled.
@@ -65,7 +74,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 `Renderer.caps`, a `Caps`, is what the device can do that the quality depends on: `ray_query`, `mesh_shaders`, which the [mesh shader path](gpu-scene.md#mesh-shader-path) needs, the adapter's `vendor`, its `video_memory`, and the vendors' `upscalers` that it runs. `device_caps(platform)` reads them from `Platform_API.gpu_features`, `gpu_adapter` (see [GPU: Adapter](../gpu/interface.md#adapter)) and `gpu_upscalers` (see [GPU: Upscalers](../gpu/upscalers.md#upscalers)) when the renderer starts.
 
 - **Defaults:** `default_quality(caps)` picks a preset by the video memory: Low below 4 GiB, Medium below 6 GiB, High below 10 GiB, Ultra above, and High when the memory is unknown, as on an adapter that shares the CPU's.
-- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, gives the screen cascades for the split cascades without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
+- **Limits:** `clamp_quality(q, caps)` turns off what the device cannot do, such as traced shadows without `Ray_Query`, turns the virtual shadow map off at Low, gives the screen cascades for the split cascades without `Ray_Query`, gives temporal AA, which upscales too, for an upscaler that the device does not run, and puts each enum back in its range, since a settings file or a script may give any number. `set_quality` and `Frame_Desc.quality` both go through it.
 - `CINNABAR_DISABLE_FEATURES=Ray_Query` hides the feature, as it does everywhere, to try the fallback on hardware that has it.
 
 ## Changing quality while the game runs
@@ -75,6 +84,7 @@ A change takes effect on the next frame, and nothing waits for the GPU.
 - **Sizes:** the atlas, the GI cascades, the fog volume and, with the render scale, the scene's targets are the graph's transient textures, and the [texture cache](../gpu/render-graph.md#render-graph) makes a new one when a description changes. The histories (GI, fog) start again, as they do on a resize.
 - **Pipelines** do not change with a level: the levels are constants that the passes read. A technique's pipelines are synced whether or not the frame uses it, so switching to it does not wait for it to compile. For example, the shadow mask's pipeline and the traced fog injection are synced on every device with `Ray_Query`.
 - **FSR** makes its upscaler the first frame that uses it, and again when the frame's size changes, which compiles FSR's pipelines on the main thread for a moment (see [Anti-aliasing](anti-aliasing.md#fsr)). Until then, and while its motion pass compiles, temporal AA stands in.
+- **The virtual shadow map:** its pool is the renderer's own, not a graph's transient, and is made again the first frame with another size. Until its compute pipelines compile, the frame draws cascades.
 - **Traced shadows:** the GPU scene's acceleration structure is made the first frame that traces (see [Ray scene](ray-scene.md#ray-scene)), and every mesh gets its own then (`residency_enable_accels`), which the next frames build. When tracing turns off, the structures stay, so turning it on again builds nothing new. Until the traced fog injection is ready, the fog lights the traced lights without shadows.
 
 ## Saved quality
@@ -86,6 +96,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.preset` | `Low`, `Medium`, `High`, `Ultra`, `Custom` |
 | `quality.shadows` | `Low` … `Ultra` |
 | `quality.shadows.ray_traced` | `true`, `false` |
+| `quality.shadows.virtual` | `true`, `false`; a file without it keeps the preset's |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
 | `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |

@@ -114,7 +114,21 @@ struct Frame_Constants {
 	uint occlusion_offset;
 	// The meshlets that select_meshlets.hlsl picked, which a draw with DRAW_SELECTED reads.
 	uint selected_meshlets;
-	uint3 padding;
+	// The virtual shadow map, whose levels are the first shadow views (see virtual_shadow.hlsli): how many, 0 without it,
+	// how a distance picks one, the level that this view draws, the pool's read and write views, the page table, and
+	// the pool's pages.
+	uint virtual_levels;
+	uint virtual_level;
+	float virtual_first_texel;
+	float virtual_pixel_angle;
+	float virtual_bias;
+	uint virtual_pool;
+	uint virtual_pool_storage;
+	uint virtual_table;
+	uint virtual_pool_pages_per_row;
+	uint virtual_pool_pages;
+	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
+	uint virtual_draw;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -137,6 +151,8 @@ static const uint DEBUG_LOD_DEPTH = 19;
 static const uint DEBUG_EMISSION = 20;
 // From the frame's textures, but the forward pass counts its quads for it.
 static const uint DEBUG_QUAD_OVERDRAW = 22;
+// The virtual shadow map's level at each pixel, and whether its pages were allocated (see virtual_debug_color).
+static const uint DEBUG_SHADOW_VIRTUAL = 23;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;
@@ -318,6 +334,8 @@ static const uint LIGHT_DISK = 4;
 static const uint LIGHT_LINE = 5;
 // Light_Record's flags.
 static const uint LIGHT_TWO_SIDED = 1;
+// The light's shadow is the virtual shadow map (see virtual_shadow.hlsli).
+static const uint LIGHT_VIRTUAL_SHADOW = 2;
 struct Light_Record {
 	float3 position;
 	float range;
@@ -335,13 +353,15 @@ struct Light_Record {
 
 // Matches Shadow_View in lib/engine/render/shadows.odin: a shadow map's projection of positions relative to the
 // camera, as the rows of its matrix, its rectangle of the atlas in UV (offset, scale), and the size of one of its
-// texels: in meters for an orthographic view, at a distance of 1 m for a perspective one (perspective is 1).
+// texels: in meters for an orthographic view, at a distance of 1 m for a perspective one (perspective is 1). A virtual
+// shadow map's level has its valid rectangle in UV (low, high) as rect, and page_origin, its first page in the level's
+// absolute grid.
 struct Shadow_View {
 	float4 rows[4];
 	float4 rect;
 	float texel;
 	uint perspective;
-	float2 padding;
+	int2 page_origin;
 };
 
 // What a shading model shades: the point, its normal after the material's normal map, and the direction to the camera.

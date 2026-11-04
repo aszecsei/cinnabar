@@ -11,7 +11,7 @@ import "cinnabar:engine/ecs"
 // traces up to four lights' shadows into a screen-space mask, from the prepass's depth, against an acceleration
 // structure of the GPU scene. The other lights that cast shadows get shadow maps in one atlas: the cascades for the
 // first directional light, one view for a spot light, and six for a point light. The maps draw each material's depth
-// pass.
+// pass. With a virtual shadow map in the quality, its levels take the place of the cascades (see virtual_shadows.odin).
 
 SHADOW_FORMAT :: gpu.Format.D32_Float
 // The most cascades that a level has. Frame_Constants.cascade_splits holds this many.
@@ -26,21 +26,25 @@ Shadow_Filter :: enum u32 {
 }
 
 // Shadow_Params are the shadow maps at a level. The atlas is square. Cascades take cells of cell pixels; spot lights
-// and point lights' faces take slots of slot pixels, several to a cell.
+// and point lights' faces take slots of slot pixels, several to a cell. A level with virtual_levels has a virtual shadow
+// map, whose pool is pool_pages of VIRTUAL_PAGE_TEXELS on a side. virtual_bias moves its levels: above 0 is coarser.
 Shadow_Params :: struct {
-	atlas:    int,
-	cell:     int,
-	slot:     int,
-	cascades: int,
-	filter:   Shadow_Filter,
+	atlas:          int,
+	cell:           int,
+	slot:           int,
+	cascades:       int,
+	filter:         Shadow_Filter,
+	virtual_levels: int,
+	pool_pages:     [2]u32,
+	virtual_bias:   f32,
 }
 
 @(rodata)
 SHADOW_PARAMS := [Quality_Level]Shadow_Params {
 	.Low    = {atlas = 2048, cell = 1024, slot = 512, cascades = 2, filter = .Taps_1},
-	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4},
-	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4},
-	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9},
+	.Medium = {atlas = 4096, cell = 1024, slot = 512, cascades = 3, filter = .Taps_4, virtual_levels = 12, pool_pages = {32, 32}, virtual_bias = 1},
+	.High   = {atlas = 4096, cell = 1024, slot = 512, cascades = 4, filter = .Taps_4, virtual_levels = 12, pool_pages = {64, 32}},
+	.Ultra  = {atlas = 8192, cell = 2048, slot = 1024, cascades = 4, filter = .Taps_9, virtual_levels = 13, pool_pages = {64, 64}},
 }
 // By default, the cascades cover the view to this depth, in meters, split between even and exponential by this much
 // (see Shadows).
@@ -71,17 +75,19 @@ max_shadow_views :: proc(p: Shadow_Params) -> int {
 SHADOW_MASK_SHADER :: #load("../content/shaders/shadow_mask.hlsl.meta", string)
 
 // Shadow_View matches Shadow_View in material_common.hlsli: a shadow map's projection of positions relative to the
-// camera, as its matrix's rows, its rectangle of the atlas in UV, and the size of a texel.
+// camera, as its matrix's rows, its rectangle of the atlas in UV, and the size of a texel. A virtual shadow map's level
+// has its valid rectangle in UV (low, high) as rect, and page_origin, its first page in the level's absolute grid.
 Shadow_View :: struct {
 	rows:            [4][4]f32,
 	rect:            [4]f32,
 	// In meters for an orthographic view, at 1 m for a perspective one.
 	texel:           f32,
 	perspective:     u32,
-	padding:         [2]f32,
+	page_origin:     [2]i32,
 }
 
 #assert(size_of(Shadow_View) == 96)
+#assert(VIRTUAL_MAX_LEVELS <= MAX_PASS_PIECES)
 
 // Mask_Constants matches Mask_Constants in shadow_mask.hlsl.
 Mask_Constants :: struct {
@@ -109,6 +115,7 @@ Mask_Constants :: struct {
 Shadow_Passes :: struct {
 	mask_pipeline: Shader_Pipeline,
 	sampler:       gpu.Sampler,
+	virtual:       Virtual_Shadows,
 }
 
 // Shadow_Frame is one frame's shadows, in frame memory: the shadow maps' views, and the lights of the mask's channels.
@@ -128,6 +135,7 @@ Shadow_Frame :: struct {
 	mask_count:     int,
 	atlas:          Texture,
 	mask:           Texture,
+	virtual:        Virtual_Frame,
 	views_upload:   gpu.Upload,
 	mask_constants: gpu.Upload,
 }
@@ -135,9 +143,11 @@ Shadow_Frame :: struct {
 shadows_init :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
 	s.mask_pipeline = shader_pipeline(SHADOW_MASK_SHADER)
 	s.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Clamp, compare = .Greater_Equal, label = "shadow comparison"})
+	virtual_shadows_init(&s.virtual)
 }
 
 shadows_destroy :: proc(s: ^Shadow_Passes, platform: ^core.Platform_API) {
+	virtual_shadows_destroy(&s.virtual, platform)
 	platform.gpu_destroy_sampler(s.sampler)
 	destroy_shader_pipeline(&s.mask_pipeline, platform)
 }
@@ -169,12 +179,15 @@ assign_shadows :: proc(f: ^Frame) {
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
 	}
 	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
-	assign_shadow_views(f, trace)
+	params := SHADOW_PARAMS[f.shadow_settings.level]
+	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, params)
+	assign_shadow_views(f, trace, virtual)
 }
 
-// assign_shadow_views gives the lights their shadows, with the mask's channels first if trace.
+// assign_shadow_views gives the lights their shadows, with the mask's channels first if trace, and with a virtual shadow
+// map in place of the cascades if virtual.
 @(private)
-assign_shadow_views :: proc(f: ^Frame, trace: bool) {
+assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false) {
 	r := f.renderer
 	lf := f.lights
 	sf := new(Shadow_Frame, r.platform.frame_allocator)
@@ -224,15 +237,20 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 		}
 		switch record.type {
 		case .Directional:
-			// The cascades take the first cells, so the slots start after them. A second directional light without a
-			// mask channel has no shadow.
+			// The cascades take the first cells, so the slots start after them. A virtual shadow map's levels take none.
+			// A second directional light without a mask channel has no shadow.
 			if cascades_taken || next_slot > 0 {
 				continue
 			}
 			cascades_taken = true
-			first_slot = sf.params.cascades * slots_per_cell(sf.params)
 			record.shadow = i32(len(sf.views))
-			add_cascades(f, sf, record.direction)
+			if virtual {
+				record.flags += {.Virtual_Shadow}
+				add_virtual_levels(f, sf, record.direction)
+			} else {
+				first_slot = sf.params.cascades * slots_per_cell(sf.params)
+				add_cascades(f, sf, record.direction)
+			}
 		case .Spot:
 			if first_slot + next_slot + 1 > max_views {
 				continue
@@ -265,8 +283,10 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool) {
 			// Without their views, the lights have no shadow maps.
 			for &record in lf.records {
 				record.shadow = -1
+				record.flags -= {.Virtual_Shadow}
 			}
 			clear(&sf.views)
+			sf.virtual.count = 0
 		}
 	}
 }
@@ -297,7 +317,7 @@ sphere_inside :: proc(planes: [][4]f32, center: [3]f32, radius: f32) -> bool {
 
 // light_basis is a right, up and forward with forward along a direction, as a view's axes are, with right × up =
 // forward.
-@(private = "file")
+@(private)
 light_basis :: proc(forward: [3]f32) -> (right, up: [3]f32) {
 	hint := abs(forward.y) < 0.99 ? [3]f32{0, 1, 0} : [3]f32{0, 0, 1}
 	right = linalg.normalize(linalg.cross(hint, forward))
@@ -407,7 +427,7 @@ add_perspective_view :: proc(f: ^Frame, sf: ^Shadow_Frame, position, direction: 
 	append(&sf.viewports, pixels)
 }
 
-@(private = "file")
+@(private)
 matrix_rows :: proc(m: matrix[4, 4]f32) -> (rows: [4][4]f32) {
 	for r in 0 ..< 4 {
 		rows[r] = {m[r, 0], m[r, 1], m[r, 2], m[r, 3]}
@@ -438,10 +458,13 @@ frustum_planes_6 :: proc(m: matrix[4, 4]f32) -> (planes: [6][4]f32) {
 add_shadow_passes :: proc(f: ^Frame) {
 	sf := f.shadows
 	g := f.graph
-	if len(sf.views) > 0 {
+	if sf.virtual.count > 0 {
+		add_virtual_shadow_passes(f)
+	}
+	if atlas_views := len(sf.views) - sf.virtual.count; atlas_views > 0 {
 		atlas := u32(sf.params.atlas)
 		sf.atlas = create_texture(g, {size = {atlas, atlas}, format = SHADOW_FORMAT, label = "shadow atlas"})
-		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = len(sf.views))
+		p := add_render_pass(g, "shadow maps", draw_shadow_maps, f, pieces = atlas_views)
 		depth(g, p, sf.atlas, .Clear)
 		declare_scene_draws(f, p)
 	}
@@ -459,10 +482,12 @@ add_shadow_passes :: proc(f: ^Frame) {
 @(private = "file")
 draw_shadow_maps :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
-	viewport := f.shadows.viewports[ctx.piece]
+	// A virtual shadow map's levels are the first views.
+	view := f.shadows.virtual.count + ctx.piece
+	viewport := f.shadows.viewports[view]
 	gpu.cmd_set_viewport(ctx.cb, {f32(viewport.x), f32(viewport.y)}, {f32(viewport.z), f32(viewport.w)})
 	gpu.cmd_set_scissor(ctx.cb, {i32(viewport.x), i32(viewport.y)}, {i32(viewport.z), i32(viewport.w)})
-	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + ctx.piece, .Depth)
+	draw_scene_view(f, ctx.cb, FIRST_SHADOW_VIEW + view, .Depth)
 }
 
 @(private = "file")

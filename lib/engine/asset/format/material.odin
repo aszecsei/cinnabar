@@ -72,6 +72,10 @@ Material_Pass :: enum u32 {
 	// A compute stage that evaluates the material at ray hits, for the ray scene's hit shading (see
 	// docs/rendering/ray-scene.md#hit-shading). An opaque or masked material of meshes has it.
 	Hit,
+	// The pixel stages of the virtual shadow map's depth pass and of its impostor path, which write depth to its pool (see
+	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps). They draw with the depth passes' other stages.
+	Virtual_Depth,
+	Impostor_Virtual_Depth,
 }
 
 // material_impostor_pass is the impostor path's pass that stands in for an opaque pass.
@@ -83,6 +87,8 @@ material_impostor_pass :: proc "contextless" (pass: Material_Pass) -> Material_P
 		return .Impostor_Prepass
 	case .Depth:
 		return .Impostor_Depth
+	case .Virtual_Depth:
+		return .Impostor_Virtual_Depth
 	}
 	return pass
 }

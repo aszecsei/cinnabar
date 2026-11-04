@@ -30,6 +30,27 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 }
 
 @(test)
+the_virtual_shadow_map_takes_every_level_but_low :: proc(t: ^testing.T) {
+	testing.expect(t, !preset_quality(.Low, {}).shadows.virtual, "the cascades stay for Low")
+	for preset in Quality_Preset.Medium ..= Quality_Preset.Ultra {
+		q := preset_quality(preset, {})
+		testing.expect(t, q.shadows.virtual)
+		testing.expect_value(t, quality_preset(q, {}), preset)
+		// With the device's traced shadows, the option stays, and the traced shadows take the light first.
+		testing.expect(t, preset_quality(preset, {ray_query = true}).shadows.virtual)
+	}
+	// Low has no virtual shadow map to turn on.
+	custom := preset_quality(.Low, {})
+	custom.shadows.virtual = true
+	testing.expect(t, !clamp_quality(custom, {}).shadows.virtual)
+	// The zero quality is the cheapest frame.
+	testing.expect(t, !Quality{}.shadows.virtual)
+	settings: Frame_Settings
+	apply_quality(&settings, preset_quality(.High, {}))
+	testing.expect(t, settings.shadows.virtual)
+}
+
+@(test)
 quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	q := preset_quality(.Ultra, {ray_query = true})
 	testing.expect(t, q.shadows.ray_traced)

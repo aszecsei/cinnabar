@@ -137,7 +137,21 @@ Frame_Constants :: struct {
 	occlusion_offset:         u32,
 	// The meshlets that select meshlets picked, which a draw with DRAW_SELECTED reads (see meshlet_select.odin).
 	selected_meshlets:        u32,
-	padding:                  [3]u32,
+	// The virtual shadow map, whose levels are the first shadow views (see virtual_shadows.odin): how many, 0 without it,
+	// how a distance picks one, the level that this view draws, the pool's read and write views, the page table, and
+	// the pool's pages.
+	virtual_levels:             u32,
+	virtual_level:              u32,
+	virtual_first_texel:        f32,
+	virtual_pixel_angle:        f32,
+	virtual_bias:               f32,
+	virtual_pool:               u32,
+	virtual_pool_storage:       u32,
+	virtual_table:              u32,
+	virtual_pool_pages_per_row: u32,
+	virtual_pool_pages:         u32,
+	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
+	virtual_draw:               u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -461,7 +475,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 704 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 736 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1188,6 +1202,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
+	if shadows.virtual.count > 0 {
+		virtual_constants(&constants, f)
+	}
 	if f.fog != nil {
 		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
 		constants.fog_slices = f.fog.grid.z
@@ -1222,6 +1239,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.jitter = f.jitter
 		case:
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
+			if v - FIRST_SHADOW_VIEW < shadows.virtual.count {
+				c.virtual_level, c.virtual_draw = u32(v - FIRST_SHADOW_VIEW), 1
+			}
 			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]
 			views[v].flags = VIEW_CASTERS
 			c.cull_eye = shadows.eyes[v - FIRST_SHADOW_VIEW]
@@ -2121,7 +2141,7 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	if pushes {
 		push = material_push(f, pass, group)
 	}
-	if pass != .Depth {
+	if pass != .Depth && pass != .Virtual_Depth {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)

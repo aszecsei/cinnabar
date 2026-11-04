@@ -296,6 +296,32 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
+	// With the virtual shadow map's pipelines, a frame without traced shadows draws its passes in place of the cascades,
+	// and the null backend validates its pass with no attachments. Low keeps the cascades, and turning the option off does too.
+	r.shadows.virtual.mark_pipeline.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	r.shadows.virtual.allocate_pipeline.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	{
+		q := r.quality
+		q.shadows = {level = .High, virtual = true}
+		desc.quality = &q
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
+		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.High].virtual_levels + 6)
+		testing.expect(t, r.shadows.virtual.pool != {})
+		testing.expect_value(t, r.shadows.virtual.pool_pages, SHADOW_PARAMS[.High].pool_pages)
+		// A level with another pool remakes it.
+		q.shadows.level = .Ultra
+		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
+		testing.expect_value(t, r.shadows.virtual.pool_pages, SHADOW_PARAMS[.Ultra].pool_pages)
+		q.shadows = {level = .Low, virtual = true}
+		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
+		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.Low].cascades + 6)
+		q.shadows = {level = .High, virtual = false}
+		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
+		testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
+		desc.quality = nil
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
 	// A Flat background is the clear color, which is not pre-exposed, so the histogram does not count it.
 	ecs.get(w, mist, Environment).mode = {true, .Flat}
 	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")

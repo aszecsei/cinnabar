@@ -1,5 +1,6 @@
 // The depth pass of every material (see docs/rendering/lighting-and-shadows.md#shadows), which the shadow maps draw. An opaque material
-// has no pixel shader. A masked one evaluates its opacity and discards below the cutoff.
+// has no pixel shader. A masked one evaluates its opacity and discards below the cutoff. The virtual shadow map's depth
+// pass has no depth attachment, so every material's pixel shader writes the depth itself.
 #ifndef MATERIAL_DEPTH_HLSLI
 #define MATERIAL_DEPTH_HLSLI
 
@@ -19,6 +20,16 @@ void ps_depth(Varyings i, bool front : SV_IsFrontFace) {
 	Surface s = evaluate(material_inputs(i, front));
 	clip(shade_opacity(s) - MATERIAL_CUTOFF);
 }
+
+void ps_virtual_depth(Varyings i, bool front : SV_IsFrontFace) {
+	Virtual_Write w = virtual_test(i.position.xy, i.position.z, max(abs(ddx(i.position.z)), abs(ddy(i.position.z))));
+	if (!virtual_quad_wanted(w)) {
+		return;
+	}
+	Surface s = evaluate(material_inputs(i, front));
+	clip(shade_opacity(s) - MATERIAL_CUTOFF);
+	virtual_write(w);
+}
 #else
 float4 vs_depth(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) : SV_Position {
 	return clip_position(load_vertex(vertex_id, instance_id).world);
@@ -33,6 +44,10 @@ Depth_Varyings depth_varyings(Material_Vertex v) {
 	Depth_Varyings o;
 	o.position = clip_position(v.world);
 	return o;
+}
+
+void ps_virtual_depth(float4 position : SV_Position) {
+	virtual_write(virtual_test(position.xy, position.z, max(abs(ddx(position.z)), abs(ddy(position.z)))));
 }
 #endif
 

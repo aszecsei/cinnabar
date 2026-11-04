@@ -32,8 +32,7 @@ float sprite_shadow(Light_Record light, Light reaching, float3 p, float depth) {
 	if (light.mask >= 0) {
 		return 1;
 	}
-	int view = shadow_view(light, p, depth);
-	return view < 0 ? 1 : shadow_map(uint(view), p, 0, reaching.direction);
+	return map_shadow(light, p, 0, reaching.direction, depth);
 }
 
 [numthreads(SPRITE_LIGHT_TEXELS, SPRITE_LIGHT_TEXELS, 1)]

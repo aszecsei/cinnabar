@@ -72,6 +72,9 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	if (debug_view == DEBUG_SHADOW_CASCADES) {
 		return CASCADE_COLORS[cascade_at(frame.near / max(i.position.z, 1e-7))] * lambert;
 	}
+	if (debug_view == DEBUG_SHADOW_VIRTUAL) {
+		return virtual_debug_color(i.world) * lambert;
+	}
 	// Vertex pulling draws no meshlets, so its surfaces are all one color, at level 0.
 	if (debug_view == DEBUG_MESHLETS) {
 		return hash_color(i.cluster & ((1u << MESHLET_DEPTH_SHIFT) - 1)) * lambert;

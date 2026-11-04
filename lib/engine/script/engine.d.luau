@@ -169,6 +169,7 @@ type RenderQuality = {
 	aa: string,
 	render_scale: number,
 	lod_error: number,
+	virtual_shadows: boolean,
 }
 
 -- What Render.set_quality changes: the fields that it gives. A preset sets every feature first.
@@ -184,6 +185,7 @@ type RenderQualityChange = {
 	aa: string?,
 	render_scale: number?,
 	lod_error: number?,
+	virtual_shadows: boolean?,
 }
 
 -- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs.

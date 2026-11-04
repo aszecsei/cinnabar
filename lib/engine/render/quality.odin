@@ -66,6 +66,9 @@ Shadow_Quality :: struct {
 	// Traced shadows for the first MAX_MASK_LIGHTS lights, which needs Ray_Query. The shadow maps still take the rest,
 	// at level.
 	ray_traced: bool,
+	// A virtual shadow map in place of the cascades, for a directional light that is not traced (see
+	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps). Low has none.
+	virtual:    bool,
 }
 
 Ao_Quality :: struct {
@@ -148,7 +151,7 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	return {
-		shadows = {level = level, ray_traced = caps.ray_query && level >= .High},
+		shadows = {level = level, ray_traced = caps.ray_query && level >= .High, virtual = level >= .Medium},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = caps.ray_query && level >= .High ? .Split_Cascades : .Screen_Cascades, level = level},
 		fog = level,
@@ -193,6 +196,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	}
 	q.shadows.level = clamp_enum(q.shadows.level, .High)
 	q.shadows.ray_traced &&= caps.ray_query
+	q.shadows.virtual &&= SHADOW_PARAMS[q.shadows.level].virtual_levels > 0
 	q.ao.technique = clamp_enum(q.ao.technique, .Off)
 	q.ao.level = clamp_enum(q.ao.level, .High)
 	q.gi.technique = clamp_enum(q.gi.technique, .Off)
@@ -229,6 +233,7 @@ set_quality :: proc(r: ^Renderer, q: Quality) {
 apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.shadows.level = q.shadows.level
 	settings.shadows.ray_traced = q.shadows.ray_traced
+	settings.shadows.virtual = q.shadows.virtual
 	settings.ambient_occlusion.technique = q.ao.technique
 	settings.ambient_occlusion.level = q.ao.level
 	settings.ambient_occlusion.off ||= q.ao.technique == .Off
