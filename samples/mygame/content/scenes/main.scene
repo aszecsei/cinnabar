@@ -25,6 +25,7 @@ component 1 Transform
 	scale = [1, 1, 1]
 component 32 Camera
 	near = 0.001
+component 97 Audio_Listener
 behaviour 79650b8e784445cba714fef3fd88eec6
 
 entity 294f29a7187efef1
@@ -51,6 +52,7 @@ component 33 Mesh_Renderer
 	cast_shadows = true
 component 65 Collider
 behaviour ecc996e9308f4bf1b7d7b4d623429249
+	sound = $1899c44a1ec54500d12ede038a7e3f4f
 
 entity 52f2b689117aa80c
 name = "Tall Box"

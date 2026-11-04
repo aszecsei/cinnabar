@@ -333,6 +333,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Skin => "skin",
         AssetKind.Animation => "animation",
         AssetKind.AnimationGraph => "animation graph",
+        AssetKind.Audio => "audio",
         _ => "script",
     };
 

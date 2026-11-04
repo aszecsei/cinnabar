@@ -29,6 +29,18 @@ file_read :: proc(path: string, align: int, allocator: runtime.Allocator) -> (da
 	return buffer, true
 }
 
+// file_read_range reads part of a file into buffer, from offset in bytes, and returns how many bytes it read: fewer past
+// the file's end, and 0 if the file does not exist.
+file_read_range :: proc(path: string, offset: i64, buffer: []byte) -> int {
+	f, err := os.open(path)
+	if err != nil {
+		return 0
+	}
+	defer os.close(f)
+	read, read_err := os.read_at(f, buffer, offset)
+	return read if read_err == nil || read_err == .EOF else 0
+}
+
 // file_write replaces a file's contents with data, through a temporary file beside it, so a reader never sees half of
 // it. It returns false if it could not.
 file_write :: proc(path: string, data: []byte) -> bool {

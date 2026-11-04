@@ -43,7 +43,7 @@ main :: proc() {
 		return
 	}
 	source_path, _ := filepath.join({exe_dir, DEFAULT_GAME_NAME}, context.temp_allocator)
-	content_dir, project_path, physics_backend := "", "", ""
+	content_dir, project_path, physics_backend, audio_backend := "", "", "", ""
 	shared_target := ""
 	adapter: u64
 	link_port := -1
@@ -58,6 +58,9 @@ main :: proc() {
 			i += 1
 		case os.args[i] == "--physics" && i + 1 < len(os.args):
 			physics_backend = os.args[i + 1]
+			i += 1
+		case os.args[i] == "--audio" && i + 1 < len(os.args):
+			audio_backend = os.args[i + 1]
 			i += 1
 		case os.args[i] == "--shared" && i + 1 < len(os.args):
 			shared_target = os.args[i + 1]
@@ -106,6 +109,7 @@ main :: proc() {
 		content_dir = content_dir,
 		project_path = project_path,
 		physics_backend_name = physics_backend,
+		audio_backend_name = audio_backend,
 	) {
 		return
 	}

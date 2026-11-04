@@ -6,6 +6,8 @@ import "core:slice"
 import "core:sync"
 import "core:thread"
 
+import audio "cinnabar:core/audio"
+
 // The device's one format, whatever the endpoint's is: 48 kHz stereo, 32-bit float (see docs/core/audio.md#format).
 AUDIO_SAMPLE_RATE :: 48000
 Audio_Frame :: [2]f32
@@ -142,6 +144,26 @@ audio_write :: proc(frames: []Audio_Frame) -> int {
 		device.thread = thread.create_and_start_with_data(device, _audio_thread, device.thread_context, .High, name = "audio")
 	}
 	return count
+}
+
+// audio_device_write and audio_device_status are the device as an audio backend sees it (see
+// docs/audio/backends.md#the-contract).
+@(private)
+audio_device_write :: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32 {
+	context = platform.audio.thread_context
+	return i32(audio_write(frames[:count]))
+}
+
+@(private)
+audio_device_status :: proc "c" (out: ^audio.Device_Status) {
+	context = platform.audio.thread_context
+	status := audio_status()
+	out^ = {
+		queued  = i64(status.queued),
+		played  = status.played,
+		starved = status.starved,
+		open    = b32(status.open),
+	}
 }
 
 @(private)

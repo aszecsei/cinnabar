@@ -16,8 +16,9 @@ Read the layers in this order the first time. Each one assumes the ones before i
 | 6 | [Scripting](scripting/README.md) | `lib/core/script`, `lib/engine/script` | Luau embedding across the reload boundary, the API scripts see, behaviours, and the tooling. |
 | 7 | [Physics](physics/README.md) | `lib/core/physics`, `lib/engine/physics` | Physics on Jolt: the boundary a backend implements, plugins, the components, the physics tick, joints, queries and events. |
 | 8 | [Animation](animation/README.md) | `lib/engine/anim` | The animation graph: states, fades and blends of clips, events, root motion, and the poses presented between ticks. |
-| 9 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
-| 10 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
+| 9 | [Audio](audio/README.md) | `lib/core/audio`, `lib/engine/audio` | Sound in the world: the mixer on its own thread, the boundary a backend implements, spatial sound, occlusion, streaming and the script binding. |
+| 10 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
+| 11 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
 
 [History](history.md) keeps the implementation phases of each layer, in the order they were built.
 
@@ -61,6 +62,7 @@ Each layer's README also has an **Overview** of its packages and data flow, and 
 | Add an asset kind | [Content: Identity and cooking](content/identity-and-cooking.md) and [Blobs and loading](content/blobs-and-loading.md) |
 | Add an editor panel or command | [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Write a physics backend | [Physics: Backends](physics/backends.md) |
+| Play a sound, or write an audio backend | [Audio: Design](audio/design.md) and [Audio: Backends](audio/backends.md) |
 | Add a message to the editor or cook link | [Editor: Editor link](editor/link.md) and [Content: Cook daemon](content/daemon-and-operations.md#cook-link) |
 | Port to another platform or GPU API | [Core: Platform](core/platform.md#platform-and-backend-abstraction) and [GPU: Interface](gpu/interface.md#hardware-floor) |
 | Understand a crash after a code reload | [Hot reload: Rules](overview/hot-reload.md#rules) |

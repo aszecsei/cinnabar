@@ -3,6 +3,7 @@ package core
 import "base:runtime"
 import "core:time"
 
+import audio "cinnabar:core/audio"
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 import "cinnabar:core/layout"
@@ -45,8 +46,9 @@ Platform_API :: struct {
 	// relative path is relative to the working directory. file_read reads a whole file into
 	// memory from allocator, at the given alignment. file_modified is the file's modification time in nanoseconds,
 	// or 0 if it does not exist. file_write replaces a whole file, such as the user's settings, so a reader never sees
-	// half of it.
+	// half of it. file_read_range reads part of a file into a buffer, and returns how many bytes it read.
 	file_read:        proc(path: string, align: int, allocator: runtime.Allocator) -> ([]byte, bool),
+	file_read_range:  proc(path: string, offset: i64, buffer: []byte) -> int,
 	file_modified:    proc(path: string) -> i64,
 	file_write:       proc(path: string, data: []byte) -> bool,
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
@@ -162,6 +164,11 @@ Platform_API :: struct {
 	// procedures are host code. world_destroy_all and shutdown are the host's; a soft restart destroys the worlds that
 	// the game left.
 	physics: physics.Physics_API,
+
+	// The audio backend that the project chose, or the null backend (see docs/audio/backends.md#the-contract). Its
+	// procedures are host code, and its voices keep playing through a code reload. reset and shutdown are the host's; a
+	// soft restart stops what the game left playing.
+	audio: audio.Audio_API,
 }
 
 // Game_API is what the game side provides to the host (game -> host).
@@ -175,8 +182,8 @@ Game_API :: struct {
 	state_size:  proc() -> int,
 	layout_hash: proc() -> u64,
 	// The host refuses a DLL whose abi_hash differs from its own: a different GPU command format (see
-	// docs/gpu/command-buffers.md#command-buffers), physics format (see docs/physics/design.md#the-boundary) or
-	// Platform_API.
+	// docs/gpu/command-buffers.md#command-buffers), physics format (see docs/physics/design.md#the-boundary), audio format
+	// (see docs/audio/backends.md#the-contract) or Platform_API.
 	abi_hash:    proc() -> u64,
 	// script_types returns the Luau definition file of the game's scripts, for host.exe --emit-script-types. It
 	// must not need init: it makes its own script runtime. See docs/scripting/tooling-and-hot-reload.md#types-and-tooling.
@@ -195,10 +202,10 @@ Editor_Message :: struct {
 	payload: []byte,
 }
 
-// abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format, the physics format
-// and Platform_API's layout.
+// abi_hash identifies what both sides of the DLL boundary must agree on: the GPU command format, the physics and audio
+// formats and Platform_API's layout.
 abi_hash :: proc() -> u64 {
-	return gpu.format_hash() ~ physics.format_hash() ~ layout.hash(Platform_API)
+	return gpu.format_hash() ~ physics.format_hash() ~ audio.format_hash() ~ layout.hash(Platform_API)
 }
 
 // The game DLL exports a `proc() -> Game_API` under this name.

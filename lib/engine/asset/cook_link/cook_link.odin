@@ -118,6 +118,7 @@ Asset_Kind :: enum u8 {
 	Skin,
 	Animation,
 	Animation_Graph,
+	Audio,
 }
 
 Asset_Status :: enum u8 {

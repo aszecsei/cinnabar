@@ -12,6 +12,7 @@ import "core:strings"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/audio"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 
@@ -28,6 +29,11 @@ PHYSICS_IGNORE_KEY :: "physics.ignore"
 // The physics backend, which the host reads before the game starts (see docs/physics/backends.md#choosing); the game
 // only knows the key.
 PHYSICS_BACKEND_KEY :: "physics.backend"
+// The audio backend, which the host reads before the game starts (see docs/audio/backends.md#choosing); the game only
+// knows the key.
+AUDIO_BACKEND_KEY :: "audio.backend"
+// The buses that sounds mix into, besides Master (see docs/audio/design.md#buses-and-effects).
+AUDIO_BUSES_KEY :: "audio.buses"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -47,6 +53,8 @@ Settings :: struct {
 	mesh_texel_density:    f32,
 	// The physics layers, or none for physics.default_layers.
 	physics_layers:        physics.Layers,
+	// The audio buses besides Master.
+	audio_buses:           audio.Bus_Names,
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -178,6 +186,27 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 		if key == PHYSICS_BACKEND_KEY {
 			if value == "" {
 				problem(problems, line, "%s takes a backend's name, such as jolt or none", key)
+			}
+			continue
+		}
+		if key == AUDIO_BACKEND_KEY {
+			if value == "" {
+				problem(problems, line, "%s takes a backend's name, such as mixer or none", key)
+			}
+			continue
+		}
+		if key == AUDIO_BUSES_KEY {
+			buses: audio.Bus_Names
+			ok := true
+			for part in strings.split(value, ",", context.temp_allocator) {
+				name := strings.trim_space(part)
+				if !audio.add_bus_name(&buses, name) {
+					problem(problems, line, "%s: %q is empty, longer than %d, %s, given twice, or past %d buses", key, name, audio.MAX_BUS_NAME, audio.MASTER_NAME, audio.MAX_BUSES)
+					ok = false
+				}
+			}
+			if ok {
+				settings.audio_buses = buses
 			}
 			continue
 		}

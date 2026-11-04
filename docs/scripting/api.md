@@ -64,6 +64,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Debug` | `log`, `warn`, `error` |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
+| `Audio` | `play(sound, position?, gain?, bus?)` and `set_bus_gain(bus, gain)`. See [Audio: Scripts](../audio/design.md#scripts). |
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
 | `Animation` | An Animator's graph's parameters by name, with its entity first (`set_float`, `set_bool`, `trigger`, `reset_trigger`, `get_float`, `get_bool`), its current `state` and its `root_motion` in the world, where the game defines it (see [Animation: Scripts](../animation/design.md#scripts)) |
 
@@ -140,6 +141,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `FixedUpdate` | `fixed_update(dt)`, or a native `Fixed` system for heavy work ([Fixed step](behaviours.md#fixed-step)) |
 | `Rigidbody`, `Collider` | `RigidBody`, `Collider` |
 | `rb.AddForce(f)`, `rb.velocity` | `Physics.add_force(entity, f)`, `Physics.velocity(entity)` |
+| `AudioSource.PlayClipAtPoint(clip, position)` | `Audio.play(sound, position)` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere` | `Physics.raycast`, `Physics.sphere_cast`, `Physics.overlap_sphere` |
 | `OnCollisionEnter`, `OnCollisionExit`, `OnTriggerEnter`, `OnTriggerExit` | `on_collision_enter(other, point, normal, velocity, impulse)`, `on_collision_exit(other)`, `on_trigger_enter(other)`, `on_trigger_exit(other)`; no `stay` (see [Physics: Events](../physics/design.md#events)) |
 | `animator.SetFloat`, `SetBool`, `SetTrigger`, `ResetTrigger` | `Animation.set_float(entity, name, v)`, `set_bool`, `trigger`, `reset_trigger` (see [Animation: Scripts](../animation/design.md#scripts)) |

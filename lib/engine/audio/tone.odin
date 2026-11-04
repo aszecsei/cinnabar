@@ -1,5 +1,3 @@
-// Package audio holds the game side of the audio device. So far that is the test tone, which shows the device working
-// (see docs/core/audio.md#test-tone).
 package audio
 
 import "core:math"
