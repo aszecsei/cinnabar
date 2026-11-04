@@ -8,12 +8,14 @@ import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
 import "core:os"
+import "core:slice"
 import "core:sync"
 import "core:testing"
 import "core:time"
 
 import "cinnabar:core"
 import boundary "cinnabar:core/audio"
+import "cinnabar:core/audio/adpcm"
 import audio_host "cinnabar:core/audio/host"
 import audio_null "cinnabar:core/audio/null"
 import "cinnabar:core/jobs"
@@ -243,7 +245,7 @@ frame :: proc(f: ^Fixture, run := true) {
 @(private = "file")
 write_sound :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, samples: []i16, channels: u32 = 1, stream := false) {
 	buffer: [32]u8
-	blob := format.audio_write({guid = guid, channels = channels, stream = stream, samples = samples, source_path = "game/audio/test.wav"}, context.temp_allocator)
+	blob := format.audio_write({guid = guid, frames = u64(len(samples)) / u64(channels), channels = channels, stream = stream, data = slice.to_bytes(samples), source_path = "game/audio/test.wav"}, context.temp_allocator)
 	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)), blob) == nil)
 }
 
@@ -490,6 +492,50 @@ a_sound_loads_or_streams :: proc(t: ^testing.T) {
 	testing.expect(t, stream.offset >= size_of(format.Audio_Blob))
 	buffer: [32]u8
 	testing.expect_value(t, record.paths[1], fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(LONG, &buffer)))
+	testing.expect_value(t, f.assets.used, 0)
+}
+
+@(private = "file")
+write_adpcm_sound :: proc(t: ^testing.T, f: ^Fixture, guid: format.Guid, samples: []i16, stream: bool) {
+	buffer: [32]u8
+	data := adpcm.encode(samples, 1, context.temp_allocator)
+	blob := format.audio_write({guid = guid, frames = u64(len(samples)), channels = 1, stream = stream, format = .ADPCM, data = data, source_path = "game/audio/test.wav"}, context.temp_allocator)
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", f.cache, format.guid_format(guid, &buffer)), blob) == nil)
+}
+
+// A compressed sound that streams goes to a backend that can read it with its format and where its data is, and a backend
+// that cannot gets it decoded, as PCM. So does a compressed sound that does not stream, on any backend.
+@(test)
+a_compressed_sound_streams_or_decodes :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	samples := [?]i16{100, 110, 120, 130, 140, 150, 160, 170}
+	write_adpcm_sound(t, f, SOUND, samples[:], stream = false)
+	write_adpcm_sound(t, f, LONG, samples[:], stream = true)
+	write_adpcm_sound(t, f, OTHER, samples[:], stream = true)
+	listener(f)
+
+	source(f, {1, 0, 0}, SOUND)
+	frame(f)
+	source(f, {2, 0, 0}, LONG)
+	frame(f)
+	f.audio.features -= {.Stream_ADPCM}
+	source(f, {3, 0, 0}, OTHER)
+	frame(f)
+
+	testing.expect_value(t, len(record.sounds), 3)
+	memory, streamed, fallback := record.sounds[0], record.sounds[1], record.sounds[2]
+	testing.expect(t, memory.path == nil)
+	testing.expect_value(t, memory.frames, 8)
+	testing.expect_value(t, memory.format, boundary.Sound_Format.PCM)
+	testing.expect(t, streamed.samples == nil)
+	testing.expect_value(t, streamed.format, boundary.Sound_Format.ADPCM)
+	testing.expect_value(t, streamed.frames, 8)
+	testing.expect_value(t, streamed.size, adpcm.data_bytes(8, 1))
+	testing.expect(t, streamed.offset >= size_of(format.Audio_Blob))
+	testing.expect(t, fallback.path == nil)
+	testing.expect_value(t, fallback.format, boundary.Sound_Format.PCM)
+	testing.expect_value(t, fallback.frames, 8)
 	testing.expect_value(t, f.assets.used, 0)
 }
 

@@ -31,7 +31,7 @@ The host reads the key itself, from the user's file first, before the game start
 
 **Handles.** The backend allocates `Sound`, `Voice` and `Bus` handles, an index and a generation. A call with a stale or nil handle does nothing, which the backend may log. A nil `Bus` means `MASTER_BUS`, which always exists.
 
-**Sounds.** A `Sound_Desc` is 16-bit PCM at `SAMPLE_RATE` (48 kHz), mono or stereo, interleaved. A sound with `samples` is in memory, and the backend copies them before `sound_create` returns. A sound with `path` has them in that file, from `offset` in bytes, and the backend reads them as it plays. The cooker can replace the file while it plays, so the backend must not hold it open between reads ([Streaming](design.md#streaming)): `Host.file_open`, `file_read_at`, `file_modified` and `file_close` are for this, and a voice ends when its file changes. A backend without `Streaming` gets every sound with `samples`.
+**Sounds.** A `Sound_Desc` is at `SAMPLE_RATE` (48 kHz), mono or stereo, interleaved. A sound with `samples` is in memory, always as 16-bit PCM, and the backend copies them before `sound_create` returns. A sound with `path` has its data in that file, `size` bytes from `offset`, in `format`, and the backend reads them as it plays. The engine gives a compressed format only to a backend that advertises its feature. Each pass over a compressed sound starts its decoder at the start of the data, throws away `skip` frames, keeps `frames` frames and ignores the rest. The rest continues the sound from its start, so a backend can fade across a loop's seam ([Streaming](design.md#streaming)). A Vorbis sound's data is a plain Ogg Vorbis stream, which a backend such as FMOD can read from `offset` itself. The cooker can replace the file while it plays, so the backend must not hold it open between reads ([Streaming](design.md#streaming)): `Host.file_open`, `file_read_at`, `file_modified` and `file_close` are for this, and a voice ends when its file changes. A backend without `Streaming` gets every sound with `samples`.
 
 `sound_destroy` makes the handle stale at once, and the sound's voices go on until they end.
 
@@ -57,6 +57,7 @@ The host reads the key itself, from the user's file first, before the game start
 | Feature | Without it |
 |---|---|
 | `Streaming` | Sounds that ask to stream are loaded. |
+| `Stream_ADPCM`, `Stream_Vorbis`, `Stream_Opus` | The engine decodes a sound of that format when it loads, and gives the backend PCM in `samples`, so a backend without them still plays every sound. |
 | `Spatial` | The backend may ignore positions, distances and occlusion. |
 | `Buses` | `bus_create` may return the nil bus, whose voices go to Master. |
 | `Effects` | `bus_set_effect` may do nothing. |

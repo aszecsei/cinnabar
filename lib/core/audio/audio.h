@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define CN_AUDIO_API_VERSION 1
+#define CN_AUDIO_API_VERSION 2
 #define CN_AUDIO_SAMPLE_RATE 48000
 #define CN_AUDIO_MAX_BUS_EFFECTS 4
 
@@ -23,6 +23,16 @@ enum cn_audio_feature {
     CN_AUDIO_FEATURE_STREAMING = 1u << 1,
     CN_AUDIO_FEATURE_BUSES = 1u << 2,
     CN_AUDIO_FEATURE_EFFECTS = 1u << 3,
+    CN_AUDIO_FEATURE_STREAM_ADPCM = 1u << 4,
+    CN_AUDIO_FEATURE_STREAM_VORBIS = 1u << 5,
+    CN_AUDIO_FEATURE_STREAM_OPUS = 1u << 6,
+};
+
+enum cn_sound_format {
+    CN_SOUND_FORMAT_PCM,
+    CN_SOUND_FORMAT_ADPCM,
+    CN_SOUND_FORMAT_VORBIS,
+    CN_SOUND_FORMAT_OPUS,
 };
 
 typedef struct cn_audio_backend_info {
@@ -39,7 +49,10 @@ typedef struct cn_sound_desc {
     const int16_t* samples;
     const char* path;
     uint64_t offset;
+    uint64_t size;
     uint32_t channels;
+    uint32_t format;
+    uint32_t skip;
     uint32_t _pad;
 } cn_sound_desc;
 
@@ -159,7 +172,7 @@ static inline uint32_t cn_audio_layout(void) {
 
 static_assert(sizeof(cn_audio_handle) == 8);
 static_assert(sizeof(cn_audio_backend_info) == 32);
-static_assert(sizeof(cn_sound_desc) == 40);
+static_assert(sizeof(cn_sound_desc) == 56);
 static_assert(sizeof(cn_voice_params) == 40);
 static_assert(sizeof(cn_voice_desc) == 64);
 static_assert(sizeof(cn_effect) == 16);

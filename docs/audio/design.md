@@ -70,7 +70,7 @@ A voice's handle goes stale as soon as it stops, while its slot stays busy until
 
 **`render` is a plain procedure**: it takes commands, mixes frames, and needs no thread or device. The tests call it, and read the samples.
 
-**A voice's path,** in `mix_voice`: read its PCM through a two-frame window, interpolated by `pitch`; apply the occlusion's low-pass; apply its gains, moved from last block's across this block, so a change never clicks; and add it to its bus.
+**A voice's path,** in `mix_voice`: read its PCM, from memory or a stream's ring, through a two-frame window, interpolated by `pitch`; apply the occlusion's low-pass; apply its gains, moved from last block's across this block, so a change never clicks; and add it to its bus.
 
 **Limits.** `MAX_VOICES` (128) and `MAX_STREAMS` (16). Past them a voice is refused, with one warning, and `stats` counts it. There are no virtual voices and no priorities yet.
 
@@ -100,19 +100,29 @@ Setting new parameters on a slot of the same kind keeps its memory, so a delay's
 
 ## Streaming
 
-A sound whose blob says `stream` is not loaded. `sound_create` takes its blob's path and where its samples start, and each voice of it reads them as it plays.
+A sound whose blob says `stream` is not loaded. `sound_create` takes its blob's path, where its data starts, its size and its format, and each voice of it reads them as it plays.
 
 - **Each playing voice has a stream**: a ring of `STREAM_RING_FRAMES` (about 1.4 s), and a place in the file. The stream thread tops the ring up when a `STREAM_CHUNK_FRAMES` (about 0.7 s) of it is free, so a slow disk has a long time to catch up.
 - **A voice waits for its first read,** so it does not start with a gap.
 - **A reader that falls behind** plays silence, and `stats` counts it in `stream_starved`, which `destroy` logs.
-- **A blob's samples are uncompressed PCM**, so a seek is one multiplication, and the runtime links no decoder ([Content: Audio](../content/kinds/audio.md#audio)).
+- **A blob's data is in a format** that its `.meta` file chose ([Content: Audio](../content/kinds/audio.md#audio)). A place in PCM or ADPCM is one multiplication. A place in Vorbis or Opus is not, and nothing asks for one but the start, so there is no seek table: a later seek needs one, or a decode from the start.
+
+**Decoding is the stream thread's, never the mix thread's.** The mix thread reads only the ring, which holds PCM whatever the format, so it takes no lock, allocates nothing and reads no file, as before. `lib/core/audio/codec` is the decoder:
+
+- **Each playing voice has its own decoder state,** as each has its own place in the file. Its memory is allocated once for the stream, on the game's thread, as the ring is: about 660 KB for Vorbis, which is the most, 160 KB for Opus, and 10 KB for ADPCM. stb_vorbis takes all of its memory from this, and libopus's state is in it.
+- **A block that does not fit in the ring waits** for the next fill, since a block is the codec's size and not the ring's.
+- **It costs little.** On the sample's 20-second sound, a pass decodes in 3 ms for ADPCM, 7 ms for Vorbis and 18 ms for Opus. This is on one thread for 16 streams at most, so the decoder is not what a reader falls behind on.
+
+**A loop's seam is crossed, not cut.** A pass of a Vorbis or Opus sound ends with `frames` given, and the cook has coded the sound's start again after its end. So the decoder goes on for `SEAM_FRAMES` (512, about 11 ms) past the end, and the next pass fades from these into its own start. Both are the same sound with different coding noise, so their levels add to the sound's. Without this, the two sides meet with a step the size of that noise: on the sample's slow pad, a second difference of about 40 for Vorbis and 86 for Opus, against about 22 anywhere else in the sound, and with it about 1. `a_loop_has_no_step_at_its_seam` holds this to account. ADPCM has no such step to hide: its noise is as large as a step everywhere.
+
+**A loop starts its decoder again.** libopus resets its state. stb_vorbis reads its headers again, which takes about 0.2 ms, because `stb_vorbis_flush_pushdata` drops a frame and looks for a page, and so is not a return to the start. Each pass then throws away `skip` frames.
 
 **A stream closes its file after every read.** The cooker writes a blob by renaming a new file over it, and Windows refuses that while the file is open, even one opened with `FILE_SHARE_DELETE`; `a_file_that_is_open_cannot_be_replaced` holds this to account. So a long-held handle would make a re-cook of a playing sound fail. The other side of the bargain:
 
 - A read can still meet the cooker's rename, for the moment that it takes, so `write_blob` tries the rename again for a short while.
 - A stream looks at the file's time at each read. If the file changed, what follows may not line up with what played, so the voice ends, and `update` starts its source again from the new sound.
 
-`update` also looks at one sound's blob each frame, in turn, and makes a new sound of a changed one. Memory sounds use this too, and stay out of the asset system: the backend holds their samples, so the blob is read, copied and freed.
+`update` also looks at one sound's blob each frame, in turn, and makes a new sound of a changed one. Memory sounds use this too, and stay out of the asset system: the backend holds their samples, so the blob is read, decoded if it is compressed, copied and freed. A compressed memory sound gives what a later pass of a stream gives, crossed over, so its loop has no seam either.
 
 ## Lifetimes
 

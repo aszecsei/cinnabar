@@ -68,7 +68,7 @@ report :: proc(level: audio.Log_Level, format: string, args: ..any) {
 info :: proc "c" () -> audio.Backend_Info {
 	return {
 		api_version = audio.API_VERSION,
-		features = {.Spatial, .Streaming, .Buses, .Effects},
+		features = {.Spatial, .Streaming, .Buses, .Effects, .Stream_ADPCM, .Stream_Vorbis, .Stream_Opus},
 		layout = audio.layout_signature(),
 		name = "null",
 		version = "1",
@@ -102,7 +102,7 @@ update :: proc "c" () {}
 @(private)
 sound_create :: proc "c" (desc: ^audio.Sound_Desc) -> audio.Sound {
 	context = runtime.default_context()
-	if desc == nil || (desc.channels != 1 && desc.channels != 2) || (desc.samples == nil && desc.path == nil) {
+	if desc == nil || (desc.channels != 1 && desc.channels != 2) || (desc.samples == nil && desc.path == nil) || desc.format > .Opus || (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
 		report(.Error, "audio: null: sound_create: invalid description")
 		return {}
 	}

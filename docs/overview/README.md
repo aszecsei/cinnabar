@@ -103,7 +103,7 @@ cinnabar/
 │   ├── editorctl/           Drives a running editor from a terminal: screenshots and GIFs
 │   └── ltc_fit/             Fits the area lights' lookup tables
 ├── samples/mygame/          The sample game: game.odin, main_release/, content/, project.settings
-└── vendor/                  luau, compressonator, meshoptimizer, jolt (submodules); agility, dxc (downloaded)
+└── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg (submodules); agility, dxc (downloaded)
 ```
 
 Packages are small and single-purpose. A package's tests are beside it as `*_test.odin`, and the justfile's `test` recipe lists every package with tests.
