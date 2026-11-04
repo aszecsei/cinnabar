@@ -68,6 +68,13 @@ Platform_API :: struct {
 	// compiles to nothing with -define:PROFILE=false: profile.scope(&platform.profile, name).
 	profile: profile.Procs,
 
+	// The audio device (see docs/core/audio.md#audio). audio_write queues 48 kHz stereo frames and returns how many fit,
+	// from one thread at a time. It opens the device on its first frames. audio_status is safe from any thread.
+	// audio_test_tone is whether CINNABAR_TEST_TONE asks the game to play the test tone.
+	audio_write:     proc(frames: []Audio_Frame) -> int,
+	audio_status:    proc() -> Audio_Status,
+	audio_test_tone: bool,
+
 	gpu_features:     proc() -> gpu.Features,
 	// The device that the backend chose (see docs/gpu/interface.md#adapter).
 	gpu_adapter:      proc() -> gpu.Adapter,

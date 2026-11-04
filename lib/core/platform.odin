@@ -25,6 +25,8 @@ DISABLE_FEATURES_VARIABLE :: "CINNABAR_DISABLE_FEATURES"
 // A gpu.Output_Request name that replaces the game's requests, to see an output mode without the game's settings. For
 // example: CINNABAR_OUTPUT=Scrgb.
 OUTPUT_VARIABLE :: "CINNABAR_OUTPUT"
+// 1 asks the game to play the audio device's test tone (see docs/core/audio.md#test-tone).
+TEST_TONE_VARIABLE :: "CINNABAR_TEST_TONE"
 
 // The build selects the GPU backend by pointing this collection at a backend package.
 import backend "gpu_backend:."
@@ -58,6 +60,7 @@ Platform :: struct {
 	input_queue: [dynamic]Input_Event,
 	// What the physics backend calls. The backend keeps its address.
 	physics_host: physics.Host,
+	audio:       Audio_Device,
 	api:         Platform_API,
 }
 
@@ -124,6 +127,7 @@ init :: proc(
 		backend.request_output(request)
 	}
 	platform.reservations = make([dynamic][]byte)
+	audio_init(&platform.audio)
 
 	platform.start = time.tick_now()
 	platform.last_frame = platform.start
@@ -150,6 +154,9 @@ init :: proc(
 		jobs_unlock                  = jobs.unlock,
 		jobs_worker_count            = jobs.worker_count,
 		profile                      = profile.procs(),
+		audio_write                  = audio_write,
+		audio_status                 = audio_status,
+		audio_test_tone              = os.get_env(TEST_TONE_VARIABLE, context.temp_allocator) == "1",
 		gpu_features                 = gpu_features,
 		gpu_adapter                  = backend.adapter,
 		gpu_frame_target             = backend.frame_target,
@@ -241,6 +248,7 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	audio_shutdown(&platform.audio)
 	platform.api.physics.shutdown()
 	backend.shutdown()
 	_window_close()
