@@ -221,7 +221,7 @@ free_data :: proc(a: ^Assets, r: ^Record) {
 	}
 }
 
-@(private)
+// blob_path is where an asset's blob is, in frame memory, for what reads a blob itself, such as a stream.
 blob_path :: proc(a: ^Assets, guid: format.Guid) -> string {
 	buffer: [32]u8
 	switch &source in a.source {

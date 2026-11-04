@@ -35,6 +35,7 @@ There are three ways a running game changes code or state, and each keeps a diff
 |---|---|---|---|
 | Window, GPU device, swapchain | Kept | Kept | Lost |
 | The audio device and its queue ([Core](../core/audio.md#the-device)) | Kept, and it keeps playing | Kept, and what is queued plays out | Lost |
+| The audio backend's threads, voices, sounds and buses ([Audio](../audio/design.md#lifetimes)) | Kept, and they keep playing | The threads stay. `core` stops the voices and destroys the rest between `shutdown` and `init` | Lost |
 | `Game_State` and everything in it: the world, asset handles, the renderer's tables | Kept; `on_reload` rebuilds registrations | Fresh: `shutdown`, then `init` | Fresh |
 | GPU resources in the `Game` scope | Kept | Destroyed by `core` between `shutdown` and `init` ([GPU](../gpu/resources-and-pipelines.md#resources)) | Lost |
 | GPU resources in the `Level`, `Asset` and `Permanent` scopes | Kept | Kept | Lost |

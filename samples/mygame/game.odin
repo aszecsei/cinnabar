@@ -60,6 +60,8 @@ BILLBOARDS_SCENE_META :: #load("content/scenes/billboards.scene.meta", string)
 ANIMATION_SCENE_META :: #load("content/scenes/animation.scene.meta", string)
 // The cube map scene, a sphere under a Texture sky whose texture is a cube map (see docs/rendering/sky.md#texture).
 CUBE_SKY_SCENE_META :: #load("content/scenes/cube_sky.scene.meta", string)
+// The audio scene, a hum that moves behind a wall, over a long sound that streams (see docs/audio/design.md#the-sample).
+AUDIO_SCENE_META :: #load("content/scenes/audio.scene.meta", string)
 // The array that tints the large triangles, a layer for each (see docs/content/kinds/textures.md#cube-maps-and-arrays).
 TRIANGLE_TINTS_META :: #load("content/textures/cube/tints.texture_set.meta", string)
 
@@ -248,6 +250,8 @@ Game_State :: struct {
 	world:              ecs.World,
 	// The physics world, which the fixed ticks step (see docs/physics/design.md#the-physics-tick).
 	physics:            physics.State,
+	// The sounds that the world and the scripts play (see docs/audio/design.md#the-game-side).
+	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
@@ -367,6 +371,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	if !physics.init(&s.physics, platform, anchor = PHYSICS_ANCHOR, assets = &s.assets) {
 		log.panic("mygame: cannot create the physics world")
 	}
+	audio.init(&s.audio, platform, &s.assets)
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
@@ -395,6 +400,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	scene.register_components(r)
 	volume.register_components(r)
 	physics.register_components(r)
+	audio.register_components(r)
 	anim.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
@@ -482,6 +488,7 @@ register_scripts :: proc(r: ^script.Runtime) {
 	// script_types, outside any Game_State, never does.
 	project.define_quality_bindings(r, &container_of(r, Game_State, "scripts").script_quality)
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
+	audio.register_scripts(r, &container_of(r, Game_State, "scripts").audio)
 	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
@@ -569,8 +576,11 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	}
 
 	find_camera(s)
+	// The device takes one writer, and the test tone is that writer when it asks to be.
 	if s.platform.audio_test_tone {
 		audio.tone_update(&s.tone, s.platform, tone_pan(s))
+	} else {
+		audio.update(&s.audio, &s.world, &s.physics, run, dt)
 	}
 	sync_pipelines(s)
 	when DEBUG_AXES {
@@ -960,6 +970,7 @@ shutdown :: proc(state: rawptr) {
 	script.destroy(&s.scripts)
 	render.renderer_destroy(&s.renderer)
 	asset.destroy(&s.assets)
+	audio.destroy(&s.audio)
 	physics.destroy(&s.physics)
 	anim.destroy(&s.animation)
 	ecs.destroy(&s.world)
@@ -986,6 +997,7 @@ update_output :: proc(s: ^Game_State) {
 			s.output_override = nil
 			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
 			physics.set_layers(&s.physics, project.physics_layers(s.project.settings))
+			apply_audio_settings(s)
 		}
 	}
 	if .F8 in s.platform.input().pressed {
@@ -1000,15 +1012,21 @@ update_output :: proc(s: ^Game_State) {
 	}
 }
 
+// apply_audio_settings makes the project's buses, and gives Sfx its room.
+apply_audio_settings :: proc(s: ^Game_State) {
+	audio.set_buses(&s.audio, s.project.settings.audio_buses)
+	audio.set_bus_effect(&s.audio, "Sfx", 0, {kind = .Reverb, parameters = {1.2, 0.4, 0.15}})
+}
+
 // switch_scene loads the next scene, the glass scene, the surfaces scene, the room scene, the billboards scene, the
-// animation scene, the cube map scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
+// animation scene, the cube map scene, the audio scene, then the main scene again, when F7 is pressed. A linked editor owns the scene, so
 // the key does nothing then.
 switch_scene :: proc(s: ^Game_State) {
 	if .F7 not_in s.platform.input().pressed || editor.active(&s.editor) {
 		return
 	}
-	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META}
-	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map"}
+	metas := [?]string{MAIN_SCENE_META, GLASS_SCENE_META, SURFACES_SCENE_META, ROOM_SCENE_META, BILLBOARDS_SCENE_META, ANIMATION_SCENE_META, CUBE_SKY_SCENE_META, AUDIO_SCENE_META}
+	names := [?]string{"main", "glass", "surfaces", "room", "billboards", "animation", "cube map", "audio"}
 	s.scene_index = (s.scene_index + 1) % len(metas)
 	if guid, ok := format.meta_guid(metas[s.scene_index]); ok {
 		scene.load_asset(&s.world, &s.scripts, &s.assets, guid)
@@ -1023,6 +1041,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	s.platform = platform
 	ecs.reload(&s.world, platform)
 	physics.reload(&s.physics, platform)
+	audio.reload(&s.audio, platform)
 	register_world(s)
 	render.renderer_reload(&s.renderer, platform, &s.world)
 	register_post_effects(s)

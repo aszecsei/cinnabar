@@ -43,6 +43,8 @@ dev_defines := "-define:LUAU_SHARED=true " + luau_features
 luau_dir := obj_dir + "/luau"
 # lib/core/physics/jolt/jolt.odin links its libraries from build/obj/jolt.
 jolt_dir := obj_dir + "/jolt"
+# lib/core/audio/plugin's tests load the mixer's library from here.
+audio_dir := obj_dir + "/audio"
 cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
@@ -70,7 +72,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
 
 # =================================
 # Help
@@ -218,7 +220,7 @@ update-compressonator tag="": install-compressonator
 alias b := build
 
 # Build the host and the game DLL, and cook the game's scripts and scenes
-build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs
+build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs audio
 
 # Build the development host
 host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt
@@ -253,6 +255,16 @@ jolt:
     # A running host keeps physics_jolt.dll locked. The backend is host code, so a change needs a host restart anyway.
     mkdir -p "{{dev_dir}}"
     cmp -s "{{jolt_dir}}/shared/out/physics_jolt.dll" "{{dev_dir}}/physics_jolt.dll" || cp "{{jolt_dir}}/shared/out/physics_jolt.dll" "{{dev_dir}}/"
+
+# Build the mixer as a library, audio_cinnabar.dll, as another audio backend would be (see
+# docs/audio/backends.md#loading). The host links the mixer itself, so only --audio cinnabar and the tests load this.
+[script]
+audio-plugin:
+    set -euo pipefail
+    mkdir -p "{{audio_dir}}" "{{dev_dir}}"
+    odin build lib/core/audio/dll -collection:cinnabar=lib -build-mode:dll -out:"{{audio_dir}}/audio_cinnabar.dll" -o:speed
+    # A running host keeps the library locked. A backend is host code, so a change needs a host restart anyway.
+    cmp -s "{{audio_dir}}/audio_cinnabar.dll" "{{dev_dir}}/audio_cinnabar.dll" || cp "{{audio_dir}}/audio_cinnabar.dll" "{{dev_dir}}/"
 
 # Build Compressonator's block compression core for the cooker
 compressonator: install-compressonator
@@ -323,6 +335,11 @@ stages config="dev": cook
 # docs/content/kinds/effects.md#effects). An effect without a .meta file gets one: commit it.
 effects config="dev": cook
     "./{{tools_dir}}/cook.exe" effects --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
+
+# Cook the game's sounds into the loose cache of the configuration (see docs/content/kinds/audio.md#audio). A sound without
+# a .meta file gets one: commit it.
+audio config="dev": cook
+    "./{{tools_dir}}/cook.exe" audio --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{roots}}
 
 # Cook the game's animation graphs into the loose cache of the configuration (see
 # docs/content/kinds/animation-graphs.md#animation-graphs). A graph without a .meta file gets one: commit it.
@@ -413,7 +430,7 @@ edit: build editor
 
 # Build the statically linked release executable into build/release, with its content and project settings beside it,
 # so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release")
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release") (audio "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
@@ -438,6 +455,10 @@ lint:
 # Check that every docs/<path>.md#<section> link in the source, the justfile and the docs resolves to a heading
 docs-check:
     python -I tools/check_docs.py .
+
+# Write the sample's generated sounds (see docs/content/kinds/audio.md#the-samples-sounds). Commit what it writes.
+sample-audio:
+    python -I tools/audio_samples.py .
 
 # Write the sample's generated textures, such as the bricks' height map (see docs/rendering/materials.md#parallax-occlusion-mapping).
 # Commit what it writes.
@@ -479,8 +500,8 @@ intel-report: cook
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau jolt compressonator meshoptimizer lightusd link-schema install-dxc
-    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" || exit 1; done
+test: luau jolt audio-plugin compressonator meshoptimizer lightusd link-schema install-dxc
+    for p in lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/mixer lib/core/audio/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

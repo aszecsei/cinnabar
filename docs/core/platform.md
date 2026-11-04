@@ -23,12 +23,13 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Memory | `permanent_allocator`, `frame_allocator`, `asset_allocator`, `heap_allocator`, `memory_reserve`, `memory_commit`, `memory_release` | See [Memory](jobs-and-memory.md#memory). |
 | Paths | `content_dir`, `project_path` | Where the game's loose cache and its project settings are, as absolute strings in host memory: beside the executable, unless the host's command line says otherwise. See [Building and running](../overview/building-and-running.md#build-layout). |
 | Time and input | `time_seconds`, `input` | `input` is the state at the start of the frame. See [Input](input.md#input). |
-| Files | `file_read`, `file_modified`, `file_write` | What the asset runtime reads the loose cache with, and the project package writes the user's settings with. |
+| Files | `file_read`, `file_read_range`, `file_modified`, `file_write` | What the asset runtime reads the loose cache with, and the project package writes the user's settings with. `file_read_range` reads part of a file, such as a streamed sound's header. |
 | Window | `window_size`, `set_window_title` | The size is read once per frame. |
 | Jobs | `jobs_run`, `jobs_wait`, `jobs_lock`, `jobs_unlock`, `jobs_worker_count` | See [Job system](jobs-and-memory.md#job-system). Background jobs are deliberately absent. |
 | Profiler | `profile` | A `profile.Procs`, which the profile package's front-end takes. See [Profiling](profiling.md#zones). |
 | Audio | `audio_write`, `audio_status`, `audio_test_tone` | The device's queue, its state, and whether `CINNABAR_TEST_TONE` asks for the test tone. See [Audio](audio.md#audio). |
 | GPU | `gpu_features`, `gpu_frame_target`, `gpu_output`, `gpu_request_output`, `gpu_preview_target`, `gpu_release_preview_target`, `gpu_submit`, `gpu_upload`, `gpu_stream_*`, `gpu_transfer_done`, `gpu_read_buffer`, `gpu_create_*`, `gpu_update_*`, `gpu_pipeline_ready`, `gpu_accel_reference`, `gpu_destroy_*`, `gpu_destroy_scope` | One field per backend procedure. See [GPU](../gpu/interface.md#packages). |
+| Audio backend | `audio` | The `Audio_API` table that the project chose. See [Audio: Backends](../audio/backends.md#the-contract). |
 | Scripting | `script_open`, `script_close`, `script_push_binding`, `script_atom`, `script_direct_access` | The host trampolines. See [Scripting](../scripting/embedding.md#host-trampolines). |
 
 In release, `main_release` fills the same struct with direct references, so a game never knows which configuration it is in.

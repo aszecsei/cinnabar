@@ -19,6 +19,7 @@ Read them in this order the first time.
 | [Materials](kinds/materials.md) | Shading models, materials, instances, functions and graphs. |
 | [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
 | [Animation graphs](kinds/animation-graphs.md) | Parameters, clips with their events, and the states, blends and transitions that an Animator plays. |
+| [Audio](kinds/audio.md) | Sounds: what the cooker decodes, the blob and its import settings, and the sample's sounds. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 
@@ -61,6 +62,7 @@ The code is in three places:
 | | `stages.odin`, `usd.odin`, `usd/cn_usd.cpp` | USD stages: composition and conversion through LightUSD, each sub-asset's cook, the generated material instances and prefab, the manifest |
 | | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half. The game bakes the same files live while the editor edits them (see [Mesh editing](../editor/mesh-editing.md#live-meshes)) |
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
+| | `audio.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, and whether they stream |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |

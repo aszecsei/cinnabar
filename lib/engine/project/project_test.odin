@@ -7,6 +7,7 @@ import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:engine/audio"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 
@@ -205,6 +206,23 @@ a_saved_quality_is_the_user_files :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(saved_files["project.user.settings"].text, "output = Sdr\n"))
 	testing.expect_value(t, w.settings.output, gpu.Output_Request.Sdr)
 	testing.expect_value(t, saved_files["project.settings"].text, "quality.preset = Ultra\n")
+}
+
+// audio.buses names the buses besides Master in order, and audio.backend is the host's: the game only knows the key.
+@(test)
+audio_buses_and_backend :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("audio.buses = Music, Sfx\naudio.backend = none\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect_value(t, s.audio_buses.count, 2)
+	testing.expect_value(t, audio.bus_name(&s.audio_buses, 1), "Sfx")
+
+	// A list with a bad name keeps what the settings had, and says so.
+	parse("audio.buses = Music, Master\naudio.backend =\n", &s, &problems)
+	testing.expect_value(t, len(problems), 2)
+	testing.expect_value(t, s.audio_buses.count, 2)
+	testing.expect_value(t, audio.bus_name(&s.audio_buses, 0), "Music")
 }
 
 // physics.layers names the layers in order, and physics.ignore the pairs that do not collide, wherever it is in the

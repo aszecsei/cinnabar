@@ -6,6 +6,7 @@ import "core:log"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:time"
 
 import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
@@ -33,6 +34,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Skin = nil,
 	.Animation = nil,
 	.Animation_Graph = {format.ANIMATION_GRAPH_EXTENSION},
+	.Audio = AUDIO_EXTENSIONS,
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -66,6 +68,8 @@ import_settings :: proc(kind: format.Asset_Kind) -> []Setting_Info {
 		return MESH_SETTINGS
 	case .Stage:
 		return STAGE_SETTINGS
+	case .Audio:
+		return AUDIO_SETTINGS
 	}
 	return nil
 }
@@ -110,7 +114,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage, .Animation_Graph}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage, .Animation_Graph, .Audio}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -355,6 +359,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Animation
 	case .Animation_Graph:
 		return .Animation_Graph
+	case .Audio:
+		return .Audio
 	}
 	return .Script
 }
@@ -519,6 +525,11 @@ cooked_key :: proc(output: string, kind: format.Asset_Kind, layout: u64) -> u64 
 	return header.key
 }
 
+// A running game holds a blob open for a moment when it reads it, as a stream does twice a second, and Windows refuses a
+// rename over an open file. Reads are far shorter than this.
+WRITE_BLOB_ATTEMPTS :: 10
+WRITE_BLOB_WAIT :: 20 * time.Millisecond
+
 // write_blob writes a blob to a temporary file and renames it, so the running game never reads a partial blob.
 write_blob :: proc(output: string, blob: []byte) -> bool {
 	temporary := fmt.tprintf("%s.tmp", output)
@@ -526,7 +537,12 @@ write_blob :: proc(output: string, blob: []byte) -> bool {
 		log.errorf("cook: %s: %v", temporary, err)
 		return false
 	}
-	if err := os.rename(temporary, output); err != nil {
+	err := os.rename(temporary, output)
+	for attempt := 1; err != nil && attempt < WRITE_BLOB_ATTEMPTS; attempt += 1 {
+		time.sleep(WRITE_BLOB_WAIT)
+		err = os.rename(temporary, output)
+	}
+	if err != nil {
 		log.errorf("cook: %s: %v", output, err)
 		return false
 	}

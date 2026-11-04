@@ -1,0 +1,94 @@
+# The audio scene, which F7 in mygame cycles to (see docs/audio/design.md#the-sample): a hum that moves from side to side
+# behind a wall, in earshot of a listener on the camera, over a long sound that streams. The wall muffles the hum while
+# it is between the two, and the hum moves across the stereo image as it goes. Positions are raw World_Position values in
+# units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+scene 2
+
+entity a0d1000000000001
+name = "Camera"
+component 1 Transform
+	position = [2516582400000000000, 25165824, -100663296]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 32 Camera
+component 97 Audio_Listener
+behaviour 79650b8e784445cba714fef3fd88eec6
+
+entity a0d1000000000002
+name = "Global Volume"
+component 1 Transform
+	position = [2516582400000000000, 16777216, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 42 Volume
+	shape = Global
+component 49 Environment
+	background = [0.32, 0.5, 0.78]
+
+entity a0d1000000000003
+name = "Sun"
+component 1 Transform
+	position = [2516582400000000000, 67108864, 0]
+	rotation = [0.403058, 0.272532, -0.127084, 0.864361]
+	scale = [1, 1, 1]
+component 34 Directional_Light
+	color = [1, 0.95, 0.85]
+	intensity = 3
+	cast_shadows = true
+
+entity a0d1000000000004
+name = "Floor"
+component 1 Transform
+	position = [2516582400000000000, -838861, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [40, 0.1, 40]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 65 Collider
+
+entity a0d1000000000005
+name = "Wall"
+component 1 Transform
+	position = [2516582400000000000, 25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [4, 3, 0.2]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $cbeb3ff7d07840a7a816ea35868ee5b0
+	cast_shadows = true
+component 65 Collider
+
+entity a0d1000000000006
+name = "Hum"
+component 1 Transform
+	position = [2516582400000000000, 25165824, 50331648]
+	rotation = [0, 0, 0, 1]
+	scale = [0.4, 0.4, 0.4]
+component 4 Previous_Transform
+component 33 Mesh_Renderer
+	mesh = $9486d4ef423a1cec3dcc39a1250a78f8
+	materials.0 = $a120bc6f08344b128690c05eac5a2125
+	cast_shadows = true
+component 96 Audio_Source
+	sound = $58c65b3b72c5880124b3e610fbcf7cb2
+	bus = 2
+	loop = true
+	min_distance = 2
+	max_distance = 40
+behaviour 6870f098abf40ca88d9de5f597dda41d
+
+entity a0d1000000000007
+name = "Ambience"
+component 1 Transform
+	position = [2516582400000000000, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 96 Audio_Source
+	sound = $ac87e25625175689bc0e47ad70107ebe
+	bus = 1
+	loop = true
+	spatial = false
+	occluded = false
+	gain = 0.2

@@ -177,6 +177,9 @@ cook :: proc(
 	if .Animation_Graph in kinds {
 		pass.ok = cook_animation_graphs(options, pass.assets, &pass) && pass.ok
 	}
+	if .Audio in kinds {
+		pass.ok = cook_audio(options, pass.assets, &pass) && pass.ok
+	}
 	written := 0
 	for n in pass.cooked {
 		written += n

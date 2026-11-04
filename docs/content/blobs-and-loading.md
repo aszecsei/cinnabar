@@ -32,6 +32,8 @@ A mesh blob holds its flags (a second UV set, a vertex color, 32-bit indices, a 
 
 A skin blob holds its joints, parents first: each with its parent's index, its inverse bind matrix in three rows, its rest pose as a translation, a quaternion and a scale, its sphere at bind time and its name. It ends with the skin's name and the model's path. An animation blob holds its skin's GUID and count of joints, its duration, its channels (a joint, a part, an interpolation, and ranges of the keys), the keys' times in `f32`, and their values in `f32`, three or four per key. It ends with the animation's name and the model's path (see [Skins and animations](kinds/skins-and-animations.md#animations)).
 
+An audio blob holds its frame count, its channels, whether it streams, and its samples as interleaved 16-bit PCM at 48 kHz, which start at 16 bytes. It starts with the source path after the header. A stream reads the header and then any part of the samples from the file, and never loads the blob (see [Audio](kinds/audio.md#audio)).
+
 The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
 
 ## Loading

@@ -11,6 +11,9 @@ import "core:strings"
 import "core:sync"
 import "core:time"
 
+import audio_boundary "cinnabar:core/audio"
+import audio_host "cinnabar:core/audio/host"
+import audio_plugin "cinnabar:core/audio/plugin"
 import "cinnabar:core/gpu"
 import "cinnabar:core/jobs"
 import physics "cinnabar:core/physics"
@@ -60,6 +63,8 @@ Platform :: struct {
 	input_queue: [dynamic]Input_Event,
 	// What the physics backend calls. The backend keeps its address.
 	physics_host: physics.Host,
+	// What the audio backend calls. The backend keeps its address.
+	audio_host:  audio_boundary.Host,
 	audio:       Audio_Device,
 	api:         Platform_API,
 }
@@ -70,7 +75,8 @@ platform: Platform
 // A non-empty shared_target renders into shared textures for another process, such as the editor, with the window
 // hidden (see docs/gpu/presentation.md#presentation). A non-zero adapter is the LUID of the GPU to use. content_dir and
 // project_path are where the game's files are; empty, they are beside the executable (see game_paths). physics is the
-// physics backend's name; empty, it is the project's physics.backend, or jolt.
+// physics backend's name; empty, it is the project's physics.backend, or jolt. audio is the audio backend's name; empty,
+// it is the project's audio.backend, or the mixer.
 init :: proc(
 	title: string,
 	width: i32 = 1280,
@@ -80,6 +86,7 @@ init :: proc(
 	content_dir := "",
 	project_path := "",
 	physics_backend_name := "",
+	audio_backend_name := "",
 ) -> bool {
 	if err := virtual.arena_init_static(&platform.permanent, PERMANENT_RESERVE); err != nil {
 		log.errorf("core: permanent arena: %v", err)
@@ -112,6 +119,11 @@ init :: proc(
 	physics_host.bind(physics_api)
 	info := physics_api.info()
 	log.infof("core: physics %s %s", info.name, info.version)
+	platform.audio_host = audio_host.table(audio_device_write, audio_device_status)
+	audio_name := audio_backend_name if audio_backend_name != "" else audio_host.backend_setting(project, context.temp_allocator)
+	audio_api := audio_plugin.load(&platform.audio_host, audio_name)
+	audio_info := audio_api.info()
+	log.infof("core: audio %s %s", audio_info.name, audio_info.version)
 	if !_window_open(title, width, height, visible = shared_target == "") {
 		log.error("core: failed to open window")
 		return false
@@ -145,6 +157,7 @@ init :: proc(
 		time_seconds                 = time_seconds,
 		input                        = _window_input,
 		file_read                    = file_read,
+		file_read_range              = file_read_range,
 		file_modified                = file_modified,
 		file_write                   = file_write,
 		window_size                  = window_size,
@@ -198,6 +211,7 @@ init :: proc(
 		script_atom                  = script_host.atom,
 		script_direct_access         = script_host.direct_access,
 		physics                      = physics_api^,
+		audio                        = audio_api^,
 	}
 	return true
 }
@@ -249,6 +263,8 @@ absolute :: proc(path: string, allocator: runtime.Allocator) -> string {
 }
 
 shutdown :: proc() {
+	// The backend first: it writes to the device from its own thread.
+	platform.api.audio.shutdown()
 	audio_shutdown(&platform.audio)
 	platform.api.physics.shutdown()
 	backend.shutdown()
@@ -318,9 +334,12 @@ alloc_game_state :: proc(size: int) -> rawptr {
 }
 
 // soft_restart runs between the old game's shutdown and the new game's init. It destroys the GPU resources in the
-// Game scope, the virtual memory reservations, the script VMs and the physics worlds, which the old game may have left,
-// and frees all permanent allocations.
+// Game scope, the virtual memory reservations, the script VMs, the physics worlds and the audio backend's voices, sounds
+// and buses, which the old game may have left, and frees all permanent allocations.
 soft_restart :: proc() {
+	if count := platform.api.audio.reset(); count > 0 {
+		log.debugf("core: stopped %d audio voices that the game left playing", count)
+	}
 	if count := script_host.close_all(); count > 0 {
 		log.debugf("core: closed %d script VMs that the game left open", count)
 	}

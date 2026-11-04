@@ -12,4 +12,4 @@ Rendering does not read the ECS. Each frame, before the render graph is built, e
 
 The built-in renderer's [GPU scene](../rendering/gpu-scene.md#gpu-scene) is the main consumer: it extracts every `Mesh_Renderer` relative to a render origin rather than the camera, so that its records persist across frames.
 
-Audio reads the world at the same point in the frame and in the same way, through `presented`, so what is heard is a tick behind and interpolated, like what is drawn ([Core](../core/audio.md#test-tone)).
+Audio reads the world at the same point in the frame and in the same way, through `presented`, so what is heard is a tick behind and interpolated, like what is drawn ([Audio](../audio/design.md#sources-and-the-listener)).

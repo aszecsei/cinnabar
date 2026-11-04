@@ -213,6 +213,8 @@ Asset_Kind :: enum u32 {
 	Animation,
 	// Parameters, clips with their events, and a state machine of clips and blends, which an Animator plays.
 	Animation_Graph,
+	// A sound as PCM, which an Audio_Source or a script plays.
+	Audio,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

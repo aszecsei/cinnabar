@@ -37,7 +37,7 @@ A writer chooses its own queue depth by writing until `queued` reaches it. The d
 
 A writer in the game's frame code stops whenever the frames stop, so it must queue enough to outlast them. A code reload is one such stop: the host loads the new DLL between frames, and the device thread keeps playing the queue. In `mygame` a reload takes about 17 ms. A stall that is longer than the queue starves, such as the first frames of a run, or dragging the window, because the window's message loop holds the main thread.
 
-A writer on its own host-side thread does not stop for any of these, so it can keep a much shorter queue. Its code must be host code, because a thread cannot run in a DLL that a reload replaces ([Hot reload](../overview/hot-reload.md#rules)).
+A writer on its own host-side thread does not stop for any of these, so it can keep a much shorter queue. Its code must be host code, because a thread cannot run in a DLL that a reload replaces ([Hot reload](../overview/hot-reload.md#rules)). [The mixer](../audio/design.md#the-mixer) is such a writer, and keeps 40 ms queued.
 
 ## Device loss
 
@@ -47,6 +47,6 @@ Without an endpoint, the thread drains the queue at the sample rate, and logs on
 
 ## Test tone
 
-Set `CINNABAR_TEST_TONE=1` to make `Platform_API.audio_test_tone` true. `mygame` then plays a quiet 440 Hz sine with `audio.Tone` in `lib/engine/audio`, which keeps 250 ms queued.
+Set `CINNABAR_TEST_TONE=1` to make `Platform_API.audio_test_tone` true. `mygame` then plays a quiet 440 Hz sine with `audio.Tone` in `lib/engine/audio`, which keeps 250 ms queued. The device takes one writer, so the game then plays no other sound: `mygame` calls `audio.update` only without the tone, and the mixer's thread does not start.
 
 The tone writes after the world's `Late` stage, where [render extraction](../world/render-extraction.md#render-extraction) reads the world, and its pan comes from the `ecs.presented` pose of the first entity with a `Spin`: `Tone Source` in the main scene. So its pan is a tick behind and interpolated, as a drawn pose is, and it moves from one frame's value to the next over the frames it writes. The phase and the pan are in `Game_State`, so a code reload continues the sine exactly, and a soft restart starts it again.
