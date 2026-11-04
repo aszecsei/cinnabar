@@ -14,6 +14,7 @@ import "core:time"
 
 import "cinnabar:core"
 import boundary "cinnabar:core/audio"
+import "cinnabar:core/audio/codec"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -533,9 +534,28 @@ find_sound :: proc(s: ^State, guid: format.Guid) -> ^Sound_Slot {
 	return sound
 }
 
+// can_stream is whether the backend can read a sound of this format as it plays.
+@(private)
+can_stream :: proc(features: boundary.Features, sound_format: boundary.Sound_Format) -> bool {
+	if .Streaming not_in features {
+		return false
+	}
+	switch sound_format {
+	case .PCM:
+		return true
+	case .ADPCM:
+		return .Stream_ADPCM in features
+	case .Vorbis:
+		return .Stream_Vorbis in features
+	case .Opus:
+		return .Stream_Opus in features
+	}
+	return false
+}
+
 // load_sound reads a blob's start, and then all of it, or only tells the backend where it is if it streams. All of a
-// memory sound goes to the backend, which copies it, so it stays out of the asset system: nothing else reads it. The time
-// comes first, so a blob that changes during the read is read again.
+// memory sound goes to the backend as PCM, decoded here if it is compressed, and the backend copies it, so it stays out of
+// the asset system: nothing else reads it. The time comes first, so a blob that changes during the read is read again.
 @(private)
 load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 	api := &s.platform.audio
@@ -556,9 +576,12 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 		frames   = blob.frames,
 		channels = blob.channels,
 	}
-	if bool(blob.stream) && .Streaming in s.features {
+	if bool(blob.stream) && can_stream(s.features, blob.format) {
 		desc.path = strings.clone_to_cstring(path, s.platform.frame_allocator)
-		desc.offset = u64(blob.samples.offset)
+		desc.offset = u64(blob.data.offset)
+		desc.size = u64(blob.data.size)
+		desc.format = blob.format
+		desc.skip = blob.skip
 		sound.handle = api.sound_create(&desc)
 		return
 	}
@@ -573,7 +596,18 @@ load_sound :: proc(s: ^State, sound: ^Sound_Slot) {
 		log.errorf("audio: %s is not a cooked sound of its GUID. Cook the content.", path)
 		return
 	}
-	desc.samples = raw_data(format.audio_samples(data, view))
+	if view.format == .PCM {
+		desc.samples = raw_data(format.audio_samples(data, view))
+		sound.handle = api.sound_create(&desc)
+		return
+	}
+	samples := make([]i16, view.frames * u64(view.channels), s.platform.asset_allocator)
+	defer delete(samples, s.platform.asset_allocator)
+	if !codec.decode_all(view.format, format.audio_data(data, view), int(view.channels), view.frames, u64(view.skip), samples, s.platform.asset_allocator) {
+		log.errorf("audio: cannot decode %s. Cook the content.", path)
+		return
+	}
+	desc.samples = raw_data(samples)
 	sound.handle = api.sound_create(&desc)
 }
 

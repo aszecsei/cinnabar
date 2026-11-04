@@ -71,7 +71,10 @@ Sound_Data :: struct {
 	samples:  [^]i16,
 	path:     cstring,
 	offset:   u64,
+	size:     u64,
 	channels: u32,
+	format:   audio.Sound_Format,
+	skip:     u32,
 	users:    i32,
 	// In the list of sounds to free.
 	next:     ^Sound_Data,
@@ -184,7 +187,7 @@ api := audio.Audio_API {
 	info = proc "c" () -> audio.Backend_Info {
 		return {
 			api_version = audio.API_VERSION,
-			features = {.Spatial, .Streaming, .Buses, .Effects},
+			features = {.Spatial, .Streaming, .Buses, .Effects, .Stream_ADPCM, .Stream_Vorbis, .Stream_Opus},
 			layout = audio.layout_signature(),
 			name = "mixer",
 			version = "1",
@@ -321,7 +324,7 @@ free_sound :: proc(m: ^Mixer, data: ^Sound_Data) {
 }
 
 sound_create :: proc(m: ^Mixer, desc: ^audio.Sound_Desc) -> audio.Sound {
-	if desc == nil || (desc.channels != 1 && desc.channels != 2) || desc.frames == 0 || (desc.samples == nil && desc.path == nil) {
+	if desc == nil || (desc.channels != 1 && desc.channels != 2) || desc.frames == 0 || (desc.samples == nil && desc.path == nil) || desc.format > .Opus || (desc.format != .PCM && (desc.samples != nil || desc.size == 0)) {
 		report(m, .Error, "audio: mixer: sound_create: invalid description")
 		return {}
 	}
@@ -343,7 +346,10 @@ sound_create :: proc(m: ^Mixer, desc: ^audio.Sound_Desc) -> audio.Sound {
 	data^ = {
 		frames   = desc.frames,
 		offset   = desc.offset,
+		size     = desc.size,
 		channels = desc.channels,
+		format   = desc.format,
+		skip     = desc.skip,
 		users    = 1,
 	}
 	if desc.samples != nil {
@@ -626,6 +632,10 @@ shutdown :: proc(m: ^Mixer) {
 		m.stream_thread = nil
 	}
 	for &stream in m.streams {
+		if stream.decoder_memory != nil {
+			m.host.free(raw_data(stream.decoder_memory))
+			stream.decoder_memory = nil
+		}
 		if stream.ring != nil {
 			m.host.free(stream.ring)
 			stream.ring = nil

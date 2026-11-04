@@ -62,7 +62,7 @@ The code is in three places:
 | | `stages.odin`, `usd.odin`, `usd/cn_usd.cpp` | USD stages: composition and conversion through LightUSD, each sub-asset's cook, the generated material instances and prefab, the manifest |
 | | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half. The game bakes the same files live while the editor edits them (see [Mesh editing](../editor/mesh-editing.md#live-meshes)) |
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
-| | `audio.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, and whether they stream |
+| | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
@@ -76,6 +76,8 @@ The sections below follow the same order: how an asset is identified, how each k
 
 - Arseny Kapoulkine, [meshoptimizer](https://github.com/zeux/meshoptimizer): vertex welding, cache and fetch ordering, meshlet building, the cluster LOD builder `clusterlod.h`, and MikkTSpace-compatible tangents in [Meshes](kinds/meshes.md#meshes).
 - Arseny Kapoulkine, [niagara](https://github.com/zeux/niagara): a meshlet's `f16` culling sphere, and its 16-bit refs to its vertices from a base, with a fallback to whole words, in [Meshlets](kinds/meshes.md#meshlets).
+- Xiph.Org, [libvorbis and libogg](https://github.com/xiph/vorbis) and [Opus](https://github.com/xiph/opus): the encoders and the Opus decoder behind [Audio](kinds/audio.md#audio).
+- Sean Barrett, [stb_vorbis](https://github.com/nothings/stb): the Vorbis decoder in [Audio](kinds/audio.md#audio).
 - AMD, [Compressonator](https://github.com/GPUOpen-Tools/compressonator): the `CMP_Core` block encoders for BC1 to BC7 in [Textures](kinds/textures.md#textures).
 - Microsoft, [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler): the compiler that [Shaders](kinds/shaders.md#shaders) and [Materials](kinds/materials.md#materials) drive, and its `-Zi -Qembed_debug` flags.
 - Light Transport Entertainment, [TinyUSDZ](https://github.com/lighttransport/tinyusdz), now LightUSD: the USD reader, composition and Tydra converter behind [Stages](kinds/stages.md#stages).

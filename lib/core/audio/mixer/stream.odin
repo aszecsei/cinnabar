@@ -2,6 +2,8 @@ package audio_mixer
 
 import "core:sync"
 
+import "cinnabar:core/audio/codec"
+
 // Each stream's ring holds about 1.4 s, and its reader tops it up once a chunk's worth of room is free, about every
 // 0.7 s. Powers of two, so an index wraps with a mask.
 STREAM_RING_FRAMES :: 1 << 16
@@ -22,22 +24,29 @@ Stream_State :: enum u32 {
 // Stream is one playing voice's window on a file: the stream thread writes the ring, and the mix thread reads it.
 @(private)
 Stream :: struct {
-	state:      Stream_State,
-	sound:      ^Sound_Data,
-	loop:       bool,
+	state:          Stream_State,
+	sound:          ^Sound_Data,
+	loop:           bool,
 	// The stream thread's: the next frame of the file, and the file's time at the first read.
-	next_frame: u64,
-	modified:   i64,
-	opened:     bool,
+	next_frame:     u64,
+	modified:       i64,
+	opened:         bool,
+	// A compressed sound's decoder, and what it has decoded that the ring has not taken.
+	decoder:        codec.Decoder,
+	pending:        [^]i16,
+	pending_frames: int,
+	// Allocated on the game's thread, and kept for the stream's next sound.
+	decoder_memory: []byte,
 	// Interleaved like the sound.
-	ring:       [^]i16,
-	read:       Index,
-	write:      Index,
+	ring:           [^]i16,
+	read:           Index,
+	write:          Index,
 	// Set after the last write: no more frames come.
-	ended:      b32,
+	ended:          b32,
 }
 
-// stream_take gives a playing voice a free stream, or nil. The ring is allocated once, here on the game's thread.
+// stream_take gives a playing voice a free stream, or nil. The ring and the decoder's memory are allocated here, on the
+// game's thread, so the stream thread decodes without allocating.
 @(private)
 stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 	for &stream in m.streams {
@@ -50,6 +59,10 @@ stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 				return nil
 			}
 		}
+		if sound.format != .PCM && !stream_decoder_init(m, &stream, sound) {
+			return nil
+		}
+		stream.pending_frames = 0
 		stream.sound = sound
 		stream.loop = loop
 		stream.next_frame = 0
@@ -62,6 +75,23 @@ stream_take :: proc(m: ^Mixer, sound: ^Sound_Data, loop: bool) -> ^Stream {
 		return &stream
 	}
 	return nil
+}
+
+@(private)
+stream_decoder_init :: proc(m: ^Mixer, stream: ^Stream, sound: ^Sound_Data) -> bool {
+	channels := int(sound.channels)
+	size := codec.memory_bytes(sound.format, channels)
+	if len(stream.decoder_memory) < size {
+		memory := m.host.allocate(uint(size), codec.MEMORY_ALIGN)
+		if memory == nil {
+			return false
+		}
+		if stream.decoder_memory != nil {
+			m.host.free(raw_data(stream.decoder_memory))
+		}
+		stream.decoder_memory = ([^]byte)(memory)[:size]
+	}
+	return codec.decoder_init(&stream.decoder, sound.format, channels, sound.frames, u64(sound.skip), sound.size, stream.decoder_memory)
 }
 
 @(private)
@@ -133,6 +163,10 @@ stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
 	}
 	stream.opened = true
 	stream.modified = modified
+	if sound.format != .PCM {
+		stream_fill_decoded(m, stream, file, write, free)
+		return
+	}
 
 	frame_size := u64(sound.channels) * size_of(i16)
 	for free > 0 {
@@ -160,6 +194,56 @@ stream_fill :: proc(m: ^Mixer, stream: ^Stream) {
 		write += u64(frames)
 		stream.next_frame += u64(frames)
 		free -= frames
+		sync.atomic_store_explicit(&stream.write.value, write, .Release)
+	}
+}
+
+@(private)
+Stream_Reader :: struct {
+	m:      ^Mixer,
+	file:   rawptr,
+	offset: u64,
+}
+
+@(private)
+stream_read_file :: proc(user: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64 {
+	reader := (^Stream_Reader)(user)
+	return reader.m.host.file_read_at(reader.file, reader.offset + offset, buffer, size)
+}
+
+// stream_fill_decoded fills the ring from a compressed sound's decoder. A block that does not fit waits for the next fill.
+@(private)
+stream_fill_decoded :: proc(m: ^Mixer, stream: ^Stream, file: rawptr, write: u64, free: int) {
+	write, free := write, free
+	sound := stream.sound
+	channels := int(sound.channels)
+	reader := Stream_Reader{m, file, sound.offset}
+	for free > 0 {
+		if stream.pending_frames == 0 {
+			frames, count, status := codec.decoder_next(&stream.decoder, stream_read_file, &reader)
+			switch status {
+			case .Failed:
+				stream_fail(m, stream)
+				return
+			case .End:
+				if !stream.loop {
+					sync.atomic_store_explicit(&stream.ended, true, .Release)
+					return
+				}
+				codec.decoder_restart(&stream.decoder)
+				continue
+			case .Frames:
+				stream.pending = frames
+				stream.pending_frames = count
+			}
+		}
+		start := int(write & (STREAM_RING_FRAMES - 1))
+		count := min(free, STREAM_RING_FRAMES - start, stream.pending_frames)
+		copy(stream.ring[start * channels:][:count * channels], stream.pending[:count * channels])
+		stream.pending = stream.pending[count * channels:]
+		stream.pending_frames -= count
+		write += u64(count)
+		free -= count
 		sync.atomic_store_explicit(&stream.write.value, write, .Release)
 	}
 }

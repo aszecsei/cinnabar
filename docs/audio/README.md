@@ -17,6 +17,8 @@ Sound in the world: the boundary between the engine and an audio backend in `lib
 | `lib/core/audio/host` | Host | The `Host` table: the heap, the log and files for a backend, and the `audio.backend` setting. |
 | `lib/core/audio/plugin` | Host | Finds the backend that a project chose, and checks it. |
 | `lib/core/audio/mixer` | Host | The engine's own backend: voices, buses and effects on a mix thread, and streams on a thread of their own. |
+| `lib/core/audio/codec` | Host and game | Decodes compressed sounds a block at a time, for the mixer's stream thread and the engine's load of a sound. |
+| `lib/core/audio/adpcm`, `lib/core/audio/opus` | Host, game and cooker | IMA ADPCM in Odin, and the bindings to libopus. |
 | `lib/core/audio/null` | Host | A backend that makes no sound, for tests and for games without sound. |
 | `lib/core/audio/dll` | Host | The mixer as a library, `audio_cinnabar.dll`, which proves the boundary. |
 | `lib/core/audio/conformance` | Shared | The tests that every backend passes. |

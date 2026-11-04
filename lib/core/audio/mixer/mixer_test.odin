@@ -1,8 +1,10 @@
 package audio_mixer
 
+import "core:encoding/endian"
 import "core:fmt"
 import "core:log"
 import "core:math"
+import "core:mem"
 import "core:os"
 import "core:slice"
 import "core:strings"
@@ -11,6 +13,8 @@ import "core:testing"
 import "core:time"
 
 import audio "cinnabar:core/audio"
+import "cinnabar:core/audio/adpcm"
+import "cinnabar:core/audio/codec"
 import "cinnabar:core/audio/conformance"
 import audio_host "cinnabar:core/audio/host"
 
@@ -572,11 +576,23 @@ Stream_File :: struct {
 	path: string,
 }
 
+@(private = "file")
+temp_dir_count: u64
+
+// A directory for one test. The runner gives every test the same random seed, so tests on other threads try the same names
+// for a temporary directory, and Windows refuses a name that another test is still deleting. A count keeps them apart.
+@(private = "file")
+temp_dir :: proc(t: ^testing.T) -> string {
+	pattern := fmt.tprintf("audio_mixer_test_%d_*", sync.atomic_add(&temp_dir_count, 1))
+	dir, err := os.make_directory_temp("", pattern, context.temp_allocator)
+	testing.expectf(t, err == nil, "%v", err)
+	return dir
+}
+
 // A file like a blob: a header that a stream's offset skips, then the samples.
 @(private = "file")
 write_stream_file :: proc(t: ^testing.T, samples: []i16) -> Stream_File {
-	dir, err := os.make_directory_temp("", "audio_mixer_test_*", context.temp_allocator)
-	testing.expect(t, err == nil)
+	dir := temp_dir(t)
 	path := fmt.tprintf("%s/sound.blob", dir)
 	data := make([]byte, 16 + len(samples) * size_of(i16), context.temp_allocator)
 	copy(data[16:], slice.to_bytes(samples))
@@ -718,8 +734,7 @@ a_missing_file_ends_its_voice :: proc(t: ^testing.T) {
 		setup(&f)
 	}
 	defer teardown(&f)
-	dir, err := os.make_directory_temp("", "audio_mixer_test_*", context.temp_allocator)
-	testing.expect(t, err == nil)
+	dir := temp_dir(t)
 	defer os.remove_all(dir)
 	sound := stream_sound(f.m, {dir, fmt.tprintf("%s/gone.blob", dir)}, 100)
 	voice := play(f.m, sound, plain())
@@ -817,4 +832,347 @@ recording_write :: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32 {
 	}
 	sync.atomic_store(&device_peak, peak)
 	return count
+}
+
+// A compressed sound in a file like a blob. The Vorbis and Opus ones come from the cooker, which writes them with
+// `odin test tools/cook -define:WRITE_AUDIO_FIXTURES=true`, and start with 16 bytes that say what they are.
+@(private = "file")
+Coded :: struct {
+	format:   audio.Sound_Format,
+	frames:   u64,
+	channels: u32,
+	skip:     u32,
+	// With the 16 bytes that a stream's offset skips.
+	file:     []byte,
+}
+
+@(private = "file")
+coded_of :: proc(sound_format: audio.Sound_Format, file: []byte) -> Coded {
+	frames, _ := endian.get_u64(file[0:], .Little)
+	channels, _ := endian.get_u32(file[8:], .Little)
+	skip, _ := endian.get_u32(file[12:], .Little)
+	return {sound_format, frames, channels, skip, file}
+}
+
+@(private = "file")
+coded_adpcm :: proc(frames: int, channels: u32) -> Coded {
+	samples := make([]i16, frames * int(channels), context.temp_allocator)
+	for i in 0 ..< frames {
+		for c in 0 ..< int(channels) {
+			samples[i * int(channels) + c] = i16(math.sin(f64(i) * f64(480 + c * 240) * math.TAU / 48000) * 12000)
+		}
+	}
+	data := adpcm.encode(samples, int(channels), context.temp_allocator)
+	file := make([]byte, 16 + len(data), context.temp_allocator)
+	copy(file[16:], data)
+	return {.ADPCM, u64(frames), channels, 0, file}
+}
+
+// Every compressed format, mono and stereo, each longer than a ring.
+@(private = "file")
+long_coded :: proc() -> [6]Coded {
+	return {
+		coded_of(.Vorbis, #load("../codec/testdata/tone_mono.vorbis")),
+		coded_of(.Vorbis, #load("../codec/testdata/tone_stereo.vorbis")),
+		coded_of(.Opus, #load("../codec/testdata/tone_mono.opus")),
+		coded_of(.Opus, #load("../codec/testdata/tone_stereo.opus")),
+		coded_adpcm(96000, 1),
+		coded_adpcm(96000, 2),
+	}
+}
+
+// Every compressed format, far shorter than a chunk.
+@(private = "file")
+short_coded :: proc() -> [3]Coded {
+	return {coded_of(.Vorbis, #load("../codec/testdata/short_mono.vorbis")), coded_of(.Opus, #load("../codec/testdata/short_mono.opus")), coded_adpcm(1000, 1)}
+}
+
+@(private = "file")
+write_coded_file :: proc(t: ^testing.T, coded: Coded) -> Stream_File {
+	dir := temp_dir(t)
+	path := fmt.tprintf("%s/sound.blob", dir)
+	testing.expect(t, os.write_entire_file(path, coded.file) == nil)
+	return {dir, path}
+}
+
+@(private = "file")
+coded_desc :: proc(coded: Coded, file: Stream_File) -> audio.Sound_Desc {
+	return {
+		frames = coded.frames,
+		path = strings.clone_to_cstring(file.path, context.temp_allocator),
+		offset = 16,
+		size = u64(len(coded.file) - 16),
+		channels = coded.channels,
+		format = coded.format,
+		skip = coded.skip,
+	}
+}
+
+@(private = "file")
+device_frames :: proc(samples: []i16, channels: int) -> []audio.Device_Frame {
+	frames := make([]audio.Device_Frame, len(samples) / channels, context.temp_allocator)
+	for &frame, i in frames {
+		frame = {f32(samples[i * channels]) / 32768, f32(samples[i * channels + channels - 1]) / 32768}
+	}
+	return frames
+}
+
+// The frames that the first pass over the sound gives, and that each later one gives, as the device gets them.
+@(private = "file")
+decoded_passes :: proc(t: ^testing.T, coded: Coded) -> (first, later: []audio.Device_Frame) {
+	channels := int(coded.channels)
+	memory, _ := mem.make_aligned([]byte, codec.memory_bytes(coded.format, channels), codec.MEMORY_ALIGN, context.temp_allocator)
+	decoder: codec.Decoder
+	testing.expect(t, codec.decoder_init(&decoder, coded.format, channels, coded.frames, u64(coded.skip), u64(len(coded.file) - 16), memory))
+	reader := codec.Memory_Reader{coded.file[16:]}
+	samples := make([dynamic]i16, context.temp_allocator)
+	for {
+		frames, count, status := codec.decoder_next(&decoder, codec.read_memory, &reader)
+		testing.expect(t, status != .Failed)
+		if status != .Frames {
+			break
+		}
+		append(&samples, ..frames[:count * channels])
+	}
+	first = device_frames(samples[:], channels)
+	whole := make([]i16, int(coded.frames) * channels, context.temp_allocator)
+	testing.expect(t, codec.decode_all(coded.format, coded.file[16:], channels, coded.frames, u64(coded.skip), whole))
+	return first, device_frames(whole, channels)
+}
+
+// Renders count frames in steps that a stream thread would keep up with.
+@(private = "file")
+render_stream :: proc(m: ^Mixer, count: int) -> []audio.Device_Frame {
+	out := make([]audio.Device_Frame, count, context.temp_allocator)
+	for start := 0; start < len(out); start += STREAM_CHUNK_FRAMES / 2 {
+		stream_step(m)
+		render(m, out[start:min(start + STREAM_CHUNK_FRAMES / 2, len(out))])
+	}
+	return out
+}
+
+// A compressed stream plays what its data decodes to, longer than a ring, and ends, with nothing starved. One whole pass
+// is what the mix thread reads from the ring, as PCM is.
+@(test)
+a_compressed_stream_matches_its_decoded_sound :: proc(t: ^testing.T) {
+	for coded in long_coded() {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		file := write_coded_file(t, coded)
+		defer os.remove_all(file.dir)
+		expected, _ := decoded_passes(t, coded)
+		desc := coded_desc(coded, file)
+		sound := sound_create(f.m, &desc)
+		testing.expect(t, sound.generation != 0)
+		voice := play(f.m, sound, plain())
+		out := render_stream(f.m, int(coded.frames) + 2 * STREAM_CHUNK_FRAMES)
+		same := true
+		for frame, i in expected {
+			same &&= out[i] == frame
+		}
+		testing.expectf(t, same, "%v with %d channels", coded.format, coded.channels)
+		testing.expect(t, !bool(voice_playing(f.m, voice)))
+		stats_out: audio.Stats
+		stats(f.m, &stats_out)
+		testing.expect_value(t, stats_out.stream_starved, 0)
+		testing.expect_value(t, f.m.stream_failed, 0)
+	}
+}
+
+// Each loop gives its frames with no gap, in the order that the codec gives them, and its tests look at how they meet.
+@(test)
+a_compressed_stream_loops :: proc(t: ^testing.T) {
+	check :: proc(t: ^testing.T, coded: Coded, passes: int) {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		file := write_coded_file(t, coded)
+		defer os.remove_all(file.dir)
+		first, later := decoded_passes(t, coded)
+		desc := coded_desc(coded, file)
+		sound := sound_create(f.m, &desc)
+		voice := play(f.m, sound, plain(), loop = true)
+		out := render_stream(f.m, len(first) * passes)
+		same := true
+		for frame, i in out {
+			same &&= frame == (first[i] if i < len(first) else later[i % len(later)])
+		}
+		testing.expectf(t, same, "%v with %d frames", coded.format, coded.frames)
+		testing.expect(t, bool(voice_playing(f.m, voice)))
+		stats_out: audio.Stats
+		stats(f.m, &stats_out)
+		testing.expect_value(t, stats_out.stream_starved, 0)
+		testing.expect_value(t, f.m.stream_failed, 0)
+	}
+	for coded in long_coded() {
+		check(t, coded, 3)
+	}
+	for coded in short_coded() {
+		check(t, coded, 40)
+	}
+}
+
+// Rendering decodes nothing. Until the stream thread has read, a voice waits, and its decoder has not moved.
+@(test)
+rendering_does_not_decode :: proc(t: ^testing.T) {
+	for coded in long_coded() {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		file := write_coded_file(t, coded)
+		defer os.remove_all(file.dir)
+		expected, _ := decoded_passes(t, coded)
+		desc := coded_desc(coded, file)
+		sound := sound_create(f.m, &desc)
+		play(f.m, sound, plain())
+		stream := &f.m.streams[0]
+		out := make([]audio.Device_Frame, STREAM_RING_FRAMES, context.temp_allocator)
+		render(f.m, out)
+		testing.expect_value(t, stream.decoder.given, 0)
+		testing.expect_value(t, stream.decoder.next_read, 0)
+		testing.expect_value(t, out[0], audio.Device_Frame{})
+		stats_out: audio.Stats
+		stats(f.m, &stats_out)
+		testing.expect_value(t, stats_out.stream_starved, 0)
+
+		// After one read, a voice starts at the sound's first frame, with no gap.
+		stream_step(f.m)
+		testing.expect(t, stream.decoder.given > 0)
+		given := stream.decoder.given
+		render(f.m, out[:BLOCK_FRAMES + 2])
+		testing.expect_value(t, out[0], expected[0])
+		testing.expect_value(t, out[BLOCK_FRAMES], expected[BLOCK_FRAMES])
+		testing.expect_value(t, stream.decoder.given, given)
+	}
+}
+
+// A compressed stream closes its file after each read too, so the cooker can replace it, and its voice then ends.
+@(test)
+a_replaced_file_ends_a_compressed_voice :: proc(t: ^testing.T) {
+	for coded in long_coded() {
+		f: Fixture
+		setup(&f)
+		defer teardown(&f)
+		file := write_coded_file(t, coded)
+		defer os.remove_all(file.dir)
+		desc := coded_desc(coded, file)
+		sound := sound_create(f.m, &desc)
+		voice := play(f.m, sound, plain())
+		stream_step(f.m)
+
+		time.sleep(20 * time.Millisecond)
+		temporary := fmt.tprintf("%s.tmp", file.path)
+		testing.expect(t, os.write_entire_file(temporary, []byte{1, 2, 3}) == nil)
+		testing.expect_value(t, os.rename(temporary, file.path), nil)
+
+		out := make([]audio.Device_Frame, STREAM_RING_FRAMES, context.temp_allocator)
+		render(f.m, out[:STREAM_CHUNK_FRAMES + 10])
+		stream_step(f.m)
+		render(f.m, out)
+		testing.expect(t, !bool(voice_playing(f.m, voice)))
+		testing.expect_value(t, f.m.stream_failed, 0)
+	}
+}
+
+// Data that cannot decode ends the voice, and update reports it.
+@(test)
+bad_data_ends_a_compressed_voice :: proc(t: ^testing.T) {
+	for coded in long_coded() {
+		f: Fixture
+		{
+			context.logger = log.nil_logger()
+			setup(&f)
+		}
+		defer teardown(&f)
+		// Each format fails on a run of bytes that do not start like a block of it, or that end too soon.
+		bad := coded
+		bad.file = make([]byte, 16 + 8, context.temp_allocator)
+		for &b in bad.file[16:] {
+			b = 0xff
+		}
+		file := write_coded_file(t, bad)
+		defer os.remove_all(file.dir)
+		desc := coded_desc(bad, file)
+		sound := sound_create(f.m, &desc)
+		voice := play(f.m, sound, plain(), loop = true)
+		stream_step(f.m)
+		out: [10]audio.Device_Frame
+		render(f.m, out[:])
+		testing.expect(t, !bool(voice_playing(f.m, voice)))
+		testing.expect_value(t, f.m.stream_failed, 1)
+	}
+}
+
+// A memory sound is always PCM, and a format that does not exist or has no size is refused.
+@(test)
+a_bad_format_is_refused :: proc(t: ^testing.T) {
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	// The host's log goes to one logger for the process, so an error here would land on whichever test is running.
+	f.host.log = proc "c" (level: audio.Log_Level, message: cstring) {}
+	samples := [?]i16{1, 2}
+	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, samples = &samples[0], channels = 1, format = .Vorbis, size = 4}), audio.Sound{})
+	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, path = "a.blob", channels = 1, format = .Opus}), audio.Sound{})
+	testing.expect_value(t, sound_create(f.m, &audio.Sound_Desc{frames = 2, path = "a.blob", channels = 1, format = audio.Sound_Format(99), size = 4}), audio.Sound{})
+}
+
+@(private = "file")
+reader_thread: int
+@(private = "file")
+reader_calls: int
+@(private = "file")
+mix_thread_id: int
+@(private = "file")
+real_read_at: proc "c" (file: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64
+
+// The whole table with its threads: a decoder reads as it decodes, in one call, so the thread that reads is the thread that
+// decodes, and it is not the thread that writes to the device.
+@(test)
+a_compressed_stream_decodes_off_the_mix_thread :: proc(t: ^testing.T) {
+	sync.guard(&table_lock)
+	sync.atomic_store(&device_peak, 0)
+	sync.atomic_store(&reader_calls, 0)
+	sync.atomic_store(&mix_thread_id, 0)
+	{
+		context.logger = log.nil_logger()
+		table_host = audio_host.table(thread_recording_write, fake_status)
+	}
+	real_read_at = table_host.file_read_at
+	table_host.file_read_at = proc "c" (file: rawptr, offset: u64, buffer: rawptr, size: u64) -> i64 {
+		sync.atomic_store(&reader_thread, sync.current_thread_id())
+		sync.atomic_add(&reader_calls, 1)
+		return real_read_at(file, offset, buffer, size)
+	}
+	coded := coded_of(.Vorbis, #load("../codec/testdata/tone_mono.vorbis"))
+	file := write_coded_file(t, coded)
+	defer os.remove_all(file.dir)
+
+	api := load(&table_host)
+	defer api.shutdown()
+	desc := coded_desc(coded, file)
+	sound := api.sound_create(&desc)
+	voice := api.voice_play(&audio.Voice_Desc{sound = sound, params = plain(), loop = true})
+	testing.expect(t, bool(api.voice_playing(voice)))
+	for _ in 0 ..< 2000 {
+		if sync.atomic_load(&device_peak) >= 0.2 {
+			break
+		}
+		time.sleep(time.Millisecond)
+	}
+	testing.expect(t, sync.atomic_load(&device_peak) >= 0.2)
+	testing.expect(t, sync.atomic_load(&reader_calls) > 0)
+	mix := sync.atomic_load(&mix_thread_id)
+	decode := sync.atomic_load(&reader_thread)
+	testing.expect(t, mix != 0 && decode != 0)
+	testing.expect(t, mix != decode)
+	testing.expect(t, decode != sync.current_thread_id())
+	testing.expect_value(t, api.reset(), 1)
+}
+
+@(private = "file")
+thread_recording_write :: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32 {
+	sync.atomic_store(&mix_thread_id, sync.current_thread_id())
+	return recording_write(frames, count)
 }

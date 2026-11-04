@@ -10,7 +10,7 @@ package audio_boundary
 import "cinnabar:core/layout"
 
 // The version of Audio_API. The host refuses a backend whose info reports another one.
-API_VERSION :: 1
+API_VERSION :: 2
 
 // The rate of every sound and of the device, in frames per second. The cooker converts to it.
 SAMPLE_RATE :: 48000
@@ -40,6 +40,11 @@ Feature :: enum u8 {
 	Buses,
 	// bus_set_effect takes effect.
 	Effects,
+	// sound_create takes a path to a sound in this format, and reads it as it plays. Without one, the engine decodes such a
+	// sound when it loads, and gives the backend PCM.
+	Stream_ADPCM,
+	Stream_Vorbis,
+	Stream_Opus,
 }
 
 Features :: bit_set[Feature;u32]
@@ -55,17 +60,36 @@ Backend_Info :: struct {
 	version:     cstring,
 }
 
-// Sound_Desc is 16-bit PCM at SAMPLE_RATE, with interleaved channels. A sound with samples is in memory, and the
-// backend copies them before sound_create returns. A sound with a path instead has its samples in that file, from
-// offset in bytes, and the backend reads them as it plays. The path is copied. The cooker can replace the file while it
-// plays, so the backend must not hold it open between reads, and a voice ends when its file changes.
+// Sound_Format is how a file's samples are stored. A backend that advertises the format's Feature can stream it, and the
+// engine decodes the sound first for one that does not. See docs/audio/backends.md#the-contract.
+Sound_Format :: enum u32 {
+	// Interleaved 16-bit samples.
+	PCM,
+	// Blocks of IMA ADPCM, which lib/core/audio/adpcm reads.
+	ADPCM,
+	// An Ogg Vorbis stream.
+	Vorbis,
+	// Opus packets at 48 kHz, each after its size in a little-endian u16.
+	Opus,
+}
+
+// Sound_Desc is a sound at SAMPLE_RATE, with interleaved channels. A sound with samples is in memory, as 16-bit PCM, and
+// the backend copies them before sound_create returns. A sound with a path instead has its data in that file, size bytes
+// from offset, in format, and the backend reads them as it plays. The path is copied. The cooker can replace the file
+// while it plays, so the backend must not hold it open between reads, and a voice ends when its file changes.
+//
+// Each pass over a compressed sound starts its decoder at the start of the data, throws away skip frames, keeps frames
+// frames and ignores the rest. So a loop is the coded data of a sound that continues into itself.
 Sound_Desc :: struct {
 	frames:   u64,
 	samples:  [^]i16,
 	path:     cstring,
 	offset:   u64,
+	size:     u64,
 	// 1 or 2.
 	channels: u32,
+	format:   Sound_Format,
+	skip:     u32,
 	_:        u32,
 }
 
@@ -247,7 +271,7 @@ format_hash :: proc() -> u64 {
 // audio.h asserts the same sizes.
 #assert(size_of(Handle) == 8)
 #assert(size_of(Backend_Info) == 32)
-#assert(size_of(Sound_Desc) == 40)
+#assert(size_of(Sound_Desc) == 56)
 #assert(size_of(Voice_Params) == 40)
 #assert(size_of(Voice_Desc) == 64)
 #assert(size_of(Effect) == 16)

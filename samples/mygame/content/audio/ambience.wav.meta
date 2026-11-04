@@ -1,2 +1,3 @@
 # cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
 guid = ac87e25625175689bc0e47ad70107ebe
+format = vorbis
