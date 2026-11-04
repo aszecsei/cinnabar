@@ -6,15 +6,8 @@
 #define VIRTUAL_SHADOW_HLSLI
 
 #include "material_common.hlsli"
+#include "virtual_pages.hlsli"
 
-static const uint VIRTUAL_PAGE_TEXELS = 128;
-static const uint VIRTUAL_PAGE_SHIFT = 7;
-static const uint VIRTUAL_PAGES = 128;
-static const uint VIRTUAL_SIZE = VIRTUAL_PAGE_TEXELS * VIRTUAL_PAGES;
-static const uint VIRTUAL_NO_PAGE = ~0u;
-// A level's request words, and the page table's entries.
-static const uint VIRTUAL_LEVEL_PAGES = VIRTUAL_PAGES * VIRTUAL_PAGES;
-static const uint VIRTUAL_LEVEL_WORDS = VIRTUAL_LEVEL_PAGES / 32;
 // Match SHADOW_DEPTH_BIAS and SHADOW_SLOPE_BIAS in lib/engine/render/shadows.odin, which a pipeline with a depth
 // attachment applies itself.
 static const float VIRTUAL_DEPTH_BIAS = -64;
@@ -82,37 +75,18 @@ bool virtual_in_rect(Shadow_View view, int2 low, int2 high) {
 	return all(float2(low) >= lower) && all(float2(high) < upper);
 }
 
-uint virtual_table_entry(uint level, uint2 page) {
-	return (level * VIRTUAL_LEVEL_PAGES + page.y * VIRTUAL_PAGES + page.x) * 4;
-}
-
 // virtual_physical is the texel of the pool that a physical page's corner is at.
 uint2 virtual_physical(uint page) {
 	return uint2(page % frame.virtual_pool_pages_per_row, page / frame.virtual_pool_pages_per_row) * VIRTUAL_PAGE_TEXELS;
 }
 
 // virtual_sphere_has_pages is whether a sphere relative to the camera reaches a page of the level that this view draws.
-// Near a view's camera, most of a coarser level's casters are over no page, so the depth pass culls them here. A sphere
-// over more than VIRTUAL_CULL_PAGES pages on a side counts as reaching one, which is cheaper to draw than to test.
-static const int VIRTUAL_CULL_PAGES = 8;
+// The culling of the level's views has tested each instance and item, so this tests each meshlet, which is much smaller.
 bool virtual_sphere_has_pages(float3 center, float radius) {
 	Shadow_View view = virtual_view(frame.virtual_level);
 	float2 texel = virtual_project(view, center).xy;
 	float reach = radius / view.texel + 1;
-	int2 low = max(int2(floor(texel - reach)) >> VIRTUAL_PAGE_SHIFT, 0);
-	int2 high = min(int2(ceil(texel + reach)) >> VIRTUAL_PAGE_SHIFT, int(VIRTUAL_PAGES) - 1);
-	if (any(high - low >= VIRTUAL_CULL_PAGES)) {
-		return true;
-	}
-	ByteAddressBuffer table = cn_buffer(frame.virtual_table);
-	for (int y = low.y; y <= high.y; y++) {
-		for (int x = low.x; x <= high.x; x++) {
-			if (table.Load(virtual_table_entry(frame.virtual_level, uint2(x, y))) != VIRTUAL_NO_PAGE) {
-				return true;
-			}
-		}
-	}
-	return false;
+	return virtual_rect_has_pages(cn_buffer(frame.virtual_table), frame.virtual_level, int2(floor(texel - reach)) >> VIRTUAL_PAGE_SHIFT, int2(floor(texel + reach)) >> VIRTUAL_PAGE_SHIFT);
 }
 
 // virtual_quad_has_page is whether a fragment's 2x2 quad has a fragment on a page of the level that this view draws, so a
@@ -186,18 +160,20 @@ uint virtual_block_page(ByteAddressBuffer table, uint level, int2 page) {
 	return table.Load(virtual_table_entry(level, uint2(page)));
 }
 
-// virtual_find finds the finest level from the point's footprint on that has the page that holds the point. A level
-// without it leaves the point to the next coarser level, so a pool that runs out costs detail and not shadows. Marks
-// propagate only to the parents of the pages that hold each point, so that page exists in every coarser level, but a
-// block across the coarser level's page line may reach a page that does not, and virtual_shadow keeps such a block's
-// texels in the point's page. The block is at the point as shadow_map offsets it (see there), by the level's texel.
+// virtual_find finds the finest level that has the page that holds the point, from one finer than its footprint's, where
+// the marking may have placed a point at a level's edge, whose distance it rebuilt from depth. A level without the page
+// leaves the point to the next coarser level, so a pool that runs out costs detail and not shadows. A mark moves to the
+// parent of its page, so a block across the coarser level's page line may reach a page that does not exist, and
+// virtual_shadow keeps such a block's texels in the point's page. The block is at the point as shadow_map offsets it (see
+// there), by the level's texel.
 // Matches virtual_lookup in virtual_shadows.odin.
 bool virtual_find(float3 p, float3 normal, float3 to_light, out Virtual_Hit hit) {
 	float cos_light = dot(normal, to_light);
 	float sin_light = sqrt(saturate(1 - cos_light * cos_light));
 	hit = (Virtual_Hit)0;
 	ByteAddressBuffer table = cn_buffer(frame.virtual_table);
-	for (uint level = virtual_footprint_level(length(p)); level < frame.virtual_levels; level++) {
+	uint footprint = virtual_footprint_level(length(p));
+	for (uint level = footprint > 0 ? footprint - 1 : 0; level < frame.virtual_levels; level++) {
 		Shadow_View view = virtual_view(level);
 		int2 texel = int2(floor(virtual_project(view, p).xy));
 		if (!virtual_in_rect(view, texel, texel)) {
@@ -264,7 +240,7 @@ float3 virtual_debug_color(float3 p) {
 		return float3(1, 0, 1);
 	}
 	float3 color = hash_color(hit.level + 1);
-	return hit.level == virtual_footprint_level(length(p)) ? color : lerp(color, float3(1, 0, 0), 0.5);
+	return hit.level <= virtual_footprint_level(length(p)) ? color : lerp(color, float3(1, 0, 0), 0.5);
 }
 
 #endif

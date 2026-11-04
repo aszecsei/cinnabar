@@ -298,7 +298,6 @@ a_rebase_leaves_every_level_valid_around_the_camera :: proc(t: ^testing.T) {
 		p := [3]f32{1, -1, 5}
 		level := virtual_footprint_level(c.selection, linalg.length(p))
 		testing.expect_value(t, virtual_mark(requests, views, .Taps_4, p, level), level)
-		virtual_propagate(requests, views)
 		virtual_allocate(requests, table, len(views), 1024)
 		testing.expect_value(t, virtual_lookup(table, views, p, level), level)
 	}
@@ -407,6 +406,56 @@ a_block_covers_as_many_texels_as_its_filter_reads :: proc(t: ^testing.T) {
 	testing.expect_value(t, size, 4)
 }
 
+// The culling has only a level's planes and page fields, so they have to place a point where the level's projection does.
+@(test)
+a_levels_planes_and_page_fields_place_a_point_on_its_page :: proc(t: ^testing.T) {
+	c := test_camera(offset = {123.4, 5.6, -789})
+	direction := linalg.normalize(TEST_LIGHT)
+	for level in 0 ..< c.selection.levels {
+		l := virtual_level(c, direction, level)
+		fields := virtual_page_fields(l.view, level)
+		page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
+		first := [2]i32{i32((fields >> 8) & 0xff), i32((fields >> 16) & 0xff)}
+		testing.expect_value(t, int(fields & 0xff), level)
+		for sx in ([]f32{-0.8, -0.3, 0.1, 0.7}) {
+			for sy in ([]f32{-0.6, 0, 0.5}) {
+				p := c.right * (sx * page * 3) + c.up * (sy * page * 3) + c.forward * page
+				texel, _ := virtual_project(l.view, p)
+				at := [2]f32{linalg.dot(l.planes[0].xyz, p) + l.planes[0].w, linalg.dot(l.planes[3].xyz, p) + l.planes[3].w} / page
+				placed := at + [2]f32{f32(first.x), f32(first.y)}
+				expected := texel / VIRTUAL_PAGE_TEXELS
+				testing.expectf(t, abs(placed.x - expected.x) < 0.01 && abs(placed.y - expected.y) < 0.01, "level %d: %v against %v", level, placed, expected)
+			}
+		}
+	}
+}
+
+@(test)
+culling_keeps_only_what_reaches_a_page_that_was_allocated :: proc(t: ^testing.T) {
+	c := test_camera()
+	direction := linalg.normalize(TEST_LIGHT)
+	views := test_views(c)
+	requests, table := test_buffers(len(views))
+	level := 6
+	l := virtual_level(c, direction, level)
+	fields := virtual_page_fields(l.view, level)
+	p := c.forward * 5
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, p, level), level)
+	virtual_allocate(requests, table, len(views), 64)
+	page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
+	right, _ := light_basis(direction)
+	// On the page, and just reaching it from the next but one.
+	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p, 0))
+	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * 4.5))
+	// Far enough off the page that the sphere misses it.
+	testing.expect(t, !virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * 0.5))
+	// A level with no pages keeps nothing but a sphere too big to test.
+	testing.expect(t, !virtual_reaches_pages(table, virtual_level(c, direction, 3).planes, virtual_page_fields(views[3], 3), p, 0))
+	testing.expect(t, virtual_reaches_pages(table, l.planes, fields, p + right * (page * 4), page * VIRTUAL_CULL_PAGES))
+	// Outside the level, it reaches nothing.
+	testing.expect(t, !virtual_reaches_pages(table, l.planes, fields, right * f32(virtual_level_extent(level)) * 4, page))
+}
+
 @(test)
 marking_sets_the_one_page_of_a_block_inside_a_page :: proc(t: ^testing.T) {
 	c := test_camera()
@@ -494,30 +543,66 @@ a_point_past_every_level_marks_nothing :: proc(t: ^testing.T) {
 }
 
 @(test)
-propagation_marks_the_chain_up_to_the_coarsest_level :: proc(t: ^testing.T) {
+marks_that_fit_the_pool_move_nothing :: proc(t: ^testing.T) {
 	c := test_camera()
 	views := test_views(c)
 	requests, _ := test_buffers(len(views))
-	p := c.forward * 0.5
-	virtual_mark(requests, views, .Taps_1, p, 0)
-	marked := count_marked(requests)
-	virtual_propagate(requests, views)
-	testing.expect(
-		t,
-		count_marked(requests) >= marked + len(views) - 1,
-		"every coarser level has the parent",
-	)
-	for level in 1 ..< len(views) {
-		texel, _ := virtual_project(views[level], p)
-		testing.expect(
-			t,
-			is_marked(
-				requests,
-				level,
-				{i32(texel.x) / VIRTUAL_PAGE_TEXELS, i32(texel.y) / VIRTUAL_PAGE_TEXELS},
-			),
-		)
+	virtual_mark(requests, views, .Taps_1, c.forward * 0.5, 0)
+	marked := u32(count_marked(requests))
+	requested, moved := virtual_fit_pool(requests, views, marked)
+	testing.expect_value(t, requested, marked)
+	testing.expect_value(t, moved, u32(0))
+	testing.expect_value(t, u32(count_marked(requests)), marked)
+}
+
+@(test)
+marks_that_do_not_fit_move_the_finest_to_their_parents_only_until_they_fit :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, _ := test_buffers(len(views))
+	// Pages of level 0 in a row, and one of level 3 that nothing moves to.
+	for x in i32(60) ..< 68 {
+		index := VIRTUAL_LEVEL_PAGES * 0 + 64 * VIRTUAL_PAGES + int(x)
+		requests[index >> 5] |= 1 << uint(index & 31)
 	}
+	coarse := 3 * VIRTUAL_LEVEL_PAGES + 64 * VIRTUAL_PAGES + 64
+	requests[coarse >> 5] |= 1 << uint(coarse & 31)
+	requested, moved := virtual_fit_pool(requests, views, 7)
+	testing.expect_value(t, requested, u32(9))
+	testing.expect(t, moved >= 2, "at least two moved")
+	testing.expect(t, count_marked(requests) <= 7, "they fit")
+	// One less than the whole row stays where it was asked for, so the pool loses no more detail than it must.
+	kept := 0
+	for x in i32(60) ..< 68 {
+		if is_marked(requests, 0, {x, 64}) {
+			kept += 1
+		}
+	}
+	testing.expect_value(t, kept, 8 - int(moved))
+	testing.expect(t, kept > 0, "level 0 keeps what fits")
+	testing.expect(t, is_marked(requests, 3, {64, 64}), "a coarser level keeps its page")
+}
+
+@(test)
+a_moved_mark_leaves_its_points_to_its_parent :: proc(t: ^testing.T) {
+	c := test_camera()
+	views := test_views(c)
+	requests, table := test_buffers(len(views))
+	// Two points on neighbouring pages of the first level. With room for one page, their marks move up to one parent.
+	right, _ := light_basis(linalg.normalize(TEST_LIGHT))
+	page := f32(virtual_level_extent(0)) / VIRTUAL_PAGES
+	a := c.forward * 0.5
+	b := a + right * page
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, a, 0), 0)
+	testing.expect_value(t, virtual_mark(requests, views, .Taps_1, b, 0), 0)
+	_, moved := virtual_fit_pool(requests, views, 1)
+	testing.expect(t, moved > 0)
+	testing.expect_value(t, count_marked(requests), 1)
+	stats := virtual_allocate(requests, table, len(views), 1)
+	testing.expect_value(t, stats.allocated, u32(1))
+	found := virtual_lookup(table, views, a, 0)
+	testing.expect(t, found > 0, "the point falls back to a coarser level")
+	testing.expect_value(t, virtual_lookup(table, views, b, 0), found)
 }
 
 @(test)
@@ -591,12 +676,12 @@ the_pool_stays_within_its_size_and_every_page_is_its_own :: proc(t: ^testing.T) 
 			)
 		}
 	}
-	virtual_propagate(requests, views)
 	capacity: u32 = 32
+	requested, moved := virtual_fit_pool(requests, views, capacity)
 	stats := virtual_allocate(requests, table, len(views), capacity)
-	testing.expect(t, stats.requested > capacity, "this view asks for more than the pool holds")
-	testing.expect_value(t, stats.allocated, capacity)
-	testing.expect_value(t, stats.missed, stats.requested - capacity)
+	testing.expect(t, requested > capacity, "this view asks for more than the pool holds")
+	testing.expect(t, moved > 0, "some marks moved")
+	testing.expect(t, stats.allocated <= capacity, "the pool stays within its size")
 	seen := make([]bool, capacity, context.temp_allocator)
 	for entry in table {
 		if entry == VIRTUAL_NO_PAGE {
@@ -667,15 +752,15 @@ with_a_pool_too_small_every_marked_point_falls_back_to_a_coarser_level_with_no_h
 			)
 		}
 	}
-	virtual_propagate(requests, views)
-	stats := virtual_allocate(requests, table, len(views), 48)
-	testing.expect(t, stats.missed > 0, "the pool is too small")
+	_, moved := virtual_fit_pool(requests, views, 48)
+	testing.expect(t, moved > 0, "the pool is too small")
+	virtual_allocate(requests, table, len(views), 48)
 
 	fell_back := 0
 	for p in points {
 		wanted := virtual_footprint_level(c.selection, linalg.length(p))
-		found := virtual_lookup(table, views, p, wanted)
-		testing.expectf(t, found >= wanted, "%v wants level %d and has %d", p, wanted, found)
+		found := virtual_lookup(table, views, p, virtual_lookup_level(c.selection, linalg.length(p)))
+		testing.expectf(t, found >= 0, "%v wants level %d and has none", p, wanted)
 		if found > wanted {
 			fell_back += 1
 		}
@@ -712,7 +797,8 @@ with_room_in_the_pool_every_marked_point_has_its_own_level :: proc(t: ^testing.T
 			)
 		}
 	}
-	virtual_propagate(requests, views)
+	_, moved := virtual_fit_pool(requests, views, u32(len(views) * VIRTUAL_LEVEL_PAGES))
+	testing.expect_value(t, moved, u32(0))
 	stats := virtual_allocate(requests, table, len(views), u32(len(views) * VIRTUAL_LEVEL_PAGES))
 	testing.expect_value(t, stats.missed, 0)
 	for point in points {

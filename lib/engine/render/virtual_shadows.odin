@@ -46,6 +46,9 @@ VIRTUAL_MARK_MARGIN :: 1
 // Copies of the stats that the CPU reads, so a read never waits for a frame in flight.
 VIRTUAL_STATS_COPIES :: 3
 VIRTUAL_MARK_GROUP_SIZE :: 8
+// A sphere over more than this many pages on a side counts as reaching one, which is cheaper to draw than to test.
+// Matches VIRTUAL_CULL_PAGES in virtual_pages.hlsli.
+VIRTUAL_CULL_PAGES :: 8
 // Matches numthreads in virtual_shadow_allocate.hlsl.
 VIRTUAL_ALLOCATE_GROUP_SIZE :: 64
 
@@ -372,32 +375,90 @@ virtual_mark :: proc(
 }
 
 // virtual_parent_page is a level's page's parent in the next coarser level, whose grid is on every second line of the
-// level's. Matches propagate in virtual_shadow_allocate.hlsl.
+// level's. Matches fit_pool in virtual_shadow_allocate.hlsl.
 virtual_parent_page :: proc(origin, page, parent_origin: [2]i32) -> [2]i32 {
 	return {(origin.x + page.x) >> 1 - parent_origin.x, (origin.y + page.y) >> 1 - parent_origin.y}
 }
 
-// virtual_propagate sets each marked page's parent, finest first. Matches propagate in virtual_shadow_allocate.hlsl.
-virtual_propagate :: proc(requests: []u32, views: []Shadow_View) {
+// virtual_rect_has_pages is whether pages from low to high have a physical page in a level. A sphere over more than
+// VIRTUAL_CULL_PAGES pages on a side counts as reaching one. Matches virtual_rect_has_pages in virtual_pages.hlsli.
+virtual_rect_has_pages :: proc(table: []u32, level: int, low, high: [2]i32) -> bool {
+	first := [2]i32{max(low.x, 0), max(low.y, 0)}
+	last := [2]i32{min(high.x, VIRTUAL_PAGES - 1), min(high.y, VIRTUAL_PAGES - 1)}
+	if first.x > last.x || first.y > last.y {
+		return false
+	}
+	if last.x - first.x >= VIRTUAL_CULL_PAGES || last.y - first.y >= VIRTUAL_CULL_PAGES {
+		return true
+	}
+	for y in first.y ..= last.y {
+		for x in first.x ..= last.x {
+			if table[page_index(level, {x, y})] != VIRTUAL_NO_PAGE {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// virtual_page_fields is what a level's Cull_View holds for virtual_reaches_pages: the level, and its valid rectangle's
+// first page, which the view's left and bottom planes are at.
+virtual_page_fields :: proc(view: Shadow_View, level: int) -> u32 {
+	x := u32(math.round(view.rect.x * VIRTUAL_PAGES))
+	y := u32(math.round(view.rect.y * VIRTUAL_PAGES))
+	return u32(level) | x << 8 | y << 16
+}
+
+// virtual_reaches_pages is whether a sphere relative to the camera reaches a page of a level, from its culling planes and
+// its page fields. Matches virtual_view_reaches_pages in virtual_pages.hlsli.
+virtual_reaches_pages :: proc(table: []u32, planes: [6][4]f32, fields: u32, center: [3]f32, radius: f32) -> bool {
+	level := int(fields & 0xff)
+	page := f32(virtual_level_extent(level)) / VIRTUAL_PAGES
+	at := [2]f32{linalg.dot(planes[0].xyz, center) + planes[0].w, linalg.dot(planes[3].xyz, center) + planes[3].w} / page
+	reach := radius / page + 1.0 / VIRTUAL_PAGE_TEXELS
+	first := [2]i32{i32((fields >> 8) & 0xff), i32((fields >> 16) & 0xff)}
+	low := first + [2]i32{i32(math.floor(at.x - reach)), i32(math.floor(at.y - reach))}
+	high := first + [2]i32{i32(math.floor(at.x + reach)), i32(math.floor(at.y + reach))}
+	return virtual_rect_has_pages(table, level, low, high)
+}
+
+// virtual_fit_pool makes the marks fit the pool, if they do not: finest level first, it moves a page's mark to its parent
+// in the next coarser level, one page at a time, until they fit. Marks that fit move nothing, so no level draws pages that
+// nothing reads. It returns how many pages the frame asked for, and how many moved. Matches fit_pool in
+// virtual_shadow_allocate.hlsl.
+virtual_fit_pool :: proc(requests: []u32, views: []Shadow_View, capacity: u32) -> (requested, moved: u32) {
+	for word in requests[:len(views) * VIRTUAL_LEVEL_WORDS] {
+		requested += u32(bits.count_ones(word))
+	}
+	total := requested
 	for level in 0 ..< len(views) - 1 {
 		origin, parent_origin := views[level].page_origin, views[level + 1].page_origin
 		for word in 0 ..< VIRTUAL_LEVEL_WORDS {
-			pending := requests[level * VIRTUAL_LEVEL_WORDS + word]
-			for pending != 0 {
+			if total <= capacity {
+				return
+			}
+			at := level * VIRTUAL_LEVEL_WORDS + word
+			pending := requests[at]
+			for pending != 0 && total > capacity {
 				index := word * 32 + int(bits.count_trailing_zeros(pending))
 				pending &= pending - 1
+				requests[at] = pending
+				total -= 1
+				moved += 1
 				page := [2]i32{i32(index % VIRTUAL_PAGES), i32(index / VIRTUAL_PAGES)}
 				parent := virtual_parent_page(origin, page, parent_origin)
-				if parent.x >= 0 &&
-				   parent.y >= 0 &&
-				   parent.x < VIRTUAL_PAGES &&
-				   parent.y < VIRTUAL_PAGES {
+				if parent.x >= 0 && parent.y >= 0 && parent.x < VIRTUAL_PAGES && parent.y < VIRTUAL_PAGES {
 					parent_index := page_index(level + 1, parent)
-					requests[parent_index >> 5] |= 1 << uint(parent_index & 31)
+					mask := u32(1) << uint(parent_index & 31)
+					if requests[parent_index >> 5] & mask == 0 {
+						requests[parent_index >> 5] |= mask
+						total += 1
+					}
 				}
 			}
 		}
 	}
+	return
 }
 
 // virtual_allocate gives pages out from the coarsest level, writes the table, and returns the stats. The table starts
@@ -429,8 +490,8 @@ virtual_allocate :: proc(
 	return
 }
 
-// virtual_lookup is the finest level from a point's footprint that has the page that holds the point, or -1. Marks
-// propagate to the parents of those pages, so a marked point finds one unless the pool has room for no level of it.
+// virtual_lookup is the finest level from level on that has the page that holds the point, or -1. A mark that does not fit
+// the pool moves to its page's parent, so a marked point finds one unless the pool has no room for the coarsest level's.
 // Matches virtual_find in virtual_shadow.hlsli.
 virtual_lookup :: proc(table: []u32, views: []Shadow_View, p: [3]f32, level: int) -> int {
 	for l in level ..< len(views) {
@@ -442,6 +503,12 @@ virtual_lookup :: proc(table: []u32, views: []Shadow_View, p: [3]f32, level: int
 		}
 	}
 	return -1
+}
+
+// virtual_lookup_level is the first level that a point's lookup tries: one finer than its footprint's. Matches virtual_find
+// in virtual_shadow.hlsli.
+virtual_lookup_level :: proc(s: Virtual_Selection, distance: f32) -> int {
+	return max(virtual_footprint_level(s, distance) - 1, 0)
 }
 
 // virtual_shadow_stats is the virtual shadow map's pages, a frame or two ago, all 0 after a frame without it.
@@ -683,6 +750,8 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	indirect_buffer(g, p, vf.arguments)
 	write(g, p, vf.pool)
 
+	add_virtual_culling(f)
+
 	p = add_render_pass(g, "virtual shadow maps", draw_virtual_shadow_maps, f, pieces = vf.count)
 	rasterize_size(g, p, {VIRTUAL_SIZE, VIRTUAL_SIZE})
 	read(g, p, vf.table)
@@ -706,6 +775,46 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	copy_source(g, p, vf.stats)
 	copy_dest(g, p, copy)
 	v.counted = true
+}
+
+// add_virtual_culling adds the culling of the levels' views, which the page table has to be written for: their instance
+// sets' lists, then their draws. Only an instance or an item that reaches a page draws, so a level's cost follows its
+// pages, and not all that is over its valid rectangle.
+@(private = "file")
+add_virtual_culling :: proc(f: ^Frame) {
+	sf := f.scene_frame
+	if sf == nil || len(sf.items) == 0 {
+		return
+	}
+	g := f.graph
+	table := f.shadows.virtual.table
+	add_virtual_instance_passes(f, table)
+	p := add_compute_pass(g, "cull virtual shadow draws", proc(ctx: ^Pass_Context) {
+		f := (^Frame)(ctx.data)
+		sf := f.scene_frame
+		pipeline := f.renderer.scene.cull_pipeline.pipeline
+		if pipeline == {} {
+			return
+		}
+		gpu.cmd_set_pipeline(ctx.cb, pipeline)
+		gpu.cmd_set_pass_constants(ctx.cb, sf.virtual_cull)
+		gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(f.shadows.virtual.count), 1})
+	}, f)
+	read(g, p, sf.instances)
+	read(g, p, table)
+	if len(sf.sets) > 0 {
+		read(g, p, sf.instance_counters)
+	}
+	if sf.meshlet_select.selections != 0 {
+		read(g, p, sf.meshlet_select.selections)
+	}
+	write(g, p, sf.arguments)
+	write(g, p, sf.mesh_arguments)
+	write(g, p, sf.draws)
+	write(g, p, sf.counts)
+	if sf.stats != 0 {
+		write(g, p, sf.stats)
+	}
 }
 
 @(private = "file")
@@ -788,13 +897,13 @@ run_virtual_mark :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_push_constants(ctx.cb, &push)
 	groups := (f.size + VIRTUAL_MARK_GROUP_SIZE - 1) / VIRTUAL_MARK_GROUP_SIZE
 	gpu.cmd_dispatch(ctx.cb, {groups.x, groups.y, 1})
-	push.phase = u32(Mark_Phase.Volume)
-	gpu.cmd_push_constants(ctx.cb, &push)
-	grid := VIRTUAL_VOLUME_GRID
-	gpu.cmd_dispatch(
-		ctx.cb,
-		{grid.x / VIRTUAL_MARK_GROUP_SIZE, grid.y / VIRTUAL_MARK_GROUP_SIZE, grid.z},
-	)
+	// The volume mark's pages are for what has no prepass. Every caster over them draws, so a frame without it marks none.
+	if f.fog != nil || has_transparency(f) || has_sprites(f) {
+		push.phase = u32(Mark_Phase.Volume)
+		gpu.cmd_push_constants(ctx.cb, &push)
+		grid := VIRTUAL_VOLUME_GRID
+		gpu.cmd_dispatch(ctx.cb, {grid.x / VIRTUAL_MARK_GROUP_SIZE, grid.y / VIRTUAL_MARK_GROUP_SIZE, grid.z})
+	}
 }
 
 @(private = "file")

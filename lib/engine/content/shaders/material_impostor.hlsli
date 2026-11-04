@@ -63,8 +63,7 @@ void view_ray(float3 p, out float3 origin, out float3 direction) {
 }
 
 // impostor_vertex is a corner of the quad: in front of the sphere, toward the view, as wide as the sphere, so it covers
-// the sphere's outline from a point outside it. In a virtual shadow map's level, a sphere that reaches no page has no
-// quad, since an impostor has no meshlets for the amplification shaders to cull.
+// the sphere's outline from a point outside it.
 Impostor_Varyings impostor_vertex(uint vertex_id, uint instance_id) {
 	Draw_Record d = load_draw();
 	Mesh_Record m = load_mesh(d);
@@ -72,17 +71,13 @@ Impostor_Varyings impostor_vertex(uint vertex_id, uint instance_id) {
 	float3 scales = axis_scales(instance.rows);
 	float radius = m.impostor_sphere.w * max(scales.x, max(scales.y, scales.z));
 	float3 center = transform_point(instance.rows, m.impostor_sphere.xyz) - frame.camera_offset.xyz;
-	Impostor_Varyings o;
-	if (frame.virtual_draw != 0 && !virtual_sphere_has_pages(center, radius)) {
-		o = (Impostor_Varyings)0;
-		return o;
-	}
 	float3 origin, toward;
 	view_ray(center, origin, toward);
 	float3 direction = -normalize(toward);
 	float3 right, up;
 	impostor_basis(direction, right, up);
 	float2 corner = IMPOSTOR_CORNERS[vertex_id];
+	Impostor_Varyings o;
 	o.world = center + (right * corner.x + up * corner.y + direction) * radius;
 	o.position = clip_position(o.world);
 	o.draw = CN_DRAW_ID;
