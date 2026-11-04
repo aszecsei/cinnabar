@@ -546,7 +546,9 @@ same_attachments :: proc(a, b: ^Begin_Pass) -> bool {
 @(private = "file")
 validate_attachments :: proc(pass: ^Begin_Pass, resources: Resources) -> (formats: Pipeline_Info, err: Validation_Error) {
 	has_depth := pass.depth.texture != {}
-	if pass.color_count > MAX_COLOR_ATTACHMENTS || (pass.color_count == 0 && !has_depth) {
+	has_attachments := pass.color_count > 0 || has_depth
+	sized := pass.size.x > 0 && pass.size.y > 0
+	if pass.color_count > MAX_COLOR_ATTACHMENTS || has_attachments == sized {
 		return {}, .Bad_Attachment_Count
 	}
 	formats.kind = .Graphics
@@ -805,10 +807,12 @@ validate_graphics_pipeline_desc :: proc(desc: Graphics_Pipeline_Desc) -> Desc_Er
 	if has_vertex && (has_mesh || len(desc.amplification) > 0) {
 		return .Bad_Stages
 	}
-	if (!has_vertex && !has_mesh) || (len(desc.colors) > 0 && len(desc.pixel) == 0) {
+	// With no attachments, the pixel shader's storage writes are all that the pipeline does.
+	no_attachments := len(desc.colors) == 0 && desc.depth_format == .Unknown
+	if (!has_vertex && !has_mesh) || ((len(desc.colors) > 0 || no_attachments) && len(desc.pixel) == 0) {
 		return .Missing_Shader
 	}
-	if len(desc.colors) > MAX_COLOR_ATTACHMENTS || (len(desc.colors) == 0 && desc.depth_format == .Unknown) {
+	if len(desc.colors) > MAX_COLOR_ATTACHMENTS {
 		return .Bad_Color_Count
 	}
 	for color in desc.colors {

@@ -202,6 +202,37 @@ lights_take_their_shadows_in_order :: proc(t: ^testing.T) {
 	testing.expect_value(t, lf.records[2].mask, -1)
 	testing.expect_value(t, frame.shadows.mask_count, 3)
 	testing.expect_value(t, len(frame.shadows.views), 0)
+
+	// A virtual shadow map's levels take the cascades' place, as the first views, and no cells of the atlas, so the other
+	// lights' slots start at the atlas's first.
+	for &record in lf.records {
+		record.shadow, record.mask = -1, -1
+	}
+	assign_shadow_views(frame, trace = false, virtual = true)
+	sf = frame.shadows
+	levels := SHADOW_PARAMS[.High].virtual_levels
+	testing.expect_value(t, sf.virtual.count, levels)
+	testing.expect_value(t, lf.records[0].shadow, 0)
+	testing.expect(t, .Virtual_Shadow in lf.records[0].flags)
+	testing.expect_value(t, lf.records[1].shadow, i32(levels))
+	testing.expect(t, .Virtual_Shadow not_in lf.records[1].flags)
+	testing.expect_value(t, lf.records[4].shadow, i32(levels + 6))
+	testing.expect_value(t, len(sf.views), levels + 6 + 1)
+	testing.expect_value(t, sf.cascade_splits, [4]f32{})
+	first, _ := slot_viewport(sf.params, 0, sf.params.slot)
+	testing.expect_value(t, sf.viewports[levels], first)
+	for view in sf.views[:levels] {
+		testing.expect_value(t, view.perspective, u32(0))
+	}
+	// Traced shadows still take the light first: it has a channel of the mask, and no levels.
+	for &record in lf.records {
+		record.shadow, record.mask = -1, -1
+		record.flags -= {.Virtual_Shadow}
+	}
+	assign_shadow_views(frame, trace = true, virtual = true)
+	testing.expect_value(t, lf.records[0].mask, 0)
+	testing.expect(t, .Virtual_Shadow not_in lf.records[0].flags)
+	testing.expect_value(t, frame.shadows.virtual.count, 0)
 }
 
 @(test)

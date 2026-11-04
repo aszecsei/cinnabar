@@ -479,10 +479,13 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		.Impostor_Depth = {},
 		// A compute pipeline, made below.
 		.Hit = {},
+		// No attachments: the pixel shader writes depth to the virtual shadow map's pool, with its own bias, and clamps it.
+		.Virtual_Depth = {depth_clamp = true, cull = cull, label = label},
+		.Impostor_Virtual_Depth = {},
 	}
 	// An impostor's quad faces its view, and its pixels write their own depths, which the shadow maps' bias does not
 	// move, so the impostor's depth pass moves them itself.
-	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth}) {
+	for pass in ([]format.Material_Pass{.Forward, .Prepass, .Depth, .Virtual_Depth}) {
 		impostor := descs[pass]
 		impostor.cull = .None
 		descs[format.material_impostor_pass(pass)] = impostor
@@ -490,6 +493,14 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	for &desc, pass in descs {
 		desc.vertex = format.material_code(data, blob, switches, pass, .Vertex)
 		desc.pixel = format.material_code(data, blob, switches, pass, .Pixel)
+	}
+	// The virtual shadow map's depth passes draw with the depth passes' other stages. A blob from before they existed has
+	// no pixel code for them, and draws nothing in them.
+	if descs[.Virtual_Depth].pixel != nil {
+		descs[.Virtual_Depth].vertex = descs[.Depth].vertex
+	}
+	if descs[.Impostor_Virtual_Depth].pixel != nil {
+		descs[.Impostor_Virtual_Depth].vertex = descs[.Impostor_Depth].vertex
 	}
 	sorted := .Sorted in blob.flags
 	over := descs[.Transparent]
@@ -518,6 +529,12 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		desc.amplification = format.material_code(data, blob, switches, pass, .Amplification)
 		desc.mesh = format.material_code(data, blob, switches, pass, .Mesh)
 		p.mesh_path &&= desc.amplification != nil && desc.mesh != nil
+	}
+	if descs[.Virtual_Depth].pixel != nil {
+		mesh_descs[.Virtual_Depth] = descs[.Virtual_Depth]
+		mesh_descs[.Virtual_Depth].vertex = nil
+		mesh_descs[.Virtual_Depth].amplification = mesh_descs[.Depth].amplification
+		mesh_descs[.Virtual_Depth].mesh = mesh_descs[.Depth].mesh
 	}
 	for &desc, pass in mesh_descs {
 		if !p.mesh_path {

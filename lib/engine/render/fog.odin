@@ -204,6 +204,7 @@ add_fog_passes :: proc(f: ^Frame) {
 	if f.shadows.atlas != 0 {
 		read(g, p, f.shadows.atlas)
 	}
+	declare_virtual_shadows(f, p)
 	if ff.traced && f.shadows.mask_count > 0 {
 		ff.accel = ray_scene_accel(f)
 		read_accel(g, p, ff.accel)

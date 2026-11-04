@@ -45,6 +45,8 @@ Light_Type :: enum u32 {
 Light_Flag :: enum u32 {
 	// An area light that shines from both of its faces.
 	Two_Sided,
+	// The light's shadow is the virtual shadow map (see virtual_shadows.odin).
+	Virtual_Shadow,
 }
 
 // Light_Record matches Light_Record in material_common.hlsli: a light relative to the camera. direction is where the

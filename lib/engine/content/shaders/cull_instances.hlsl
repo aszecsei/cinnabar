@@ -9,6 +9,7 @@
 // cull_draws.hlsl then draws each of a set's items once for each instance in its list's range of the view.
 #include "instanced.hlsli"
 #include "occlusion.hlsli"
+#include "virtual_pages.hlsli"
 
 // Matches Instance_Cull_Constants in lib/engine/render/scene.odin. The sets, the jobs and the views are in the upload
 // ring, at these offsets of their buffers.
@@ -41,9 +42,18 @@ struct Instance_Cull_Constants {
 	uint occlusion_offset;
 	// The camera's tally (see Cull_Stats in lib/engine/render/occlusion.odin).
 	uint stats;
-	uint padding;
+	// The virtual shadow map's levels, which the early phases' rows skip (see dispatch_view).
+	uint view_skip;
 };
 CN_PASS_CONSTANTS(Instance_Cull_Constants, cull);
+
+// dispatch_view is the view of a row of a dispatch. The levels of a virtual shadow map are the first shadow views, and
+// they cull after the page table is written, in a dispatch of their own, so the early phases' rows skip them. Matches
+// VIEW_FIRST_SHADOW in cull_draws.hlsl.
+uint dispatch_view(uint row) {
+	uint view = cull.view_first + row;
+	return view >= 2 ? view + cull.view_skip : view;
+}
 
 static const uint PHASE_CULL = 0;
 static const uint PHASE_PLACE = 1;
@@ -96,7 +106,9 @@ struct Cull_View {
 	float4 offset;
 	uint first_draw;
 	uint flags;
-	uint2 padding;
+	// A virtual shadow map's level, which culls against its pages (see virtual_view_reaches_pages): 0 for another view.
+	uint virtual_table;
+	uint virtual_page;
 };
 
 // Matches the size of Instance_Record in lib/engine/render/scene.odin, whose first 48 bytes are its rows.
@@ -123,7 +135,7 @@ bool sphere_in_view(Cull_View view, float3 center, float radius) {
 			return false;
 		}
 	}
-	return true;
+	return view.virtual_table == 0 || virtual_view_reaches_pages(view.planes, view.virtual_table, view.virtual_page, center, radius);
 }
 
 // counter is a word of the counters for one of a set's lists in a view: its count, then its cursor, then its start,
@@ -278,7 +290,7 @@ void place_lists(uint i) {
 	// The dispatch's lists: each set's in each of its views.
 	uint per_set = cull.view_rows * LISTS;
 	uint set = i / per_set;
-	uint view = cull.view_first + (i % per_set) / LISTS;
+	uint view = dispatch_view((i % per_set) / LISTS);
 	uint list = i % LISTS;
 	RWByteAddressBuffer counters = cn_rw_buffer(cull.counters);
 	uint at = counter(0, set, view, list);
@@ -345,7 +357,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex, uint3 id : S
 	if (job >= cull.job_count) {
 		return;
 	}
-	uint view_index = cull.view_first + group.z;
+	uint view_index = dispatch_view(group.z);
 	uint set_index = cn_buffer(cull.jobs).Load(cull.jobs_offset + job * 4);
 	Instance_Set_Record set = cn_buffer(cull.sets).Load<Instance_Set_Record>(cull.sets_offset + set_index * sizeof(Instance_Set_Record));
 	uint cell_index = job - set.first_job;

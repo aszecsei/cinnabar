@@ -23,6 +23,7 @@ These rules come from Metal's encoder model. All backends enforce them.
 - A graphics pipeline's attachment formats must match the pass. A compute pipeline is bound only outside a pass.
 - Copies, dispatches, acceleration structure builds and upscales occur only outside a render pass. An upscale leaves nothing bound, as a pass boundary does (see [Upscalers](upscalers.md#upscaling)).
 - A render pass declares its attachments with load and store operations. It maps to `BeginRenderPass` (D3D12), dynamic rendering (Vulkan) and a render command encoder (Metal).
+- A render pass with no attachments gives the size that it rasterizes in, and its pipelines have a pixel shader, whose storage writes are its output. A pass with attachments gives no size. The render graph's `rasterize_size` sets it, and a pass that declares a `write` has `Pass_Flag.Storage_Writes`, which allows storage writes on the D3D12 pass.
 
 ### Split passes
 

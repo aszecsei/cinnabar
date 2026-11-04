@@ -8,6 +8,7 @@
 // cull_instances.hlsl listed in the view (see docs/rendering/gpu-scene.md#instanced-meshes). A dispatch row is a view.
 #include "cinnabar.hlsli"
 #include "occlusion.hlsli"
+#include "virtual_pages.hlsli"
 
 // Matches Cull_Constants in lib/engine/render/scene.odin. The items, the bins' first draws and the views are in the
 // upload ring, at these offsets of its buffer.
@@ -54,7 +55,10 @@ struct Cull_Constants {
 	// What select_meshlets.hlsl picked for each ITEM_HIERARCHY item: its range of the selected meshlets, from the
 	// eighth byte, whose count is SELECTION_NONE for an item that tests all of its meshlets.
 	uint selections;
-	uint2 padding;
+	// The virtual shadow map's levels, which the early dispatch's rows skip: they cull after the page table is written, in
+	// a dispatch of their own.
+	uint view_skip;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Cull_Constants, cull);
 
@@ -64,6 +68,8 @@ CN_PASS_CONSTANTS(Cull_Constants, cull);
 // model's items, which are relative to the camera, and every other view leaves them out.
 // Matches VIEW_CAMERA in lib/engine/render/scene.odin: the camera's view is the first.
 static const uint VIEW_CAMERA = 0;
+// Matches FIRST_SHADOW_VIEW in lib/engine/render/scene.odin.
+static const uint VIEW_FIRST_SHADOW = 2;
 static const uint VIEW_CASTERS = 1;
 static const uint VIEW_MODEL = 2;
 struct Cull_View {
@@ -71,7 +77,9 @@ struct Cull_View {
 	float4 offset;
 	uint first_draw;
 	uint flags;
-	uint2 padding;
+	// A virtual shadow map's level, which culls against its pages (see virtual_view_reaches_pages): 0 for another view.
+	uint virtual_table;
+	uint virtual_page;
 };
 
 // Matches Cull_Item in lib/engine/render/scene.odin: one submesh of one instance, its bin, and its bounding sphere in
@@ -145,6 +153,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 	uint view_index = cull.view_first + id.y;
+	if (view_index >= VIEW_FIRST_SHADOW) {
+		view_index += cull.view_skip;
+	}
 	Cull_View view = cn_buffer(cull.views).Load<Cull_View>(cull.views_offset + view_index * sizeof(Cull_View));
 	Item item = cn_buffer(cull.items).Load<Item>(cull.items_offset + id.x * sizeof(Item));
 	if ((item.flags & (ITEM_SURFACE | ITEM_RIBBON | ITEM_PARTICLES)) != 0) {
@@ -274,5 +285,5 @@ bool item_visible(Item item, Cull_View view, out float3 center, out float radius
 			return false;
 		}
 	}
-	return true;
+	return view.virtual_table == 0 || virtual_view_reaches_pages(view.planes, view.virtual_table, view.virtual_page, p, radius);
 }

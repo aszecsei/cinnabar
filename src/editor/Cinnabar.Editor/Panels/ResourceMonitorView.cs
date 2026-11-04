@@ -97,6 +97,8 @@ public sealed class ResourceMonitorView : Grid
                 ("Meshlets tested", $"{g.SelectedMeshlets:N0} / {g.HierarchyMeshlets:N0}"),
                 // With the viewport's shading stats: the forward pass's 2x2 quads, and the share of their lanes that cover a pixel.
                 .. ShadingRows(g),
+                // The virtual shadow map's pages, while a frame draws one: those it asked for, those it got of the pool's, and those it had no room for.
+                .. VirtualShadowRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
                 ("Behaviours", $"{g.Behaviours:N0}"),
@@ -109,6 +111,16 @@ public sealed class ResourceMonitorView : Grid
 
     // The shading's row, none while the viewport's shading stats are off: the forward pass's quads with the share of their
     // lanes that cover a pixel (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
+    internal static IEnumerable<(string Name, string Value)> VirtualShadowRows(Link.Protocol.GameStats g)
+    {
+        if (g.VirtualPagesCapacity > 0)
+        {
+            yield return ("Shadow pages requested", $"{g.VirtualPagesRequested:N0}");
+            yield return ("Shadow pages allocated", $"{g.VirtualPagesAllocated:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesAllocated * 100.0 / g.VirtualPagesCapacity:0}% full)");
+            yield return ("Shadow pages missed", $"{g.VirtualPagesMissed:N0}");
+        }
+    }
+
     internal static IEnumerable<(string Name, string Value)> ShadingRows(Link.Protocol.GameStats g)
     {
         if (g.ForwardQuads > 0)

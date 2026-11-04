@@ -7,6 +7,7 @@
 #define MATERIAL_MESH_HLSLI
 
 #include "material_vertex.hlsli"
+#include "virtual_shadow.hlsli"
 #include "meshlet_lod.hlsli"
 #include "occlusion.hlsli"
 
@@ -76,8 +77,9 @@ bool lod_selected(Meshlet c, float4 rows[3], float scale) {
 // the material's displacement bound, is in the frustum, and its normal cone does not point away from the view. The
 // cone is not tested for a two-sided material, for a material that displaces its vertices, which may turn them, for
 // an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull. In the late view of
-// occlusion culling, its sphere is not behind the depth pyramid either. A sphere with an infinite radius passes every
-// test, which would otherwise take it through NaNs.
+// occlusion culling, its sphere is not behind the depth pyramid either. In a virtual shadow map's level, its sphere
+// reaches a page that was allocated. A sphere with an infinite radius passes every test, which would otherwise take it
+// through NaNs.
 bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	float3 scales = axis_scales(instance.rows);
 	float scale = max(scales.x, max(scales.y, scales.z));
@@ -113,6 +115,9 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 #endif
 	// The late view of occlusion culling tests each meshlet against the depth pyramid too.
 	if (frame.occlusion != 0 && sphere_occluded(load_occlusion(frame.occlusion - 1, frame.occlusion_offset), center, radius)) {
+		return false;
+	}
+	if (frame.virtual_draw != 0 && !virtual_sphere_has_pages(center, radius)) {
 		return false;
 	}
 	return true;

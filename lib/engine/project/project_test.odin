@@ -112,6 +112,23 @@ quality_keys_replace_the_presets_features :: proc(t: ^testing.T) {
 }
 
 @(test)
+a_settings_file_from_before_the_virtual_shadow_map_reads_without_a_problem :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = High\nquality.shadows = High\nquality.shadows.ray_traced = false\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect(t, quality(s, caps).shadows.virtual, "the preset's option stays")
+	// The key turns it off, and a value that does not fit is a problem.
+	s = {}
+	parse("quality.preset = High\nquality.shadows.virtual = false\nquality.shadows.virtual = maybe\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, problems[0], `3: quality.shadows.virtual takes true or false, not "maybe"`)
+	testing.expect(t, !quality(s, caps).shadows.virtual)
+	free_all(context.temp_allocator)
+}
+
+@(test)
 a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T) {
 	// World_Probes was Split_Cascades' name: a file that a build before the rename saved reads without a problem, and
 	// is written with the new name.

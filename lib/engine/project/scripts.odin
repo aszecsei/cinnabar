@@ -43,6 +43,7 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Aa                 = "aa",
 	.Render_Scale       = "render_scale",
 	.Lod_Error          = "lod_error",
+	.Virtual_Shadows    = "virtual_shadows",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
@@ -83,6 +84,8 @@ quality_binding :: proc(L: ^luau.State) -> c.int {
 		#partial switch k {
 		case .Ray_Traced_Shadows:
 			luau.pushboolean(L, b32(q.shadows.ray_traced))
+		case .Virtual_Shadows:
+			luau.pushboolean(L, b32(q.shadows.virtual))
 		case .Render_Scale:
 			luau.pushnumber(L, f64(q.render_scale))
 		case .Lod_Error:

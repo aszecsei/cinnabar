@@ -137,7 +137,21 @@ Frame_Constants :: struct {
 	occlusion_offset:         u32,
 	// The meshlets that select meshlets picked, which a draw with DRAW_SELECTED reads (see meshlet_select.odin).
 	selected_meshlets:        u32,
-	padding:                  [3]u32,
+	// The virtual shadow map, whose levels are the first shadow views (see virtual_shadows.odin): how many, 0 without it,
+	// how a distance picks one, the level that this view draws, the pool's read and write views, the page table, and
+	// the pool's pages.
+	virtual_levels:             u32,
+	virtual_level:              u32,
+	virtual_first_texel:        f32,
+	virtual_pixel_angle:        f32,
+	virtual_bias:               f32,
+	virtual_pool:               u32,
+	virtual_pool_storage:       u32,
+	virtual_table:              u32,
+	virtual_pool_pages_per_row: u32,
+	virtual_pool_pages:         u32,
+	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
+	virtual_draw:               u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -324,7 +338,9 @@ Cull_View :: struct {
 	offset:     [4]f32,
 	first_draw: u32,
 	flags:      u32,
-	padding:    [2]u32,
+	// A virtual shadow map's level, which culls against its pages (see virtual_page_fields): 0 for another view.
+	virtual_table: u32,
+	virtual_page: u32,
 }
 
 // Cull_Constants matches Cull_Constants in cull_draws.hlsl.
@@ -372,7 +388,10 @@ Cull_Constants :: struct {
 	stats:              u32,
 	// What select meshlets picked for each ITEM_HIERARCHY item (see meshlet_select.odin), as its read index.
 	selections:         u32,
-	padding:            [2]u32,
+	// The virtual shadow map's levels, which the early dispatch's rows skip: they cull after the page table is written, in
+	// a dispatch of their own.
+	view_skip:          u32,
+	padding:            u32,
 }
 
 // Instance_Set_Record matches Instance_Set_Record in cull_instances.hlsl: an Instanced_Mesh_Renderer's set this frame.
@@ -409,6 +428,14 @@ SET_IMPOSTOR :: 2
 SET_BILLBOARD :: 4
 // A set whose items are all opaque, which occlusion culling culls (see occlusion.odin).
 SET_OCCLUDABLE :: 8
+
+// Instance_Views are the views of a dispatch of cull_instances.hlsl: the early ones, the late view when the frame culls
+// by occlusion, and a virtual shadow map's levels, once the page table is written.
+Instance_Views :: enum {
+	Early,
+	Late,
+	Virtual,
+}
 
 // The phases of cull_instances.hlsl, a dispatch each: culling each cell's instances in each view, which writes their
 // bits and counts them; placing each set's lists; and listing each cell's visible instances in them.
@@ -448,7 +475,8 @@ Instance_Cull_Constants :: struct {
 	occlusion_offset: u32,
 	// The camera's tally (see Cull_Stats).
 	stats:            u32,
-	padding:          u32,
+	// The virtual shadow map's levels, which the early phases' rows skip.
+	view_skip:        u32,
 }
 
 // The bytes of a cell's visibility bits in a view, and the groups in a row of a dispatch of the cells.
@@ -461,7 +489,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 704 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 736 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -591,8 +619,8 @@ Scene_Frame :: struct {
 	job_upload:         gpu.Upload,
 	job_count:          int,
 	set_instances:      int,
-	// The constants of each phase of cull_instances.hlsl, for the early views and the late view, and its buffers.
-	instance_constants: [2][3]gpu.Upload,
+	// The constants of each phase of cull_instances.hlsl, for each Instance_Views, and its buffers.
+	instance_constants: [Instance_Views][3]gpu.Upload,
 	instance_bits:      Buffer,
 	instance_counters:  Buffer,
 	visible_instances:  Buffer,
@@ -619,6 +647,8 @@ Scene_Frame :: struct {
 	// Each view's Frame_Constants.
 	view_constants:  []gpu.Upload,
 	cull_constants:  gpu.Upload,
+	// The culling's constants for a virtual shadow map's levels, which run after the page table is written.
+	virtual_cull:    gpu.Upload,
 	// With the ray scene, the acceleration structure's instance of each mesh instance that casts shadows or has a
 	// surface (see docs/rendering/ray-scene.md#ray-scene), the hit table's records of each slot and of their submeshes,
 	// and the bins that its submeshes use.
@@ -1188,6 +1218,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
+	if shadows.virtual.count > 0 {
+		virtual_constants(&constants, f)
+	}
 	if f.fog != nil {
 		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
 		constants.fog_slices = f.fog.grid.z
@@ -1222,6 +1255,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.jitter = f.jitter
 		case:
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
+			if v - FIRST_SHADOW_VIEW < shadows.virtual.count {
+				c.virtual_level, c.virtual_draw = u32(v - FIRST_SHADOW_VIEW), 1
+				views[v].virtual_table = gpu.read_index(r.shadows.virtual.table) + 1
+				views[v].virtual_page = virtual_page_fields(shadows.views[v - FIRST_SHADOW_VIEW], v - FIRST_SHADOW_VIEW)
+			}
 			views[v].planes = shadows.planes[v - FIRST_SHADOW_VIEW]
 			views[v].flags = VIEW_CASTERS
 			c.cull_eye = shadows.eyes[v - FIRST_SHADOW_VIEW]
@@ -1315,6 +1353,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		sf.instance_counters = import_buffer(g, s.instance_counters)
 		sf.visible_instances = import_buffer(g, s.visible_instances)
 	}
+	cull.view_skip = u32(shadows.virtual.count)
 	sf.cull_constants, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		sf.items = nil
@@ -1325,9 +1364,19 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		sf.items = nil
 		return
 	}
+	if shadows.virtual.count > 0 && has_items {
+		levels := cull
+		levels.view_first, levels.view_skip = FIRST_SHADOW_VIEW, 0
+		sf.virtual_cull, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		if !ok {
+			sf.items = nil
+			return
+		}
+		(^Cull_Constants)(raw_data(sf.virtual_cull.data))^ = levels
+	}
 	if sf.occluding {
 		late := cull
-		late.view_first = u32(sf.late_view)
+		late.view_first, late.view_skip = u32(sf.late_view), 0
 		sf.occlusion.late_cull, ok = platform.gpu_upload(size_of(Cull_Constants), gpu.PASS_CONSTANTS_ALIGN)
 		if !ok {
 			sf.items = nil
@@ -1951,12 +2000,22 @@ instance_constants :: proc(f: ^Frame, views: gpu.Upload, cull: Cull_Constants) -
 		occlusion_offset = cull.occlusion_offset,
 		stats            = cull.stats,
 	}
-	// The early phases' views, and the late view's when the frame culls by occlusion.
-	for &phases, late in sf.instance_constants {
-		if late == 1 && !sf.occluding {
-			break
+	levels := f.shadows.virtual.count
+	for &phases, views in sf.instance_constants {
+		switch views {
+		case .Early:
+			c.view_first, c.view_rows, c.view_skip = 0, u32(sf.view_count - levels), u32(levels)
+		case .Late:
+			if !sf.occluding {
+				continue
+			}
+			c.view_first, c.view_rows, c.view_skip = u32(sf.late_view), 1, 0
+		case .Virtual:
+			if levels == 0 {
+				continue
+			}
+			c.view_first, c.view_rows, c.view_skip = FIRST_SHADOW_VIEW, u32(levels), 0
 		}
-		c.view_first, c.view_rows = late == 1 ? u32(sf.late_view) : 0, late == 1 ? 1 : u32(sf.view_count)
 		for &u, phase in phases {
 			c.phase = u32(phase)
 			ok: bool
@@ -1980,7 +2039,7 @@ add_instance_passes :: proc(f: ^Frame) {
 	if len(sf.sets) == 0 {
 		return
 	}
-	add_instance_phases(f, false)
+	add_instance_phases(f, .Early)
 }
 
 // add_late_instance_passes adds the late view's phases of cull_instances.hlsl, after the depth pyramid: the instances
@@ -1991,20 +2050,43 @@ add_late_instance_passes :: proc(f: ^Frame) {
 	if len(sf.sets) == 0 {
 		return
 	}
-	add_instance_phases(f, true)
+	add_instance_phases(f, .Late)
+}
+
+// add_virtual_instance_passes adds a virtual shadow map's levels' phases of cull_instances.hlsl, once the page table is
+// written, so they list only the instances that reach a page. It declares that they read the table.
+@(private)
+add_virtual_instance_passes :: proc(f: ^Frame, table: Buffer) {
+	sf := f.scene_frame
+	if len(sf.sets) == 0 {
+		return
+	}
+	add_instance_phases(f, .Virtual, table)
+}
+
+// INSTANCE_PASS_NAMES are each phase's pass by its views, in INSTANCE_PHASE order.
+@(private = "file", rodata)
+INSTANCE_PASS_NAMES := [Instance_Views][3]string {
+	.Early   = {"cull instances", "place instances", "list instances"},
+	.Late    = {"cull late instances", "place late instances", "list late instances"},
+	.Virtual = {"cull virtual shadow instances", "place virtual shadow instances", "list virtual shadow instances"},
 }
 
 @(private = "file")
-add_instance_phases :: proc(f: ^Frame, late: bool) {
+add_instance_phases :: proc(f: ^Frame, views: Instance_Views, table: Buffer = 0) {
 	sf := f.scene_frame
 	g := f.graph
 	alloc := f.renderer.platform.frame_allocator
-	p := add_compute_pass(g, late ? "cull late instances" : "cull instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_CULL, late}, alloc))
+	names := INSTANCE_PASS_NAMES[views]
+	p := add_compute_pass(g, names[INSTANCE_PHASE_CULL], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_CULL, views}, alloc))
 	read(g, p, sf.instances)
 	write(g, p, sf.instance_bits)
 	write(g, p, sf.instance_counters)
-	if sf.occluding {
-		if late {
+	if table != 0 {
+		read(g, p, table)
+	}
+	if sf.occluding && views != .Virtual {
+		if views == .Late {
 			for t in sf.occlusion.hzb[:f.renderer.scene.occlusion.hzb_levels] {
 				read(g, p, t)
 			}
@@ -2014,20 +2096,20 @@ add_instance_phases :: proc(f: ^Frame, late: bool) {
 	if sf.stats != 0 {
 		write(g, p, sf.stats)
 	}
-	p = add_compute_pass(g, late ? "place late instances" : "place instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_PLACE, late}, alloc))
+	p = add_compute_pass(g, names[INSTANCE_PHASE_PLACE], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_PLACE, views}, alloc))
 	write(g, p, sf.instance_counters)
-	p = add_compute_pass(g, late ? "list late instances" : "list instances", run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_LIST, late}, alloc))
+	p = add_compute_pass(g, names[INSTANCE_PHASE_LIST], run_instance_phase, new_clone(Instance_Step{f, INSTANCE_PHASE_LIST, views}, alloc))
 	write(g, p, sf.instance_bits)
 	write(g, p, sf.instance_counters)
 	write(g, p, sf.visible_instances)
 }
 
-// Instance_Step is a phase's pass's data, in frame memory: the early views' or the late view's.
+// Instance_Step is a phase's pass's data, in frame memory.
 @(private = "file")
 Instance_Step :: struct {
 	frame: ^Frame,
 	phase: int,
-	late:  bool,
+	views: Instance_Views,
 }
 
 // run_instance_phase dispatches a phase: a group for each cell in each of its views, in rows of INSTANCE_JOB_ROW, or a
@@ -2041,9 +2123,17 @@ run_instance_phase :: proc(ctx: ^Pass_Context) {
 	if pipeline == {} {
 		return
 	}
-	rows := step.late ? 1 : sf.view_count
+	levels := f.shadows.virtual.count
+	rows := sf.view_count - levels
+	switch step.views {
+	case .Early:
+	case .Late:
+		rows = 1
+	case .Virtual:
+		rows = levels
+	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
-	gpu.cmd_set_pass_constants(ctx.cb, sf.instance_constants[step.late ? 1 : 0][step.phase])
+	gpu.cmd_set_pass_constants(ctx.cb, sf.instance_constants[step.views][step.phase])
 	if step.phase == INSTANCE_PHASE_PLACE {
 		gpu.cmd_dispatch(ctx.cb, {u32(len(sf.sets) * rows * INSTANCE_LISTS + format.INSTANCE_CELL_SIZE - 1) / format.INSTANCE_CELL_SIZE, 1, 1})
 		return
@@ -2099,7 +2189,7 @@ cull_draws :: proc(ctx: ^Pass_Context) {
 	}
 	gpu.cmd_set_pipeline(ctx.cb, pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, sf.cull_constants)
-	gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(sf.view_count), 1})
+	gpu.cmd_dispatch(ctx.cb, {u32(len(sf.items) + CULL_GROUP_SIZE - 1) / CULL_GROUP_SIZE, u32(sf.view_count - f.shadows.virtual.count), 1})
 }
 
 // draw_scene_view draws each bin of a view's group with one indirect draw, with its material's pipeline for a pass (see
@@ -2121,7 +2211,7 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	if pushes {
 		push = material_push(f, pass, group)
 	}
-	if pass != .Depth {
+	if pass != .Depth && pass != .Virtual_Depth {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)

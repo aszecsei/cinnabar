@@ -94,9 +94,9 @@ displacing_materials_compile_every_pass_and_keep_their_bound :: proc(t: ^testing
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		// The same passes as any opaque material, the mesh shader path's, the impostor path's and the hit pass
-		// included, which all but the impostor's and the hit pass place vertices with the displacement.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 18)
+		// The same passes as any opaque material, the mesh shader path's, the impostor path's, the virtual shadow map's and
+		// the hit pass included, which all but the impostor's and the hit pass place vertices with the displacement.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 20)
 		testing.expect(t, .Displaces in blob.flags)
 		testing.expect(t, .Reads_Time in blob.flags)
 		testing.expect_value(t, blob.displacement_bound, 0.5)
@@ -136,9 +136,10 @@ patch_materials_have_no_mesh_shader_entries :: proc(t: ^testing.T) {
 	blob, ok := format.material_view(data)
 	testing.expect(t, ok)
 	if ok {
-		// The forward pass's and the prepass's two stages, and the depth pass's vertex stage, from the patch vertex
-		// path; no amplification or mesh stages, no impostor passes, and no hit pass, since rays see no patches.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 5)
+		// The forward pass's and the prepass's two stages, the depth pass's vertex stage, from the patch vertex path, and
+		// the virtual shadow map's pixel stage; no amplification or mesh stages, no impostor passes, and no hit pass, since
+		// rays see no patches.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 6)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) == nil)
 		testing.expect(t, .Patches in blob.flags)
 		testing.expect(t, .Displaces in blob.flags)
@@ -190,9 +191,9 @@ materials_cook_a_variant_for_each_switch_set_and_instances_resolve :: proc(t: ^t
 	if ok {
 		// The material's own switches (none) and its instances' (use_albedo): two variants, each with the forward
 		// pass's and the prepass's two stages, an opaque depth pass's vertex stage, the mesh shader path's
-		// amplification and mesh stages of each of the three, the impostor path's two stages of each, and the hit
-		// pass's compute stage.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 36)
+		// amplification and mesh stages of each of the three, the impostor path's two stages of each, the virtual shadow
+		// map's pixel stages of both paths, and the hit pass's compute stage.
+		testing.expect_value(t, len(format.material_variants(data, blob)), 40)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 1, .Forward, .Pixel) != nil)
@@ -291,7 +292,9 @@ masked_materials_discard_in_their_depth_pass :: proc(t: ^testing.T) {
 	if blob, ok := format.material_view(data); ok {
 		// The shadow maps discard where the opacity is below the cutoff, so the depth pass has a pixel stage too. Rays
 		// evaluate it as well, and its hit pass marks the holes.
-		testing.expect_value(t, len(format.material_variants(data, blob)), 19)
+		testing.expect_value(t, len(format.material_variants(data, blob)), 21)
+		testing.expect(t, format.material_code(data, blob, 0, .Virtual_Depth, .Pixel) != nil)
+		testing.expect(t, format.material_code(data, blob, 0, .Impostor_Virtual_Depth, .Pixel) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Hit, .Compute) != nil)
 		testing.expect(t, format.material_code(data, blob, 0, .Depth, .Pixel) != nil)
 	}
@@ -497,7 +500,7 @@ billboard_materials_pull_their_vertices :: proc(t: ^testing.T) {
 		guid:     string,
 		flags:    format.Material_Flags,
 		variants: int,
-	}{{"00112233445566778899aabbccddeeff", {.Billboard}, 6}, {"00112233445566778899aabbccddee00", {.Billboard, .Billboard_Axis}, 7}}
+	}{{"00112233445566778899aabbccddeeff", {.Billboard}, 7}, {"00112233445566778899aabbccddee00", {.Billboard, .Billboard_Axis}, 8}}
 	for c in cases {
 		data := tree_blob(t, tree, format.guid_parse(c.guid) or_else {})
 		blob, ok := format.material_view(data)

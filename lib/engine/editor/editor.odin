@@ -245,6 +245,9 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			stats.hierarchy_meshlets, stats.selected_meshlets = c.hierarchy_meshlets, c.selected_meshlets
 			sh := render.shading_stats(e.renderer)
 			stats.forward_quads, stats.forward_pixels = sh.forward_quads, sh.forward_pixels
+			vs := render.virtual_shadow_stats(e.renderer)
+			stats.virtual_pages_requested, stats.virtual_pages_allocated = vs.requested, vs.allocated
+			stats.virtual_pages_missed, stats.virtual_pages_capacity = vs.missed, vs.capacity
 			gi := render.gi_split_stats(e.renderer)
 			cascades := make([]link.Gi_Cascade_Stats, gi.count, frame)
 			for &cascade, k in cascades {
