@@ -90,7 +90,8 @@ init :: proc(
 		log.errorf("core: cannot find the executable's directory: %v", exe_err)
 		return false
 	}
-	content, project := game_paths(exe_dir, content_dir, project_path, virtual.arena_allocator(&platform.permanent))
+	// From the heap, not the permanent arena, which a soft restart frees: the next game reads them too.
+	content, project := game_paths(exe_dir, content_dir, project_path, runtime.heap_allocator())
 	for &arena in platform.frame {
 		if err := virtual.arena_init_static(&arena, FRAME_RESERVE); err != nil {
 			log.errorf("core: frame arena: %v", err)
@@ -256,6 +257,8 @@ shutdown :: proc() {
 	profile.shutdown()
 	release_reservations()
 	delete(platform.reservations)
+	delete(platform.api.content_dir, runtime.heap_allocator())
+	delete(platform.api.project_path, runtime.heap_allocator())
 	delete(platform.input_queue)
 	for &arena in platform.frame {
 		virtual.arena_destroy(&arena)
