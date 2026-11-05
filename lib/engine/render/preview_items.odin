@@ -18,6 +18,11 @@ import "cinnabar:engine/ecs"
 // entities that draw.
 MAX_PREVIEW_ITEMS :: 1024
 MAX_PREVIEW_DRAWS :: 2048
+// How much of each of the renderer's tables a thumbnail leaves to the world, as their limits are hard. It is more than one
+// item of a thumbnail can take, as it checks before each.
+PREVIEW_ROOM :: 32
+// A mesh is flat when its smallest side is this much of its largest.
+PREVIEW_FLAT :: 0.01
 
 // Preview_Item is a mesh that a preview draws.
 Preview_Item :: struct {
@@ -81,6 +86,26 @@ preview_fit :: proc(centers: [][3]f32, radii: []f32) -> (center: [3]f32, radius:
 		radius = max(radius, linalg.length(c - center) + radii[i])
 	}
 	return center, max(radius, 0.01)
+}
+
+// preview_facing is how to turn a flat mesh so that a camera in a direction sees it, as a mesh has one side and a plane
+// that looks away draws nothing. It keeps its up as far as it can. A mesh with depth stays as it is, and its blob is not read.
+preview_facing :: proc(data: []byte, blob: ^format.Mesh_Blob, camera: [3]f32) -> quaternion128 {
+	size := blob.bounds.max - blob.bounds.min
+	if min(size.x, size.y, size.z) > PREVIEW_FLAT * max(size.x, size.y, size.z) {
+		return 1
+	}
+	area := format.mesh_face_area(data, blob)
+	if linalg.dot(area, camera) >= 0 {
+		return 1
+	}
+	normal := linalg.normalize(area)
+	up := [3]f32{0, 1, 0}
+	axis := up - normal * linalg.dot(up, normal)
+	if linalg.length(axis) < 0.1 {
+		axis = {1, 0, 0}
+	}
+	return linalg.quaternion_angle_axis_f32(math.PI, linalg.normalize(axis))
 }
 
 // preview_distance is how far a camera must be from a sphere to see all of it.
@@ -205,6 +230,32 @@ prefab_preview_items :: proc(scene: format.Scene, node: u64, allocator: runtime.
 		}
 	}
 	return items[:]
+}
+
+// preview_has_room is whether a thumbnail can ask for more and still leave the world PREVIEW_ROOM of each table.
+preview_has_room :: proc(r: ^Renderer) -> bool {
+	return(
+		r.materials.ref_count + PREVIEW_ROOM <= MAX_MATERIALS &&
+		r.materials.pipeline_count + PREVIEW_ROOM <= MAX_MATERIAL_PIPELINES &&
+		r.residency.count + PREVIEW_ROOM <= MAX_RESIDENT \
+	)
+}
+
+// preview_touch makes what an item draws resident, as a thumbnail does a little at a time, so that a large prefab does not
+// hold up one frame with all of its blobs.
+preview_touch :: proc(r: ^Renderer, item: ^Preview_Item) {
+	r.residency.baking = true
+	defer r.residency.baking = false
+	resident_mesh(&r.residency, item.mesh)
+	table := Material_Table {
+		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
+		bytes = make([dynamic]byte, r.platform.frame_allocator),
+	}
+	for material in item.materials {
+		if material != {} {
+			use_material(r, &table, material)
+		}
+	}
 }
 
 // add_preview_item_passes adds the passes of a preview of many meshes: one that writes its records, a prepass and a

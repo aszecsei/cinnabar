@@ -214,8 +214,6 @@ set_import_settings_is_all_or_nothing :: proc(t: ^testing.T) {
 
 @(test)
 a_failed_write_restores_the_meta_files :: proc(t: ^testing.T) {
-	// The failed write logs its error, which is what the test makes happen.
-	context.logger = log.nil_logger()
 	o := ops_open(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}})
 	defer ops_close(&o)
 	a, b := guid_at(&o, "a.luau"), guid_at(&o, "b.luau")
@@ -229,7 +227,13 @@ a_failed_write_restores_the_meta_files :: proc(t: ^testing.T) {
 	testing.expect(t, bool(win.SetFileAttributesW(wide_b, win.FILE_ATTRIBUTE_READONLY)))
 	defer win.SetFileAttributesW(wide_b, win.FILE_ATTRIBUTE_NORMAL)
 
-	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+	// The failed write logs its error, which is what the test makes happen. Only that goes quiet: a test's expects report
+	// through the logger too.
+	result: cook_link.Operation_Result
+	{
+		context.logger = log.nil_logger()
+		result = operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+	}
 	testing.expect(t, strings.contains(result.error, "b.luau.meta"))
 	after_a, _ := os.read_entire_file(meta_a, context.temp_allocator)
 	after_b, _ := os.read_entire_file(meta_b, context.temp_allocator)

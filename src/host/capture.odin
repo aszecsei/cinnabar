@@ -36,6 +36,9 @@ Capture :: struct {
 	editor:    ^Link,
 	// Main thread: the copies the backend is making, oldest first, and the editor's requests that wait for a frame.
 	in_flight: [dynamic]In_Flight,
+	// The thumbnail that the game is drawing, and the file that it goes to, from the heap.
+	thumbnail_id:   u32,
+	thumbnail_path: string,
 	requests:  [dynamic]Request,
 	ring_last: time.Tick,
 	ring_due:  bool,
@@ -73,6 +76,7 @@ Job_Kind :: enum u8 {
 	Ring_Sample,
 	Screenshot,
 	Gif,
+	Thumbnail,
 }
 
 Job :: struct {
@@ -164,6 +168,10 @@ capture_request :: proc(c: ^Capture, m: link.Capture_Request) {
 	}
 	path := strings_clone_heap(m.path)
 	switch m.kind {
+	case .Thumbnail:
+		// The game draws it when it can. One at a time: a new one replaces one that the editor no longer waits for.
+		delete(c.thumbnail_path, runtime.heap_allocator())
+		c.thumbnail_id, c.thumbnail_path = m.id, path
 	case .Screenshot:
 		append(&c.requests, Request{id = m.id, kind = m.kind, path = path})
 	case .Gif:
@@ -181,6 +189,8 @@ capture_disconnect :: proc(c: ^Capture) {
 		delete(r.path, runtime.heap_allocator())
 	}
 	clear(&c.requests)
+	delete(c.thumbnail_path, runtime.heap_allocator())
+	c.thumbnail_id, c.thumbnail_path = 0, ""
 }
 
 // capture_tick runs on the main thread between frames: it collects the backend's finished copies for the worker,
@@ -191,6 +201,15 @@ capture_tick :: proc(c: ^Capture) {
 		done, ok := core.poll_frame_capture()
 		if !ok {
 			break
+		}
+		if done.ticket != 0 {
+			if done.ticket == c.thumbnail_id && c.thumbnail_path != "" {
+				post_job(c, Job{kind = .Thumbnail, capture = done, frame = c.frame, id = done.ticket, path = c.thumbnail_path})
+				c.thumbnail_id, c.thumbnail_path = 0, ""
+			} else {
+				core.release_frame_capture(done)
+			}
+			continue
 		}
 		if len(c.in_flight) == 0 {
 			// Nothing asked for it, which cannot happen: one request per frame, answered in order.
@@ -352,6 +371,23 @@ free_temp_allocator :: proc() {
 run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bool) {
 	heap := runtime.heap_allocator()
 	switch job.kind {
+	case .Thumbnail:
+		img, ok := capture.to_rgb8(job.capture, heap)
+		size := job.capture.size
+		core.release_frame_capture(job.capture)
+		if !ok {
+			delete(job.path, heap)
+			return {id = job.id, kind = .Thumbnail, reason = strings_clone_heap("the texture's format cannot be read")}, true
+		}
+		defer delete(img.pixels, heap)
+		png, encoded := capture.encode_png(img, heap)
+		defer delete(png, heap)
+		if !encoded {
+			delete(job.path, heap)
+			return {id = job.id, kind = .Thumbnail, reason = strings_clone_heap("the PNG could not be encoded")}, true
+		}
+		path, reason := write_capture(job.path, .Thumbnail, job.frame, png)
+		return {id = job.id, kind = .Thumbnail, ok = reason == "", reason = reason, path = path, frame = job.frame, width = size.x, height = size.y}, true
 	case .Ring_Sample, .Screenshot:
 		img, ok := capture.to_rgb8(job.capture, heap)
 		mode := link.Output_Mode(job.capture.mode)
@@ -533,7 +569,7 @@ default_capture_path :: proc(
 	now := time.now()
 	year, month, day := time.date(now)
 	hour, minute, second := time.clock_from_time(now)
-	extension := "png" if kind == .Screenshot else "gif"
+	extension := "gif" if kind == .Gif else "png"
 	name := fmt.tprintf(
 		"%04d%02d%02d-%02d%02d%02d-f%d.%s",
 		year,

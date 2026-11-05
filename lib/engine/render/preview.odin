@@ -61,8 +61,10 @@ Preview_Desc :: struct {
 	// A preview of many meshes, in place of the mesh and the material, each with its own pose and materials, which a
 	// distance of 0 frames (see add_preview_item_passes).
 	items:    []Preview_Item,
-	// A thumbnail: what it makes resident is not the world's, and can go when it is done.
+	// A thumbnail: what it makes resident is not the world's, and can go when it is done. When complete, draw_frame asks
+	// for a copy of the target with this ticket, and sets captured if the backend has room.
 	capture:  u32,
+	captured: ^bool,
 }
 
 // Previews is the previews' state between frames, in the Renderer: the records of the one that a frame draws, and the

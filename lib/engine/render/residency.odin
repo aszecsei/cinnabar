@@ -232,6 +232,14 @@ resident_streaming :: proc(r: ^Residency) -> (count: int) {
 	return
 }
 
+// residency_baked_count is how many entries only thumbnails asked for.
+residency_baked_count :: proc(r: ^Residency) -> (count: int) {
+	for &e in r.entries[:r.count] {
+		count += int(e.baked && !e.world)
+	}
+	return
+}
+
 // residency_release_baked gives back what only thumbnails asked for, and gives how many it let go. Something that streams
 // stays for a later call, and a thumbnail that asks again makes it resident again. The GPU's destroys wait for the frames
 // that use what they destroy.

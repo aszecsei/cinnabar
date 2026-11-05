@@ -147,6 +147,11 @@ guid :: proc(a: ^Assets, h: Handle) -> format.Guid {
 	return r.guid if r != nil else {}
 }
 
+// current is whether poll has seen the cooker's last write, so that what is loaded is what the index says is cooked.
+current :: proc(a: ^Assets) -> bool {
+	return a.platform.file_modified(generation_path(a)) == a.cache_generation
+}
+
 // poll swaps the blobs that the cooker has written again, and returns their handles in frame memory. Call it at the
 // end of the frame, when nothing holds a blob. It checks the blobs only when the cache's generation file changes,
 // which a cook writes after all of its blobs, so every blob of one cook is swapped in the same frame.

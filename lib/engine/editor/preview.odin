@@ -130,6 +130,7 @@ close_previews :: proc(e: ^Editor) {
 	for id in 0 ..< MAX_PREVIEWS {
 		close_preview(e, id)
 	}
+	close_thumbnail(e)
 }
 
 // previews gives the previews that this frame draws, for render.Frame_Desc.previews, in frame memory: at most one, the
@@ -140,6 +141,16 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 	}
 	for id in 0 ..< MAX_PREVIEWS {
 		refresh_preview(e, &e.previews[id])
+	}
+	// A preview that the user looks at comes first, but one that plays in every frame shares them with a thumbnail.
+	playing := false
+	for &p in e.previews {
+		playing ||= p.open && p.has_settings && (p.dirty || !p.complete || reads_time(e, p = &p))
+	}
+	if thumbnail, draw := thumbnail_preview(e, playing); draw {
+		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
+		descs[0] = thumbnail
+		return descs
 	}
 	for n in 0 ..< MAX_PREVIEWS {
 		id := (e.next_preview + n) % MAX_PREVIEWS

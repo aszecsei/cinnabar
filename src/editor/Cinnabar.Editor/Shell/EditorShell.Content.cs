@@ -17,6 +17,9 @@ public sealed partial class EditorShell
 
     public CookSession Cook { get; }
 
+    /// <summary>The pictures that the host draws for the content browser, while it can.</summary>
+    public ThumbnailQueue Thumbnails { get; private set; } = null!;
+
     /// <summary>The user asked to open a scene file. The window asks about unsaved changes, and calls <see cref="OpenScene"/>.</summary>
     public event Action<string>? OpenSceneFileRequested;
 
@@ -183,6 +186,10 @@ public sealed partial class EditorShell
         // A pull can change the tags with nothing else knowing.
         Cook.Cooked += _ => Content.Tags.Reload();
         Content.Model.PrefabViews = PrefabContentsOf;
+        // A game that plays is not to be disturbed, and a game that is not linked cannot draw.
+        Thumbnails = new ThumbnailQueue(Assets, Host.Send, () => Host.Linked && Mode == Link.Protocol.EditorMode.Edit);
+        Host.StateChanged += () => Thumbnails.Restart(DateTime.UtcNow);
+        ModeChanged += () => Thumbnails.Pump(DateTime.UtcNow);
         // A cook can change any prefab's text.
         Cook.Cooked += _ => _prefabTrees.Clear();
         LoadContentView();

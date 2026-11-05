@@ -44,6 +44,42 @@ public sealed class AssetIndex
     /// <summary>The roots, the assets, the folders, the problems or <see cref="Linked"/> changed.</summary>
     public event Action? Changed;
 
+    /// <summary>
+    /// An asset's picture is ready, by its GUID. It is not <see cref="Changed"/>, as a screen of tiles makes many of these,
+    /// and what shows need not be built again for each.
+    /// </summary>
+    public event Action<string>? ThumbnailChanged;
+
+    /// <summary>The host wrote an asset's picture at a path, if that is still the asset's.</summary>
+    public void MarkThumbnailReady(string guid, string path)
+    {
+        if (_assets.TryGetValue(guid, out var asset) && asset.Thumbnail == path && !asset.ThumbnailReady)
+        {
+            _assets[guid] = asset with { ThumbnailReady = true };
+            ForgetLists();
+            ThumbnailChanged?.Invoke(guid);
+        }
+    }
+
+    /// <summary>
+    /// The asset whose picture a tile of this one shows: its own, or for a file with none, such as a stage or a model, what
+    /// it makes: its prefab, or its first mesh. Null when there is none.
+    /// </summary>
+    public Asset? PictureOf(Asset shown)
+    {
+        var asset = Find(shown.Guid) ?? shown;
+        if (asset.Thumbnail != "")
+        {
+            return asset;
+        }
+        if (IsSubasset(asset))
+        {
+            return null;
+        }
+        var made = SubassetsOf(asset.Guid).ToList();
+        return made.Find(a => a.Kind == AssetKind.Prefab && a.Thumbnail != "") ?? made.Find(a => a.Kind == AssetKind.Mesh && a.Thumbnail != "");
+    }
+
     /// <summary>Applies one of the daemon's messages, and returns false for a message that is not about the index.</summary>
     public bool Apply(ILinkMessage message)
     {

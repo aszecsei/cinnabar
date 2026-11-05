@@ -144,6 +144,7 @@ public sealed partial class EditorShell
     /// <summary>Writes the autosave if it is due. The window calls it every few seconds, and so does every new undo entry.</summary>
     public void Tick(DateTime now)
     {
+        Thumbnails.Pump(now);
         if (Scene == null)
         {
             return;
@@ -459,6 +460,12 @@ public sealed partial class EditorShell
                 return;
             case Link.Protocol.ProfileCapture capture:
                 Profiler.Apply(capture);
+                return;
+            case Link.Protocol.CaptureResult { Kind: Link.Protocol.CaptureKind.Thumbnail } thumbnail:
+                Thumbnails.Apply(thumbnail, DateTime.UtcNow);
+                return;
+            case Link.Protocol.ThumbnailFailed failed:
+                Thumbnails.Apply(failed, DateTime.UtcNow);
                 return;
             case Link.Protocol.CaptureResult result:
                 Captures.Apply(result);

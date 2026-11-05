@@ -31,6 +31,7 @@ Null_Capture :: struct {
 	format: gpu.Format,
 	mode:   gpu.Output_Mode,
 	pixels: []byte,
+	ticket: u32,
 }
 
 // Null_Frame is a frame's fake GPU spans, until begin_frame gives them to the profiler.
@@ -86,6 +87,9 @@ state: struct {
 	timing_mutex:  sync.Mutex,
 	// Whether this frame copies the frame target, and the slots.
 	capture_requested: bool,
+	texture_requested: bool,
+	texture:           gpu.Texture,
+	texture_ticket:    u32,
 	captures:          [CAPTURE_SLOTS]Null_Capture,
 }
 
@@ -279,6 +283,7 @@ end_frame :: proc() {
 	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target); layout != .Render_Target {
 		log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
 	}
+	fill_texture_capture()
 	if state.capture_requested {
 		state.capture_requested = false
 		for &c in state.captures {
@@ -288,10 +293,45 @@ end_frame :: proc() {
 			desc := gpu.pool_get(&state.textures, state.frame_target)
 			size := desc.size
 			delete(c.pixels)
-			c = {taken = true, ready = true, size = size, format = desc.format, mode = state.output.mode, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
+			c = {taken = true, ready = true, ticket = 0, size = size, format = desc.format, mode = state.output.mode, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
 			break
 		}
 	}
+}
+
+// fill_texture_capture fills the slot of a copy that request_texture_capture asked for.
+@(private = "file")
+fill_texture_capture :: proc() {
+	if !state.texture_requested {
+		return
+	}
+	state.texture_requested = false
+	for &c in state.captures {
+		if c.taken {
+			continue
+		}
+		desc := gpu.pool_get(&state.textures, state.texture)
+		size := desc.size
+		delete(c.pixels)
+		c = {taken = true, ready = true, ticket = state.texture_ticket, size = size, format = desc.format, mode = .Sdr, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
+		break
+	}
+}
+
+// request_texture_capture takes a slot for a copy of a texture at this frame's end, or is false when every slot is in use
+// or a copy is already asked for this frame.
+request_texture_capture :: proc(texture: gpu.Texture, ticket: u32) -> bool {
+	if state.texture_requested {
+		return false
+	}
+	for c in state.captures {
+		if !c.taken {
+			state.texture_requested = true
+			state.texture, state.texture_ticket = texture, ticket
+			return true
+		}
+	}
+	return false
 }
 
 // capture_row_pitch is a captured row's bytes: four per pixel, aligned to 256 as D3D12's footprints are.
@@ -318,7 +358,7 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	for &c, i in state.captures {
 		if c.taken && c.ready {
 			c.ready = false
-			return {slot = u32(i), size = c.size, format = c.format, mode = c.mode, row_pitch = capture_row_pitch(c.size.x), pixels = c.pixels}, true
+			return {slot = u32(i), size = c.size, format = c.format, mode = c.mode, ticket = c.ticket, row_pitch = capture_row_pitch(c.size.x), pixels = c.pixels}, true
 		}
 	}
 	return

@@ -577,6 +577,20 @@ public sealed class ContentBrowserView : DockPanel
         {
             menu.Items.Add(new MenuItem { Header = "Show in Explorer", Command = new RelayCommand(() => _shell.ShowInExplorer(path)) });
         }
+        // Only what could not be drawn asks for this: a picture's file changes when what it shows does.
+        var regenerate = new MenuItem
+        {
+            Header = "Regenerate Picture",
+            Command = new RelayCommand(() =>
+            {
+                if (_index.PictureOf(asset) is { } picture)
+                {
+                    _shell.Thumbnails.Forget(picture, DateTime.UtcNow);
+                }
+            }),
+        };
+        menu.Opening += (_, _) => regenerate.IsVisible = _index.PictureOf(asset) is { } picture && _shell.Thumbnails.FailureOf(picture) != null;
+        menu.Items.Add(regenerate);
         menu.Items.Add(new Separator());
         foreach (var id in new[] { EditorCommands.RenameAsset, EditorCommands.DuplicateAsset, EditorCommands.DeleteAsset, EditorCommands.Reimport })
         {

@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:log"
 import "core:math"
 import "core:math/linalg"
+import "core:mem"
 import "core:mem/virtual"
 import "core:os"
 import "core:testing"
@@ -104,6 +105,72 @@ prefab_items_compose_parents_and_skip_inactive :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(prefab_preview_items(scene, 99, context.temp_allocator)), 0)
 }
 
+// flat_mesh is a mesh blob of the triangles of indices over positions.
+@(private = "file")
+flat_mesh :: proc(positions: [][3]f32, indices: []u16) -> (data: []byte, blob: ^format.Mesh_Blob) {
+	low, high := positions[0], positions[0]
+	for p in positions {
+		low, high = linalg.min(low, p), linalg.max(high, p)
+	}
+	stride := int(format.mesh_attribute_stride({}))
+	contents := format.Mesh_Contents {
+		guid         = guid("0000000000000000000000000000000f"),
+		vertex_count = u32(len(positions)),
+		index_count  = u32(len(indices)),
+		bounds       = {min = low, max = high, radius = 1},
+		submeshes    = {{index_count = u32(len(indices)), meshlet_count = 1}},
+		positions    = mem.slice_to_bytes(positions),
+		attributes   = make([]byte, len(positions) * stride, context.temp_allocator),
+		indices      = mem.slice_to_bytes(indices),
+		meshlets     = {{vertex_count = 3, triangle_count = 1}},
+		meshlet_vertices = mem.slice_to_bytes([]u32{0, 1, 2}),
+		meshlet_triangles = mem.slice_to_bytes([]u32{0 | 1 << 8 | 2 << 16}),
+	}
+	written := format.mesh_write(contents, context.temp_allocator)
+	data, _ = mem.alloc_bytes(len(written), format.BLOB_ALIGN, context.temp_allocator)
+	copy(data, written)
+	blob, _ = format.mesh_view(data)
+	return
+}
+
+@(test)
+a_flat_mesh_turns_to_face_the_camera :: proc(t: ^testing.T) {
+	camera := [3]f32{0, 0, -1}
+	plane := [][3]f32{{0, 0, 0}, {0, 1, 0}, {1, 0, 0}}
+
+	// Clockwise from the camera: it shows as it is.
+	data, blob := flat_mesh(plane, {0, 1, 2})
+	testing.expect(t, blob != nil)
+	testing.expect(t, format.mesh_face_area(data, blob).z < 0)
+	testing.expect_value(t, preview_facing(data, blob, camera), quaternion128(1))
+
+	// It looks away: it turns about its up, so that it still stands.
+	data, blob = flat_mesh(plane, {0, 2, 1})
+	turn := preview_facing(data, blob, camera)
+	turned := linalg.quaternion128_mul_vector3(turn, format.mesh_face_area(data, blob))
+	testing.expectf(t, linalg.dot(turned, camera) > 0, "it still looks away: %v", turned)
+	up := linalg.quaternion128_mul_vector3(turn, [3]f32{0, 1, 0})
+	testing.expectf(t, abs(up.y - 1) < 0.001, "it fell over: %v", up)
+
+	// A floor, whose up is what it looks along, turns over too.
+	floor := [][3]f32{{0, 0, 0}, {1, 0, 0}, {0, 0, 1}}
+	data, blob = flat_mesh(floor, {0, 1, 2})
+	looks := format.mesh_face_area(data, blob)
+	above := [3]f32{0, 1, 0}
+	if linalg.dot(looks, above) >= 0 {
+		above = -above
+	}
+	turned = linalg.quaternion128_mul_vector3(preview_facing(data, blob, above), looks)
+	testing.expectf(t, linalg.dot(turned, above) > 0, "the floor still looks away: %v", turned)
+}
+
+@(test)
+a_mesh_with_depth_stays_as_it_is :: proc(t: ^testing.T) {
+	// It looks away from the camera, but it is no plane, and a solid's far side is not what shows.
+	data, blob := flat_mesh({{0, 0, 0}, {0, 1, 1}, {1, 0, 0}}, {0, 2, 1})
+	testing.expect_value(t, preview_facing(data, blob, [3]f32{0, 0, -1}), quaternion128(1))
+}
+
 @(test)
 fit_holds_every_item :: proc(t: ^testing.T) {
 	centers := [][3]f32{{-10, 0, 0}, {10, 0, 0}, {0, 4, 3}}
@@ -160,10 +227,15 @@ over_budget_keeps_the_largest :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(preview_largest(radii, 99, context.temp_allocator)), 5)
 }
 
+// What is not in the cache fails, which residency logs. Only that goes quiet: a test's expects report through the logger too.
+@(private = "file")
+quiet_mesh :: proc(r: ^Residency, g: format.Guid) {
+	context.logger = log.nil_logger()
+	resident_mesh(r, g)
+}
+
 @(test)
 released_entries_leave_what_the_world_uses :: proc(t: ^testing.T) {
-	// What is not in the cache fails, which residency logs.
-	context.logger = log.nil_logger()
 	arena: virtual.Arena
 	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
 	defer virtual.arena_destroy(&arena)
@@ -189,12 +261,13 @@ released_entries_leave_what_the_world_uses :: proc(t: ^testing.T) {
 	shared, only_baked, only_world := guid("11111111111111111111111111111111"), guid("22222222222222222222222222222222"), guid("33333333333333333333333333333333")
 
 	r.baking = true
-	resident_mesh(r, shared)
-	resident_mesh(r, only_baked)
+	quiet_mesh(r, shared)
+	quiet_mesh(r, only_baked)
 	r.baking = false
-	resident_mesh(r, shared)
-	resident_mesh(r, only_world)
+	quiet_mesh(r, shared)
+	quiet_mesh(r, only_world)
 	testing.expect_value(t, r.count, 3)
+	testing.expect_value(t, residency_baked_count(r), 1)
 
 	testing.expect_value(t, residency_release_baked(r), 1)
 

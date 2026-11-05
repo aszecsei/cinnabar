@@ -37,6 +37,7 @@ Capture_Slot :: struct {
 	mode:        gpu.Output_Mode,
 	sdr_white:   f32,
 	row_pitch:   u32,
+	ticket:      u32,
 }
 
 @(private)
@@ -44,6 +45,10 @@ Captures :: struct {
 	slots:   [CAPTURE_SLOTS]Capture_Slot,
 	// The slot that this frame's end_frame copies into, or -1.
 	pending: i32,
+	// The slot that this frame's end_frame copies a texture into, or -1, the texture and what to call the copy.
+	texture_pending: i32,
+	texture:         gpu.Texture,
+	texture_ticket:  u32,
 }
 
 // request_frame_capture asks for a copy of this frame's frame target. False when the window is minimized or every
@@ -96,6 +101,7 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 			sdr_white = slot.sdr_white,
 			row_pitch = slot.row_pitch,
 			pixels = slot.mapped[:int(slot.row_pitch) * int(slot.size.y)],
+				ticket = slot.ticket,
 		},
 		true
 }
@@ -110,6 +116,7 @@ release_frame_capture :: proc(capture: gpu.Frame_Capture) {
 @(private)
 init_captures :: proc() {
 	dev.captures.pending = -1
+	dev.captures.texture_pending = -1
 }
 
 @(private)
@@ -118,7 +125,8 @@ shutdown_captures :: proc() {
 		release(&slot.resource)
 	}
 	dev.captures = {
-		pending = -1,
+		pending         = -1,
+		texture_pending = -1,
 	}
 }
 
@@ -139,6 +147,86 @@ cancel_capture :: proc() {
 		sync.atomic_store(&slot.state, .Free)
 		dev.captures.pending = -1
 	}
+	if i := dev.captures.texture_pending; i >= 0 {
+		sync.atomic_store(&dev.captures.slots[i].state, .Free)
+		dev.captures.texture_pending = -1
+	}
+}
+
+// request_texture_capture asks for a copy of a texture at this frame's end, which poll_frame_capture gives with the
+// ticket. The texture must end the frame in the render target layout, and stays there. It is false when every slot is
+// in use or a copy is already asked for this frame, so ask again next frame. Call it on the main thread while the frame
+// records.
+request_texture_capture :: proc(texture: gpu.Texture, ticket: u32) -> bool {
+	c := &dev.captures
+	if !dev.recording || c.texture_pending >= 0 {
+		return false
+	}
+	for &slot, i in c.slots {
+		if sync.atomic_load(&slot.state) == .Free {
+			sync.atomic_store(&slot.state, .Requested)
+			c.texture_pending = i32(i)
+			c.texture, c.texture_ticket = texture, ticket
+			return true
+		}
+	}
+	return false
+}
+
+// record_texture_capture copies the asked texture into its slot on the frame's final list, and leaves it as it was.
+@(private)
+record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
+	c := &dev.captures
+	if c.texture_pending < 0 {
+		return
+	}
+	slot := &c.slots[c.texture_pending]
+	target := gpu.pool_get(&dev.textures, c.texture)
+	desc: d3d.RESOURCE_DESC
+	target.resource->GetDesc(&desc)
+	footprint: d3d.PLACED_SUBRESOURCE_FOOTPRINT
+	rows: u32
+	row_size, total: u64
+	dev.device->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, &rows, &row_size, &total)
+	if slot.resource == nil || slot.capacity < u32(total) {
+		if slot.resource != nil {
+			slot.resource->Release()
+			slot.resource = nil
+			slot.mapped = nil
+			slot.capacity = 0
+		}
+		resource, ok := create_buffer_resource({size = u32(total), usage = {.Readback}, label = "texture capture"}, .READBACK)
+		if !ok || !check(resource->Map(0, nil, (^rawptr)(&slot.mapped)), "IResource.Map(texture capture)") {
+			if ok {
+				resource->Release()
+			}
+			sync.atomic_store(&slot.state, .Free)
+			c.texture_pending = -1
+			return
+		}
+		slot.resource = resource
+		slot.capacity = u32(total)
+	}
+	texture_barrier(list, target.resource, {.RENDER_TARGET}, {.COPY_SOURCE}, {.RENDER_TARGET}, {.COPY}, .RENDER_TARGET, .COPY_SOURCE)
+	dst := d3d.TEXTURE_COPY_LOCATION {
+		pResource = slot.resource,
+		Type      = .PLACED_FOOTPRINT,
+	}
+	dst.PlacedFootprint = footprint
+	src := d3d.TEXTURE_COPY_LOCATION {
+		pResource = target.resource,
+		Type      = .SUBRESOURCE_INDEX,
+	}
+	list->CopyTextureRegion(&dst, 0, 0, 0, &src, nil)
+	texture_barrier(list, target.resource, {.COPY_SOURCE}, {.RENDER_TARGET}, {.COPY}, {.RENDER_TARGET}, .COPY_SOURCE, .RENDER_TARGET)
+	slot.size = {u32(desc.Width), desc.Height}
+	slot.format = target.desc.format
+	slot.mode = .Sdr
+	slot.sdr_white = 1
+	slot.row_pitch = footprint.Footprint.RowPitch
+	slot.fence_value = 0
+	slot.ticket = c.texture_ticket
+	sync.atomic_store(&slot.state, .Copying)
 }
 
 // record_capture copies the frame target into the slot on the frame's final list, and leaves the target in the
@@ -227,6 +315,7 @@ record_capture :: proc(
 	slot.sdr_white = dev.output.display.sdr_white
 	slot.row_pitch = footprint.Footprint.RowPitch
 	slot.fence_value = 0
+	slot.ticket = 0
 	sync.atomic_store(&slot.state, .Copying)
 }
 
@@ -236,5 +325,9 @@ stamp_capture :: proc(fence_value: u64) {
 	if slot := pending_capture(); slot != nil {
 		slot.fence_value = fence_value
 		dev.captures.pending = -1
+	}
+	if i := dev.captures.texture_pending; i >= 0 {
+		dev.captures.slots[i].fence_value = fence_value
+		dev.captures.texture_pending = -1
 	}
 }

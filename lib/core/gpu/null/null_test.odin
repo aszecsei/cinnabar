@@ -352,3 +352,33 @@ frame_captures_are_ready_after_end_frame :: proc(t: ^testing.T) {
 	testing.expect(t, got)
 	release_frame_capture(last)
 }
+
+@(test)
+a_texture_capture_comes_back_with_its_ticket :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	defer destroy_texture(texture)
+	testing.expect(t, request_texture_capture(texture, 7))
+	// One a frame: the caller asks again next frame.
+	testing.expect(t, !request_texture_capture(texture, 8))
+	end_frame()
+
+	capture, ok := poll_frame_capture()
+	testing.expect(t, ok)
+	testing.expect_value(t, capture.ticket, 7)
+	testing.expect_value(t, capture.size, [2]u32{16, 8})
+	testing.expect_value(t, capture.mode, gpu.Output_Mode.Sdr)
+	testing.expect(t, int(capture.row_pitch) * 8 == len(capture.pixels))
+	release_frame_capture(capture)
+
+	// A copy of the frame target has none.
+	begin_frame({64, 32})
+	testing.expect(t, request_frame_capture())
+	end_frame()
+	frame, frame_ok := poll_frame_capture()
+	testing.expect(t, frame_ok)
+	testing.expect_value(t, frame.ticket, 0)
+	release_frame_capture(frame)
+}

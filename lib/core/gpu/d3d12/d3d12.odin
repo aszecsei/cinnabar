@@ -470,6 +470,7 @@ end_frame :: proc() {
 	} else {
 		texture_barrier(list, target.resource, {.RENDER_TARGET}, {.NO_ACCESS}, {.RENDER_TARGET}, {}, .RENDER_TARGET, .PRESENT)
 	}
+	record_texture_capture(list)
 	if dev.shared_mode {
 		end_shared_previews(list)
 	}

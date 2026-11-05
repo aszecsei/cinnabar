@@ -26,8 +26,8 @@ public sealed record AutomationRequest(
 /// <summary>What <c>status</c> answers: the host and the scene.</summary>
 public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid);
 
-/// <summary>What <c>content</c> answers: the content browser's folder, search and selection, and the names of the assets that it shows.</summary>
-public sealed record AutomationContent(string? Folder, string Search, string[] Selection, string[] Items);
+/// <summary>What <c>content</c> answers: the content browser's folder, search and selection, the names of the assets that it shows, and the pictures that it waits for and those that could not be made.</summary>
+public sealed record AutomationContent(string? Folder, string Search, string[] Selection, string[] Items, int ThumbnailsWaiting = 0, string[]? ThumbnailsFailed = null);
 
 /// <summary>The answer to a request. Files are the ones a capture wrote, the sidecar last.</summary>
 public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null);

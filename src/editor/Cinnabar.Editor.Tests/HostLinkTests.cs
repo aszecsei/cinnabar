@@ -8,6 +8,7 @@ using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Viewport;
+using SkiaSharp;
 using Vortice.DXGI;
 
 namespace Cinnabar.Editor.Tests;
@@ -526,6 +527,92 @@ public sealed class HostLinkTests : IAsyncDisposable
         // Off, the host records no zones, and the summaries say so.
         editor.Link.Send(new ProfileRecording(false));
         await editor.Next<ProfileSummary>(s => !s.Recording);
+    }
+
+    // The sample's room, and its main scene, which a bake reads as it does a prefab, as they are the same flat entities.
+    const string RoomMesh = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
+    const string MainScene = "047ea7c35e4dbfb73d2dac450b79b9a8";
+
+    static void SkipWithoutTheRoom()
+    {
+        foreach (var guid in new[] { RoomMesh, MainScene })
+        {
+            if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", guid + ".blob")))
+            {
+                Assert.Skip("the sample's content is not cooked");
+            }
+        }
+    }
+
+    // Asks for a picture as the content browser does, and decodes what the host wrote.
+    static async Task<SKBitmap> Bake(Editor editor, uint id, ThumbnailKind kind, string guid, string directory)
+    {
+        var path = Path.Combine(directory, $"{guid}.{id}.png");
+        editor.Link.Send(new CaptureRequest(id, CaptureKind.Thumbnail, path));
+        editor.Link.Send(new BakeThumbnail(id, kind, Convert.FromHexString(guid), 0, 64, 64));
+        var written = await editor.Next<CaptureResult>(r => r.Id == id);
+        Assert.True(written.Ok, written.Reason);
+        Assert.Equal((CaptureKind.Thumbnail, path, 64u, 64u), (written.Kind, written.Path, written.Width, written.Height));
+        return SKBitmap.Decode(path);
+    }
+
+    [Fact]
+    public async Task ABakeWritesAPngOfTheMesh()
+    {
+        SkipWithoutTheRoom();
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-bake-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var picture = await Bake(editor, 1, ThumbnailKind.Mesh, RoomMesh, directory);
+            var background = picture.GetPixel(0, 0);
+            var drawn = picture.Pixels.Count(p => p != background);
+            Assert.True(drawn > 64 * 64 / 20, $"{drawn} pixels were drawn");
+
+            // What cannot be drawn says so, and leaves no file for the index to call ready.
+            const string Missing = "0123456789abcdef0123456789abcdef";
+            var missing = Path.Combine(directory, "missing.png");
+            editor.Link.Send(new CaptureRequest(2, CaptureKind.Thumbnail, missing));
+            editor.Link.Send(new BakeThumbnail(2, ThumbnailKind.Mesh, Convert.FromHexString(Missing), 0, 64, 64));
+            var failed = await editor.Next<ThumbnailFailed>(m => m.Id == 2);
+            Assert.Equal("what it draws could not be loaded", failed.Reason);
+            Assert.False(File.Exists(missing));
+
+            // The next one is not lost behind it.
+            using var again = await Bake(editor, 3, ThumbnailKind.Mesh, RoomMesh, directory);
+            Assert.Equal(picture.Pixels.Count(p => p != background), again.Pixels.Count(p => p != background));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ABakeOfAPrefabDrawsItsMaterials()
+    {
+        SkipWithoutTheRoom();
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-bake-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            // A bare mesh is gray, and from outside the sample's room is red brick.
+            static int Warm(SKBitmap picture) => picture.Pixels.Count(p => p.Red - p.Blue > 20);
+            using var bare = await Bake(editor, 1, ThumbnailKind.Mesh, RoomMesh, directory);
+            using var dressed = await Bake(editor, 2, ThumbnailKind.Prefab, MainScene, directory);
+            Assert.True(Warm(dressed) > 64 * 64 / 10, $"{Warm(dressed)} pixels are warm");
+            Assert.True(Warm(bare) < Warm(dressed) / 10, $"the bare mesh has {Warm(bare)} warm pixels, and the prefab {Warm(dressed)}");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]

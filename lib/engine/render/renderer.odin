@@ -595,6 +595,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	ok := execute(&g)
 	if ok {
+		for &preview in desc.previews {
+			if preview.capture != 0 && preview.complete != nil && preview.complete^ && preview.captured != nil && r.platform.gpu_capture_texture != nil {
+				preview.captured^ = r.platform.gpu_capture_texture(preview.target, preview.capture)
+			}
+		}
 		finish_cull_stats(f)
 		finish_gi_split_stats(r)
 		finish_shading_stats(r)

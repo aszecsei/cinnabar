@@ -263,6 +263,8 @@ Frame_Capture :: struct {
 	sdr_white: f32,
 	row_pitch: u32,
 	pixels:    []byte,
+	// What request_texture_capture asked it to be called, or 0 for a copy of the frame target.
+	ticket:    u32,
 }
 
 is_depth_format :: proc(format: Format) -> bool {

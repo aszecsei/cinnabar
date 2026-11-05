@@ -63,6 +63,7 @@ Editor :: struct {
 	residency:    ^render.Residency,
 	// The renderer, which answers where the texture sky's sun is.
 	renderer:     ^render.Renderer,
+	thumbnail:    Thumbnail,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
 	mesh_overlay: link.Mesh_Overlay,
 }
@@ -210,13 +211,14 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				e.steps += 1
 			}
 		case:
-			if !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
+			if !handle_thumbnail_message(e, message) && !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
 				log.warnf("editor: the game does not handle %v", message)
 			}
 		}
 	}
 	finish_pick(e, w, out, frame)
 	send_preview_targets(e, out)
+	send_thumbnail_failed(e, out)
 	if !e.types_sent {
 		link.write_message(out, component_types(w, frame))
 		link.write_message(out, command_infos(e, frame))

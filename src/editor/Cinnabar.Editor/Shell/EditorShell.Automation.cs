@@ -210,7 +210,7 @@ public sealed partial class EditorShell
             }
         }
         return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],
-            [.. model.Tiles.Select(t => t.Name)]));
+            [.. model.Tiles.Select(t => t.Name)], Thumbnails.Waiting, [.. Thumbnails.Failures]));
     }
 
     AutomationResponse CaptureUiResponse(AutomationRequest request)

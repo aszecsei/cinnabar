@@ -77,7 +77,47 @@ sealed class ContentGridView : Panel
         _scroll.AddHandler(PointerReleasedEvent, OnBlankReleased);
         _marqueeTimer.Tick += (_, _) => MarqueeTick();
         KeyDown += OnKeyDown;
+        new ViewSubscriptions(this, attached: () => { })
+            .Add(() => _index.ThumbnailChanged += OnThumbnailChanged, () => _index.ThumbnailChanged -= OnThumbnailChanged)
+            .Add(() => _shell.Thumbnails.Changed += OnPictureAnswered, () => _shell.Thumbnails.Changed -= OnPictureAnswered);
     }
+
+    // The tiles that show an asset's picture: its own, and that of the file that makes it.
+    IEnumerable<(Border Tile, ContentTile Item)> TilesOf(string guid)
+    {
+        foreach (var key in new[] { guid, _index.Find(guid)?.Parent ?? "" })
+        {
+            if (_tiles.TryGetValue(key, out var tile) && _shown.FirstOrDefault(t => t.Key == key) is { } item)
+            {
+                yield return (tile, item);
+            }
+        }
+    }
+
+    // The host answered: what failed says why.
+    void OnPictureAnswered(string guid)
+    {
+        foreach (var (tile, item) in TilesOf(guid))
+        {
+            ToolTip.SetTip(tile, TipOf(item));
+        }
+    }
+
+    // A picture is ready: the tile that shows it shows it, and so does the file of a prefab or mesh, whose picture it is.
+    void OnThumbnailChanged(string guid)
+    {
+        foreach (var (tile, item) in TilesOf(guid))
+        {
+            if (tile.Child is StackPanel { Children: [Panel picture, ..] } && ThumbnailPath(item) is { } path && !picture.Children.OfType<Image>().Any())
+            {
+                ShowThumbnail(picture, path);
+            }
+        }
+    }
+
+    // What a tile waits for, if its picture is not ready.
+    string? WantedThumbnail(ContentTile item) =>
+        item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: false } picture ? picture.Guid : null;
 
     /// <summary>The menu of the empty space, for the open folder.</summary>
     public ContextMenu? BlankMenu
@@ -227,25 +267,9 @@ sealed class ContentGridView : Panel
         return Wire(new Border { Classes = { "asset-row" }, Width = _layout.TileWidth, Height = _layout.RowHeight, Child = line }, item);
     }
 
-    // The picture of a tile: an asset's own, or for a file with none, such as a stage or a model, what it makes: its
-    // prefab, or its first mesh.
-    string? ThumbnailPath(ContentTile item)
-    {
-        if (item.Asset is not { } asset)
-        {
-            return null;
-        }
-        if (asset.ThumbnailReady)
-        {
-            return asset.Thumbnail;
-        }
-        if (AssetIndex.IsSubasset(asset) || asset.Thumbnail != "")
-        {
-            return null;
-        }
-        var made = _index.SubassetsOf(asset.Guid).ToList();
-        return (made.Find(a => a.Kind == Link.Cook.AssetKind.Prefab && a.ThumbnailReady) ?? made.Find(a => a.Kind == Link.Cook.AssetKind.Mesh && a.ThumbnailReady))?.Thumbnail;
-    }
+    // The file of a tile's picture, once it is ready.
+    string? ThumbnailPath(ContentTile item) =>
+        item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: true } picture ? picture.Thumbnail : null;
 
     // Shows a thumbnail over a tile's icon once it is decoded, for as long as the tile is realized, which is what keeps it
     // in the cache. The icon shows until then, and instead when it cannot be read.
@@ -253,7 +277,6 @@ sealed class ContentGridView : Panel
     {
         var image = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
         Avalonia.Media.RenderOptions.SetBitmapInterpolationMode(image, Avalonia.Media.Imaging.BitmapInterpolationMode.HighQuality);
-        picture.Children.Add(image);
         var attached = false;
         image.AttachedToVisualTree += async (_, _) =>
         {
@@ -285,6 +308,8 @@ sealed class ContentGridView : Panel
                 ThumbnailCache.Shared.Release(path);
             }
         };
+        // Last, as a tile that shows attaches what is added to it at once.
+        picture.Children.Add(image);
     }
 
     void Enter(ContentTile item)
@@ -341,23 +366,26 @@ sealed class ContentGridView : Panel
     Border Wire(Border view, ContentTile item)
     {
         var key = item.Key;
-        if (item.Asset is { } shown)
-        {
-            var problems = _index.ProblemsOf(shown.Guid);
-            var tip = $"{shown.Root}/{shown.Path}" + (AssetIndex.IsSubasset(shown) ? $"\n{shown.Subasset}" : "");
-            ToolTip.SetTip(view, problems.Count == 0 ? tip : tip + "\n" + string.Join("\n", problems.Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text)));
-        }
-        else
-        {
-            ToolTip.SetTip(view, $"{item.Name}\nDrag it into the scene to take this part of the prefab. Alt makes plain entities of it.");
-        }
+        ToolTip.SetTip(view, TipOf(item));
         view.Classes.Set("selected", _model.Selection.Contains(key));
-        view.AttachedToVisualTree += (_, _) => _tiles[key] = view;
+        var wanted = _model.ViewMode == ContentViewMode.Grid ? WantedThumbnail(item) : null;
+        view.AttachedToVisualTree += (_, _) =>
+        {
+            _tiles[key] = view;
+            if (wanted != null)
+            {
+                _shell.Thumbnails.Want(wanted, DateTime.UtcNow);
+            }
+        };
         view.DetachedFromVisualTree += (_, _) =>
         {
             if (_tiles.GetValueOrDefault(key) == view)
             {
                 _tiles.Remove(key);
+            }
+            if (wanted != null)
+            {
+                _shell.Thumbnails.Unwant(wanted);
             }
         };
         view.PointerPressed += (_, e) => OnTilePressed(view, item, e);
@@ -399,6 +427,21 @@ sealed class ContentGridView : Panel
         };
         view.ContextMenu = item.Asset is { } menuAsset ? _menu(menuAsset) : PartMenu(item);
         return view;
+    }
+
+    string TipOf(ContentTile item)
+    {
+        if (item.Asset is not { } shown)
+        {
+            return $"{item.Name}\nDrag it into the scene to take this part of the prefab. Alt makes plain entities of it.";
+        }
+        var lines = new List<string> { $"{shown.Root}/{shown.Path}" + (AssetIndex.IsSubasset(shown) ? $"\n{shown.Subasset}" : "") };
+        lines.AddRange(_index.ProblemsOf(shown.Guid).Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text));
+        if (_index.PictureOf(shown) is { } picture && _shell.Thumbnails.FailureOf(picture) is { } failure)
+        {
+            lines.Add($"No picture: {failure}");
+        }
+        return string.Join("\n", lines);
     }
 
     ContextMenu? PartMenu(ContentTile item)

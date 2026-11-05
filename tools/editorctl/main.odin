@@ -78,6 +78,8 @@ Content :: struct {
 	search:    string `json:"search"`,
 	selection: []string `json:"selection"`,
 	items:     []string `json:"items"`,
+	thumbnails_waiting: int `json:"thumbnailsWaiting"`,
+	thumbnails_failed:  []string `json:"thumbnailsFailed"`,
 }
 
 // Response matches AutomationResponse.
@@ -398,6 +400,10 @@ print_response :: proc(r: Response) {
 		fmt.printfln("search: %s", content.search)
 		fmt.printfln("selection: %v", content.selection)
 		fmt.printfln("items: %v", content.items)
+		fmt.printfln("thumbnails waiting: %d", content.thumbnails_waiting)
+		for failure in content.thumbnails_failed {
+			fmt.printfln("thumbnail failed: %s", failure)
+		}
 	}
 	for file in r.files {
 		fmt.println(file)
