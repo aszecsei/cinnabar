@@ -41,8 +41,10 @@ static class TestAssets
         uint[]? size = null,
         string toolTexture = "",
         Link.Cook.Hotspot[]? hotspots = null,
-        string generated = "") =>
-        new(guid, kind, root, path, status, errors, warnings, behaviour, settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated);
+        string generated = "",
+        string thumbnail = "",
+        bool thumbnailReady = false) =>
+        new(guid, kind, root, path, status, errors, warnings, behaviour, settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated, thumbnail, thumbnailReady);
 }
 
 /// <summary>Editor shells over a scene file in a test's temp directory.</summary>

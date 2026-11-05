@@ -161,6 +161,11 @@ Asset :: struct {
 	// For a sub-asset whose source the cooker generates, as a USD stage's prefab, the generated text's absolute path,
 	// which the editor reads in place of the file's (see docs/content/kinds/stages.md#prefab). "" otherwise.
 	generated:    string,
+	// The absolute path of the PNG that shows the asset, for a kind that has one (see
+	// docs/content/daemon-and-operations.md#thumbnails), or "". The name holds a key of what it shows, so it changes
+	// with the asset. Whether the file is there yet: a material's, a mesh's or a prefab's comes from the host.
+	thumbnail:       string,
+	thumbnail_ready: bool,
 }
 
 // A hotspot rectangle of a material's tool texture, in texels: a complete tileable piece that the Hotspot tool maps a

@@ -68,7 +68,7 @@ cook_audio :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -
 	return ok
 }
 
-@(private = "file")
+@(private)
 audio_setting :: proc(a: Asset_Source, key: string) -> string {
 	if value, found := format.meta_value(a.meta, key); found {
 		return value
@@ -150,7 +150,7 @@ audio_format_of :: proc(setting: string) -> audio.Sound_Format {
 
 // decode_sound decodes a sound to 16-bit PCM at the engine's rate, in the channels that the setting asks for. The samples
 // are the caller's, from the heap.
-@(private = "file")
+@(private)
 decode_sound :: proc(source: []byte, channels_setting: string) -> (samples: [dynamic]i16, channels: u32, ok: bool) {
 	// The source's channels and rate first, from a decoder that asks for no conversion of them.
 	config := ma.decoder_config_init(.s16, 0, 0)

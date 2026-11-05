@@ -2,7 +2,7 @@
 
 The daemon keeps the cache current while sources change, owns every `.meta` file, does the editor's asset operations, and serves the cook link.
 
-**In this document:** [Cook daemon](#cook-daemon)
+**In this document:** [Cook daemon](#cook-daemon) · [Thumbnails](#thumbnails)
 
 ## Cook daemon
 
@@ -50,7 +50,7 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 - **Handshake:** `Hello`, then `Welcome` with the roots, the configuration, the importers, each with its extension and import settings, and the kinds of node of material graphs, then the whole index as an `Asset_Snapshot`, an `Asset_Problems` for each asset that has problems, and the `Shading_Models` with their surface inputs. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed, and `Shading_Models` when a shading model changed. It sends `Cook_Finished` after every pass.
 - **During a pass** that takes longer than 250 ms, the daemon sends `Cook_Progress` at most every 100 ms and at the end of each step: the step's kind, a stage's name for a stage's step, and the jobs that are done of the total. A step is the assets of a kind, or one stage's meshes and textures, as a stage is most of a large cook. Which counts the messages carry depends on the timing; what the pass cooks does not. A quick pass sends none.
-- **An entry has everything that the editor shows,** the import settings, the behaviour class, a sub-asset's parent and name, a material's permutations, a texture's size and a material's tool texture and hotspots included, so the editor never asks for an asset's details or opens an image. It finds an asset's dependents in the dependencies of the others.
+- **An entry has everything that the editor shows,** the import settings, the behaviour class, a sub-asset's parent and name, a material's permutations, a texture's size and a material's tool texture and hotspots included, so the editor never asks for an asset's details. The one image that it opens is a thumbnail, by the path that the entry gives. It finds an asset's dependents in the dependencies of the others.
 - **Previews:** `Cook_Preview` gives the text of a material that the editor has not saved. The daemon scans the roots, cooks the text as the material with that GUID, for its default switches only, into the preview area of the cache, `<cache>/dev/preview/<guid>.blob`, and answers with a `Preview_Result` of the same request ID: the first error, or `""`, and the problems with the lines of the text. A preview cooks between passes, writes no generation and changes no index; its problems go in the answer and not to the log. The daemon deletes the preview area when it starts (see [Rendering](../rendering/materials.md#material-previews)).
 - **Unsaved animation graphs:** `Cook_Preview` with an animation graph's GUID finds the asset in the daemon's index, without a scan, and answers with the problems that a cook of the text would report, with the file's path and the text's lines. A text without problems goes in the preview area for the editor's [preview](../editor/animation-graph-editor.md#preview), and one with problems leaves the last good one there.
 - **Schema:** `cook --emit-link-schema` writes `build/obj/link/cook-schema.json`, and the editor's generator turns it into C# in `Cinnabar.Editor.Link.Cook`, as it does the editor link's schema in `Cinnabar.Editor.Link.Protocol`.
@@ -63,3 +63,11 @@ The editor talks to the daemon through the cook link. It has the editor link's t
 | Previews | `Cook_Preview`, a request answered with a `Preview_Result` of the same request ID |
 | Operations | `Create_Asset`, `Create_Folder`, `Move_Assets`, `Rename_Asset`, `Rename_Folder`, `Duplicate_Assets`, `Delete_Assets`, `Set_Import_Settings`, `Reimport`, each a request answered with an `Operation_Result` of the same request ID: the reason that it failed, or the GUIDs of the assets that it made |
 
+### Thumbnails
+
+The picture that the content browser shows of an asset. The daemon owns which file each asset should have, and removes the others.
+
+- **The file** is `<cache>/thumbnails/<guid>.<key>.png`, outside the content roots, so writing one starts no pass, and the entry's `thumbnail` names it. The key covers what the picture shows: the asset's blob, and the blobs of what it draws with, through what those draw with. A material's are its dependencies. A prefab's are the assets that its flat entities name, since its dependencies are only its scripts and its prefabs. So a texture's new blob gives every material and prefab that uses it a new file, and a reader never sees half of one. `thumbnail_ready` says whether the file is there.
+- **Textures and sounds** the daemon makes in its pass, on every core, when the file is missing. A texture's picture comes from its blob's smallest mip that is at least 256 pixels on its longer side, so a stage's textures need no source and no new cook: color keeps its sRGB bytes, a mask is gray, a normal map shows its normals, HDR is tone mapped, and a cube or an array shows its first layer. A sound's is a waveform of each column's lowest and highest sample.
+- **Materials, instances, meshes and prefabs** need the renderer, so their entries say that they are not ready, and they show their kinds' icons.
+- **What it costs:** on the intel sample, making all 359 textures' pictures took about 720 ms, and each pass after that spends time reading each blob's header, once, to find the keys.

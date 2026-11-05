@@ -237,7 +237,7 @@ folders_missing :: proc(from, other: []cook_link.Folder) -> []cook_link.Folder {
 
 @(private = "file")
 asset_equal :: proc(a, b: cook_link.Asset) -> bool {
-	if a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
+	if a.thumbnail != b.thumbnail || a.thumbnail_ready != b.thumbnail_ready || a.generated != b.generated || a.guid != b.guid || a.kind != b.kind || a.root != b.root || a.path != b.path || a.status != b.status || a.errors != b.errors || a.warnings != b.warnings || a.behaviour != b.behaviour || a.parent != b.parent || a.subasset != b.subasset || a.permutations != b.permutations || a.size != b.size || a.tool_texture != b.tool_texture {
 		return false
 	}
 	return slice.equal(a.settings, b.settings) && slice.equal(a.dependencies, b.dependencies) && slice.equal(a.hotspots, b.hotspots)

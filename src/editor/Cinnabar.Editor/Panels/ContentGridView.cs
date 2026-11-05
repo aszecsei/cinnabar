@@ -162,6 +162,10 @@ sealed class ContentGridView : Panel
             icon.Opacity = 0.7;
             picture.Children.Add(icon);
         }
+        if (ThumbnailPath(item) is { } thumbnail)
+        {
+            ShowThumbnail(picture, thumbnail);
+        }
         if (item.Asset is { } asset && Marks(asset) is { } marks)
         {
             marks.HorizontalAlignment = HorizontalAlignment.Left;
@@ -221,6 +225,66 @@ sealed class ContentGridView : Panel
             }
         }
         return Wire(new Border { Classes = { "asset-row" }, Width = _layout.TileWidth, Height = _layout.RowHeight, Child = line }, item);
+    }
+
+    // The picture of a tile: an asset's own, or for a file with none, such as a stage or a model, what it makes: its
+    // prefab, or its first mesh.
+    string? ThumbnailPath(ContentTile item)
+    {
+        if (item.Asset is not { } asset)
+        {
+            return null;
+        }
+        if (asset.ThumbnailReady)
+        {
+            return asset.Thumbnail;
+        }
+        if (AssetIndex.IsSubasset(asset) || asset.Thumbnail != "")
+        {
+            return null;
+        }
+        var made = _index.SubassetsOf(asset.Guid).ToList();
+        return (made.Find(a => a.Kind == Link.Cook.AssetKind.Prefab && a.ThumbnailReady) ?? made.Find(a => a.Kind == Link.Cook.AssetKind.Mesh && a.ThumbnailReady))?.Thumbnail;
+    }
+
+    // Shows a thumbnail over a tile's icon once it is decoded, for as long as the tile is realized, which is what keeps it
+    // in the cache. The icon shows until then, and instead when it cannot be read.
+    static void ShowThumbnail(Panel picture, string path)
+    {
+        var image = new Image { Stretch = Stretch.Uniform, IsHitTestVisible = false };
+        Avalonia.Media.RenderOptions.SetBitmapInterpolationMode(image, Avalonia.Media.Imaging.BitmapInterpolationMode.HighQuality);
+        picture.Children.Add(image);
+        var attached = false;
+        image.AttachedToVisualTree += async (_, _) =>
+        {
+            attached = true;
+            var bitmap = await ThumbnailCache.Shared.Acquire(path);
+            if (!attached)
+            {
+                ThumbnailCache.Shared.Release(path);
+            }
+            else if (bitmap != null)
+            {
+                image.Source = bitmap;
+                if (picture.Children.Count > 0 && picture.Children[0] is PathIcon icon)
+                {
+                    icon.IsVisible = false;
+                }
+            }
+            else
+            {
+                ThumbnailCache.Shared.Release(path);
+            }
+        };
+        image.DetachedFromVisualTree += (_, _) =>
+        {
+            attached = false;
+            if (image.Source != null)
+            {
+                image.Source = null;
+                ThumbnailCache.Shared.Release(path);
+            }
+        };
     }
 
     void Enter(ContentTile item)

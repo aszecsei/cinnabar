@@ -121,6 +121,26 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task TheIndexCarriesAThumbnailPathAndItsFileExists()
+    {
+        Directory.CreateDirectory(Path.Combine(_content, "textures"));
+        // A 1x1 PNG.
+        File.WriteAllBytes(Path.Combine(_content, "textures", "dot.png"), Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="));
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Path == "textures/dot.png"), session, output);
+
+        var dot = index.Assets.Values.Single(a => a.Path == "textures/dot.png");
+        Assert.True(dot.ThumbnailReady);
+        Assert.True(File.Exists(dot.Thumbnail));
+        Assert.StartsWith(Path.Combine(_dir, "cache", "thumbnails").Replace('\\', '/'), dot.Thumbnail.Replace('\\', '/'));
+        // A script has no thumbnail.
+        Assert.Equal("", index.Assets.Values.First(a => a.Kind == AssetKind.Script).Thumbnail);
+    }
+
+    [Fact]
     public async Task SettingsOfTwoAssetsMakeOnePass()
     {
         var index = new AssetIndex();
