@@ -6,10 +6,10 @@ namespace Cinnabar.Editor.Tests;
 public class AssetIndexTests
 {
     static Asset Script(string guid, string path, string behaviour = "", AssetStatus status = AssetStatus.Current, params string[] dependencies) =>
-        new(guid, AssetKind.Script, "game", path, status, 0, 0, behaviour, [], dependencies, "", "", 0, [0, 0], "", [], "");
+        TestAssets.Make(guid, AssetKind.Script, path, status: status, behaviour: behaviour, dependencies: dependencies);
 
     static Asset Scene(string guid, string path, params string[] dependencies) =>
-        new(guid, AssetKind.Scene, "game", path, AssetStatus.Current, 0, 0, "", [], dependencies, "", "", 0, [0, 0], "", [], "");
+        TestAssets.Make(guid, AssetKind.Scene, path, dependencies: dependencies);
 
     static AssetIndex Index(Asset[] assets, params string[] folders)
     {
@@ -36,10 +36,29 @@ public class AssetIndexTests
     }
 
     static Asset Model(string guid, string path) =>
-        new(guid, AssetKind.Model, "game", path, AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "");
+        TestAssets.Make(guid, AssetKind.Model, path);
 
     static Asset Mesh(string guid, Asset model, string name) =>
-        new(guid, AssetKind.Mesh, model.Root, model.Path, model.Status, 0, 0, "", [], [], model.Guid, name, 0, [0, 0], "", [], "");
+        TestAssets.Make(guid, AssetKind.Mesh, model.Path, root: model.Root, status: model.Status, parent: model.Guid, subasset: name);
+
+    [Fact]
+    public void TheListsFollowEachChange()
+    {
+        var kit = Model("10", "props/kit.glb");
+        var index = Index([kit, Mesh("11", kit, "Wall"), Script("01", "props/door.luau")], "props");
+        Assert.Equal(["10", "01"], index.AssetsIn("game", "props").Select(a => a.Guid).OrderDescending());
+        Assert.Equal(["11"], index.SubassetsOf("10").Select(a => a.Guid));
+
+        index.Apply(new AssetDelta([Mesh("12", kit, "Arch"), Script("02", "props/gate.luau")], ["11"], [], []));
+        Assert.Equal(["12"], index.SubassetsOf("10").Select(a => a.Guid));
+        Assert.Contains("02", index.AssetsIn("game", "props").Select(a => a.Guid));
+
+        // A file that moves leaves its old folder's list, and a file that goes takes its sub-assets' list with it.
+        index.Apply(new AssetDelta([Script("02", "gate.luau")], ["10", "12"], [], []));
+        Assert.DoesNotContain("02", index.AssetsIn("game", "props").Select(a => a.Guid));
+        Assert.Contains("02", index.AssetsIn("game", "").Select(a => a.Guid));
+        Assert.Empty(index.SubassetsOf("10"));
+    }
 
     [Fact]
     public void SubassetsListUnderTheirFile()

@@ -8,6 +8,7 @@
 //   editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
 //   editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 //   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
+//   editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 package editorctl
 
 import "base:runtime"
@@ -71,13 +72,22 @@ Status :: struct {
 	host_pid:   int `json:"hostPid"`,
 }
 
+// Content matches AutomationContent.
+Content :: struct {
+	folder:    string `json:"folder"`,
+	search:    string `json:"search"`,
+	selection: []string `json:"selection"`,
+	items:     []string `json:"items"`,
+}
+
 // Response matches AutomationResponse.
 Response :: struct {
-	id:     i64 `json:"id"`,
-	ok:     bool `json:"ok"`,
-	files:  []string `json:"files"`,
-	error:  string `json:"error"`,
-	status: Maybe(Status) `json:"status"`,
+	id:      i64 `json:"id"`,
+	ok:      bool `json:"ok"`,
+	files:   []string `json:"files"`,
+	error:   string `json:"error"`,
+	status:  Maybe(Status) `json:"status"`,
+	content: Maybe(Content) `json:"content"`,
 }
 
 // Info matches AutomationInfo.
@@ -92,7 +102,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>]",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
 		)
 		os.exit(2)
 	}
@@ -206,14 +216,14 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera", "ui":
+	case "status", "screenshot", "gif", "viewport", "camera", "ui", "content":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport, camera or ui"
+		return o, "no command: status, screenshot, gif, viewport, camera, ui or content"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera or ui", o.command)
+		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera, ui or content", o.command)
 	}
-	if (len(o.settings) > 0) != (o.command == "viewport") {
-		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport"
+	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
+		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport or content"
 	}
 	camera_options := o.position != nil || o.yaw != nil || o.pitch != nil
 	if o.command == "camera" && o.position == nil {
@@ -382,6 +392,12 @@ print_response :: proc(r: Response) {
 		fmt.printfln("scene: %s", status.scene)
 		fmt.printfln("game: %s", status.game)
 		fmt.printfln("host pid: %d", status.host_pid)
+	}
+	if content, has := r.content.?; has {
+		fmt.printfln("folder: %s", content.folder)
+		fmt.printfln("search: %s", content.search)
+		fmt.printfln("selection: %v", content.selection)
+		fmt.printfln("items: %v", content.items)
 	}
 	for file in r.files {
 		fmt.println(file)

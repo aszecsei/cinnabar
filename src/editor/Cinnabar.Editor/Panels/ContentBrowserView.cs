@@ -35,14 +35,13 @@ public sealed class ContentBrowserView : DockPanel
 
     readonly EditorShell _shell;
     readonly AssetIndex _index;
+    readonly ContentBrowserModel _model;
     readonly TextBox _search = new() { PlaceholderText = "Search by name, or kind:script, kind:scene", Width = 260, Classes = { "outliner-filter" } };
     readonly TextBlock _location = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), TextTrimming = TextTrimming.CharacterEllipsis };
     readonly TextBlock _status = new() { Classes = { "dim" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly Border _general = new() { Classes = { "problems" }, Margin = new Thickness(4, 0, 4, 4) };
     readonly ListBox _folders = new() { Classes = { "outliner" } };
     readonly ListBox _assets = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
-    // The files whose sub-assets show under them, by GUID.
-    readonly HashSet<string> _expandedFiles = [];
     readonly StackPanel _details = new() { Spacing = 2, Margin = new Thickness(8, 4) };
     readonly TextBlock _empty = new()
     {
@@ -53,13 +52,8 @@ public sealed class ContentBrowserView : DockPanel
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(16),
     };
-    // Roots start expanded, and other folders collapsed. The set holds the expanded ones, as "root/path".
-    readonly HashSet<string> _expanded = [];
-    readonly HashSet<string> _seenRoots = [];
-    (string Root, string Path)? _folder;
-    // The selected assets, by GUID. The first one's details show.
-    List<string> _selection = [];
-    string? Selected => _selection.Count > 0 ? _selection[0] : null;
+    // The first selected asset's details show.
+    string? Selected => _model.Selection.Count > 0 ? _model.Selection[0] : null;
     bool _rebuildPosted;
     bool _syncing;
     PointerPressedEventArgs? _press;
@@ -69,6 +63,7 @@ public sealed class ContentBrowserView : DockPanel
     {
         _shell = shell;
         _index = shell.Assets;
+        _model = shell.Content.Model;
 
         var bar = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
         SetDock(_search, DockSide.Right);
@@ -101,36 +96,33 @@ public sealed class ContentBrowserView : DockPanel
         {
             if (!_syncing && _folders.SelectedItem is FolderRow row)
             {
-                _folder = (row.Root, row.Path);
-                _search.Text = "";
-                ShowAssets();
+                _model.Open(new ContentFolder(row.Root, row.Path));
             }
         };
         _assets.SelectionChanged += (_, _) =>
         {
             if (!_syncing)
             {
-                // The asset that was selected first stays first, so its details stay.
-                var selected = _assets.SelectedItems?.OfType<Asset>().Select(a => a.Guid).ToList() ?? [];
-                _selection = [.. _selection.Where(selected.Contains), .. selected.Where(g => !_selection.Contains(g))];
-                ShowDetails();
-                Publish();
+                _model.Select(_assets.SelectedItems?.OfType<Asset>().Select(a => a.Guid) ?? []);
             }
         };
         KeyDown += OnKeyDown;
-        _search.TextChanged += (_, _) => ShowAssets();
+        _search.TextChanged += (_, _) =>
+        {
+            if (!_syncing)
+            {
+                _model.Search = _search.Text ?? "";
+            }
+        };
 
         new ViewSubscriptions(this, attached: Rebuild)
-            .Add(() => _index.Changed += PostRebuild, () => _index.Changed -= PostRebuild)
+            .Add(() => _model.Changed += PostRebuild, () => _model.Changed -= PostRebuild)
+            .Add(() => _model.ContextChanged += ShowDetails, () => _model.ContextChanged -= ShowDetails)
+            .Add(() => _model.Revealed += OnRevealed, () => _model.Revealed -= OnRevealed)
             .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
             .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
-            .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus)
-            .Add(() => _shell.Content.ContentRevealed += OnRevealed, () => _shell.Content.ContentRevealed -= OnRevealed);
+            .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus);
     }
-
-    // Tells the shell the folder and the selection, which the asset commands act on.
-    void Publish() =>
-        _shell.Content.SelectContent(_folder is { } f ? new ContentFolder(f.Root, f.Path) : null, [.. _selection]);
 
     // F2, Ctrl+D and Delete act on the selected assets while the browser has focus, and not while a box has it.
     void OnKeyDown(object? sender, KeyEventArgs e)
@@ -146,33 +138,17 @@ public sealed class ContentBrowserView : DockPanel
             (Key.Delete, KeyModifiers.None) => EditorCommands.DeleteAsset,
             _ => null,
         };
-        if (command != null && _selection.Count > 0)
+        if (command != null && _model.Selection.Count > 0)
         {
-            // The command acts on the shell's selection, which is this one as of now.
-            Publish();
             _shell.Commands.Get(command).Execute();
             e.Handled = true;
         }
     }
 
-    void OnRevealed(ContentItem item)
+    void OnRevealed(Asset asset)
     {
-        if (item.Guid is { } guid && _index.Find(guid) is { } asset)
-        {
-            Reveal(asset);
-        }
-        else if (item.Folder is { } folder)
-        {
-            for (var path = AssetIndex.Parent(folder.Path); path != ""; path = AssetIndex.Parent(path))
-            {
-                _expanded.Add($"{folder.Root}/{path}");
-            }
-            _expanded.Add(folder.Root + "/");
-            _folder = (folder.Root, folder.Path);
-            _search.Text = "";
-            ShowFolders();
-            ShowAssets();
-        }
+        Rebuild();
+        _assets.ScrollIntoView(asset);
     }
 
     static GridSplitter Splitter(int column)
@@ -201,94 +177,58 @@ public sealed class ContentBrowserView : DockPanel
 
     void Rebuild()
     {
-        foreach (var root in _index.Roots.Where(r => _seenRoots.Add(r.Name)))
-        {
-            _expanded.Add(root.Name + "/");
-        }
-        if (_folder is not { } folder || _index.FindRoot(folder.Root) == null || (folder.Path != "" && !_index.Folders.Contains(new(folder.Root, folder.Path))))
-        {
-            _folder = _index.Roots.Count > 0 ? (_index.Roots[0].Name, "") : null;
-        }
         ShowFolders();
         ShowAssets();
         ShowStatus();
         ShowGeneralProblems();
-        Publish();
         // A view of an index that the daemon no longer keeps up to date.
         Opacity = _index.Linked ? 1 : 0.6;
     }
 
     void ShowFolders()
     {
-        var rows = new List<FolderRow>();
-        void Add(string root, string path, string name, int depth)
-        {
-            var children = _index.ChildFolders(root, path).ToList();
-            var expanded = _expanded.Contains($"{root}/{path}");
-            rows.Add(new FolderRow(root, path, name, depth, children.Count > 0, expanded));
-            if (expanded)
-            {
-                foreach (var child in children)
-                {
-                    Add(root, path == "" ? child : $"{path}/{child}", child, depth + 1);
-                }
-            }
-        }
-        foreach (var root in _index.Roots)
-        {
-            Add(root.Name, "", root.Name, 0);
-        }
+        var rows = _model.FolderRows();
         _syncing = true;
         _folders.ItemsSource = rows;
-        _folders.SelectedItem = rows.FirstOrDefault(r => _folder is { } f && r.Root == f.Root && r.Path == f.Path);
+        _folders.SelectedItem = rows.FirstOrDefault(r => _model.Folder is { } f && r.Root == f.Root && r.Path == f.Path);
         _syncing = false;
     }
 
     void ShowAssets()
     {
-        var query = _search.Text?.Trim() ?? "";
-        List<Asset> assets;
-        if (query.Length > 0)
+        var assets = _model.Items;
+        var query = _model.Search.Trim();
+        if (_model.Searching)
         {
-            assets = [.. _index.Search(query)];
             _location.Text = $"{assets.Count} {(assets.Count == 1 ? "asset matches" : "assets match")} \"{query}\"";
         }
-        else if (_folder is { } folder)
+        else if (_model.Folder is { } folder)
         {
-            // An expanded file shows its sub-assets under it.
-            assets = [];
-            foreach (var asset in _index.AssetsIn(folder.Root, folder.Path))
-            {
-                assets.Add(asset);
-                if (_expandedFiles.Contains(asset.Guid))
-                {
-                    assets.AddRange(_index.SubassetsOf(asset.Guid));
-                }
-            }
             _location.Text = folder.Path == "" ? folder.Root : $"{folder.Root} › {folder.Path.Replace("/", " › ")}";
         }
         else
         {
-            assets = [];
             _location.Text = "";
         }
         _empty.Text = _index.Roots.Count == 0
             ? "The content roots appear here once the cook daemon runs."
             : query.Length > 0 ? "No asset matches the search." : "This folder has no assets.";
         _empty.IsVisible = assets.Count == 0;
-        _selection = [.. _selection.Where(g => assets.Any(a => a.Guid == g))];
         _syncing = true;
+        if ((_search.Text ?? "") != _model.Search)
+        {
+            _search.Text = _model.Search;
+        }
         _assets.ItemsSource = assets;
         // The list keeps what it had selected across a new list where it can, which may be an asset that is no
-        // longer selected here, so its selection is rebuilt from this one, not added to.
+        // longer selected, so its selection is rebuilt from the model's, not added to.
         _assets.SelectedItems?.Clear();
-        foreach (var asset in assets.Where(a => _selection.Contains(a.Guid)))
+        foreach (var asset in assets.Where(a => _model.Selection.Contains(a.Guid)))
         {
             _assets.SelectedItems?.Add(asset);
         }
         _syncing = false;
         ShowDetails();
-        Publish();
     }
 
     void ShowStatus()
@@ -440,7 +380,7 @@ public sealed class ContentBrowserView : DockPanel
             ToolTip.SetTip(link, $"{asset.Root}/{asset.Path}");
             link.PointerPressed += (_, e) =>
             {
-                Reveal(asset);
+                _shell.Content.RevealAsset(asset.Guid);
                 e.Handled = true;
             };
             panel.Children.Add(link);
@@ -477,22 +417,6 @@ public sealed class ContentBrowserView : DockPanel
         return list;
     }
 
-    // Selects an asset in its folder, and clears the search.
-    void Reveal(Asset asset)
-    {
-        var folder = AssetIndex.Parent(asset.Path);
-        for (var path = folder; path != ""; path = AssetIndex.Parent(path))
-        {
-            _expanded.Add($"{asset.Root}/{path}");
-        }
-        _folder = (asset.Root, folder);
-        _selection = [asset.Guid];
-        _search.Text = "";
-        ShowFolders();
-        ShowAssets();
-        _assets.ScrollIntoView(asset);
-    }
-
     Control FolderView(FolderRow row)
     {
         var expander = new TextBlock
@@ -506,13 +430,8 @@ public sealed class ContentBrowserView : DockPanel
         {
             expander.PointerPressed += (_, e) =>
             {
-                var key = $"{row.Root}/{row.Path}";
-                if (!_expanded.Remove(key))
-                {
-                    _expanded.Add(key);
-                }
+                _model.ToggleFolder(row.Root, row.Path);
                 e.Handled = true;
-                ShowFolders();
             };
         }
         var icon = CommandViews.Icon("folder", 14);
@@ -530,13 +449,11 @@ public sealed class ContentBrowserView : DockPanel
         }
         view.DoubleTapped += (_, e) =>
         {
-            var key = $"{row.Root}/{row.Path}";
-            if (row.HasChildren && !_expanded.Remove(key))
+            if (row.HasChildren)
             {
-                _expanded.Add(key);
+                _model.ToggleFolder(row.Root, row.Path);
             }
             e.Handled = true;
-            ShowFolders();
         };
         // Assets dragged onto a folder move into it.
         var folder = new ContentFolder(row.Root, row.Path);
@@ -566,18 +483,15 @@ public sealed class ContentBrowserView : DockPanel
         // A folder's menu acts on that folder, so it opens it first.
         void Open()
         {
-            if (row != null && _folder != (row.Root, row.Path))
+            if (row != null)
             {
-                _folder = (row.Root, row.Path);
-                _search.Text = "";
-                ShowFolders();
-                ShowAssets();
+                _model.Open(new ContentFolder(row.Root, row.Path));
             }
         }
         menu.Opening += (_, _) =>
         {
             menu.Items.Clear();
-            var linked = _shell.Content.CanChangeContent && (row != null || _folder != null);
+            var linked = _shell.Content.CanChangeContent && (row != null || _model.Folder != null);
             foreach (var (label, template) in new (string, AssetTemplate?)[]
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
@@ -623,13 +537,13 @@ public sealed class ContentBrowserView : DockPanel
     Control AssetView(Asset asset)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        var searching = !string.IsNullOrEmpty(_search.Text?.Trim());
+        var searching = _model.Searching;
         var subasset = AssetIndex.IsSubasset(asset);
         // A file with sub-assets expands in place to show them, indented under it. Search lists them as they are.
         var hasSubassets = !subasset && _index.SubassetsOf(asset.Guid).Any();
         var expander = new TextBlock
         {
-            Text = hasSubassets && !searching ? (_expandedFiles.Contains(asset.Guid) ? "▾" : "▸") : "",
+            Text = hasSubassets && !searching ? (_model.IsFileExpanded(asset.Guid) ? "▾" : "▸") : "",
             Width = 12,
             Margin = new Thickness(subasset && !searching ? 18 : 0, 0, 0, 0),
             Classes = { "dim" },
@@ -639,12 +553,8 @@ public sealed class ContentBrowserView : DockPanel
         {
             expander.PointerPressed += (_, e) =>
             {
-                if (!_expandedFiles.Remove(asset.Guid))
-                {
-                    _expandedFiles.Add(asset.Guid);
-                }
+                _model.ToggleFile(asset.Guid);
                 e.Handled = true;
-                ShowAssets();
             };
         }
         line.Children.Add(expander);
@@ -696,10 +606,10 @@ public sealed class ContentBrowserView : DockPanel
             }
             _press = null;
             // A drag of a selected asset takes the selection, with that asset first.
-            var guids = _selection.Contains(asset.Guid) ? [asset.Guid, .. _selection.Where(g => g != asset.Guid)] : new List<string> { asset.Guid };
+            var guids = _model.Selection.Contains(asset.Guid) ? [asset.Guid, .. _model.Selection.Where(g => g != asset.Guid)] : new List<string> { asset.Guid };
             var data = new DataTransfer();
             data.Add(DataTransferItem.Create(AssetFormat, string.Join(' ', guids)));
-            await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Link | DragDropEffects.Move);
+            await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Copy | DragDropEffects.Link | DragDropEffects.Move);
         };
         view.PointerReleased += (_, _) => _press = null;
         view.DoubleTapped += (_, e) =>
@@ -719,7 +629,7 @@ public sealed class ContentBrowserView : DockPanel
         // A right click on an asset that is not selected selects it alone, so the operations act on what the menu is for.
         menu.Opening += (_, _) =>
         {
-            if (!_selection.Contains(asset.Guid))
+            if (!_model.Selection.Contains(asset.Guid))
             {
                 _assets.SelectedItem = _assets.ItemsSource?.OfType<Asset>().FirstOrDefault(a => a.Guid == asset.Guid);
             }
@@ -771,5 +681,3 @@ public sealed class ContentBrowserView : DockPanel
     public static IReadOnlyList<string>? DroppedAll(DragEventArgs e) =>
         e.DataTransfer.TryGetValue(AssetFormat)?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 }
-
-public sealed record FolderRow(string Root, string Path, string Name, int Depth, bool HasChildren, bool Expanded);

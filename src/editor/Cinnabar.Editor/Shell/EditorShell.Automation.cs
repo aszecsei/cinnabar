@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
 using LogLevel = Cinnabar.Editor.Model.LogLevel;
@@ -103,9 +104,57 @@ public sealed partial class EditorShell
                 return new AutomationResponse(request.Id, true);
             case "ui":
                 return CaptureUiResponse(request);
+            case "content":
+                return ContentResponse(request);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera and ui");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
         }
+    }
+
+    // Changes what the content browser shows, each setting in turn, and answers with what it shows then.
+    AutomationResponse ContentResponse(AutomationRequest request)
+    {
+        var model = Content.Model;
+        foreach (var (name, value) in request.Settings ?? [])
+        {
+            var text = value.ToString();
+            switch (name)
+            {
+                case "folder":
+                    var slash = text.IndexOf('/');
+                    var (root, path) = slash < 0 ? (text, "") : (text[..slash], text[(slash + 1)..]);
+                    if (Assets.FindRoot(root) == null)
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"no content root is named {root}");
+                    }
+                    model.Reveal(ContentItem.Of(new ContentFolder(root, path)));
+                    break;
+                case "search":
+                    model.Search = text;
+                    break;
+                case "reveal":
+                    if (Assets.Find(text) == null)
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"no asset has the GUID {text}");
+                    }
+                    Content.RevealAsset(text);
+                    break;
+                case "shown":
+                    if (value.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        Layout.Show("contentBrowser");
+                    }
+                    else
+                    {
+                        Layout.Close("contentBrowser");
+                    }
+                    break;
+                default:
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, reveal and shown");
+            }
+        }
+        return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],
+            [.. model.Items.Select(AssetIndex.DisplayName)]));
     }
 
     AutomationResponse CaptureUiResponse(AutomationRequest request)

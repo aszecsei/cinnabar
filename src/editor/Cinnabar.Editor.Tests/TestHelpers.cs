@@ -21,6 +21,30 @@ sealed class TempDirectory(string name) : IDisposable
     }
 }
 
+/// <summary>Index entries, naming only what a test cares about, so that a new field of an asset changes one place.</summary>
+static class TestAssets
+{
+    public static Link.Cook.Asset Make(
+        string guid,
+        Link.Cook.AssetKind kind,
+        string path,
+        string root = "game",
+        Link.Cook.AssetStatus status = Link.Cook.AssetStatus.Current,
+        uint errors = 0,
+        uint warnings = 0,
+        string behaviour = "",
+        Link.Cook.Setting[]? settings = null,
+        string[]? dependencies = null,
+        string parent = "",
+        string subasset = "",
+        uint permutations = 0,
+        uint[]? size = null,
+        string toolTexture = "",
+        Link.Cook.Hotspot[]? hotspots = null,
+        string generated = "") =>
+        new(guid, kind, root, path, status, errors, warnings, behaviour, settings ?? [], dependencies ?? [], parent, subasset, permutations, size ?? [0, 0], toolTexture, hotspots ?? [], generated);
+}
+
 /// <summary>Editor shells over a scene file in a test's temp directory.</summary>
 static class TestShell
 {

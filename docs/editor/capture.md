@@ -63,6 +63,7 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 | `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"shadingStats":true}` | `ok`, or an error that names the settings |
 | `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out | `ok` |
 | `ui` | `window`: a panel's ID, for the window that holds it, or left out for the main window; `path`: the PNG's path, absolute | `files`: the image |
+| `content` | `settings`: what to change in the content browser, each left out to keep it: `folder`, as `<root>/<path>`; `search`; `reveal`, an asset's GUID; `shown`, whether its panel is open | `content`: `folder`, `search`, `selection` and the names of the shown assets, `items` |
 
 ```
 {"id":1,"command":"screenshot","views":["depth","normals"]}
@@ -84,6 +85,7 @@ editorctl [--automation <file>] [--json] gif [--out <path>]
 editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
 editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
+editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 ```
 
 A `--set` value of `true` or `false` is a boolean, a number is a number, and anything else a string, such as a debug view's name, `QuadOverdraw`. With `viewport` and `camera`, a script measures the same view with each setting: the sidecar's `context.profile` has the passes' times. It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.

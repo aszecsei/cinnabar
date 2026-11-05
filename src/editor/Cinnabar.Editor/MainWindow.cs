@@ -283,7 +283,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    async Task AskRename(Shell.ContentItem item)
+    async Task AskRename(ContentItem item)
     {
         string current;
         if (item.Guid is { } guid && _shell.Assets.Find(guid) is { } asset)
@@ -305,7 +305,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
+    async Task ConfirmDelete(IReadOnlyList<ContentItem> items)
     {
         var (deleted, users) = _shell.Content.DeleteEffects(items);
         var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)

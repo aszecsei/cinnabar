@@ -17,6 +17,10 @@ public sealed class AssetIndex
     readonly Dictionary<string, Problem[]> _problems = [];
     readonly List<NodeInfo> _nodes = [];
     readonly List<ShadingModelInfo> _shadingModels = [];
+    // The files of each folder and the sub-assets of each file, by name, built when next asked for after a change, since
+    // the content browser asks for them for each row and a cook changes the assets many times.
+    Dictionary<(string Root, string Folder), List<Asset>>? _filesByFolder;
+    Dictionary<string, List<Asset>>? _subassetsByFile;
 
     public IReadOnlyList<Root> Roots => _roots;
 
@@ -67,6 +71,7 @@ public sealed class AssetIndex
                 }
                 _folders.UnionWith(snapshot.Folders);
                 Linked = true;
+                ForgetLists();
                 break;
             case AssetDelta delta:
                 foreach (var asset in delta.Changed)
@@ -80,6 +85,7 @@ public sealed class AssetIndex
                 }
                 _folders.ExceptWith(delta.RemovedFolders);
                 _folders.UnionWith(delta.AddedFolders);
+                ForgetLists();
                 break;
             case AssetProblems problems:
                 if (problems.Problems.Length == 0)
@@ -148,12 +154,28 @@ public sealed class AssetIndex
         _folders.Where(f => f.Root == root && Parent(f.Path) == folder).Select(f => Name(f.Path)).Order(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The assets directly in a folder of a root, by name.</summary>
-    public IEnumerable<Asset> AssetsIn(string root, string folder) =>
-        _assets.Values.Where(a => a.Root == root && a.Parent == "" && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+    public IEnumerable<Asset> AssetsIn(string root, string folder)
+    {
+        _filesByFolder ??= _assets.Values.Where(a => a.Parent == "")
+            .GroupBy(a => (a.Root, Parent(a.Path)))
+            .ToDictionary(g => g.Key, g => g.OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase).ToList());
+        return _filesByFolder.GetValueOrDefault((root, folder)) ?? [];
+    }
 
     /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content/identity-and-cooking.md#identity).</summary>
-    public IEnumerable<Asset> SubassetsOf(string guid) =>
-        _assets.Values.Where(a => a.Parent == guid).OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase);
+    public IEnumerable<Asset> SubassetsOf(string guid)
+    {
+        _subassetsByFile ??= _assets.Values.Where(a => a.Parent != "")
+            .GroupBy(a => a.Parent)
+            .ToDictionary(g => g.Key, g => g.OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase).ToList());
+        return _subassetsByFile.GetValueOrDefault(guid) ?? [];
+    }
+
+    void ForgetLists()
+    {
+        _filesByFolder = null;
+        _subassetsByFile = null;
+    }
 
     /// <summary>Whether an asset is a sub-asset, which changes only with its file.</summary>
     public static bool IsSubasset(Asset asset) => asset.Parent != "";
