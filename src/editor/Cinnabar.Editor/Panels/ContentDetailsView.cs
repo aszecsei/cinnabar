@@ -50,6 +50,11 @@ sealed class ContentDetailsView : StackPanel
         Children.Clear();
         DraftBar.IsVisible = _shell.Content.Draft.Dirty;
         _apply.IsEnabled = _shell.Content.CanChangeContent;
+        if (_model.Selection.Count > 0 && ContentBrowserModel.ParsePartKey(_model.Selection[0]) is var (prefab, id))
+        {
+            ShowPart(prefab, id);
+            return;
+        }
         if (_model.Selection.Count == 0 || _index.Find(_model.Selection[0]) is not { } asset)
         {
             return;
@@ -91,6 +96,48 @@ sealed class ContentDetailsView : StackPanel
         {
             Row("Problems", Problems(_shell, problems));
         }
+    }
+
+    // A part of a prefab: what it is in, and what it draws, as links, which is how to reach its mesh and its materials.
+    void ShowPart(string prefab, ulong id)
+    {
+        if (_shell.PrefabTreeOf(prefab) is not { } tree || tree.Find(id) is not { } node)
+        {
+            return;
+        }
+        void Row(string label, Control value)
+        {
+            var row = new DockPanel();
+            var name = new TextBlock { Text = label, Width = 96, Classes = { "dim" } };
+            DockPanel.SetDock(name, DockSide.Left);
+            row.Children.Add(name);
+            row.Children.Add(value);
+            Children.Add(row);
+        }
+        Row("Part", new SelectableTextBlock { Text = node.Name, TextWrapping = TextWrapping.Wrap });
+        Row("Of", Links(new[] { prefab }.Select(_index.Find).OfType<Asset>()));
+        Row("ID", new SelectableTextBlock { Text = $"{node.Id:x16}", FontFamily = new FontFamily("Consolas"), FontSize = 11 });
+        Row("Under it", new TextBlock { Text = tree.Nodes.Count(n => IsUnder(tree, n, id)).ToString() });
+        if (node.Mesh != "")
+        {
+            Row("Mesh", Links(new[] { node.Mesh }.Select(_index.Find).OfType<Asset>()));
+        }
+        if (node.Materials.Count > 0)
+        {
+            Row("Materials", Links(node.Materials.Select(_index.Find).OfType<Asset>()));
+        }
+    }
+
+    static bool IsUnder(Document.PrefabTree tree, Document.PrefabNode node, ulong above)
+    {
+        for (var n = node; n.Parent != 0 && tree.Find(n.Parent) is { } parent; n = parent)
+        {
+            if (parent.Id == above)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     // The selected assets' tags as chips: dim when only some have the tag, which a click gives to all, with a cross that
@@ -208,7 +255,7 @@ sealed class ContentDetailsView : StackPanel
         var panel = new WrapPanel();
         foreach (var asset in assets)
         {
-            var link = new TextBlock { Text = AssetIndex.Name(asset.Path), Classes = { "link" }, Margin = new Thickness(0, 0, 10, 0), Cursor = new Cursor(StandardCursorType.Hand) };
+            var link = new TextBlock { Text = AssetIndex.Name(AssetIndex.DisplayName(asset)), Classes = { "link" }, Margin = new Thickness(0, 0, 10, 0), Cursor = new Cursor(StandardCursorType.Hand) };
             ToolTip.SetTip(link, $"{asset.Root}/{asset.Path}");
             link.PointerPressed += (_, e) =>
             {

@@ -295,6 +295,63 @@ public sealed partial class EditorShell
     public string PrefabName(string guid) =>
         Assets.Find(guid) is { } asset ? Path.GetFileNameWithoutExtension(asset.Path) : guid;
 
+    readonly Dictionary<string, PrefabTree?> _prefabTrees = [];
+
+    /// <summary>
+    /// A prefab's tree, or null when it cannot be read or has no one root. The trees last until the next cook, as it can
+    /// change any prefab's text, which is small enough to read when asked: Jungle's, the largest sample, has 1,822 entities.
+    /// </summary>
+    public PrefabTree? PrefabTreeOf(string guid)
+    {
+        if (_prefabTrees.TryGetValue(guid, out var tree))
+        {
+            return tree;
+        }
+        tree = SceneOfPrefab(guid) is { } scene ? PrefabTree.Of(scene, SceneOfPrefab, guid) : null;
+        _prefabTrees[guid] = tree;
+        return tree;
+    }
+
+    // A prefab's scene as its file has it, or null. A USD stage's prefab is text that the cooker generates.
+    Scene? SceneOfPrefab(string guid)
+    {
+        if (Assets.Find(guid) is not { Kind: AssetKind.Prefab } asset || (asset.Generated != "" ? asset.Generated : Assets.FullPath(asset)) is not { } path)
+        {
+            return null;
+        }
+        try
+        {
+            return SceneFile.Parse(File.ReadAllText(path).ReplaceLineEndings("\n")).Scene;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The prefab to place for what a drag holds: a prefab, or a file that makes one, such as a USD stage, or null.</summary>
+    public string? PrefabToPlace(string guid) =>
+        Assets.Find(guid) is not { } asset ? null
+        : asset.Kind == AssetKind.Prefab ? guid
+        : Assets.SubassetsOf(guid).FirstOrDefault(a => a.Kind == AssetKind.Prefab)?.Guid;
+
+    // What the content browser shows of a prefab's entity.
+    PrefabContents? PrefabContentsOf(string guid, ulong node)
+    {
+        if (PrefabTreeOf(guid) is not { } tree || tree.Find(node == 0 ? tree.Root : node) is not { } at)
+        {
+            return null;
+        }
+        var children = at.Children.Select(tree.Find).OfType<PrefabNode>()
+            .Select(c => new PrefabPart(guid, c.Id, c.Name, c.Children.Count, c.Mesh != "")).ToList();
+        List<(ulong, string)> trail = [];
+        for (var n = at; n.Id != tree.Root; n = tree.Find(n.Parent) ?? tree.Find(tree.Root)!)
+        {
+            trail.Insert(0, (n.Id, n.Name));
+        }
+        return new PrefabContents(children, [.. new[] { at.Mesh }.Where(m => m != "").Concat(at.Materials)], trail);
+    }
+
     /// <summary>
     /// Where a prefab dropped at a frame pixel lands: on what the pixel shows, or on the grid plane through the camera's
     /// pivot when it shows nothing, snapped to the grid when Snap is on.
@@ -326,7 +383,7 @@ public sealed partial class EditorShell
     /// Shows an instance of a prefab at a point while a drag is over the viewport, in an undo entry that stays open:
     /// the first point creates it, and the next ones move it.
     /// </summary>
-    public void PreviewPrefab(string guid, long[] at)
+    public void PreviewPrefab(string guid, long[] at, ulong node = 0)
     {
         if (Scene == null || !IsEditing || !IsPrefab(guid))
         {
@@ -334,7 +391,7 @@ public sealed partial class EditorShell
         }
         if (_prefabDrop != 0 && Scene.InTransaction)
         {
-            var (_, moved) = DropPose(at);
+            var (_, moved) = DropPose(at, PartOf(guid, node));
             PreviewEdit(new AddComponent(_prefabDrop, moved));
             return;
         }
@@ -343,8 +400,8 @@ public sealed partial class EditorShell
             return;
         }
         BeginEdit($"Create Instance {PrefabName(guid)}");
-        var (parent, pose) = DropPose(at);
-        var create = PrefabEdits.CreateInstance(Scene, guid, parent, pose);
+        var (parent, pose) = DropPose(at, PartOf(guid, node));
+        var create = PrefabEdits.CreateInstance(Scene, guid, parent, pose, node: node);
         _prefabDrop = create.Id;
         PreviewEdit(create);
         if (Scene.Scene.Find(create.Id) == null)
@@ -355,11 +412,20 @@ public sealed partial class EditorShell
         }
     }
 
+    PrefabNode? PartOf(string guid, ulong node) => node == 0 ? null : PrefabTreeOf(guid)?.Find(node);
+
     // Where a dropped instance goes: at the root with a Transform at the point, or in a prefab document, which has one
-    // root, under the root with a Local_Transform that puts it there.
-    (ulong Parent, SceneComponent Pose) DropPose(long[] at)
+    // root, under the root with a Local_Transform that puts it there. A part keeps its rotation and scale in the prefab, as
+    // Sponza's floors stand up only with the rotation of the group, and what it draws is around the point.
+    (ulong Parent, SceneComponent Pose) DropPose(long[] at, PrefabNode? part = null)
     {
         var world = new Pose(at, Quat.Identity, [1, 1, 1]);
+        if (part != null)
+        {
+            var held = new Pose(at, part.Pose.Rotation, part.Pose.Scale);
+            var anchor = held.Compose(part.Anchor, Quat.Identity, [1, 1, 1]).Position;
+            world = held with { Position = [.. at.Select((p, i) => p - (anchor[i] - p))] };
+        }
         if (Scene is not { IsPrefab: true } || PrefabExpansion.RootOf(Scene.Scene).Root is not { } root)
         {
             return (0, new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(world)));
@@ -370,8 +436,11 @@ public sealed partial class EditorShell
             new("offset", SceneEdits.Floats(offset)), new("rotation", SceneEdits.Floats(rotation.X, rotation.Y, rotation.Z, rotation.W)), new("scale", SceneEdits.Floats(scale))]));
     }
 
-    /// <summary>Keeps the previewed instance as one undo entry and selects it. Returns false when nothing was previewed.</summary>
-    public bool CommitPrefab()
+    /// <summary>
+    /// Keeps the previewed instance as one undo entry and selects it, as plain entities with <paramref name="unpack"/>.
+    /// Returns false when nothing was previewed.
+    /// </summary>
+    public bool CommitPrefab(bool unpack = false)
     {
         if (_prefabDrop == 0 || Scene is not { InTransaction: true })
         {
@@ -380,6 +449,13 @@ public sealed partial class EditorShell
         }
         var id = _prefabDrop;
         _prefabDrop = 0;
+        if (unpack)
+        {
+            foreach (var op in PrefabEdits.UnpackCompletely(Scene, id))
+            {
+                PreviewEdit(op);
+            }
+        }
         CommitEdit();
         SelectScene(id);
         return true;
@@ -400,30 +476,45 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Adds an instance of a prefab as a child of an entity at the identity pose, or with 0, as a root at the origin,
-    /// as a drop onto the outliner does, and selects it.
+    /// Adds an instance of a prefab as a child of an entity, or with 0, as a root, as a drop onto the outliner does, and
+    /// selects it. A whole prefab goes at the identity pose or the origin. A part goes where it is in the prefab, with the
+    /// entity standing in for the prefab's root, so several parts dropped the same way fit together. With
+    /// <paramref name="unpack"/> they are plain entities, in the same undo entry.
     /// </summary>
-    public bool CreateInstance(string guid, ulong parent)
+    public bool CreateInstance(string guid, ulong parent, ulong node = 0, bool unpack = false)
     {
         if (Scene == null || !IsPrefab(guid))
         {
             return false;
         }
+        var place = PartOf(guid, node)?.Pose ?? Pose.Identity;
+        var (offset, rotation, scale) = Pose.Relative(Pose.Identity, place);
         var pose = parent == 0
-            ? new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(Pose.Identity))
+            ? new SceneComponent(SceneEdits.TransformId, "Transform", SceneEdits.TransformFields(place))
             : new SceneComponent(SceneEdits.LocalTransformId, "Local_Transform", [
-                new("offset", SceneEdits.Floats(0, 0, 0)), new("rotation", SceneEdits.Floats(0, 0, 0, 1)), new("scale", SceneEdits.Floats(1, 1, 1))]);
+                new("offset", SceneEdits.Floats(offset)), new("rotation", SceneEdits.Floats(rotation.X, rotation.Y, rotation.Z, rotation.W)), new("scale", SceneEdits.Floats(scale))]);
         BlockOperation create;
         try
         {
-            create = PrefabEdits.CreateInstance(Scene, guid, parent, pose);
+            create = PrefabEdits.CreateInstance(Scene, guid, parent, pose, node: node);
         }
         catch (InvalidOperationException e)
         {
             Console.Add(LogLevel.Error, $"edit: {e.Message}");
             return false;
         }
-        if (!Edit($"Create Instance {PrefabName(guid)}", create))
+        var label = $"Create Instance {PrefabName(guid)}";
+        if (unpack)
+        {
+            BeginEdit(label);
+            PreviewEdit(create);
+            foreach (var op in PrefabEdits.UnpackCompletely(Scene, create.Id))
+            {
+                PreviewEdit(op);
+            }
+            CommitEdit();
+        }
+        else if (!Edit(label, create))
         {
             return false;
         }

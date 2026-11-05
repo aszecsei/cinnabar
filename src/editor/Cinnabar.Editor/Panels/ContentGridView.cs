@@ -15,7 +15,7 @@ using AssetStatus = Cinnabar.Editor.Link.Cook.AssetStatus;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>A row of the content browser's assets, which the view realizes only while it shows.</summary>
-sealed record TileRow(Asset[] Items);
+sealed record TileRow(ContentTile[] Items);
 
 /// <summary>
 /// The content browser's assets (see docs/editor/shell-and-panels.md#content-browser), as tiles or as a list: a virtualized
@@ -39,13 +39,13 @@ sealed class ContentGridView : Panel
     readonly DispatcherTimer _marqueeTimer = new() { Interval = TimeSpan.FromMilliseconds(30) };
     // The realized tiles, so a new selection needs no new rows.
     readonly Dictionary<string, Border> _tiles = [];
-    IReadOnlyList<Asset> _shown = [];
+    IReadOnlyList<ContentTile> _shown = [];
     ContentGridLayout _layout;
     bool _layoutSet;
     // The press that may start a drag, the asset it is on, and whether its release selects that asset alone: a press on
     // a selected asset may be a drag of the whole selection.
     PointerPressedEventArgs? _press;
-    Asset? _pressed;
+    ContentTile? _pressed;
     bool _selectOnRelease;
     // The marquee: its start in the rows' space, the pointer in this panel's, and what it adds to.
     Point? _marqueeStart;
@@ -89,7 +89,7 @@ sealed class ContentGridView : Panel
     /// <summary>Shows the model's assets, building new rows only when they or their shape changed.</summary>
     public void Show()
     {
-        var items = _model.Items;
+        var items = _model.Tiles;
         var width = _scroll.Bounds.Width;
         var layout = ContentGridLayout.Of(width, _model.ViewMode, _model.TileSize);
         if (_layoutSet && layout == _layout && items.SequenceEqual(_shown))
@@ -119,9 +119,9 @@ sealed class ContentGridView : Panel
     }
 
     /// <summary>Scrolls so that an asset shows.</summary>
-    public void ScrollTo(Asset asset)
+    public void ScrollTo(string key)
     {
-        var index = _shown.ToList().FindIndex(a => a.Guid == asset.Guid);
+        var index = _shown.ToList().FindIndex(t => t.Key == key);
         if (index >= 0)
         {
             ScrollToRow(_layout.RowOf(index));
@@ -144,37 +144,37 @@ sealed class ContentGridView : Panel
     Control RowView(TileRow row)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = ContentGridLayout.Gap, Height = _layout.RowHeight };
-        foreach (var asset in row.Items)
+        foreach (var tile in row.Items)
         {
-            line.Children.Add(_model.ViewMode == ContentViewMode.List ? ListRow(asset) : Tile(asset));
+            line.Children.Add(_model.ViewMode == ContentViewMode.List ? ListRow(tile) : Tile(tile));
         }
         return line;
     }
 
-    Border Tile(Asset asset)
+    Border Tile(ContentTile item)
     {
         var size = _model.TileSize;
         var picture = new Panel { Width = size, Height = size, HorizontalAlignment = HorizontalAlignment.Center };
-        if (CommandViews.Icon(KindIcon(asset), Math.Round(size * 0.45)) is { } icon)
+        if (CommandViews.Icon(KindIcon(item), Math.Round(size * 0.45)) is { } icon)
         {
             icon.HorizontalAlignment = HorizontalAlignment.Center;
             icon.VerticalAlignment = VerticalAlignment.Center;
             icon.Opacity = 0.7;
             picture.Children.Add(icon);
         }
-        if (Marks(asset) is { } marks)
+        if (item.Asset is { } asset && Marks(asset) is { } marks)
         {
             marks.HorizontalAlignment = HorizontalAlignment.Left;
             marks.VerticalAlignment = VerticalAlignment.Top;
             picture.Children.Add(marks);
         }
-        if (HasContents(asset))
+        if (HasContents(item))
         {
-            picture.Children.Add(EnterButton(asset));
+            picture.Children.Add(EnterButton(item));
         }
         var label = new TextBlock
         {
-            Text = TileName(asset),
+            Text = AssetIndex.Name(item.Name),
             TextWrapping = TextWrapping.Wrap,
             MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis,
@@ -183,44 +183,59 @@ sealed class ContentGridView : Panel
             FontSize = 11,
         };
         var content = new StackPanel { Children = { picture, label } };
-        return Wire(new Border { Classes = { "asset-tile" }, Width = _layout.TileWidth, Height = _layout.RowHeight - ContentGridLayout.Gap, Padding = new Thickness(ContentGridLayout.Gap, ContentGridLayout.Gap, ContentGridLayout.Gap, 0), Child = content }, asset);
+        return Wire(new Border { Classes = { "asset-tile" }, Width = _layout.TileWidth, Height = _layout.RowHeight - ContentGridLayout.Gap, Padding = new Thickness(ContentGridLayout.Gap, ContentGridLayout.Gap, ContentGridLayout.Gap, 0), Child = content }, item);
     }
 
-    Border ListRow(Asset asset)
+    Border ListRow(ContentTile item)
     {
         var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(6, 2) };
-        var arrow = new TextBlock { Text = HasContents(asset) ? "▸" : "", Width = 12, Classes = { "dim" }, Cursor = HasContents(asset) ? new Cursor(StandardCursorType.Hand) : Cursor.Default };
-        if (HasContents(asset))
+        var arrow = new TextBlock { Text = HasContents(item) ? "\u25b8" : "", Width = 12, Classes = { "dim" }, Cursor = HasContents(item) ? new Cursor(StandardCursorType.Hand) : Cursor.Default };
+        if (HasContents(item))
         {
             arrow.PointerPressed += (_, e) =>
             {
-                _model.Enter(asset.Guid);
+                Enter(item);
                 e.Handled = true;
             };
         }
         line.Children.Add(arrow);
-        if (CommandViews.Icon(KindIcon(asset), 14) is { } icon)
+        if (CommandViews.Icon(KindIcon(item), 14) is { } icon)
         {
             line.Children.Add(icon);
         }
-        line.Children.Add(new TextBlock { Text = AssetIndex.DisplayName(asset) });
-        if (asset.Behaviour != "")
+        line.Children.Add(new TextBlock { Text = item.Name });
+        if (item.Asset is { } asset)
         {
-            line.Children.Add(new Border { Classes = { "badge", "script" }, Margin = new Thickness(0), Child = new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) } });
+            if (asset.Behaviour != "")
+            {
+                line.Children.Add(new Border { Classes = { "badge", "script" }, Margin = new Thickness(0), Child = new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) } });
+            }
+            if (_model.Filtering)
+            {
+                var where = AssetIndex.IsSubasset(asset) ? asset.Path : AssetIndex.Parent(asset.Path);
+                line.Children.Add(new TextBlock { Text = $"{asset.Root}/{where}", Classes = { "dim" } });
+            }
+            if (Marks(asset) is { } marks)
+            {
+                line.Children.Add(marks);
+            }
         }
-        if (_model.Filtering)
-        {
-            var where = AssetIndex.IsSubasset(asset) ? asset.Path : AssetIndex.Parent(asset.Path);
-            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{where}", Classes = { "dim" } });
-        }
-        if (Marks(asset) is { } marks)
-        {
-            line.Children.Add(marks);
-        }
-        return Wire(new Border { Classes = { "asset-row" }, Width = _layout.TileWidth, Height = _layout.RowHeight, Child = line }, asset);
+        return Wire(new Border { Classes = { "asset-row" }, Width = _layout.TileWidth, Height = _layout.RowHeight, Child = line }, item);
     }
 
-    Control EnterButton(Asset asset)
+    void Enter(ContentTile item)
+    {
+        if (item.Part is { } part)
+        {
+            _model.EnterNode(part.Id);
+        }
+        else if (item.Asset is { } asset)
+        {
+            _model.Enter(asset.Guid);
+        }
+    }
+
+    Control EnterButton(ContentTile item)
     {
         var button = new Border
         {
@@ -230,10 +245,10 @@ sealed class ContentGridView : Panel
             Child = new TextBlock { Text = "›", FontSize = 14, Margin = new Thickness(6, -2, 6, 0) },
             Cursor = new Cursor(StandardCursorType.Hand),
         };
-        ToolTip.SetTip(button, "Show what this file makes");
+        ToolTip.SetTip(button, item.Part != null || item.Asset?.Kind == Link.Cook.AssetKind.Prefab ? "Show what is in it, to take a part of it" : "Show what this file makes");
         button.PointerPressed += (_, e) =>
         {
-            _model.Enter(asset.Guid);
+            Enter(item);
             e.Handled = true;
         };
         return button;
@@ -259,24 +274,32 @@ sealed class ContentGridView : Panel
     }
 
     // Selecting, dragging, opening and the menu are the same for a tile and a row.
-    Border Wire(Border view, Asset asset)
+    Border Wire(Border view, ContentTile item)
     {
-        var problems = _index.ProblemsOf(asset.Guid);
-        var tip = $"{asset.Root}/{asset.Path}" + (AssetIndex.IsSubasset(asset) ? $"\n{asset.Subasset}" : "");
-        ToolTip.SetTip(view, problems.Count == 0 ? tip : tip + "\n" + string.Join("\n", problems.Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text)));
-        view.Classes.Set("selected", _model.Selection.Contains(asset.Guid));
-        view.AttachedToVisualTree += (_, _) => _tiles[asset.Guid] = view;
+        var key = item.Key;
+        if (item.Asset is { } shown)
+        {
+            var problems = _index.ProblemsOf(shown.Guid);
+            var tip = $"{shown.Root}/{shown.Path}" + (AssetIndex.IsSubasset(shown) ? $"\n{shown.Subasset}" : "");
+            ToolTip.SetTip(view, problems.Count == 0 ? tip : tip + "\n" + string.Join("\n", problems.Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text)));
+        }
+        else
+        {
+            ToolTip.SetTip(view, $"{item.Name}\nDrag it into the scene to take this part of the prefab. Alt makes plain entities of it.");
+        }
+        view.Classes.Set("selected", _model.Selection.Contains(key));
+        view.AttachedToVisualTree += (_, _) => _tiles[key] = view;
         view.DetachedFromVisualTree += (_, _) =>
         {
-            if (_tiles.GetValueOrDefault(asset.Guid) == view)
+            if (_tiles.GetValueOrDefault(key) == view)
             {
-                _tiles.Remove(asset.Guid);
+                _tiles.Remove(key);
             }
         };
-        view.PointerPressed += (_, e) => OnTilePressed(view, asset, e);
+        view.PointerPressed += (_, e) => OnTilePressed(view, item, e);
         view.PointerMoved += async (_, e) =>
         {
-            if (_press is not { } press || _pressed != asset)
+            if (_press is not { } press || _pressed != item)
             {
                 return;
             }
@@ -286,17 +309,20 @@ sealed class ContentGridView : Panel
             }
             _press = null;
             _selectOnRelease = false;
-            // A drag of a selected asset takes the selection, with that asset first.
-            var guids = _model.Selection.Contains(asset.Guid) ? [asset.Guid, .. _model.Selection.Where(g => g != asset.Guid)] : new List<string> { asset.Guid };
+            // A drag of a selected tile takes the selection, with that tile first. Assets and parts go to different places,
+            // so a part's drag holds only parts, and an asset's only assets.
+            var isPart = item.Part != null;
+            var keys = (_model.Selection.Contains(key) ? [key, .. _model.Selection.Where(g => g != key)] : new List<string> { key })
+                .Where(k => k.Contains(':') == isPart);
             var data = new DataTransfer();
-            data.Add(DataTransferItem.Create(ContentBrowserView.AssetFormat, string.Join(' ', guids)));
+            data.Add(DataTransferItem.Create(isPart ? ContentBrowserView.PartFormat : ContentBrowserView.AssetFormat, string.Join(' ', keys)));
             await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Copy | DragDropEffects.Link | DragDropEffects.Move);
         };
         view.PointerReleased += (_, e) =>
         {
-            if (_selectOnRelease && _pressed == asset)
+            if (_selectOnRelease && _pressed == item)
             {
-                _model.Press(asset.Guid, false, false);
+                _model.Press(key, false, false);
             }
             _selectOnRelease = false;
             _press = null;
@@ -304,14 +330,23 @@ sealed class ContentGridView : Panel
         view.DoubleTapped += (_, e) =>
         {
             _press = null;
-            Activate(asset);
+            Activate(item);
             e.Handled = true;
         };
-        view.ContextMenu = _menu(asset);
+        view.ContextMenu = item.Asset is { } menuAsset ? _menu(menuAsset) : PartMenu(item);
         return view;
     }
 
-    void OnTilePressed(Border view, Asset asset, PointerPressedEventArgs e)
+    ContextMenu? PartMenu(ContentTile item)
+    {
+        if (!HasContents(item))
+        {
+            return null;
+        }
+        return new ContextMenu { Items = { new MenuItem { Header = "Show Contents", Command = new CommunityToolkit.Mvvm.Input.RelayCommand(() => Enter(item)) } } };
+    }
+
+    void OnTilePressed(Border view, ContentTile item, PointerPressedEventArgs e)
     {
         Focus();
         if (!e.GetCurrentPoint(view).Properties.IsLeftButtonPressed)
@@ -320,35 +355,47 @@ sealed class ContentGridView : Panel
         }
         var add = e.KeyModifiers.HasFlag(KeyModifiers.Control);
         var range = e.KeyModifiers.HasFlag(KeyModifiers.Shift);
-        _selectOnRelease = !add && !range && _model.Selection.Contains(asset.Guid) && _model.Selection.Count > 1;
+        _selectOnRelease = !add && !range && _model.Selection.Contains(item.Key) && _model.Selection.Count > 1;
         if (!_selectOnRelease)
         {
-            _model.Press(asset.Guid, add, range);
+            _model.Press(item.Key, add, range);
         }
         _press = e;
-        _pressed = asset;
+        _pressed = item;
         e.Handled = true;
     }
 
-    // A double click, or Enter, on an asset: a file with no editor shows what it makes, and others open.
-    void Activate(Asset asset)
+    // A double click, or Enter, on a tile: a part shows what is under it, a file with no editor what it makes, and others
+    // open. A generated prefab has no text worth opening, so it shows what is in it too.
+    void Activate(ContentTile item)
     {
-        if (HasContents(asset) && !EditorShell.CanOpen(asset))
+        if (item.Part != null)
         {
-            _model.Enter(asset.Guid);
+            if (HasContents(item))
+            {
+                Enter(item);
+            }
         }
-        else
+        else if (item.Asset is { } asset)
         {
-            _shell.OpenAsset(asset);
+            if (HasContents(item) && (!EditorShell.CanOpen(asset) || (asset.Kind == Link.Cook.AssetKind.Prefab && asset.Generated != "")))
+            {
+                _model.Enter(asset.Guid);
+            }
+            else
+            {
+                _shell.OpenAsset(asset);
+            }
         }
     }
 
-    bool HasContents(Asset asset) => !AssetIndex.IsSubasset(asset) && _index.SubassetsOf(asset.Guid).Any();
+    bool HasContents(ContentTile item) => item.Part is { } part
+        ? part.ChildCount > 0
+        : item.Asset is { } asset && (asset.Kind == Link.Cook.AssetKind.Prefab || (!AssetIndex.IsSubasset(asset) && _index.SubassetsOf(asset.Guid).Any()));
 
-    // A sub-asset's name is its path in its file, of which the last part tells it apart in a tile.
-    static string TileName(Asset asset) => AssetIndex.Name(AssetIndex.DisplayName(asset));
-
-    static string KindIcon(Asset asset) => ContentBrowserView.KindNoun(asset.Kind).Replace(' ', '-');
+    static string KindIcon(ContentTile item) => item.Part is { } part
+        ? part.HasMesh ? "mesh" : "prefab"
+        : ContentBrowserView.KindNoun(item.Asset!.Kind).Replace(' ', '-');
 
     void OnBlankPressed(object? sender, PointerPressedEventArgs e)
     {
@@ -423,7 +470,7 @@ sealed class ContentGridView : Panel
         Canvas.SetTop(_band, top - offset.Y);
         _band.Width = right - left;
         _band.Height = bottom - top;
-        var inside = _layout.InRect(start.X, start.Y, end.X, end.Y, _shown.Count).Select(i => _shown[i].Guid);
+        var inside = _layout.InRect(start.X, start.Y, end.X, end.Y, _shown.Count).Select(i => _shown[i].Key);
         _model.Select(_marqueeBase.Concat(inside).Distinct());
     }
 
@@ -451,16 +498,16 @@ sealed class ContentGridView : Panel
         {
             if (_model.Move(step, range) is { } moved)
             {
-                ScrollTo(moved);
+                ScrollTo(moved.Key);
             }
             e.Handled = true;
         }
-        else if (e.Key == Key.Enter && _model.Selection.Count > 0 && _index.Find(_model.Selection[0]) is { } asset)
+        else if (e.Key == Key.Enter && _model.Selection.Count > 0 && _shown.FirstOrDefault(t => t.Key == _model.Selection[0]) is { } selected)
         {
-            Activate(asset);
+            Activate(selected);
             e.Handled = true;
         }
-        else if (e.Key == Key.Back && _model.OpenFile != null)
+        else if (e.Key == Key.Back && (_model.OpenFile != null || _model.OpenPrefab != null))
         {
             _model.Leave();
             e.Handled = true;

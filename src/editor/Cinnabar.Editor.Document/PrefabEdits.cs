@@ -337,13 +337,13 @@ public static partial class PrefabEdits
     /// A new instance of a prefab under a parent, or at the root with 0, with its root's pose: a Transform at the root,
     /// or a Local_Transform under a parent.
     /// </summary>
-    public static BlockOperation CreateInstance(SceneDocument document, string prefab, ulong parent, SceneComponent pose, ulong id = 0)
+    public static BlockOperation CreateInstance(SceneDocument document, string prefab, ulong parent, SceneComponent pose, ulong id = 0, ulong node = 0)
     {
         while (id == 0 || document.Scene.Find(id) != null || document.Expanded.Flat.Find(id) != null)
         {
             id = SceneEntity.NewId();
         }
-        var block = new SceneEntity(id) { Prefab = prefab, Parent = parent, ParentPath = PathOf(document.Expanded, parent) };
+        var block = new SceneEntity(id) { Prefab = prefab, Node = node, Parent = parent, ParentPath = PathOf(document.Expanded, parent) };
         block.Components.Add(pose);
         return new BlockOperation(document, id, [], [block]);
     }

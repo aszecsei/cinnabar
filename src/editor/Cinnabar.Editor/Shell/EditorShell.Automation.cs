@@ -185,6 +185,9 @@ public sealed partial class EditorShell
                 case "leave":
                     model.Leave();
                     break;
+                case "enterNode":
+                    model.EnterNode(ulong.Parse(text, System.Globalization.NumberStyles.HexNumber));
+                    break;
                 case "reveal":
                     if (Assets.Find(text) == null)
                     {
@@ -203,11 +206,11 @@ public sealed partial class EditorShell
                     }
                     break;
                 default:
-                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, popOut, enter, leave, reveal and shown");
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, popOut, enter, enterNode, leave, reveal and shown");
             }
         }
         return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],
-            [.. model.Items.Select(AssetIndex.DisplayName)]));
+            [.. model.Tiles.Select(t => t.Name)]));
     }
 
     AutomationResponse CaptureUiResponse(AutomationRequest request)

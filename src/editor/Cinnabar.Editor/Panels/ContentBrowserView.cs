@@ -31,6 +31,9 @@ public sealed class ContentBrowserView : DockPanel
     /// <summary>Dragged assets, by their GUIDs, separated by spaces.</summary>
     public static readonly DataFormat<string> AssetFormat = DataFormat.CreateStringApplicationFormat("cinnabar-asset");
 
+    /// <summary>Dragged parts of prefabs, as <c>guid:id</c>, separated by spaces, in a format that what takes assets ignores.</summary>
+    public static readonly DataFormat<string> PartFormat = DataFormat.CreateStringApplicationFormat("cinnabar-prefab-node");
+
     const double Indent = 14;
 
     readonly EditorShell _shell;
@@ -176,7 +179,7 @@ public sealed class ContentBrowserView : DockPanel
     void OnRevealed(Asset asset)
     {
         Rebuild();
-        _grid.ScrollTo(asset);
+        _grid.ScrollTo(asset.Guid);
     }
 
     static GridSplitter Splitter(int column)
@@ -317,8 +320,8 @@ public sealed class ContentBrowserView : DockPanel
         _location.Children.Clear();
         if (_model.Filtering)
         {
-            var count = _model.Items.Count;
-            var scope = _model.OpenFile != null ? " in this file" : _model.InThisFolder ? " in this folder" : "";
+            var count = _model.Tiles.Count;
+            var scope = _model.OpenPrefab != null ? " in this prefab" : _model.OpenFile != null ? " in this file" : _model.InThisFolder ? " in this folder" : "";
             _location.Children.Add(new TextBlock { Text = $"{count} {(count == 1 ? "asset matches" : "assets match")}{scope}", VerticalAlignment = VerticalAlignment.Center });
             _location.Children.Add(Link("Clear", _model.ClearFilter));
             return;
@@ -339,6 +342,14 @@ public sealed class ContentBrowserView : DockPanel
             {
                 _location.Children.Add(Link(crumb.Name, () => _model.Open(folder)));
             }
+            else if (crumb.File is { } file)
+            {
+                _location.Children.Add(Link(crumb.Name, () => _model.Enter(file)));
+            }
+            else if (crumb.Node is { } node)
+            {
+                _location.Children.Add(Link(crumb.Name, () => _model.EnterNode(node)));
+            }
         }
     }
 
@@ -355,11 +366,12 @@ public sealed class ContentBrowserView : DockPanel
 
     void ShowAssets()
     {
-        var assets = _model.Items;
         _empty.Text = _index.Roots.Count == 0
             ? "The content roots appear here once the cook daemon runs."
-            : _model.Filtering ? "No asset matches the filter." : "This folder has no assets.";
-        _empty.IsVisible = assets.Count == 0;
+            : _model.Filtering ? "No asset matches the filter."
+            : _model.OpenPrefab != null ? "Nothing is under this entity."
+            : "This folder has no assets.";
+        _empty.IsVisible = _model.Tiles.Count == 0;
         _syncing = true;
         if ((_search.Text ?? "") != _model.Search)
         {
@@ -557,7 +569,7 @@ public sealed class ContentBrowserView : DockPanel
         {
             menu.Items.Add(new MenuItem { Header = _shell.OpenLabel(asset), Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
         }
-        if (!AssetIndex.IsSubasset(asset) && _index.SubassetsOf(asset.Guid).Any())
+        if (asset.Kind == AssetKind.Prefab || (!AssetIndex.IsSubasset(asset) && _index.SubassetsOf(asset.Guid).Any()))
         {
             menu.Items.Add(new MenuItem { Header = "Show Contents", Command = new RelayCommand(() => _model.Enter(asset.Guid)) });
         }
@@ -596,6 +608,11 @@ public sealed class ContentBrowserView : DockPanel
             _ = clipboard.SetTextAsync(text);
         }
     }
+
+    /// <summary>The prefab and the entity of each dragged part, or none.</summary>
+    public static IReadOnlyList<(string Prefab, ulong Node)> DroppedParts(DragEventArgs e) =>
+        [.. (e.DataTransfer.TryGetValue(PartFormat)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+            .Select(ContentBrowserModel.ParsePartKey).OfType<(string Prefab, ulong Id)>()];
 
     /// <summary>The GUID of a dragged asset, the first of several, or null.</summary>
     public static string? Dropped(DragEventArgs e) => DroppedAll(e) is [var first, ..] ? first : null;

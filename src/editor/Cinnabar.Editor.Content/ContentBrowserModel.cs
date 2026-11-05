@@ -55,8 +55,24 @@ public enum ContentKind
 /// <summary>A row of the content browser's tags: a tag, how many assets have it or a tag under it, and whether it filters.</summary>
 public sealed record TagRow(string Tag, string Name, int Depth, int Count, bool HasChildren, bool Expanded, bool Filtering);
 
-/// <summary>A part of the path that the content browser shows over its assets: a folder, or a file that is open.</summary>
-public sealed record ContentCrumb(string Name, ContentFolder? Folder, string? File);
+/// <summary>A part of the path that the content browser shows over its assets: a folder, a file or prefab that is open, or an entity of the prefab.</summary>
+public sealed record ContentCrumb(string Name, ContentFolder? Folder, string? File, ulong? Node = null);
+
+/// <summary>An entity of a prefab, which a tile shows and a drag takes as a part of the prefab.</summary>
+public sealed record PrefabPart(string Prefab, ulong Id, string Name, int ChildCount, bool HasMesh);
+
+/// <summary>What the content browser shows of a prefab's entity: the entities under it, the assets that it uses, and the entities above it, from the prefab's root's child.</summary>
+public sealed record PrefabContents(IReadOnlyList<PrefabPart> Children, IReadOnlyList<string> Assets, IReadOnlyList<(ulong Id, string Name)> Trail);
+
+/// <summary>What a tile of the content browser shows, by a key that the selection holds: an asset, by its GUID, or a part of a prefab.</summary>
+public sealed record ContentTile(string Key, Asset? Asset, PrefabPart? Part)
+{
+    public static ContentTile Of(Asset asset) => new(asset.Guid, asset, null);
+
+    public static ContentTile Of(PrefabPart part) => new(ContentBrowserModel.PartKey(part.Prefab, part.Id), null, part);
+
+    public string Name => Part?.Name ?? (Asset is { } asset ? AssetIndex.DisplayName(asset) : "");
+}
 
 /// <summary>
 /// What the content browser shows (see docs/editor/shell-and-panels.md#content-browser): the open folder or file, the
@@ -79,7 +95,7 @@ public sealed class ContentBrowserModel
     readonly HashSet<string> _collapsedTags = [];
     readonly ProjectTags _tags;
     List<string> _selection = [];
-    List<Asset>? _items;
+    List<ContentTile>? _tiles;
     string _search = "";
     string? _anchor;
     string? _cursor;
@@ -168,6 +184,29 @@ public sealed class ContentBrowserModel
     /// <summary>The file whose sub-assets show in place of its folder's assets, by GUID, or null.</summary>
     public string? OpenFile { get; private set; }
 
+    /// <summary>The prefab whose entities show, by GUID, or null: a sub-asset of the open file, or a file of the open folder.</summary>
+    public string? OpenPrefab { get; private set; }
+
+    /// <summary>The entity of the open prefab whose children show, or 0 for its root.</summary>
+    public ulong OpenNode { get; private set; }
+
+    /// <summary>Finds what a prefab's entity shows, with 0 for its root, or null for a prefab with no tree. The shell gives it.</summary>
+    public Func<string, ulong, PrefabContents?>? PrefabViews { get; set; }
+
+    /// <summary>A part's key in the selection and a drag.</summary>
+    public static string PartKey(string prefab, ulong id) => $"{prefab}:{id:x16}";
+
+    /// <summary>Reads a part's key, and returns null for an asset's.</summary>
+    public static (string Prefab, ulong Id)? ParsePartKey(string key)
+    {
+        var colon = key.IndexOf(':');
+        return colon > 0 && ulong.TryParse(key.AsSpan(colon + 1), System.Globalization.NumberStyles.HexNumber, null, out var id)
+            ? (key[..colon], id) : null;
+    }
+
+    /// <summary>The selected assets, by GUID, without the selected parts, as the asset commands take.</summary>
+    public IReadOnlyList<string> SelectedAssets => [.. _selection.Where(k => !k.Contains(':'))];
+
     /// <summary>The selected assets, by GUID, the one that was selected first first.</summary>
     public IReadOnlyList<string> Selection => _selection;
 
@@ -250,17 +289,17 @@ public sealed class ContentBrowserModel
     public event Action? ViewSettingsChanged;
 
     /// <summary>
-    /// The assets to show: those of the open file or the open folder, or every asset that the filter matches, the open
-    /// file's only when one is open. The selection keeps only the assets that are among them.
+    /// What to show: the entities and assets of the open prefab, the assets of the open file or the open folder, or every
+    /// asset that the filter matches, the open file's only when one is open. The selection keeps only what is among them.
     /// </summary>
-    public IReadOnlyList<Asset> Items
+    public IReadOnlyList<ContentTile> Tiles
     {
         get
         {
-            if (_items == null)
+            if (_tiles == null)
             {
-                _items = BuildItems();
-                var shown = _items.Select(a => a.Guid).ToHashSet();
+                _tiles = BuildTiles();
+                var shown = _tiles.Select(t => t.Key).ToHashSet();
                 var kept = _selection.Where(shown.Contains).ToList();
                 if (kept.Count != _selection.Count)
                 {
@@ -268,9 +307,12 @@ public sealed class ContentBrowserModel
                     ContextChanged?.Invoke();
                 }
             }
-            return _items;
+            return _tiles;
         }
     }
+
+    /// <summary>The assets among <see cref="Tiles"/>.</summary>
+    public IReadOnlyList<Asset> Items => [.. Tiles.Select(t => t.Asset).OfType<Asset>()];
 
     /// <summary>How many assets of each kind the filter's other parts leave, for the kinds that it offers.</summary>
     public IReadOnlyList<(ContentKind Kind, int Count)> KindCounts() =>
@@ -293,6 +335,14 @@ public sealed class ContentBrowserModel
         if (OpenFile != null && _index.Find(OpenFile) is { } file)
         {
             crumbs.Add(new ContentCrumb(AssetIndex.Name(file.Path), null, file.Guid));
+        }
+        if (OpenPrefab != null && _index.Find(OpenPrefab) is { } prefab)
+        {
+            crumbs.Add(new ContentCrumb(AssetIndex.Name(AssetIndex.DisplayName(prefab)), null, null, 0));
+            if (PrefabViews?.Invoke(OpenPrefab, OpenNode) is { } view)
+            {
+                crumbs.AddRange(view.Trail.Select(t => new ContentCrumb(t.Name, null, null, t.Id)));
+            }
         }
         return crumbs;
     }
@@ -376,28 +426,78 @@ public sealed class ContentBrowserModel
         }
         Folder = folder;
         OpenFile = null;
+        OpenPrefab = null;
+        OpenNode = 0;
         _search = "";
         ItemsMoved();
         ContextChanged?.Invoke();
     }
 
-    /// <summary>Shows a file's sub-assets in place of its folder's assets, and ends the search.</summary>
-    public void Enter(string file)
+    /// <summary>
+    /// Shows what a file makes in place of its folder's assets, or a prefab's entities, whether it is a file or a sub-asset
+    /// of one, and ends the search.
+    /// </summary>
+    public void Enter(string guid)
     {
-        if (_index.Find(file) is not { } asset || AssetIndex.IsSubasset(asset))
+        if (_index.Find(guid) is not { } asset)
+        {
+            return;
+        }
+        var prefab = asset.Kind == AssetKind.Prefab;
+        if (AssetIndex.IsSubasset(asset) && !prefab)
         {
             return;
         }
         Folder = new ContentFolder(asset.Root, AssetIndex.Parent(asset.Path));
-        OpenFile = file;
+        OpenFile = AssetIndex.IsSubasset(asset) ? asset.Parent : prefab ? null : guid;
+        OpenPrefab = prefab ? guid : null;
+        OpenNode = 0;
         _search = "";
         ItemsMoved();
         ContextChanged?.Invoke();
     }
 
-    /// <summary>Goes back from an open file to its folder, with the file selected, so the filter ends: it was the file's.</summary>
+    /// <summary>Shows what is under an entity of the open prefab, with 0 for its root.</summary>
+    public void EnterNode(ulong id)
+    {
+        if (OpenPrefab != null)
+        {
+            OpenNode = id;
+            _search = "";
+            ItemsMoved();
+        }
+    }
+
+    /// <summary>
+    /// Goes back a level: from a prefab's entity to the one above it, from its root to the file that makes it or its folder,
+    /// and from a file to its folder, with what it left selected. Leaving a file or a prefab ends the filter, which was its.
+    /// </summary>
     public void Leave()
     {
+        if (OpenPrefab is { } prefab)
+        {
+            if (OpenNode != 0)
+            {
+                var trail = PrefabViews?.Invoke(prefab, OpenNode)?.Trail ?? [];
+                var left = OpenNode;
+                OpenNode = trail.Count >= 2 ? trail[^2].Id : 0;
+                _selection = [PartKey(prefab, left)];
+                _anchor = _cursor = _selection[0];
+                _search = "";
+                ItemsMoved();
+                ContextChanged?.Invoke();
+                return;
+            }
+            OpenPrefab = null;
+            _kinds.Clear();
+            _filterTags.Clear();
+            _search = "";
+            _selection = [prefab];
+            _anchor = _cursor = prefab;
+            ItemsMoved();
+            ContextChanged?.Invoke();
+            return;
+        }
         if (OpenFile is { } file)
         {
             OpenFile = null;
@@ -444,23 +544,23 @@ public sealed class ContentBrowserModel
     /// Moves the selection by assets, as the arrow keys do, stopping at the ends, or with Shift grows it from the anchor.
     /// It gives the asset that the cursor moved to.
     /// </summary>
-    public Asset? Move(int by, bool range)
+    public ContentTile? Move(int by, bool range)
     {
-        var items = Items;
+        var items = Tiles;
         if (items.Count == 0)
         {
             return null;
         }
         var at = _cursor == null ? -1 : IndexOf(items, _cursor);
         var next = at < 0 ? (by < 0 ? items.Count - 1 : 0) : Math.Clamp(at + by, 0, items.Count - 1);
-        Press(items[next].Guid, false, range);
+        Press(items[next].Key, false, range);
         return items[next];
     }
 
     public void SelectAll()
     {
-        Select(Items.Select(a => a.Guid));
-        _anchor = Items.Count > 0 ? Items[0].Guid : null;
+        Select(Tiles.Select(t => t.Key));
+        _anchor = Tiles.Count > 0 ? Tiles[0].Key : null;
     }
 
     /// <summary>Shows an asset selected in its folder, or opens a folder, showing where it is, and ends the search.</summary>
@@ -479,6 +579,8 @@ public sealed class ContentBrowserModel
             _expandedFolders.Add(folder.Root + "/");
             Folder = folder;
             OpenFile = null;
+            OpenPrefab = null;
+            OpenNode = 0;
             _search = "";
             ItemsMoved();
             ContextChanged?.Invoke();
@@ -494,6 +596,8 @@ public sealed class ContentBrowserModel
         }
         // A sub-asset shows in its file. What is revealed shows, whatever the filter hid.
         OpenFile = AssetIndex.IsSubasset(asset) ? asset.Parent : null;
+        OpenPrefab = null;
+        OpenNode = 0;
         Folder = new ContentFolder(asset.Root, folder);
         _search = "";
         _kinds.Clear();
@@ -512,10 +616,12 @@ public sealed class ContentBrowserModel
         {
             Folder = folder;
             OpenFile = null;
-            _items = null;
+            OpenPrefab = null;
+            OpenNode = 0;
+            _tiles = null;
             Changed?.Invoke();
         }
-        _ = Items;
+        _ = Tiles;
         _selection = [.. selected];
         ContextChanged?.Invoke();
     }
@@ -534,18 +640,25 @@ public sealed class ContentBrowserModel
             context = Folder != fallback;
             Folder = fallback;
             OpenFile = null;
+            OpenPrefab = null;
+            OpenNode = 0;
         }
         if (OpenFile != null && _index.Find(OpenFile) == null)
         {
             OpenFile = null;
         }
-        var existing = _selection.Where(g => _index.Find(g) != null).ToList();
+        if (OpenPrefab != null && _index.Find(OpenPrefab) == null)
+        {
+            OpenPrefab = null;
+            OpenNode = 0;
+        }
+        var existing = _selection.Where(k => k.Contains(':') || _index.Find(k) != null).ToList();
         if (existing.Count != _selection.Count)
         {
             _selection = existing;
             context = true;
         }
-        _items = null;
+        _tiles = null;
         Changed?.Invoke();
         if (context)
         {
@@ -556,6 +669,10 @@ public sealed class ContentBrowserModel
     // What a filter looks through, and what shows without one.
     IEnumerable<Asset> Scope()
     {
+        if (OpenPrefab is { } prefab)
+        {
+            return (PrefabViews?.Invoke(prefab, OpenNode)?.Assets ?? []).Select(_index.Find).OfType<Asset>();
+        }
         if (OpenFile is { } file)
         {
             return _index.SubassetsOf(file);
@@ -567,6 +684,24 @@ public sealed class ContentBrowserModel
         return !Filtering ? _index.AssetsIn(folder.Root, folder.Path)
             : InThisFolder ? _index.AssetsUnder(folder.Root, folder.Path)
             : _index.Assets.Values;
+    }
+
+    List<ContentTile> BuildTiles()
+    {
+        if (OpenPrefab is { } prefab)
+        {
+            if (PrefabViews?.Invoke(prefab, OpenNode) is not { } view)
+            {
+                return [];
+            }
+            var query = Search.Trim();
+            var parts = _kinds.Count > 0 ? [] : view.Children.Where(p => query.Length == 0 || query.Split(' ', StringSplitOptions.RemoveEmptyEntries).All(w => p.Name.Contains(w, StringComparison.OrdinalIgnoreCase)));
+            var assets = view.Assets.Select(_index.Find).OfType<Asset>()
+                .Where(a => MatchesSearchAndTags(a) && (_kinds.Count == 0 || _kinds.Contains(KindOf(a.Kind))));
+            return [.. parts.Select(ContentTile.Of), .. assets.Select(ContentTile.Of)];
+        }
+        // A prefab comes first in what a file makes: it is the way into the file's whole hierarchy.
+        return [.. (OpenFile != null ? BuildItems().OrderBy(a => a.Kind == AssetKind.Prefab ? 0 : 1) : BuildItems().AsEnumerable()).Select(ContentTile.Of)];
     }
 
     List<Asset> BuildItems()
@@ -595,11 +730,11 @@ public sealed class ContentBrowserModel
         ItemsMoved();
     }
 
-    static int IndexOf(IReadOnlyList<Asset> items, string guid)
+    static int IndexOf(IReadOnlyList<ContentTile> items, string guid)
     {
         for (var i = 0; i < items.Count; i++)
         {
-            if (items[i].Guid == guid)
+            if (items[i].Key == guid)
             {
                 return i;
             }
@@ -610,19 +745,19 @@ public sealed class ContentBrowserModel
     // The assets from one to another, in the order that they show, or null when one of them does not show.
     List<string>? Span(string from, string to)
     {
-        var items = Items;
+        var items = Tiles;
         var a = IndexOf(items, from);
         var b = IndexOf(items, to);
         if (a < 0 || b < 0)
         {
             return null;
         }
-        return [.. items.Skip(Math.Min(a, b)).Take(Math.Abs(a - b) + 1).Select(i => i.Guid)];
+        return [.. items.Skip(Math.Min(a, b)).Take(Math.Abs(a - b) + 1).Select(i => i.Key)];
     }
 
     void ItemsMoved()
     {
-        _items = null;
+        _tiles = null;
         Changed?.Invoke();
     }
 

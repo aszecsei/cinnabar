@@ -99,7 +99,7 @@ public sealed class ContentBrowser
     public ContentFolder? Folder => Model.Folder;
 
     /// <summary>The GUIDs of the content browser's selected assets.</summary>
-    public IReadOnlyList<string> SelectedAssets => Model.Selection;
+    public IReadOnlyList<string> SelectedAssets => Model.SelectedAssets;
 
     /// <summary>
     /// Whether the selection holds a sub-asset. A sub-asset changes only with its file, so the file operations do not

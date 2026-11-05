@@ -302,14 +302,14 @@ public sealed class ContentModelTests : IDisposable
         Assert.Equal(["A", "B", "C", "Wall"], Names(model));
 
         // With nothing selected, the first press starts at an end.
-        Assert.Equal("a1", model.Move(1, false)?.Guid);
+        Assert.Equal("a1", model.Move(1, false)?.Key);
         const int columns = 2;
-        Assert.Equal("c1", model.Move(columns, false)?.Guid);
+        Assert.Equal("c1", model.Move(columns, false)?.Key);
         Assert.Equal(["c1"], model.Selection);
         // A step past an end stops there.
-        Assert.Equal(Wall, model.Move(columns, false)?.Guid);
-        Assert.Equal(Wall, model.Move(1, false)?.Guid);
-        Assert.Equal("a1", model.Move(-100, false)?.Guid);
+        Assert.Equal(Wall, model.Move(columns, false)?.Key);
+        Assert.Equal(Wall, model.Move(1, false)?.Key);
+        Assert.Equal("a1", model.Move(-100, false)?.Key);
     }
 
     [Fact]

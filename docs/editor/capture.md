@@ -63,7 +63,7 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 | `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"shadingStats":true}` | `ok`, or an error that names the settings |
 | `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out | `ok` |
 | `ui` | `window`: a panel's ID, for the window that holds it, or left out for the main window; `path`: the PNG's path, absolute | `files`: the image |
-| `content` | `settings`: what to change in the content browser, each left out to keep it: `folder`, as `<root>/<path>`; `search`; `view`, `grid` or `list`; `tileSize`; `kinds`, the filter's kinds, separated by commas; `tags`, the filter's tags, likewise; `showTags`; `popOut`; `enter`, a file's GUID, to show what it makes; `leave`; `reveal`, an asset's GUID; `shown`, whether its panel is open | `content`: `folder`, `search`, `selection` and the names of the shown assets, `items` |
+| `content` | `settings`: what to change in the content browser, each left out to keep it: `folder`, as `<root>/<path>`; `search`; `view`, `grid` or `list`; `tileSize`; `kinds`, the filter's kinds, separated by commas; `tags`, the filter's tags, likewise; `showTags`; `popOut`; `enter`, a file's GUID, to show what it makes, or a prefab's; `enterNode`, an entity's ID in the open prefab; `leave`; `reveal`, an asset's GUID; `shown`, whether its panel is open | `content`: `folder`, `search`, `selection` and the names of the shown assets, `items` |
 
 ```
 {"id":1,"command":"screenshot","views":["depth","normals"]}

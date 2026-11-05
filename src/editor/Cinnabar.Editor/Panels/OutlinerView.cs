@@ -60,12 +60,12 @@ public sealed class OutlinerView : DockPanel
         // A drop below the rows, on the list itself, makes the entity a root.
         DragDrop.SetAllowDrop(_list, true);
         // A prefab from the content browser dropped there makes an instance at the root.
-        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DroppedPrefab(e) != null ? DragDropEffects.Copy : CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
+        _list.AddHandler(DragDrop.DragOverEvent, (_, e) => e.DragEffects = DroppedPrefabs(e).Count > 0 ? DragDropEffects.Copy : CanDrop(e, 0) ? DragDropEffects.Move : DragDropEffects.None);
         _list.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (DroppedPrefab(e) is { } prefab)
+            if (DroppedPrefabs(e) is { Count: > 0 } prefabs)
             {
-                _shell.CreateInstance(prefab, 0);
+                CreateInstances(prefabs, 0, e);
                 return;
             }
             Drop(e, 0);
@@ -259,7 +259,7 @@ public sealed class OutlinerView : DockPanel
         view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
         {
             // A prefab from the content browser makes an instance under the entity; a script adds its behaviour.
-            if (DroppedPrefab(e) != null)
+            if (DroppedPrefabs(e).Count > 0)
             {
                 e.DragEffects = row.Node.SceneId != 0 ? DragDropEffects.Copy : DragDropEffects.None;
             }
@@ -275,9 +275,9 @@ public sealed class OutlinerView : DockPanel
         });
         view.AddHandler(DragDrop.DropEvent, (_, e) =>
         {
-            if (DroppedPrefab(e) is { } prefab)
+            if (DroppedPrefabs(e) is { Count: > 0 } prefabs)
             {
-                _shell.CreateInstance(prefab, row.Node.SceneId);
+                CreateInstances(prefabs, row.Node.SceneId, e);
             }
             else if (ContentBrowserView.Dropped(e) is { } script)
             {
@@ -293,8 +293,28 @@ public sealed class OutlinerView : DockPanel
         return view;
     }
 
-    string? DroppedPrefab(DragEventArgs e) =>
-        _shell.IsEditing && _shell.Scene != null && ContentBrowserView.Dropped(e) is { } guid && _shell.IsPrefab(guid) ? guid : null;
+    // What a drag can place: the parts of prefabs that it holds, or the prefab of the asset that it holds first.
+    IReadOnlyList<(string Prefab, ulong Node)> DroppedPrefabs(DragEventArgs e)
+    {
+        if (!_shell.IsEditing || _shell.Scene == null)
+        {
+            return [];
+        }
+        if (ContentBrowserView.DroppedParts(e) is { Count: > 0 } parts)
+        {
+            return parts;
+        }
+        return ContentBrowserView.Dropped(e) is { } guid && _shell.PrefabToPlace(guid) is { } prefab ? [(prefab, 0)] : [];
+    }
+
+    // Alt makes plain entities of what the drag places.
+    void CreateInstances(IReadOnlyList<(string Prefab, ulong Node)> prefabs, ulong parent, DragEventArgs e)
+    {
+        foreach (var (prefab, node) in prefabs)
+        {
+            _shell.CreateInstance(prefab, parent, node, e.KeyModifiers.HasFlag(KeyModifiers.Alt));
+        }
+    }
 
     // An entity can go under any scene entity that is not itself or one of its descendants, or to the root.
     bool CanDrop(DragEventArgs e, ulong parent)
