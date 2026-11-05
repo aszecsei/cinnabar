@@ -176,6 +176,32 @@ a_png_reads_back :: proc(t: ^testing.T) {
 @(private = "file")
 PNG_2X2 := #load("testdata/2x2.png", string)
 
+// A part of a prefab has a file with its prefab's name and more, which no index entry names: it goes when its prefab's does.
+@(test)
+a_parts_picture_goes_with_its_prefabs :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.png", PNG_2X2}})
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	pass := cook(options, ALL_KINDS, log_problems = false)
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	thumbnails_update(&index, pass, options)
+	entry, found := asset_at(&index, "a.png")
+	testing.expect(t, found)
+	stem := strings.trim_suffix(entry.thumbnail, ".png")
+	part := fmt.tprintf("%s.e7e4b781f0a1effe.png", stem)
+	testing.expect(t, os.write_entire_file(part, transmute([]byte)string("part")) == nil)
+	dir := fmt.tprintf("%s/thumbnails", options.cache)
+	other := fmt.tprintf("%s/00000000000000000000000000000000.1111111111111111.e7e4b781f0a1effe.png", dir)
+	testing.expect(t, os.write_entire_file(other, transmute([]byte)string("old")) == nil)
+
+	thumbnails_update(&index, pass, options)
+
+	testing.expect(t, os.exists(part))
+	testing.expect(t, !os.exists(other))
+}
+
 @(test)
 a_stale_thumbnail_is_pruned :: proc(t: ^testing.T) {
 	tree := make_tree(t, {{"content/a.png", PNG_2X2}, {"content/b.luau", "return 1"}})

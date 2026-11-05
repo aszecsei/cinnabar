@@ -94,12 +94,21 @@ sealed class ContentGridView : Panel
         }
     }
 
-    // The host answered: what failed says why.
-    void OnPictureAnswered(string guid)
+    // The host answered: what failed says why, and a part's picture is in no index, so this is the news of it.
+    void OnPictureAnswered(string key)
     {
-        foreach (var (tile, item) in TilesOf(guid))
+        foreach (var (tile, item) in TilesOf(key))
         {
             ToolTip.SetTip(tile, TipOf(item));
+            ShowPictureOf(tile, item);
+        }
+    }
+
+    void ShowPictureOf(Border tile, ContentTile item)
+    {
+        if (tile.Child is StackPanel { Children: [Panel picture, ..] } && ThumbnailPath(item) is { } path && !picture.Children.OfType<Image>().Any())
+        {
+            ShowThumbnail(picture, path);
         }
     }
 
@@ -108,16 +117,20 @@ sealed class ContentGridView : Panel
     {
         foreach (var (tile, item) in TilesOf(guid))
         {
-            if (tile.Child is StackPanel { Children: [Panel picture, ..] } && ThumbnailPath(item) is { } path && !picture.Children.OfType<Image>().Any())
-            {
-                ShowThumbnail(picture, path);
-            }
+            ShowPictureOf(tile, item);
         }
     }
 
     // What a tile waits for, if its picture is not ready.
-    string? WantedThumbnail(ContentTile item) =>
-        item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: false } picture ? picture.Guid : null;
+    string? WantedThumbnail(ContentTile item)
+    {
+        if (item.Part is { } part)
+        {
+            // What has no mesh and nothing under it, as a light, has nothing to draw, which is no failure.
+            return (part.HasMesh || part.ChildCount > 0) && _shell.Thumbnails.PartPicture(part.Prefab, part.Id) == null ? item.Key : null;
+        }
+        return item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: false } picture ? picture.Guid : null;
+    }
 
     /// <summary>The menu of the empty space, for the open folder.</summary>
     public ContextMenu? BlankMenu
@@ -268,8 +281,14 @@ sealed class ContentGridView : Panel
     }
 
     // The file of a tile's picture, once it is ready.
-    string? ThumbnailPath(ContentTile item) =>
-        item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: true } picture ? picture.Thumbnail : null;
+    string? ThumbnailPath(ContentTile item)
+    {
+        if (item.Part is { } part)
+        {
+            return _shell.Thumbnails.PartPicture(part.Prefab, part.Id);
+        }
+        return item.Asset is { } asset && _index.PictureOf(asset) is { ThumbnailReady: true } picture ? picture.Thumbnail : null;
+    }
 
     // Shows a thumbnail over a tile's icon once it is decoded, for as long as the tile is realized, which is what keeps it
     // in the cache. The icon shows until then, and instead when it cannot be read.
@@ -433,7 +452,8 @@ sealed class ContentGridView : Panel
     {
         if (item.Asset is not { } shown)
         {
-            return $"{item.Name}\nDrag it into the scene to take this part of the prefab. Alt makes plain entities of it.";
+            var tip = $"{item.Name}\nDrag it into the scene to take this part of the prefab. Alt makes plain entities of it.";
+            return item.Part is { } part && _shell.Thumbnails.FailureOf(part.Prefab, part.Id) is { } why ? $"{tip}\nNo picture: {why}" : tip;
         }
         var lines = new List<string> { $"{shown.Root}/{shown.Path}" + (AssetIndex.IsSubasset(shown) ? $"\n{shown.Subasset}" : "") };
         lines.AddRange(_index.ProblemsOf(shown.Guid).Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text));
@@ -446,11 +466,22 @@ sealed class ContentGridView : Panel
 
     ContextMenu? PartMenu(ContentTile item)
     {
-        if (!HasContents(item))
+        var menu = new ContextMenu();
+        if (HasContents(item))
         {
-            return null;
+            menu.Items.Add(new MenuItem { Header = "Show Contents", Command = new CommunityToolkit.Mvvm.Input.RelayCommand(() => Enter(item)) });
         }
-        return new ContextMenu { Items = { new MenuItem { Header = "Show Contents", Command = new CommunityToolkit.Mvvm.Input.RelayCommand(() => Enter(item)) } } };
+        if (item.Part is { } part)
+        {
+            var regenerate = new MenuItem
+            {
+                Header = "Regenerate Picture",
+                Command = new CommunityToolkit.Mvvm.Input.RelayCommand(() => _shell.Thumbnails.Forget(part.Prefab, part.Id, DateTime.UtcNow)),
+            };
+            menu.Opening += (_, _) => regenerate.IsVisible = _shell.Thumbnails.FailureOf(part.Prefab, part.Id) != null;
+            menu.Items.Add(regenerate);
+        }
+        return menu;
     }
 
     void OnTilePressed(Border view, ContentTile item, PointerPressedEventArgs e)

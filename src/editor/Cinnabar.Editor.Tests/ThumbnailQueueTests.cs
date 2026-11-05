@@ -19,7 +19,7 @@ public sealed class ThumbnailQueueTests
     readonly DateTime _now = new(2026, 11, 5, 0, 0, 0, DateTimeKind.Utc);
     bool _canBake = true;
 
-    ThumbnailQueue NewQueue()
+    ThumbnailQueue NewQueue(Func<string, bool>? fileExists = null)
     {
         _index.Apply(new AssetSnapshot(
         [
@@ -29,7 +29,7 @@ public sealed class ThumbnailQueueTests
             TestAssets.Make(Done, AssetKind.Material, "d.material", thumbnail: "t/d.png", thumbnailReady: true),
             TestAssets.Make(Script, AssetKind.Script, "e.luau"),
         ], []));
-        return new ThumbnailQueue(_index, _sent.Add, () => _canBake);
+        return new ThumbnailQueue(_index, _sent.Add, () => _canBake, fileExists);
     }
 
     IEnumerable<BakeThumbnail> Bakes => _sent.OfType<BakeThumbnail>();
@@ -184,6 +184,83 @@ public sealed class ThumbnailQueueTests
         Assert.False(stale.ThumbnailReady);
         Assert.True(_index.PictureOf(stale)!.ThumbnailReady);
         Assert.Empty(queue.Failures);
+    }
+
+    [Fact]
+    public void ANodeTileBakesOnlyItsSubtree()
+    {
+        var files = new HashSet<string>();
+        var queue = NewQueue(files.Contains);
+        const ulong Node = 0xe7e4b781f0a1effe;
+        var key = ContentBrowserModel.PartKey(C, Node);
+        const string File = "t/c.e7e4b781f0a1effe.png";
+
+        Assert.Equal(File, queue.PartPath(C, Node));
+        Assert.Null(queue.PartPicture(C, Node));
+        queue.Want(key, _now);
+
+        // It draws its prefab with that node, into a file beside the prefab's, and no asset's picture is marked.
+        var bake = Bakes.Single();
+        Assert.Equal((C, Node, ThumbnailKind.Prefab), (Guid(bake), bake.Node, bake.Kind));
+        var capture = _sent.OfType<CaptureRequest>().Single();
+        Assert.Equal(File, capture.Path);
+        var answers = new List<string>();
+        queue.Changed += answers.Add;
+        queue.Apply(new CaptureResult(capture.Id, CaptureKind.Thumbnail, true, "", File, 0, 0, 0, 0, 0, OutputMode.Sdr), _now);
+        Assert.False(_index.Find(C)!.ThumbnailReady);
+        Assert.Equal([key], answers);
+        Assert.Equal(File, queue.PartPicture(C, Node));
+        Assert.Equal(0, queue.Waiting);
+
+        // It is not asked for again, as the next tile that shows finds it.
+        queue.Unwant(key);
+        queue.Want(key, _now);
+        Assert.Single(Bakes);
+    }
+
+    [Fact]
+    public void ANodesFileFromAnEarlierRunIsNotDrawnAgain()
+    {
+        var queue = NewQueue(path => path == "t/c.0000000000000007.png");
+        Assert.Equal("t/c.0000000000000007.png", queue.PartPicture(C, 7));
+        queue.Want(ContentBrowserModel.PartKey(C, 7), _now);
+        Assert.Empty(Bakes);
+    }
+
+    [Fact]
+    public void ANodeOfAChangedPrefabGetsANewFile()
+    {
+        var queue = NewQueue(path => path == "t/c.0000000000000007.png");
+        _index.Apply(new AssetDelta([TestAssets.Make(C, AssetKind.Prefab, "c.prefab", thumbnail: "t/c2.png")], [], [], []));
+        Assert.Null(queue.PartPicture(C, 7));
+        queue.Want(ContentBrowserModel.PartKey(C, 7), _now);
+        Assert.Equal(7ul, Bakes.Single().Node);
+        Assert.Equal("t/c2.0000000000000007.png", _sent.OfType<CaptureRequest>().Single().Path);
+    }
+
+    [Fact]
+    public void ANodeThatDrawsNothingIsNotAskedForAgain()
+    {
+        var queue = NewQueue(_ => false);
+        queue.Want(ContentBrowserModel.PartKey(C, 7), _now);
+        queue.Apply(new ThumbnailFailed(Bakes.Single().Id, "it draws nothing"), _now);
+        Assert.Equal("it draws nothing", queue.FailureOf(C, 7));
+        Assert.Equal(0, queue.Waiting);
+
+        queue.Pump(_now);
+        Assert.Single(Bakes);
+        queue.Forget(C, 7, _now);
+        Assert.Equal(2, Bakes.Count());
+        Assert.Null(queue.FailureOf(C, 7));
+    }
+
+    [Fact]
+    public void APartOfAPrefabWithNoPictureAsksForNothing()
+    {
+        var queue = NewQueue(_ => false);
+        Assert.Null(queue.PartPath(Script, 7));
+        queue.Want(ContentBrowserModel.PartKey(Script, 7), _now);
+        Assert.Empty(_sent);
     }
 
     [Fact]

@@ -529,7 +529,8 @@ public sealed class HostLinkTests : IAsyncDisposable
         await editor.Next<ProfileSummary>(s => !s.Recording);
     }
 
-    // The sample's room, and its main scene, which a bake reads as it does a prefab, as they are the same flat entities.
+    // The sample's room, and its main scene, which a bake reads as it does a prefab, as they are the same flat entities. A
+    // prefab has one root, which stands at the origin, so the scene's 21 stand there together, with its brick box in front.
     const string RoomMesh = "3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d";
     const string MainScene = "047ea7c35e4dbfb73d2dac450b79b9a8";
 
@@ -545,11 +546,11 @@ public sealed class HostLinkTests : IAsyncDisposable
     }
 
     // Asks for a picture as the content browser does, and decodes what the host wrote.
-    static async Task<SKBitmap> Bake(Editor editor, uint id, ThumbnailKind kind, string guid, string directory)
+    static async Task<SKBitmap> Bake(Editor editor, uint id, ThumbnailKind kind, string guid, string directory, ulong node = 0)
     {
         var path = Path.Combine(directory, $"{guid}.{id}.png");
         editor.Link.Send(new CaptureRequest(id, CaptureKind.Thumbnail, path));
-        editor.Link.Send(new BakeThumbnail(id, kind, Convert.FromHexString(guid), 0, 64, 64));
+        editor.Link.Send(new BakeThumbnail(id, kind, Convert.FromHexString(guid), node, 64, 64));
         var written = await editor.Next<CaptureResult>(r => r.Id == id);
         Assert.True(written.Ok, written.Reason);
         Assert.Equal((CaptureKind.Thumbnail, path, 64u, 64u), (written.Kind, written.Path, written.Width, written.Height));
@@ -602,12 +603,48 @@ public sealed class HostLinkTests : IAsyncDisposable
         Directory.CreateDirectory(directory);
         try
         {
-            // A bare mesh is gray, and from outside the sample's room is red brick.
+            // A bare mesh is gray, and the sample's box is red brick.
             static int Warm(SKBitmap picture) => picture.Pixels.Count(p => p.Red - p.Blue > 20);
             using var bare = await Bake(editor, 1, ThumbnailKind.Mesh, RoomMesh, directory);
             using var dressed = await Bake(editor, 2, ThumbnailKind.Prefab, MainScene, directory);
             Assert.True(Warm(dressed) > 64 * 64 / 10, $"{Warm(dressed)} pixels are warm");
             Assert.True(Warm(bare) < Warm(dressed) / 10, $"the bare mesh has {Warm(bare)} warm pixels, and the prefab {Warm(dressed)}");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ABakeOfANodeDrawsItsEntityAndNotThePrefab()
+    {
+        // Sponza's prefab, and its first floor, which are the intel sample's.
+        const string Sponza = "bfd7069a83795b6a4ffb0c1ca75a8aa9";
+        const ulong FirstFloor = 0xe7e4b781f0a1effe;
+        if (!File.Exists(Path.Combine(EditorOptions.RepositoryRoot(), "build", "dev", "content", Sponza + ".blob")))
+        {
+            Assert.Skip("the intel sample's content is not cooked");
+        }
+
+        await using var editor = await Connect();
+        editor.Link.Send(new Hello(LinkMessages.ProtocolVersion, "test"));
+        await editor.Next<Welcome>();
+        var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-bake-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var whole = await Bake(editor, 1, ThumbnailKind.Prefab, Sponza, directory);
+            using var part = await Bake(editor, 2, ThumbnailKind.Prefab, Sponza, directory, FirstFloor);
+            var differ = whole.Pixels.Zip(part.Pixels).Count(p => p.First != p.Second);
+            Assert.True(differ > 64 * 64 / 10, $"{differ} pixels differ");
+
+            // A node that is not in it draws nothing, and says so.
+            var nowhere = Path.Combine(directory, "nowhere.png");
+            editor.Link.Send(new CaptureRequest(3, CaptureKind.Thumbnail, nowhere));
+            editor.Link.Send(new BakeThumbnail(3, ThumbnailKind.Prefab, Convert.FromHexString(Sponza), 0x0123456789abcdef, 64, 64));
+            var failed = await editor.Next<ThumbnailFailed>(m => m.Id == 3);
+            Assert.Equal("it draws nothing", failed.Reason);
         }
         finally
         {

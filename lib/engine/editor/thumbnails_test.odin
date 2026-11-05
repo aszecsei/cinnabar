@@ -400,6 +400,29 @@ a_bake_gives_back_what_many_bakes_loaded :: proc(t: ^testing.T) {
 	testing.expect_value(t, render.residency_baked_count(&f.renderer.residency), 1)
 }
 
+@(test)
+a_bake_of_a_node_draws_only_what_is_under_it :: proc(t: ^testing.T) {
+	f := bake_setup(t)
+	defer bake_teardown(f)
+	write_scene(t, f, BAKE_PREFAB, BAKE_PREFAB_TEXT + BAKE_MISSING_TEXT)
+
+	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 1, kind = .Prefab, asset = BAKE_PREFAB, node = 2, width = 64, height = 64})
+	preview_quietly(f, false)
+	// Its one mesh is the one that is not in the cache, so what it draws is not its prefab's other.
+	testing.expect_value(t, f.editor.thumbnail.failed, "what it draws could not be loaded")
+
+	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 2, kind = .Prefab, asset = BAKE_PREFAB, node = 1, width = 64, height = 64})
+	desc, draw := first_drawing(f)
+	testing.expect(t, draw)
+	testing.expect_value(t, len(desc.items), 2)
+	free_all(f.platform.frame_allocator)
+
+	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 3, kind = .Prefab, asset = BAKE_PREFAB, node = 99, width = 64, height = 64})
+	preview_quietly(f, false)
+	testing.expect_value(t, f.editor.thumbnail.failed_id, 3)
+	testing.expect_value(t, f.editor.thumbnail.failed, "it draws nothing")
+}
+
 // What only thumbnails asked for goes a while after the last one, and not before.
 @(test)
 a_bake_gives_back_what_it_loaded :: proc(t: ^testing.T) {
