@@ -477,3 +477,47 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	read_gi_split_stats(r)
 	testing.expect_value(t, gi_split_stats(r), Gi_Split_Stats{})
 }
+
+@(test)
+a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
+	Warnings :: struct {
+		count: int,
+		text:  string,
+	}
+	warnings: Warnings
+	runner := context.logger
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, _: runtime.Logger_Options, _ := #caller_location) {
+			w := (^Warnings)(data)
+			if level == .Warning {
+				w.count += 1
+				w.text = text
+			}
+		},
+		data = &warnings,
+		lowest_level = .Warning,
+	}
+	r := new(Renderer)
+	defer free(r)
+	f := Frame{renderer = r, gi = &Gi_Frame{settings = {technique = .Split_Cascades}}}
+	// Waiting for its first frame is not losing it.
+	note_split_fallback(&f, false)
+	count_while_waiting := warnings.count
+	note_split_fallback(&f, true)
+	note_split_fallback(&f, false)
+	count_after_loss := warnings.count
+	reason := warnings.text
+	note_split_fallback(&f, false)
+	count_later := warnings.count
+	// A frame that asks for the screen cascades has not lost anything.
+	note_split_fallback(&f, true)
+	f.gi.settings.technique = .Screen_Cascades
+	note_split_fallback(&f, false)
+	count_by_choice := warnings.count
+	context.logger = runner
+	testing.expect_value(t, count_while_waiting, 0)
+	testing.expect_value(t, count_after_loss, 1)
+	testing.expect_value(t, reason, "gi: the split cascades gave way to the screen cascades: the world probes did not run")
+	testing.expect_value(t, count_later, 1)
+	testing.expect_value(t, count_by_choice, 1)
+}

@@ -1,5 +1,6 @@
 package render
 
+import "core:log"
 import "core:math"
 
 import "cinnabar:core"
@@ -224,6 +225,8 @@ Gi_Split :: struct {
 	stats_copying: bool,
 	ran:           bool,
 	last_stats:    Gi_Split_Stats,
+	// Whether the last frame that wanted the split cascades had them, for note_split_fallback.
+	running:       bool,
 }
 
 // Gi_Split_Frame is one frame's split cascades, in frame memory.
@@ -717,6 +720,32 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	add_split_stats_copy(f, sf)
 	s.ran = true
 	return true
+}
+
+// note_split_fallback warns when a frame that wants the split cascades takes the screen cascades after a frame that had
+// them, which changes the whole frame's indirect light with nothing moving. It warns once, until they run again.
+@(private)
+note_split_fallback :: proc(f: ^Frame, ran: bool) {
+	r := f.renderer
+	s := &r.gi.split
+	if ran || f.gi.settings.technique != .Split_Cascades {
+		s.running = ran
+		return
+	}
+	if !s.running {
+		return
+	}
+	s.running = false
+	reason := "the upload ring has no room"
+	switch {
+	case f.gi.probes == nil:
+		reason = "the world probes did not run"
+	case !gi_split_ready(r):
+		reason = "their pipelines are not ready"
+	case !hit_shading_ready(f):
+		reason = "hit shading has no room"
+	}
+	log.warnf("gi: the split cascades gave way to the screen cascades: %s", reason)
 }
 
 // add_split_stats_copy copies the tables' counters to their next copy, after the merge, for read_gi_split_stats to
