@@ -345,6 +345,11 @@ start_streaming :: proc(r: ^Residency, e: ^Resident_Entry) {
 	if e.handle == {} {
 		handle, loaded := asset.load(r.assets, e.guid)
 		if !loaded {
+			// A live mesh was let go with no asset behind it, so nothing may go on drawing what the editor gave up.
+			if e.stale {
+				destroy_resources(r, e.kind, &e.current)
+				e.current, e.ready, e.stale = {}, false, false
+			}
 			fail(r, e, "is not cooked")
 			return
 		}

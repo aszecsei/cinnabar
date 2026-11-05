@@ -10,6 +10,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import "cinnabar:engine/debug"
 import format "cinnabar:engine/asset/format"
@@ -985,7 +986,7 @@ live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
 	testing.expect_value(t, mesh.bounds.max, [3]f32{2, 2, 2})
 	testing.expect_value(t, live_buffers, 6)
 	// A step of the wrong count is refused.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	step(f, 1, link.Live_Mesh_Vertices{guid = ([16]u8)(guid), positions = positions[:6]})
 	render.residency_update(residency)
 	mesh, _ = render.resident_mesh(residency, guid)
