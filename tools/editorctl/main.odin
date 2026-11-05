@@ -7,6 +7,7 @@
 //   editorctl [--automation <file>] [--json] gif [--out <path>]
 //   editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
 //   editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+//   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
 package editorctl
 
 import "base:runtime"
@@ -43,6 +44,8 @@ Options :: struct {
 	position:   []f64,
 	yaw:        Maybe(f64),
 	pitch:      Maybe(f64),
+	// The panel whose window ui draws, or "" for the main window.
+	window:     string,
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
@@ -55,6 +58,7 @@ Request :: struct {
 	position: []f64 `json:"position"`,
 	yaw:      Maybe(f64) `json:"yaw"`,
 	pitch:    Maybe(f64) `json:"pitch"`,
+	window:   string `json:"window"`,
 }
 
 // Status matches AutomationStatus.
@@ -88,7 +92,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>]",
 		)
 		os.exit(2)
 	}
@@ -161,6 +165,9 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		case arg == "--out" && i + 1 < len(args):
 			o.out = args[i + 1]
 			i += 1
+		case arg == "--window" && i + 1 < len(args):
+			o.window = args[i + 1]
+			i += 1
 		case arg == "--set" && i + 1 < len(args):
 			name, _, value := strings.partition(args[i + 1], "=")
 			if name == "" || value == "" {
@@ -199,11 +206,11 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera":
+	case "status", "screenshot", "gif", "viewport", "camera", "ui":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport or camera"
+		return o, "no command: status, screenshot, gif, viewport, camera or ui"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport or camera", o.command)
+		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera or ui", o.command)
 	}
 	if (len(o.settings) > 0) != (o.command == "viewport") {
 		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport"
@@ -218,8 +225,11 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	if len(o.views) > 0 && o.command != "screenshot" {
 		return o, "--view goes with screenshot"
 	}
-	if o.out != "" && o.command != "screenshot" && o.command != "gif" {
-		return o, "--out goes with screenshot or gif"
+	if o.window != "" && o.command != "ui" {
+		return o, "--window goes with ui"
+	}
+	if o.out != "" && o.command != "screenshot" && o.command != "gif" && o.command != "ui" {
+		return o, "--out goes with screenshot, gif or ui"
 	}
 	return o, ""
 }
@@ -305,6 +315,7 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		position = o.position,
 		yaw      = o.yaw,
 		pitch    = o.pitch,
+		window   = o.window,
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)

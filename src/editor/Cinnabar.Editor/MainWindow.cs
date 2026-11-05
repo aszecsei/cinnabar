@@ -110,12 +110,34 @@ public sealed class MainWindow : Window
                 _ = OfferRestore();
             }
         };
+        shell.UiCapture = CaptureUi;
         Closing += OnClosing;
         Closed += (_, _) =>
         {
             _autosave.Stop();
             shell.Dispose();
         };
+    }
+
+    // Draws the controls of a panel's window, or of this window, into a PNG (see docs/editor/capture.md#automation). The
+    // viewport's frames are on a composition surface of their own, so they do not show.
+    string? CaptureUi(string? panel, string path)
+    {
+        TopLevel window = this;
+        if (panel != null)
+        {
+            if (!_shell.Layout.Panels.Any(p => p.Id == panel))
+            {
+                return $"unknown window {panel}; the windows are named by their panels: {string.Join(", ", _shell.Layout.Panels.Select(p => p.Id))}";
+            }
+            window = _shell.Layout.FloatingWindowOf(panel) as TopLevel ?? this;
+        }
+        var scale = window.RenderScaling;
+        using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(PixelSize.FromSize(window.ClientSize, scale), new Vector(96 * scale, 96 * scale));
+        image.Render(window);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        image.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+        return null;
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)

@@ -341,6 +341,10 @@ public sealed class EditorLayout
         return dock;
     }
 
+    /// <summary>The floating window that holds a panel, or null when the panel is in the main window or closed.</summary>
+    public IHostWindow? FloatingWindowOf(string id) =>
+        Root.Windows?.FirstOrDefault(w => w.Layout != null && Walk(w.Layout).Any(d => d.Id == id))?.Host;
+
     /// <summary>Every dockable under <paramref name="dockable"/>, including the layouts of floating windows.</summary>
     static IEnumerable<IDockable> Walk(IDockable dockable)
     {

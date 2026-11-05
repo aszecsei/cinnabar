@@ -13,8 +13,15 @@ namespace Cinnabar.Editor.Shell;
 public sealed partial class EditorShell
 {
     AutomationServer? _automation;
+    int _uiCaptures;
 
     public int AutomationPort => _automation?.Port ?? 0;
+
+    /// <summary>
+    /// Draws a window's controls into a PNG: the window of a panel, or the main window for null, and the file's path. It
+    /// returns the reason when it cannot. The main window sets it, so a shell in a test has none.
+    /// </summary>
+    public Func<string?, string, string?>? UiCapture { get; set; }
 
     public void StartAutomation()
     {
@@ -94,9 +101,24 @@ public sealed partial class EditorShell
                 }
                 Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? Camera.Yaw, request.Pitch ?? Camera.Pitch);
                 return new AutomationResponse(request.Id, true);
+            case "ui":
+                return CaptureUiResponse(request);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport and camera");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera and ui");
         }
+    }
+
+    AutomationResponse CaptureUiResponse(AutomationRequest request)
+    {
+        if (UiCapture is not { } capture)
+        {
+            return new AutomationResponse(request.Id, false, Error: "the editor has no window to draw");
+        }
+        var path = CaptureModel.ImagePath(request.Path, _options.CaptureDirectory, DateTime.UtcNow, ++_uiCaptures, "ui");
+        var window = string.IsNullOrEmpty(request.Window) ? null : request.Window;
+        return capture(window, path) is { } error
+            ? new AutomationResponse(request.Id, false, Error: error)
+            : new AutomationResponse(request.Id, true, [path]);
     }
 
     static AutomationResponse Response(long id, CaptureOutcome outcome) => new(id, outcome.Ok, [.. outcome.Files], outcome.Error);
