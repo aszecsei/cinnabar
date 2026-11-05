@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text.Json;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Model;
@@ -179,5 +180,31 @@ public sealed partial class EditorShell
         Assets.Changed += FollowMovedGraphs;
         // What the browser reveals shows, also when another tab hides the panel.
         Content.ContentRevealed += () => Layout.Show("contentBrowser");
+        LoadContentView();
+        Content.Model.ViewSettingsChanged += () => WriteSetting("content view", EditorSettings.ContentViewFileName,
+            JsonSerializer.Serialize(new ContentViewSettings(Content.Model.ViewMode, Content.Model.TileSize)));
     }
+
+    // How each user last showed the content browser's assets. A file that cannot be read leaves the defaults.
+    void LoadContentView()
+    {
+        if (Settings.Read(EditorSettings.ContentViewFileName) is not { } text)
+        {
+            return;
+        }
+        try
+        {
+            if (JsonSerializer.Deserialize<ContentViewSettings>(text) is { } saved)
+            {
+                Content.Model.ViewMode = saved.ViewMode;
+                Content.Model.TileSize = saved.TileSize;
+            }
+        }
+        catch (JsonException e)
+        {
+            Console.Add(LogLevel.Warning, $"content: cannot read {EditorSettings.ContentViewFileName}: {e.Message}");
+        }
+    }
+
+    sealed record ContentViewSettings(ContentViewMode ViewMode, double TileSize);
 }

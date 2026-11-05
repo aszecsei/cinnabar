@@ -49,10 +49,241 @@ public sealed class ContentModelTests : IDisposable
         shell.Content.RevealAsset(Wall);
 
         Assert.Equal(new ContentFolder("game", "lib"), model.Folder);
-        Assert.True(model.IsFileExpanded(Kit));
-        Assert.Equal(["kit.glb", "Wall", "util.luau"], Names(model));
+        Assert.Equal(Kit, model.OpenFile);
+        Assert.Equal(["Wall"], Names(model));
         Assert.Equal([Wall], model.Selection);
         Assert.Equal(Wall, revealed?.Guid);
+
+        // Leaving goes back to the folder, with the file selected, and the path over the assets says where it is.
+        Assert.Equal(["game", "lib", "kit.glb"], model.Crumbs().Select(c => c.Name));
+        model.Leave();
+        Assert.Null(model.OpenFile);
+        Assert.Equal(["kit.glb", "util.luau"], Names(model));
+        Assert.Equal([Kit], model.Selection);
+    }
+
+    [Fact]
+    public void LeavingAFileEndsItsFilter()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.Enter(Kit);
+        model.ToggleKind(ContentKind.Meshes);
+        model.Leave();
+        Assert.False(model.Filtering);
+        Assert.Equal(["kit.glb", "util.luau"], Names(model));
+    }
+
+    [Theory]
+    [InlineData(Avalonia.Input.Key.Delete, Avalonia.Input.KeyModifiers.None, true)]
+    [InlineData(Avalonia.Input.Key.Back, Avalonia.Input.KeyModifiers.None, true)]
+    [InlineData(Avalonia.Input.Key.Q, Avalonia.Input.KeyModifiers.None, true)]
+    [InlineData(Avalonia.Input.Key.Left, Avalonia.Input.KeyModifiers.Shift, true)]
+    [InlineData(Avalonia.Input.Key.A, Avalonia.Input.KeyModifiers.Control, true)]
+    [InlineData(Avalonia.Input.Key.Z, Avalonia.Input.KeyModifiers.Control, true)]
+    [InlineData(Avalonia.Input.Key.Z, Avalonia.Input.KeyModifiers.Control | Avalonia.Input.KeyModifiers.Shift, true)]
+    [InlineData(Avalonia.Input.Key.S, Avalonia.Input.KeyModifiers.Control, false)]
+    [InlineData(Avalonia.Input.Key.D, Avalonia.Input.KeyModifiers.Control, false)]
+    [InlineData(Avalonia.Input.Key.F2, Avalonia.Input.KeyModifiers.None, false)]
+    [InlineData(Avalonia.Input.Key.P, Avalonia.Input.KeyModifiers.Control | Avalonia.Input.KeyModifiers.Alt, false)]
+    public void ATextBoxKeepsTheKeysThatItUses(Avalonia.Input.Key key, Avalonia.Input.KeyModifiers modifiers, bool used) =>
+        Assert.Equal(used, Ribbon.ShortcutCommand.TextBoxUses(new Avalonia.Input.KeyGesture(key, modifiers)));
+
+    [Fact]
+    public void AShortcutDoesNothingWhileATextBoxUsesIt()
+    {
+        var delete = new Avalonia.Input.KeyGesture(Avalonia.Input.Key.Delete);
+        var text = true;
+        var ran = new CommunityToolkit.Mvvm.Input.RelayCommand(() => { });
+        var shortcut = new Ribbon.ShortcutCommand(ran, delete, () => false, () => text);
+        Assert.False(shortcut.CanExecute(null));
+        text = false;
+        Assert.True(shortcut.CanExecute(null));
+    }
+
+    [Fact]
+    public void KindChipsFilterSubassetsToo()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        Assert.False(model.Filtering);
+
+        model.ToggleKind(ContentKind.Meshes);
+        Assert.Equal(["Wall"], Names(model));
+        Assert.Equal([(ContentKind.Models, 1), (ContentKind.Meshes, 1), (ContentKind.Scripts, 2)], model.KindCounts());
+
+        model.ToggleKind(ContentKind.Scripts);
+        Assert.Equal(["door.luau", "Wall", "util.luau"], Names(model));
+
+        // The search and the kinds narrow together, and Clear ends both.
+        model.Search = "door";
+        Assert.Equal(["door.luau"], Names(model));
+        Assert.Equal([(ContentKind.Scripts, 1)], model.KindCounts());
+        model.ClearFilter();
+        Assert.False(model.Filtering);
+        Assert.Equal(["door.luau"], Names(model));
+    }
+
+    [Fact]
+    public void AFilterCanStayInTheOpenFolderOrFile()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.Open(new ContentFolder("game", "lib"));
+        model.ToggleKind(ContentKind.Scripts);
+        Assert.Equal(["door.luau", "util.luau"], Names(model));
+
+        model.InThisFolder = true;
+        Assert.Equal(["util.luau"], Names(model));
+
+        // An open file's filter looks only in the file, and finds what it makes by kind.
+        model.Enter(Kit);
+        Assert.Empty(model.Items);
+        model.ToggleKind(ContentKind.Scripts);
+        model.ToggleKind(ContentKind.Meshes);
+        Assert.Equal(["Wall"], Names(model));
+    }
+
+    [Fact]
+    public void GridColumnsFollowTheWidth()
+    {
+        // A tile is its picture and a gap on each side, and tiles have a gap between them.
+        var tile = ContentBrowserModel.DefaultTileSize + 2 * ContentGridLayout.Gap;
+        var three = ContentGridLayout.Of(3 * tile + 2 * ContentGridLayout.Gap, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize);
+        Assert.Equal(3, three.Columns);
+        Assert.Equal(2, ContentGridLayout.Of(3 * tile + 2 * ContentGridLayout.Gap - 1, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize).Columns);
+        Assert.Equal(1, ContentGridLayout.Of(1, ContentViewMode.Grid, ContentBrowserModel.DefaultTileSize).Columns);
+        Assert.Equal(4, three.RowCount(10));
+        Assert.Equal(3, three.RowOf(9));
+
+        var list = ContentGridLayout.Of(500, ContentViewMode.List, ContentBrowserModel.DefaultTileSize);
+        Assert.Equal(1, list.Columns);
+        Assert.Equal(ContentGridLayout.ListRowHeight, list.RowHeight);
+    }
+
+    [Fact]
+    public void AnIndexFollowsFromAPoint()
+    {
+        var layout = new ContentGridLayout(3, 100, 130);
+        Assert.Equal(0, layout.IndexAt(1, 1, 7));
+        Assert.Equal(4, layout.IndexAt(110, 131, 7));
+        // Over the gap between tiles, past the last asset, past the last column and above the rows there is none.
+        Assert.Null(layout.IndexAt(103, 1, 7));
+        Assert.Null(layout.IndexAt(110, 261, 7));
+        Assert.Null(layout.IndexAt(320, 1, 7));
+        Assert.Null(layout.IndexAt(1, -1, 7));
+    }
+
+    [Fact]
+    public void ArrowsMoveByARowOfColumns()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.Enter(Kit);
+        shell.Assets.Apply(new AssetDelta(
+        [
+            TestAssets.Make("a1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "A"),
+            TestAssets.Make("b1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "B"),
+            TestAssets.Make("c1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "C"),
+        ], [], [], []));
+        Assert.Equal(["A", "B", "C", "Wall"], Names(model));
+
+        // With nothing selected, the first press starts at an end.
+        Assert.Equal("a1", model.Move(1, false)?.Guid);
+        const int columns = 2;
+        Assert.Equal("c1", model.Move(columns, false)?.Guid);
+        Assert.Equal(["c1"], model.Selection);
+        // A step past an end stops there.
+        Assert.Equal(Wall, model.Move(columns, false)?.Guid);
+        Assert.Equal(Wall, model.Move(1, false)?.Guid);
+        Assert.Equal("a1", model.Move(-100, false)?.Guid);
+    }
+
+    [Fact]
+    public void ShiftSelectsARangeAcrossRows()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.Open(new ContentFolder("game", ""));
+        model.Enter(Kit);
+        shell.Assets.Apply(new AssetDelta(
+        [
+            TestAssets.Make("a1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "A"),
+            TestAssets.Make("b1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "B"),
+            TestAssets.Make("c1", AssetKind.Mesh, "lib/kit.glb", parent: Kit, subasset: "C"),
+        ], [], [], []));
+        _ = model.Items;
+
+        model.Press("a1", false, false);
+        model.Press("c1", false, true);
+        Assert.Equal(["a1", "b1", "c1"], model.Selection);
+
+        // A range is from the anchor, either way, and shrinks with the pointer.
+        model.Press("b1", false, true);
+        Assert.Equal(["a1", "b1"], model.Selection);
+
+        // Ctrl takes one out and moves the anchor.
+        model.Press("a1", true, false);
+        Assert.Equal(["b1"], model.Selection);
+        model.Press(Wall, false, true);
+        Assert.Equal(["a1", "b1", "c1", Wall], model.Selection.Order(StringComparer.Ordinal).OrderBy(g => g == Wall ? 1 : 0));
+
+        // Arrows with Shift grow from the same anchor.
+        model.Press("b1", false, false);
+        model.Move(1, true);
+        Assert.Equal(["b1", "c1"], model.Selection);
+
+        model.SelectAll();
+        Assert.Equal(4, model.Selection.Count);
+    }
+
+    [Fact]
+    public void TheMarqueeSelectsByGeometry()
+    {
+        var layout = new ContentGridLayout(3, 100, 130);
+        // From the middle of the first tile to the middle of the fifth, either way round.
+        Assert.Equal([0, 1, 3, 4], layout.InRect(50, 60, 160, 200, 7));
+        Assert.Equal([0, 1, 3, 4], layout.InRect(160, 200, 50, 60, 7));
+        // A rectangle that stays in a gap between columns touches nothing.
+        Assert.Empty(layout.InRect(101, 10, 105, 20, 7));
+        // Past the last asset there is none, however far it reaches.
+        Assert.Equal([6], layout.InRect(0, 270, 50, 900, 7));
+    }
+
+    [Fact]
+    public void ARevealShowsWhatTheFilterHid()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.ToggleKind(ContentKind.Textures);
+        Assert.Empty(model.Items);
+
+        shell.Content.RevealAsset(Door);
+
+        Assert.Empty(model.Kinds);
+        Assert.Equal([Door], model.Selection);
+        Assert.Contains("door.luau", Names(model));
+    }
+
+    [Fact]
+    public void TheViewSettingsLastAndStayInRange()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        var saved = 0;
+        model.ViewSettingsChanged += () => saved++;
+
+        model.TileSize = 1;
+        Assert.Equal(ContentBrowserModel.MinTileSize, model.TileSize);
+        model.TileSize = 5000;
+        Assert.Equal(ContentBrowserModel.MaxTileSize, model.TileSize);
+        model.ViewMode = ContentViewMode.List;
+        Assert.Equal(3, saved);
+        Assert.True(File.Exists(Path.Combine(shell.Settings.Directory, Shell.EditorSettings.ContentViewFileName)));
+
+        using var reopened = TestShell.Open(_temp, null, null);
+        Assert.Equal(ContentViewMode.List, reopened.Content.Model.ViewMode);
+        Assert.Equal(ContentBrowserModel.MaxTileSize, reopened.Content.Model.TileSize);
     }
 
     [Fact]

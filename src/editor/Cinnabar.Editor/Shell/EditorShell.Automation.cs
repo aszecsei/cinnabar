@@ -132,6 +132,36 @@ public sealed partial class EditorShell
                 case "search":
                     model.Search = text;
                     break;
+                case "view":
+                    if (!Enum.TryParse<ContentViewMode>(text, ignoreCase: true, out var mode))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"view takes grid or list, not {text}");
+                    }
+                    model.ViewMode = mode;
+                    break;
+                case "tileSize":
+                    model.TileSize = value.GetDouble();
+                    break;
+                case "kinds":
+                    foreach (var kind in model.Kinds.ToList())
+                    {
+                        model.ToggleKind(kind);
+                    }
+                    foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (!Enum.TryParse<ContentKind>(part, ignoreCase: true, out var kind))
+                        {
+                            return new AutomationResponse(request.Id, false, Error: $"unknown kind {part}; the kinds are {string.Join(", ", Enum.GetNames<ContentKind>())}");
+                        }
+                        model.ToggleKind(kind);
+                    }
+                    break;
+                case "enter":
+                    model.Enter(text);
+                    break;
+                case "leave":
+                    model.Leave();
+                    break;
                 case "reveal":
                     if (Assets.Find(text) == null)
                     {
@@ -150,7 +180,7 @@ public sealed partial class EditorShell
                     }
                     break;
                 default:
-                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, reveal and shown");
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, enter, leave, reveal and shown");
             }
         }
         return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],

@@ -195,13 +195,14 @@ public sealed class AssetIndex
     /// The assets of every folder that a search matches. Each word must match: <c>kind:script</c> or <c>kind:scene</c>
     /// matches the kind, and any other word a part of the file's name or the behaviour's class, ignoring case.
     /// </summary>
-    public IEnumerable<Asset> Search(string query)
-    {
-        var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return _assets.Values.Where(a => words.All(w => Matches(a, w)))
+    public IEnumerable<Asset> Search(string query) =>
+        _assets.Values.Where(a => MatchesSearch(a, query))
             .OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase);
-    }
+
+    /// <summary>Whether an asset has every word of a search (see <see cref="Search"/>).</summary>
+    public static bool MatchesSearch(Asset asset, string query) =>
+        query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All(w => Matches(asset, w));
 
     static bool Matches(Asset asset, string word)
     {

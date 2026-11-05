@@ -29,22 +29,56 @@ public sealed record ContentItem(string? Guid, ContentFolder? Folder)
 /// <summary>A row of the content browser's folder list.</summary>
 public sealed record FolderRow(string Root, string Path, string Name, int Depth, bool HasChildren, bool Expanded);
 
+/// <summary>How the content browser shows its assets.</summary>
+public enum ContentViewMode
+{
+    Grid,
+    List,
+}
+
+/// <summary>What the content browser's filter offers: the asset kinds that a person looks for together.</summary>
+public enum ContentKind
+{
+    Scenes,
+    Prefabs,
+    Models,
+    Meshes,
+    Materials,
+    Textures,
+    Audio,
+    Effects,
+    Animation,
+    Scripts,
+    Shaders,
+}
+
+/// <summary>A part of the path that the content browser shows over its assets: a folder, or a file that is open.</summary>
+public sealed record ContentCrumb(string Name, ContentFolder? Folder, string? File);
+
 /// <summary>
-/// What the content browser shows (see docs/editor/shell-and-panels.md#content-browser): the open folder, the search, the
-/// selection and what is expanded. Docking can rebuild the panel's view at any time, and the commands act on the folder
-/// and the selection whether the panel shows or not, so all of it is here. Use it on one thread.
+/// What the content browser shows (see docs/editor/shell-and-panels.md#content-browser): the open folder or file, the
+/// filter, the selection and how it shows them. Docking can rebuild the panel's view at any time, and the commands act on
+/// the folder and the selection whether the panel shows or not, so all of it is here. Use it on one thread.
 /// </summary>
 public sealed class ContentBrowserModel
 {
+    public const double MinTileSize = 64;
+    public const double MaxTileSize = 256;
+    public const double DefaultTileSize = 72;
+
     readonly AssetIndex _index;
     // Roots start expanded, and other folders collapsed. The set holds the expanded ones, as "root/path".
     readonly HashSet<string> _expandedFolders = [];
     readonly HashSet<string> _seenRoots = [];
-    // The files whose sub-assets show under them, by GUID.
-    readonly HashSet<string> _expandedFiles = [];
+    readonly HashSet<ContentKind> _kinds = [];
     List<string> _selection = [];
     List<Asset>? _items;
     string _search = "";
+    string? _anchor;
+    string? _cursor;
+    ContentViewMode _viewMode = ContentViewMode.Grid;
+    double _tileSize = DefaultTileSize;
+    bool _inThisFolder;
 
     public ContentBrowserModel(AssetIndex index)
     {
@@ -56,10 +90,13 @@ public sealed class ContentBrowserModel
     /// <summary>The open folder, where new assets go.</summary>
     public ContentFolder? Folder { get; private set; }
 
+    /// <summary>The file whose sub-assets show in place of its folder's assets, by GUID, or null.</summary>
+    public string? OpenFile { get; private set; }
+
     /// <summary>The selected assets, by GUID, the one that was selected first first.</summary>
     public IReadOnlyList<string> Selection => _selection;
 
-    /// <summary>What to search for, or <c>""</c> to show the open folder.</summary>
+    /// <summary>What to search for, or <c>""</c>.</summary>
     public string Search
     {
         get => _search;
@@ -75,7 +112,57 @@ public sealed class ContentBrowserModel
 
     public bool Searching => Search.Trim().Length > 0;
 
-    /// <summary>What the view shows changed: the folders, the assets or the search. A cook raises it for each of its messages.</summary>
+    /// <summary>The kinds that show. None means every kind.</summary>
+    public IReadOnlyCollection<ContentKind> Kinds => _kinds;
+
+    /// <summary>A search or a kind narrows what shows, so it comes from every folder, or those under the open one.</summary>
+    public bool Filtering => Searching || _kinds.Count > 0;
+
+    /// <summary>Whether a filter looks only in the open folder and those under it.</summary>
+    public bool InThisFolder
+    {
+        get => _inThisFolder;
+        set
+        {
+            if (_inThisFolder != value)
+            {
+                _inThisFolder = value;
+                ItemsMoved();
+            }
+        }
+    }
+
+    public ContentViewMode ViewMode
+    {
+        get => _viewMode;
+        set
+        {
+            if (_viewMode != value)
+            {
+                _viewMode = value;
+                ViewSettingsChanged?.Invoke();
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>The side of a tile's picture, in the grid.</summary>
+    public double TileSize
+    {
+        get => _tileSize;
+        set
+        {
+            var size = Math.Clamp(value, MinTileSize, MaxTileSize);
+            if (_tileSize != size)
+            {
+                _tileSize = size;
+                ViewSettingsChanged?.Invoke();
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>What the view shows changed: the folders, the assets or the filter. A cook raises it for each of its messages.</summary>
     public event Action? Changed;
 
     /// <summary>The open folder or the selection, which the commands act on, changed.</summary>
@@ -84,9 +171,12 @@ public sealed class ContentBrowserModel
     /// <summary>An asset was revealed: it is selected in its folder, for the view to scroll to.</summary>
     public event Action<Asset>? Revealed;
 
+    /// <summary>The view mode or the tile size changed, which each user keeps.</summary>
+    public event Action? ViewSettingsChanged;
+
     /// <summary>
-    /// The assets to show: every asset that the search matches, or the open folder's, each expanded file with its
-    /// sub-assets under it. The selection keeps only the assets that are among them.
+    /// The assets to show: those of the open file or the open folder, or every asset that the filter matches, the open
+    /// file's only when one is open. The selection keeps only the assets that are among them.
     /// </summary>
     public IReadOnlyList<Asset> Items
     {
@@ -95,10 +185,75 @@ public sealed class ContentBrowserModel
             if (_items == null)
             {
                 _items = BuildItems();
-                KeepSelected(g => _items.Any(a => a.Guid == g));
+                var shown = _items.Select(a => a.Guid).ToHashSet();
+                var kept = _selection.Where(shown.Contains).ToList();
+                if (kept.Count != _selection.Count)
+                {
+                    _selection = kept;
+                    ContextChanged?.Invoke();
+                }
             }
             return _items;
         }
+    }
+
+    /// <summary>How many assets of each kind the filter's other parts leave, for the kinds that it offers.</summary>
+    public IReadOnlyList<(ContentKind Kind, int Count)> KindCounts() =>
+        [.. Scope().Where(a => !Searching || AssetIndex.MatchesSearch(a, Search)).GroupBy(a => KindOf(a.Kind)).OrderBy(g => g.Key).Select(g => (g.Key, g.Count()))];
+
+    /// <summary>The path over the assets: the root, each folder, and the open file.</summary>
+    public IReadOnlyList<ContentCrumb> Crumbs()
+    {
+        if (Folder is not { } folder)
+        {
+            return [];
+        }
+        List<ContentCrumb> crumbs = [new ContentCrumb(folder.Root, new ContentFolder(folder.Root, ""), null)];
+        var path = "";
+        foreach (var part in folder.Path.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            path = path == "" ? part : $"{path}/{part}";
+            crumbs.Add(new ContentCrumb(part, new ContentFolder(folder.Root, path), null));
+        }
+        if (OpenFile != null && _index.Find(OpenFile) is { } file)
+        {
+            crumbs.Add(new ContentCrumb(AssetIndex.Name(file.Path), null, file.Guid));
+        }
+        return crumbs;
+    }
+
+    /// <summary>The kind that the filter offers an asset under.</summary>
+    public static ContentKind KindOf(AssetKind kind) => kind switch
+    {
+        AssetKind.Scene => ContentKind.Scenes,
+        AssetKind.Prefab => ContentKind.Prefabs,
+        AssetKind.Model or AssetKind.Stage => ContentKind.Models,
+        AssetKind.Mesh or AssetKind.InstanceSet => ContentKind.Meshes,
+        AssetKind.Material or AssetKind.MaterialInstance or AssetKind.MaterialFunction => ContentKind.Materials,
+        AssetKind.Texture => ContentKind.Textures,
+        AssetKind.Audio => ContentKind.Audio,
+        AssetKind.Effect => ContentKind.Effects,
+        AssetKind.Animation or AssetKind.AnimationGraph or AssetKind.Skin => ContentKind.Animation,
+        AssetKind.Shader or AssetKind.ShadingModel => ContentKind.Shaders,
+        _ => ContentKind.Scripts,
+    };
+
+    /// <summary>Shows or hides a kind in the filter.</summary>
+    public void ToggleKind(ContentKind kind)
+    {
+        if (!_kinds.Remove(kind))
+        {
+            _kinds.Add(kind);
+        }
+        ItemsMoved();
+    }
+
+    /// <summary>Ends the filter: no search and every kind.</summary>
+    public void ClearFilter()
+    {
+        _kinds.Clear();
+        _search = "";
+        ItemsMoved();
     }
 
     /// <summary>The rows of the folder list: each root, and the folders under the expanded ones.</summary>
@@ -125,18 +280,6 @@ public sealed class ContentBrowserModel
         return rows;
     }
 
-    public bool IsFileExpanded(string guid) => _expandedFiles.Contains(guid);
-
-    /// <summary>Shows or hides a file's sub-assets.</summary>
-    public void ToggleFile(string guid)
-    {
-        if (!_expandedFiles.Remove(guid))
-        {
-            _expandedFiles.Add(guid);
-        }
-        ItemsMoved();
-    }
-
     /// <summary>Shows or hides the folders under a folder.</summary>
     public void ToggleFolder(string root, string path)
     {
@@ -148,17 +291,47 @@ public sealed class ContentBrowserModel
         Changed?.Invoke();
     }
 
-    /// <summary>Opens a folder, and ends the search.</summary>
+    /// <summary>Opens a folder, and ends the search and any open file.</summary>
     public void Open(ContentFolder folder)
     {
-        if (Folder == folder && _search == "")
+        if (Folder == folder && _search == "" && OpenFile == null)
         {
             return;
         }
         Folder = folder;
+        OpenFile = null;
         _search = "";
         ItemsMoved();
         ContextChanged?.Invoke();
+    }
+
+    /// <summary>Shows a file's sub-assets in place of its folder's assets, and ends the search.</summary>
+    public void Enter(string file)
+    {
+        if (_index.Find(file) is not { } asset || AssetIndex.IsSubasset(asset))
+        {
+            return;
+        }
+        Folder = new ContentFolder(asset.Root, AssetIndex.Parent(asset.Path));
+        OpenFile = file;
+        _search = "";
+        ItemsMoved();
+        ContextChanged?.Invoke();
+    }
+
+    /// <summary>Goes back from an open file to its folder, with the file selected, so the filter ends: it was the file's.</summary>
+    public void Leave()
+    {
+        if (OpenFile is { } file)
+        {
+            OpenFile = null;
+            _kinds.Clear();
+            _search = "";
+            _selection = [file];
+            _anchor = _cursor = file;
+            ItemsMoved();
+            ContextChanged?.Invoke();
+        }
     }
 
     /// <summary>Selects assets, by GUID. Those that stay selected keep their order, so the first one's details stay.</summary>
@@ -166,6 +339,51 @@ public sealed class ContentBrowserModel
     {
         var selected = guids.ToList();
         Set([.. _selection.Where(selected.Contains), .. selected.Where(g => !_selection.Contains(g))]);
+    }
+
+    /// <summary>A click on an asset: it alone, or with Ctrl in or out of the selection, or with Shift the assets from the anchor to it.</summary>
+    public void Press(string guid, bool add, bool range)
+    {
+        if (range && _anchor != null && Span(_anchor, guid) is { } span)
+        {
+            Select(add ? _selection.Union(span) : span);
+        }
+        else
+        {
+            if (add)
+            {
+                Select(_selection.Contains(guid) ? _selection.Where(g => g != guid) : _selection.Append(guid));
+            }
+            else
+            {
+                Select([guid]);
+            }
+            _anchor = guid;
+        }
+        _cursor = guid;
+    }
+
+    /// <summary>
+    /// Moves the selection by assets, as the arrow keys do, stopping at the ends, or with Shift grows it from the anchor.
+    /// It gives the asset that the cursor moved to.
+    /// </summary>
+    public Asset? Move(int by, bool range)
+    {
+        var items = Items;
+        if (items.Count == 0)
+        {
+            return null;
+        }
+        var at = _cursor == null ? -1 : IndexOf(items, _cursor);
+        var next = at < 0 ? (by < 0 ? items.Count - 1 : 0) : Math.Clamp(at + by, 0, items.Count - 1);
+        Press(items[next].Guid, false, range);
+        return items[next];
+    }
+
+    public void SelectAll()
+    {
+        Select(Items.Select(a => a.Guid));
+        _anchor = Items.Count > 0 ? Items[0].Guid : null;
     }
 
     /// <summary>Shows an asset selected in its folder, or opens a folder, showing where it is, and ends the search.</summary>
@@ -183,6 +401,7 @@ public sealed class ContentBrowserModel
             }
             _expandedFolders.Add(folder.Root + "/");
             Folder = folder;
+            OpenFile = null;
             _search = "";
             ItemsMoved();
             ContextChanged?.Invoke();
@@ -196,14 +415,13 @@ public sealed class ContentBrowserModel
         {
             _expandedFolders.Add($"{asset.Root}/{path}");
         }
-        // A sub-asset shows under its file.
-        if (AssetIndex.IsSubasset(asset))
-        {
-            _expandedFiles.Add(asset.Parent);
-        }
+        // A sub-asset shows in its file. What is revealed shows, whatever the filter hid.
+        OpenFile = AssetIndex.IsSubasset(asset) ? asset.Parent : null;
         Folder = new ContentFolder(asset.Root, folder);
         _search = "";
+        _kinds.Clear();
         _selection = [asset.Guid];
+        _anchor = _cursor = asset.Guid;
         ItemsMoved();
         ContextChanged?.Invoke();
         Revealed?.Invoke(asset);
@@ -215,6 +433,7 @@ public sealed class ContentBrowserModel
         if (Folder != folder)
         {
             Folder = folder;
+            OpenFile = null;
             _items = null;
             Changed?.Invoke();
         }
@@ -229,13 +448,18 @@ public sealed class ContentBrowserModel
         {
             _expandedFolders.Add(root.Name + "/");
         }
-        // The open folder can go, with its root or by a delete or a move.
+        // The open folder can go, with its root or by a delete or a move, and so can the open file.
         var context = false;
         if (Folder is not { } folder || _index.FindRoot(folder.Root) == null || (folder.Path != "" && !_index.Folders.Contains(new(folder.Root, folder.Path))))
         {
             var fallback = _index.Roots.Count > 0 ? new ContentFolder(_index.Roots[0].Name, "") : null;
             context = Folder != fallback;
             Folder = fallback;
+            OpenFile = null;
+        }
+        if (OpenFile != null && _index.Find(OpenFile) == null)
+        {
+            OpenFile = null;
         }
         var existing = _selection.Where(g => _index.Find(g) != null).ToList();
         if (existing.Count != _selection.Count)
@@ -251,26 +475,60 @@ public sealed class ContentBrowserModel
         }
     }
 
-    List<Asset> BuildItems()
+    // What a filter looks through, and what shows without one.
+    IEnumerable<Asset> Scope()
     {
-        if (Searching)
+        if (OpenFile is { } file)
         {
-            return [.. _index.Search(Search.Trim())];
+            return _index.SubassetsOf(file);
         }
         if (Folder is not { } folder)
         {
-            return [];
+            return Filtering && !InThisFolder ? _index.Assets.Values : [];
         }
-        List<Asset> assets = [];
-        foreach (var asset in _index.AssetsIn(folder.Root, folder.Path))
+        return !Filtering ? _index.AssetsIn(folder.Root, folder.Path)
+            : InThisFolder ? _index.AssetsUnder(folder.Root, folder.Path)
+            : _index.Assets.Values;
+    }
+
+    List<Asset> BuildItems()
+    {
+        var scope = Scope();
+        if (!Filtering)
         {
-            assets.Add(asset);
-            if (_expandedFiles.Contains(asset.Guid))
+            return [.. scope];
+        }
+        var matches = scope.Where(a => (!Searching || AssetIndex.MatchesSearch(a, Search)) && (_kinds.Count == 0 || _kinds.Contains(KindOf(a.Kind))));
+        return OpenFile != null
+            ? [.. matches]
+            : [.. matches.OrderBy(a => AssetIndex.Name(a.Path), StringComparer.OrdinalIgnoreCase)
+                .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    static int IndexOf(IReadOnlyList<Asset> items, string guid)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i].Guid == guid)
             {
-                assets.AddRange(_index.SubassetsOf(asset.Guid));
+                return i;
             }
         }
-        return assets;
+        return -1;
+    }
+
+    // The assets from one to another, in the order that they show, or null when one of them does not show.
+    List<string>? Span(string from, string to)
+    {
+        var items = Items;
+        var a = IndexOf(items, from);
+        var b = IndexOf(items, to);
+        if (a < 0 || b < 0)
+        {
+            return null;
+        }
+        return [.. items.Skip(Math.Min(a, b)).Take(Math.Abs(a - b) + 1).Select(i => i.Guid)];
     }
 
     void ItemsMoved()
@@ -279,22 +537,76 @@ public sealed class ContentBrowserModel
         Changed?.Invoke();
     }
 
-    void KeepSelected(Func<string, bool> keep)
-    {
-        var kept = _selection.Where(keep).ToList();
-        if (kept.Count != _selection.Count)
-        {
-            _selection = kept;
-            ContextChanged?.Invoke();
-        }
-    }
-
     void Set(List<string> selection)
     {
         if (!selection.SequenceEqual(_selection))
         {
             _selection = selection;
             ContextChanged?.Invoke();
+        }
+    }
+}
+
+/// <summary>
+/// Where the content browser's assets are: rows of equal height, each a fixed number of tiles, so a tile's place follows
+/// from its index, whatever is realized. A list is one column of short rows.
+/// </summary>
+public readonly record struct ContentGridLayout(int Columns, double TileWidth, double RowHeight)
+{
+    public const double Gap = 6;
+    public const double LabelHeight = 34;
+    public const double ListRowHeight = 22;
+
+    public static ContentGridLayout Of(double width, ContentViewMode mode, double tileSize)
+    {
+        if (mode == ContentViewMode.List)
+        {
+            return new ContentGridLayout(1, Math.Max(width, 0), ListRowHeight);
+        }
+        var tile = tileSize + 2 * Gap;
+        return new ContentGridLayout(Math.Max((int)Math.Floor((width + Gap) / (tile + Gap)), 1), tile, tileSize + LabelHeight + 2 * Gap);
+    }
+
+    public int RowCount(int items) => (items + Columns - 1) / Columns;
+
+    public int RowOf(int index) => index / Columns;
+
+    public double Top(int row) => row * RowHeight;
+
+    /// <summary>The asset under a point in the rows' space, or null over the gaps and past the last.</summary>
+    public int? IndexAt(double x, double y, int count)
+    {
+        if (x < 0 || y < 0)
+        {
+            return null;
+        }
+        var column = (int)Math.Floor(x / (TileWidth + Gap));
+        if (column >= Columns || x - column * (TileWidth + Gap) > TileWidth)
+        {
+            return null;
+        }
+        var index = (int)Math.Floor(y / RowHeight) * Columns + column;
+        return index < count ? index : null;
+    }
+
+    /// <summary>The assets that a rectangle in the rows' space touches, in order.</summary>
+    public IEnumerable<int> InRect(double x0, double y0, double x1, double y1, int count)
+    {
+        var (left, right) = (Math.Min(x0, x1), Math.Max(x0, x1));
+        var (top, bottom) = (Math.Min(y0, y1), Math.Max(y0, y1));
+        var firstRow = Math.Max((int)Math.Floor(top / RowHeight), 0);
+        var lastRow = (int)Math.Floor(bottom / RowHeight);
+        for (var row = firstRow; row <= lastRow; row++)
+        {
+            for (var column = 0; column < Columns; column++)
+            {
+                var x = column * (TileWidth + Gap);
+                var index = row * Columns + column;
+                if (index < count && x < right && x + TileWidth > left)
+                {
+                    yield return index;
+                }
+            }
         }
     }
 }
