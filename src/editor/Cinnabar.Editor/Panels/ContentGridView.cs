@@ -264,7 +264,6 @@ sealed class ContentGridView : Panel
         var problems = _index.ProblemsOf(asset.Guid);
         var tip = $"{asset.Root}/{asset.Path}" + (AssetIndex.IsSubasset(asset) ? $"\n{asset.Subasset}" : "");
         ToolTip.SetTip(view, problems.Count == 0 ? tip : tip + "\n" + string.Join("\n", problems.Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text)));
-        view.Background = Brushes.Transparent;
         view.Classes.Set("selected", _model.Selection.Contains(asset.Guid));
         view.AttachedToVisualTree += (_, _) => _tiles[asset.Guid] = view;
         view.DetachedFromVisualTree += (_, _) =>

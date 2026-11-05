@@ -33,6 +33,7 @@ public sealed class MainWindow : Window
     readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
     // Set once the user has answered about unsaved changes, so the second Close goes through.
     bool _closing;
+    bool _askingDraft;
 
     public MainWindow(EditorShell shell)
     {
@@ -72,6 +73,7 @@ public sealed class MainWindow : Window
         shell.Content.RenameRequested += item => _ = AskRename(item);
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
+        shell.Content.DraftLeft += () => _ = AskDraft();
         shell.GraphCloseRequested += editor => _ = AskCloseGraph(editor);
         shell.GraphOverwriteRequested += editor => _ = AskOverwriteGraph(editor);
         shell.SceneChanged += UpdateSceneStatus;
@@ -138,6 +140,30 @@ public sealed class MainWindow : Window
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         image.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         return null;
+    }
+
+    // The selection moved off files with changes to their import settings that are not applied. Keep Editing goes back to them.
+    async Task AskDraft()
+    {
+        if (_askingDraft)
+        {
+            return;
+        }
+        _askingDraft = true;
+        var content = _shell.Content;
+        var left = content.Draft.Assets;
+        var answer = await Dialogs.Ask(this, "Import settings not applied",
+            $"{(left.Count == 1 ? "A file" : $"{left.Count} files")} that you were editing {(left.Count == 1 ? "has" : "have")} import settings that are not applied.",
+            "Apply", "Discard", "Keep Editing");
+        _askingDraft = false;
+        if (answer == "Apply" && await content.ApplyDraft() || answer == "Discard")
+        {
+            content.FinishDraft();
+        }
+        else
+        {
+            content.Model.Select(left);
+        }
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)

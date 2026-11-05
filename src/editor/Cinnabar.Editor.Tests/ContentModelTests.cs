@@ -62,6 +62,119 @@ public sealed class ContentModelTests : IDisposable
         Assert.Equal([Kit], model.Selection);
     }
 
+    static readonly SettingInfo Mips = new("mips", ["true", "false"], "true", "Make the mips.");
+    static readonly SettingInfo Size = new("max_size", ["256", "512", "1024"], "1024", "The largest side.");
+    static readonly SettingInfo Tangents = new("tangents", ["file", "generate"], "file", "Where tangents come from.");
+    const string Rock = "20202020202020202020202020202020";
+    const string Moss = "21212121212121212121212121212121";
+
+    EditorShell DraftShell()
+    {
+        var shell = TestShell.Open(_temp, null, null);
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)],
+        [
+            new Importer(AssetKind.Texture, ".png", [Mips, Size]),
+            new Importer(AssetKind.Model, ".glb", [Tangents, new SettingInfo("mips", ["on", "off"], "on", "Not the same setting.")]),
+            new Importer(AssetKind.Mesh, ".mesh", [Tangents]),
+        ], []));
+        shell.Assets.Apply(new AssetSnapshot(
+        [
+            TestAssets.Make(Rock, AssetKind.Texture, "rock.png", settings: [new Setting("max_size", "256")]),
+            TestAssets.Make(Moss, AssetKind.Texture, "moss.png"),
+            TestAssets.Make(Kit, AssetKind.Model, "kit.glb"),
+            TestAssets.Make(Wall, AssetKind.Mesh, "kit.glb", parent: Kit, subasset: "Wall"),
+        ], []));
+        return shell;
+    }
+
+    [Fact]
+    public void AMixedValueStaysUnsetForAssetsTheEditDoesNotChange()
+    {
+        using var shell = DraftShell();
+        var model = shell.Content.Model;
+        var draft = shell.Content.Draft;
+        model.Select([Rock, Moss]);
+
+        var rows = draft.Rows();
+        Assert.Equal(["mips", "max_size"], rows.Select(r => r.Info.Key));
+        Assert.Equal("true", rows[0].Value);
+        // The two files differ, so it shows no value.
+        Assert.Null(rows[1].Value);
+        Assert.False(draft.Dirty);
+
+        // Changing another setting leaves the one that differs as each has it.
+        draft.Set("mips", "false");
+        Assert.True(draft.Dirty);
+        Assert.True(draft.Rows()[0].Changed);
+        var request = draft.Request();
+        Assert.Equal([new Setting("max_size", "256"), new Setting("mips", "false")], request.Single(a => a.Guid == Rock).Settings);
+        Assert.Equal([new Setting("mips", "false")], request.Single(a => a.Guid == Moss).Settings);
+
+        // Setting it back to what each has is no change.
+        draft.Set("mips", "true");
+        Assert.False(draft.Dirty);
+        Assert.Empty(draft.Request());
+
+        // A setting at the default leaves the file that had another value, and the other file is not touched.
+        draft.Set("max_size", "1024");
+        var request2 = Assert.Single(draft.Request());
+        Assert.Equal(Rock, request2.Guid);
+        Assert.Empty(request2.Settings);
+    }
+
+    [Fact]
+    public void ADraftShowsOnlyWhatAllTheFilesTake()
+    {
+        using var shell = DraftShell();
+        var draft = shell.Content.Draft;
+        // A model and a texture share no setting: their mips have different values.
+        shell.Content.Model.Select([Rock, Kit]);
+        Assert.Empty(draft.Rows());
+
+        shell.Content.Model.Select([Kit]);
+        Assert.Equal(["tangents", "mips"], draft.Rows().Select(r => r.Info.Key));
+    }
+
+    [Fact]
+    public void ASubassetShowsItsFilesSettingsAsALink()
+    {
+        using var shell = DraftShell();
+        var draft = shell.Content.Draft;
+        shell.Content.Model.Select([Wall]);
+        Assert.Empty(draft.Assets);
+        Assert.Empty(draft.Rows());
+
+        // With its file, the draft edits the file alone.
+        shell.Content.Model.Select([Wall, Kit]);
+        Assert.Equal([Kit], draft.Assets);
+    }
+
+    [Fact]
+    public void LeavingADraftAsksAndKeepsItUntilAnswered()
+    {
+        using var shell = DraftShell();
+        var model = shell.Content.Model;
+        var draft = shell.Content.Draft;
+        var asked = 0;
+        shell.Content.DraftLeft += () => asked++;
+        model.Select([Rock]);
+        draft.Set("mips", "false");
+
+        // The same files in another order are no change of what it edits.
+        model.Select([Rock, Wall]);
+        Assert.Equal(0, asked);
+        Assert.True(draft.Dirty);
+
+        model.Select([Moss]);
+        Assert.Equal(1, asked);
+        Assert.True(draft.Dirty);
+        Assert.Equal([Rock], draft.Assets);
+
+        shell.Content.FinishDraft();
+        Assert.False(draft.Dirty);
+        Assert.Equal([Moss], draft.Assets);
+    }
+
     [Fact]
     public void LeavingAFileEndsItsFilter()
     {

@@ -108,10 +108,10 @@ public sealed class ContentTests : IDisposable
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
 
-        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ContentBrowser.WithSetting(settings, [Native], "native", "false"));
+        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ImportSettingsDraft.WithSetting(settings, [Native], "native", "false"));
         Assert.Equal([new Setting("old", "1"), new Setting("native", "false"), new Setting("last", "2")],
-            ContentBrowser.WithSetting(settings, [], "native", "false"));
-        Assert.Equal([new Setting("native", "true")], ContentBrowser.WithSetting([], [Native], "native", "true"));
+            ImportSettingsDraft.WithSetting(settings, [], "native", "false"));
+        Assert.Equal([new Setting("native", "true")], ImportSettingsDraft.WithSetting([], [Native], "native", "true"));
     }
 
     [Fact]

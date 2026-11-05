@@ -79,7 +79,10 @@ public sealed class ContentBrowserView : DockPanel
         Children.Add(_general);
 
         // The panel docks at the bottom by default, where it is wide and short, so the details are a column.
-        var details = new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        var details = new DockPanel();
+        SetDock(_details.DraftBar, DockSide.Top);
+        details.Children.Add(_details.DraftBar);
+        details.Children.Add(new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
         var assets = new Panel { Children = { _grid, _empty } };
         _grid.BlankMenu = FolderMenu(null);
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("220,4,*,4,320") };
@@ -116,6 +119,7 @@ public sealed class ContentBrowserView : DockPanel
             .Add(() => _model.Changed += PostRebuild, () => _model.Changed -= PostRebuild)
             .Add(() => _model.ContextChanged += OnContextChanged, () => _model.ContextChanged -= OnContextChanged)
             .Add(() => _model.Revealed += OnRevealed, () => _model.Revealed -= OnRevealed)
+            .Add(() => _shell.Content.Draft.Changed += _details.Show, () => _shell.Content.Draft.Changed -= _details.Show)
             .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
             .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
             .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus);

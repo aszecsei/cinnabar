@@ -301,11 +301,16 @@ Delete_Assets :: struct {
 	folders: []Folder,
 }
 
-// Replaces an asset's import settings. The daemon checks them with the asset's importer, writes its .meta file, and
-// cooks it again.
-Set_Import_Settings :: struct {
+// An asset and the import settings that replace its own.
+Asset_Settings :: struct {
 	guid:     string,
 	settings: []Setting,
+}
+
+// Replaces assets' import settings, all of them or none. The daemon checks them with each asset's importer, writes the
+// .meta files, and cooks the assets again, in one pass.
+Set_Import_Settings :: struct {
+	assets: []Asset_Settings,
 }
 
 // Cooks assets again with the same settings, also when their blobs are up to date.

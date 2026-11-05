@@ -41,7 +41,7 @@ every_message_round_trips :: proc(t: ^testing.T) {
 		Rename_Folder{root = "game", path = "a", name = "b"},
 		Duplicate_Assets{guids = {"01"}},
 		Delete_Assets{guids = {"01"}, folders = {{"game", "old"}}},
-		Set_Import_Settings{guid = "01", settings = {{"native", "true"}}},
+		Set_Import_Settings{assets = {{guid = "01", settings = {{"native", "true"}}}}},
 		Reimport{guids = {"01"}},
 		Operation_Result{error = "exists", guids = {"03"}},
 		Cook_Progress{kind = .Stage, name = "game/stages/sponza.usdz", done = 412, total = 1088},

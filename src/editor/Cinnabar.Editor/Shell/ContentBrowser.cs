@@ -32,7 +32,49 @@ public sealed class ContentBrowser
         this.console = console;
         this.movingScene = movingScene;
         Model = new ContentBrowserModel(assets);
+        Draft = new ImportSettingsDraft(assets);
+        // The draft follows the selection first, so what else hears of the selection sees it.
+        Model.ContextChanged += FollowSelection;
         Model.ContextChanged += changed;
+    }
+
+    /// <summary>The import settings of the selected files, until they are applied.</summary>
+    public ImportSettingsDraft Draft { get; }
+
+    /// <summary>The selection moved off files whose settings have changes that are not applied. The window asks what to do.</summary>
+    public event Action? DraftLeft;
+
+    void FollowSelection()
+    {
+        if (Draft.Dirty && !Draft.Holds(Model.Selection))
+        {
+            DraftLeft?.Invoke();
+        }
+        else
+        {
+            Draft.Load(Model.Selection);
+        }
+    }
+
+    /// <summary>
+    /// Sends the draft's changes to the daemon, which writes the .meta files and cooks the assets in one pass. A setting at
+    /// its default leaves the .meta file, and the others stay as they are. When the daemon refuses, the draft keeps them.
+    /// </summary>
+    public async Task<bool> ApplyDraft()
+    {
+        if (Draft.Request() is { Length: > 0 } request && await Operate(new SetImportSettings(request)) == null)
+        {
+            return false;
+        }
+        Draft.Revert();
+        return true;
+    }
+
+    /// <summary>Ends a draft that the selection left: the draft follows the selection again.</summary>
+    public void FinishDraft()
+    {
+        Draft.Revert();
+        Draft.Load(Model.Selection);
     }
 
     /// <summary>What the content browser shows, which outlives its view.</summary>
@@ -240,34 +282,6 @@ public sealed class ContentBrowser
             .Concat(items.Select(i => i.Folder).OfType<ContentFolder>().SelectMany(f => assets.AssetsUnder(f.Root, f.Path)))
             .DistinctBy(a => a.Guid).ToList();
         return (deleted, assets.DependentsOutside([.. deleted.Select(a => a.Guid)]));
-    }
-
-    /// <summary>
-    /// Sets one of an asset's import settings. A setting at its default leaves the .meta file, and the others stay as
-    /// they are.
-    /// </summary>
-    public async Task<bool> SetImportSetting(string guid, string key, string value)
-    {
-        if (assets.Find(guid) is not { } asset)
-        {
-            return false;
-        }
-        return await Operate(new SetImportSettings(guid, WithSetting(asset.Settings, assets.SettingsOf(asset.Kind), key, value))) != null;
-    }
-
-    /// <summary>
-    /// An asset's import settings with one set: in its place, or last if it is new, and left out at its default.
-    /// </summary>
-    public static Setting[] WithSetting(IReadOnlyList<Setting> settings, IReadOnlyList<SettingInfo> infos, string key, string value)
-    {
-        var info = infos.FirstOrDefault(s => s.Key == key);
-        var result = settings.Where(s => s.Key != key).ToList();
-        if (info == null || value != info.Default)
-        {
-            var at = settings.ToList().FindIndex(s => s.Key == key);
-            result.Insert(at < 0 ? result.Count : at, new Setting(key, value));
-        }
-        return [.. result];
     }
 
     public async Task<bool> ReimportSelectedAssets() =>

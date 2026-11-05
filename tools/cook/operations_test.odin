@@ -1,8 +1,10 @@
 package cook
 
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strings"
+import win "core:sys/windows"
 import "core:testing"
 
 import cook_link "cinnabar:engine/asset/cook_link"
@@ -106,8 +108,8 @@ a_failed_operation_changes_nothing :: proc(t: ^testing.T) {
 			cook_link.Move_Assets{guids = {a}, root = "game", folder = "missing"},
 			cook_link.Delete_Assets{folders = {{"game", ""}}},
 			cook_link.Delete_Assets{guids = {"00000000000000000000000000000000"}},
-			cook_link.Set_Import_Settings{guid = a, settings = {{"native", "maybe"}}},
-			cook_link.Set_Import_Settings{guid = a, settings = {{"colour", "red"}}},
+			cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "maybe"}}}}},
+			cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"colour", "red"}}}}},
 			cook_link.Reimport{guids = {"nope"}},
 		}) {
 		result := operate(&o, message)
@@ -177,14 +179,62 @@ import_settings_are_checked_and_cook_again :: proc(t: ^testing.T) {
 	a := guid_at(&o, "a.luau")
 
 	// A setting that the importer does not know stays as the file has it.
-	result := operate(&o, cook_link.Set_Import_Settings{guid = a, settings = {{"old", "1"}, {"native", "true"}}})
+	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"old", "1"}, {"native", "true"}}}}})
 	testing.expect_value(t, result.error, "")
 	testing.expect_value(t, o.pass.cooked[.Script], 1)
 	text, _ := os.read_entire_file(fmt.tprintf("%s/content/a.luau.meta", o.tree.dir), context.temp_allocator)
 	testing.expect_value(t, string(text), "# a comment that stays\nguid = 00112233445566778899aabbccddee01\nold = 1\nnative = true\n")
 
-	testing.expect_value(t, operate(&o, cook_link.Set_Import_Settings{guid = a, settings = {}}).error, "")
+	testing.expect_value(t, operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a}}}).error, "")
 	testing.expect_value(t, len(o.index.assets[a].settings), 0)
+}
+
+@(test)
+set_import_settings_is_all_or_nothing :: proc(t: ^testing.T) {
+	o := ops_open(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}})
+	defer ops_close(&o)
+	a, b := guid_at(&o, "a.luau"), guid_at(&o, "b.luau")
+	meta_a := fmt.tprintf("%s/content/a.luau.meta", o.tree.dir)
+	before, _ := os.read_entire_file(meta_a, context.temp_allocator)
+
+	// A bad setting on the second asset leaves the first's .meta file as it was.
+	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "maybe"}}}}})
+	testing.expect(t, result.error != "")
+	after, _ := os.read_entire_file(meta_a, context.temp_allocator)
+	testing.expect_value(t, string(after), string(before))
+	testing.expect_value(t, o.pass.cooked[.Script], 0)
+
+	// With both good, both change, and one pass cooks them.
+	result = operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+	testing.expect_value(t, result.error, "")
+	testing.expect_value(t, o.pass.cooked[.Script], 2)
+	testing.expect_value(t, len(o.index.assets[a].settings), 1)
+	testing.expect_value(t, len(o.index.assets[b].settings), 1)
+}
+
+@(test)
+a_failed_write_restores_the_meta_files :: proc(t: ^testing.T) {
+	// The failed write logs its error, which is what the test makes happen.
+	context.logger = log.nil_logger()
+	o := ops_open(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}})
+	defer ops_close(&o)
+	a, b := guid_at(&o, "a.luau"), guid_at(&o, "b.luau")
+	meta_a := fmt.tprintf("%s/content/a.luau.meta", o.tree.dir)
+	meta_b := fmt.tprintf("%s/content/b.luau.meta", o.tree.dir)
+	before_a, _ := os.read_entire_file(meta_a, context.temp_allocator)
+	before_b, _ := os.read_entire_file(meta_b, context.temp_allocator)
+
+	// A read-only file cannot be replaced, so the second write fails once the first has happened.
+	wide_b := win.utf8_to_wstring(meta_b, context.temp_allocator)
+	testing.expect(t, bool(win.SetFileAttributesW(wide_b, win.FILE_ATTRIBUTE_READONLY)))
+	defer win.SetFileAttributesW(wide_b, win.FILE_ATTRIBUTE_NORMAL)
+
+	result := operate(&o, cook_link.Set_Import_Settings{assets = {{guid = a, settings = {{"native", "true"}}}, {guid = b, settings = {{"native", "true"}}}}})
+	testing.expect(t, strings.contains(result.error, "b.luau.meta"))
+	after_a, _ := os.read_entire_file(meta_a, context.temp_allocator)
+	after_b, _ := os.read_entire_file(meta_b, context.temp_allocator)
+	testing.expect_value(t, string(after_a), string(before_a))
+	testing.expect_value(t, string(after_b), string(before_b))
 }
 
 @(test)

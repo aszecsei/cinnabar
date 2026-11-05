@@ -117,6 +117,7 @@
     <!-- Content browser -->
     <Style Selector="Border.asset-tile, Border.asset-row">
         <Setter Property="CornerRadius" Value="3" />
+        <Setter Property="Background" Value="Transparent" />
         <Setter Property="TextElement.FontSize" Value="12" />
     </Style>
     <Style Selector="Border.asset-tile:pointerover, Border.asset-row:pointerover">
