@@ -20,6 +20,9 @@ float3 load_merged_rw(uint bin) {
 	return float3(f16tof32(m.x), f16tof32(m.x >> 16), f16tof32(m.y));
 }
 
+// A new bin counts as this many rays that passed through, so its first ray does not stand for the whole bin.
+static const float NEW_BIN_RAYS = 2;
+
 // confidence_weight is how much a probe's light counts, from the rays that reached it, decayed as its bins' are.
 float confidence_weight(Split_Grid g, float confidence) {
 	return confidence / (confidence + g.confidence_half);
@@ -46,7 +49,13 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	int3 u = int3(split_key_cell(record.x));
 	Split_Level level = g.levels[l];
 	bool fresh = (record.z & SPLIT_FRESH) != 0;
-	float confidence = g.decay * (fresh ? 0 : asfloat(record.w)) + float(deposits.Load(slot * 4));
+	// As a bin's rays, the confidence decays only in frames that rays reach the probe, so one that goes out of view keeps
+	// its weight, and does not jump back when it returns.
+	float reached = float(deposits.Load(slot * 4));
+	float confidence = fresh ? reached : asfloat(record.w);
+	if (!fresh && reached > 0) {
+		confidence = confidence * g.decay + reached;
+	}
 
 	if (thread < 8) {
 		uint parent = SPLIT_NO_SLOT;
@@ -85,7 +94,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		uint3 h = history.Load3(bin * SPLIT_HISTORY_SIZE);
 		float3 mean = fresh ? 0 : float3(f16tof32(h.x), f16tof32(h.x >> 16), f16tof32(h.y));
 		float through = fresh ? 1 : f16tof32(h.y >> 16);
-		float rays = fresh ? 0 : asfloat(h.z);
+		float rays = fresh ? NEW_BIN_RAYS : asfloat(h.z);
 		if (counts.x > 0) {
 			accum.Store4(bin * SPLIT_ACCUM_SIZE, 0);
 			accum.Store(bin * SPLIT_ACCUM_SIZE + 16, 0);

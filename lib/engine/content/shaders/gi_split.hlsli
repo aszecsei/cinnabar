@@ -78,7 +78,8 @@ struct Split_Level {
 };
 
 // Matches Split_Cascade in lib/engine/render/gi_split.odin: the cascade's slots, its table's entries, a power of two,
-// its first bin, the directions along each side of its probes' octahedron, and the merge's groups for each probe.
+// its first bin, the directions along each side of its probes' octahedron, the merge's groups for each probe, and the
+// frames that a probe lives without a ray.
 struct Split_Cascade {
 	uint first_slot;
 	uint slots;
@@ -87,7 +88,7 @@ struct Split_Cascade {
 	uint first_bin;
 	uint side;
 	uint chunks;
-	uint padding;
+	uint lifetime;
 };
 
 // Matches Split_Grid in lib/engine/render/gi_split.odin.
@@ -102,7 +103,6 @@ struct Split_Grid {
 	uint2 tile;
 	uint2 tiles;
 	uint2 rotation;
-	uint lifetime;
 	uint ray_count;
 	float level_distance;
 	float band;
@@ -120,6 +120,7 @@ struct Split_Grid {
 	uint padding0;
 	uint padding1;
 	uint padding2;
+	uint padding3;
 };
 
 Split_Grid split_grid() {

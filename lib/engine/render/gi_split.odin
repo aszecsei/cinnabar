@@ -30,8 +30,10 @@ SPLIT_MERGED_SIZE :: 8
 SPLIT_COUNTERS_SIZE :: 16
 // A window's first cell is a multiple of this, so a cascade's cell is the first cascade's shifted right, exactly.
 SPLIT_SNAP :: 1 << MAX_SPLIT_CASCADES
-// A probe that no ray reached for this many frames is freed.
-SPLIT_LIFETIME :: 60
+// A probe that no ray reached for this many frames is freed, so a surface that leaves the view keeps its light when it
+// returns. A cascade whose slots run short shortens this, to no less than SPLIT_MIN_LIFETIME (see split_lifetime).
+SPLIT_LIFETIME :: 600
+SPLIT_MIN_LIFETIME :: 60
 // The share of each level's distances that blends into the next.
 SPLIT_BAND :: 0.5
 // A ray starts this many pixels off its surface.
@@ -97,7 +99,7 @@ Split_Cascade :: struct {
 	first_bin:   u32,
 	side:        u32,
 	chunks:      u32,
-	padding:     u32,
+	lifetime:    u32,
 }
 
 // Split_Grid matches Split_Grid in gi_split.hlsli.
@@ -112,7 +114,6 @@ Split_Grid :: struct {
 	tile:            [2]u32,
 	tiles:           [2]u32,
 	rotation:        [2]u32,
-	lifetime:        u32,
 	ray_count:       u32,
 	level_distance:  f32,
 	band:            f32,
@@ -127,7 +128,7 @@ Split_Grid :: struct {
 	total_entries:   u32,
 	total_bins:      u32,
 	atlas_columns:   u32,
-	padding:         [3]u32,
+	padding:         [4]u32,
 }
 
 // Split_Push matches Split_Push in gi_split.hlsli.
@@ -214,6 +215,8 @@ Gi_Split :: struct {
 	rays:         gpu.Buffer,
 	ray_capacity: int,
 	windows:      [MAX_SPLIT_LEVELS]Split_Window,
+	// The frames that each cascade's probes live without a ray (see split_lifetime).
+	lifetimes:    [MAX_SPLIT_CASCADES]u32,
 	// Whether the storage is new since the last frame, so its slots and accumulators must be cleared.
 	fresh:        bool,
 	frame:        u32,
@@ -507,6 +510,23 @@ split_rotation :: proc(frame: u32, tile: [2]u32) -> [2]u32 {
 	return {j % tile.x, j / tile.x}
 }
 
+// split_lifetime is a cascade's lifetime after a frame, from its table a frame or two ago. A key that found no room, or
+// a table that is nearly full, shortens it by a quarter each frame, which frees the probes that went longest without a
+// ray. A table with room lengthens it by a frame each frame, as fast as a probe ages, so lengthening frees nothing and
+// a table does not swing between the two. A cascade without stats keeps its lifetime.
+split_lifetime :: proc(lifetime: u32, stats: Split_Cascade_Stats) -> u32 {
+	if stats.slots == 0 {
+		return lifetime
+	}
+	if stats.dropped > 0 || stats.active >= stats.slots - stats.slots / 8 {
+		return max(lifetime - lifetime / 4, SPLIT_MIN_LIFETIME)
+	}
+	if stats.active < stats.slots - stats.slots / 4 {
+		return min(lifetime + 1, SPLIT_LIFETIME)
+	}
+	return lifetime
+}
+
 // split_bytes is the split cascades' memory at a level, without the rays' buffers.
 split_bytes :: proc(params: Gi_Split_Params) -> int {
 	l := split_layout(params)
@@ -542,6 +562,9 @@ ensure_split_storage :: proc(r: ^Renderer, params: Gi_Split_Params, rays: int) {
 		s.atlas = platform.gpu_create_texture({size = size, format = SPLIT_FORMAT, usage = {.Sampled, .Storage}, label = "gi split atlas"}, nil)
 		s.params, s.layout = params, l
 		s.windows = {}
+		for &lifetime in s.lifetimes {
+			lifetime = SPLIT_LIFETIME
+		}
 		s.fresh = true
 	}
 	if rays > s.ray_capacity {
@@ -612,6 +635,10 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	}
 	l := s.layout
 	copy(grid.cascades[:], l.cascades[:])
+	for k in 0 ..< int(l.count) {
+		s.lifetimes[k] = split_lifetime(s.lifetimes[k], s.last_stats.cascades[k])
+		grid.cascades[k].lifetime = s.lifetimes[k]
+	}
 	offset := ecs.position_sub(f.view.position, r.scene.origin)
 	grid^ = {
 		levels          = grid.levels,
@@ -624,7 +651,6 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 		tile            = tile,
 		tiles           = tiles,
 		rotation        = split_rotation(s.frame, tile),
-		lifetime        = SPLIT_LIFETIME,
 		ray_count       = ray_count,
 		level_distance  = f32(params.distance) * math.pow(2, f32(params.voxel)),
 		band            = SPLIT_BAND,
