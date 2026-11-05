@@ -1,8 +1,9 @@
 // The split radiance cascades' merge (see docs/rendering/global-illumination.md#split-cascades): one pass for each
 // cascade, from the last to the first, a group for each 64 bins of each active probe, dispatched by the counts that
 // the table's arguments phase wrote. Each bin first takes its frame's rays into its history: the share of rays that
-// passed through and the mean light that the rest found, blended by the rays against the history's, which decays each
-// frame, so a bin that many rays reach follows a change within a few frames. Then it adds what passes through it from
+// passed through and the mean light that the rest found, blended by the rays against the history's, which decays with
+// each frame that rays reach the bin, so a bin that many rays reach follows a change within a few frames, and one ray
+// to a bin that few reach moves it as little as a ray's share of its history. Then it adds what passes through it from
 // beyond: the next cascade's light in the four finer directions that it splits into, at the eight probes of the next
 // cascade around it, each by its trilinear weight, three to one on each axis, and by its confidence. Where no such
 // probe has light, and beyond the last cascade, it is the world probes' light along the direction. The first
@@ -84,7 +85,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		uint3 h = history.Load3(bin * SPLIT_HISTORY_SIZE);
 		float3 mean = fresh ? 0 : float3(f16tof32(h.x), f16tof32(h.x >> 16), f16tof32(h.y));
 		float through = fresh ? 1 : f16tof32(h.y >> 16);
-		float rays = fresh ? 0 : asfloat(h.z) * g.decay;
+		float rays = fresh ? 0 : asfloat(h.z);
 		if (counts.x > 0) {
 			accum.Store4(bin * SPLIT_ACCUM_SIZE, 0);
 			accum.Store(bin * SPLIT_ACCUM_SIZE + 16, 0);
@@ -92,7 +93,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 			float exposure = cn_buffer(push.exposure).Load<float>(0);
 			float3 frame_mean = float3(counts.z, counts.w, blue) / (g.radiance_scale * count * max(exposure, 1e-10));
 			float frame_through = (count - float(counts.y)) / count;
-			rays += count;
+			rays = rays * g.decay + count;
 			float alpha = count / rays;
 			mean = lerp(mean, frame_mean, alpha);
 			through = lerp(through, frame_through, alpha);

@@ -54,7 +54,7 @@ SPLIT_FORMAT :: gpu.Format.RGBA16_Float
 // probes have (directions << k)^2 directions. A level of detail's cells are 2^(voxel + L) meters, and it holds the
 // distances from distance cells of level 0 times 2^L, to twice that. The first cascade has slots probes, and each
 // after it a quarter of the one before, but no fewer than min_slots. The bins' histories hold about history_frames
-// frames of rays.
+// frames of rays, counting only the frames that rays reached them.
 Gi_Split_Params :: struct {
 	tile:           [2]u32,
 	directions:     u32,
