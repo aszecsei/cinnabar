@@ -5,9 +5,10 @@ namespace Cinnabar.Editor.Docking;
 
 /// <summary>
 /// The saved dock layout: the tree of splits, tool docks and the document dock, with each panel by ID. Panel state
-/// is not in it. A panel that floated is listed in <see cref="Floating"/> and docks again in its default dock.
+/// is not in it. A panel that floated is listed in <see cref="Floating"/> and docks again in its default dock, and with
+/// <see cref="Windows"/>, which a file from an older editor lacks, a window that kept its place pops out again there.
 /// </summary>
-public sealed record LayoutFile(int Version, LayoutNode Root, IReadOnlyList<string> Floating)
+public sealed record LayoutFile(int Version, LayoutNode Root, IReadOnlyList<string> Floating, IReadOnlyList<FloatingWindow>? Windows = null)
 {
     public const int CurrentVersion = 1;
 
@@ -32,6 +33,29 @@ public sealed record LayoutFile(int Version, LayoutNode Root, IReadOnlyList<stri
         {
             return null;
         }
+    }
+}
+
+/// <summary>A panel's floating window, by where it was on the desktop.</summary>
+public sealed record FloatingWindow(string Panel, double X, double Y, double Width, double Height)
+{
+    // How much of a window's top must show for it to be found and moved.
+    const double MinShown = 64;
+
+    /// <summary>
+    /// The window on one of the screens, each as its left, top, width and height: as it is when enough of it shows on one,
+    /// as when a monitor that it was on has gone, and otherwise moved onto the first, and made to fit.
+    /// </summary>
+    public FloatingWindow OnScreen(IReadOnlyList<(double X, double Y, double Width, double Height)> screens)
+    {
+        if (screens.Count == 0 || screens.Any(s =>
+                Math.Min(X + Width, s.X + s.Width) - Math.Max(X, s.X) >= MinShown && Y >= s.Y && Y + MinShown <= s.Y + s.Height))
+        {
+            return this;
+        }
+        var (left, top, width, height) = screens[0];
+        var (w, h) = (Math.Min(Width, width), Math.Min(Height, height));
+        return this with { X = left + (width - w) / 2, Y = top + (height - h) / 2, Width = w, Height = h };
     }
 }
 

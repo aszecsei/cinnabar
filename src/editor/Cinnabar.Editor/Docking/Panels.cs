@@ -19,7 +19,7 @@ public sealed class PanelTool : Tool
         Icon = icon;
         DefaultDock = defaultDock;
         _createView = createView;
-        // Pinned panels would need their own place in the saved layout. Floating panels dock again on restart.
+        // Pinned panels would need their own place in the saved layout.
         CanPin = false;
     }
 

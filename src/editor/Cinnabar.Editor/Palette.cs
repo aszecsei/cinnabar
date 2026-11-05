@@ -24,6 +24,9 @@ static class Palette
     /// <summary>The outline of a color swatch.</summary>
     public static readonly Color SwatchBorder = Color.Parse("#55555C");
 
+    /// <summary>What shows behind a window's panels.</summary>
+    public static readonly IBrush WindowBrush = new ImmutableSolidColorBrush(Color.Parse("#1B1B1D"));
+
     public static readonly IBrush ErrorBrush = new ImmutableSolidColorBrush(Error);
 
     public static readonly IBrush WarningBrush = new ImmutableSolidColorBrush(Warning);

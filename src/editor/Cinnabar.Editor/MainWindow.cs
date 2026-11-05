@@ -44,12 +44,14 @@ public sealed class MainWindow : Window
 
         var views = new CommandViews(shell.Commands, shell.KeyBindings);
         var ribbon = new RibbonView(shell, views);
+        void AttachKeys(Window window) => AttachShortcuts(window, shell, views);
         var dock = new DockControl
         {
             Factory = shell.Layout.Factory,
             Layout = shell.Layout.Root,
             InitializeFactory = true,
             InitializeLayout = false,
+            HostWindowFactory = () => new Docking.EditorHostWindow(AttachKeys),
         };
         shell.Layout.RootChanged += () => dock.Layout = shell.Layout.Root;
 
@@ -83,17 +85,7 @@ public sealed class MainWindow : Window
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
 
-        foreach (var (id, shortcut) in shell.KeyBindings.All)
-        {
-            if (views.Gesture(id) is { } gesture)
-            {
-                KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(views.Adapter(id), gesture, () => shell.GameHasKeys, () => FocusManager?.GetFocusedElement() is TextBox) });
-            }
-            else
-            {
-                shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} is not a key gesture");
-            }
-        }
+        AttachKeys(this);
 
         shell.Host.StateChanged += UpdateHostStatus;
         UpdateHostStatus();
@@ -110,6 +102,7 @@ public sealed class MainWindow : Window
         {
             shell.StartCook();
             shell.StartAutomation();
+            shell.Layout.RestoreWindows([.. (Screens?.All ?? []).Select(s => (s.Bounds.X / s.Scaling, s.Bounds.Y / s.Scaling, s.Bounds.Width / s.Scaling, s.Bounds.Height / s.Scaling))]);
             if (shell.PendingRestore != null)
             {
                 _ = OfferRestore();
@@ -122,6 +115,22 @@ public sealed class MainWindow : Window
             _autosave.Stop();
             shell.Dispose();
         };
+    }
+
+    // The shell's shortcuts on a window, as each window's key bindings are its own.
+    static void AttachShortcuts(Window window, EditorShell shell, CommandViews views)
+    {
+        foreach (var (id, shortcut) in shell.KeyBindings.All)
+        {
+            if (views.Gesture(id) is { } gesture)
+            {
+                window.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(views.Adapter(id), gesture, () => shell.GameHasKeys, () => window.FocusManager?.GetFocusedElement() is TextBox) });
+            }
+            else if (window is MainWindow)
+            {
+                shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} is not a key gesture");
+            }
+        }
     }
 
     // Draws the controls of a panel's window, or of this window, into a PNG (see docs/editor/capture.md#automation). The
@@ -208,6 +217,7 @@ public sealed class MainWindow : Window
         {
             _closing = true;
             _shell.SaveLayout();
+            _shell.Layout.Closing = true;
             Close();
         }
     }

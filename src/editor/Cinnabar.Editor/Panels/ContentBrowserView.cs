@@ -75,7 +75,7 @@ public sealed class ContentBrowserView : DockPanel
         _shell = shell;
         _index = shell.Assets;
         _model = shell.Content.Model;
-        _filter = new ContentFilterBar(_model);
+        _filter = new ContentFilterBar(_model, () => _shell.Commands.Get(EditorCommands.PopOutContentBrowser).Execute());
         _grid = new ContentGridView(shell, AssetMenu);
         _details = new ContentDetailsView(shell);
 
@@ -139,6 +139,7 @@ public sealed class ContentBrowserView : DockPanel
 
         new ViewSubscriptions(this, attached: Rebuild)
             .Add(() => _model.Changed += PostRebuild, () => _model.Changed -= PostRebuild)
+            .Add(() => _shell.Layout.Changed += PostRebuild, () => _shell.Layout.Changed -= PostRebuild)
             .Add(() => _model.ContextChanged += OnContextChanged, () => _model.ContextChanged -= OnContextChanged)
             .Add(() => _model.Revealed += OnRevealed, () => _model.Revealed -= OnRevealed)
             .Add(() => _shell.Content.Draft.Changed += _details.Show, () => _shell.Content.Draft.Changed -= _details.Show)
@@ -208,7 +209,7 @@ public sealed class ContentBrowserView : DockPanel
         ShowTags();
         ShowLocation();
         ShowAssets();
-        _filter.Show();
+        _filter.Show(_shell.Layout.IsFloating("contentBrowser"));
         ShowStatus();
         ShowGeneralProblems();
         // A view of an index that the daemon no longer keeps up to date.

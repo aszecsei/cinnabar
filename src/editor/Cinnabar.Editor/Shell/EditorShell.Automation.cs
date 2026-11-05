@@ -169,6 +169,16 @@ public sealed partial class EditorShell
                 case "showTags":
                     model.ShowingTags = value.ValueKind == System.Text.Json.JsonValueKind.True;
                     break;
+                case "popOut":
+                    if (value.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        Layout.PopOut("contentBrowser");
+                    }
+                    else
+                    {
+                        Layout.DockBack("contentBrowser");
+                    }
+                    break;
                 case "enter":
                     model.Enter(text);
                     break;
@@ -193,7 +203,7 @@ public sealed partial class EditorShell
                     }
                     break;
                 default:
-                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, enter, leave, reveal and shown");
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, popOut, enter, leave, reveal and shown");
             }
         }
         return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],
