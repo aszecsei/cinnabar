@@ -1,12 +1,12 @@
 package ecs
 
-import "core:log"
 import "core:mem/virtual"
 import "core:sync"
 import "core:testing"
 
 import "cinnabar:core"
 import "cinnabar:core/jobs"
+import "cinnabar:core/testlog"
 
 Health :: struct {
 	value: i32,
@@ -262,11 +262,11 @@ unregistered_components_are_rejected :: proc(t: ^testing.T) {
 		x: int,
 	}
 	// The test runner fails a test that logs an error, and these errors are expected.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	e := spawn(w)
 	testing.expect(t, !add(w, e, Unknown{}))
 	testing.expect(t, get(w, e, Unknown) == nil)
-	testing.expect(t, !add_raw(w, e, 7, nil))
+	testing.expect(t, !add_raw(w, e, 9999, nil))
 }
 
 @(test)

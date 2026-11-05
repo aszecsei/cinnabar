@@ -2,7 +2,6 @@ package render
 
 import "base:runtime"
 import "core:fmt"
-import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:os"
@@ -11,6 +10,7 @@ import "core:time"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -157,7 +157,7 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 
 	// A reader of another dimension gets its default: a shader that reads a cube as a 2D texture is undefined. It logs
 	// that once, which is expected here.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	_, now_ready = resident_texture(r, cube)
 	testing.expect(t, !now_ready)
 	_, now_ready = resident_texture(r, array, .Cube)
@@ -284,7 +284,7 @@ resident_meshes_swap_only_when_their_new_data_is_in :: proc(t: ^testing.T) {
 	_, ready = resident_mesh(r, {})
 	testing.expect(t, !ready)
 	// It logs that once, which is expected here.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	_, ready = resident_mesh(r, format.guid_parse("00112233445566778899aabbccddeeff") or_else {})
 	testing.expect(t, !ready)
 }

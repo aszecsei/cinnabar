@@ -1,7 +1,6 @@
 package render
 
 import "core:fmt"
-import "core:log"
 import "core:mem/virtual"
 import "core:sync"
 import "core:testing"
@@ -12,6 +11,7 @@ import "cinnabar:core/jobs"
 // The tests submit to the null backend, which validates barriers against the layouts it tracks.
 // Engine code itself never imports a backend.
 import null "cinnabar:core/gpu/null"
+import "cinnabar:core/testlog"
 
 // The null backend and the job system are singletons, and the test runner runs tests on several threads. Every test
 // in the package that starts either holds this lock.
@@ -287,7 +287,7 @@ sampling_an_unwritten_texture_fails :: proc(t: ^testing.T) {
 	color(&g, p, target, .Clear)
 
 	// The test runner fails a test that logs an error, and this error is expected.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	_, ok := record(&g)
 	testing.expect(t, !ok)
 }
@@ -409,7 +409,7 @@ split_passes_form_a_chain :: proc(t: ^testing.T) {
 	testing.expect(t, null.submit(cbs))
 
 	// The test runner fails a test that logs an error, and these rejections are expected.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect(t, !null.submit(cbs[1:]), "a submission started with a resumed piece")
 	testing.expect(t, !null.submit(cbs[:len(cbs) - 1]), "a submission ended with a suspended piece")
 }

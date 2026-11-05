@@ -7,6 +7,7 @@ import "core:testing"
 import audio "cinnabar:core/audio"
 import "cinnabar:core/audio/conformance"
 import audio_host "cinnabar:core/audio/host"
+import "cinnabar:core/testlog"
 
 @(private = "file")
 lock: sync.Mutex
@@ -55,7 +56,7 @@ the_mixer_loads_as_a_plugin :: proc(t: ^testing.T) {
 names_choose_backends :: proc(t: ^testing.T) {
 	sync.guard(&lock)
 	setup()
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	mixer := load(&host)
 	testing.expect_value(t, string(mixer.info().name), "mixer")
 	testing.expect_value(t, string(load(&host, "mixer").info().name), "mixer")
@@ -84,7 +85,7 @@ same :: proc "c" () -> audio.Backend_Info {
 a_backend_of_another_boundary_is_refused :: proc(t: ^testing.T) {
 	sync.guard(&lock)
 	setup()
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect_value(t, string(checked(&host, &audio.Audio_API{info = other_version}, "other").info().name), "null")
 	testing.expect_value(t, string(checked(&host, &audio.Audio_API{info = other_layout}, "other").info().name), "null")
 	testing.expect_value(t, string(checked(&host, nil, "other").info().name), "null")
