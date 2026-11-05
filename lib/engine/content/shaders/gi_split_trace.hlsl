@@ -2,15 +2,21 @@
 // of the screen, which traces one ray from its pixel this frame through the ray scene, as far as the last cascade of
 // its coarser level reaches. The ray starts at the pixel's surface, a little off it, not at a probe's center, so no
 // probe inside a wall darkens what it sees. Its direction is uniform over the sphere: the R2 sequence by the frame,
-// offset for each tile. A pixel without a surface stores a miss of no length, which the deposit skips.
+// offset for each tile, repeating. A pixel without a surface stores a miss of no length, which the deposit skips.
 #include "gi_split.hlsli"
+
+// A tile's rays repeat after this many frames, so a still view's probes settle on a fixed set of rays, as a radiance
+// cascade's do, and not on a mean that each new ray moves. Rays that never repeat flicker across whole walls, at more
+// than three times the spread in the lit scene. Fewer frames settle a little further from the mean of all directions.
+static const uint RAY_CYCLE = 16;
 
 // split_ray_direction is a tile's ray this frame.
 float3 split_ray_direction(Split_Grid g, uint ray) {
 	uint h = split_hash(ray * 0x9e3779b9u + 1);
 	float2 offset = float2(h & 0xffff, h >> 16) / 65536.0;
 	// R2's steps, 0.7548776662 and 0.5698402910, in 32-bit fixed point, so the frame's multiple wraps exactly.
-	uint2 step = uint2(g.frame * 3242174889u, g.frame * 2447445413u);
+	uint n = g.frame % RAY_CYCLE;
+	uint2 step = uint2(n * 3242174889u, n * 2447445413u);
 	float2 u = frac(offset + float2(step >> 8) / 16777216.0);
 	float z = 1 - 2 * u.x;
 	float r = sqrt(saturate(1 - z * z));
