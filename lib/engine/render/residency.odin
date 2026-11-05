@@ -106,6 +106,8 @@ Residency :: struct {
 	// Whether meshes get acceleration structures, which the renderer sets the first frame that traces (see
 	// residency_enable_accels).
 	accels:   bool,
+	// What this asks for is for a thumbnail, not the world, so it can go when the thumbnails are done.
+	baking:   bool,
 }
 
 @(private)
@@ -141,6 +143,9 @@ Resident_Entry :: struct {
 	stale:         bool,
 	// This version of a texture was read as another dimension, which was logged.
 	wrong_dimension_logged: bool,
+	// Who has asked for it: a thumbnail, or anything else, which keeps it.
+	baked:         bool,
+	world:         bool,
 }
 
 @(private)
@@ -213,6 +218,45 @@ resident_mesh :: proc(r: ^Residency, guid: format.Guid) -> (mesh: ^Resident_Mesh
 	return &e.current.mesh, e.ready
 }
 
+// resident_failed is whether a mesh asset could not be made resident, so what waits for it should not.
+resident_failed :: proc(r: ^Residency, guid: format.Guid) -> bool {
+	i, found := r.index[{guid, .Mesh}]
+	return !found || r.entries[i].failed_at != 0
+}
+
+// resident_streaming is how many assets are on their way to the GPU.
+resident_streaming :: proc(r: ^Residency) -> (count: int) {
+	for &e in r.entries[:r.count] {
+		count += int(e.streaming)
+	}
+	return
+}
+
+// residency_release_baked gives back what only thumbnails asked for, and gives how many it let go. Something that streams
+// stays for a later call, and a thumbnail that asks again makes it resident again. The GPU's destroys wait for the frames
+// that use what they destroy.
+residency_release_baked :: proc(r: ^Residency) -> (released: int) {
+	for i := r.count - 1; i >= 0; i -= 1 {
+		e := &r.entries[i]
+		if !e.baked || e.world || e.streaming || e.live {
+			continue
+		}
+		destroy_resources(r, e.kind, &e.current)
+		if e.handle != {} {
+			asset.unload(r.assets, e.handle)
+		}
+		delete_key(&r.index, Resident_Key{e.guid, e.kind})
+		r.count -= 1
+		if i != r.count {
+			r.entries[i] = r.entries[r.count]
+			r.index[{r.entries[i].guid, r.entries[i].kind}] = i
+		}
+		r.entries[r.count] = {}
+		released += 1
+	}
+	return
+}
+
 // resident_instance_set gives an instance set asset's resources, and whether they are ready, as resident_mesh does.
 resident_instance_set :: proc(r: ^Residency, guid: format.Guid) -> (set: ^Resident_Instance_Set, ready: bool) {
 	e := entry(r, guid, .Instance_Set) or_return
@@ -256,6 +300,11 @@ log_wrong_dimension :: proc(e: ^Resident_Entry, wanted: format.Texture_Dimension
 @(private = "file")
 entry :: proc(r: ^Residency, guid: format.Guid, kind: format.Asset_Kind) -> (e: ^Resident_Entry, ok: bool) {
 	e = find_entry(r, guid, kind) or_return
+	if r.baking {
+		e.baked = true
+	} else {
+		e.world = true
+	}
 	if !e.live && e.handle == {} && !e.streaming && (e.failed_at == 0 || r.frame - e.failed_at >= RESIDENT_RETRY_FRAMES) {
 		start_streaming(r, e)
 	}
