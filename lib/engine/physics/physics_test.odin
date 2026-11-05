@@ -19,6 +19,7 @@ import physics_host "cinnabar:core/physics/host"
 import physics_jolt "cinnabar:core/physics/jolt"
 import physics_null "cinnabar:core/physics/null"
 import script_host "cinnabar:core/script"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -360,7 +361,6 @@ a_rigid_body_needs_a_collider :: proc(t: ^testing.T) {
 	defer teardown(t, f)
 	e := spawn_at(f, {0, 5, 0})
 	ecs.add(&f.world, e, DEFAULT_RIGID_BODY)
-	context.logger = log.nil_logger()
 	ticks(f, 2)
 	testing.expect_value(t, ecs.get(&f.world, e, Physics_Body).body, core_physics.Body{})
 	ecs.add(&f.world, e, DEFAULT_COLLIDER)
@@ -636,7 +636,7 @@ effects_need_a_body :: proc(t: ^testing.T) {
 	f := setup(t, scripts = true)
 	defer teardown(t, f)
 	context.user_ptr = f
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	_, ok := script.spawn_source(&f.runtime, "=bodiless", `Physics.add_force(World.spawn(), vector.create(0, 1, 0))`)
 	testing.expect(t, !ok)
 }
@@ -818,7 +818,7 @@ mesh_colliders :: proc(t: ^testing.T) {
 	BOX_MESH :: format.Guid{1 = 1, 15 = 7}
 	MISSING :: format.Guid{1 = 2, 15 = 7}
 	write_mesh(t, f, BOX_MESH)
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 
 	g := spawn_at(f, {0, -0.5, 0})
 	ecs.get(&f.world, g, ecs.Transform).scale = {20, 1, 20}
@@ -853,7 +853,6 @@ features_gate_components :: proc(t: ^testing.T) {
 	register(&f.physics, &f.world)
 	b := box(f, {0, 5, 0})
 	point_joint(f, b, {0, 1, 0})
-	context.logger = log.nil_logger()
 	ticks(f, 2)
 	testing.expect(t, ecs.has(&f.world, b, Physics_Body))
 	testing.expect(t, !ecs.has(&f.world, b, Physics_Joint), "the joint is ignored")

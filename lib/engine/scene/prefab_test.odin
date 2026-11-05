@@ -2,12 +2,12 @@ package scene
 
 import "base:runtime"
 import "core:fmt"
-import "core:log"
 import "core:mem/virtual"
 import "core:os"
 import "core:testing"
 
 import "cinnabar:core"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -130,7 +130,7 @@ only_a_cooked_prefab_spawns :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	// A refused spawn logs an error, which a test would count as its failure.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	scene_guid := format.Guid{0 = 0x7e, 15 = 2}
 	write_blob(t, f, scene_guid, TURRET, .Scene)
 

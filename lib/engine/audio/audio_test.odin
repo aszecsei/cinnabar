@@ -3,7 +3,6 @@ package audio
 import "base:runtime"
 import "core:c"
 import "core:fmt"
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
@@ -24,6 +23,7 @@ import physics_host "cinnabar:core/physics/host"
 import physics_boundary "cinnabar:core/physics"
 import physics_jolt "cinnabar:core/physics/jolt"
 import script_host "cinnabar:core/script"
+import "cinnabar:core/testlog"
 import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
@@ -456,7 +456,6 @@ a_voice_starts_with_its_occlusion :: proc(t: ^testing.T) {
 no_physics_and_no_listener :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	context.logger = log.nil_logger()
 	write_sound(t, f, SOUND, SAMPLES[:])
 	source(f, {0, 0, 10})
 	update(&f.audio, &f.world, nil, true, STEP)
@@ -568,7 +567,7 @@ a_changed_blob_restarts_its_sources :: proc(t: ^testing.T) {
 a_missing_blob_waits_to_be_cooked :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	listener(f)
 	source(f, {1, 0, 0})
 	frame(f)
@@ -658,7 +657,6 @@ Test.report(pcall(Audio.set_bus_gain, "Master", 0.5) and 1 or 0)
 buses_come_from_names :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)
-	context.logger = log.nil_logger()
 	names: Bus_Names
 	testing.expect(t, add_bus_name(&names, "Music"))
 	testing.expect(t, add_bus_name(&names, "Sfx"))

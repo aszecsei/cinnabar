@@ -1,6 +1,5 @@
 package ecs
 
-import "core:log"
 import "core:math"
 import "core:math/linalg"
 import "core:sync"
@@ -8,6 +7,7 @@ import "core:testing"
 import "core:time"
 
 import "cinnabar:core/jobs"
+import "cinnabar:core/testlog"
 
 @(private = "file")
 expect_near :: proc(t: ^testing.T, got, want: [3]f32, loc := #caller_location) {
@@ -168,7 +168,7 @@ hierarchy_cycles_are_reported :: proc(t: ^testing.T) {
 	defer teardown(f)
 	w := &f.world
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	a, b := spawn(w), spawn(w)
 	for pair in ([][2]Entity{{a, b}, {b, a}}) {
 		add(w, pair[0], TRANSFORM_IDENTITY)

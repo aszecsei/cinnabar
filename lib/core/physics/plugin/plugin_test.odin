@@ -8,6 +8,7 @@ import "cinnabar:core/jobs"
 import physics "cinnabar:core/physics"
 import "cinnabar:core/physics/conformance"
 import physics_host "cinnabar:core/physics/host"
+import "cinnabar:core/testlog"
 
 @(private = "file")
 lock: sync.Mutex
@@ -46,6 +47,6 @@ names_choose_backends :: proc(t: ^testing.T) {
 		host = physics_host.table()
 	}
 	testing.expect_value(t, string(load(&host, "none").info().name), "null")
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect(t, load(&host, "no_such_backend") == nil)
 }

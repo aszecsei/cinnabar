@@ -20,6 +20,7 @@ import "cinnabar:engine/volume"
 // What the hooks of the test frame saw, and the logged problems other than the shaders that the test cache lacks.
 @(private = "file")
 Hook_Record :: struct {
+	runner:   log.Logger,
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
@@ -34,12 +35,17 @@ Hook_Record :: struct {
 	mutex:                                              sync.Mutex,
 }
 
-// record_problems keeps every warning and error, except that a shader is not cooked: the test's cache has none, so
-// every pipeline is missing, which the frame must survive.
+// record_problems keeps every warning and error, except that a shader is not cooked or has no blob: the test's cache
+// has none, so every pipeline is missing, which the frame must survive.
 @(private = "file")
 record_problems :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location: runtime.Source_Code_Location) {
 	r := (^Hook_Record)(data)
-	if level < .Warning || strings.contains(text, "is not cooked") {
+	// testing.expect reports a failure as an error log from the test file. It must reach the test runner.
+	if strings.has_suffix(location.file_path, "_test.odin") {
+		r.runner.procedure(r.runner.data, level, text, options, location)
+		return
+	}
+	if level < .Warning || strings.contains(text, "is not cooked") || strings.contains(text, "no blob for") {
 		return
 	}
 	sync.guard(&r.mutex)
@@ -109,6 +115,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		}
 		delete(record.problems)
 	}
+	record.runner = context.logger
 	context.logger = {record_problems, &record, .Debug, {}}
 
 	w := new(ecs.World)

@@ -1,13 +1,13 @@
 package ecs
 
 import "base:runtime"
-import "core:log"
 import "core:sync"
 import "core:testing"
 import "core:time"
 
 import "cinnabar:core/jobs"
 import "cinnabar:core/profile"
+import "cinnabar:core/testlog"
 
 @(private = "file")
 Resources :: struct {
@@ -170,7 +170,6 @@ fixed_ticks_are_capped :: proc(t: ^testing.T) {
 	defer teardown(f)
 	w := &f.world
 
-	context.logger = log.nil_logger()
 	testing.expect_value(t, run_fixed(w, time.Second, nil), MAX_TICKS_PER_FRAME)
 	testing.expect_value(t, w.clock.time, tick_start(&w.clock, MAX_TICKS_PER_FRAME))
 	testing.expect_value(t, run_fixed(w, 0, nil), 0)
@@ -217,7 +216,7 @@ after_cycles_are_rejected :: proc(t: ^testing.T) {
 	defer teardown(f)
 	w := &f.world
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	register_system(w, {name = "a", stage = .Update, procedure = first, after = {"b"}})
 	register_system(w, {name = "b", stage = .Update, procedure = second, after = {"a"}})
 	testing.expect(t, !register_system(w, {name = "a", stage = .Update, procedure = first}))

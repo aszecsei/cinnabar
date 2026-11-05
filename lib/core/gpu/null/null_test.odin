@@ -1,12 +1,12 @@
 package gpu_null
 
-import "core:log"
 import "core:mem/virtual"
 import "core:sync"
 import "core:testing"
 
 import "cinnabar:core/gpu"
 import "cinnabar:core/profile"
+import "cinnabar:core/testlog"
 
 // The backend is a singleton, and the test runner runs tests on several threads.
 @(private = "file")
@@ -53,7 +53,7 @@ submit_rejects_unknown_texture :: proc(t: ^testing.T) {
 	gpu.cmd_end_pass(&invalid)
 
 	// The test runner fails a test that logs an error, and this rejection is expected.
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect(t, !submit({valid, invalid}))
 }
 
@@ -75,7 +75,7 @@ destroyed_handles_are_invalid :: proc(t: ^testing.T) {
 
 	cb := gpu.command_buffer(virtual.arena_allocator(&arena))
 	gpu.cmd_set_pass_constants(&cb, {buffer = buffer})
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect(t, !submit({cb}))
 }
 
@@ -85,7 +85,7 @@ create_rejects_bad_descs :: proc(t: ^testing.T) {
 	testing.expect(t, init(nil, {1280, 720}))
 	defer shutdown()
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect_value(t, create_buffer({size = 6}, nil), gpu.Buffer{})
 	testing.expect_value(t, create_buffer({size = 4}, {1, 2, 3, 4, 5}), gpu.Buffer{})
 	testing.expect_value(t, create_texture({size = {4, 4}, format = .D32_Float, usage = {.Sampled}}, nil), gpu.Texture{})
@@ -159,7 +159,7 @@ updates_keep_the_attachment_formats :: proc(t: ^testing.T) {
 	testing.expect(t, update_graphics_pipeline(pipeline, desc))
 	testing.expect(t, update_compute_pipeline(compute, {compute = shader}))
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	other := desc
 	other.colors = {{format = .RGBA16_Float}}
 	testing.expect(t, !update_graphics_pipeline(pipeline, other), "an update changed the attachment formats")
@@ -184,7 +184,7 @@ mesh_updates_keep_the_kind :: proc(t: ^testing.T) {
 	testing.expect(t, pipeline != {})
 	testing.expect(t, update_graphics_pipeline(pipeline, mesh))
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	vertex := mesh
 	vertex.mesh, vertex.vertex = nil, shader
 	testing.expect(t, !update_graphics_pipeline(pipeline, vertex), "an update turned a mesh pipeline into a vertex pipeline")
@@ -211,7 +211,7 @@ ray_tracing_resources :: proc(t: ^testing.T) {
 	testing.expect(t, blas != {} && tlas != {})
 	testing.expect(t, accel_reference(blas) != accel_reference(tlas))
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect(t, !update_compute_pipeline(pipeline, {compute = {0}}), "an update turned a ray tracing pipeline into a compute pipeline")
 	testing.expect_value(t, create_accel({kind = .Bottom, geometries = {{vertices = {index = 99, generation = 1}, vertex_stride = 32, vertex_count = 3}}}), gpu.Accel_Struct{})
 
@@ -237,7 +237,7 @@ streams_are_checked :: proc(t: ^testing.T) {
 	testing.expect(t, transfer != 0 && transfer_done(transfer))
 	testing.expect(t, stream_buffer(buffer, 0, data) != 0)
 
-	context.logger = log.nil_logger()
+	context.logger = testlog.expected_errors()
 	testing.expect_value(t, stream_texture(texture, data), gpu.Transfer(0))
 	testing.expect_value(t, stream_buffer(buffer, 4, data), gpu.Transfer(0))
 	testing.expect_value(t, stream_buffer({index = 99, generation = 1}, 0, data[:4]), gpu.Transfer(0))
