@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -41,6 +42,19 @@ public sealed class ContentBrowserView : DockPanel
     readonly Border _general = new() { Classes = { "problems" }, Margin = new Thickness(4, 0, 4, 4) };
     readonly ContentFilterBar _filter;
     readonly ListBox _folders = new() { Classes = { "outliner" } };
+    readonly ListBox _tags = new() { Classes = { "outliner" } };
+    readonly TextBlock _noTags = new()
+    {
+        Text = "Tag an asset in its details to see its tags here. A / nests them, as env/stone.",
+        Classes = { "empty" },
+        TextWrapping = TextWrapping.Wrap,
+        TextAlignment = TextAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(12),
+        IsHitTestVisible = false,
+    };
+    readonly ToggleButton _showFolders = new() { Content = "Folders", Classes = { "kind-chip" } };
+    readonly ToggleButton _showTags = new() { Content = "Tags", Classes = { "kind-chip" } };
     readonly ContentGridView _grid;
     readonly ContentDetailsView _details;
     readonly TextBlock _empty = new()
@@ -88,7 +102,14 @@ public sealed class ContentBrowserView : DockPanel
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("220,4,*,4,320") };
         Grid.SetColumn(assets, 2);
         Grid.SetColumn(details, 4);
-        grid.Children.Add(_folders);
+        var left = new DockPanel();
+        var pane = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0), Children = { _showFolders, _showTags } };
+        SetDock(pane, DockSide.Top);
+        left.Children.Add(pane);
+        left.Children.Add(new Panel { Children = { _folders, _tags, _noTags } });
+        _showFolders.Click += (_, _) => _model.ShowingTags = false;
+        _showTags.Click += (_, _) => _model.ShowingTags = true;
+        grid.Children.Add(left);
         grid.Children.Add(Splitter(1));
         grid.Children.Add(assets);
         grid.Children.Add(Splitter(3));
@@ -96,6 +117,7 @@ public sealed class ContentBrowserView : DockPanel
         Children.Add(grid);
 
         _folders.ItemTemplate = new FuncDataTemplate<FolderRow>((row, _) => row == null ? new Control() : FolderView(row));
+        _tags.ItemTemplate = new FuncDataTemplate<TagRow>((row, _) => row == null ? new Control() : TagView(row));
         _folders.SelectionChanged += (_, _) =>
         {
             if (!_syncing && _folders.SelectedItem is FolderRow row)
@@ -183,6 +205,7 @@ public sealed class ContentBrowserView : DockPanel
     void Rebuild()
     {
         ShowFolders();
+        ShowTags();
         ShowLocation();
         ShowAssets();
         _filter.Show();
@@ -190,6 +213,92 @@ public sealed class ContentBrowserView : DockPanel
         ShowGeneralProblems();
         // A view of an index that the daemon no longer keeps up to date.
         Opacity = _index.Linked ? 1 : 0.6;
+    }
+
+    void ShowTags()
+    {
+        var rows = _model.TagRows();
+        var showing = _model.ShowingTags;
+        _showFolders.IsChecked = !showing;
+        _showTags.IsChecked = showing;
+        _folders.IsVisible = !showing;
+        _tags.IsVisible = showing && rows.Count > 0;
+        _noTags.IsVisible = showing && rows.Count == 0;
+        _syncing = true;
+        _tags.ItemsSource = rows;
+        _tags.SelectedItem = null;
+        _syncing = false;
+    }
+
+    // A tag's row: a click filters by it, an asset dropped on it gets it, and its menu renames or deletes it.
+    Control TagView(TagRow row)
+    {
+        var expander = new TextBlock
+        {
+            Text = row.HasChildren ? (row.Expanded ? "\u25be" : "\u25b8") : "",
+            Width = 14,
+            Classes = { "dim" },
+            Cursor = row.HasChildren ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
+        };
+        if (row.HasChildren)
+        {
+            expander.PointerPressed += (_, e) =>
+            {
+                _model.ToggleTagExpanded(row.Tag);
+                e.Handled = true;
+            };
+        }
+        var name = new TextBlock { Text = row.Name };
+        if (row.Filtering)
+        {
+            name.FontWeight = FontWeight.Bold;
+            name.Foreground = new SolidColorBrush(Palette.Accent);
+        }
+        var view = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Margin = new Thickness(row.Depth * Indent, 0, 0, 0),
+            Background = Brushes.Transparent,
+            Children =
+            {
+                expander,
+                name,
+                new TextBlock { Text = row.Count.ToString(), Classes = { "dim" } },
+            },
+        };
+        ToolTip.SetTip(view, row.Tag);
+        view.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(view).Properties.IsLeftButtonPressed)
+            {
+                _model.ToggleTag(row.Tag);
+                e.Handled = true;
+            }
+        };
+        DragDrop.SetAllowDrop(view, true);
+        view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            e.DragEffects = DroppedAll(e) is { Count: > 0 } ? DragDropEffects.Link : DragDropEffects.None;
+            e.Handled = true;
+        });
+        view.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (DroppedAll(e) is { Count: > 0 } guids)
+            {
+                _shell.Content.Tags.Add(guids, row.Tag);
+            }
+            e.Handled = true;
+        });
+        view.ContextMenu = new ContextMenu
+        {
+            Items =
+            {
+                new MenuItem { Header = "Rename", Command = new RelayCommand(() => _shell.Content.RequestRenameTag(row.Tag)) },
+                new MenuItem { Header = "Delete", Command = new RelayCommand(() => _shell.Content.RequestDeleteTag(row.Tag)) },
+            },
+        };
+        return view;
     }
 
     void ShowFolders()

@@ -74,6 +74,9 @@ public sealed class MainWindow : Window
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
         shell.Content.DraftLeft += () => _ = AskDraft();
+        shell.Content.TagRenameRequested += tag => _ = AskRenameTag(tag);
+        shell.Content.TagDeleteRequested += tag => _ = ConfirmDeleteTag(tag);
+        Activated += (_, _) => shell.Content.Tags.Reload();
         shell.GraphCloseRequested += editor => _ = AskCloseGraph(editor);
         shell.GraphOverwriteRequested += editor => _ = AskOverwriteGraph(editor);
         shell.SceneChanged += UpdateSceneStatus;
@@ -140,6 +143,34 @@ public sealed class MainWindow : Window
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
         image.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
         return null;
+    }
+
+    async Task AskRenameTag(string tag)
+    {
+        var name = await Dialogs.AskName(this, "Rename Tag", $"A new name for {tag} and the tags under it. A / nests it under another tag.", tag, "Rename");
+        if (name == null)
+        {
+            return;
+        }
+        if (ProjectTags.Normalize(name) is { } renamed)
+        {
+            _shell.Content.Tags.Rename(tag, renamed);
+        }
+        else
+        {
+            await Dialogs.Ask(this, "The tag did not change", $"{name} is not a tag: it can have letters, digits, _ and -, with / between its parts.", "OK");
+        }
+    }
+
+    async Task ConfirmDeleteTag(string tag)
+    {
+        var tags = _shell.Content.Tags;
+        var count = tags.Assets.Count(g => tags.Has(g, tag));
+        var answer = await Dialogs.Ask(this, "Delete Tag", $"Take {tag} and the tags under it from {(count == 1 ? "the 1 asset that has them" : $"the {count} assets that have them")}? The assets stay.", "Delete", "Cancel");
+        if (answer == "Delete")
+        {
+            tags.Remove([.. tags.Assets], tag);
+        }
     }
 
     // The selection moved off files with changes to their import settings that are not applied. Keep Editing goes back to them.

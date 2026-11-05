@@ -156,6 +156,19 @@ public sealed partial class EditorShell
                         model.ToggleKind(kind);
                     }
                     break;
+                case "tags":
+                    foreach (var tag in model.FilterTags.ToList())
+                    {
+                        model.ToggleTag(tag);
+                    }
+                    foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        model.ToggleTag(part);
+                    }
+                    break;
+                case "showTags":
+                    model.ShowingTags = value.ValueKind == System.Text.Json.JsonValueKind.True;
+                    break;
                 case "enter":
                     model.Enter(text);
                     break;
@@ -180,7 +193,7 @@ public sealed partial class EditorShell
                     }
                     break;
                 default:
-                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, enter, leave, reveal and shown");
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, enter, leave, reveal and shown");
             }
         }
         return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],

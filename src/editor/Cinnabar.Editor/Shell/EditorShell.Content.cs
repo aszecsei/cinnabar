@@ -180,6 +180,8 @@ public sealed partial class EditorShell
         Assets.Changed += FollowMovedGraphs;
         // What the browser reveals shows, also when another tab hides the panel.
         Content.ContentRevealed += () => Layout.Show("contentBrowser");
+        // A pull can change the tags with nothing else knowing.
+        Cook.Cooked += _ => Content.Tags.Reload();
         LoadContentView();
         Content.Model.ViewSettingsChanged += () => WriteSetting("content view", EditorSettings.ContentViewFileName,
             JsonSerializer.Serialize(new ContentViewSettings(Content.Model.ViewMode, Content.Model.TileSize)));

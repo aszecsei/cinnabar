@@ -200,9 +200,13 @@ public sealed class AssetIndex
             .OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Whether an asset has every word of a search (see <see cref="Search"/>).</summary>
-    public static bool MatchesSearch(Asset asset, string query) =>
-        query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All(w => Matches(asset, w));
+    /// <summary>
+    /// Whether an asset has every word of a search (see <see cref="Search"/>). A <c>tag:</c> word asks the given function,
+    /// and without one matches nothing.
+    /// </summary>
+    public static bool MatchesSearch(Asset asset, string query, Func<Asset, string, bool>? tagged = null) =>
+        query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All(w =>
+            w.StartsWith("tag:", StringComparison.OrdinalIgnoreCase) ? tagged?.Invoke(asset, w["tag:".Length..]) ?? false : Matches(asset, w));
 
     static bool Matches(Asset asset, string word)
     {

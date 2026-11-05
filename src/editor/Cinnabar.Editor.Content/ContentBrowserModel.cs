@@ -52,6 +52,9 @@ public enum ContentKind
     Shaders,
 }
 
+/// <summary>A row of the content browser's tags: a tag, how many assets have it or a tag under it, and whether it filters.</summary>
+public sealed record TagRow(string Tag, string Name, int Depth, int Count, bool HasChildren, bool Expanded, bool Filtering);
+
 /// <summary>A part of the path that the content browser shows over its assets: a folder, or a file that is open.</summary>
 public sealed record ContentCrumb(string Name, ContentFolder? Folder, string? File);
 
@@ -71,6 +74,10 @@ public sealed class ContentBrowserModel
     readonly HashSet<string> _expandedFolders = [];
     readonly HashSet<string> _seenRoots = [];
     readonly HashSet<ContentKind> _kinds = [];
+    readonly HashSet<string> _filterTags = new(StringComparer.Ordinal);
+    // Tags start expanded. The set holds the ones that the user collapsed.
+    readonly HashSet<string> _collapsedTags = [];
+    readonly ProjectTags _tags;
     List<string> _selection = [];
     List<Asset>? _items;
     string _search = "";
@@ -79,12 +86,80 @@ public sealed class ContentBrowserModel
     ContentViewMode _viewMode = ContentViewMode.Grid;
     double _tileSize = DefaultTileSize;
     bool _inThisFolder;
+    bool _showingTags;
 
-    public ContentBrowserModel(AssetIndex index)
+    public ContentBrowserModel(AssetIndex index, ProjectTags tags)
     {
         _index = index;
+        _tags = tags;
+        _tags.Changed += OnTagsChanged;
+        _tags.Reload();
         _index.Changed += OnIndexChanged;
         OnIndexChanged();
+    }
+
+    /// <summary>Whether the left of the panel shows the tags, and not the folders.</summary>
+    public bool ShowingTags
+    {
+        get => _showingTags;
+        set
+        {
+            if (_showingTags != value)
+            {
+                _showingTags = value;
+                Changed?.Invoke();
+            }
+        }
+    }
+
+    /// <summary>The tags that an asset must have, each or one under it, for it to show.</summary>
+    public IReadOnlyCollection<string> FilterTags => _filterTags;
+
+    /// <summary>Shows or hides a tag's assets in the filter.</summary>
+    public void ToggleTag(string tag)
+    {
+        if (!_filterTags.Remove(tag))
+        {
+            _filterTags.Add(tag);
+        }
+        ItemsMoved();
+    }
+
+    /// <summary>Whether an asset has a tag or one under it, or its file has: what is true of a file is true of what it makes.</summary>
+    public bool HasTag(Asset asset, string tag) => _tags.Has(asset.Guid, tag) || (asset.Parent != "" && _tags.Has(asset.Parent, tag));
+
+    /// <summary>Shows or hides the tags under a tag.</summary>
+    public void ToggleTagExpanded(string tag)
+    {
+        if (!_collapsedTags.Remove(tag))
+        {
+            _collapsedTags.Add(tag);
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>The rows of the tag list: each tag, under the tag above it, and not under one that is collapsed.</summary>
+    public IReadOnlyList<TagRow> TagRows()
+    {
+        var all = _tags.All();
+        // How many assets have each tag, counting a file's tags once for the file.
+        var rows = new List<TagRow>();
+        foreach (var tag in all)
+        {
+            var parts = tag.Split('/');
+            var hidden = false;
+            for (var i = 1; i < parts.Length && !hidden; i++)
+            {
+                hidden = _collapsedTags.Contains(string.Join('/', parts[..i]));
+            }
+            if (hidden)
+            {
+                continue;
+            }
+            var count = _tags.Assets.Count(g => _tags.Has(g, tag));
+            rows.Add(new TagRow(tag, parts[^1], parts.Length - 1, count, all.Any(t => t.StartsWith(tag + "/", StringComparison.Ordinal)), !_collapsedTags.Contains(tag), _filterTags.Contains(tag)));
+        }
+        return rows;
     }
 
     /// <summary>The open folder, where new assets go.</summary>
@@ -115,8 +190,8 @@ public sealed class ContentBrowserModel
     /// <summary>The kinds that show. None means every kind.</summary>
     public IReadOnlyCollection<ContentKind> Kinds => _kinds;
 
-    /// <summary>A search or a kind narrows what shows, so it comes from every folder, or those under the open one.</summary>
-    public bool Filtering => Searching || _kinds.Count > 0;
+    /// <summary>A search, a kind or a tag narrows what shows, so it comes from every folder, or those under the open one.</summary>
+    public bool Filtering => Searching || _kinds.Count > 0 || _filterTags.Count > 0;
 
     /// <summary>Whether a filter looks only in the open folder and those under it.</summary>
     public bool InThisFolder
@@ -199,7 +274,7 @@ public sealed class ContentBrowserModel
 
     /// <summary>How many assets of each kind the filter's other parts leave, for the kinds that it offers.</summary>
     public IReadOnlyList<(ContentKind Kind, int Count)> KindCounts() =>
-        [.. Scope().Where(a => !Searching || AssetIndex.MatchesSearch(a, Search)).GroupBy(a => KindOf(a.Kind)).OrderBy(g => g.Key).Select(g => (g.Key, g.Count()))];
+        [.. Scope().Where(a => MatchesSearchAndTags(a)).GroupBy(a => KindOf(a.Kind)).OrderBy(g => g.Key).Select(g => (g.Key, g.Count()))];
 
     /// <summary>The path over the assets: the root, each folder, and the open file.</summary>
     public IReadOnlyList<ContentCrumb> Crumbs()
@@ -248,10 +323,11 @@ public sealed class ContentBrowserModel
         ItemsMoved();
     }
 
-    /// <summary>Ends the filter: no search and every kind.</summary>
+    /// <summary>Ends the filter: no search, every kind and no tag.</summary>
     public void ClearFilter()
     {
         _kinds.Clear();
+        _filterTags.Clear();
         _search = "";
         ItemsMoved();
     }
@@ -326,6 +402,7 @@ public sealed class ContentBrowserModel
         {
             OpenFile = null;
             _kinds.Clear();
+            _filterTags.Clear();
             _search = "";
             _selection = [file];
             _anchor = _cursor = file;
@@ -420,6 +497,7 @@ public sealed class ContentBrowserModel
         Folder = new ContentFolder(asset.Root, folder);
         _search = "";
         _kinds.Clear();
+        _filterTags.Clear();
         _selection = [asset.Guid];
         _anchor = _cursor = asset.Guid;
         ItemsMoved();
@@ -498,12 +576,23 @@ public sealed class ContentBrowserModel
         {
             return [.. scope];
         }
-        var matches = scope.Where(a => (!Searching || AssetIndex.MatchesSearch(a, Search)) && (_kinds.Count == 0 || _kinds.Contains(KindOf(a.Kind))));
+        var matches = scope.Where(a => MatchesSearchAndTags(a) && (_kinds.Count == 0 || _kinds.Contains(KindOf(a.Kind))));
         return OpenFile != null
             ? [.. matches]
             : [.. matches.OrderBy(a => AssetIndex.Name(a.Path), StringComparer.OrdinalIgnoreCase)
                 .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    bool MatchesSearchAndTags(Asset asset) =>
+        (!Searching || AssetIndex.MatchesSearch(asset, Search, HasTag)) && _filterTags.All(t => HasTag(asset, t));
+
+    void OnTagsChanged()
+    {
+        // A tag that nothing has now can no longer be turned off, so it stops filtering.
+        var all = _tags.All();
+        _filterTags.RemoveWhere(t => !all.Contains(t));
+        ItemsMoved();
     }
 
     static int IndexOf(IReadOnlyList<Asset> items, string guid)

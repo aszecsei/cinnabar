@@ -25,18 +25,33 @@ public sealed class ContentBrowser
         CookSession cook,
         ConsoleLog console,
         Func<Func<Task<OperationResult?>>, Task<bool>> movingScene,
-        Action changed)
+        Action changed,
+        string tagsPath)
     {
         this.assets = assets;
         this.cook = cook;
         this.console = console;
         this.movingScene = movingScene;
-        Model = new ContentBrowserModel(assets);
+        Tags = new ProjectTags(tagsPath);
+        Model = new ContentBrowserModel(assets, Tags);
         Draft = new ImportSettingsDraft(assets);
         // The draft follows the selection first, so what else hears of the selection sees it.
         Model.ContextChanged += FollowSelection;
         Model.ContextChanged += changed;
     }
+
+    /// <summary>The project's tags for its assets.</summary>
+    public ProjectTags Tags { get; }
+
+    /// <summary>The user asked to rename a tag. The window asks for the new name.</summary>
+    public event Action<string>? TagRenameRequested;
+
+    /// <summary>The user asked to delete a tag. The window says how many assets have it, and confirms.</summary>
+    public event Action<string>? TagDeleteRequested;
+
+    public void RequestRenameTag(string tag) => TagRenameRequested?.Invoke(tag);
+
+    public void RequestDeleteTag(string tag) => TagDeleteRequested?.Invoke(tag);
 
     /// <summary>The import settings of the selected files, until they are applied.</summary>
     public ImportSettingsDraft Draft { get; }
@@ -253,9 +268,15 @@ public sealed class ContentBrowser
 
     public async Task<bool> DuplicateSelectedAssets()
     {
-        if (SelectedAssets.Count == 0 || await Operate(new DuplicateAssets([.. SelectedAssets])) is not { } result)
+        var sources = SelectedAssets.ToList();
+        if (sources.Count == 0 || await Operate(new DuplicateAssets([.. sources])) is not { } result)
         {
             return false;
+        }
+        // The daemon answers with the copies in the order that it was given the assets.
+        foreach (var (from, to) in sources.Zip(result.Guids))
+        {
+            Tags.Copy(from, to);
         }
         if (result.Guids is [var first, ..])
         {

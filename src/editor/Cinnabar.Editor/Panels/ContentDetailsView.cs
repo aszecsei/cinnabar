@@ -71,6 +71,7 @@ sealed class ContentDetailsView : StackPanel
         {
             Row("Behaviour", new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) });
         }
+        Row("Tags", TagsEditor());
         ShowSettings(asset, Row);
         // Settings that the importer does not know, which it warns of.
         var unknown = asset.Settings.Where(s => !_index.SettingsOf(asset.Kind).Any(i => i.Key == s.Key)).ToList();
@@ -90,6 +91,63 @@ sealed class ContentDetailsView : StackPanel
         {
             Row("Problems", Problems(_shell, problems));
         }
+    }
+
+    // The selected assets' tags as chips: dim when only some have the tag, which a click gives to all, with a cross that
+    // takes it from all. A box adds a tag, offering those that exist.
+    Control TagsEditor()
+    {
+        var tags = _shell.Content.Tags;
+        var selection = _model.Selection.ToList();
+        var panel = new WrapPanel();
+        foreach (var tag in selection.SelectMany(tags.Of).Distinct().Order(StringComparer.OrdinalIgnoreCase))
+        {
+            var everyOne = selection.All(g => tags.Of(g).Contains(tag));
+            var name = new TextBlock { Text = tag, Opacity = everyOne ? 1 : 0.55, VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            var cross = new TextBlock { Text = " \u00d7", Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center };
+            ToolTip.SetTip(cross, $"Take {tag} from the selected assets");
+            cross.PointerPressed += (_, e) =>
+            {
+                tags.Remove(selection, tag);
+                e.Handled = true;
+            };
+            if (!everyOne)
+            {
+                ToolTip.SetTip(name, $"Only some of the selected assets have {tag}. A click gives it to all of them.");
+                name.Cursor = new Cursor(StandardCursorType.Hand);
+                name.PointerPressed += (_, e) =>
+                {
+                    tags.Add(selection, tag);
+                    e.Handled = true;
+                };
+            }
+            panel.Children.Add(new Border { Classes = { "badge", "tag" }, Child = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Children = { name, cross } } });
+        }
+        var box = new AutoCompleteBox
+        {
+            PlaceholderText = "Add a tag, as env/stone",
+            ItemsSource = tags.All(),
+            FilterMode = AutoCompleteFilterMode.ContainsOrdinal,
+            MinimumPrefixLength = 1,
+            MinWidth = 160,
+        };
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter && !string.IsNullOrWhiteSpace(box.Text))
+            {
+                if (ProjectTags.Normalize(box.Text) is { } tag)
+                {
+                    tags.Add(selection, tag);
+                }
+                else
+                {
+                    ToolTip.SetTip(box, "A tag can have letters, digits, _ and -, with / between its parts.");
+                    ToolTip.SetIsOpen(box, true);
+                }
+                e.Handled = true;
+            }
+        };
+        return new StackPanel { Spacing = 2, Children = { panel, box } };
     }
 
     // A sub-asset's settings are its file's, so it links there. The selected files' settings are the draft's.
