@@ -117,8 +117,12 @@ void fog_inject(uint3 id) {
 
 	float4 result = current;
 	if (push.valid != 0) {
-		// Where the point was in last frame's volume.
-		float3 previous = p + frame.camera_offset.xyz - frame.previous_camera_offset.xyz;
+		// Where the froxel's middle was in last frame's volume. The history holds each froxel's mean over the jitter, so a
+		// still camera reads its own texel; from the jittered point it would read between slices, by a different amount
+		// each frame, and smear them.
+		float middle = fog_depth(id.z + 0.5);
+		float2 middle_xy = ndc / float2(push.right.w, push.up.w) * middle;
+		float3 previous = push.right.xyz * middle_xy.x + push.up.xyz * middle_xy.y + push.forward.xyz * middle + frame.camera_offset.xyz - frame.previous_camera_offset.xyz;
 		float4 clip = mul(frame.previous_view_projection, float4(previous, 1));
 		if (clip.w > 0) {
 			float2 uv = (clip.xy / clip.w * float2(0.5, -0.5) + 0.5) * frame.fog_scale;
