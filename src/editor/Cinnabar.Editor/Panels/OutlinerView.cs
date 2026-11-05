@@ -334,7 +334,7 @@ public sealed class OutlinerView : DockPanel
         if (instance is { Prefab: not "" } && CommandViews.Icon("prefab", 12) is { } icon)
         {
             icon.Classes.Add("prefab");
-            ToolTip.SetTip(icon, $"An instance of {_shell.PrefabName(instance.Prefab)}");
+            ToolTip.SetTip(icon, $"{(_shell.Scene?.Scene.Find(id)?.Node is not (null or 0) ? "A part of" : "An instance of")} {_shell.PrefabName(instance.Prefab)}");
             content.Children.Insert(1, icon);
         }
         TextBlock? mark = null;

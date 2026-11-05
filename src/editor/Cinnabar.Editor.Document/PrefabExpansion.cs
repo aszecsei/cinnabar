@@ -136,7 +136,7 @@ public static partial class PrefabExpansion
 
         void Place(List<Flat> output, SceneEntity block, IReadOnlyList<string> chain, bool isOutermost)
         {
-            if (Prefab(block, chain, isOutermost) is not var (prefab, root))
+            if (Prefab(block, chain, isOutermost) is not var (whole, wholeRoot) || Part(block, whole, wholeRoot, isOutermost) is not var (prefab, root))
             {
                 var alone = Plain(block.Copy(block.Id));
                 output.Add(new Flat(alone, [block.Id], block.Prefab));
@@ -169,6 +169,39 @@ public static partial class PrefabExpansion
                 output.Add(new Flat(Plain(e), PathOf(f), first ? block.Prefab : f.Prefab));
                 first = false;
             }
+        }
+
+        // The part of a prefab's flat entities that an instance names: its node and the node's descendants, in their
+        // order, with the node as the root. A node that the prefab does not have warns, as a missing prefab does.
+        (List<Flat> Entities, ulong Root)? Part(SceneEntity block, List<Flat> prefab, ulong root, bool isOutermost)
+        {
+            if (block.Node == 0)
+            {
+                return (prefab, root);
+            }
+            var parents = prefab.ToDictionary(f => f.Entity.Id, f => f.Entity.Parent);
+            if (!parents.ContainsKey(block.Node))
+            {
+                if (isOutermost)
+                {
+                    Problems.Add(new SceneProblem(0, $"instance {block.Id:x16}: the prefab {block.Prefab} has no entity {block.Node:x16}, so the instance is its root alone", false));
+                }
+                return null;
+            }
+            bool Inside(ulong id)
+            {
+                // The bound stops a cycle of parents, which the loader reports.
+                for (var steps = 0; id != 0 && steps < prefab.Count; steps++)
+                {
+                    if (id == block.Node)
+                    {
+                        return true;
+                    }
+                    id = parents.GetValueOrDefault(id);
+                }
+                return false;
+            }
+            return ([.. prefab.Where(f => Inside(f.Entity.Id))], block.Node);
         }
 
         (List<Flat> Entities, ulong Root)? Prefab(SceneEntity block, IReadOnlyList<string> chain, bool isOutermost)
@@ -256,6 +289,7 @@ public static partial class PrefabExpansion
     static SceneEntity Plain(SceneEntity e)
     {
         e.Prefab = "";
+        e.Node = 0;
         e.Keys = SceneKeys.None;
         e.ParentPath = null;
         e.RemovedComponents.Clear();

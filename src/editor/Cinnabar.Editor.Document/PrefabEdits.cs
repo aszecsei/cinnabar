@@ -292,7 +292,7 @@ public static partial class PrefabEdits
             }
             else if (info.IsInstanceRoot)
             {
-                scene.Entities.Add(new SceneEntity(e.Id) { Prefab = e.Prefab, Parent = e.Parent });
+                scene.Entities.Add(new SceneEntity(e.Id) { Prefab = e.Prefab, Node = e.Node, Parent = e.Parent });
             }
         }
         return PrefabExpansion.Expand(scene, document.Prefabs.SceneOf).Flat.Find(id);

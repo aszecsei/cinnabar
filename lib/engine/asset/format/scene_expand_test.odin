@@ -70,10 +70,11 @@ the_fixture_expands_to_its_expected_scene :: proc(t: ^testing.T) {
 	testing.expectf(t, ok, "problems: %v", problems)
 	expect_scene(t, flat, f.expected)
 
-	// The warnings are the missing prefab, the override whose entity is gone, and door.prefab's reference to an entity
-	// that it does not have, for the scene's own instance of the door. The variant's instance is the variant's
-	// warning, at its own cook.
-	warnings := [?]string{"44444444444444444444444444444444 is missing", "5000000000000001#2000000000000009", "instance 5000000000000001: the field bell refers to 20000000000000ff"}
+	// The warnings are the missing prefab, the override whose entity is gone, door.prefab's reference to an entity that
+	// it does not have, for the scene's own instance of the door, and the part that names an entity that the door does
+	// not have. The variant's instance is the variant's warning, at its own cook. A part leaves out the door's root, so
+	// its reference is not the part's.
+	warnings := [?]string{"44444444444444444444444444444444 is missing", "5000000000000001#2000000000000009", "instance 5000000000000001: the field bell refers to 20000000000000ff", "has no entity 20000000000000ee"}
 	testing.expectf(t, len(problems) == len(warnings), "problems: %v", problems)
 	for w in warnings {
 		found := false
@@ -82,6 +83,86 @@ the_fixture_expands_to_its_expected_scene :: proc(t: ^testing.T) {
 		}
 		testing.expectf(t, found, "no warning with %q: %v", w, problems)
 	}
+}
+
+// A prefab with a root, a part with a child and a reference out of the part, for what the fixture does not show.
+@(private = "file")
+PART_PREFAB := `scene 2
+
+entity 0000000000000001
+name = "Root"
+behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+	inner = @0000000000000002
+
+entity 0000000000000002
+name = "Part"
+parent = @0000000000000001
+behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+	outside = @0000000000000001
+	child = @0000000000000003
+
+entity 0000000000000003
+name = "Child"
+parent = @0000000000000002
+
+entity 0000000000000004
+name = "Other"
+parent = @0000000000000001
+`
+
+@(private = "file")
+expand_part :: proc(t: ^testing.T, node: string) -> (flat: Scene, problems: []Scene_Problem) {
+	prefab, parse_problems, parsed := scene_parse(PART_PREFAB, context.temp_allocator)
+	testing.expectf(t, parsed, "%v", parse_problems)
+	prefabs := make(map[Guid]Scene, context.temp_allocator)
+	guid, _ := guid_parse("44444444444444444444444444444444")
+	prefabs[guid] = prefab
+	text := fmt.tprintf("scene 2\n\nentity 0000000000000009\nprefab = $44444444444444444444444444444444\nnode = @%s\n", node)
+	scene, level_problems, level_ok := scene_parse(text, context.temp_allocator)
+	testing.expectf(t, level_ok, "%v", level_problems)
+	ok: bool
+	flat, problems, ok = scene_expand(scene, resolver_of(&prefabs), allocator = context.temp_allocator)
+	testing.expectf(t, ok, "%v", problems)
+	return
+}
+
+@(test)
+a_part_keeps_the_node_and_its_descendants :: proc(t: ^testing.T) {
+	flat, _ := expand_part(t, "0000000000000002")
+	testing.expect_value(t, len(flat.entities), 2)
+	testing.expect_value(t, flat.entities[0].id, 9)
+	testing.expect_value(t, flat.entities[0].name, "Part")
+	testing.expect_value(t, flat.entities[0].parent, 0)
+	testing.expect_value(t, flat.entities[1].id, scene_path_id(9, 3))
+	testing.expect_value(t, flat.entities[1].name, "Child")
+	testing.expect_value(t, flat.entities[1].parent, 9)
+}
+
+@(test)
+a_missing_node_is_the_root_alone :: proc(t: ^testing.T) {
+	flat, problems := expand_part(t, "00000000000000ee")
+	testing.expect_value(t, len(flat.entities), 1)
+	testing.expect_value(t, flat.entities[0].id, 9)
+	testing.expect_value(t, flat.entities[0].node, 0)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect(t, !problems[0].error && strings.contains(problems[0].message, "has no entity 00000000000000ee"))
+}
+
+@(test)
+a_reference_outside_the_part_becomes_none :: proc(t: ^testing.T) {
+	flat, problems := expand_part(t, "0000000000000002")
+	fields := flat.entities[0].behaviours[0].fields
+	testing.expect_value(t, fields[0].value.entity, 0)
+	testing.expect_value(t, fields[1].value.entity, scene_path_id(9, 3))
+	testing.expect_value(t, len(problems), 1)
+	testing.expect(t, strings.contains(problems[0].message, "the field outside refers to 0000000000000001"))
+}
+
+@(test)
+only_an_instance_block_takes_node :: proc(t: ^testing.T) {
+	_, problems, ok := scene_parse("scene 2\n\nentity 0000000000000009\nnode = @0000000000000002\n", context.temp_allocator)
+	testing.expect(t, !ok)
+	testing.expect(t, len(problems) > 0 && strings.contains(problems[0].message, "only an instance block takes node"))
 }
 
 @(private = "file")

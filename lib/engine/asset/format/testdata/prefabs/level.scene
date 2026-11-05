@@ -1,5 +1,6 @@
 # A level with an instance of the door with an override of every kind, entities added to it and one under a removed
-# entity, an instance of the variant, an instance of a prefab that is missing, and an override whose entity is gone.
+# entity, an instance of the variant, an instance of a prefab that is missing, an override whose entity is gone, and
+# parts of the door: its frame with an override inside, the nested lamp's bulb, and an entity that it does not have.
 # expected.scene is what it expands to. The blocks are in the order that the editor writes them.
 scene 2
 
@@ -69,5 +70,35 @@ name = "Statue"
 prefab = $44444444444444444444444444444444
 component 1 Transform
 	position = [0, 0, 33554432]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity 9000000000000001
+name = "Part Frame"
+prefab = $22222222222222222222222222222222
+node = @2000000000000002
+component 1 Transform
+	position = [33554432, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity 9000000000000001#2000000000000003
+name = "Part Handle"
+
+entity a000000000000001
+name = "Part Bulb"
+prefab = $22222222222222222222222222222222
+node = @cdd485308415a1d2
+component 1 Transform
+	position = [50331648, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+
+entity b000000000000001
+name = "No Such Part"
+prefab = $22222222222222222222222222222222
+node = @20000000000000ee
+component 1 Transform
+	position = [67108864, 0, 0]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]

@@ -37,6 +37,9 @@ Scene_Entity :: struct {
 	keys:               Scene_Keys,
 	// An instance block: the prefab that it instantiates, whose root it stands for.
 	prefab:             Guid,
+	// An instance block: the entity of the prefab's expansion that it instantiates with its descendants, in place of the
+	// whole prefab, or 0.
+	node:               u64,
 	// An override block: the IDs of its path, from the instance's. id is scene_path_id_of the path.
 	path:               []u64,
 	// An override block: the entity and its descendants are taken out of the instance.

@@ -59,7 +59,8 @@ public sealed class PrefabTests : IDisposable
         }
         // The same warnings as the cooker's, and no errors.
         Assert.DoesNotContain(expansion.Problems, p => p.IsError);
-        Assert.Equal(3, expansion.Problems.Count);
+        Assert.Equal(4, expansion.Problems.Count);
+        Assert.Contains(expansion.Problems, p => p.Message.Contains("has no entity 20000000000000ee"));
         Assert.Contains(expansion.Problems, p => p.Message.Contains("44444444444444444444444444444444 is missing"));
         Assert.Contains(expansion.Problems, p => p.Message.Contains("5000000000000001#2000000000000009"));
         Assert.Contains(expansion.Problems, p => p.Message.Contains("instance 5000000000000001: the field bell refers to 20000000000000ff"));

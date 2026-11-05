@@ -519,7 +519,7 @@ public sealed class PropertiesView : ScrollViewer
             {
                 line.Children.Add(icon);
             }
-            line.Children.Add(new TextBlock { Text = instance.Prefab != "" ? "Instance of" : "In an instance of", Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center });
+            line.Children.Add(new TextBlock { Text = _shell.Scene?.Scene.Find(instance.Instance)?.Node is not (null or 0) ? (instance.Prefab != "" ? "Part of" : "In a part of") : instance.Prefab != "" ? "Instance of" : "In an instance of", Classes = { "field-name" }, VerticalAlignment = VerticalAlignment.Center });
             line.Children.Add(link);
             if (_shell.PrefabOfInstance(instance.Instance) is { IsDirty: true } changed)
             {

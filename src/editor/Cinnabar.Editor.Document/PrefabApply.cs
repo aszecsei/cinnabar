@@ -38,7 +38,16 @@ public static partial class PrefabEdits
         {
             throw new InvalidOperationException("the instance's prefab is not open, or does not have one root");
         }
-        return (prefab, root.Id);
+        // The instance's root is its node, in a part of a prefab.
+        if (block.Node == 0)
+        {
+            return (prefab, root.Id);
+        }
+        if (PrefabExpansion.Expand(prefab.Scene, document.Prefabs.SceneOf, prefab.Guid).Flat.Find(block.Node) == null)
+        {
+            throw new InvalidOperationException($"the instance's prefab has no entity {block.Node:x16}");
+        }
+        return (prefab, block.Node);
     }
 
     // Where an entity of the scene is in the prefab: the instance's root is the prefab's root, and an entity on a path
@@ -138,7 +147,7 @@ public static partial class PrefabEdits
     // The instance block without its overrides: the prefab, the parent and the pose, which are the scene's.
     static SceneEntity Bare(SceneEntity block)
     {
-        var bare = new SceneEntity(block.Id) { Prefab = block.Prefab, Parent = block.Parent, ParentPath = block.ParentPath };
+        var bare = new SceneEntity(block.Id) { Prefab = block.Prefab, Node = block.Node, Parent = block.Parent, ParentPath = block.ParentPath };
         bare.Components.AddRange(block.Components.Where(c => c.Id is SceneEdits.TransformId or SceneEdits.LocalTransformId).Select(c => c.Copy()));
         return bare;
     }
@@ -396,6 +405,8 @@ public static partial class PrefabEdits
         // the path through the variant's root.
         var instanceBlock = Bare(block);
         instanceBlock.Prefab = guid;
+        // The variant is what the part made, so its instance is the whole variant.
+        instanceBlock.Node = 0;
         var kept = new List<SceneEntity>();
         void Keep(SceneEntity copy, SceneEntity into)
         {

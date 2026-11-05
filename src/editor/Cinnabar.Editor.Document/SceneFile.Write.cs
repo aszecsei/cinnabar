@@ -32,6 +32,10 @@ public static partial class SceneFile
             {
                 sb.Append("prefab = $").Append(e.Prefab).Append('\n');
             }
+            if (e.Node != 0)
+            {
+                sb.Append("node = ").Append(FormatValue(SceneValue.EntityRef(e.Node))).Append('\n');
+            }
             if (plain ? !e.Active : e.Keys.HasFlag(SceneKeys.Active))
             {
                 sb.Append(e.Active ? "active = true\n" : "active = false\n");
