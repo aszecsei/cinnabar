@@ -161,6 +161,11 @@ Asset :: struct {
 	// For a sub-asset whose source the cooker generates, as a USD stage's prefab, the generated text's absolute path,
 	// which the editor reads in place of the file's (see docs/content/kinds/stages.md#prefab). "" otherwise.
 	generated:    string,
+	// The absolute path of the PNG that shows the asset, for a kind that has one (see
+	// docs/content/daemon-and-operations.md#thumbnails), or "". The name holds a key of what it shows, so it changes
+	// with the asset. Whether the file is there yet: a material's, a mesh's or a prefab's comes from the host.
+	thumbnail:       string,
+	thumbnail_ready: bool,
 }
 
 // A hotspot rectangle of a material's tool texture, in texels: a complete tileable piece that the Hotspot tool maps a
@@ -301,11 +306,16 @@ Delete_Assets :: struct {
 	folders: []Folder,
 }
 
-// Replaces an asset's import settings. The daemon checks them with the asset's importer, writes its .meta file, and
-// cooks it again.
-Set_Import_Settings :: struct {
+// An asset and the import settings that replace its own.
+Asset_Settings :: struct {
 	guid:     string,
 	settings: []Setting,
+}
+
+// Replaces assets' import settings, all of them or none. The daemon checks them with each asset's importer, writes the
+// .meta files, and cooks the assets again, in one pass.
+Set_Import_Settings :: struct {
+	assets: []Asset_Settings,
 }
 
 // Cooks assets again with the same settings, also when their blobs are up to date.

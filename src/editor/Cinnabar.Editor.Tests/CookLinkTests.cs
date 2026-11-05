@@ -108,7 +108,7 @@ public sealed class CookLinkTests : IDisposable
         var copy = Assert.Single((await session.Request(new DuplicateAssets([gate]))).Guids);
         Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
 
-        Assert.Equal("", (await session.Request(new SetImportSettings(gate, [new Setting("native", "true")]))).Error);
+        Assert.Equal("", (await session.Request(new SetImportSettings([new AssetSettings(gate, [new Setting("native", "true")])]))).Error);
         Assert.Equal([new Setting("native", "true")], index.Find(gate)!.Settings);
         Assert.Equal("", (await session.Request(new Reimport([gate]))).Error);
         Assert.Equal([new CookedCount(AssetKind.Script, 1)], session.LastCook!.Cooked);
@@ -118,6 +118,48 @@ public sealed class CookLinkTests : IDisposable
         Assert.Contains("already exists", refused.Error);
         Assert.Equal("scripts/doors/portcullis_copy.luau", index.Find(copy)?.Path);
         Assert.Contains("root", (await session.Request(new DeleteAssets([], [new Folder("game", "")]))).Error);
+    }
+
+    [Fact]
+    public async Task TheIndexCarriesAThumbnailPathAndItsFileExists()
+    {
+        Directory.CreateDirectory(Path.Combine(_content, "textures"));
+        // A 1x1 PNG.
+        File.WriteAllBytes(Path.Combine(_content, "textures", "dot.png"), Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="));
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Path == "textures/dot.png"), session, output);
+
+        var dot = index.Assets.Values.Single(a => a.Path == "textures/dot.png");
+        Assert.True(dot.ThumbnailReady);
+        Assert.True(File.Exists(dot.Thumbnail));
+        Assert.StartsWith(Path.Combine(_dir, "cache", "thumbnails").Replace('\\', '/'), dot.Thumbnail.Replace('\\', '/'));
+        // A script has no thumbnail.
+        Assert.Equal("", index.Assets.Values.First(a => a.Kind == AssetKind.Script).Thumbnail);
+    }
+
+    [Fact]
+    public async Task SettingsOfTwoAssetsMakeOnePass()
+    {
+        var index = new AssetIndex();
+        using var session = Start(index);
+        var output = new List<string>();
+        session.Output += line => { lock (output) { output.Add(line); } };
+        await Until(() => session.State == CookState.Linked && index.Assets.Count == 4, session, output);
+        var door = index.Assets.Values.Single(a => a.Path == "scripts/door.luau");
+        var util = index.Assets.Values.Single(a => a.Path == "scripts/util.luau");
+        var cooks = 0;
+        session.Cooked += _ => cooks++;
+
+        var native = new[] { new Setting("native", "true") };
+        Assert.Equal("", (await session.Request(new SetImportSettings([new AssetSettings(door.Guid, native), new AssetSettings(util.Guid, native)]))).Error);
+
+        Assert.Equal(native, index.Find(door.Guid)!.Settings);
+        Assert.Equal(native, index.Find(util.Guid)!.Settings);
+        Assert.Equal(1, cooks);
+        Assert.Equal([new CookedCount(AssetKind.Script, 2)], session.LastCook!.Cooked);
     }
 
     [Fact]

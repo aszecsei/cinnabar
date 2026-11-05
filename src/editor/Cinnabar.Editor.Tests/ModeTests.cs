@@ -89,8 +89,8 @@ public sealed class ModeTests : IDisposable
         using var shell = NewShell();
         var runs = 0;
         var command = new Command("test.command", "Test", () => runs++);
-        var letter = new ShortcutCommand(new CommandAdapter(command), new KeyGesture(Key.W), () => shell.GameHasKeys);
-        var function = new ShortcutCommand(new CommandAdapter(command), new KeyGesture(Key.F5, KeyModifiers.Shift), () => shell.GameHasKeys);
+        var letter = new ShortcutCommand(new CommandAdapter(command), new KeyGesture(Key.W), () => shell.GameHasKeys, () => false);
+        var function = new ShortcutCommand(new CommandAdapter(command), new KeyGesture(Key.F5, KeyModifiers.Shift), () => shell.GameHasKeys, () => false);
 
         Assert.True(letter.CanExecute(null));
         shell.ViewportHasFocus = true;

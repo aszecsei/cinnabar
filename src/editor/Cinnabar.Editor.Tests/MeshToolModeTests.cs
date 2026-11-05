@@ -33,7 +33,7 @@ public sealed class MeshToolModeTests : IDisposable
         MeshFixtures.WriteRoom(_temp);
         var shell = TestShell.Open(_temp, "main.scene", Text);
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
-        shell.Assets.Apply(new AssetSnapshot([new Asset(MeshFixtures.MeshGuid, AssetKind.Mesh, "game", "room.mesh", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "")], []));
+        shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MeshFixtures.MeshGuid, AssetKind.Mesh, "room.mesh")], []));
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33])]));
         shell.Viewport.RequestSize(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);

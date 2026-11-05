@@ -322,41 +322,60 @@ delete_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Delete_Assets)
 	return {}
 }
 
+// Checks every asset's settings before it writes any .meta file, and puts back what it wrote when a write fails, so an
+// operation changes all of the assets or none.
 @(private = "file")
 set_import_settings :: proc(roots: []Root, index: ^Index, op: cook_link.Set_Import_Settings) -> cook_link.Operation_Result {
-	path, found := asset_path(roots, index, op.guid)
-	if !found {
-		return not_found(index, op.guid)
+	Change :: struct {
+		path, meta_path: string,
+		old, new:        []byte,
 	}
-	entry := index.assets[op.guid]
-	known := import_settings(kind_of(path))
-	settings := make([]format.Meta_Setting, len(op.settings), context.temp_allocator)
-	for s, i in op.settings {
-		for other in op.settings[:i] {
-			if other.key == s.key {
-				return failed("%s is set twice", s.key)
-			}
+	changes := make([]Change, len(op.assets), context.temp_allocator)
+	for a, n in op.assets {
+		path, found := asset_path(roots, index, a.guid)
+		if !found {
+			return not_found(index, a.guid)
 		}
-		if info, ok := find_setting(known, s.key); ok {
-			if !slice.contains(info.values, s.value) {
-				return failed("%s must be %s", s.key, strings.join(info.values, " or ", context.temp_allocator))
+		entry := index.assets[a.guid]
+		known := import_settings(kind_of(path))
+		settings := make([]format.Meta_Setting, len(a.settings), context.temp_allocator)
+		for s, i in a.settings {
+			for other in a.settings[:i] {
+				if other.key == s.key {
+					return failed("%s is set twice", s.key)
+				}
 			}
-		} else if !slice.contains(entry.settings, cook_link.Setting{s.key, s.value}) {
-			// A setting that the importer does not know stays as the .meta file has it, but is never added.
-			return failed("%s has no setting %q", name_of(path), s.key)
+			if info, ok := find_setting(known, s.key); ok {
+				if !slice.contains(info.values, s.value) {
+					return failed("%s must be %s", s.key, strings.join(info.values, " or ", context.temp_allocator))
+				}
+			} else if !slice.contains(entry.settings, cook_link.Setting{s.key, s.value}) {
+				// A setting that the importer does not know stays as the .meta file has it, but is never added.
+				return failed("%s has no setting %q", name_of(path), s.key)
+			}
+			settings[i] = {s.key, s.value}
 		}
-		settings[i] = {s.key, s.value}
+		meta_path := meta_of(path)
+		old, err := os.read_entire_file(meta_path, context.temp_allocator)
+		if err != nil {
+			return failed("cannot read %s: %s", display(roots, meta_path), os.error_string(err))
+		}
+		guid, _ := format.guid_parse(a.guid)
+		changes[n] = {path, meta_path, old, transmute([]byte)meta_with(guid, string(old), settings)}
 	}
-	meta_path := meta_of(path)
-	old, err := os.read_entire_file(meta_path, context.temp_allocator)
-	if err != nil {
-		return failed("cannot read %s: %s", display(roots, meta_path), os.error_string(err))
+	for c, n in changes {
+		if !write_blob(c.meta_path, c.new) {
+			for done in changes[:n] {
+				if !write_blob(done.meta_path, done.old) {
+					log.errorf("cook: cannot put back %s", display(roots, done.meta_path))
+				}
+			}
+			return failed("cannot write %s", display(roots, c.meta_path))
+		}
 	}
-	guid, _ := format.guid_parse(op.guid)
-	if !write_blob(meta_path, transmute([]byte)meta_with(guid, string(old), settings)) {
-		return failed("cannot write %s", display(roots, meta_path))
+	for c in changes {
+		log.infof("cook: changed the import settings of %s", display(roots, c.path))
 	}
-	log.infof("cook: changed the import settings of %s", display(roots, path))
 	return {}
 }
 

@@ -93,6 +93,15 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 					}
 				}
 			}
+			for e in flat.entities {
+				for c in e.components {
+					for f in c.fields {
+						if f.value.kind == .Asset && f.value.asset != {} && !slice.contains(s.visual[:], f.value.asset) {
+							append(&s.visual, f.value.asset)
+						}
+					}
+				}
+			}
 			key := scene_key(options.config, s^, scene, prefabs, sources)
 			buffer: [32]u8
 			output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))

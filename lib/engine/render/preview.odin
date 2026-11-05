@@ -58,6 +58,13 @@ Preview_Desc :: struct {
 	// posed by this palette when it has one and the mesh a skin. The palette is in frame memory.
 	animated: bool,
 	palette:  [][3][4]f32,
+	// A preview of many meshes, in place of the mesh and the material, each with its own pose and materials, which a
+	// distance of 0 frames (see add_preview_item_passes).
+	items:    []Preview_Item,
+	// A thumbnail: what it makes resident is not the world's, and can go when it is done. When complete, draw_frame asks
+	// for a copy of the target with this ticket, and sets captured if the backend has room.
+	capture:  u32,
+	captured: ^bool,
 }
 
 // Previews is the previews' state between frames, in the Renderer: the records of the one that a frame draws, and the
@@ -97,6 +104,9 @@ Preview_Frame :: struct {
 	skin:        Skinned_Instance,
 	skin_upload: gpu.Upload,
 	skin_buffers: [3]Buffer,
+	// A preview of many meshes: its runs of draws, and its instances. 0 instances means one.
+	bins:        []Preview_Bin,
+	instance_count: u32,
 }
 
 // preview_mesh is the GUID of one of the engine's preview meshes.
@@ -113,9 +123,9 @@ preview_mesh :: proc(shape: Preview_Shape) -> format.Guid {
 
 previews_init :: proc(p: ^Previews, r: ^Renderer) {
 	platform := r.platform
-	p.instances = platform.gpu_create_buffer({size = size_of(Instance_Record), label = "preview instance"}, nil)
-	p.draws = platform.gpu_create_buffer({size = MAX_SUBMESHES * size_of(Draw_Record), label = "preview draws"}, nil)
-	p.arguments = platform.gpu_create_buffer({size = MAX_SUBMESHES * size_of(gpu.Draw_Indirect_Args), usage = {.Storage, .Indirect}, label = "preview arguments"}, nil)
+	p.instances = platform.gpu_create_buffer({size = MAX_PREVIEW_ITEMS * size_of(Instance_Record), label = "preview instance"}, nil)
+	p.draws = platform.gpu_create_buffer({size = MAX_PREVIEW_DRAWS * size_of(Draw_Record), label = "preview draws"}, nil)
+	p.arguments = platform.gpu_create_buffer({size = MAX_PREVIEW_DRAWS * size_of(gpu.Draw_Indirect_Args), usage = {.Storage, .Indirect}, label = "preview arguments"}, nil)
 	p.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
 }
 
@@ -212,6 +222,10 @@ preview_use :: proc(r: ^Renderer, table: ^Material_Table, desc: ^Preview_Desc) -
 // pass, and the output pass into its target. Without its mesh or its material, it clears the target to the background.
 @(private)
 add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
+	if desc.items != nil {
+		add_preview_item_passes(f, desc)
+		return
+	}
 	if desc.effect {
 		add_effect_preview_passes(f, desc)
 		return
@@ -513,6 +527,13 @@ write_preview_records :: proc(
 		return
 	}
 	pf.records = upload
+	preview_write_constants(pf, r, desc, upload, view_projection, origin, PREVIEW_NEAR, mesh_at, surface_at, table_at, light_at)
+}
+
+// preview_write_constants uploads a preview's Frame_Constants, whose records are at those places in its upload.
+@(private)
+preview_write_constants :: proc(pf: ^Preview_Frame, r: ^Renderer, desc: ^Preview_Desc, upload: gpu.Upload, view_projection: matrix[4, 4]f32, origin: [3]f32, near: f32, mesh_at, surface_at, table_at, light_at: u32) {
+	platform := r.platform
 	buffer := gpu.read_index(upload.buffer)
 	right, up, _ := view_axes({rotation = desc.rotation})
 	constants := Frame_Constants {
@@ -541,7 +562,7 @@ write_preview_records :: proc(
 		lights                   = buffer,
 		lights_offset            = upload.offset + light_at,
 		directional_count        = 1,
-		near                     = PREVIEW_NEAR,
+		near                     = near,
 		shadow_sampler           = gpu.sampler_index(r.shadows.sampler),
 		screen_size              = {f32(desc.size.x), f32(desc.size.y)},
 		exposure                 = gpu.read_index(r.post.unit_exposure),
@@ -549,14 +570,15 @@ write_preview_records :: proc(
 		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
 	}
-	pf.constants, ok = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	constants_upload, ok := platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		return
 	}
+	pf.constants = constants_upload
 	(^Frame_Constants)(raw_data(pf.constants.data))^ = constants
 }
 
-@(private = "file")
+@(private)
 declare_preview_draws :: proc(g: ^Graph, p: Pass, pf: ^Preview_Frame) {
 	indirect_buffer(g, p, pf.arguments)
 	read(g, p, pf.draws)
@@ -568,12 +590,12 @@ declare_preview_draws :: proc(g: ^Graph, p: Pass, pf: ^Preview_Frame) {
 	}
 }
 
-@(private = "file")
+@(private)
 update_preview :: proc(ctx: ^Pass_Context) {
 	pf := (^Preview_Frame)(ctx.data)
 	g := ctx.graph
 	u := pf.records
-	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.instance_at, gpu_buffer(g, pf.instances), 0, size_of(Instance_Record))
+	gpu.cmd_copy_buffer(ctx.cb, u.buffer, u.offset + pf.instance_at, gpu_buffer(g, pf.instances), 0, max(pf.instance_count, 1) * size_of(Instance_Record))
 	if pf.draw_count == 0 {
 		return
 	}
@@ -583,7 +605,7 @@ update_preview :: proc(ctx: ^Pass_Context) {
 
 // preview_pipelines are the pipelines that a preview draws with: an opaque material's prepass and forward pass, or a
 // transparent one's passes over the scene, its back faces first.
-@(private = "file")
+@(private)
 preview_pipelines :: proc(p: ^Material_Pipeline) -> (pipelines: [2]gpu.Pipeline, count: int) {
 	if material_group(p) == .Opaque {
 		return {p.pipelines[.Prepass], p.pipelines[.Forward]}, 2
@@ -621,7 +643,7 @@ draw_preview :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 	}
 }
 
-@(private = "file")
+@(private)
 draw_preview_output :: proc(ctx: ^Pass_Context) {
 	pf := (^Preview_Frame)(ctx.data)
 	g := ctx.graph

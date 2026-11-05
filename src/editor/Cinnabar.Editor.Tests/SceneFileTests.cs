@@ -61,6 +61,30 @@ public class SceneFileTests
     }
 
     [Fact]
+    public void NodeRoundTrips()
+    {
+        const string text = "scene 2\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = @2000000000000002\n";
+        var (scene, problems) = SceneFile.Parse(text);
+        Assert.Empty(problems);
+        Assert.Equal(0x2000000000000002ul, scene!.Find(0x9000000000000001)!.Node);
+        Assert.Equal(text, SceneFile.Write(scene));
+
+        // A path names a nested instance's entity, and is the ID that the path hashes to.
+        var (nested, _) = SceneFile.Parse("scene 2\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = @2000000000000005#1000000000000002\n");
+        Assert.Equal(ScenePath.Id(0x2000000000000005, 0x1000000000000002), nested!.Find(0x9000000000000001)!.Node);
+    }
+
+    [Theory]
+    [InlineData("scene 2\n\nentity 9000000000000001\nnode = @2000000000000002\n", "only an instance block takes node")]
+    [InlineData("scene 2\n\nentity 9000000000000001#2000000000000002\nnode = @2000000000000002\n", "only an instance block takes node")]
+    [InlineData("scene 2\n\nentity 9000000000000001\nprefab = $22222222222222222222222222222222\nnode = 3\n", "node takes an entity")]
+    public void NodeOnAPlainEntityIsAnError(string text, string fragment)
+    {
+        var (_, problems) = SceneFile.Parse(text);
+        Assert.Contains(problems, p => p.IsError && p.Message.Contains(fragment));
+    }
+
+    [Fact]
     public void WritingGivesTheFileBack()
     {
         var text = Door.ReplaceLineEndings("\n");

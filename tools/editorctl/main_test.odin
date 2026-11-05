@@ -62,6 +62,29 @@ arguments_are_read_and_checked :: proc(t: ^testing.T) {
 }
 
 @(test)
+ui_parses_its_options :: proc(t: ^testing.T) {
+	o, problem := parse_args({"ui", "--window", "contentBrowser", "--out", "a.png"})
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, o.command, "ui")
+	testing.expect_value(t, o.window, "contentBrowser")
+	testing.expect_value(t, o.out, "a.png")
+	_, stray := parse_args({"gif", "--window", "console"})
+	testing.expect(t, strings.contains(stray, "--window"))
+}
+
+@(test)
+content_takes_settings_or_none :: proc(t: ^testing.T) {
+	asked, problem := parse_args({"content"})
+	testing.expect_value(t, problem, "")
+	testing.expect_value(t, asked.command, "content")
+	changed, changed_problem := parse_args({"content", "--set", "search=door"})
+	defer delete(changed.settings)
+	testing.expect_value(t, changed_problem, "")
+	search, _ := changed.settings["search"].(json.String)
+	testing.expect_value(t, string(search), "door")
+}
+
+@(test)
 the_request_is_one_json_line :: proc(t: ^testing.T) {
 	o := Options {
 		command = "screenshot",

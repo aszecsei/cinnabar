@@ -7,6 +7,8 @@
 //   editorctl [--automation <file>] [--json] gif [--out <path>]
 //   editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
 //   editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+//   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
+//   editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 package editorctl
 
 import "base:runtime"
@@ -43,6 +45,8 @@ Options :: struct {
 	position:   []f64,
 	yaw:        Maybe(f64),
 	pitch:      Maybe(f64),
+	// The panel whose window ui draws, or "" for the main window.
+	window:     string,
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
@@ -55,6 +59,7 @@ Request :: struct {
 	position: []f64 `json:"position"`,
 	yaw:      Maybe(f64) `json:"yaw"`,
 	pitch:    Maybe(f64) `json:"pitch"`,
+	window:   string `json:"window"`,
 }
 
 // Status matches AutomationStatus.
@@ -67,13 +72,24 @@ Status :: struct {
 	host_pid:   int `json:"hostPid"`,
 }
 
+// Content matches AutomationContent.
+Content :: struct {
+	folder:    string `json:"folder"`,
+	search:    string `json:"search"`,
+	selection: []string `json:"selection"`,
+	items:     []string `json:"items"`,
+	thumbnails_waiting: int `json:"thumbnailsWaiting"`,
+	thumbnails_failed:  []string `json:"thumbnailsFailed"`,
+}
+
 // Response matches AutomationResponse.
 Response :: struct {
-	id:     i64 `json:"id"`,
-	ok:     bool `json:"ok"`,
-	files:  []string `json:"files"`,
-	error:  string `json:"error"`,
-	status: Maybe(Status) `json:"status"`,
+	id:      i64 `json:"id"`,
+	ok:      bool `json:"ok"`,
+	files:   []string `json:"files"`,
+	error:   string `json:"error"`,
+	status:  Maybe(Status) `json:"status"`,
+	content: Maybe(Content) `json:"content"`,
 }
 
 // Info matches AutomationInfo.
@@ -88,7 +104,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
 		)
 		os.exit(2)
 	}
@@ -161,6 +177,9 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		case arg == "--out" && i + 1 < len(args):
 			o.out = args[i + 1]
 			i += 1
+		case arg == "--window" && i + 1 < len(args):
+			o.window = args[i + 1]
+			i += 1
 		case arg == "--set" && i + 1 < len(args):
 			name, _, value := strings.partition(args[i + 1], "=")
 			if name == "" || value == "" {
@@ -199,14 +218,14 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		}
 	}
 	switch o.command {
-	case "status", "screenshot", "gif", "viewport", "camera":
+	case "status", "screenshot", "gif", "viewport", "camera", "ui", "content":
 	case "":
-		return o, "no command: status, screenshot, gif, viewport or camera"
+		return o, "no command: status, screenshot, gif, viewport, camera, ui or content"
 	case:
-		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport or camera", o.command)
+		return o, fmt.tprintf("unknown command %s: status, screenshot, gif, viewport, camera, ui or content", o.command)
 	}
-	if (len(o.settings) > 0) != (o.command == "viewport") {
-		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport"
+	if o.command != "content" && (len(o.settings) > 0) != (o.command == "viewport") {
+		return o, o.command == "viewport" ? "viewport takes --set <name>=<value>" : "--set goes with viewport or content"
 	}
 	camera_options := o.position != nil || o.yaw != nil || o.pitch != nil
 	if o.command == "camera" && o.position == nil {
@@ -218,8 +237,11 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	if len(o.views) > 0 && o.command != "screenshot" {
 		return o, "--view goes with screenshot"
 	}
-	if o.out != "" && o.command != "screenshot" && o.command != "gif" {
-		return o, "--out goes with screenshot or gif"
+	if o.window != "" && o.command != "ui" {
+		return o, "--window goes with ui"
+	}
+	if o.out != "" && o.command != "screenshot" && o.command != "gif" && o.command != "ui" {
+		return o, "--out goes with screenshot, gif or ui"
 	}
 	return o, ""
 }
@@ -305,6 +327,7 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		position = o.position,
 		yaw      = o.yaw,
 		pitch    = o.pitch,
+		window   = o.window,
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)
@@ -371,6 +394,16 @@ print_response :: proc(r: Response) {
 		fmt.printfln("scene: %s", status.scene)
 		fmt.printfln("game: %s", status.game)
 		fmt.printfln("host pid: %d", status.host_pid)
+	}
+	if content, has := r.content.?; has {
+		fmt.printfln("folder: %s", content.folder)
+		fmt.printfln("search: %s", content.search)
+		fmt.printfln("selection: %v", content.selection)
+		fmt.printfln("items: %v", content.items)
+		fmt.printfln("thumbnails waiting: %d", content.thumbnails_waiting)
+		for failure in content.thumbnails_failed {
+			fmt.printfln("thumbnail failed: %s", failure)
+		}
 	}
 	for file in r.files {
 		fmt.println(file)

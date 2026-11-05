@@ -85,6 +85,34 @@ public sealed class AutomationServerTests
     }
 
     [Fact]
+    public async Task TheUiCommandAnswersWithItsFile()
+    {
+        using var dir = new TempDirectory("ui-command");
+        using var shell = TestShell.Open(dir, null, null);
+        var request = new AutomationRequest(1, "ui", Path: dir.Combine("chrome"), Window: "contentBrowser");
+
+        var none = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
+        Assert.False(none.Ok);
+        Assert.Contains("no window", none.Error);
+
+        (string? Window, string Path)? asked = null;
+        shell.UiCapture = (window, path) =>
+        {
+            asked = (window, path);
+            return null;
+        };
+        var drawn = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
+        Assert.True(drawn.Ok);
+        Assert.Equal([dir.Combine("chrome.png")], drawn.Files!);
+        Assert.Equal(("contentBrowser", dir.Combine("chrome.png")), asked);
+
+        shell.UiCapture = (_, _) => "the window is gone";
+        var failed = await shell.HandleAutomation(request, TestContext.Current.CancellationToken);
+        Assert.False(failed.Ok);
+        Assert.Equal("the window is gone", failed.Error);
+    }
+
+    [Fact]
     public void TheInfoFileRoundTripsAndAMissingOneIsNull()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"cinnabar-automation-tests-{Guid.NewGuid():N}");

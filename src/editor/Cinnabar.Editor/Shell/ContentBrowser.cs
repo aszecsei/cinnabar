@@ -8,47 +8,98 @@ using CookFolder = Cinnabar.Editor.Link.Cook.Folder;
 
 namespace Cinnabar.Editor.Shell;
 
-/// <summary>A folder of a content root, by the root's name and its path in the root, <c>""</c> for the root itself.</summary>
-public sealed record ContentFolder(string Root, string Path)
-{
-    public string Name => Path == "" ? Root : AssetIndex.Name(Path);
-
-    /// <summary>The folder as the root's name and its path, for a message.</summary>
-    public string Display => Path == "" ? Root : $"{Root}/{Path}";
-
-    /// <summary>The folder under this one with a name, trimmed.</summary>
-    public ContentFolder Child(string name) => new(Root, Path == "" ? name.Trim() : $"{Path}/{name.Trim()}");
-
-    /// <summary>The folder's directory on disk, or null when the index has no such root.</summary>
-    public string? Directory(AssetIndex assets) =>
-        assets.FindRoot(Root) is { } root ? System.IO.Path.Combine(root.Dir, Path) : null;
-}
-
-/// <summary>An asset, by its GUID, or a folder, which an operation such as Rename or Delete acts on.</summary>
-public sealed record ContentItem(string? Guid, ContentFolder? Folder)
-{
-    public static ContentItem Of(Asset asset) => new(asset.Guid, null);
-
-    public static ContentItem Of(ContentFolder folder) => new(null, folder);
-}
-
 /// <summary>
 /// The asset operations (see docs/editor/shell-and-panels.md#content-browser): each asks the cook daemon, which is the only program
 /// that writes .meta files, and awaits its answer. They change the project, not the scene, so they are not on the undo
 /// stack. The commands act on the content browser's folder and selection.
 /// </summary>
-public sealed class ContentBrowser(
-    AssetIndex assets,
-    CookSession cook,
-    ConsoleLog console,
-    Func<Func<Task<OperationResult?>>, Task<bool>> movingScene,
-    Action changed)
+public sealed class ContentBrowser
 {
+    readonly AssetIndex assets;
+    readonly CookSession cook;
+    readonly ConsoleLog console;
+    readonly Func<Func<Task<OperationResult?>>, Task<bool>> movingScene;
+
+    public ContentBrowser(
+        AssetIndex assets,
+        CookSession cook,
+        ConsoleLog console,
+        Func<Func<Task<OperationResult?>>, Task<bool>> movingScene,
+        Action changed,
+        string tagsPath)
+    {
+        this.assets = assets;
+        this.cook = cook;
+        this.console = console;
+        this.movingScene = movingScene;
+        Tags = new ProjectTags(tagsPath);
+        Model = new ContentBrowserModel(assets, Tags);
+        Draft = new ImportSettingsDraft(assets);
+        // The draft follows the selection first, so what else hears of the selection sees it.
+        Model.ContextChanged += FollowSelection;
+        Model.ContextChanged += changed;
+    }
+
+    /// <summary>The project's tags for its assets.</summary>
+    public ProjectTags Tags { get; }
+
+    /// <summary>The user asked to rename a tag. The window asks for the new name.</summary>
+    public event Action<string>? TagRenameRequested;
+
+    /// <summary>The user asked to delete a tag. The window says how many assets have it, and confirms.</summary>
+    public event Action<string>? TagDeleteRequested;
+
+    public void RequestRenameTag(string tag) => TagRenameRequested?.Invoke(tag);
+
+    public void RequestDeleteTag(string tag) => TagDeleteRequested?.Invoke(tag);
+
+    /// <summary>The import settings of the selected files, until they are applied.</summary>
+    public ImportSettingsDraft Draft { get; }
+
+    /// <summary>The selection moved off files whose settings have changes that are not applied. The window asks what to do.</summary>
+    public event Action? DraftLeft;
+
+    void FollowSelection()
+    {
+        if (Draft.Dirty && !Draft.Holds(Model.Selection))
+        {
+            DraftLeft?.Invoke();
+        }
+        else
+        {
+            Draft.Load(Model.Selection);
+        }
+    }
+
+    /// <summary>
+    /// Sends the draft's changes to the daemon, which writes the .meta files and cooks the assets in one pass. A setting at
+    /// its default leaves the .meta file, and the others stay as they are. When the daemon refuses, the draft keeps them.
+    /// </summary>
+    public async Task<bool> ApplyDraft()
+    {
+        if (Draft.Request() is { Length: > 0 } request && await Operate(new SetImportSettings(request)) == null)
+        {
+            return false;
+        }
+        Draft.Revert();
+        return true;
+    }
+
+    /// <summary>Ends a draft that the selection left: the draft follows the selection again.</summary>
+    public void FinishDraft()
+    {
+        Draft.Revert();
+        Draft.Load(Model.Selection);
+    }
+
+    /// <summary>What the content browser shows, which outlives its view.</summary>
+    public ContentBrowserModel Model { get; }
+
     /// <summary>The content browser's folder, where new assets go.</summary>
-    public ContentFolder? Folder { get; private set; }
+    public ContentFolder? Folder => Model.Folder;
 
     /// <summary>The GUIDs of the content browser's selected assets.</summary>
-    public IReadOnlyList<string> SelectedAssets { get; private set; } = [];
+    public IReadOnlyList<string> SelectedAssets => Model.SelectedAssets;
 
     /// <summary>
     /// Whether the selection holds a sub-asset. A sub-asset changes only with its file, so the file operations do not
@@ -68,22 +119,23 @@ public sealed class ContentBrowser(
     /// <summary>The user asked to delete assets and folders. The window shows what uses them, and confirms.</summary>
     public event Action<IReadOnlyList<ContentItem>>? DeleteRequested;
 
-    /// <summary>An operation made or moved an asset or a folder, which the content browser shows and selects.</summary>
-    public event Action<ContentItem>? ContentRevealed;
+    /// <summary>The content browser shows an asset or a folder, so its panel should show.</summary>
+    public event Action? ContentRevealed;
 
     /// <summary>The cook daemon refused an operation, with its reason. The window shows it.</summary>
     public event Action<string>? OperationFailed;
 
     /// <summary>Shows an asset in the content browser, selected in its folder.</summary>
-    public void RevealAsset(string guid) => ContentRevealed?.Invoke(new ContentItem(guid, null));
+    public void RevealAsset(string guid) => Reveal(new ContentItem(guid, null));
 
-    /// <summary>The content browser's folder or selection changed.</summary>
-    public void SelectContent(ContentFolder? folder, IReadOnlyList<string> selected)
+    void Reveal(ContentItem item)
     {
-        Folder = folder;
-        SelectedAssets = selected;
-        changed();
+        Model.Reveal(item);
+        ContentRevealed?.Invoke();
     }
+
+    /// <summary>Sets the content browser's folder and selection, as they are given.</summary>
+    public void SelectContent(ContentFolder? folder, IReadOnlyList<string> selected) => Model.SetContext(folder, selected);
 
     public void RequestNewAsset(AssetTemplate? template) => NewAssetRequested?.Invoke(template);
 
@@ -163,7 +215,7 @@ public sealed class ContentBrowser(
             var result = await Operate(new CreateAsset(t, folder.Root, folder.Path, name));
             if (result is { Guids: [var guid, ..] })
             {
-                ContentRevealed?.Invoke(new ContentItem(guid, null));
+                Reveal(new ContentItem(guid, null));
             }
             return result != null;
         }
@@ -172,7 +224,7 @@ public sealed class ContentBrowser(
         {
             return false;
         }
-        ContentRevealed?.Invoke(ContentItem.Of(created));
+        Reveal(ContentItem.Of(created));
         return true;
     }
 
@@ -183,7 +235,7 @@ public sealed class ContentBrowser(
             var moved = await movingScene(() => Operate(new RenameAsset(guid, name)));
             if (moved)
             {
-                ContentRevealed?.Invoke(item);
+                Reveal(item);
             }
             return moved;
         }
@@ -195,7 +247,7 @@ public sealed class ContentBrowser(
         {
             return false;
         }
-        ContentRevealed?.Invoke(ContentItem.Of(new ContentFolder(folder.Root, AssetIndex.Parent(folder.Path)).Child(name)));
+        Reveal(ContentItem.Of(new ContentFolder(folder.Root, AssetIndex.Parent(folder.Path)).Child(name)));
         return true;
     }
 
@@ -206,7 +258,7 @@ public sealed class ContentBrowser(
         {
             return false;
         }
-        ContentRevealed?.Invoke(new ContentItem(guids[0], null));
+        Reveal(new ContentItem(guids[0], null));
         return true;
     }
 
@@ -216,13 +268,19 @@ public sealed class ContentBrowser(
 
     public async Task<bool> DuplicateSelectedAssets()
     {
-        if (SelectedAssets.Count == 0 || await Operate(new DuplicateAssets([.. SelectedAssets])) is not { } result)
+        var sources = SelectedAssets.ToList();
+        if (sources.Count == 0 || await Operate(new DuplicateAssets([.. sources])) is not { } result)
         {
             return false;
         }
+        // The daemon answers with the copies in the order that it was given the assets.
+        foreach (var (from, to) in sources.Zip(result.Guids))
+        {
+            Tags.Copy(from, to);
+        }
         if (result.Guids is [var first, ..])
         {
-            ContentRevealed?.Invoke(new ContentItem(first, null));
+            Reveal(new ContentItem(first, null));
         }
         return true;
     }
@@ -245,34 +303,6 @@ public sealed class ContentBrowser(
             .Concat(items.Select(i => i.Folder).OfType<ContentFolder>().SelectMany(f => assets.AssetsUnder(f.Root, f.Path)))
             .DistinctBy(a => a.Guid).ToList();
         return (deleted, assets.DependentsOutside([.. deleted.Select(a => a.Guid)]));
-    }
-
-    /// <summary>
-    /// Sets one of an asset's import settings. A setting at its default leaves the .meta file, and the others stay as
-    /// they are.
-    /// </summary>
-    public async Task<bool> SetImportSetting(string guid, string key, string value)
-    {
-        if (assets.Find(guid) is not { } asset)
-        {
-            return false;
-        }
-        return await Operate(new SetImportSettings(guid, WithSetting(asset.Settings, assets.SettingsOf(asset.Kind), key, value))) != null;
-    }
-
-    /// <summary>
-    /// An asset's import settings with one set: in its place, or last if it is new, and left out at its default.
-    /// </summary>
-    public static Setting[] WithSetting(IReadOnlyList<Setting> settings, IReadOnlyList<SettingInfo> infos, string key, string value)
-    {
-        var info = infos.FirstOrDefault(s => s.Key == key);
-        var result = settings.Where(s => s.Key != key).ToList();
-        if (info == null || value != info.Default)
-        {
-            var at = settings.ToList().FindIndex(s => s.Key == key);
-            result.Insert(at < 0 ? result.Count : at, new Setting(key, value));
-        }
-        return [.. result];
     }
 
     public async Task<bool> ReimportSelectedAssets() =>

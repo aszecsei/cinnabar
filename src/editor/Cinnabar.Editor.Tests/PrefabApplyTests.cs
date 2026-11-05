@@ -154,6 +154,127 @@ public sealed class PrefabApplyTests : IDisposable
         Assert.NotNull(document.Scene.Find(0x7000000000000002));
     }
 
+    const ulong Part = 0x9000000000000001;
+
+    // The door's frame with what is under it, and a whole door to compare with.
+    const string PartLevel = "scene 2\n\n" +
+        "entity 9000000000000001\nname = \"Frame Alone\"\nprefab = $22222222222222222222222222222222\nnode = @2000000000000002\ncomponent 1 Transform\n\tposition = [16777216, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n\n" +
+        "entity 5000000000000001\nname = \"Front Door\"\nprefab = $22222222222222222222222222222222\ncomponent 1 Transform\n\tposition = [0, 0, 0]\n\trotation = [0, 0, 0, 1]\n\tscale = [1, 1, 1]\n";
+
+    [Fact]
+    public void APartIsItsNodeAndWhatIsUnderIt()
+    {
+        var (document, _) = Open(PartLevel);
+        var flat = document.Expanded.Flat;
+        Assert.Equal("Frame Alone", flat.Find(Part)!.Name);
+        Assert.Equal(0ul, flat.Find(Part)!.Parent);
+        Assert.Equal(Part, flat.Find(In(Part, HandleId))!.Parent);
+        Assert.Equal(Part, flat.Find(In(Part, HingeId))!.Parent);
+        Assert.Null(flat.Find(In(Part, FrameId)));
+        // The door's root and its lamp are not in the part, and the whole door is unchanged.
+        Assert.Equal(3, flat.Entities.Count(e => e.Id == Part || e.Parent == Part));
+        Assert.Equal(1.0, Intensity(document, In(Front, FrameId)));
+    }
+
+    [Fact]
+    public void ApplyOnAPartWritesToTheNode()
+    {
+        var (document, _) = Open(PartLevel);
+        document.Apply("Override", new SetField(Part, 35, "intensity", Number(0.25)));
+        Assert.Equal(1.0, Intensity(document, In(Front, FrameId)));
+
+        document.Apply("Apply Door", PrefabEdits.Apply(document, Part, 35, null, "intensity"));
+
+        // The node's own value is the prefab's now, so the whole door has it too.
+        Assert.Equal(0.25, Intensity(document, In(Front, FrameId)));
+        Assert.Equal(0.25, Intensity(document, Part));
+        Assert.DoesNotContain("35", document.Scene.Find(Part)!.Components.Select(c => c.Id.ToString()));
+        Assert.Contains("intensity = 0.25", SceneFile.Write(document.Prefabs.Find(Door)!.Scene));
+    }
+
+    [Fact]
+    public void ResetOnAPartReturnsToThePrefabsValue()
+    {
+        var (document, _) = Open(PartLevel);
+        document.Apply("Override", new SetField(Part, 35, "intensity", Number(0.25)));
+        Assert.Equal(0.25, Intensity(document, Part));
+
+        document.Apply("Reset", new SetField(Part, 35, "intensity", null));
+
+        Assert.Equal(1.0, Intensity(document, Part));
+        Assert.Equal(0x2000000000000002ul, document.Scene.Find(Part)!.Node);
+    }
+
+    [Fact]
+    public void RevertAllOnAPartKeepsItAPart()
+    {
+        var (document, _) = Open(PartLevel);
+        document.Apply("Override", new SetField(In(Part, HandleId), 2, "offset", SceneValue.Of(SceneNumber.Of(1.0), SceneNumber.Of(2.0), SceneNumber.Of(3.0))));
+
+        document.Apply("Revert", PrefabEdits.RevertAll(document, Part));
+
+        Assert.Equal(FrameId, document.Scene.Find(Part)!.Node);
+        Assert.Null(document.Scene.Find(In(Part, HandleId)));
+        Assert.Equal(3, document.Expanded.Flat.Entities.Count(e => e.Id == Part || e.Parent == Part));
+    }
+
+    [Fact]
+    public void MakeVariantOfAPart()
+    {
+        var (document, _) = Open(PartLevel);
+        document.Apply("Override", new SetField(In(Part, HingeId), 2, "offset", SceneValue.Of(SceneNumber.Of(1.0), SceneNumber.Of(2.0), SceneNumber.Of(3.0))));
+        var names = document.Expanded.Flat.Entities.Select(e => e.Name).Order().ToList();
+
+        var (ops, variant) = PrefabEdits.MakeVariant(document, Part, _temp.Combine("frame_alone.prefab"));
+        document.Apply("Make Variant", ops);
+
+        // The variant's root is the part of the door, and the scene's instance is the whole variant.
+        var (root, roots) = PrefabExpansion.RootOf(variant.Scene);
+        Assert.Equal(1, roots);
+        Assert.Equal(Door, root!.Prefab);
+        Assert.Equal(FrameId, root.Node);
+        Assert.Equal(variant.Guid, document.Scene.Find(Part)!.Prefab);
+        Assert.Equal(0ul, document.Scene.Find(Part)!.Node);
+        Assert.Equal(names, document.Expanded.Flat.Entities.Select(e => e.Name).Order().ToList());
+        Assert.DoesNotContain(document.Expanded.Problems, p => p.IsError);
+
+        document.Undo();
+        Assert.Equal(FrameId, document.Scene.Find(Part)!.Node);
+        Assert.Equal(Door, document.Scene.Find(Part)!.Prefab);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnpackOfAPartIsComplete(bool completely)
+    {
+        var (document, _) = Open(PartLevel);
+        document.Apply("Override", new SetField(In(Part, HandleId), 2, "offset", SceneValue.Of(SceneNumber.Of(1.0), SceneNumber.Of(2.0), SceneNumber.Of(3.0))));
+        var before = document.Expanded.Flat.Entities.Select(e => (e.Id, e.Name, e.Parent)).ToList();
+
+        document.Apply("Unpack", completely ? PrefabEdits.UnpackCompletely(document, Part) : PrefabEdits.Unpack(document, Part));
+
+        Assert.Equal(before, document.Expanded.Flat.Entities.Select(e => (e.Id, e.Name, e.Parent)).ToList());
+        // Only the whole door stays an instance.
+        Assert.Equal([Front], document.Scene.Entities.Where(e => e.Prefab != "").Select(e => e.Id));
+        Assert.Equal(0ul, document.Scene.Find(Part)!.Node);
+        Assert.Contains($"entity {In(Part, HandleId):x16}", SceneFile.Write(document.Scene));
+        Assert.DoesNotContain("node =", SceneFile.Write(document.Scene));
+
+        document.Undo();
+        Assert.Equal(FrameId, document.Scene.Find(Part)!.Node);
+    }
+
+    [Fact]
+    public void APartOfANodeThatWentCannotApply()
+    {
+        var (document, _) = Open(PartLevel.Replace("node = @2000000000000002", "node = @20000000000000ee"));
+        // The instance is its root alone, with the warning, and there is nothing to apply it to.
+        Assert.Contains(document.Expanded.Problems, p => p.Message.Contains("has no entity 20000000000000ee"));
+        document.Apply("Override", new AddComponent(Part, new SceneComponent(35, "Point_Light", [new SceneField("intensity", Number(0.25))])));
+        Assert.Throws<InvalidOperationException>(() => PrefabEdits.Apply(document, Part, 35, null, "intensity"));
+    }
+
     [Fact]
     public void MakeVariantMovesTheOverridesIntoANewPrefab()
     {

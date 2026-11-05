@@ -16,6 +16,75 @@ public sealed class ShellTests : IDisposable
         shell.Console.Lines.Where(l => l.Level >= LogLevel.Warning).Select(l => l.Text);
 
     [Fact]
+    public void AnOldLayoutFileStillLoads()
+    {
+        using var dir = new TempDirectory("old-layout");
+        using var shell = TestShell.Open(dir, null, null);
+        // A file from before floating windows kept their place has none of it.
+        var json = shell.Layout.Save().ToJson();
+        Assert.DoesNotContain("windows", json);
+        var file = Docking.LayoutFile.FromJson(json);
+        Assert.NotNull(file);
+        Assert.Null(file.Windows);
+        Assert.True(shell.Layout.Restore(file));
+        Assert.Empty(shell.Layout.PendingWindows);
+    }
+
+    [Fact]
+    public void FloatingBoundsRoundTrip()
+    {
+        using var dir = new TempDirectory("floating-bounds");
+        using var shell = TestShell.Open(dir, null, null);
+        var saved = shell.Layout.Save() with { Floating = ["contentBrowser"], Windows = [new Docking.FloatingWindow("contentBrowser", -1200, 40.5, 900, 600)] };
+
+        var file = Docking.LayoutFile.FromJson(saved.ToJson());
+
+        Assert.Equal(saved.Windows, file!.Windows);
+        // The panel docks first, as the window pops out only when the main window has opened.
+        Assert.True(shell.Layout.Restore(file));
+        Assert.Equal(saved.Windows, shell.Layout.PendingWindows);
+        Assert.True(shell.Layout.IsOpen("contentBrowser"));
+    }
+
+    [Fact]
+    public void ASavedWindowOfARenamedPanelFollowsTheNewName()
+    {
+        using var dir = new TempDirectory("renamed-window");
+        using var shell = TestShell.Open(dir, null, null);
+        var saved = shell.Layout.Save() with { Windows = [new Docking.FloatingWindow("assetBrowser", 1, 2, 3, 4), new Docking.FloatingWindow("gone", 1, 2, 3, 4)] };
+
+        Assert.True(shell.Layout.Restore(saved));
+
+        Assert.Equal("contentBrowser", Assert.Single(shell.Layout.PendingWindows).Panel);
+    }
+
+    [Fact]
+    public void AWindowOffEveryScreenComesBackOnOne()
+    {
+        (double, double, double, double)[] screens = [(0, 0, 1920, 1080), (1920, 0, 1280, 720)];
+        var onSecond = new Docking.FloatingWindow("p", 2000, 100, 800, 600);
+        Assert.Equal(onSecond, onSecond.OnScreen(screens));
+        // Partly off is still found: it can be dragged by the top that shows.
+        var partly = new Docking.FloatingWindow("p", 1800, 100, 800, 600);
+        Assert.Equal(partly, partly.OnScreen(screens));
+
+        // The monitor it was on is gone: it comes back whole, in the middle of the first.
+        var gone = new Docking.FloatingWindow("p", -2000, 100, 800, 600).OnScreen(screens);
+        Assert.Equal((560d, 240d, 800d, 600d), (gone.X, gone.Y, gone.Width, gone.Height));
+
+        // Above a screen, its title bar could not be reached.
+        var above = new Docking.FloatingWindow("p", 100, -300, 800, 600).OnScreen(screens);
+        Assert.Equal(240d, above.Y);
+
+        // Larger than the screen, it fits.
+        var large = new Docking.FloatingWindow("p", -9000, 0, 4000, 3000).OnScreen(screens);
+        Assert.Equal((0d, 0d, 1920d, 1080d), (large.X, large.Y, large.Width, large.Height));
+
+        // With no screens known, it stays.
+        Assert.Equal(gone, gone.OnScreen([]));
+    }
+
+    [Fact]
     public void TheDefaultRibbonAndKeyBindingsAreValid()
     {
         using var shell = NewShell();

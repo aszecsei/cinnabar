@@ -1,4 +1,5 @@
 using Avalonia.Threading;
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link.Protocol;
 using Cinnabar.Editor.Model;
 using LogLevel = Cinnabar.Editor.Model.LogLevel;
@@ -13,8 +14,15 @@ namespace Cinnabar.Editor.Shell;
 public sealed partial class EditorShell
 {
     AutomationServer? _automation;
+    int _uiCaptures;
 
     public int AutomationPort => _automation?.Port ?? 0;
+
+    /// <summary>
+    /// Draws a window's controls into a PNG: the window of a panel, or the main window for null, and the file's path. It
+    /// returns the reason when it cannot. The main window sets it, so a shell in a test has none.
+    /// </summary>
+    public Func<string?, string, string?>? UiCapture { get; set; }
 
     public void StartAutomation()
     {
@@ -94,9 +102,128 @@ public sealed partial class EditorShell
                 }
                 Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? Camera.Yaw, request.Pitch ?? Camera.Pitch);
                 return new AutomationResponse(request.Id, true);
+            case "ui":
+                return CaptureUiResponse(request);
+            case "content":
+                return ContentResponse(request);
             default:
-                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport and camera");
+                return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
         }
+    }
+
+    // Changes what the content browser shows, each setting in turn, and answers with what it shows then.
+    AutomationResponse ContentResponse(AutomationRequest request)
+    {
+        var model = Content.Model;
+        foreach (var (name, value) in request.Settings ?? [])
+        {
+            var text = value.ToString();
+            switch (name)
+            {
+                case "folder":
+                    var slash = text.IndexOf('/');
+                    var (root, path) = slash < 0 ? (text, "") : (text[..slash], text[(slash + 1)..]);
+                    if (Assets.FindRoot(root) == null)
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"no content root is named {root}");
+                    }
+                    model.Reveal(ContentItem.Of(new ContentFolder(root, path)));
+                    break;
+                case "search":
+                    model.Search = text;
+                    break;
+                case "view":
+                    if (!Enum.TryParse<ContentViewMode>(text, ignoreCase: true, out var mode))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"view takes grid or list, not {text}");
+                    }
+                    model.ViewMode = mode;
+                    break;
+                case "tileSize":
+                    model.TileSize = value.GetDouble();
+                    break;
+                case "kinds":
+                    foreach (var kind in model.Kinds.ToList())
+                    {
+                        model.ToggleKind(kind);
+                    }
+                    foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (!Enum.TryParse<ContentKind>(part, ignoreCase: true, out var kind))
+                        {
+                            return new AutomationResponse(request.Id, false, Error: $"unknown kind {part}; the kinds are {string.Join(", ", Enum.GetNames<ContentKind>())}");
+                        }
+                        model.ToggleKind(kind);
+                    }
+                    break;
+                case "tags":
+                    foreach (var tag in model.FilterTags.ToList())
+                    {
+                        model.ToggleTag(tag);
+                    }
+                    foreach (var part in text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        model.ToggleTag(part);
+                    }
+                    break;
+                case "showTags":
+                    model.ShowingTags = value.ValueKind == System.Text.Json.JsonValueKind.True;
+                    break;
+                case "popOut":
+                    if (value.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        Layout.PopOut("contentBrowser");
+                    }
+                    else
+                    {
+                        Layout.DockBack("contentBrowser");
+                    }
+                    break;
+                case "enter":
+                    model.Enter(text);
+                    break;
+                case "leave":
+                    model.Leave();
+                    break;
+                case "enterNode":
+                    model.EnterNode(ulong.Parse(text, System.Globalization.NumberStyles.HexNumber));
+                    break;
+                case "reveal":
+                    if (Assets.Find(text) == null)
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"no asset has the GUID {text}");
+                    }
+                    Content.RevealAsset(text);
+                    break;
+                case "shown":
+                    if (value.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        Layout.Show("contentBrowser");
+                    }
+                    else
+                    {
+                        Layout.Close("contentBrowser");
+                    }
+                    break;
+                default:
+                    return new AutomationResponse(request.Id, false, Error: $"unknown content setting {name}; the settings are folder, search, view, tileSize, kinds, tags, showTags, popOut, enter, enterNode, leave, reveal and shown");
+            }
+        }
+        return new AutomationResponse(request.Id, true, Content: new AutomationContent(model.Folder?.Display, model.Search, [.. model.Selection],
+            [.. model.Tiles.Select(t => t.Name)], Thumbnails.Waiting, [.. Thumbnails.Failures]));
+    }
+
+    AutomationResponse CaptureUiResponse(AutomationRequest request)
+    {
+        if (UiCapture is not { } capture)
+        {
+            return new AutomationResponse(request.Id, false, Error: "the editor has no window to draw");
+        }
+        var path = CaptureModel.ImagePath(request.Path, _options.CaptureDirectory, DateTime.UtcNow, ++_uiCaptures, "ui");
+        var window = string.IsNullOrEmpty(request.Window) ? null : request.Window;
+        return capture(window, path) is { } error
+            ? new AutomationResponse(request.Id, false, Error: error)
+            : new AutomationResponse(request.Id, true, [path]);
     }
 
     static AutomationResponse Response(long id, CaptureOutcome outcome) => new(id, outcome.Ok, [.. outcome.Files], outcome.Error);

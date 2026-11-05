@@ -84,6 +84,8 @@ Message :: union {
 	Profile_Recording,
 	Capture_Request,
 	Capture_Result,
+	Bake_Thumbnail,
+	Thumbnail_Failed,
 	Live_Mesh,
 	Live_Mesh_Vertices,
 	Release_Live_Mesh,
@@ -1090,6 +1092,33 @@ Capture_Kind :: enum u8 {
 	Screenshot,
 	// The history ring's last frames, as a looping GIF.
 	Gif,
+	// A texture that the game's next Bake_Thumbnail with this id draws, as a PNG.
+	Thumbnail,
+}
+
+// What a Bake_Thumbnail draws.
+Thumbnail_Kind :: enum u8 {
+	Material,
+	Mesh,
+	Prefab,
+}
+
+// Editor to game: draw a picture of an asset, which the host writes to the path of the Capture_Request with this id, as
+// its Capture_Result says. With node, only that entity of a prefab and what is under it. A new one replaces one that is
+// not done. See docs/content/daemon-and-operations.md#thumbnails.
+Bake_Thumbnail :: struct {
+	id:     u32,
+	kind:   Thumbnail_Kind,
+	asset:  [16]u8,
+	node:   u64,
+	width:  i32,
+	height: i32,
+}
+
+// Game to editor: a Bake_Thumbnail that cannot be drawn, and why.
+Thumbnail_Failed :: struct {
+	id:     u32,
+	reason: string,
 }
 
 // Matches gpu.Output_Mode.

@@ -22,7 +22,8 @@ Prefab_Resolver :: struct {
 // blocks apply over them, the outermost scene last. A prefab that is missing or broken expands to the instance's root
 // alone, with a warning. A cycle of prefabs, a nesting deeper than SCENE_EXPAND_DEPTH and two entities with one ID
 // are errors, and ok is false. self is the prefab being expanded, if the scene is one, so that one containing itself
-// is a cycle. The scene and the messages are in allocator.
+// is a cycle. An instance with a node is only that entity of its prefab's expansion and its descendants, with the node
+// as its root. The scene and the messages are in allocator.
 scene_expand :: proc(scene: Scene, resolver: Prefab_Resolver, self: Guid = {}, allocator := context.allocator) -> (flat: Scene, problems: []Scene_Problem, ok: bool) {
 	chain: []Guid
 	if self != {} {
@@ -138,9 +139,13 @@ expand_entities :: proc(x: ^Expander, scene: Scene, chain: []Guid) -> []Scene_En
 @(private = "file")
 place_instance :: proc(x: ^Expander, out: ^[dynamic]Scene_Entity, block: Scene_Entity, chain: []Guid, outermost: bool) {
 	prefab, root, found := flat_prefab(x, block, chain, outermost)
+	if found && block.node != 0 {
+		prefab, root, found = prefab_part(x, block, prefab, outermost)
+	}
 	if !found {
 		e := copy_entity(x, block)
 		e.prefab = {}
+		e.node = 0
 		e.removed_components = nil
 		e.removed_behaviours = nil
 		append(out, e)
@@ -184,6 +189,35 @@ place_instance :: proc(x: ^Expander, out: ^[dynamic]Scene_Entity, block: Scene_E
 	}
 	r.components = components[:]
 	apply_override(x, r, block)
+}
+
+// prefab_part is the part of a prefab's flat entities that an instance names: its node and the node's descendants, in
+// their order, with the node as the root. A node that the prefab does not have warns, as a missing prefab does.
+@(private = "file")
+prefab_part :: proc(x: ^Expander, block: Scene_Entity, prefab: []Scene_Entity, outermost: bool) -> (part: []Scene_Entity, root: u64, ok: bool) {
+	parents := make(map[u64]u64, len(prefab), context.temp_allocator)
+	for e in prefab {
+		parents[e.id] = e.parent
+	}
+	if block.node not_in parents {
+		if outermost {
+			buffer: [32]u8
+			expand_problem(x, false, "instance %016x: the prefab %s has no entity %016x, so the instance is its root alone", block.id, guid_format(block.prefab, &buffer), block.node)
+		}
+		return
+	}
+	kept := make([dynamic]Scene_Entity, 0, len(prefab), x.allocator)
+	for e in prefab {
+		// The bound stops a cycle of parents, which the loader reports.
+		at := e.id
+		for steps := 0; at != 0 && at != block.node && steps < len(prefab); steps += 1 {
+			at = parents[at] or_else 0
+		}
+		if at == block.node {
+			append(&kept, e)
+		}
+	}
+	return kept[:], block.node, true
 }
 
 // flat_prefab is the prefab's flat entities and its root's ID, inside chain. A cycle and a nesting beyond the depth

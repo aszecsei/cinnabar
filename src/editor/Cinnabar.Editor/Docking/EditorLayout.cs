@@ -1,3 +1,4 @@
+using Avalonia.Threading;
 using Dock.Model.Controls;
 using Dock.Model.Core;
 using Dock.Model.Mvvm;
@@ -52,7 +53,17 @@ public sealed class EditorLayout
         Factory.DockableRemoved += (_, _) => Changed?.Invoke();
         Factory.DockableClosed += (_, _) => Changed?.Invoke();
         Factory.DockableMoved += (_, _) => Changed?.Invoke();
-        Factory.WindowClosed += (_, _) => Changed?.Invoke();
+        // Closing a floating window goes WindowClosing, DockableRemoved for its panels, WindowRemoved, then DockableClosed
+        // for them, and raises no WindowClosed. So its panels are noted first, and go back once Dock has finished.
+        Factory.WindowClosing += (_, e) => _closingPanels = e.Window?.Layout == null ? [] : [.. Walk(e.Window.Layout).OfType<PanelTool>()];
+        Factory.WindowRemoved += (_, _) =>
+        {
+            if (_closingPanels.Count > 0)
+            {
+                Dispatcher.UIThread.Post(DockBackClosing);
+            }
+            Changed?.Invoke();
+        };
         Factory.ActiveDockableChanged += (_, e) =>
         {
             if (e.Dockable is ViewportDocument or EditorDocument)
@@ -197,7 +208,17 @@ public sealed class EditorLayout
         var root = Root.VisibleDockables?.FirstOrDefault(d => d is not IProportionalDockSplitter);
         var node = root == null ? null : SaveNode(root, docked);
         var floating = _panels.Keys.Where(id => IsOpen(id) && !docked.Contains(id)).Order().ToList();
-        return new LayoutFile(LayoutFile.CurrentVersion, node ?? new DocumentsNode(DocumentDockId, null), floating);
+        var windows = new List<FloatingWindow>();
+        foreach (var id in floating)
+        {
+            if (FloatingWindowOf(id) is { } host)
+            {
+                host.GetPosition(out var x, out var y);
+                host.GetSize(out var width, out var height);
+                windows.Add(new FloatingWindow(id, x, y, width, height));
+            }
+        }
+        return new LayoutFile(LayoutFile.CurrentVersion, node ?? new DocumentsNode(DocumentDockId, null), floating, windows.Count > 0 ? windows : null);
     }
 
     /// <summary>Restores a saved layout, and returns false and keeps the current one if it has no viewport.</summary>
@@ -215,6 +236,7 @@ public sealed class EditorLayout
         {
             Show(id);
         }
+        PendingWindows = [.. (file.Windows ?? []).Where(w => _panels.ContainsKey(CurrentId(w.Panel))).Select(w => w with { Panel = CurrentId(w.Panel) })];
         return true;
     }
 
@@ -340,6 +362,87 @@ public sealed class EditorLayout
         Factory.AddDockable(main, dock);
         return dock;
     }
+
+    List<PanelTool> _closingPanels = [];
+    const double PopOutWidth = 1100;
+    const double PopOutHeight = 700;
+
+    /// <summary>The windows to pop out once the main window is open, as a floating window needs one to float from.</summary>
+    public IReadOnlyList<FloatingWindow> PendingWindows { get; private set; } = [];
+
+    /// <summary>The editor is closing, so a window that closes with it does not dock its panels again.</summary>
+    public bool Closing { get; set; }
+
+    /// <summary>Whether a panel is in a window of its own.</summary>
+    public bool IsFloating(string id) => FloatingDockWindowOf(id) != null;
+
+    /// <summary>Puts a panel in a window of its own, opening it first, unless it is in one already.</summary>
+    public void PopOut(string id)
+    {
+        Show(id);
+        if (!IsFloating(id))
+        {
+            Factory.FloatDockable(_panels[id]);
+            // A docked panel is often short and wide, which is why it is popping out.
+            FloatingWindowOf(id)?.SetSize(PopOutWidth, PopOutHeight);
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Puts a floating panel back in its default dock, and closes a window that it leaves empty.</summary>
+    public void DockBack(string id)
+    {
+        if (FloatingDockWindowOf(id) is not { } window)
+        {
+            return;
+        }
+        Factory.RemoveDockable(_panels[id], true);
+        Show(id);
+        if (window.Layout == null || !Walk(window.Layout).OfType<PanelTool>().Any())
+        {
+            window.Exit();
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Places the windows that the saved layout kept, on the screens that there are now.</summary>
+    public void RestoreWindows(IReadOnlyList<(double X, double Y, double Width, double Height)> screens)
+    {
+        var pending = PendingWindows;
+        PendingWindows = [];
+        foreach (var saved in pending)
+        {
+            var placed = saved.OnScreen(screens);
+            PopOut(placed.Panel);
+            if (FloatingWindowOf(placed.Panel) is { } host)
+            {
+                host.SetPosition(placed.X, placed.Y);
+                host.SetSize(placed.Width, placed.Height);
+            }
+        }
+    }
+
+    // A panel in a window that closed is not lost: it goes back to its default dock, where the user can find it.
+    void DockBackClosing()
+    {
+        var panels = _closingPanels;
+        _closingPanels = [];
+        if (Closing)
+        {
+            return;
+        }
+        foreach (var panel in panels)
+        {
+            Show(panel.Id);
+        }
+    }
+
+    IDockWindow? FloatingDockWindowOf(string id) =>
+        Root.Windows?.FirstOrDefault(w => w.Layout != null && Walk(w.Layout).Any(d => d.Id == id));
+
+    /// <summary>The floating window that holds a panel, or null when the panel is in the main window or closed.</summary>
+    public IHostWindow? FloatingWindowOf(string id) =>
+        FloatingDockWindowOf(id)?.Host;
 
     /// <summary>Every dockable under <paramref name="dockable"/>, including the layouts of floating windows.</summary>
     static IEnumerable<IDockable> Walk(IDockable dockable)

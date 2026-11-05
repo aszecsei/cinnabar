@@ -96,6 +96,10 @@ Platform_API :: struct {
 	// shared objects.
 	gpu_preview_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
 	gpu_release_preview_target: proc(id: int),
+	// gpu_capture_texture asks for a copy of a texture at this frame's end, which the host gets with the ticket, as the
+	// content browser's thumbnails do. The texture must end the frame in the render target layout. It is false when the
+	// backend has no room this frame, so ask again next frame.
+	gpu_capture_texture:        proc(texture: gpu.Texture, ticket: u32) -> bool,
 	// gpu_submit runs the command buffers on a queue, in order after the queue's earlier submissions in the frame.
 	// They start after the earlier submissions of the wait_for queues finish. It returns false if the backend
 	// rejected the command buffers. See docs/gpu/queues-streaming-readback.md#queues.

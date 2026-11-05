@@ -17,6 +17,10 @@ public sealed class AssetIndex
     readonly Dictionary<string, Problem[]> _problems = [];
     readonly List<NodeInfo> _nodes = [];
     readonly List<ShadingModelInfo> _shadingModels = [];
+    // The files of each folder and the sub-assets of each file, by name, built when next asked for after a change, since
+    // the content browser asks for them for each row and a cook changes the assets many times.
+    Dictionary<(string Root, string Folder), List<Asset>>? _filesByFolder;
+    Dictionary<string, List<Asset>>? _subassetsByFile;
 
     public IReadOnlyList<Root> Roots => _roots;
 
@@ -39,6 +43,42 @@ public sealed class AssetIndex
 
     /// <summary>The roots, the assets, the folders, the problems or <see cref="Linked"/> changed.</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// An asset's picture is ready, by its GUID. It is not <see cref="Changed"/>, as a screen of tiles makes many of these,
+    /// and what shows need not be built again for each.
+    /// </summary>
+    public event Action<string>? ThumbnailChanged;
+
+    /// <summary>The host wrote an asset's picture at a path, if that is still the asset's.</summary>
+    public void MarkThumbnailReady(string guid, string path)
+    {
+        if (_assets.TryGetValue(guid, out var asset) && asset.Thumbnail == path && !asset.ThumbnailReady)
+        {
+            _assets[guid] = asset with { ThumbnailReady = true };
+            ForgetLists();
+            ThumbnailChanged?.Invoke(guid);
+        }
+    }
+
+    /// <summary>
+    /// The asset whose picture a tile of this one shows: its own, or for a file with none, such as a stage or a model, what
+    /// it makes: its prefab, or its first mesh. Null when there is none.
+    /// </summary>
+    public Asset? PictureOf(Asset shown)
+    {
+        var asset = Find(shown.Guid) ?? shown;
+        if (asset.Thumbnail != "")
+        {
+            return asset;
+        }
+        if (IsSubasset(asset))
+        {
+            return null;
+        }
+        var made = SubassetsOf(asset.Guid).ToList();
+        return made.Find(a => a.Kind == AssetKind.Prefab && a.Thumbnail != "") ?? made.Find(a => a.Kind == AssetKind.Mesh && a.Thumbnail != "");
+    }
 
     /// <summary>Applies one of the daemon's messages, and returns false for a message that is not about the index.</summary>
     public bool Apply(ILinkMessage message)
@@ -67,6 +107,7 @@ public sealed class AssetIndex
                 }
                 _folders.UnionWith(snapshot.Folders);
                 Linked = true;
+                ForgetLists();
                 break;
             case AssetDelta delta:
                 foreach (var asset in delta.Changed)
@@ -80,6 +121,7 @@ public sealed class AssetIndex
                 }
                 _folders.ExceptWith(delta.RemovedFolders);
                 _folders.UnionWith(delta.AddedFolders);
+                ForgetLists();
                 break;
             case AssetProblems problems:
                 if (problems.Problems.Length == 0)
@@ -148,12 +190,28 @@ public sealed class AssetIndex
         _folders.Where(f => f.Root == root && Parent(f.Path) == folder).Select(f => Name(f.Path)).Order(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The assets directly in a folder of a root, by name.</summary>
-    public IEnumerable<Asset> AssetsIn(string root, string folder) =>
-        _assets.Values.Where(a => a.Root == root && a.Parent == "" && Parent(a.Path) == folder).OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase);
+    public IEnumerable<Asset> AssetsIn(string root, string folder)
+    {
+        _filesByFolder ??= _assets.Values.Where(a => a.Parent == "")
+            .GroupBy(a => (a.Root, Parent(a.Path)))
+            .ToDictionary(g => g.Key, g => g.OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase).ToList());
+        return _filesByFolder.GetValueOrDefault((root, folder)) ?? [];
+    }
 
     /// <summary>The sub-assets that a file makes, such as a model's meshes, by name (see docs/content/identity-and-cooking.md#identity).</summary>
-    public IEnumerable<Asset> SubassetsOf(string guid) =>
-        _assets.Values.Where(a => a.Parent == guid).OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase);
+    public IEnumerable<Asset> SubassetsOf(string guid)
+    {
+        _subassetsByFile ??= _assets.Values.Where(a => a.Parent != "")
+            .GroupBy(a => a.Parent)
+            .ToDictionary(g => g.Key, g => g.OrderBy(a => a.Subasset, StringComparer.OrdinalIgnoreCase).ToList());
+        return _subassetsByFile.GetValueOrDefault(guid) ?? [];
+    }
+
+    void ForgetLists()
+    {
+        _filesByFolder = null;
+        _subassetsByFile = null;
+    }
 
     /// <summary>Whether an asset is a sub-asset, which changes only with its file.</summary>
     public static bool IsSubasset(Asset asset) => asset.Parent != "";
@@ -173,13 +231,18 @@ public sealed class AssetIndex
     /// The assets of every folder that a search matches. Each word must match: <c>kind:script</c> or <c>kind:scene</c>
     /// matches the kind, and any other word a part of the file's name or the behaviour's class, ignoring case.
     /// </summary>
-    public IEnumerable<Asset> Search(string query)
-    {
-        var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return _assets.Values.Where(a => words.All(w => Matches(a, w)))
+    public IEnumerable<Asset> Search(string query) =>
+        _assets.Values.Where(a => MatchesSearch(a, query))
             .OrderBy(a => Name(a.Path), StringComparer.OrdinalIgnoreCase)
             .ThenBy(a => a.Path, StringComparer.OrdinalIgnoreCase);
-    }
+
+    /// <summary>
+    /// Whether an asset has every word of a search (see <see cref="Search"/>). A <c>tag:</c> word asks the given function,
+    /// and without one matches nothing.
+    /// </summary>
+    public static bool MatchesSearch(Asset asset, string query, Func<Asset, string, bool>? tagged = null) =>
+        query.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).All(w =>
+            w.StartsWith("tag:", StringComparison.OrdinalIgnoreCase) ? tagged?.Invoke(asset, w["tag:".Length..]) ?? false : Matches(asset, w));
 
     static bool Matches(Asset asset, string word)
     {

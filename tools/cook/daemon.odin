@@ -121,6 +121,7 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress)
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
+	thumbnails_update(&next, pass, d.options)
 	changes := index_diff(&d.index, &next)
 	// What went away is in the old index, so it stays until the changes are sent.
 	defer {

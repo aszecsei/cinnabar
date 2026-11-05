@@ -133,6 +133,8 @@ Asset_Source :: struct {
 	// The assets that it depends on: a script's requires, and the scripts that a scene's or a prefab's behaviours name
 	// and the prefabs that it instantiates.
 	dependencies: [dynamic]format.Guid,
+	// For a scene or a prefab, the assets that its flat entities name: what it looks like, which its dependencies do not say.
+	visual:       [dynamic]format.Guid,
 	// For a script that defines a behaviour, the class's name.
 	behaviour:    string,
 	// The sub-assets that the cook made of it, such as a model's meshes (see docs/content/identity-and-cooking.md#identity).

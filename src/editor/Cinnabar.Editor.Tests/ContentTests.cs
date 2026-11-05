@@ -1,3 +1,4 @@
+using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Shell;
 using LogLevel = Cinnabar.Editor.Model.LogLevel;
@@ -18,8 +19,8 @@ public sealed class ContentTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(DoorScript, AssetKind.Script, "game", "door.luau", AssetStatus.Current, 0, 0, "Door", [], [UtilScript], "", "", 0, [0, 0], "", [], ""),
-            new Asset(UtilScript, AssetKind.Script, "game", "lib/util.luau", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            TestAssets.Make(DoorScript, AssetKind.Script, "door.luau", behaviour: "Door", dependencies: [UtilScript]),
+            TestAssets.Make(UtilScript, AssetKind.Script, "lib/util.luau"),
         ], [new Folder("game", "lib")]));
         return shell;
     }
@@ -32,8 +33,8 @@ public sealed class ContentTests : IDisposable
         using var shell = NewShell();
         shell.Assets.Apply(new AssetDelta(
         [
-            new Asset("10", AssetKind.Model, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
-            new Asset("11", AssetKind.Mesh, "game", "kit.glb", AssetStatus.Current, 0, 0, "", [], [], "10", "Wall", 0, [0, 0], "", [], ""),
+            TestAssets.Make("10", AssetKind.Model, "kit.glb"),
+            TestAssets.Make("11", AssetKind.Mesh, "kit.glb", parent: "10", subasset: "Wall"),
         ], [], [], []));
 
         shell.Content.SelectContent(null, ["10", DoorScript]);
@@ -54,9 +55,9 @@ public sealed class ContentTests : IDisposable
         using var shell = NewShell();
         shell.Assets.Apply(new AssetDelta(
         [
-            new Asset("20", AssetKind.Material, "game", "rock.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
-            new Asset("21", AssetKind.MaterialInstance, "game", "mossy.material_instance", AssetStatus.Current, 0, 0, "", [], ["20"], "", "", 0, [0, 0], "", [], ""),
-            new Asset("22", AssetKind.ShadingModel, "game", "lit.shading", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            TestAssets.Make("20", AssetKind.Material, "rock.material"),
+            TestAssets.Make("21", AssetKind.MaterialInstance, "mossy.material_instance", dependencies: ["20"]),
+            TestAssets.Make("22", AssetKind.ShadingModel, "lit.shading"),
         ], [], [], []));
 
         var materials = new Panels.AssetContext(shell.Assets, "material", _ => { });
@@ -97,7 +98,7 @@ public sealed class ContentTests : IDisposable
         shell.Content.SelectContent(new ContentFolder("game", ""), []);
         Assert.Equal("new_animation_graph", shell.Content.NewName(AssetTemplate.AnimationGraph));
 
-        var graph = new Asset("44445555666677778888999900001111", AssetKind.AnimationGraph, "game", "fox.animation_graph", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "");
+        var graph = TestAssets.Make("44445555666677778888999900001111", AssetKind.AnimationGraph, "fox.animation_graph");
         Assert.True(EditorShell.CanOpen(graph));
         Assert.Equal("Open in Animation Graph Editor", shell.OpenLabel(graph));
     }
@@ -107,10 +108,10 @@ public sealed class ContentTests : IDisposable
     {
         Setting[] settings = [new("old", "1"), new("native", "true"), new("last", "2")];
 
-        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ContentBrowser.WithSetting(settings, [Native], "native", "false"));
+        Assert.Equal([new Setting("old", "1"), new Setting("last", "2")], ImportSettingsDraft.WithSetting(settings, [Native], "native", "false"));
         Assert.Equal([new Setting("old", "1"), new Setting("native", "false"), new Setting("last", "2")],
-            ContentBrowser.WithSetting(settings, [], "native", "false"));
-        Assert.Equal([new Setting("native", "true")], ContentBrowser.WithSetting([], [Native], "native", "true"));
+            ImportSettingsDraft.WithSetting(settings, [], "native", "false"));
+        Assert.Equal([new Setting("native", "true")], ImportSettingsDraft.WithSetting([], [Native], "native", "true"));
     }
 
     [Fact]

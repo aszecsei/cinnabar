@@ -87,7 +87,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         var text = File.ReadAllText(Path.Combine(EditorOptions.RepositoryRoot(), "samples", "mygame", "content", "models", "fox", "fox.animation_graph"));
         var shell = TestShell.Open(_temp, null, null);
         File.WriteAllText(_temp.Combine("fox.animation_graph"), text);
-        var asset = new Asset(Guid, AssetKind.AnimationGraph, "game", "fox.animation_graph", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], "");
+        var asset = TestAssets.Make(Guid, AssetKind.AnimationGraph, "fox.animation_graph");
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
         shell.Assets.Apply(new AssetSnapshot([asset], []));
         return (shell, asset, text);
@@ -649,8 +649,8 @@ public sealed class AnimationGraphEditorTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(Survey, AssetKind.Animation, "game", "fox.gltf", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
-            new Asset(Walk, AssetKind.Texture, "game", "walk.png", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            TestAssets.Make(Survey, AssetKind.Animation, "fox.gltf"),
+            TestAssets.Make(Walk, AssetKind.Texture, "walk.png"),
         ], []));
         var problem = Assert.Single(editor.Problems);
         Assert.False(problem.Error);

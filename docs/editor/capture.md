@@ -11,6 +11,7 @@ A capture is a request to a running host for an image of what it draws: its next
 - **Who asks.** The editor's Screenshot (F12) and Record Last 5 s (Shift+F12) commands, on the View tab's Capture group, and the [automation](#automation) socket, through which `editorctl`, and so a terminal or an LLM tool, asks for the same. A capture needs a linked host, and one runs at a time.
 - **What comes out.** The image, and beside it a [sidecar](#sidecar) JSON with the editor's state at the capture. A screenshot can bring the renderer's debug views too: the request names them, and each becomes an image of its own.
 - **Where.** `build/captures` in the repository, named `<utc time>-<sequence>.<png|gif>`, with `.<view>.png` for each debug view and `.json` for the sidecar. A request can name the file instead. The host chooses `captures/<utc time>-f<frame>.<png|gif>` beside its executable when it is given no path.
+- **Thumbnails** are captures too, of a texture that the game drew rather than of the frame, and so go past the history ring and the sidecar: the content browser sends the host `Capture_Request` with the kind `Thumbnail` and the file, and the game `Bake_Thumbnail`, the game asks for the copy once its drawing is complete, and the host writes the file and answers as it does for a screenshot (see [Thumbnails](../content/daemon-and-operations.md#thumbnails)). They do not count as the capture that runs at a time, so a screenshot goes between them.
 - **The host's side** is `src/host/capture.odin`. The editor's is `CaptureModel` in `Cinnabar.Editor.Model`, which the shell drives; the model knows only how to send and what to write, so its tests run without a host.
 
 ## Screenshots
@@ -62,6 +63,8 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 | `gif` | `path`: the GIF's path, absolute | `files`: the GIF, then the sidecar |
 | `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"shadingStats":true}` | `ok`, or an error that names the settings |
 | `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out | `ok` |
+| `ui` | `window`: a panel's ID, for the window that holds it, or left out for the main window; `path`: the PNG's path, absolute | `files`: the image |
+| `content` | `settings`: what to change in the content browser, each left out to keep it: `folder`, as `<root>/<path>`; `search`; `view`, `grid` or `list`; `tileSize`; `kinds`, the filter's kinds, separated by commas; `tags`, the filter's tags, likewise; `showTags`; `popOut`; `enter`, a file's GUID, to show what it makes, or a prefab's; `enterNode`, an entity's ID in the open prefab; `leave`; `reveal`, an asset's GUID; `shown`, whether its panel is open | `content`: `folder`, `search`, `selection` and the names of the shown assets, `items` |
 
 ```
 {"id":1,"command":"screenshot","views":["depth","normals"]}
@@ -69,6 +72,8 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 ```
 
 A capture that fails answers `ok` false with the reason in `error`, and still lists the sidecar, which has the reason too. An unknown command or view is an error that names the valid ones. The server is `AutomationServer` in `Cinnabar.Editor.Model`, which knows nothing of the editor: the shell gives it a handler.
+
+`ui` differs from `screenshot`: the editor, not the host, draws its own controls into the image, so it works without a host, and its name is `<utc time>-<sequence>.ui.png` in the same directory. It writes no sidecar. The viewport's frames are on a composition surface of their own, so the viewport's area does not show them.
 
 ### editorctl
 
@@ -80,6 +85,8 @@ editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--out <p
 editorctl [--automation <file>] [--json] gif [--out <path>]
 editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
 editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
+editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 ```
 
 A `--set` value of `true` or `false` is a boolean, a number is a number, and anything else a string, such as a debug view's name, `QuadOverdraw`. With `viewport` and `camera`, a script measures the same view with each setting: the sidecar's `context.profile` has the passes' times. It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.

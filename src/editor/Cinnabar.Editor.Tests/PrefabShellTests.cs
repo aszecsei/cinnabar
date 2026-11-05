@@ -41,8 +41,8 @@ public sealed class PrefabShellTests : IDisposable
         shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", directory)], [new Importer(AssetKind.Prefab, ".prefab", [])], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(Door, AssetKind.Prefab, "game", "door.prefab", AssetStatus.Current, 0, 0, "", [], [Lamp], "", "", 0, [0, 0], "", [], ""),
-            new Asset(Lamp, AssetKind.Prefab, "game", "lamp.prefab", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            TestAssets.Make(Door, AssetKind.Prefab, "door.prefab", dependencies: [Lamp]),
+            TestAssets.Make(Lamp, AssetKind.Prefab, "lamp.prefab"),
         ], []));
     }
 

@@ -117,3 +117,43 @@ component 1 Transform
 	position = [0, 0, 33554432]
 	rotation = [0, 0, 0, 1]
 	scale = [1, 1, 1]
+
+entity 9000000000000001
+name = "Part Frame"
+component 1 Transform
+	position = [33554432, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	intensity = 1.0
+
+entity 178ce61b6aec4bd7
+name = "Part Handle"
+parent = @9000000000000001
+component 2 Local_Transform
+	offset = [0.4, 1, 0]
+behaviour aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+	frame = @9000000000000001
+
+entity 3eb174dc1e6144f0
+name = "Hinge"
+parent = @9000000000000001
+component 2 Local_Transform
+	offset = [-0.5, 1, 0]
+
+entity a000000000000001
+name = "Part Bulb"
+component 1 Transform
+	position = [50331648, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 35 Point_Light
+	intensity = 0.5
+	color = [1, 0.9, 0.8]
+
+entity b000000000000001
+name = "No Such Part"
+component 1 Transform
+	position = [67108864, 0, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]

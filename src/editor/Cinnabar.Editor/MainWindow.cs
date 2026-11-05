@@ -33,6 +33,7 @@ public sealed class MainWindow : Window
     readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
     // Set once the user has answered about unsaved changes, so the second Close goes through.
     bool _closing;
+    bool _askingDraft;
 
     public MainWindow(EditorShell shell)
     {
@@ -43,12 +44,14 @@ public sealed class MainWindow : Window
 
         var views = new CommandViews(shell.Commands, shell.KeyBindings);
         var ribbon = new RibbonView(shell, views);
+        void AttachKeys(Window window) => AttachShortcuts(window, shell, views);
         var dock = new DockControl
         {
             Factory = shell.Layout.Factory,
             Layout = shell.Layout.Root,
             InitializeFactory = true,
             InitializeLayout = false,
+            HostWindowFactory = () => new Docking.EditorHostWindow(AttachKeys),
         };
         shell.Layout.RootChanged += () => dock.Layout = shell.Layout.Root;
 
@@ -72,23 +75,17 @@ public sealed class MainWindow : Window
         shell.Content.RenameRequested += item => _ = AskRename(item);
         shell.Content.DeleteRequested += items => _ = ConfirmDelete(items);
         shell.Content.OperationFailed += error => _ = Dialogs.Ask(this, "The content did not change", error, "OK");
+        shell.Content.DraftLeft += () => _ = AskDraft();
+        shell.Content.TagRenameRequested += tag => _ = AskRenameTag(tag);
+        shell.Content.TagDeleteRequested += tag => _ = ConfirmDeleteTag(tag);
+        Activated += (_, _) => shell.Content.Tags.Reload();
         shell.GraphCloseRequested += editor => _ = AskCloseGraph(editor);
         shell.GraphOverwriteRequested += editor => _ = AskOverwriteGraph(editor);
         shell.SceneChanged += UpdateSceneStatus;
         UpdateSceneStatus();
         Content = new Grid { Children = { main, palette } };
 
-        foreach (var (id, shortcut) in shell.KeyBindings.All)
-        {
-            if (views.Gesture(id) is { } gesture)
-            {
-                KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(views.Adapter(id), gesture, () => shell.GameHasKeys) });
-            }
-            else
-            {
-                shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} is not a key gesture");
-            }
-        }
+        AttachKeys(this);
 
         shell.Host.StateChanged += UpdateHostStatus;
         UpdateHostStatus();
@@ -105,17 +102,108 @@ public sealed class MainWindow : Window
         {
             shell.StartCook();
             shell.StartAutomation();
+            shell.Layout.RestoreWindows([.. (Screens?.All ?? []).Select(s => (s.Bounds.X / s.Scaling, s.Bounds.Y / s.Scaling, s.Bounds.Width / s.Scaling, s.Bounds.Height / s.Scaling))]);
             if (shell.PendingRestore != null)
             {
                 _ = OfferRestore();
             }
         };
+        shell.UiCapture = CaptureUi;
         Closing += OnClosing;
         Closed += (_, _) =>
         {
             _autosave.Stop();
             shell.Dispose();
         };
+    }
+
+    // The shell's shortcuts on a window, as each window's key bindings are its own.
+    static void AttachShortcuts(Window window, EditorShell shell, CommandViews views)
+    {
+        foreach (var (id, shortcut) in shell.KeyBindings.All)
+        {
+            if (views.Gesture(id) is { } gesture)
+            {
+                window.KeyBindings.Add(new KeyBinding { Gesture = gesture, Command = new ShortcutCommand(views.Adapter(id), gesture, () => shell.GameHasKeys, () => window.FocusManager?.GetFocusedElement() is TextBox) });
+            }
+            else if (window is MainWindow)
+            {
+                shell.Console.Add(LogLevel.Warning, $"key bindings: {shortcut} for {id} is not a key gesture");
+            }
+        }
+    }
+
+    // Draws the controls of a panel's window, or of this window, into a PNG (see docs/editor/capture.md#automation). The
+    // viewport's frames are on a composition surface of their own, so they do not show.
+    string? CaptureUi(string? panel, string path)
+    {
+        TopLevel window = this;
+        if (panel != null)
+        {
+            if (!_shell.Layout.Panels.Any(p => p.Id == panel))
+            {
+                return $"unknown window {panel}; the windows are named by their panels: {string.Join(", ", _shell.Layout.Panels.Select(p => p.Id))}";
+            }
+            window = _shell.Layout.FloatingWindowOf(panel) as TopLevel ?? this;
+        }
+        var scale = window.RenderScaling;
+        using var image = new Avalonia.Media.Imaging.RenderTargetBitmap(PixelSize.FromSize(window.ClientSize, scale), new Vector(96 * scale, 96 * scale));
+        image.Render(window);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+        image.Save(path, Avalonia.Media.Imaging.PngBitmapEncoderOptions.Default);
+        return null;
+    }
+
+    async Task AskRenameTag(string tag)
+    {
+        var name = await Dialogs.AskName(this, "Rename Tag", $"A new name for {tag} and the tags under it. A / nests it under another tag.", tag, "Rename");
+        if (name == null)
+        {
+            return;
+        }
+        if (ProjectTags.Normalize(name) is { } renamed)
+        {
+            _shell.Content.Tags.Rename(tag, renamed);
+        }
+        else
+        {
+            await Dialogs.Ask(this, "The tag did not change", $"{name} is not a tag: it can have letters, digits, _ and -, with / between its parts.", "OK");
+        }
+    }
+
+    async Task ConfirmDeleteTag(string tag)
+    {
+        var tags = _shell.Content.Tags;
+        var count = tags.Assets.Count(g => tags.Has(g, tag));
+        var answer = await Dialogs.Ask(this, "Delete Tag", $"Take {tag} and the tags under it from {(count == 1 ? "the 1 asset that has them" : $"the {count} assets that have them")}? The assets stay.", "Delete", "Cancel");
+        if (answer == "Delete")
+        {
+            tags.Remove([.. tags.Assets], tag);
+        }
+    }
+
+    // The selection moved off files with changes to their import settings that are not applied. Keep Editing goes back to them.
+    async Task AskDraft()
+    {
+        if (_askingDraft)
+        {
+            return;
+        }
+        _askingDraft = true;
+        var content = _shell.Content;
+        var left = content.Draft.Assets;
+        var answer = await Dialogs.Ask(this, "Import settings not applied",
+            $"{(left.Count == 1 ? "A file" : $"{left.Count} files")} that you were editing {(left.Count == 1 ? "has" : "have")} import settings that are not applied.",
+            "Apply", "Discard", "Keep Editing");
+        _askingDraft = false;
+        if (answer == "Apply" && await content.ApplyDraft() || answer == "Discard")
+        {
+            content.FinishDraft();
+        }
+        else
+        {
+            content.Model.Select(left);
+        }
     }
 
     async void OnClosing(object? sender, WindowClosingEventArgs e)
@@ -129,6 +217,7 @@ public sealed class MainWindow : Window
         {
             _closing = true;
             _shell.SaveLayout();
+            _shell.Layout.Closing = true;
             Close();
         }
     }
@@ -261,7 +350,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    async Task AskRename(Shell.ContentItem item)
+    async Task AskRename(ContentItem item)
     {
         string current;
         if (item.Guid is { } guid && _shell.Assets.Find(guid) is { } asset)
@@ -283,7 +372,7 @@ public sealed class MainWindow : Window
         }
     }
 
-    async Task ConfirmDelete(IReadOnlyList<Shell.ContentItem> items)
+    async Task ConfirmDelete(IReadOnlyList<ContentItem> items)
     {
         var (deleted, users) = _shell.Content.DeleteEffects(items);
         var names = items.Select(i => i.Guid is { } g ? _shell.Assets.Find(g)?.Path is { } p ? System.IO.Path.GetFileName(p) : null : i.Folder?.Name)

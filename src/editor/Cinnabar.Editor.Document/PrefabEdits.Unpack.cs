@@ -32,7 +32,8 @@ public static partial class PrefabEdits
     public static Operation[] Unpack(SceneDocument document, ulong instance)
     {
         var block = document.Scene.Find(instance);
-        if (block is not { Prefab: not "" } || document.Prefabs.SceneOf(block.Prefab) is not { } prefab || PrefabExpansion.RootOf(prefab) is not ({ } root, 1))
+        // One level of a part is no simpler than all of them, as its entities may be inside a nested instance.
+        if (block is not { Prefab: not "", Node: 0 } || document.Prefabs.SceneOf(block.Prefab) is not { } prefab || PrefabExpansion.RootOf(prefab) is not ({ } root, 1))
         {
             return UnpackCompletely(document, instance);
         }

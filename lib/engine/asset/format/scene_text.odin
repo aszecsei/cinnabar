@@ -257,6 +257,9 @@ finish_entity :: proc(p: ^Parser) {
 	if plain && (len(p.entity.removed_components) > 0 || len(p.entity.removed_behaviours) > 0) {
 		problem(p, true, "entity %016x: only an instance or an override block removes a component or a behaviour", p.entity.id)
 	}
+	if p.entity.node != 0 && (p.entity.prefab == {} || p.entity.path != nil) {
+		problem(p, true, "entity %016x: only an instance block takes node", p.entity.id)
+	}
 	append(&p.entities, p.entity)
 	p.open = false
 }
@@ -318,6 +321,11 @@ parse_line :: proc(p: ^Parser, line: string, indented: bool) {
 			problem(p, true, "an override block cannot change which prefab an entity instantiates")
 		}
 		p.entity.prefab = value.asset
+	case "node":
+		if value.kind != .Entity || value.entity == 0 {
+			problem(p, true, "node takes an entity of the prefab, such as @2000000000000002")
+		}
+		p.entity.node = value.entity
 	case "removed":
 		if value.kind != .Bool {
 			problem(p, true, "removed takes true or false")

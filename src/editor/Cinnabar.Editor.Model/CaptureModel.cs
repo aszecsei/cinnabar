@@ -96,6 +96,19 @@ public sealed class CaptureModel
     public static string BaseName(DateTime utc, int sequence) => $"{utc:yyyyMMdd-HHmmss}-{sequence:00}";
 
     /// <summary>
+    /// A PNG's absolute path: the one asked for, with its extension, or a new name with a suffix in the directory.
+    /// </summary>
+    public static string ImagePath(string? path, string directory, DateTime utc, int sequence, string suffix)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return Path.Combine(Path.GetFullPath(directory), $"{BaseName(utc, sequence)}.{suffix}.png");
+        }
+        var full = Path.GetFullPath(path);
+        return full.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? full : full + ".png";
+    }
+
+    /// <summary>
     /// Captures a screenshot or a GIF into <paramref name="directory"/>, or at <paramref name="path"/> when given, with
     /// a screenshot of each view beside it and the sidecar. The views need <paramref name="current"/>, the viewport's
     /// settings, which they change and put back. <paramref name="context"/> is read when the sidecar is written.

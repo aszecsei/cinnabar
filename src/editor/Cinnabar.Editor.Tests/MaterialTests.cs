@@ -233,10 +233,10 @@ public sealed class MaterialTests : IDisposable
         shell.Assets.Apply(new ShadingModels(Shading));
         shell.Assets.Apply(new AssetSnapshot(
         [
-            new Asset(MaterialGuid, AssetKind.Material, "game", "checker.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", [], ""),
-            new Asset(FunctionGuid, AssetKind.MaterialFunction, "game", "rim.material_function", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
-            new Asset("22", AssetKind.Material, "game", "glow.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", [], ""),
-            new Asset(EffectGuid, AssetKind.Effect, "game", "smoke.effect", AssetStatus.Current, 0, 0, "", [], [], "", "", 0, [0, 0], "", [], ""),
+            TestAssets.Make(MaterialGuid, AssetKind.Material, "checker.material", permutations: 1),
+            TestAssets.Make(FunctionGuid, AssetKind.MaterialFunction, "rim.material_function"),
+            TestAssets.Make("22", AssetKind.Material, "glow.material", permutations: 1),
+            TestAssets.Make(EffectGuid, AssetKind.Effect, "smoke.effect"),
         ], []));
         return shell;
     }
@@ -310,7 +310,7 @@ public sealed class MaterialTests : IDisposable
         // The content browser renames the file, and the index gives the asset its new path.
         File.Move(_temp.Combine("checker.material"), _temp.Combine("tiles.material"));
         shell.Assets.Apply(new AssetDelta(
-            [new Asset(MaterialGuid, AssetKind.Material, "game", "tiles.material", AssetStatus.Current, 0, 0, "", [], [], "", "", 1, [0, 0], "", [], "")], [], [], []));
+            [TestAssets.Make(MaterialGuid, AssetKind.Material, "tiles.material", permutations: 1)], [], [], []));
         Assert.Equal(Path.GetFullPath(_temp.Combine("tiles.material")), editor.Document.Path);
         Assert.Equal("tiles.material", editor.Document.Title);
 

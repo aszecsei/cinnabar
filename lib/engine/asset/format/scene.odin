@@ -13,6 +13,7 @@ PREFAB_EXTENSION :: ".prefab"
 // so expansion drops these two from a prefab's root.
 SCENE_TRANSFORM_ID :: 1
 SCENE_LOCAL_TRANSFORM_ID :: 2
+SCENE_MESH_RENDERER_ID :: 33
 
 // Scene is a scene as its file describes it (see docs/editor/document-and-scenes.md#scenes). The cooker parses it from text, the asset
 // runtime reads it from a blob, and the editor sends it over the link. The scene loader in lib/engine applies it. A
@@ -37,6 +38,9 @@ Scene_Entity :: struct {
 	keys:               Scene_Keys,
 	// An instance block: the prefab that it instantiates, whose root it stands for.
 	prefab:             Guid,
+	// An instance block: the entity of the prefab's expansion that it instantiates with its descendants, in place of the
+	// whole prefab, or 0.
+	node:               u64,
 	// An override block: the IDs of its path, from the instance's. id is scene_path_id_of the path.
 	path:               []u64,
 	// An override block: the entity and its descendants are taken out of the instance.

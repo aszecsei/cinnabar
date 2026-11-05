@@ -36,6 +36,20 @@ static partial class EditorCommands
             Icon = "delete",
             CanExecuteWhen = () => shell.Content.CanChangeContent && shell.Content.SelectedAssets.Count > 0 && !shell.Content.SelectionHasSubassets,
         });
+        commands.Register(new Command(PopOutContentBrowser, "Pop Out Content Browser", () =>
+            {
+                if (shell.Layout.IsFloating("contentBrowser"))
+                {
+                    shell.Layout.DockBack("contentBrowser");
+                }
+                else
+                {
+                    shell.Layout.PopOut("contentBrowser");
+                }
+            })
+        {
+            Description = "Put the content browser in a window of its own, or back in its dock. Its folder, filter and selection stay.",
+        });
         commands.Register(new Command(Reimport, "Re-import", () => _ = shell.Content.ReimportSelectedAssets())
         {
             Description = "Cook the assets selected in the content browser again, also when they are up to date.",

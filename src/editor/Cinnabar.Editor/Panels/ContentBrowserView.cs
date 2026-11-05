@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Input;
 using Avalonia.Input.Platform;
@@ -13,7 +14,6 @@ using Cinnabar.Editor.Shell;
 using CommunityToolkit.Mvvm.Input;
 using Asset = Cinnabar.Editor.Link.Cook.Asset;
 using AssetKind = Cinnabar.Editor.Link.Cook.AssetKind;
-using AssetStatus = Cinnabar.Editor.Link.Cook.AssetStatus;
 using AssetTemplate = Cinnabar.Editor.Link.Cook.AssetTemplate;
 using DockSide = Avalonia.Controls.Dock;
 
@@ -21,29 +21,45 @@ namespace Cinnabar.Editor.Panels;
 
 /// <summary>
 /// The content browser (see docs/editor/shell-and-panels.md#content-browser): the content roots' folders on the left, as a virtualized
-/// list of the visible rows, the selected folder's assets in the middle, or every asset that a search matches, and the
-/// selected asset's details on the right. Everything comes from the cook daemon's index. A double click opens a scene in
-/// the editor and a script in the script editor, and a script that defines a behaviour drags onto an entity. The menus,
-/// the keys and dragging onto a folder do the asset operations, which the daemon does.
+/// list of the visible rows, the assets in the middle, as tiles or a list, and the selected asset's details on the right.
+/// Everything comes from the cook daemon's index, and what shows is the shell's <see cref="ContentBrowserModel"/>, as a view
+/// lasts only until docking rebuilds it. The menus, the keys and dragging onto a folder do the asset operations, which the
+/// daemon does.
 /// </summary>
 public sealed class ContentBrowserView : DockPanel
 {
     /// <summary>Dragged assets, by their GUIDs, separated by spaces.</summary>
     public static readonly DataFormat<string> AssetFormat = DataFormat.CreateStringApplicationFormat("cinnabar-asset");
 
+    /// <summary>Dragged parts of prefabs, as <c>guid:id</c>, separated by spaces, in a format that what takes assets ignores.</summary>
+    public static readonly DataFormat<string> PartFormat = DataFormat.CreateStringApplicationFormat("cinnabar-prefab-node");
+
     const double Indent = 14;
 
     readonly EditorShell _shell;
     readonly AssetIndex _index;
+    readonly ContentBrowserModel _model;
     readonly TextBox _search = new() { PlaceholderText = "Search by name, or kind:script, kind:scene", Width = 260, Classes = { "outliner-filter" } };
-    readonly TextBlock _location = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), TextTrimming = TextTrimming.CharacterEllipsis };
+    readonly StackPanel _location = new() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0), Spacing = 4 };
     readonly TextBlock _status = new() { Classes = { "dim" }, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 0) };
     readonly Border _general = new() { Classes = { "problems" }, Margin = new Thickness(4, 0, 4, 4) };
+    readonly ContentFilterBar _filter;
     readonly ListBox _folders = new() { Classes = { "outliner" } };
-    readonly ListBox _assets = new() { Classes = { "outliner" }, SelectionMode = SelectionMode.Multiple };
-    // The files whose sub-assets show under them, by GUID.
-    readonly HashSet<string> _expandedFiles = [];
-    readonly StackPanel _details = new() { Spacing = 2, Margin = new Thickness(8, 4) };
+    readonly ListBox _tags = new() { Classes = { "outliner" } };
+    readonly TextBlock _noTags = new()
+    {
+        Text = "Tag an asset in its details to see its tags here. A / nests them, as env/stone.",
+        Classes = { "empty" },
+        TextWrapping = TextWrapping.Wrap,
+        TextAlignment = TextAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(12),
+        IsHitTestVisible = false,
+    };
+    readonly ToggleButton _showFolders = new() { Content = "Folders", Classes = { "kind-chip" } };
+    readonly ToggleButton _showTags = new() { Content = "Tags", Classes = { "kind-chip" } };
+    readonly ContentGridView _grid;
+    readonly ContentDetailsView _details;
     readonly TextBlock _empty = new()
     {
         Classes = { "empty" },
@@ -52,23 +68,19 @@ public sealed class ContentBrowserView : DockPanel
         HorizontalAlignment = HorizontalAlignment.Center,
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(16),
+        IsHitTestVisible = false,
     };
-    // Roots start expanded, and other folders collapsed. The set holds the expanded ones, as "root/path".
-    readonly HashSet<string> _expanded = [];
-    readonly HashSet<string> _seenRoots = [];
-    (string Root, string Path)? _folder;
-    // The selected assets, by GUID. The first one's details show.
-    List<string> _selection = [];
-    string? Selected => _selection.Count > 0 ? _selection[0] : null;
     bool _rebuildPosted;
     bool _syncing;
-    PointerPressedEventArgs? _press;
-    Asset? _pressed;
 
     public ContentBrowserView(EditorShell shell)
     {
         _shell = shell;
         _index = shell.Assets;
+        _model = shell.Content.Model;
+        _filter = new ContentFilterBar(_model, () => _shell.Commands.Get(EditorCommands.PopOutContentBrowser).Execute());
+        _grid = new ContentGridView(shell, AssetMenu);
+        _details = new ContentDetailsView(shell);
 
         var bar = new DockPanel { Margin = new Thickness(0, 0, 0, 2) };
         SetDock(_search, DockSide.Right);
@@ -78,17 +90,29 @@ public sealed class ContentBrowserView : DockPanel
         bar.Children.Add(_location);
         SetDock(bar, DockSide.Top);
         Children.Add(bar);
+        SetDock(_filter, DockSide.Top);
+        Children.Add(_filter);
         SetDock(_general, DockSide.Top);
         Children.Add(_general);
 
         // The panel docks at the bottom by default, where it is wide and short, so the details are a column.
-        var details = new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
-        var assets = new Panel { Children = { _assets, _empty } };
-        _assets.ContextMenu = FolderMenu(null);
+        var details = new DockPanel();
+        SetDock(_details.DraftBar, DockSide.Top);
+        details.Children.Add(_details.DraftBar);
+        details.Children.Add(new ScrollViewer { Content = _details, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled });
+        var assets = new Panel { Children = { _grid, _empty } };
+        _grid.BlankMenu = FolderMenu(null);
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("220,4,*,4,320") };
         Grid.SetColumn(assets, 2);
         Grid.SetColumn(details, 4);
-        grid.Children.Add(_folders);
+        var left = new DockPanel();
+        var pane = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 0), Children = { _showFolders, _showTags } };
+        SetDock(pane, DockSide.Top);
+        left.Children.Add(pane);
+        left.Children.Add(new Panel { Children = { _folders, _tags, _noTags } });
+        _showFolders.Click += (_, _) => _model.ShowingTags = false;
+        _showTags.Click += (_, _) => _model.ShowingTags = true;
+        grid.Children.Add(left);
         grid.Children.Add(Splitter(1));
         grid.Children.Add(assets);
         grid.Children.Add(Splitter(3));
@@ -96,83 +120,66 @@ public sealed class ContentBrowserView : DockPanel
         Children.Add(grid);
 
         _folders.ItemTemplate = new FuncDataTemplate<FolderRow>((row, _) => row == null ? new Control() : FolderView(row));
-        _assets.ItemTemplate = new FuncDataTemplate<Asset>((asset, _) => asset == null ? new Control() : AssetView(asset));
+        _tags.ItemTemplate = new FuncDataTemplate<TagRow>((row, _) => row == null ? new Control() : TagView(row));
         _folders.SelectionChanged += (_, _) =>
         {
             if (!_syncing && _folders.SelectedItem is FolderRow row)
             {
-                _folder = (row.Root, row.Path);
-                _search.Text = "";
-                ShowAssets();
+                _model.Open(new ContentFolder(row.Root, row.Path));
             }
         };
-        _assets.SelectionChanged += (_, _) =>
+        BrowserKey(Key.F2, KeyModifiers.None, () => RunOnSelection(EditorCommands.RenameAsset));
+        BrowserKey(Key.D, KeyModifiers.Control, () => RunOnSelection(EditorCommands.DuplicateAsset));
+        BrowserKey(Key.Delete, KeyModifiers.None, () => RunOnSelection(EditorCommands.DeleteAsset));
+        BrowserKey(Key.A, KeyModifiers.Control, _model.SelectAll);
+        _search.TextChanged += (_, _) =>
         {
             if (!_syncing)
             {
-                // The asset that was selected first stays first, so its details stay.
-                var selected = _assets.SelectedItems?.OfType<Asset>().Select(a => a.Guid).ToList() ?? [];
-                _selection = [.. _selection.Where(selected.Contains), .. selected.Where(g => !_selection.Contains(g))];
-                ShowDetails();
-                Publish();
+                _model.Search = _search.Text ?? "";
             }
         };
-        KeyDown += OnKeyDown;
-        _search.TextChanged += (_, _) => ShowAssets();
 
         new ViewSubscriptions(this, attached: Rebuild)
-            .Add(() => _index.Changed += PostRebuild, () => _index.Changed -= PostRebuild)
+            .Add(() => _model.Changed += PostRebuild, () => _model.Changed -= PostRebuild)
+            .Add(() => _shell.Layout.Changed += PostRebuild, () => _shell.Layout.Changed -= PostRebuild)
+            .Add(() => _model.ContextChanged += OnContextChanged, () => _model.ContextChanged -= OnContextChanged)
+            .Add(() => _model.Revealed += OnRevealed, () => _model.Revealed -= OnRevealed)
+            .Add(() => _shell.Content.Draft.Changed += _details.Show, () => _shell.Content.Draft.Changed -= _details.Show)
             .Add(() => _shell.Cook.StateChanged += ShowStatus, () => _shell.Cook.StateChanged -= ShowStatus)
             .Add(() => _shell.Cook.Cooked += OnCooked, () => _shell.Cook.Cooked -= OnCooked)
-            .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus)
-            .Add(() => _shell.Content.ContentRevealed += OnRevealed, () => _shell.Content.ContentRevealed -= OnRevealed);
+            .Add(() => _shell.Cook.ProgressChanged += ShowStatus, () => _shell.Cook.ProgressChanged -= ShowStatus);
     }
 
-    // Tells the shell the folder and the selection, which the asset commands act on.
-    void Publish() =>
-        _shell.Content.SelectContent(_folder is { } f ? new ContentFolder(f.Root, f.Path) : null, [.. _selection]);
+    // A key that means one thing here and another on the entities, which comes first while the browser has the focus, as
+    // it is nearer than the window's. It does nothing for lack of a selection, not the entities' command, and leaves a
+    // text box its keys.
+    void BrowserKey(Key key, KeyModifiers modifiers, Action run) =>
+        KeyBindings.Add(new KeyBinding
+        {
+            Gesture = new KeyGesture(key, modifiers),
+            Command = new RelayCommand(run, () => TopLevel.GetTopLevel(this)?.FocusManager?.GetFocusedElement() is not TextBox),
+        });
 
-    // F2, Ctrl+D and Delete act on the selected assets while the browser has focus, and not while a box has it.
-    void OnKeyDown(object? sender, KeyEventArgs e)
+    void RunOnSelection(string id)
     {
-        if (e.Source is TextBox)
+        var command = _shell.Commands.Get(id);
+        if (_model.Selection.Count > 0 && command.CanExecute)
         {
-            return;
-        }
-        var command = (e.Key, e.KeyModifiers) switch
-        {
-            (Key.F2, KeyModifiers.None) => EditorCommands.RenameAsset,
-            (Key.D, KeyModifiers.Control) => EditorCommands.DuplicateAsset,
-            (Key.Delete, KeyModifiers.None) => EditorCommands.DeleteAsset,
-            _ => null,
-        };
-        if (command != null && _selection.Count > 0)
-        {
-            // The command acts on the shell's selection, which is this one as of now.
-            Publish();
-            _shell.Commands.Get(command).Execute();
-            e.Handled = true;
+            command.Execute();
         }
     }
 
-    void OnRevealed(ContentItem item)
+    void OnContextChanged()
     {
-        if (item.Guid is { } guid && _index.Find(guid) is { } asset)
-        {
-            Reveal(asset);
-        }
-        else if (item.Folder is { } folder)
-        {
-            for (var path = AssetIndex.Parent(folder.Path); path != ""; path = AssetIndex.Parent(path))
-            {
-                _expanded.Add($"{folder.Root}/{path}");
-            }
-            _expanded.Add(folder.Root + "/");
-            _folder = (folder.Root, folder.Path);
-            _search.Text = "";
-            ShowFolders();
-            ShowAssets();
-        }
+        _grid.ShowSelection();
+        _details.Show();
+    }
+
+    void OnRevealed(Asset asset)
+    {
+        Rebuild();
+        _grid.ScrollTo(asset.Guid);
     }
 
     static GridSplitter Splitter(int column)
@@ -201,94 +208,178 @@ public sealed class ContentBrowserView : DockPanel
 
     void Rebuild()
     {
-        foreach (var root in _index.Roots.Where(r => _seenRoots.Add(r.Name)))
-        {
-            _expanded.Add(root.Name + "/");
-        }
-        if (_folder is not { } folder || _index.FindRoot(folder.Root) == null || (folder.Path != "" && !_index.Folders.Contains(new(folder.Root, folder.Path))))
-        {
-            _folder = _index.Roots.Count > 0 ? (_index.Roots[0].Name, "") : null;
-        }
         ShowFolders();
+        ShowTags();
+        ShowLocation();
         ShowAssets();
+        _filter.Show(_shell.Layout.IsFloating("contentBrowser"));
         ShowStatus();
         ShowGeneralProblems();
-        Publish();
         // A view of an index that the daemon no longer keeps up to date.
         Opacity = _index.Linked ? 1 : 0.6;
     }
 
+    void ShowTags()
+    {
+        var rows = _model.TagRows();
+        var showing = _model.ShowingTags;
+        _showFolders.IsChecked = !showing;
+        _showTags.IsChecked = showing;
+        _folders.IsVisible = !showing;
+        _tags.IsVisible = showing && rows.Count > 0;
+        _noTags.IsVisible = showing && rows.Count == 0;
+        _syncing = true;
+        _tags.ItemsSource = rows;
+        _tags.SelectedItem = null;
+        _syncing = false;
+    }
+
+    // A tag's row: a click filters by it, an asset dropped on it gets it, and its menu renames or deletes it.
+    Control TagView(TagRow row)
+    {
+        var expander = new TextBlock
+        {
+            Text = row.HasChildren ? (row.Expanded ? "\u25be" : "\u25b8") : "",
+            Width = 14,
+            Classes = { "dim" },
+            Cursor = row.HasChildren ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
+        };
+        if (row.HasChildren)
+        {
+            expander.PointerPressed += (_, e) =>
+            {
+                _model.ToggleTagExpanded(row.Tag);
+                e.Handled = true;
+            };
+        }
+        var name = new TextBlock { Text = row.Name };
+        if (row.Filtering)
+        {
+            name.FontWeight = FontWeight.Bold;
+            name.Foreground = new SolidColorBrush(Palette.Accent);
+        }
+        var view = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 4,
+            Margin = new Thickness(row.Depth * Indent, 0, 0, 0),
+            Background = Brushes.Transparent,
+            Children =
+            {
+                expander,
+                name,
+                new TextBlock { Text = row.Count.ToString(), Classes = { "dim" } },
+            },
+        };
+        ToolTip.SetTip(view, row.Tag);
+        view.PointerPressed += (_, e) =>
+        {
+            if (e.GetCurrentPoint(view).Properties.IsLeftButtonPressed)
+            {
+                _model.ToggleTag(row.Tag);
+                e.Handled = true;
+            }
+        };
+        DragDrop.SetAllowDrop(view, true);
+        view.AddHandler(DragDrop.DragOverEvent, (_, e) =>
+        {
+            e.DragEffects = DroppedAll(e) is { Count: > 0 } ? DragDropEffects.Link : DragDropEffects.None;
+            e.Handled = true;
+        });
+        view.AddHandler(DragDrop.DropEvent, (_, e) =>
+        {
+            if (DroppedAll(e) is { Count: > 0 } guids)
+            {
+                _shell.Content.Tags.Add(guids, row.Tag);
+            }
+            e.Handled = true;
+        });
+        view.ContextMenu = new ContextMenu
+        {
+            Items =
+            {
+                new MenuItem { Header = "Rename", Command = new RelayCommand(() => _shell.Content.RequestRenameTag(row.Tag)) },
+                new MenuItem { Header = "Delete", Command = new RelayCommand(() => _shell.Content.RequestDeleteTag(row.Tag)) },
+            },
+        };
+        return view;
+    }
+
     void ShowFolders()
     {
-        var rows = new List<FolderRow>();
-        void Add(string root, string path, string name, int depth)
-        {
-            var children = _index.ChildFolders(root, path).ToList();
-            var expanded = _expanded.Contains($"{root}/{path}");
-            rows.Add(new FolderRow(root, path, name, depth, children.Count > 0, expanded));
-            if (expanded)
-            {
-                foreach (var child in children)
-                {
-                    Add(root, path == "" ? child : $"{path}/{child}", child, depth + 1);
-                }
-            }
-        }
-        foreach (var root in _index.Roots)
-        {
-            Add(root.Name, "", root.Name, 0);
-        }
+        var rows = _model.FolderRows();
         _syncing = true;
         _folders.ItemsSource = rows;
-        _folders.SelectedItem = rows.FirstOrDefault(r => _folder is { } f && r.Root == f.Root && r.Path == f.Path);
+        _folders.SelectedItem = rows.FirstOrDefault(r => _model.Folder is { } f && r.Root == f.Root && r.Path == f.Path);
         _syncing = false;
+    }
+
+    // The path over the assets, each part a link, or how many assets a filter leaves.
+    void ShowLocation()
+    {
+        _location.Children.Clear();
+        if (_model.Filtering)
+        {
+            var count = _model.Tiles.Count;
+            var scope = _model.OpenPrefab != null ? " in this prefab" : _model.OpenFile != null ? " in this file" : _model.InThisFolder ? " in this folder" : "";
+            _location.Children.Add(new TextBlock { Text = $"{count} {(count == 1 ? "asset matches" : "assets match")}{scope}", VerticalAlignment = VerticalAlignment.Center });
+            _location.Children.Add(Link("Clear", _model.ClearFilter));
+            return;
+        }
+        var crumbs = _model.Crumbs();
+        for (var i = 0; i < crumbs.Count; i++)
+        {
+            if (i > 0)
+            {
+                _location.Children.Add(new TextBlock { Text = "›", Classes = { "dim" }, VerticalAlignment = VerticalAlignment.Center });
+            }
+            var crumb = crumbs[i];
+            if (i == crumbs.Count - 1)
+            {
+                _location.Children.Add(new TextBlock { Text = crumb.Name, VerticalAlignment = VerticalAlignment.Center });
+            }
+            else if (crumb.Folder is { } folder)
+            {
+                _location.Children.Add(Link(crumb.Name, () => _model.Open(folder)));
+            }
+            else if (crumb.File is { } file)
+            {
+                _location.Children.Add(Link(crumb.Name, () => _model.Enter(file)));
+            }
+            else if (crumb.Node is { } node)
+            {
+                _location.Children.Add(Link(crumb.Name, () => _model.EnterNode(node)));
+            }
+        }
+    }
+
+    static TextBlock Link(string text, Action click)
+    {
+        var link = new TextBlock { Text = text, Classes = { "link" }, Cursor = new Cursor(StandardCursorType.Hand), VerticalAlignment = VerticalAlignment.Center };
+        link.PointerPressed += (_, e) =>
+        {
+            click();
+            e.Handled = true;
+        };
+        return link;
     }
 
     void ShowAssets()
     {
-        var query = _search.Text?.Trim() ?? "";
-        List<Asset> assets;
-        if (query.Length > 0)
-        {
-            assets = [.. _index.Search(query)];
-            _location.Text = $"{assets.Count} {(assets.Count == 1 ? "asset matches" : "assets match")} \"{query}\"";
-        }
-        else if (_folder is { } folder)
-        {
-            // An expanded file shows its sub-assets under it.
-            assets = [];
-            foreach (var asset in _index.AssetsIn(folder.Root, folder.Path))
-            {
-                assets.Add(asset);
-                if (_expandedFiles.Contains(asset.Guid))
-                {
-                    assets.AddRange(_index.SubassetsOf(asset.Guid));
-                }
-            }
-            _location.Text = folder.Path == "" ? folder.Root : $"{folder.Root} › {folder.Path.Replace("/", " › ")}";
-        }
-        else
-        {
-            assets = [];
-            _location.Text = "";
-        }
         _empty.Text = _index.Roots.Count == 0
             ? "The content roots appear here once the cook daemon runs."
-            : query.Length > 0 ? "No asset matches the search." : "This folder has no assets.";
-        _empty.IsVisible = assets.Count == 0;
-        _selection = [.. _selection.Where(g => assets.Any(a => a.Guid == g))];
+            : _model.Filtering ? "No asset matches the filter."
+            : _model.OpenPrefab != null ? "Nothing is under this entity."
+            : "This folder has no assets.";
+        _empty.IsVisible = _model.Tiles.Count == 0;
         _syncing = true;
-        _assets.ItemsSource = assets;
-        // The list keeps what it had selected across a new list where it can, which may be an asset that is no
-        // longer selected here, so its selection is rebuilt from this one, not added to.
-        _assets.SelectedItems?.Clear();
-        foreach (var asset in assets.Where(a => _selection.Contains(a.Guid)))
+        if ((_search.Text ?? "") != _model.Search)
         {
-            _assets.SelectedItems?.Add(asset);
+            _search.Text = _model.Search;
         }
         _syncing = false;
-        ShowDetails();
-        Publish();
+        _grid.Show();
+        _details.Show();
     }
 
     void ShowStatus()
@@ -314,8 +405,8 @@ public sealed class ContentBrowserView : DockPanel
 
     static string Plural(uint count, string noun) => count == 1 ? noun : noun + "s";
 
-    // A kind's name in messages, which is also its icon's.
-    static string KindNoun(AssetKind kind) => kind switch
+    /// <summary>A kind's name in messages, which is also its icon's.</summary>
+    internal static string KindNoun(AssetKind kind) => kind switch
     {
         AssetKind.Scene => "scene",
         AssetKind.Shader => "shader",
@@ -342,155 +433,7 @@ public sealed class ContentBrowserView : DockPanel
     {
         var problems = _index.ProblemsOf("");
         _general.IsVisible = problems.Count > 0;
-        _general.Child = new StackPanel { Children = { Problems(problems) } };
-    }
-
-    void ShowDetails()
-    {
-        _details.Children.Clear();
-        if (Selected is not { } guid || _index.Find(guid) is not { } asset)
-        {
-            return;
-        }
-        void Row(string label, Control value)
-        {
-            var row = new DockPanel();
-            var name = new TextBlock { Text = label, Width = 96, Classes = { "dim" } };
-            SetDock(name, DockSide.Left);
-            row.Children.Add(name);
-            row.Children.Add(value);
-            _details.Children.Add(row);
-        }
-        Row("Path", new SelectableTextBlock { Text = $"{asset.Root}/{asset.Path}", TextWrapping = TextWrapping.Wrap });
-        Row("GUID", new SelectableTextBlock { Text = asset.Guid, FontFamily = new FontFamily("Consolas"), FontSize = 11 });
-        Row("Status", new TextBlock { Text = asset.Status == AssetStatus.Failed ? "Failed: it keeps its last good blob" : "Cooked" });
-        if (asset.Behaviour != "")
-        {
-            Row("Behaviour", new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) });
-        }
-        foreach (var info in _index.SettingsOf(asset.Kind))
-        {
-            Row(FieldValues.Humanize(info.Key), SettingEditor(asset, info));
-        }
-        // Settings that the importer does not know, which it warns of.
-        var unknown = asset.Settings.Where(s => !_index.SettingsOf(asset.Kind).Any(i => i.Key == s.Key)).ToList();
-        if (unknown.Count > 0)
-        {
-            Row("Settings", new SelectableTextBlock { Text = string.Join(", ", unknown.Select(s => $"{s.Key} = {s.Value}")) });
-        }
-        if (asset.Dependencies.Length > 0)
-        {
-            Row("Depends on", Links(asset.Dependencies.Select(_index.Find).OfType<Asset>()));
-        }
-        if (_index.Dependents(guid).ToList() is { Count: > 0 } dependents)
-        {
-            Row("Used by", Links(dependents));
-        }
-        if (_index.ProblemsOf(guid) is { Count: > 0 } problems)
-        {
-            Row("Problems", Problems(problems));
-        }
-    }
-
-    // An import setting's editor: a check box for a setting of true or false, and a list of its values otherwise. A
-    // change goes to the daemon, which writes the .meta file and cooks the asset again.
-    Control SettingEditor(Asset asset, Link.Cook.SettingInfo info)
-    {
-        var value = asset.Settings.FirstOrDefault(s => s.Key == info.Key)?.Value ?? info.Default;
-        Control editor;
-        if (info.Values is ["true", "false"] or ["false", "true"])
-        {
-            var check = new CheckBox { IsChecked = value == "true", Padding = new Thickness(4, 0), MinHeight = 0 };
-            check.IsCheckedChanged += (_, _) => _ = SetSetting(asset.Guid, info.Key, check.IsChecked == true ? "true" : "false");
-            editor = check;
-        }
-        else
-        {
-            var list = new ComboBox { ItemsSource = info.Values, SelectedItem = value, MinHeight = 0 };
-            list.SelectionChanged += (_, _) =>
-            {
-                if (list.SelectedItem is string chosen && chosen != value)
-                {
-                    _ = SetSetting(asset.Guid, info.Key, chosen);
-                }
-            };
-            editor = list;
-        }
-        editor.IsEnabled = _shell.Content.CanChangeContent;
-        ToolTip.SetTip(editor, info.Description);
-        return editor;
-    }
-
-    async Task SetSetting(string guid, string key, string value)
-    {
-        if (!await _shell.Content.SetImportSetting(guid, key, value))
-        {
-            // The editor shows the asset's settings as they are.
-            ShowDetails();
-        }
-    }
-
-    // Assets as links that select them in their folders.
-    Control Links(IEnumerable<Asset> assets)
-    {
-        var panel = new WrapPanel();
-        foreach (var asset in assets)
-        {
-            var link = new TextBlock { Text = AssetIndex.Name(asset.Path), Classes = { "link" }, Margin = new Thickness(0, 0, 10, 0), Cursor = new Cursor(StandardCursorType.Hand) };
-            ToolTip.SetTip(link, $"{asset.Root}/{asset.Path}");
-            link.PointerPressed += (_, e) =>
-            {
-                Reveal(asset);
-                e.Handled = true;
-            };
-            panel.Children.Add(link);
-        }
-        return panel;
-    }
-
-    // Each problem as its place and text. A click opens its file in the script editor, at its line.
-    Control Problems(IReadOnlyList<Link.Cook.Problem> problems)
-    {
-        var list = new StackPanel();
-        foreach (var p in problems)
-        {
-            var place = p.File == "" ? "" : p.Line > 0 ? $"{Path.GetFileName(p.File)}:{p.Line}: " : $"{Path.GetFileName(p.File)}: ";
-            var text = new TextBlock
-            {
-                Text = place + p.Text,
-                Classes = { p.Error ? "error" : "warning" },
-                Foreground = p.Error ? Palette.ErrorBrush : Palette.WarningBrush,
-                TextWrapping = TextWrapping.Wrap,
-            };
-            if (p.File != "")
-            {
-                text.Cursor = new Cursor(StandardCursorType.Hand);
-                ToolTip.SetTip(text, $"Open {p.File}");
-                text.PointerPressed += (_, e) =>
-                {
-                    _shell.OpenScript(p.File, p.Line);
-                    e.Handled = true;
-                };
-            }
-            list.Children.Add(text);
-        }
-        return list;
-    }
-
-    // Selects an asset in its folder, and clears the search.
-    void Reveal(Asset asset)
-    {
-        var folder = AssetIndex.Parent(asset.Path);
-        for (var path = folder; path != ""; path = AssetIndex.Parent(path))
-        {
-            _expanded.Add($"{asset.Root}/{path}");
-        }
-        _folder = (asset.Root, folder);
-        _selection = [asset.Guid];
-        _search.Text = "";
-        ShowFolders();
-        ShowAssets();
-        _assets.ScrollIntoView(asset);
+        _general.Child = new StackPanel { Children = { ContentDetailsView.Problems(_shell, problems) } };
     }
 
     Control FolderView(FolderRow row)
@@ -506,13 +449,8 @@ public sealed class ContentBrowserView : DockPanel
         {
             expander.PointerPressed += (_, e) =>
             {
-                var key = $"{row.Root}/{row.Path}";
-                if (!_expanded.Remove(key))
-                {
-                    _expanded.Add(key);
-                }
+                _model.ToggleFolder(row.Root, row.Path);
                 e.Handled = true;
-                ShowFolders();
             };
         }
         var icon = CommandViews.Icon("folder", 14);
@@ -530,13 +468,11 @@ public sealed class ContentBrowserView : DockPanel
         }
         view.DoubleTapped += (_, e) =>
         {
-            var key = $"{row.Root}/{row.Path}";
-            if (row.HasChildren && !_expanded.Remove(key))
+            if (row.HasChildren)
             {
-                _expanded.Add(key);
+                _model.ToggleFolder(row.Root, row.Path);
             }
             e.Handled = true;
-            ShowFolders();
         };
         // Assets dragged onto a folder move into it.
         var folder = new ContentFolder(row.Root, row.Path);
@@ -558,26 +494,23 @@ public sealed class ContentBrowserView : DockPanel
         return view;
     }
 
-    // The menu of a folder, or of the asset list for the open folder: new assets, and for a folder that is not a root,
-    // rename and delete.
+    // The menu of a folder, or of the assets' empty space for the open folder: new assets, and for a folder that is not
+    // a root, rename and delete.
     ContextMenu FolderMenu(FolderRow? row)
     {
         var menu = new ContextMenu();
         // A folder's menu acts on that folder, so it opens it first.
         void Open()
         {
-            if (row != null && _folder != (row.Root, row.Path))
+            if (row != null)
             {
-                _folder = (row.Root, row.Path);
-                _search.Text = "";
-                ShowFolders();
-                ShowAssets();
+                _model.Open(new ContentFolder(row.Root, row.Path));
             }
         }
         menu.Opening += (_, _) =>
         {
             menu.Items.Clear();
-            var linked = _shell.Content.CanChangeContent && (row != null || _folder != null);
+            var linked = _shell.Content.CanChangeContent && (row != null || _model.Folder != null);
             foreach (var (label, template) in new (string, AssetTemplate?)[]
                 {
                     ("New Script", AssetTemplate.Script), ("New Behaviour", AssetTemplate.Behaviour), ("New Scene", AssetTemplate.Scene),
@@ -620,98 +553,6 @@ public sealed class ContentBrowserView : DockPanel
         return menu;
     }
 
-    Control AssetView(Asset asset)
-    {
-        var line = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        var searching = !string.IsNullOrEmpty(_search.Text?.Trim());
-        var subasset = AssetIndex.IsSubasset(asset);
-        // A file with sub-assets expands in place to show them, indented under it. Search lists them as they are.
-        var hasSubassets = !subasset && _index.SubassetsOf(asset.Guid).Any();
-        var expander = new TextBlock
-        {
-            Text = hasSubassets && !searching ? (_expandedFiles.Contains(asset.Guid) ? "▾" : "▸") : "",
-            Width = 12,
-            Margin = new Thickness(subasset && !searching ? 18 : 0, 0, 0, 0),
-            Classes = { "dim" },
-            Cursor = hasSubassets ? new Cursor(StandardCursorType.Hand) : Cursor.Default,
-        };
-        if (hasSubassets && !searching)
-        {
-            expander.PointerPressed += (_, e) =>
-            {
-                if (!_expandedFiles.Remove(asset.Guid))
-                {
-                    _expandedFiles.Add(asset.Guid);
-                }
-                e.Handled = true;
-                ShowAssets();
-            };
-        }
-        line.Children.Add(expander);
-        if (CommandViews.Icon(KindNoun(asset.Kind).Replace(' ', '-'), 14) is { } icon)
-        {
-            line.Children.Add(icon);
-        }
-        line.Children.Add(new TextBlock { Text = AssetIndex.DisplayName(asset) });
-        if (asset.Behaviour != "")
-        {
-            line.Children.Add(new Border { Classes = { "badge", "script" }, Margin = new Thickness(0), Child = new TextBlock { Text = FieldValues.Humanize(asset.Behaviour) } });
-        }
-        if (searching)
-        {
-            var where = subasset ? asset.Path : AssetIndex.Parent(asset.Path);
-            line.Children.Add(new TextBlock { Text = $"{asset.Root}/{where}", Classes = { "dim" } });
-        }
-        if (asset.Errors > 0 || asset.Status == AssetStatus.Failed)
-        {
-            line.Children.Add(new TextBlock { Text = asset.Errors > 0 ? $"✖ {asset.Errors}" : "✖ failed", Foreground = Palette.ErrorBrush });
-        }
-        if (asset.Warnings > 0)
-        {
-            line.Children.Add(new TextBlock { Text = $"⚠ {asset.Warnings}", Classes = { "warning" } });
-        }
-        if (_index.ProblemsOf(asset.Guid) is { Count: > 0 } problems)
-        {
-            ToolTip.SetTip(line, string.Join("\n", problems.Select(p => p.Line > 0 ? $"{p.Line}: {p.Text}" : p.Text)));
-        }
-        var view = new Border { Background = Brushes.Transparent, Child = line };
-        view.PointerPressed += (_, e) =>
-        {
-            if (e.GetCurrentPoint(view).Properties.IsLeftButtonPressed)
-            {
-                _press = e;
-                _pressed = asset;
-            }
-        };
-        view.PointerMoved += async (_, e) =>
-        {
-            if (_press is not { } press || _pressed != asset)
-            {
-                return;
-            }
-            var moved = e.GetPosition(view) - press.GetPosition(view);
-            if (!Gestures.MovedPastAcrossAndDown(moved))
-            {
-                return;
-            }
-            _press = null;
-            // A drag of a selected asset takes the selection, with that asset first.
-            var guids = _selection.Contains(asset.Guid) ? [asset.Guid, .. _selection.Where(g => g != asset.Guid)] : new List<string> { asset.Guid };
-            var data = new DataTransfer();
-            data.Add(DataTransferItem.Create(AssetFormat, string.Join(' ', guids)));
-            await DragDrop.DoDragDropAsync(press, data, DragDropEffects.Link | DragDropEffects.Move);
-        };
-        view.PointerReleased += (_, _) => _press = null;
-        view.DoubleTapped += (_, e) =>
-        {
-            _press = null;
-            _shell.OpenAsset(asset);
-            e.Handled = true;
-        };
-        view.ContextMenu = AssetMenu(asset);
-        return view;
-    }
-
     ContextMenu AssetMenu(Asset asset)
     {
         var path = _index.FullPath(asset);
@@ -719,19 +560,37 @@ public sealed class ContentBrowserView : DockPanel
         // A right click on an asset that is not selected selects it alone, so the operations act on what the menu is for.
         menu.Opening += (_, _) =>
         {
-            if (!_selection.Contains(asset.Guid))
+            if (!_model.Selection.Contains(asset.Guid))
             {
-                _assets.SelectedItem = _assets.ItemsSource?.OfType<Asset>().FirstOrDefault(a => a.Guid == asset.Guid);
+                _model.Press(asset.Guid, false, false);
             }
         };
         if (EditorShell.CanOpen(asset))
         {
             menu.Items.Add(new MenuItem { Header = _shell.OpenLabel(asset), Command = new RelayCommand(() => _shell.OpenAsset(asset)) });
         }
+        if (asset.Kind == AssetKind.Prefab || (!AssetIndex.IsSubasset(asset) && _index.SubassetsOf(asset.Guid).Any()))
+        {
+            menu.Items.Add(new MenuItem { Header = "Show Contents", Command = new RelayCommand(() => _model.Enter(asset.Guid)) });
+        }
         if (path != null)
         {
             menu.Items.Add(new MenuItem { Header = "Show in Explorer", Command = new RelayCommand(() => _shell.ShowInExplorer(path)) });
         }
+        // Only what could not be drawn asks for this: a picture's file changes when what it shows does.
+        var regenerate = new MenuItem
+        {
+            Header = "Regenerate Picture",
+            Command = new RelayCommand(() =>
+            {
+                if (_index.PictureOf(asset) is { } picture)
+                {
+                    _shell.Thumbnails.Forget(picture, DateTime.UtcNow);
+                }
+            }),
+        };
+        menu.Opening += (_, _) => regenerate.IsVisible = _index.PictureOf(asset) is { } picture && _shell.Thumbnails.FailureOf(picture) != null;
+        menu.Items.Add(regenerate);
         menu.Items.Add(new Separator());
         foreach (var id in new[] { EditorCommands.RenameAsset, EditorCommands.DuplicateAsset, EditorCommands.DeleteAsset, EditorCommands.Reimport })
         {
@@ -764,6 +623,11 @@ public sealed class ContentBrowserView : DockPanel
         }
     }
 
+    /// <summary>The prefab and the entity of each dragged part, or none.</summary>
+    public static IReadOnlyList<(string Prefab, ulong Node)> DroppedParts(DragEventArgs e) =>
+        [.. (e.DataTransfer.TryGetValue(PartFormat)?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [])
+            .Select(ContentBrowserModel.ParsePartKey).OfType<(string Prefab, ulong Id)>()];
+
     /// <summary>The GUID of a dragged asset, the first of several, or null.</summary>
     public static string? Dropped(DragEventArgs e) => DroppedAll(e) is [var first, ..] ? first : null;
 
@@ -771,5 +635,3 @@ public sealed class ContentBrowserView : DockPanel
     public static IReadOnlyList<string>? DroppedAll(DragEventArgs e) =>
         e.DataTransfer.TryGetValue(AssetFormat)?.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 }
-
-public sealed record FolderRow(string Root, string Path, string Name, int Depth, bool HasChildren, bool Expanded);

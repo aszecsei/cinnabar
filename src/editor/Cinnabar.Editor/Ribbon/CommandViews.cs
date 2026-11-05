@@ -25,9 +25,32 @@ sealed class CommandAdapter : ICommand
     public void Execute(object? parameter) => Command.Execute();
 }
 
-/// <summary>A command as a shortcut: while the game has the keys the shortcut does nothing, except on the function keys, so F5 and Shift+F5 work during play.</summary>
-sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> gameHasKeys) : ICommand
+/// <summary>
+/// A command as a shortcut: while the game has the keys the shortcut does nothing, except on the function keys, so F5 and
+/// Shift+F5 work during play. Nor does one that a text box uses, while a text box has the focus: a window's key bindings
+/// come before the focused control sees the key, so Delete in a search box would delete the selected entities.
+/// </summary>
+sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> gameHasKeys, Func<bool> textHasFocus) : ICommand
 {
+    /// <summary>
+    /// Whether a text box uses a key: any key alone or with Shift but the function keys, and with Ctrl what edits text and
+    /// moves through it.
+    /// </summary>
+    public static bool TextBoxUses(KeyGesture gesture)
+    {
+        if (gesture.Key is >= Key.F1 and <= Key.F24)
+        {
+            return false;
+        }
+        return (gesture.KeyModifiers & ~KeyModifiers.Shift) switch
+        {
+            KeyModifiers.None => true,
+            KeyModifiers.Control => gesture.Key is Key.A or Key.C or Key.V or Key.X or Key.Z or Key.Y
+                or Key.Left or Key.Right or Key.Up or Key.Down or Key.Home or Key.End or Key.Back or Key.Delete,
+            _ => false,
+        };
+    }
+
     public event EventHandler? CanExecuteChanged
     {
         add => command.CanExecuteChanged += value;
@@ -35,7 +58,9 @@ sealed class ShortcutCommand(ICommand command, KeyGesture gesture, Func<bool> ga
     }
 
     public bool CanExecute(object? parameter) =>
-        (gesture.Key is >= Key.F1 and <= Key.F24 || !gameHasKeys()) && command.CanExecute(parameter);
+        (gesture.Key is >= Key.F1 and <= Key.F24 || !gameHasKeys())
+        && !(TextBoxUses(gesture) && textHasFocus())
+        && command.CanExecute(parameter);
 
     public void Execute(object? parameter) => command.Execute(parameter);
 }

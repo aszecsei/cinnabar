@@ -33,6 +33,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Profile | `Profile_Summary`, `Profile_Capture_Request`, `Profile_Capture` and `Profile_Recording`, which the host handles (see [Profile](#profile)) |
 | Previews | `Open_Preview`, `Preview_Settings`, `Close_Preview`, `Preview_Target`, and `Preview_Acknowledged`, which the host handles (see [Rendering](../rendering/materials.md#material-previews)) |
 | Capture | `Capture_Request` and `Capture_Result`, which the host handles: the frames are its own (see [Capture](capture.md#capture)) |
+| Thumbnails | `Bake_Thumbnail` to the game, and `Thumbnail_Failed` from it, for the content browser's pictures, with the file in a `Capture_Request` (see [Thumbnails](../content/daemon-and-operations.md#thumbnails)) |
 | Live meshes | `Live_Mesh`, `Live_Mesh_Vertices` and `Release_Live_Mesh`: the mesh files the editor edits, which the game draws from memory (see [Mesh editing](mesh-editing.md#live-meshes)) |
 | Sky | `Sky_Sun_Request` and `Sky_Sun`: where the texture sky's sun is, which the game answers from its renderer, or why it has none (see [Sky](../rendering/sky.md#texture)) |
 | Animators | `Animator_View`, what a watched entity's Animator plays, or with an entity of 0 an animation graph's preview, and `Set_Preview_Parameter` and `Restart_Preview` (see [Animation graph editor](animation-graph-editor.md#preview)) |

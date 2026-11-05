@@ -39,6 +39,12 @@ public sealed class SceneEntity(ulong id)
     public IReadOnlyList<ulong>? Path { get; }
     /// <summary>An instance block: the GUID of the prefab whose root it stands for, as 32 lowercase hex digits, or "".</summary>
     public string Prefab { get; set; } = "";
+
+    /// <summary>
+    /// For an instance block: the entity of the prefab's expansion that it instantiates with its descendants, in place of
+    /// the whole prefab, or 0.
+    /// </summary>
+    public ulong Node { get; set; }
     /// <summary>
     /// Which of name, parent and active an instance or override block writes, since it changes only those of the
     /// prefab's entity. A plain entity writes a name that is not empty, a parent that is not 0 and active when false.
@@ -77,6 +83,7 @@ public sealed class SceneEntity(ulong id)
         copy.ParentPath = ParentPath;
         copy.Active = Active;
         copy.Prefab = Prefab;
+        copy.Node = Node;
         copy.Keys = Keys;
         copy.Removed = Removed;
         copy.Components.AddRange(Components.Select(c => c.Copy()));

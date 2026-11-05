@@ -413,6 +413,31 @@ mesh_submeshes :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> []Mesh_
 	return ([^]Mesh_Submesh)(raw_data(bytes))[:len(bytes) / size_of(Mesh_Submesh)]
 }
 
+// mesh_face_area is the sum of a mesh's triangles' areas as vectors: it points the way that its faces look, and is
+// nothing for a closed mesh.
+mesh_face_area :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> (area: [3]f32) {
+	position_bytes := blob_bytes(data, blob.positions)
+	positions := ([^][3]f32)(raw_data(position_bytes))[:len(position_bytes) / 12]
+	index_bytes := blob_bytes(data, blob.indices)
+	wide := .Index32 in blob.flags
+	count := len(index_bytes) / (wide ? 4 : 2)
+	narrow_indices := ([^]u16)(raw_data(index_bytes))
+	wide_indices := ([^]u32)(raw_data(index_bytes))
+	for i := 0; i + 2 < count; i += 3 {
+		corners: [3][3]f32
+		for c in 0 ..< 3 {
+			index := wide ? int(wide_indices[i + c]) : int(narrow_indices[i + c])
+			if index >= len(positions) {
+				return
+			}
+			corners[c] = positions[index]
+		}
+		u, v := corners[1] - corners[0], corners[2] - corners[0]
+		area += [3]f32{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x} / 2
+	}
+	return
+}
+
 // mesh_collision_positions, mesh_collision_triangles and mesh_collision_submeshes are a mesh's collision data. A mesh
 // cooked without it has none.
 mesh_collision_positions :: proc "contextless" (data: []byte, blob: ^Mesh_Blob) -> [][3]f32 {

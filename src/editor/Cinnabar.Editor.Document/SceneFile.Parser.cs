@@ -101,6 +101,10 @@ public static partial class SceneFile
             {
                 Error($"entity {_entity.Id:x16}: only an instance or an override block removes a component or a behaviour");
             }
+            if (_entity is { Node: not 0 } && (_entity.Prefab == "" || _entity.Path != null))
+            {
+                Error($"entity {_entity.Id:x16}: only an instance block takes node");
+            }
         }
 
         // A scene ID, or a path of up to ScenePath.MaxLength of them joined by #, each 16 hex digits and nonzero.
@@ -270,6 +274,12 @@ public static partial class SceneFile
                         Error("an override block cannot change which prefab an entity instantiates");
                     }
                     _entity.Prefab = value.Asset;
+                    break;
+                case "node" when value.Kind != SceneValueKind.Entity || value.Entity == 0:
+                    Error("node takes an entity of the prefab, such as @2000000000000002");
+                    break;
+                case "node":
+                    _entity.Node = value.Entity;
                     break;
                 case "removed" when value.Kind != SceneValueKind.Bool:
                     Error("removed takes true or false");

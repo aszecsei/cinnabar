@@ -9,7 +9,8 @@ namespace Cinnabar.Editor.Model;
 /// <summary>
 /// A request from a tool: its id, which the response repeats, the command, and the command's arguments: a capture's
 /// views and path, the viewport settings that <c>viewport</c> changes by their names in the sidecar, and the position in
-/// meters and the angles in radians that <c>camera</c> places the editor's camera at.
+/// meters and the angles in radians that <c>camera</c> places the editor's camera at, the panel whose window <c>ui</c>
+/// draws, and in the settings, what <c>content</c> changes in the content browser.
 /// </summary>
 public sealed record AutomationRequest(
     long Id,
@@ -19,13 +20,17 @@ public sealed record AutomationRequest(
     Dictionary<string, JsonElement>? Settings = null,
     double[]? Position = null,
     double? Yaw = null,
-    double? Pitch = null);
+    double? Pitch = null,
+    string? Window = null);
 
 /// <summary>What <c>status</c> answers: the host and the scene.</summary>
 public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid);
 
+/// <summary>What <c>content</c> answers: the content browser's folder, search and selection, the names of the assets that it shows, and the pictures that it waits for and those that could not be made.</summary>
+public sealed record AutomationContent(string? Folder, string Search, string[] Selection, string[] Items, int ThumbnailsWaiting = 0, string[]? ThumbnailsFailed = null);
+
 /// <summary>The answer to a request. Files are the ones a capture wrote, the sidecar last.</summary>
-public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null);
+public sealed record AutomationResponse(long Id, bool Ok, string[]? Files = null, string? Error = null, AutomationStatus? Status = null, AutomationContent? Content = null);
 
 /// <summary>What the editor writes beside its build for tools to find it: the port, and the editor's process, so a stale file is known.</summary>
 public sealed record AutomationInfo(int Port, int Pid, DateTime Started);
