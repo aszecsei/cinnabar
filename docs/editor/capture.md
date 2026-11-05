@@ -2,7 +2,7 @@
 
 Screenshots and GIFs of a running host, for the editor and for tools: how the host copies its frame out, the history ring behind the GIF, the sidecar that makes a screenshot debuggable, and the automation socket that `editorctl` drives.
 
-**In this document:** [Capture](#capture) · [Screenshots](#screenshots) · [History ring](#history-ring) · [Sidecar](#sidecar) · [Automation](#automation)
+**In this document:** [Capture](#capture) · [Screenshots](#screenshots) · [History ring](#history-ring) · [Sidecar](#sidecar) · [Automation](#automation) · [Flicker](#flicker)
 
 ## Capture
 
@@ -92,3 +92,19 @@ editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 A `--set` value of `true` or `false` is a boolean, a number is a number, and anything else a string, such as a debug view's name, `QuadOverdraw`. With `viewport` and `camera`, a script measures the same view with each setting: the sidecar's `context.profile` has the passes' times. It prints the files one per line, or the status's fields, and with `--json` the editor's answer as it came. A failure goes to stderr with exit code 1, and a mistaken command line exits with 2. `--out` is made absolute before it is sent, because the editor's working directory is its own. `just editorctl` builds it into `build/tools`, and `just screenshot` and `just gif` build and run it, passing their arguments on.
 
 An LLM tool working in the repository uses it like this: with the editor open, `just screenshot --view depth` writes the lit frame, the depth view and the sidecar and prints their paths; the tool reads the sidecar for the frame, the camera, the mode and the stats, and the images to look at them. `just gif` shows motion over the last five seconds. `build/tools/editorctl.exe status --json` says whether a host is linked before asking.
+
+## Flicker
+
+`tools/flickerstat` (`just flickerstat`) measures how much a still view changes over time, from a directory of screenshots of one view from one camera, taken with `editorctl`. Set the view with `viewport`, not `--view`, so the history that it measures is not reset between screenshots, and give the view a few seconds to settle first.
+
+```
+editorctl camera --position -6,2,0 --yaw 1.57 --pitch 0
+editorctl viewport --set debugView=GiDiffuse
+editorctl screenshot --out shots/001.png   # and so on, 32 or more
+flickerstat shots --out shots/heat
+```
+
+- **Spread** is each pixel's standard deviation over the screenshots, and **step** its largest change between two of them, both in the PNG's 8-bit codes, so they are what a display shows. Steady noise has a step near its spread; a pop has a large step and a small spread.
+- **The largest pops** list the screenshots between which the most pixels changed by 8 codes or more, with their bounds, by the frame numbers in the sidecars.
+- **`--out`** writes `<prefix>.spread.png` and `<prefix>.step.png` as heat from black to white, at 16 and 64 codes. Scattered pixels and edges are aliasing; a shape the size of a probe or a wall is lighting.
+- **To find a cause,** compare the debug views and turn features off (`noGi`, `noShadows`, `noAmbientOcclusion`, `noTemporalAa`), since temporal AA's ripple on edges and texture counts too. Screenshots are not consecutive frames, so a change that lasts one frame can fall between them.
