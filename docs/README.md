@@ -17,8 +17,9 @@ Read the layers in this order the first time. Each one assumes the ones before i
 | 7 | [Physics](physics/README.md) | `lib/core/physics`, `lib/engine/physics` | Physics on Jolt: the boundary a backend implements, plugins, the components, the physics tick, joints, queries and events. |
 | 8 | [Animation](animation/README.md) | `lib/engine/anim` | The animation graph: states, fades and blends of clips, events, root motion, and the poses presented between ticks. |
 | 9 | [Audio](audio/README.md) | `lib/core/audio`, `lib/engine/audio` | Sound in the world: the mixer on its own thread, the boundary a backend implements, spatial sound, occlusion, streaming and the script binding. |
-| 10 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
-| 11 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
+| 10 | [UI](ui/README.md) | `lib/engine/ui` | Menus and HUDs: documents on entities, the cascade of styles, layout and the UI scale, MSDF text, the one batch, focus and gamepad navigation, and the `Ui` library. |
+| 11 | [Content pipeline](content/README.md) | `tools/cook`, `lib/engine/asset` | Identity and cooking, each asset kind, the cook daemon and its operations, blobs and loading. |
+| 12 | [Editor](editor/README.md) | `src/editor`, `lib/engine/editor` | Processes and projects, the document model and scenes, the editor link, the viewport, the shell and panels, and the material editor. |
 
 [History](history.md) keeps the implementation phases of each layer, in the order they were built.
 
@@ -29,6 +30,7 @@ Not everyone needs every layer.
 | You are… | Read |
 |---|---|
 | Writing gameplay in Luau | [Scripting: API](scripting/api.md), [Behaviours](scripting/behaviours.md), [Tooling](scripting/tooling-and-hot-reload.md); then [World: ECS](world/ecs.md) for what is underneath |
+| Making menus and HUDs | [Content: UI documents](content/kinds/ui-documents.md), [Content: Fonts](content/kinds/fonts.md), [UI: Design](ui/design.md) |
 | Making content: materials, textures, meshes, scenes | [Content: kinds](content/README.md#documents), [Rendering: Materials](rendering/materials.md), [Editor: Material editor](editor/material-editor.md), [Editor: Shell and panels](editor/shell-and-panels.md) |
 | Writing native game code | Everything in order; [Overview: Conventions](overview/conventions.md) and [Hot reload](overview/hot-reload.md) first |
 | Working on the renderer | [GPU](gpu/README.md), then [Rendering](rendering/README.md) in order |
