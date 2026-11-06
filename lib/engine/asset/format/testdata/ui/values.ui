@@ -1,0 +1,30 @@
+ui 1
+<!-- Each line with a problem marker reports an error there, and no other line does. -->
+<ui>
+	<box width="wide"/> <!-- problem -->
+	<box width="-4"/> <!-- problem -->
+	<box width="fill 0"/> <!-- problem -->
+	<box height="50%" min_width="fit" max_width="fill 3"/>
+	<box padding="1 2 3 4 5"/> <!-- problem -->
+	<box radius="-1"/> <!-- problem -->
+	<box fill="#12345"/> <!-- problem -->
+	<box fill="linear(90, #fff)"/> <!-- problem -->
+	<box border="2"/> <!-- problem -->
+	<box border="none" opacity="1.5"/> <!-- problem -->
+	<box opacity="0.5" visible="yes"/> <!-- problem -->
+	<box image="$0011"/> <!-- problem -->
+	<box image=$00112233445566778899aabbccddeeff click="On Click"/> <!-- problem -->
+	<box anchor="middle"/> <!-- problem -->
+	<box direction="diagonal"/> <!-- problem -->
+	<text size="0">a</text> <!-- problem -->
+	<text text_align="left">a</text> <!-- problem -->
+	<text>An {unclosed binding</text> <!-- problem -->
+	<text>A {Bad Name}</text> <!-- problem -->
+	<text text="b">a</text> <!-- problem -->
+	<field max_length="2.5"/> <!-- problem -->
+	<box widht="4"/> <!-- problem -->
+	<box gap="4" gap="5"/> <!-- problem -->
+	<box nav_up="Up"/> <!-- problem -->
+	<text>Fish &amp chips</text> <!-- problem -->
+	<text>&#xFFFFFFFF;</text> <!-- problem -->
+</ui>

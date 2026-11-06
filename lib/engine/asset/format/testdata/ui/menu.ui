@@ -1,0 +1,35 @@
+ui 1
+<!-- A pause menu that uses every part of the format, with no problems. -->
+<ui modal="true" cancel="resume" focus="resume" font=$00112233445566778899aabbccddeeff size="18" color="#fff">
+	<style name="button" fill="#1c2030e0" radius="6" padding="10 16" border="1 #ffffff30"/>
+	<style name="button:focus" fill="#e2423a" border="2 #fff"/>
+	<style name="button:hover" fill='linear(90, #2a3048, #1c2030)'/>
+	<style name="button:press" opacity="0.8"/>
+	<style name="button:disabled" color="#ffffff60"/>
+	<style name="title" size="32" text_align="center"/>
+	<style name="panel" fill="#0b0d14f0" radius="12 12 4 4" padding="24" gap="12"/>
+
+	<column id="pause" anchor="center" width="fit" style="panel" min_width="320" max_height="90%">
+		<text style="title">Paused &amp; waiting &#x2026;</text>
+		<button id="resume" click="resume" nav_down="quality">Resume</button>
+		<button id="quality" click="quality" width="fill">
+			<text>Quality: {quality}</text>
+		</button>
+		<row gap="8" cross="center" align="space_between">
+			<text wrap="false">Name</text>
+			<field id="name" width="fill 2" placeholder="Your name" max_length="16" changed="name_changed" submit="name_submitted"/>
+		</row>
+		<button id="quit" click="quit" disabled="false" style="panel button">Quit {{not a binding}}</button>
+		<stack height="48">
+			<image image=$ffeeddccbbaa99887766554433221100 slice="8" tint="#ffffffc0" anchor="fill"/>
+			<text anchor="bottom_right" offset="-4 -2" line_height="1.2">v1</text>
+		</stack>
+		<box direction="row" visible="true" clip="true" padding="1 2 3"/>
+	</column>
+
+	<template id="slot">
+		<row id="slot" gap="4" focusable="true" click="slot_chosen">
+			<text id="label">Slot</text>
+		</row>
+	</template>
+</ui>

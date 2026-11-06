@@ -81,6 +81,8 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 		kind = .Effect
 	case .Animation_Graph:
 		kind = .Animation_Graph
+	case .Ui:
+		kind = .Ui
 	}
 	name := strings.trim_suffix(strings.trim_space(op.name), extension_of(kind))
 	if !valid_name(name) {
@@ -429,6 +431,8 @@ template_text :: proc(template: cook_link.Asset_Template, name: string) -> strin
 		return EFFECT_TEMPLATE
 	case .Animation_Graph:
 		return ANIMATION_GRAPH_TEMPLATE
+	case .Ui:
+		return UI_TEMPLATE
 	case .Material_Function:
 		return "material_function 1\n\nnode 1 function_input\n\tposition = [-240, 0]\n\tname = \"input\"\n\tdefault = [0, 0, 0, 0]\nnode 2 function_output\n\tposition = [120, 0]\n\tname = \"output\"\n\tvalue = @1.value\n"
 	}

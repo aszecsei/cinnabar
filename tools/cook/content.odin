@@ -183,6 +183,9 @@ cook :: proc(
 	if .Font in kinds {
 		pass.ok = cook_fonts(options, pass.assets, &pass) && pass.ok
 	}
+	if .Ui in kinds {
+		pass.ok = cook_ui_documents(options, pass.assets, &pass) && pass.ok
+	}
 	written := 0
 	for n in pass.cooked {
 		written += n

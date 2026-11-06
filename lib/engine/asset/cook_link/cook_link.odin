@@ -120,6 +120,7 @@ Asset_Kind :: enum u8 {
 	Animation_Graph,
 	Audio,
 	Font,
+	Ui,
 }
 
 Asset_Status :: enum u8 {
@@ -258,6 +259,8 @@ Asset_Template :: enum u8 {
 	Effect,
 	// An animation graph with a speed parameter and one state, which plays a clip that the author fills in.
 	Animation_Graph,
+	// A UI document of a panel with a title and a button.
+	Ui,
 }
 
 // Makes an asset from a template in a folder, with a new .meta file. The result has its GUID.

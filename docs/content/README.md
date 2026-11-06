@@ -21,6 +21,7 @@ Read them in this order the first time.
 | [Animation graphs](kinds/animation-graphs.md) | Parameters, clips with their events, and the states, blends and transitions that an Animator plays. |
 | [Audio](kinds/audio.md) | Sounds: what the cooker decodes, the blob and its import settings, and the sample's sounds. |
 | [Fonts](kinds/fonts.md) | Fonts: the glyphs that the atlas holds, msdfgen's distance fields, the blob and its import settings. |
+| [UI documents](kinds/ui-documents.md) | The `.ui` format: its elements, attributes, values, styles and templates, and the blob. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 
@@ -52,7 +53,7 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `daemon`, `stage-report`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `ui`, `daemon`, `stage-report`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
@@ -65,11 +66,12 @@ The code is in three places:
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
 | | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
 | | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
+| | `ui_documents.odin` | UI documents: the parse from `format`, the kinds of the assets that they name, and the template |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
 | `lib/engine/asset` | `asset.odin` | The runtime: `load`, `poll`, handles, the `Source` union, whose one arm is `Loose_Cache` |
-| `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
+| `lib/engine/asset/format` | `format.odin`, `scene.odin`, `scene_text.odin`, `shader.odin`, `texture.odin`, `mesh.odin`, `mesh_text.odin`, `mesh_bake.odin`, `skin.odin`, `animation.odin`, `material.odin`, `font.odin`, `ui.odin`, `ui_text.odin` | What the cooker writes and the runtime reads: GUIDs, `.meta` files, the blob header, and each kind's layout. Shared by `tools/cook` and the runtime; imports nothing from `lib/core`. |
 | `lib/engine/asset/cook_link` | `cook_link.odin` | The cook link's messages, over the transport in `lib/engine/wire` |
 
 The sections below follow the same order: how an asset is identified, how each kind is cooked, how the daemon keeps the cache current and serves the editor, what a blob looks like, and how the runtime loads it.

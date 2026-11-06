@@ -18,6 +18,7 @@ static partial class EditorCommands
         NewAssetCommand(shell, NewPrefab, Link.Cook.AssetTemplate.Prefab, "New Prefab", "prefab", "Add a prefab, an entity that scenes place as instances, to the content browser's folder.");
         NewAssetCommand(shell, NewEffect, Link.Cook.AssetTemplate.Effect, "New Effect", "effect", "Add an effect, emitters of particles that a Particle_System places, to the content browser's folder.");
         NewAssetCommand(shell, NewAnimationGraph, Link.Cook.AssetTemplate.AnimationGraph, "New Animation Graph", "animation-graph", "Add an animation graph, the states and blends of clips that an Animator plays, to the content browser's folder.");
+        NewAssetCommand(shell, NewUiDocument, Link.Cook.AssetTemplate.Ui, "New UI Document", "ui-document", "Add a UI document, a panel of boxes, text and images that a Ui_Document puts on the screen, to the content browser's folder.");
         NewAssetCommand(shell, NewFolder, null, "New Folder", "folder", "Add a folder to the content browser's folder.");
         commands.Register(new Command(RenameAsset, "Rename Asset", shell.Content.RequestRenameSelected)
         {

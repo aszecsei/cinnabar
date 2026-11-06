@@ -36,6 +36,7 @@ IMPORTERS :: [format.Asset_Kind][]string {
 	.Animation_Graph = {format.ANIMATION_GRAPH_EXTENSION},
 	.Audio = AUDIO_EXTENSIONS,
 	.Font = format.FONT_EXTENSIONS,
+	.Ui = {format.UI_EXTENSION},
 }
 
 // Setting_Info is an import setting that an importer knows: the values that it takes, and the value of an asset that
@@ -117,7 +118,7 @@ check_settings :: proc(a: Asset_Source, problems: ^Problems) -> bool {
 
 Asset_Kinds :: bit_set[format.Asset_Kind]
 
-ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage, .Animation_Graph, .Audio, .Font}
+ALL_KINDS :: Asset_Kinds{.Script, .Scene, .Shader, .Texture, .Model, .Mesh, .Shading_Model, .Material, .Material_Instance, .Material_Function, .Prefab, .Effect, .Stage, .Animation_Graph, .Audio, .Font, .Ui}
 
 // Asset_Source is a source asset with its .meta file. A cook fills in what it learns of the asset, for the daemon's
 // index.
@@ -368,6 +369,8 @@ link_kind :: proc(kind: format.Asset_Kind) -> cook_link.Asset_Kind {
 		return .Audio
 	case .Font:
 		return .Font
+	case .Ui:
+		return .Ui
 	}
 	return .Script
 }

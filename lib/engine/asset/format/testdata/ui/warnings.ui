@@ -1,0 +1,14 @@
+ui 1
+<!-- Each line with a warning marker reports a warning there, and nothing is an error. -->
+<ui>
+	<style name="ghost:hover" fill="#fff"/> <!-- warning -->
+	<row>
+		<box anchor="center"/> <!-- warning -->
+	</row>
+	<stack>
+		<box anchor="center"/>
+	</stack>
+	<text placeholder="Name">Hi</text> <!-- warning -->
+	<image gap="4"/> <!-- warning -->
+	<box changed="edit"/> <!-- warning -->
+</ui>

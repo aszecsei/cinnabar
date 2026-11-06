@@ -25,6 +25,7 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook animation_graphs --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook audio --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook fonts --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
@@ -78,6 +79,10 @@ main :: proc() {
 	case "fonts":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Font)
+		}
+	case "ui":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Ui)
 		}
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -208,6 +213,8 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "sounds"
 	case .Font:
 		return "fonts"
+	case .Ui:
+		return "UI documents"
 	}
 	return "assets"
 }

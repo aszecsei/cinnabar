@@ -25,6 +25,7 @@ static partial class EditorCommands
     public const string NewPrefab = "content.newPrefab";
     public const string NewEffect = "content.newEffect";
     public const string NewAnimationGraph = "content.newAnimationGraph";
+    public const string NewUiDocument = "content.newUiDocument";
     public const string MakePrefab = "prefab.make";
     public const string UnpackPrefab = "prefab.unpack";
     public const string UnpackPrefabCompletely = "prefab.unpackCompletely";

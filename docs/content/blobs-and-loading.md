@@ -36,6 +36,8 @@ An audio blob holds its frame count, its channels, whether it streams, its forma
 
 A font blob holds its atlas's GUID and size, its units per em, the atlas's texels to an em and its distance range, its line metrics in em, which font of a collection it is, its glyphs sorted by id (each its cell in the atlas and its plane from the pen), the font's file, which starts at 16 bytes, its family name and the source path. The atlas is a texture blob of its own (see [Fonts](kinds/fonts.md#the-blob)).
 
+A UI document blob holds its nodes in the order of a walk that visits each before its children (each its element, its parent, the end of its subtree, its line, its id, its attributes and its styles), its styles (each its name, its attributes and its variant for each state), its attributes (each an attribute and its value as text, which the runtime parses as it does a script's), the styles that each node takes, and the source path (see [UI documents](kinds/ui-documents.md#the-blob)).
+
 The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
 
 ## Loading

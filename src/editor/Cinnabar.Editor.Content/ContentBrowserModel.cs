@@ -359,7 +359,7 @@ public sealed class ContentBrowserModel
         AssetKind.Texture => ContentKind.Textures,
         AssetKind.Audio => ContentKind.Audio,
         AssetKind.Effect => ContentKind.Effects,
-        AssetKind.Font => ContentKind.Interface,
+        AssetKind.Font or AssetKind.Ui => ContentKind.Interface,
         AssetKind.Animation or AssetKind.AnimationGraph or AssetKind.Skin => ContentKind.Animation,
         AssetKind.Shader or AssetKind.ShadingModel => ContentKind.Shaders,
         _ => ContentKind.Scripts,

@@ -124,3 +124,4 @@ The order in which animation was built (see [Animation](animation/README.md)).
 The order in which the UI was built.
 
 1. **Fonts:** msdfgen's core in `vendor/msdfgen` behind a C API of the cooker's, the `Font` kind with the glyphs that GSUB reaches from its charset, and its atlas of multi-channel and true distance fields as a texture sub-asset ([Content: Fonts](content/kinds/fonts.md)).
+2. **UI documents:** the `.ui` kind, its pseudo-XML with named styles and their variants and templates, the parser and checks in `format` that the runtime shares, the blob, and the editor's template ([Content: UI documents](content/kinds/ui-documents.md)).

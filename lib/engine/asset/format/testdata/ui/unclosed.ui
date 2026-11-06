@@ -1,0 +1,6 @@
+ui 1
+<ui> <!-- problem -->
+	<column> <!-- problem -->
+		<row>
+		</column> <!-- problem -->
+	<box fill="#fff /> <!-- problem -->
