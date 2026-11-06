@@ -3,6 +3,7 @@ package ui
 import "core:fmt"
 import "core:os"
 import "core:testing"
+import "core:time"
 
 import "cinnabar:engine/asset"
 import "cinnabar:engine/ecs"
@@ -13,11 +14,16 @@ DOC :: "d0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c0"
 @(private = "file")
 OTHER :: "0d0c0d0c0d0c0d0c0d0c0d0c0d0c0d0c"
 
-// rewrite writes a document's blob again, as a cook does, and swaps it in as the end of a frame does.
+// rewrite writes a document's blob again, as a cook does, and swaps it in as the end of a frame does. The blob's and
+// the generation's times move a minute on, as the poll looks for a new time, which a write in the same moment can lack.
 @(private = "file")
 rewrite :: proc(t: ^testing.T, f: ^Fixture, guid: string, text: string) {
 	write_document(t, f, guid, text)
-	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE), transmute([]byte)fmt.tprintf("%d", f.generation)) == nil)
+	generation := fmt.tprintf("%s/%s", f.cache, format.GENERATION_FILE)
+	testing.expect(t, os.write_entire_file(generation, transmute([]byte)fmt.tprintf("%d", f.generation)) == nil)
+	later := time.time_add(time.now(), time.Minute)
+	testing.expect(t, os.change_times(fmt.tprintf("%s/%s.blob", f.cache, guid), later, later) == nil)
+	testing.expect(t, os.change_times(generation, later, later) == nil)
 	testing.expect(t, len(asset.poll(&f.assets)) > 0)
 }
 
