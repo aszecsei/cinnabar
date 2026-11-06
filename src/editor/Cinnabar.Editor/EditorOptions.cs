@@ -25,6 +25,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
     /// <summary>Animation graphs to open in the animation graph editor, by their files' full paths.</summary>
     public IReadOnlyList<string> AnimationGraphPaths { get; init; } = [];
 
+    /// <summary>UI documents to open in the UI editor, by their files' full paths.</summary>
+    public IReadOnlyList<string> UiDocumentPaths { get; init; } = [];
+
     /// <summary>The project's settings file, which the game reads (see docs/overview/architecture.md#project-settings).</summary>
     public string ProjectPath { get; init; } = InRepository("samples", "mygame", "project.settings");
 
@@ -83,6 +86,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         List<string> materials = [];
         List<string> effects = [];
         List<string> animationGraphs = [];
+        List<string> uiDocuments = [];
         string? project = null;
         for (var i = 0; i < args.Count; i++)
         {
@@ -124,6 +128,9 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
                 case "--animation-graph" when i + 1 < args.Count:
                     animationGraphs.Add(Path.GetFullPath(args[++i]));
                     break;
+                case "--ui-document" when i + 1 < args.Count:
+                    uiDocuments.Add(Path.GetFullPath(args[++i]));
+                    break;
                 case "--root" when i + 1 < args.Count && args[i + 1].IndexOf('=') > 0:
                     var root = args[++i];
                     var equals = root.IndexOf('=');
@@ -141,7 +148,7 @@ public sealed record EditorOptions(string HostPath, string GamePath, string? Sce
         {
             cook = cook with { Includes = includes };
         }
-        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs };
+        var options = new EditorOptions(Path.GetFullPath(host), Path.GetFullPath(game), scene) { Cook = cook, MaterialPaths = materials, EffectPaths = effects, AnimationGraphPaths = animationGraphs, UiDocumentPaths = uiDocuments };
         return project != null ? options with { ProjectPath = project } : options;
     }
 }

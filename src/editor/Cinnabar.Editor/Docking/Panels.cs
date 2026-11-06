@@ -77,6 +77,10 @@ public sealed class MaterialEditorDocument(Shell.MaterialEditor editor, Func<Con
 public sealed class AnimationGraphEditorDocument(Shell.AnimationGraphEditor editor, Func<Control> createView)
     : GraphEditorDocument(editor, $"animation_graph.{editor.Guid}", createView);
 
+/// <summary>A UI document in the UI editor (see docs/editor/ui-editor.md#ui-editor).</summary>
+public sealed class UiEditorDocument(Shell.UiEditor editor, Func<Control> createView)
+    : GraphEditorDocument(editor, $"ui.{editor.Guid}", createView);
+
 /// <summary>An effect's preview (see docs/rendering/particles.md#previews): a document beside the viewport, which closes.</summary>
 public sealed class EffectPreviewDocument : EditorDocument
 {

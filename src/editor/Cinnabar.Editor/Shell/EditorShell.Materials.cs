@@ -22,7 +22,7 @@ public sealed partial class EditorShell
     readonly Dictionary<string, (DateTime Modified, MaterialGraph? Graph)> _functions = [];
     // Editors that closed with their changes discarded, so their documents close without asking again.
     readonly HashSet<IGraphEditor> _discarding = [];
-    // The command line's materials, effects and animation graphs, which open once the index has them.
+    // The command line's materials, effects, animation graphs and UI documents, which open once the index has them.
     readonly List<string> _pendingMaterials = [];
 
     void OpenPendingMaterials()
@@ -40,6 +40,10 @@ public sealed partial class EditorShell
                 {
                     OpenAnimationGraph(asset);
                 }
+                else if (asset.Kind == AssetKind.Ui)
+                {
+                    OpenUiDocument(asset);
+                }
                 else
                 {
                     OpenMaterial(asset);
@@ -51,7 +55,7 @@ public sealed partial class EditorShell
     public IReadOnlyList<MaterialEditor> Materials => _materials;
 
     /// <summary>The open graphs of every kind.</summary>
-    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs);
+    public IEnumerable<IGraphEditor> GraphEditors => _materials.Concat<IGraphEditor>(_animationGraphs).Concat(_uiDocuments);
 
     /// <summary>The graph editor whose document is active, or null when the viewport is.</summary>
     public IGraphEditor? ActiveGraphEditor { get; private set; }
@@ -185,6 +189,11 @@ public sealed partial class EditorShell
             _animationGraphs.Remove(graph);
             graph.ClosePreview();
         }
+        if (editor is UiEditor ui)
+        {
+            _uiDocuments.Remove(ui);
+            ui.ClosePreview();
+        }
         _discarding.Remove(editor);
         editor.Dispose();
         if (ActiveGraphEditor == editor)
@@ -207,12 +216,13 @@ public sealed partial class EditorShell
     }
 
     /// <summary>
-    /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph whose file another
-    /// program changed since it was read is not written, and the window asks, unless <paramref name="overwrite"/> says so.
+    /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph or a UI document whose
+    /// file another program changed since it was read is not written, and the window asks, unless
+    /// <paramref name="overwrite"/> says so.
     /// </summary>
     public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
     {
-        if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true })
+        if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true } or UiDocument { ChangedOnDisk: true })
         {
             GraphOverwriteRequested?.Invoke(editor);
             return false;
@@ -243,6 +253,6 @@ public sealed partial class EditorShell
         }
     }
 
-    // The material editors' previews, then the effects', then the animation graphs'.
-    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects).Concat(_animationGraphs);
+    // The material editors' previews, then the effects', then the animation graphs', then the UI documents'.
+    IEnumerable<PreviewOwner> PreviewOwners() => _materials.Concat<PreviewOwner>(_effects).Concat(_animationGraphs).Concat(_uiDocuments);
 }
