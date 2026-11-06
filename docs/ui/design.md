@@ -2,7 +2,7 @@
 
 How the UI works: from a document on an entity to the pixels of the UI layer and back to the scripts. Read the [overview](README.md#overview) first, and [Content: UI documents](../content/kinds/ui-documents.md#ui-documents) for the format.
 
-**In this document:** [Documents](#documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame)
+**In this document:** [Documents](#documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame) · [The sample](#the-sample)
 
 ## Documents
 
@@ -118,7 +118,7 @@ function Pause:update(dt)
 end
 
 function Pause:on_resume(id)
-	self.entity:get(Ui_Document).visible = false
+	self.entity:get(UiDocument).visible = false
 end
 ```
 
@@ -142,3 +142,12 @@ A game calls the UI at these points of its frame (the sample's are in `samples/m
 | Its `ui` hook | `ui.add_passes(&s.ui, f)` |
 | `on_reload` | `ui.on_reload`, and `ui.sync_pipelines(force = true)` |
 | `shutdown` | `ui.destroy` |
+
+## The sample
+
+`samples/mygame`'s main scene has two documents, on the entities HUD and Pause Menu, in Fira Sans (`content/fonts`, under the SIL Open Font License beside it):
+
+- **The HUD** (`content/ui/hud.ui`, `hud.luau`) is a panel in the top left with an accent stripe, which shows the frame rate that its behaviour binds, smoothed over real time.
+- **The pause menu** (`content/ui/pause.ui`, `pause_menu.luau`) is modal, with order 10, and hidden until Escape or a gamepad's Start shows it. It pauses the world through the sample's `Game.set_paused`, which makes the world take no time while the script phase and the UI run on. Resume, B or Escape hides it. Quality takes the next render preset and saves it, as F9 does. The name field greets whoever types into it, through a binding.
+- `fly_camera.luau` and `hello.luau` leave the gamepad and Space and Tab alone while `Ui.wants_input()`.
+- `ui.scale` in the project's settings multiplies the UI scale.

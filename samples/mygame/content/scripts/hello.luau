@@ -1,7 +1,7 @@
 --!strict
 -- The game's main script. The scheduler resumes it once per frame, and it stays suspended across code reloads of the
 -- game DLL: its count keeps going, and Game.greeting shows the new code. Space reverses the large triangles' spin,
--- and Tab turns their Pulse off and on. F9 and its modifiers change the render quality (see quality_keys.luau). It logs
+-- and Tab turns their Pulse off and on, unless the UI takes the keys, as the pause menu does. F9 and its modifiers change the render quality (see quality_keys.luau). It logs
 -- gamepads that come and go, their A button, typed text and what an IME composes.
 local greeting = require("./greeting")
 local Pulse = require("./pulse")
@@ -36,7 +36,8 @@ while true do
 	if count % 120 == 0 then
 		Debug.log(greeting.line(count, Game.frame()))
 	end
-	if Input.was_pressed(Key.Space) then
+	local keys = not Ui.wants_input()
+	if keys and Input.was_pressed(Key.Space) then
 		for _, triangle in World.query(Spin) do
 			local spin = triangle:get(Spin)
 			if spin then
@@ -45,7 +46,7 @@ while true do
 		end
 		Debug.log("reversed the spin at", Time.time, "s")
 	end
-	if Input.was_pressed(Key.Tab) then
+	if keys and Input.was_pressed(Key.Tab) then
 		for _, triangle in World.query(Triangle) do
 			local pulse = triangle:get(Pulse)
 			if pulse then

@@ -1,7 +1,8 @@
 --!strict
 -- Flies its camera with the first gamepad that is connected, to try the gamepads out (see docs/core/input.md#gamepads).
 -- The left stick moves it along the way that it looks, the right stick turns it, the right trigger lifts it, the left
--- trigger lowers it, and the right bumper hurries it. It goes through walls: nothing here collides.
+-- trigger lowers it, and the right bumper hurries it. It goes through walls: nothing here collides. It stands still while
+-- the UI takes the input, as the pause menu does.
 local FlyCamera = Behaviour.define("FlyCamera", {
 	-- Meters a second with a stick all the way over.
 	speed = Field.number(3),
@@ -34,7 +35,7 @@ end
 
 function FlyCamera:update(dt: number)
 	local pad = first_gamepad()
-	if not pad then
+	if not pad or Ui.wants_input() then
 		return
 	end
 	local transform = self.entity.transform

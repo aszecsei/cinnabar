@@ -26,6 +26,7 @@ import "cinnabar:engine/physics"
 import "cinnabar:engine/project"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
+import "cinnabar:engine/ui"
 import "cinnabar:engine/script"
 import "cinnabar:engine/volume"
 
@@ -36,7 +37,6 @@ POST_SHADER :: #load("content/shaders/post.hlsl.meta", string)
 LENS_SHADER :: #load("content/shaders/lens.hlsl.meta", string)
 SHADOWS_SHADER :: #load("content/shaders/shadows.hlsl.meta", string)
 SHADOWS_RT_SHADER :: #load("content/shaders/shadows_rt.hlsl.meta", string)
-UI_SHADER :: #load("content/shaders/ui.hlsl.meta", string)
 // The game reads its cooked content from platform.content_dir, the loose cache, until bundles exist, and its
 // settings from platform.project_path, which the editor edits, with the user's file beside them (see
 // docs/overview/architecture.md#project-settings). The game looks for a change to the settings' files this often, in seconds.
@@ -177,23 +177,6 @@ Shadow_Constants :: struct {
 	size:   [2]u32,
 }
 
-// Matches Push in content/shaders/ui.hlsl.
-UI_Constants :: struct {
-	origin:       [2]f32,
-	size:         [2]f32,
-	color:        [4]f32,
-	accent:       [4]f32,
-	radius:       f32,
-	accent_width: f32,
-}
-
-// The HUD panel in the frame's top left corner, in pixels, and its colors as a designer picks them, sRGB-encoded. It
-// shows the UI layer, which blends over the tone-mapped scene as encoded values.
-HUD_ORIGIN :: [2]f32{16, 16}
-HUD_SIZE :: [2]f32{240, 44}
-HUD_COLOR :: [4]f32{0.08, 0.09, 0.12, 0.72}
-HUD_ACCENT :: [4]f32{0.89, 0.26, 0.2, 1}
-
 // The sample draws each spinning entity's axes into the debug layer, which shows them in exact colors, and faintly where
 // the scene hides them.
 DEBUG_AXES :: true
@@ -254,6 +237,10 @@ Game_State :: struct {
 	audio:              audio.State,
 	// The Animators' queries, which the fixed ticks advance (see docs/content/kinds/skins-and-animations.md#playback).
 	animation:          anim.State,
+	// The HUD and the pause menu, documents on the main scene's entities (see docs/ui/design.md#the-frame).
+	ui:                 ui.State,
+	// The pause menu stops the world's time, while scripts and the UI run on.
+	paused:             bool,
 	// The scene's render.Camera entity. A new scene replaces it, so find_camera looks for it again.
 	camera:             ecs.Entity,
 	// The built-in renderer, which draws the frame (see docs/rendering/frame.md#frame).
@@ -275,7 +262,6 @@ Pipelines :: struct {
 	shadows:   render.Shader_Pipeline,
 	post:      render.Shader_Pipeline,
 	lens:      render.Shader_Pipeline,
-	ui:        render.Shader_Pipeline,
 }
 
 // Frame is what the pass procedures need. It lives in frame memory.
@@ -362,7 +348,6 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 		shadows   = render.shader_pipeline(s.shadow_mode == .Pipeline ? SHADOWS_RT_SHADER : SHADOWS_SHADER),
 		post      = render.shader_pipeline(POST_SHADER),
 		lens      = render.shader_pipeline(LENS_SHADER),
-		ui        = render.shader_pipeline(UI_SHADER),
 	}
 
 	if !ecs.init(&s.world, platform) {
@@ -375,6 +360,7 @@ init :: proc(state: rawptr, platform: ^core.Platform_API) {
 	register_world(s)
 	asset.init(&s.assets, platform, asset.loose_cache(platform.content_dir))
 	render.renderer_init(&s.renderer, platform, &s.assets, &s.world)
+	ui.init(&s.ui, platform, &s.assets, &s.renderer.residency)
 	s.script_quality = project.script_quality(&s.renderer, platform.project_path)
 	register_post_effects(s)
 	sync_pipelines(s)
@@ -402,6 +388,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	physics.register_components(r)
 	audio.register_components(r)
 	anim.register_components(r)
+	ui.register_components(r)
 	ecs.register_component(r, Spin, SPIN_ID)
 	ecs.register_component(r, Triangle, TRIANGLE_ID)
 	ecs.register_component(r, Lens, LENS_ID, DEFAULT_LENS)
@@ -490,6 +477,12 @@ register_scripts :: proc(r: ^script.Runtime) {
 	physics.register_scripts(r, &container_of(r, Game_State, "scripts").physics)
 	audio.register_scripts(r, &container_of(r, Game_State, "scripts").audio)
 	anim.register_scripts(r, &container_of(r, Game_State, "scripts").animation)
+	ui.register_scripts(r, &container_of(r, Game_State, "scripts").ui)
+	script.define(r, "Game.set_paused", proc(L: ^luau.State) -> c.int {
+		luau.L_checktype(L, 1, .BOOLEAN)
+		game_of(L).paused = bool(luau.toboolean(L, 1))
+		return 0
+	}, "(paused: boolean) -> ()")
 	script.define(r, "Game.frame", proc(L: ^luau.State) -> c.int {
 		luau.pushnumber(L, f64(game_of(L).frame_count))
 		return 1
@@ -527,7 +520,13 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	update_output(s)
 	switch_scene(s)
 	run, step := editor.simulation(&s.editor, &s.world, dt)
+	// A paused world takes no time: no ticks, and no particles, while the script phase runs for the pause menu.
+	if s.paused {
+		step = 0
+	}
 	script.set_quiet(&s.scripts, !run)
+	// The documents follow the world in every mode, so the editor's viewport shows them as they are.
+	ui.sync(&s.ui, &s.world)
 	// The Animators' graphs and clips load before the ticks, so the animate system's jobs only read them.
 	anim.prepare(&s.animation, &s.world)
 	s.frame_step = 0
@@ -551,6 +550,9 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 			ecs.update_transforms(&s.world)
 		}
 		ecs.run_stage(&s.world, .Update, step, s)
+		// The UI reads the input against what the player saw, and its events reach the behaviours in the script phase.
+		ui.handle_input(&s.ui, input, s.platform.time_seconds())
+		ui.flush_events(&s.ui, &s.scripts)
 		// The script phase, with its structural changes (phases 5 and 6).
 		script.run_phase(&s.scripts, step, input)
 		ecs.run_stage(&s.world, .Late, step, s)
@@ -682,7 +684,7 @@ stream_rings :: proc(s: ^Game_State) {
 
 // render_frame draws the frame with the built-in renderer, which draws the Mesh_Renderers, and adds the sample's own
 // work through its hooks: the triangles in the world pass,
-// the ray-traced shadows and the post pass after it, the HUD panel in the UI layer, and the editor's tools in the
+// the ray-traced shadows and the post pass after it, the UI's documents in the UI layer, and the editor's tools in the
 // debug layer. The render graph places the barriers between the passes and the waits between the queues.
 render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
 	frame := new(Frame, s.platform.frame_allocator)
@@ -780,25 +782,9 @@ after_world :: proc(f: ^render.Frame) {
 	f.scene = frame.post
 }
 
-// draw_ui_layer draws the HUD panel into the UI layer.
+// draw_ui_layer draws the UI's documents, the HUD and the pause menu, into the UI layer.
 draw_ui_layer :: proc(f: ^render.Frame) {
-	p := render.add_render_pass(f.graph, "hud", draw_hud, f.data)
-	render.color(f.graph, p, f.ui, .Load)
-}
-
-draw_hud :: proc(ctx: ^render.Pass_Context) {
-	frame := (^Frame)(ctx.data)
-	constants := UI_Constants {
-		origin       = HUD_ORIGIN,
-		size         = HUD_SIZE,
-		color        = HUD_COLOR,
-		accent       = HUD_ACCENT,
-		radius       = 8,
-		accent_width = 6,
-	}
-	gpu.cmd_set_pipeline(ctx.cb, frame.state.pipelines.ui.pipeline)
-	gpu.cmd_push_constants(ctx.cb, &constants)
-	gpu.cmd_draw(ctx.cb, 3)
+	ui.add_passes(&(^Frame)(f.data).state.ui, f)
 }
 
 // draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo, which draw into the debug layer.
@@ -968,6 +954,7 @@ shutdown :: proc(state: rawptr) {
 	s := (^Game_State)(state)
 	editor.destroy(&s.editor)
 	script.destroy(&s.scripts)
+	ui.destroy(&s.ui)
 	render.renderer_destroy(&s.renderer)
 	asset.destroy(&s.assets)
 	audio.destroy(&s.audio)
@@ -998,6 +985,7 @@ update_output :: proc(s: ^Game_State) {
 			render.set_quality(&s.renderer, project.quality(s.project.settings, s.renderer.caps))
 			physics.set_layers(&s.physics, project.physics_layers(s.project.settings))
 			apply_audio_settings(s)
+			ui.set_scale_factor(&s.ui, s.project.settings.ui_scale)
 		}
 	}
 	if .F8 in s.platform.input().pressed {
@@ -1048,6 +1036,7 @@ on_reload :: proc(state: rawptr, platform: ^core.Platform_API) {
 	asset.reload(&s.assets, platform)
 	script.reload(&s.scripts, platform, register_scripts)
 	editor.reload(&s.editor, platform)
+	ui.on_reload(&s.ui, platform)
 	register_editor_commands(s)
 	sync_pipelines(s, force = true)
 	log.infof("mygame: reloaded at frame %d", s.frame_count)
@@ -1060,7 +1049,7 @@ sync_pipelines :: proc(s: ^Game_State, force := false) {
 	render.sync_graphics_pipeline(&p.scene, platform, assets, {.Vertex, .Pixel}, SCENE_PIPELINE, force)
 	render.sync_compute_pipeline(&p.post, platform, assets, POST_PIPELINE, force)
 	render.sync_compute_pipeline(&p.lens, platform, assets, LENS_PIPELINE, force)
-	render.sync_graphics_pipeline(&p.ui, platform, assets, {.Vertex, .Pixel}, UI_PIPELINE, force)
+	ui.sync_pipelines(&s.ui, force)
 	switch s.shadow_mode {
 	case .None:
 	case .Inline:
@@ -1100,18 +1089,11 @@ LENS_PIPELINE :: gpu.Compute_Pipeline_Desc {
 	label   = "lens",
 }
 
-// The HUD panel, blended into the UI layer.
-UI_PIPELINE :: gpu.Graphics_Pipeline_Desc {
-	colors = {{format = render.UI_FORMAT, blend = .Premultiplied}},
-	label  = "hud",
-}
-
 destroy_pipelines :: proc(platform: ^core.Platform_API, pipelines: ^Pipelines) {
 	render.destroy_shader_pipeline(&pipelines.scene, platform)
 	render.destroy_shader_pipeline(&pipelines.shadows, platform)
 	render.destroy_shader_pipeline(&pipelines.post, platform)
 	render.destroy_shader_pipeline(&pipelines.lens, platform)
-	render.destroy_shader_pipeline(&pipelines.ui, platform)
 }
 
 gpu_bytes :: proc(data: ^$T) -> []byte {

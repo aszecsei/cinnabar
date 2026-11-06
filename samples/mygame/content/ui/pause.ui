@@ -1,0 +1,26 @@
+ui 1
+<!-- The sample's pause menu, which pause_menu.luau shows with Escape or a gamepad's Start. It is modal: while it shows,
+     it takes the input, and B or Escape resumes. The mouse, the arrows and the d-pad or the left stick move through it. -->
+<ui modal="true" cancel="resume" focus="resume" font=$5b845a4341f6a3b772ec017211470fab size="20" color="#ffffff">
+	<style name="button" fill="#1c2030e0" radius="6" padding="10 16" border="1 #ffffff30" align="start"/>
+	<style name="button:hover" fill="#2a3048f0"/>
+	<style name="button:focus" fill="#e34233" border="2 #ffffff"/>
+	<style name="button:press" fill="#b8332a" border="2 #ffffff"/>
+	<style name="field" fill="#0b0d14" radius="4" padding="6 8" border="1 #ffffff40"/>
+	<style name="field:focus" border="2 #e34233"/>
+	<style name="caption" size="15" color="#ffffffa0"/>
+
+	<box id="dim" anchor="fill" fill="#00000080"/>
+	<column id="menu" anchor="center" width="380" padding="24" gap="10" cross="stretch" radius="12"
+	        fill="linear(90, #1a1e2bf4, #0d0f16f4)" border="1 #ffffff20">
+		<text size="34" text_align="center">Paused</text>
+		<text style="caption" text_align="center">Hello, {name}!</text>
+		<button id="resume" click="resume">Resume</button>
+		<button id="quality" click="quality">Quality: {quality}</button>
+		<row gap="10" cross="center">
+			<text style="caption">Name</text>
+			<field id="name" width="fill" placeholder="Type a name" max_length="20" changed="name_changed" submit="name_submitted"/>
+		</row>
+		<text style="caption" text_align="center" wrap="true">Quality takes the next preset. Office, fifty, waffle: the text is kerned and has its ligatures.</text>
+	</column>
+</ui>

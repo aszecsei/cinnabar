@@ -1,0 +1,16 @@
+ui 1
+<!-- The sample's HUD: a panel in the top left with an accent stripe on its left, which shows the frame rate and the
+     render quality. hud.luau binds them. Its colors are as a designer picks them, sRGB-encoded. -->
+<ui font=$5b845a4341f6a3b772ec017211470fab size="16" color="#ffffffe0">
+	<style name="label" size="13" color="#ffffff90"/>
+
+	<stack id="hud" anchor="top_left" offset="16 16" width="240" height="44" fill="#14171fb8" radius="8">
+		<box id="accent" anchor="left" width="6" height="100%" fill="#e34233" radius="8 0 0 8"/>
+		<row anchor="fill" padding="0 14 0 20" gap="8" cross="center">
+			<text id="fps">{fps}</text>
+			<text style="label">fps</text>
+			<box width="fill"/>
+			<text style="label">Esc or Start</text>
+		</row>
+	</stack>
+</ui>

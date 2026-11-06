@@ -34,6 +34,8 @@ PHYSICS_BACKEND_KEY :: "physics.backend"
 AUDIO_BACKEND_KEY :: "audio.backend"
 // The buses that sounds mix into, besides Master (see docs/audio/design.md#buses-and-effects).
 AUDIO_BUSES_KEY :: "audio.buses"
+// What multiplies the UI's scale, which the output's height gives (see docs/ui/design.md#scale).
+UI_SCALE_KEY :: "ui.scale"
 
 // Settings are a project's settings. A key that no file gives keeps its default.
 Settings :: struct {
@@ -55,6 +57,8 @@ Settings :: struct {
 	physics_layers:        physics.Layers,
 	// The audio buses besides Master.
 	audio_buses:           audio.Bus_Names,
+	// What multiplies the UI's scale, or 0 for 1.
+	ui_scale:              f32,
 }
 
 // physics_layers gives the layers that settings name, or the default ones.
@@ -207,6 +211,14 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 			}
 			if ok {
 				settings.audio_buses = buses
+			}
+			continue
+		}
+		if key == UI_SCALE_KEY {
+			if scale, ok := strconv.parse_f32(value); ok && scale >= 0.25 && scale <= 4 {
+				settings.ui_scale = scale
+			} else {
+				problem(problems, line, "%s takes a number from 0.25 to 4, not %q", key, value)
 			}
 			continue
 		}
