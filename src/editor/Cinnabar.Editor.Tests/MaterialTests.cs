@@ -229,7 +229,7 @@ public sealed class MaterialTests : IDisposable
         File.WriteAllText(_temp.Combine("glow.material"), "material 1\nshading = lit\n---\nSurface evaluate(Material_Inputs inputs) { return default_surface(); }\n");
         File.WriteAllText(_temp.Combine("smoke.effect"), "effect 1\nemitter puffs\n");
         var shell = TestShell.Open(_temp, null, null);
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], Nodes));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], Nodes, []));
         shell.Assets.Apply(new ShadingModels(Shading));
         shell.Assets.Apply(new AssetSnapshot(
         [

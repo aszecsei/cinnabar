@@ -37,6 +37,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Live meshes | `Live_Mesh`, `Live_Mesh_Vertices` and `Release_Live_Mesh`: the mesh files the editor edits, which the game draws from memory (see [Mesh editing](mesh-editing.md#live-meshes)) |
 | Sky | `Sky_Sun_Request` and `Sky_Sun`: where the texture sky's sun is, which the game answers from its renderer, or why it has none (see [Sky](../rendering/sky.md#texture)) |
 | Animators | `Animator_View`, what a watched entity's Animator plays, or with an entity of 0 an animation graph's preview, and `Set_Preview_Parameter` and `Restart_Preview` (see [Animation graph editor](animation-graph-editor.md#preview)) |
+| UI previews | `Ui_Preview_Settings`, how a preview shows a UI document, and `Ui_Preview_Layout`, where its elements went (see [UI editor](ui-editor.md#the-games-side)) |
 
 ### Profile
 

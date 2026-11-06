@@ -69,7 +69,10 @@ public sealed partial class EditorShell
             case AssetKind.AnimationGraph:
                 OpenAnimationGraph(asset);
                 break;
-            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance or AssetKind.Ui:
+            case AssetKind.Ui:
+                OpenUiDocument(asset);
+                break;
+            case AssetKind.Script or AssetKind.Shader or AssetKind.ShadingModel or AssetKind.Material or AssetKind.MaterialInstance:
                 OpenScript(path);
                 break;
         }
@@ -101,6 +104,7 @@ public sealed partial class EditorShell
         AssetKind.Effect => "Open Preview",
         AssetKind.Material when Assets.FullPath(asset) is { } path && !IsHlslMaterial(path) => "Open in Material Editor",
         AssetKind.AnimationGraph => "Open in Animation Graph Editor",
+        AssetKind.Ui => "Open in UI Editor",
         _ => "Open in Script Editor",
     };
 

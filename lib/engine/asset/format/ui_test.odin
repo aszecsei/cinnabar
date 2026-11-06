@@ -5,7 +5,9 @@ import "core:strings"
 import "core:testing"
 
 // Documents with their problems marked: `<!-- problem -->` on each line that reports an error, and `<!-- warning -->`
-// on each that reports a warning, and on no other.
+// on each that reports a warning, and on no other. A document without errors may list its nodes' elements in order, as
+// `<!-- nodes: ui column text ... -->`. The editor's reader reads the same files, and must find the same nodes (see
+// docs/editor/ui-editor.md#the-file).
 @(private = "file")
 UI_CORPUS := #load_directory("testdata/ui")
 
@@ -37,6 +39,29 @@ ui_documents_report_their_problems_at_their_lines :: proc(t: ^testing.T) {
 		testing.expectf(t, slice.equal(found_warnings[:], warnings[:]), "%s: warnings at %v, expected at %v: %v", file.name, found_warnings, warnings, problems)
 		testing.expectf(t, ok == (len(errors) == 0), "%s: ok is %v", file.name, ok)
 	}
+}
+
+@(test)
+ui_documents_have_the_nodes_that_they_list :: proc(t: ^testing.T) {
+	listed := 0
+	for file in UI_CORPUS {
+		text := string(file.data)
+		start := strings.index(text, "<!-- nodes:")
+		if start < 0 {
+			continue
+		}
+		listed += 1
+		end := strings.index(text[start:], "-->")
+		expected := strings.fields(text[start + len("<!-- nodes:"):start + end], context.temp_allocator)
+		document, _, ok := ui_parse(text)
+		testing.expectf(t, ok, "%s does not parse", file.name)
+		found := make([dynamic]string, context.temp_allocator)
+		for n in document.nodes {
+			append(&found, UI_ELEMENT_NAMES[n.element])
+		}
+		testing.expectf(t, slice.equal(found[:], expected), "%s: nodes %v, listed %v", file.name, found, expected)
+	}
+	testing.expect(t, listed >= 3)
 }
 
 @(private = "file")

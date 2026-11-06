@@ -1,6 +1,9 @@
 package cook
 
 import "core:fmt"
+import "core:hash"
+import "core:mem"
+import "core:os"
 import "core:slice"
 import "core:strings"
 import "core:testing"
@@ -90,4 +93,92 @@ ui_documents_from_the_template_cook_and_broken_ones_keep_their_blobs :: proc(t: 
 		testing.expect_value(t, p.line, 2)
 		testing.expect_value(t, p.column, 10)
 	}
+}
+
+@(test)
+an_unsaved_ui_documents_problems_keep_their_columns_and_its_preview_its_last_good_text :: proc(t: ^testing.T) {
+	cache, err := os.make_directory_temp("", "ui_check_*", context.allocator)
+	testing.expect(t, err == nil)
+	defer delete(cache)
+	defer os.remove_all(cache)
+	options := Cook_Options {
+		cache  = cache,
+		config = .Dev,
+	}
+	guid, _ := format.guid_parse("00112233445566778899aabbccddeeff")
+	font, _ := format.guid_parse(FONT_GUID)
+	kinds := make(map[format.Guid]format.Asset_Kind, context.temp_allocator)
+	kinds[font] = .Font
+	blob := fmt.tprintf("%s/preview/00112233445566778899aabbccddeeff.blob", config_dir(options))
+	read_blob :: proc(path: string) -> (^format.Blob_Header, bool) {
+		read, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil {
+			return nil, false
+		}
+		aligned, _ := mem.alloc_bytes(len(read), format.BLOB_ALIGN, context.temp_allocator)
+		copy(aligned, read)
+		return format.blob_header(aligned)
+	}
+
+	// A warning does not stop it.
+	text := fmt.tprintf("ui 1\n<ui font=$%s>\n\t<text cross=\"center\">Hi</text>\n</ui>\n", FONT_GUID)
+	problems, ok := check_ui(options, guid, text, kinds)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(problems.list), 1)
+	if len(problems.list) == 1 {
+		testing.expect(t, !problems.list[0].error)
+		testing.expect_value(t, problems.list[0].line, 3)
+		testing.expect_value(t, problems.list[0].column, 8)
+	}
+	delete(problems.list)
+	header, valid := read_blob(blob)
+	testing.expect(t, valid && header.guid == guid && header.kind == .Ui)
+	if valid {
+		// Its key is its text's, which the editor compares a layout with.
+		testing.expect_value(t, header.key, hash.fnv64a(transmute([]byte)text))
+	}
+
+	// An error leaves the last good one, at its column.
+	problems, ok = check_ui(options, guid, "ui 1\n<ui>\n\t<box gap=\"wide\"/>\n</ui>\n", kinds)
+	defer delete(problems.list)
+	testing.expect(t, !ok)
+	testing.expect_value(t, len(problems.list), 1)
+	if len(problems.list) == 1 {
+		testing.expect(t, problems.list[0].error)
+		testing.expect_value(t, problems.list[0].file, "C:/game/ui/menu.ui")
+		testing.expect_value(t, problems.list[0].line, 3)
+		testing.expect_value(t, problems.list[0].column, 7)
+	}
+	after, still := read_blob(blob)
+	testing.expect(t, still)
+	if valid && still {
+		testing.expect_value(t, after.key, hash.fnv64a(transmute([]byte)text))
+	}
+
+	// A font that is a texture is an error, as in a cook.
+	kinds[font] = .Texture
+	problems2, ok2 := check_ui(options, guid, text, kinds)
+	defer delete(problems2.list)
+	testing.expect(t, !ok2)
+}
+
+@(private = "file")
+check_ui :: proc(options: Cook_Options, guid: format.Guid, text: string, kinds: map[format.Guid]format.Asset_Kind) -> (Problems, bool) {
+	return ui_check(options, guid, text, "C:/game/ui/menu.ui", "game/ui/menu.ui", kinds)
+}
+
+@(test)
+the_ui_attributes_go_to_the_editor_by_their_names :: proc(t: ^testing.T) {
+	infos := ui_attribute_infos()
+	testing.expect_value(t, len(infos), len(format.UI_ATTRS))
+	found := false
+	for info in infos {
+		if info.name == "text_align" {
+			found = true
+			testing.expect_value(t, info.kind, "text_align")
+			testing.expect(t, info.inherited)
+			testing.expect(t, slice.contains(info.elements, "ui") && slice.contains(info.elements, "button"))
+		}
+	}
+	testing.expect(t, found)
 }

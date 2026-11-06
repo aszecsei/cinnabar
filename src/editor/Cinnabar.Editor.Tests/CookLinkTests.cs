@@ -237,6 +237,45 @@ public sealed class CookLinkTests : IDisposable
     }
 
     [Fact]
+    public async Task TheDaemonCooksAnUnsavedUiDocumentAndPutsItsProblemsOnItsElements()
+    {
+        if (!File.Exists(_cook))
+        {
+            Assert.Skip("build/tools/cook.exe is missing");
+        }
+        const string Menu = """
+            ui 1
+            <ui>
+            	<column id="menu" gap="4">
+            		<button id="ok">OK</button>
+            	</column>
+            </ui>
+
+            """;
+        Write("menu.ui", Menu);
+        var index = new AssetIndex();
+        using var session = Start(index);
+        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Ui && a.Status == AssetStatus.Current), session, []);
+        var asset = index.Assets.Values.Single(a => a.Kind == AssetKind.Ui);
+        Assert.Contains(index.UiAttributes, a => a.Name == "padding" && a.Kind == "edges");
+        var preview = Path.Combine(_dir, "cache", "preview", asset.Guid + ".blob");
+
+        Assert.Equal("", (await session.CookPreview(asset.Guid, Menu)).Error);
+        Assert.True(File.Exists(preview));
+        var written = File.GetLastWriteTimeUtc(preview);
+
+        // A problem names the file, its line and its column, which find the element; the last good preview stays.
+        var file = UiFile.Parse(Menu).File!;
+        file.SetAttribute(file.AllElements().First(e => e.Get("id") == "ok"), "gap", "wide");
+        var broken = await session.CookPreview(asset.Guid, file.Text);
+        Assert.NotEqual("", broken.Error);
+        var problem = broken.Problems.First(p => p.Error);
+        Assert.Equal(Path.GetFullPath(Path.Combine(_content, "menu.ui")), Path.GetFullPath(problem.File), ignoreCase: true);
+        Assert.Equal(file.NodeById("ok")!.Index, file.NodeAt((int)problem.Line, (int)problem.Column));
+        Assert.Equal(written, File.GetLastWriteTimeUtc(preview));
+    }
+
+    [Fact]
     public async Task AModelsSubAssetsHaveTheNamesInItsFile()
     {
         if (!File.Exists(_cook))

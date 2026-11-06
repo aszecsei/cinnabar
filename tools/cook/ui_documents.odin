@@ -3,7 +3,9 @@ package cook
 import "core:fmt"
 import "core:hash"
 import "core:os"
+import "core:strings"
 
+import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
 
 // UI documents are .ui text files: a tree of boxes, text and images in a pseudo-XML with named styles (see
@@ -70,10 +72,10 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	}
 	// A font is a font, and an image a texture. An asset that is not in the roots may come later, so it only warns.
 	for n in document.nodes {
-		check_ui_assets(a, n.props, kinds, problems, &parsed)
+		check_ui_assets(a.path, n.props, kinds, problems, &parsed, &a.dependencies)
 	}
 	for s in document.styles {
-		check_ui_assets(a, s.props, kinds, problems, &parsed)
+		check_ui_assets(a.path, s.props, kinds, problems, &parsed, &a.dependencies)
 	}
 	// A document with errors keeps its old blob, so the running game keeps the last good version.
 	if !parsed || !settings_ok {
@@ -96,9 +98,62 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	return true
 }
 
+// ui_check gives the problems of a UI document's text that the editor has not saved, as a cook of the file at this path
+// would, with the kinds of the assets in the content by GUID. A text without errors goes in the preview area of the
+// cache, <config>/preview/<guid>.blob, which the UI editor's preview draws; the document's own blob does not change. A
+// text with errors leaves the last good one. The preview's key is the text's hash, so that the editor knows which text
+// a layout that the game reports is of (see docs/editor/ui-editor.md#the-games-side).
+ui_check :: proc(options: Cook_Options, guid: format.Guid, text, path, name: string, kinds: map[format.Guid]format.Asset_Kind) -> (problems: Problems, ok: bool) {
+	document, parse_problems, parsed := format.ui_parse(text)
+	for p in parse_problems {
+		if p.error {
+			report_error(&problems, path, p.line, p.column, "%s", p.message)
+		} else {
+			report_warning(&problems, path, p.line, p.column, "%s", p.message)
+		}
+	}
+	for n in document.nodes {
+		check_ui_assets(path, n.props, kinds, &problems, &parsed, nil)
+	}
+	for s in document.styles {
+		check_ui_assets(path, s.props, kinds, &problems, &parsed, nil)
+	}
+	if !parsed {
+		return
+	}
+	dir := fmt.tprintf("%s/preview", config_dir(options))
+	if err := os.make_directory_all(dir); err != nil && err != .Exist {
+		report_error(&problems, dir, 0, 0, "%v", err)
+		return
+	}
+	buffer: [32]u8
+	blob := format.ui_write({guid = guid, key = hash.fnv64a(transmute([]byte)text), document = document, source_path = name}, context.temp_allocator)
+	if !write_blob(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), blob) {
+		report_error(&problems, path, 0, 0, "cannot write its preview")
+		return
+	}
+	return problems, true
+}
+
+// ui_attribute_infos are the attributes of UI documents for the editor, from format.UI_ATTRS, in the temporary allocator.
+ui_attribute_infos :: proc() -> []cook_link.Ui_Attribute_Info {
+	infos := make([]cook_link.Ui_Attribute_Info, len(format.UI_ATTRS), context.temp_allocator)
+	i := 0
+	for info in format.UI_ATTRS {
+		elements := make([dynamic]string, context.temp_allocator)
+		for e in info.on {
+			append(&elements, format.UI_ELEMENT_NAMES[e])
+		}
+		kind := strings.to_lower(fmt.tprintf("%v", info.kind), context.temp_allocator)
+		infos[i] = {info.name, kind, elements[:], info.inherited, info.min, info.max}
+		i += 1
+	}
+	return infos
+}
+
 // check_ui_assets checks the fonts and images that attributes name, and adds them to the document's dependencies.
 @(private = "file")
-check_ui_assets :: proc(a: ^Asset_Source, props: []format.Ui_Prop_Contents, kinds: map[format.Guid]format.Asset_Kind, problems: ^Problems, ok: ^bool) {
+check_ui_assets :: proc(path: string, props: []format.Ui_Prop_Contents, kinds: map[format.Guid]format.Asset_Kind, problems: ^Problems, ok: ^bool, dependencies: ^[dynamic]format.Guid) {
 	for p in props {
 		want: format.Asset_Kind
 		#partial switch p.attr {
@@ -116,11 +171,13 @@ check_ui_assets :: proc(a: ^Asset_Source, props: []format.Ui_Prop_Contents, kind
 		kind, found := kinds[guid]
 		switch {
 		case !found:
-			report_warning(problems, a.path, p.line, p.column, "%s %s is not an asset in the content roots", format.UI_ATTRS[p.attr].name, p.value)
+			report_warning(problems, path, p.line, p.column, "%s %s is not an asset in the content roots", format.UI_ATTRS[p.attr].name, p.value)
 		case kind != want:
-			report_error(problems, a.path, p.line, p.column, "%s %s is a %v, not a %v", format.UI_ATTRS[p.attr].name, p.value, kind, want)
+			report_error(problems, path, p.line, p.column, "%s %s is a %v, not a %v", format.UI_ATTRS[p.attr].name, p.value, kind, want)
 			ok^ = false
 		}
-		append(&a.dependencies, guid)
+		if dependencies != nil {
+			append(dependencies, guid)
+		}
 	}
 }

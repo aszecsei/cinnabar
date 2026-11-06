@@ -116,11 +116,12 @@ resolve :: proc(s: ^State, r: Node_Ref) -> (d: ^Document, n: u32, ok: bool) {
 node_states :: proc(s: ^State, index: int, d: ^Document, n: u32) -> bit_set[format.Ui_State] {
 	node := &d.nodes[n]
 	disabled := node.style.disabled || (node.parent != NONE && d.nodes[node.parent].disabled)
-	if disabled {
+	forced := d.forced if d.forced != {} && node.source == d.forced_node else {}
+	if disabled || .Disabled in forced {
 		return {.Disabled}
 	}
 	here := Node_Ref{i32(index), n, d.generation}
-	states: bit_set[format.Ui_State]
+	states := forced
 	if s.input.hovered == here {
 		states += {.Hover}
 	}

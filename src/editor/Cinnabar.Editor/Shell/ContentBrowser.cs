@@ -122,6 +122,9 @@ public sealed class ContentBrowser
     /// <summary>The content browser shows an asset or a folder, so its panel should show.</summary>
     public event Action? ContentRevealed;
 
+    /// <summary>The cook daemon made an asset from a template, by its GUID.</summary>
+    public event Action<string, AssetTemplate>? AssetCreated;
+
     /// <summary>The cook daemon refused an operation, with its reason. The window shows it.</summary>
     public event Action<string>? OperationFailed;
 
@@ -218,6 +221,7 @@ public sealed class ContentBrowser
             if (result is { Guids: [var guid, ..] })
             {
                 Reveal(new ContentItem(guid, null));
+                AssetCreated?.Invoke(guid, t);
             }
             return result != null;
         }

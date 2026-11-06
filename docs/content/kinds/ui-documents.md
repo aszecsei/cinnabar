@@ -168,6 +168,8 @@ The cooker parses the document with `format.ui_parse`, and reports each of its p
 
 **Limits:** a document has at most `MAX_UI_NODES` (4096) elements, which nest at most `MAX_UI_DEPTH` (64) deep.
 
+**The tests' documents** are in `lib/engine/asset/format/testdata/ui`, which the editor's tests read too (see [UI editor](../../editor/ui-editor.md#the-file)): `<!-- problem -->` at the end of each line that reports an error, `<!-- warning -->` on each that reports a warning, and in a document without errors, `<!-- nodes: ui column text ... -->`, its nodes' elements in order.
+
 ## The blob
 
 `Ui_Blob` holds four arrays and the source path:

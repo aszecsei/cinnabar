@@ -17,7 +17,7 @@ import "cinnabar:engine/render"
 // or every frame while its material reads the time, and a frame draws at most one preview, in turn. The same previews
 // show effects (see docs/rendering/particles.md#previews), which play, so they draw in every frame that they can, and
 // animation graphs on a mesh (see docs/editor/animation-graph-editor.md#preview), which play apart from the world, whatever the
-// editor's mode.
+// editor's mode, and UI documents (see docs/editor/ui-editor.md#the-games-side), which draw no mesh.
 
 MAX_PREVIEWS :: gpu.MAX_PREVIEW_TARGETS
 
@@ -40,6 +40,9 @@ Preview :: struct {
 	effect:          bool,
 	load_failed:     bool,
 	animation_graph: bool,
+	// A UI document's preview (see ui_preview.odin).
+	ui:              bool,
+	ui_preview:      Ui_Preview,
 	// An animation graph's instance, which plays apart from any entity; when it last moved; and the hash of the view
 	// that the editor last got, or 0.
 	instance:        anim_graph.Instance,
@@ -95,6 +98,10 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id < MAX_PREVIEWS {
 			e.previews[m.id].instance = {}
 		}
+	case link.Ui_Preview_Settings:
+		if m.id < MAX_PREVIEWS {
+			set_ui_preview_settings(e, &e.previews[m.id], m)
+		}
 	case:
 		return false
 	}
@@ -108,6 +115,7 @@ close_preview :: proc(e: ^Editor, id: int) {
 		return
 	}
 	free_preview_data(e, p)
+	close_ui_preview(e, p)
 	p^ = {}
 	e.platform.gpu_release_preview_target(id)
 	if e.renderer != nil {
@@ -115,7 +123,7 @@ close_preview :: proc(e: ^Editor, id: int) {
 	}
 }
 
-@(private = "file")
+@(private)
 free_preview_data :: proc(e: ^Editor, p: ^Preview) {
 	if p.data != nil {
 		delete(p.data, e.platform.asset_allocator)
@@ -173,6 +181,9 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
 		descs[0] = preview_desc(p, id, target)
 		descs[0].effect = is_effect(e, p)
+		if p.ui {
+			descs[0] = ui_preview_desc(e, p, id, target)
+		}
 		if p.animation_graph {
 			descs[0].animated = true
 			descs[0].palette = play_animation_graph(e, p)
@@ -276,7 +287,7 @@ send_preview_views :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.A
 // is_effect is whether a preview shows an effect, by its blob's kind. The first look loads the cooked blob, which the
 // renderer would load anyway. A blob that does not load is not tried again until refresh_preview sees it change,
 // which it does once the renderer, which retries, loads it.
-@(private = "file")
+@(private)
 is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
 	if p.kind_known {
 		return p.effect
@@ -295,6 +306,7 @@ is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
 	}
 	header, ok := format.blob_header(data)
 	p.kind_known, p.effect, p.animation_graph = ok, ok && header.kind == .Effect, ok && header.kind == .Animation_Graph
+	p.ui = ok && header.kind == .Ui
 	return p.effect
 }
 

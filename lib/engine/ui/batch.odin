@@ -57,6 +57,8 @@ pack :: proc(c: format.Ui_Color, alpha: f32) -> u32 {
 Batch :: struct {
 	instances: [dynamic]Instance,
 	full:      bool,
+	// Something does not draw yet: a font, its atlas or an image is not resident.
+	waiting:   bool,
 }
 
 @(private)
@@ -75,7 +77,8 @@ push :: proc(b: ^Batch, i: Instance) {
 
 // build_batch gives the instances of every document that shows, the lowest order first, each in the order of its tree:
 // a node's box, its image, its text, and then its children, which draw over it. now is the real time, for the caret.
-build_batch :: proc(s: ^State, now: f64, allocator := context.allocator) -> Batch {
+// With only, it gives that slot's document alone.
+build_batch :: proc(s: ^State, now: f64, allocator := context.allocator, only := -1) -> Batch {
 	// Temporary memory here is the frame's, which the platform frees each frame.
 	context.temp_allocator = s.platform.frame_allocator
 	b := Batch {
@@ -84,7 +87,7 @@ build_batch :: proc(s: ^State, now: f64, allocator := context.allocator) -> Batc
 	// Each document's order and slot, the lowest order first.
 	order := make([dynamic][2]int, 0, MAX_DOCUMENTS, context.temp_allocator)
 	for &d, i in s.documents {
-		if d.used && d.built && len(d.nodes) > 0 && d.nodes[0].shown {
+		if d.used && d.built && len(d.nodes) > 0 && d.nodes[0].shown && (only < 0 || i == only) {
 			append(&order, [2]int{int(d.order), i})
 		}
 	}
@@ -128,6 +131,8 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	batch_image(s, b, node, alpha)
 	if node.text.ok {
 		batch_text(s, b, d, index, n, now)
+	} else if (node.element == .Text || node.element == .Field) && st.font != {} {
+		b.waiting = true
 	}
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
 		batch_node(s, b, d, index, c, now)
@@ -152,6 +157,7 @@ batch_image :: proc(s: ^State, b: ^Batch, node: ^Node, alpha: f32) {
 	}
 	t, ready := render.resident_texture(s.residency, st.image)
 	if !ready || t.size.x == 0 || t.size.y == 0 {
+		b.waiting = true
 		return
 	}
 	base := Instance {
@@ -203,10 +209,12 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	text := node.text
 	font, ok := font_of(s, text.font)
 	if !ok || s.residency == nil {
+		b.waiting = true
 		return
 	}
 	atlas, ready := render.resident_texture(s.residency, font.blob.atlas)
 	if !ready {
+		b.waiting = true
 		return
 	}
 	alpha := node.alpha * (text.placeholder ? PLACEHOLDER_ALPHA : 1)

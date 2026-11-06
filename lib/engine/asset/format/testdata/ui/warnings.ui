@@ -1,5 +1,6 @@
 ui 1
 <!-- Each line with a warning marker reports a warning there, and nothing is an error. -->
+<!-- nodes: ui row box stack box text image box -->
 <ui>
 	<style name="ghost:hover" fill="#fff"/> <!-- warning -->
 	<row>

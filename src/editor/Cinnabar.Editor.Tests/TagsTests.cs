@@ -32,7 +32,7 @@ public sealed class TagsTests : IDisposable
     EditorShell NewShell()
     {
         var shell = TestShell.Open(_temp, null, null, Project);
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(A, AssetKind.Texture, "rock.png"),

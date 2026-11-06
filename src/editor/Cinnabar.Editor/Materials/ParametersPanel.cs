@@ -19,6 +19,9 @@ namespace Cinnabar.Editor.Materials;
 /// </summary>
 sealed class ParametersPanel : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     static readonly string[] TextureDefaults = ["white", "black", "normal"];
 
     readonly EditorShell _shell;

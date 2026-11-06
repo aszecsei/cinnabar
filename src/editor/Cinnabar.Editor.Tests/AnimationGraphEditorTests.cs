@@ -88,7 +88,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         var shell = TestShell.Open(_temp, null, null);
         File.WriteAllText(_temp.Combine("fox.animation_graph"), text);
         var asset = TestAssets.Make(Guid, AssetKind.AnimationGraph, "fox.animation_graph");
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
         shell.Assets.Apply(new AssetSnapshot([asset], []));
         return (shell, asset, text);
     }
@@ -646,7 +646,7 @@ public sealed class AnimationGraphEditorTests : IDisposable
         // Before the index comes, no clip can be looked up.
         Assert.Empty(editor.Problems);
 
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(Survey, AssetKind.Animation, "fox.gltf"),

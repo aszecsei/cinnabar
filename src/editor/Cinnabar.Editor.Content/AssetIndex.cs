@@ -16,6 +16,7 @@ public sealed class AssetIndex
     readonly HashSet<Folder> _folders = [];
     readonly Dictionary<string, Problem[]> _problems = [];
     readonly List<NodeInfo> _nodes = [];
+    readonly List<UiAttributeInfo> _uiAttributes = [];
     readonly List<ShadingModelInfo> _shadingModels = [];
     // The files of each folder and the sub-assets of each file, by name, built when next asked for after a change, since
     // the content browser asks for them for each row and a cook changes the assets many times.
@@ -34,6 +35,9 @@ public sealed class AssetIndex
 
     /// <summary>The kinds of node of material graphs, which the daemon's cooker knows (see docs/content/kinds/materials.md#material-graphs).</summary>
     public IReadOnlyList<NodeInfo> Nodes => _nodes;
+
+    /// <summary>The attributes of UI documents, from the daemon's Welcome, which the UI editor's properties show.</summary>
+    public IReadOnlyList<UiAttributeInfo> UiAttributes => _uiAttributes;
 
     /// <summary>The shading models that cook, by name.</summary>
     public IReadOnlyList<ShadingModelInfo> ShadingModels => _shadingModels;
@@ -92,6 +96,8 @@ public sealed class AssetIndex
                 _importers.AddRange(welcome.Importers);
                 _nodes.Clear();
                 _nodes.AddRange(welcome.Nodes);
+                _uiAttributes.Clear();
+                _uiAttributes.AddRange(welcome.UiAttributes);
                 break;
             case ShadingModels models:
                 _shadingModels.Clear();

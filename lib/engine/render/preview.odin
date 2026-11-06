@@ -65,6 +65,12 @@ Preview_Desc :: struct {
 	// for a copy of the target with this ticket, and sets captured if the backend has room.
 	capture:  u32,
 	captured: ^bool,
+	// A UI document's preview (see docs/editor/ui-editor.md#the-games-side), in place of the mesh and the material: the
+	// background, in linear light, or PREVIEW_BACKGROUND if its alpha is 0, and over it what this hook draws into
+	// Frame.ui of a frame at the target's size, whose data is ui_data. The hook gives whether all of it drew.
+	ui:         proc(f: ^Frame) -> bool,
+	ui_data:    rawptr,
+	background: [4]f32,
 }
 
 // Previews is the previews' state between frames, in the Renderer: the records of the one that a frame draws, and the
@@ -94,6 +100,8 @@ Preview_Frame :: struct {
 	scene:       Texture,
 	depth:       Texture,
 	target:      Texture,
+	// A UI preview's layer, which the output pass puts over the scene, or 0.
+	ui:          Texture,
 	instance_at: u32,
 	draws_at:    u32,
 	args_at:     u32,
@@ -230,6 +238,10 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		add_effect_preview_passes(f, desc)
 		return
 	}
+	if desc.ui != nil {
+		add_ui_preview_passes(f, desc)
+		return
+	}
 	r := f.renderer
 	g := f.graph
 	platform := r.platform
@@ -334,6 +346,47 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	pf.frame = f
 	p := add_render_pass(g, "preview output", draw_preview_output, pf)
 	read(g, p, pf.scene)
+	read(g, p, f.lut)
+	color(g, p, pf.target, .Discard)
+}
+
+// add_ui_preview_passes adds a UI document's preview's passes: the background, a UI layer of the target's size that the
+// hook draws into, and the output pass, which puts the layer over the background as a frame's output does.
+@(private = "file")
+add_ui_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
+	r := f.renderer
+	g := f.graph
+	platform := r.platform
+	pf := new(Preview_Frame, platform.frame_allocator)
+	pf.renderer, pf.desc, pf.frame = r, desc, f
+	size := desc.size
+	pf.target = import_texture(g, desc.target, .Color)
+	pf.scene = create_texture(g, {size = size, format = SCENE_FORMAT, label = "preview scene"})
+	pf.ui = create_texture(g, {size = size, format = UI_FORMAT, label = "preview ui"})
+	background := desc.background.a > 0 ? desc.background : PREVIEW_BACKGROUND
+	p := add_render_pass(g, "preview background", proc(_: ^Pass_Context) {}, pf)
+	color(g, p, pf.scene, .Clear, background)
+	p = add_render_pass(g, "clear preview ui", proc(_: ^Pass_Context) {}, pf)
+	color(g, p, pf.ui, .Clear)
+	sub := new(Frame, platform.frame_allocator)
+	sub^ = {
+		renderer    = r,
+		graph       = g,
+		data        = desc.ui_data,
+		size        = size,
+		output_size = size,
+		scene_size  = size,
+		scene       = pf.scene,
+		ui          = pf.ui,
+		lut         = f.lut,
+	}
+	ready := desc.ui(sub)
+	if desc.complete != nil {
+		desc.complete^ = ready && r.post.lut_baked
+	}
+	p = add_render_pass(g, "preview output", draw_preview_output, pf)
+	read(g, p, pf.scene)
+	read(g, p, pf.ui)
 	read(g, p, f.lut)
 	color(g, p, pf.target, .Discard)
 }
@@ -653,6 +706,9 @@ draw_preview_output :: proc(ctx: ^Pass_Context) {
 	}
 	push := output_push(pf.frame, gpu_texture(g, pf.scene), .Sdr)
 	push.size = pf.desc.size
+	if pf.ui != 0 {
+		push.ui, push.has_ui = gpu.read_index(gpu_texture(g, pf.ui)), 1
+	}
 	gpu.cmd_set_pipeline(ctx.cb, output)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_draw(ctx.cb, 3)

@@ -10,7 +10,7 @@ namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// What a preview pane shows and how its camera moves: a material editor's preview of a material on a mesh, or an
-/// effect's preview, which picks no mesh.
+/// effect's preview, which picks no mesh. A UI document's preview has a canvas of its own.
 /// </summary>
 public interface IPreviewOwner
 {
@@ -119,7 +119,8 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
         SendSettings();
     }
 
-    protected void SendSettings()
+    /// <summary>Tells the game how the preview shows what it shows: its mesh, its camera and its size.</summary>
+    protected virtual void SendSettings()
     {
         if (PreviewId is { } id)
         {

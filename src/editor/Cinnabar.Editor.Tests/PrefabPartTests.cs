@@ -37,7 +37,7 @@ public sealed class PrefabPartTests : IDisposable
         Directory.CreateDirectory(_temp.Path);
         File.WriteAllText(_temp.Combine("stand.prefab"), StandText);
         var shell = TestShell.Open(_temp, "level.scene", "scene 2\n");
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Prefab, ".prefab", [])], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Prefab, ".prefab", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(Stand, AssetKind.Prefab, "stand.prefab", generated: generated ?? ""),

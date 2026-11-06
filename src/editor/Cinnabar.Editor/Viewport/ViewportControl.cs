@@ -209,6 +209,18 @@ public sealed class ViewportControl : Control
             (point.Y - _visual.Offset.Y) * frame.Height / _visual.Size.Y);
     }
 
+    /// <summary>The point of the control that shows a point of the host's frame, in its pixels, or null before the first frame.</summary>
+    public Point? ControlPoint(Vec2 frame)
+    {
+        if (_visual == null || Session is not { FrameSize: { Width: > 0, Height: > 0 } size })
+        {
+            return null;
+        }
+        return new Point(
+            _visual.Offset.X + frame.X * _visual.Size.X / size.Width,
+            _visual.Offset.Y + frame.Y * _visual.Size.Y / size.Height);
+    }
+
     /// <summary>How many frame pixels a unit of the control's length covers.</summary>
     public double FrameScale => _visual is { Size.Y: > 0 } && Session is { FrameSize.Height: > 0 } ? Session.FrameSize.Height / _visual.Size.Y : 1;
 

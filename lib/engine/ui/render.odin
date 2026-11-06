@@ -7,14 +7,16 @@ import "cinnabar:engine/render"
 @(private)
 UI_SHADER :: #load("../content/shaders/ui.hlsl.meta", string)
 
-// Push matches Push in ui.hlsl.
+// Push matches Push in ui.hlsl. viewport is the target's size in pixels, and a document's pixel p draws at
+// p * view_scale + view_offset in it.
 @(private = "file")
 Push :: struct {
 	instances:        u32,
 	instances_offset: u32,
 	sampler:          u32,
-	padding:          u32,
+	view_scale:       f32,
 	viewport:         [2]f32,
+	view_offset:      [2]f32,
 }
 
 #assert(size_of(Push) <= 128)
@@ -44,16 +46,30 @@ sync_pipelines :: proc(s: ^State, force := false) {
 // draw. The game calls it from its ui hook, which it may add its own passes to before or after.
 add_passes :: proc(s: ^State, f: ^render.Frame) {
 	layout(s, {f32(f.output_size.x), f32(f.output_size.y)})
+	add_batch_pass(s, f, -1, {scale = 1})
+}
+
+// View is where a document's pixels draw in a target: pixel p at p * scale + offset. The game's UI draws at a scale of
+// 1; the editor's preview draws a screen of another size into its target, zoomed and panned.
+View :: struct {
+	scale:  f32,
+	offset: [2]f32,
+}
+
+// add_batch_pass adds the pass that draws the documents that layout laid out, or the one in the slot only, into the
+// frame's UI layer through a view. It is false while something does not draw yet.
+@(private)
+add_batch_pass :: proc(s: ^State, f: ^render.Frame, only: int, view: View) -> (ready: bool) {
 	if s.pipeline.pipeline == {} {
-		return
+		return false
 	}
-	b := build_batch(s, s.platform.time_seconds(), s.platform.frame_allocator)
+	b := build_batch(s, s.platform.time_seconds(), s.platform.frame_allocator, only)
 	if len(b.instances) == 0 {
-		return
+		return !b.waiting
 	}
 	upload, ok := s.platform.gpu_upload(len(b.instances) * size_of(Instance), 16)
 	if !ok {
-		return
+		return false
 	}
 	copy(([^]Instance)(raw_data(upload.data))[:len(b.instances)], b.instances[:])
 	pass := new(Ui_Pass, s.platform.frame_allocator)
@@ -64,11 +80,14 @@ add_passes :: proc(s: ^State, f: ^render.Frame) {
 			instances = gpu.read_index(upload.buffer),
 			instances_offset = upload.offset,
 			sampler = gpu.sampler_index(s.sampler),
-			viewport = s.size,
+			view_scale = view.scale,
+			viewport = {f32(f.output_size.x), f32(f.output_size.y)},
+			view_offset = view.offset,
 		},
 	}
 	p := render.add_render_pass(f.graph, "ui", draw_ui, pass)
 	render.color(f.graph, p, f.ui, .Load)
+	return !b.waiting
 }
 
 @(private = "file")

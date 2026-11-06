@@ -13,6 +13,9 @@ namespace Cinnabar.Editor.AnimationGraphs;
 /// <summary>The animation graph editor's details: the selected state's, blend's or transition's fields, with its problems.</summary>
 sealed class AnimationNodeDetails : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     readonly EditorShell _shell;
     readonly AnimationGraphEditor _editor;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2 };

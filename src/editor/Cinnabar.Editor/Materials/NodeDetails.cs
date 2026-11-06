@@ -19,6 +19,9 @@ namespace Cinnabar.Editor.Materials;
 /// </summary>
 sealed class NodeDetails : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     readonly EditorShell _shell;
     readonly MaterialEditor _editor;
     readonly StackPanel _content = new() { Margin = new Thickness(8), Spacing = 2 };

@@ -95,6 +95,8 @@ Message :: union {
 	Animator_View,
 	Set_Preview_Parameter,
 	Restart_Preview,
+	Ui_Preview_Settings,
+	Ui_Preview_Layout,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -720,6 +722,63 @@ Set_Preview_Parameter :: struct {
 // Editor to game: an animation graph's preview starts again in the entry state, with the parameters at their defaults.
 Restart_Preview :: struct {
 	id: u32,
+}
+
+// UI previews (see docs/editor/ui-editor.md#the-games-side). An Open_Preview of a UI document, with unsaved for the text
+// that the cook daemon cooked into the preview area, shows it in preview id. The game lays it out on a screen of its own
+// and draws it through a view, and tells the editor where each element went.
+
+Ui_Preview_Background :: enum u8 {
+	Dark,
+	Light,
+}
+
+// A value for a {name} in the document's text, which the file does not keep.
+Ui_Preview_Binding :: struct {
+	name:  string,
+	value: string,
+}
+
+// Editor to game: how preview id shows its UI document, in place of Preview_Settings. The document is laid out on a
+// screen of screen_width by screen_height pixels at a UI scale of scale, as a game of that size would, and a pixel p of
+// the screen draws at p * view_scale + (view_x, view_y) in the preview's target, which is width by height pixels within
+// gpu.MAX_PREVIEW_SIZE. The element that is the blob's node forced_node, or none with max(u32), shows the states
+// forced_states (1 hover, 2 focus, 4 press, 8 disabled) in place of the player's.
+Ui_Preview_Settings :: struct {
+	id:            u32,
+	screen_width:  i32,
+	screen_height: i32,
+	scale:         f32,
+	view_scale:    f32,
+	view_x:        f32,
+	view_y:        f32,
+	width:         i32,
+	height:        i32,
+	background:    Ui_Preview_Background,
+	forced_node:   u32,
+	forced_states: u8,
+	bindings:      []Ui_Preview_Binding,
+}
+
+// Where an element of a UI preview went, in the screen's pixels as x0, y0, x1, y1: its rectangle, the rectangle inside
+// its padding, and what its drawing is cut to. source is its node in the blob, in the order of the document's text.
+Ui_Layout_Node :: struct {
+	source:  u32,
+	shown:   bool,
+	rect:    [4]f32,
+	content: [4]f32,
+	clip:    [4]f32,
+}
+
+// Game to editor: where preview id's elements went when it last drew, when it changed. key is the blob's, which for a
+// text that the cook daemon cooked is the text's FNV-1a hash, and scale the UI scale that it was laid out at.
+Ui_Preview_Layout :: struct {
+	id:     u32,
+	key:    u64,
+	scale:  f32,
+	width:  i32,
+	height: i32,
+	nodes:  []Ui_Layout_Node,
 }
 
 // A key or a mouse button, as core.Key has them.
