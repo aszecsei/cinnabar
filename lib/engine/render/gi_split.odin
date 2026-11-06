@@ -31,9 +31,9 @@ SPLIT_COUNTERS_SIZE :: 16
 // A window's first cell is a multiple of this, so a cascade's cell is the first cascade's shifted right, exactly.
 SPLIT_SNAP :: 1 << MAX_SPLIT_CASCADES
 // A probe that no ray reached for this many frames is freed, so a surface that leaves the view keeps its light when it
-// returns. A cascade whose slots run short shortens this, to no less than SPLIT_MIN_LIFETIME (see split_lifetime).
+// returns. A cascade that drops keys shortens this, to no less than SPLIT_MIN_LIFETIME (see split_lifetime).
 SPLIT_LIFETIME :: 600
-SPLIT_MIN_LIFETIME :: 60
+SPLIT_MIN_LIFETIME :: 8
 // The share of each level's distances that blends into the next.
 SPLIT_BAND :: 0.5
 // A ray starts this many pixels off its surface.
@@ -510,16 +510,19 @@ split_rotation :: proc(frame: u32, tile: [2]u32) -> [2]u32 {
 	return {j % tile.x, j / tile.x}
 }
 
-// split_lifetime is a cascade's lifetime after a frame, from its table a frame or two ago. A key that found no room, or
-// a table that is nearly full, shortens it by a quarter each frame, which frees the probes that went longest without a
-// ray. A table with room lengthens it by a frame each frame, as fast as a probe ages, so lengthening frees nothing and
-// a table does not swing between the two. A cascade without stats keeps its lifetime.
+// split_lifetime is a cascade's lifetime after a frame, from its table a frame or two ago. A key that found no room
+// halves it each frame, to SPLIT_MIN_LIFETIME, which frees the probes that went longest without a ray: after a turn,
+// the probes behind the camera were reached a frame ago, and until they are freed the probes in view have no slot. A
+// table that is only nearly full keeps its probes, as freeing them early would bring each one back new as it returns,
+// which flickered on Ultra. Below three quarters full, it lengthens by a frame each frame, as fast as a probe ages, so
+// lengthening frees nothing, and between the two it holds, so a table near its limit does not grow into dropping. A
+// cascade without stats keeps its lifetime.
 split_lifetime :: proc(lifetime: u32, stats: Split_Cascade_Stats) -> u32 {
 	if stats.slots == 0 {
 		return lifetime
 	}
-	if stats.dropped > 0 || stats.active >= stats.slots - stats.slots / 8 {
-		return max(lifetime - lifetime / 4, SPLIT_MIN_LIFETIME)
+	if stats.dropped > 0 {
+		return max(lifetime / 2, SPLIT_MIN_LIFETIME)
 	}
 	if stats.active < stats.slots - stats.slots / 4 {
 		return min(lifetime + 1, SPLIT_LIFETIME)

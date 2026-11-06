@@ -484,14 +484,15 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 a_split_cascade_keeps_its_probes_until_its_slots_run_short :: proc(t: ^testing.T) {
 	roomy := Split_Cascade_Stats{active = 100, slots = 1024}
 	between := Split_Cascade_Stats{active = 800, slots = 1024}
-	full := Split_Cascade_Stats{active = 896, slots = 1024}
+	full := Split_Cascade_Stats{active = 1000, slots = 1024}
 	dropping := Split_Cascade_Stats{active = 100, slots = 1024, dropped = 1}
 
-	// With room, it stays at its longest. Short of room, it falls by a quarter each frame, however little was dropped.
+	// With room, it stays at its longest. A key that found no room, however few, halves it.
 	testing.expect_value(t, split_lifetime(SPLIT_LIFETIME, roomy), SPLIT_LIFETIME)
-	testing.expect_value(t, split_lifetime(400, full), 300)
-	testing.expect_value(t, split_lifetime(400, dropping), 300)
-	// Between the two, it holds, so a table near its limit does not swing.
+	testing.expect_value(t, split_lifetime(400, dropping), 200)
+	// A table that is nearly full, or between that and room, holds it: it frees nothing early, and does not grow into
+	// dropping.
+	testing.expect_value(t, split_lifetime(400, full), 400)
 	testing.expect_value(t, split_lifetime(400, between), 400)
 	// Without stats, as when the split did not run last frame, it holds too.
 	testing.expect_value(t, split_lifetime(400, {}), 400)
@@ -499,12 +500,16 @@ a_split_cascade_keeps_its_probes_until_its_slots_run_short :: proc(t: ^testing.T
 	// It grows no faster than a probe ages, so growing frees no probe that was alive.
 	testing.expect_value(t, split_lifetime(400, roomy), 401)
 
-	// A table that stays full ends at the shortest lifetime, and one with room again returns to the longest.
+	// One that drops keys after a turn frees the probes behind the camera within a few frames, and ends at the
+	// shortest; one with room again returns to the longest.
 	lifetime := u32(SPLIT_LIFETIME)
-	for _ in 0 ..< 100 {
-		lifetime = split_lifetime(lifetime, full)
+	frames := 0
+	for lifetime > SPLIT_MIN_LIFETIME {
+		lifetime = split_lifetime(lifetime, dropping)
+		frames += 1
 	}
-	testing.expect_value(t, lifetime, SPLIT_MIN_LIFETIME)
+	testing.expect(t, frames <= 8)
+	testing.expect_value(t, split_lifetime(lifetime, dropping), SPLIT_MIN_LIFETIME)
 	for _ in 0 ..< SPLIT_LIFETIME {
 		lifetime = split_lifetime(lifetime, roomy)
 	}
