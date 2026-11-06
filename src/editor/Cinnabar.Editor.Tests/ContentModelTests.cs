@@ -17,7 +17,7 @@ public sealed class ContentModelTests : IDisposable
     EditorShell NewShell()
     {
         var shell = TestShell.Open(_temp, null, null);
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path), new Root("engine", _temp.Combine("engine"))], [], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path), new Root("engine", _temp.Combine("engine"))], [], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(Door, AssetKind.Script, "door.luau"),
@@ -76,7 +76,7 @@ public sealed class ContentModelTests : IDisposable
             new Importer(AssetKind.Texture, ".png", [Mips, Size]),
             new Importer(AssetKind.Model, ".glb", [Tangents, new SettingInfo("mips", ["on", "off"], "on", "Not the same setting.")]),
             new Importer(AssetKind.Mesh, ".mesh", [Tangents]),
-        ], []));
+        ], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(Rock, AssetKind.Texture, "rock.png", settings: [new Setting("max_size", "256")]),

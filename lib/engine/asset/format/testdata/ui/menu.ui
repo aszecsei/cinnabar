@@ -1,5 +1,6 @@
 ui 1
 <!-- A pause menu that uses every part of the format, with no problems. -->
+<!-- nodes: ui column text button text button text row text field button text stack image text box template row text -->
 <ui modal="true" cancel="resume" focus="resume" font=$00112233445566778899aabbccddeeff size="18" color="#fff">
 	<style name="button" fill="#1c2030e0" radius="6" padding="10 16" border="1 #ffffff30"/>
 	<style name="button:focus" fill="#e2423a" border="2 #fff"/>

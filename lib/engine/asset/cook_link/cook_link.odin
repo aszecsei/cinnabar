@@ -51,6 +51,9 @@ Welcome :: struct {
 	// The kinds of node that material graphs have, which the editor's node editor shows (see
 	// docs/content/kinds/materials.md#material-graphs).
 	nodes:     []Node_Info,
+	// The attributes of UI documents, which the UI editor's properties show (see
+	// docs/content/kinds/ui-documents.md#attributes).
+	ui_attributes: []Ui_Attribute_Info,
 }
 
 // A content root, by its name, such as "game", and its directory: absolute, with forward slashes.
@@ -418,6 +421,18 @@ Node_Info :: struct {
 	scope:       Node_Scope,
 }
 
+// An attribute of UI documents, by its name, such as "padding": the kind of value that it takes, by the name of
+// format.Ui_Value_Kind in snake case, such as "length" or "text_align"; the elements that it means something on, by
+// their names; whether children inherit it; and the range of a number.
+Ui_Attribute_Info :: struct {
+	name:      string,
+	kind:      string,
+	elements:  []string,
+	inherited: bool,
+	min:       f32,
+	max:       f32,
+}
+
 // A shading model, by its name, such as "lit", and the surface inputs that its .shading file declares.
 Shading_Model_Info :: struct {
 	name:        string,
@@ -432,9 +447,10 @@ Shading_Models :: struct {
 	models: []Shading_Model_Info,
 }
 
-// Editor to daemon: the text of a material or an animation graph that the editor has not saved, as a request. The
-// daemon cooks it as the asset with this GUID, into the preview area of the cache, <cache>/dev/preview/<guid>.blob,
-// which the host's previews load. The asset's own blob does not change. A Preview_Result with the request's ID answers it.
+// Editor to daemon: the text of a material, an animation graph or a UI document that the editor has not saved, as a
+// request. The daemon cooks it as the asset with this GUID, into the preview area of the cache,
+// <cache>/dev/preview/<guid>.blob, which the host's previews load. The asset's own blob does not change. A
+// Preview_Result with the request's ID answers it.
 Cook_Preview :: struct {
 	guid: string,
 	text: string,

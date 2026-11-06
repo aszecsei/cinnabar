@@ -33,7 +33,7 @@ public sealed class MeshModeTests : IDisposable
     {
         MeshFixtures.WriteRoom(_temp);
         var shell = TestShell.Open(_temp, "main.scene", Text);
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Mesh, ".mesh", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot([TestAssets.Make(MeshFixtures.MeshGuid, AssetKind.Mesh, "room.mesh")], []));
         shell.OnGameMessage(new EntitySnapshot(
         [

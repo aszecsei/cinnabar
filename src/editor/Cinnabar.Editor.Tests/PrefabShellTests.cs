@@ -38,7 +38,7 @@ public sealed class PrefabShellTests : IDisposable
 
     static void Index(EditorShell shell, string directory)
     {
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", directory)], [new Importer(AssetKind.Prefab, ".prefab", [])], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", directory)], [new Importer(AssetKind.Prefab, ".prefab", [])], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(Door, AssetKind.Prefab, "door.prefab", dependencies: [Lamp]),

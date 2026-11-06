@@ -234,7 +234,7 @@ handle_messages :: proc(d: ^Daemon) {
 				roots[i] = {r.name, r.dir}
 			}
 			// The Welcome and the index go out before the first log line, so the editor has them first.
-			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers(), nodes = node_infos()})
+			server_send(&d.server, connection, cook_link.Welcome{protocol = version, config = "dev", roots = roots, importers = importers(), nodes = node_infos(), ui_attributes = ui_attribute_infos()})
 			snapshot, problems := index_snapshot(&d.index)
 			server_send(&d.server, connection, snapshot)
 			for p in problems {
@@ -277,9 +277,9 @@ handle_messages :: proc(d: ^Daemon) {
 	}
 }
 
-// preview cooks a material or an animation graph that the editor has not saved into the cache's preview area (see
-// cook_preview and animation_graph_check). Its problems go to the editor in the answer, and not to the log: the graph's
-// editor shows them on its nodes.
+// preview cooks a material, an animation graph or a UI document that the editor has not saved into the cache's preview
+// area (see cook_preview, animation_graph_check and ui_check). Its problems go to the editor in the answer, and not to
+// the log: the asset's editor shows them on its nodes or elements.
 @(private = "file")
 preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Result {
 	guid, guid_ok := format.guid_parse(msg.guid)
@@ -288,16 +288,23 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 	}
 	problems: Problems
 	ok: bool
-	if a, known := d.index.assets[msg.guid]; known && a.kind == .Animation_Graph {
-		path := a.path
-		for r in d.options.roots {
-			if r.name == a.root {
-				path = fmt.tprintf("%s/%s", r.dir, a.path)
-			}
+	failed := "the graph did not cook"
+	a, known := d.index.assets[msg.guid]
+	path := a.path
+	for r in d.options.roots {
+		if known && r.name == a.root {
+			path = fmt.tprintf("%s/%s", r.dir, a.path)
 		}
-		problems = animation_graph_check(d.options, guid, msg.text, path, fmt.tprintf("%s/%s", a.root, a.path))
+	}
+	name := fmt.tprintf("%s/%s", a.root, a.path)
+	switch {
+	case known && a.kind == .Animation_Graph:
+		problems = animation_graph_check(d.options, guid, msg.text, path, name)
 		ok = len(problems.list) == 0
-	} else {
+	case known && a.kind == .Ui:
+		problems, ok = ui_check(d.options, guid, msg.text, path, name, index_kinds(&d.index))
+		failed = "the document did not cook"
+	case:
 		problems, ok = cook_preview(d.options, guid, msg.text)
 	}
 	result := cook_link.Preview_Result {
@@ -307,7 +314,7 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 		result.problems[i] = {p.file, u32(p.line), u32(p.column), p.error, p.text}
 	}
 	if !ok {
-		result.error = "the graph did not cook"
+		result.error = failed
 		for p in problems.list {
 			if p.error {
 				result.error = p.text
@@ -316,6 +323,25 @@ preview :: proc(d: ^Daemon, msg: cook_link.Cook_Preview) -> cook_link.Preview_Re
 		}
 	}
 	return result
+}
+
+// index_kinds is the kind of each asset in the index by its GUID, in the temporary allocator.
+@(private = "file")
+index_kinds :: proc(index: ^Index) -> map[format.Guid]format.Asset_Kind {
+	kinds := make(map[format.Guid]format.Asset_Kind, len(index.assets), context.temp_allocator)
+	for text, a in index.assets {
+		guid, valid := format.guid_parse(text)
+		if !valid {
+			continue
+		}
+		for k in format.Asset_Kind {
+			if k != .None && link_kind(k) == a.kind {
+				kinds[guid] = k
+				break
+			}
+		}
+	}
+	return kinds
 }
 
 // clear_previews deletes the preview area of the cache.

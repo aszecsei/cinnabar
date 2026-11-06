@@ -16,7 +16,7 @@ public sealed class ContentTests : IDisposable
     EditorShell NewShell()
     {
         var shell = TestShell.Open(_temp, "main.scene", "scene 1\n\nentity 0000000000000001\nname = \"Door\"\n\nentity 0000000000000002\nname = \"Gate\"\n");
-        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Script, ".luau", [Native])], []));
+        shell.Assets.Apply(new Welcome(1, "dev", [new Root("game", _temp.Path)], [new Importer(AssetKind.Script, ".luau", [Native])], [], []));
         shell.Assets.Apply(new AssetSnapshot(
         [
             TestAssets.Make(DoorScript, AssetKind.Script, "door.luau", behaviour: "Door", dependencies: [UtilScript]),
