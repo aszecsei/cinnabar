@@ -76,6 +76,10 @@ Material_Pass :: enum u32 {
 	// docs/rendering/lighting-and-shadows.md#virtual-shadow-maps). They draw with the depth passes' other stages.
 	Virtual_Depth,
 	Impostor_Virtual_Depth,
+	// The pixel stage of the global illumination's voxelization, which writes the surface's albedo, normal and emission
+	// to the voxels that it covers (see docs/rendering/global-illumination.md#voxel-cones). It draws with the prepass's
+	// other stages. An opaque or masked material has it.
+	Voxelize,
 }
 
 // material_impostor_pass is the impostor path's pass that stands in for an opaque pass.

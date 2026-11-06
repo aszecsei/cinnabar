@@ -352,8 +352,9 @@ ensure_probe_storage :: proc(r: ^Renderer, params: Gi_Probe_Params, rays: int) {
 }
 
 // probe_lights are the punctual lights that the probes' hits see: those whose spheres reach the outermost level's box,
-// the brightest over their squared distance from the camera first, at most GI_MAX_PROBE_LIGHTS.
-@(private = "file")
+// the brightest over their squared distance from the camera first, at most GI_MAX_PROBE_LIGHTS. The voxel cones'
+// injection lights its voxels with them too.
+@(private)
 probe_lights :: proc(f: ^Frame, reach: f32) -> []u32 {
 	lf := f.lights
 	order := make([dynamic]u32, f.renderer.platform.frame_allocator)

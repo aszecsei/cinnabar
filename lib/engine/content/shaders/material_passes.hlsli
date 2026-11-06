@@ -3,7 +3,8 @@
 // as_cluster with ms_forward, ms_prepass and ms_depth take the vertex shaders' places. A transparent or additive
 // material has ps_transparent and ps_transparent_ids instead, and a transparent one ps_moments, all with vs_forward.
 // An opaque material of meshes has the impostor path's too, vs_impostor_* and ps_impostor_* for each opaque pass. An
-// opaque or masked material of meshes has cs_hit, which compiles with MATERIAL_HIT and nothing else.
+// opaque or masked material of meshes has cs_hit, which compiles with MATERIAL_HIT and nothing else. An opaque or masked
+// material that is not a ribbon's has ps_voxelize, which draws with vs_prepass or ms_prepass.
 #if MATERIAL_HIT
 #include "material_hit.hlsli"
 #else
@@ -12,7 +13,10 @@
 #include "material_depth.hlsli"
 #if MATERIAL_TRANSPARENT
 #include "material_transparent.hlsli"
-#elif !MATERIAL_PATCHES && !MATERIAL_BILLBOARD
+#else
+#include "material_voxelize.hlsli"
+#if !MATERIAL_PATCHES && !MATERIAL_BILLBOARD
 #include "material_impostor.hlsli"
+#endif
 #endif
 #endif

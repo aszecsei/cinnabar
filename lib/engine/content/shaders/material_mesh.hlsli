@@ -79,7 +79,7 @@ bool lod_selected(Meshlet c, float4 rows[3], float scale) {
 // an instance whose scale is not uniform, which bends normals, or for a cone too wide to cull. In the late view of
 // occlusion culling, its sphere is not behind the depth pyramid either. In a virtual shadow map's level, its sphere
 // reaches a page that was allocated. A sphere with an infinite radius passes every test, which would otherwise take it
-// through NaNs.
+// through NaNs. A view of the voxel cones' voxelization tests no cone, which faces the camera, not its view.
 bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 	float3 scales = axis_scales(instance.rows);
 	float scale = max(scales.x, max(scales.y, scales.z));
@@ -100,7 +100,7 @@ bool cluster_visible(Meshlet c, Instance_Record instance, float bound) {
 #if !MATERIAL_TWO_SIDED && !MATERIAL_DISPLACES
 	int4 packed = int4(c.cone << 24, c.cone << 16, c.cone << 8, c.cone) >> 24;
 	float uniformity = min(scales.x, min(scales.y, scales.z)) / scale;
-	if (packed.w < 127 && uniformity > 0.99) {
+	if (packed.w < 127 && uniformity > 0.99 && frame.voxel_draw == 0) {
 		float3 axis = normalize(transform_direction(instance.rows, float3(packed.xyz) / 127.0));
 		float cutoff = packed.w / 127.0;
 		if (frame.cull_eye.w != 0) {

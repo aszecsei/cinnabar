@@ -37,6 +37,9 @@ RWTexture2D<float4> cn_rw_texture(uint index) { return ResourceDescriptorHeap[in
 // A 3D texture, whose Texture_Desc has a depth.
 Texture3D<float4> cn_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
 RWTexture3D<float4> cn_rw_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
+// A 3D texture of an unsigned integer format, such as R32_Uint.
+Texture3D<uint> cn_uint_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
+RWTexture3D<uint> cn_rw_uint_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
 // A cube map, whose Texture_Desc has cube. It has no Load, so take a texel's middle with SampleLevel.
 TextureCube<float4> cn_texture_cube(uint index) { return ResourceDescriptorHeap[index]; }
 // A texture array, whose Texture_Desc has layers. A texture's view must match the type that reads it.

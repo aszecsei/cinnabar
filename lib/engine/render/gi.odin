@@ -11,7 +11,8 @@ import "cinnabar:core/gpu"
 // specular light from them into history textures, which the forward pass reads in place of the ambient light. After
 // the world pass, the scene is kept, without its pre-exposure, for the next frame's rays. With Split_Cascades, the world
 // probes (gi_probes.odin) give the light beyond the screen and beyond the last cascade in the ambient sky's place, and
-// the split cascades (gi_split.odin) take the screen cascades' place.
+// the split cascades (gi_split.odin) take the screen cascades' place. With Voxel_Cones, the voxel cones (gi_voxel.odin)
+// take it.
 
 // The engine's global illumination shaders, by their .meta files.
 GI_TRACE_SHADER :: #load("../content/shaders/gi_trace.hlsl.meta", string)
@@ -53,9 +54,10 @@ GI_PARAMS := [Quality_Level]Gi_Params {
 Gi_Settings :: struct {
 	// Without it, the indirect light is the Environment's ambient light.
 	off:       bool,
-	// Split_Cascades adds the world probes and the split cascades.
+	// Split_Cascades adds the world probes and the split cascades, and Voxel_Cones the voxel cones.
 	technique: Gi_Technique,
-	// The cascades' GI_PARAMS, and the world probes' GI_PROBE_PARAMS.
+	// The cascades' GI_PARAMS, the world probes' GI_PROBE_PARAMS, the split cascades' GI_SPLIT_PARAMS and the voxel
+	// cones' GI_VOXEL_PARAMS.
 	level:     Quality_Level,
 }
 
@@ -69,6 +71,7 @@ Gi_Passes :: struct {
 	frame:  u32,
 	probes: Gi_Probes,
 	split:  Gi_Split,
+	voxel:  Gi_Voxel,
 }
 
 // Gi_Constants matches Gi_Constants in gi_common.hlsli.
@@ -127,8 +130,11 @@ Gi_Frame :: struct {
 	settings:  Gi_Settings,
 	// The world probes, once add_gi_world_probes has updated them, or nil.
 	probes:    ^Gi_Probe_Frame,
-	// The split cascades' probes as the Gi_Probes debug view shows them, which their gather draws when the view is on.
+	// The split cascades' probes, or the voxel cones' voxels, as the Gi_Probes debug view shows them, which their gather
+	// draws when the view is on.
 	probe_view: Texture,
+	// The voxel cones, once begin_gi has placed their levels, or nil.
+	voxel:      ^Gi_Voxel_Frame,
 }
 
 // Gi_Merge is one merge pass, of one cascade.
@@ -145,6 +151,7 @@ gi_init :: proc(gi: ^Gi_Passes) {
 	gi.lit = shader_pipeline(GI_LIT_SHADER)
 	gi_probes_init(&gi.probes)
 	gi_split_init(&gi.split)
+	gi_voxel_init(&gi.voxel)
 }
 
 gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
@@ -153,6 +160,7 @@ gi_destroy :: proc(gi: ^Gi_Passes, platform: ^core.Platform_API) {
 	}
 	gi_probes_destroy(&gi.probes, platform)
 	gi_split_destroy(&gi.split, platform)
+	gi_voxel_destroy(&gi.voxel, platform)
 }
 
 @(private)
@@ -165,6 +173,7 @@ sync_gi_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&gi.lit, r.platform, assets, {label = "gi lit"}, force)
 	sync_gi_probe_pipelines(r, force)
 	sync_gi_split_pipelines(r, force)
+	sync_gi_voxel_pipelines(r, force)
 }
 
 // gi_region is the size of one cascade's rows: the most texels that a cascade's probes and directions take.
@@ -192,7 +201,8 @@ gi_fit :: proc(size: [2]u32, params: Gi_Params) -> Gi_Params {
 }
 
 // begin_gi decides whether the frame has global illumination, before the scene's constants are written, which say so.
-// With Split_Cascades and the probes' pipelines, it requests the ray scene, which the probes trace.
+// With Split_Cascades and the probes' pipelines, it requests the ray scene, which the probes trace. With Voxel_Cones,
+// it places the voxel cones' levels, whose voxelization the scene's views draw.
 @(private)
 begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	r := f.renderer
@@ -222,6 +232,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	if settings.technique == .Split_Cascades && gi_probes_ready(r) {
 		request_ray_scene(f)
 	}
+	gf.voxel = begin_gi_voxels(f, settings)
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)
 	gf.constants = {
@@ -274,7 +285,14 @@ add_gi_passes :: proc(f: ^Frame) {
 	platform := f.renderer.platform
 	// Last frame's projection is known once the scene's constants are written.
 	gf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
-	// With the world probes, the split cascades take the screen cascades' place.
+	// The voxel cones, or with the world probes the split cascades, take the screen cascades' place.
+	if gf.settings.technique == .Voxel_Cones {
+		voxels := add_gi_voxel_passes(f)
+		note_voxel_fallback(f, voxels)
+		if voxels {
+			return
+		}
+	}
 	split := add_gi_split_passes(f)
 	note_split_fallback(f, split)
 	if split {

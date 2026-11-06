@@ -59,6 +59,15 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, q.gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
 	testing.expect_value(t, clamp_quality(q, {ray_query = true}), q)
+	// The voxel cones need no ray queries, and no preset chooses them.
+	voxels := q
+	voxels.gi.technique = .Voxel_Cones
+	testing.expect_value(t, clamp_quality(voxels, {}).gi.technique, Gi_Technique.Voxel_Cones)
+	testing.expect_value(t, clamp_quality(voxels, {ray_query = true}).gi.technique, Gi_Technique.Voxel_Cones)
+	for preset in Quality_Preset {
+		testing.expect(t, preset_quality(preset, {}).gi.technique != .Voxel_Cones)
+		testing.expect(t, preset_quality(preset, {ray_query = true}).gi.technique != .Voxel_Cones)
+	}
 
 	// A settings file or a script may give any number.
 	bad := q

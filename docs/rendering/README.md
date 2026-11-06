@@ -19,7 +19,7 @@ Read them in this order the first time.
 | [Materials](materials.md) | Shading models, materials, permutations, instances, the runtime and previews. |
 | [Surfaces](surfaces.md) | Patch surfaces: a quadtree of grid patches picked on the GPU, with holes, for water and terrain. |
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
-| [Global illumination](global-illumination.md) | Screen-space radiance cascades, and world probes and split radiance cascades traced with ray queries. |
+| [Global illumination](global-illumination.md) | Screen-space radiance cascades; world probes and split radiance cascades traced with ray queries; and voxel cone tracing. |
 | [Volumetric fog](fog.md) | The froxel volume. |
 | [Sky](sky.md) | The Environment: the Flat background, the atmosphere's sky, its sun, moon and stars, and the ambient light. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
@@ -56,6 +56,7 @@ Read them in this order the first time.
 | `gi.odin` | Screen-space radiance cascades ([Global illumination](global-illumination.md#global-illumination)) |
 | `gi_probes.odin` | The world probes: their levels, schedule, storage and passes ([World probes](global-illumination.md#world-probes)) |
 | `gi_split.odin` | The split radiance cascades: their windows, tables, storage and passes ([Split cascades](global-illumination.md#split-cascades)) |
+| `gi_voxel.odin` | The voxel cones: their clipmap's levels, schedule, storage, voxelization views and passes ([Voxel cones](global-illumination.md#voxel-cones)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |
@@ -106,6 +107,7 @@ Each entry names the section that follows it.
 
 - Intel, [XeGTAO](https://github.com/GameTechDev/XeGTAO): the reference implementation that [Ambient occlusion](ambient-occlusion.md#ambient-occlusion) follows for its depth levels, slice search, Hilbert-curve noise and edge-aware denoiser.
 - Jorge Jimenez, Xian-Chun Wu, Angelo Pesce, Adrian Jarabo, [*Practical Real-Time Strategies for Accurate Indirect Occlusion*](https://www.activision.com/cdn/research/Practical_Real_Time_Strategies_for_Accurate_Indirect_Occlusion_NEW%20VERSION_COLOR.pdf), SIGGRAPH 2016: GTAO in [Ambient occlusion](ambient-occlusion.md#ambient-occlusion).
+- Cyril Crassin, Fabrice Neyret, Miguel Sainz, Simon Green, Elmar Eisemann, [*Interactive Indirect Illumination Using Voxel Cone Tracing*](https://research.nvidia.com/publication/2011-09_interactive-indirect-illumination-using-voxel-cone-tracing), Pacific Graphics 2011, and Cyril Crassin, Simon Green, *Octree-Based Sparse Voxelization Using the GPU Hardware Rasterizer*, OpenGL Insights, 2012: the cones, their weights and the voxelization's running means in [Voxel cones](global-illumination.md#voxel-cones). Alexey Panteleev, [*Practical Real-Time Voxel-Based Global Illumination for Current GPUs*](https://on-demand.gputechconf.com/gtc/2014/presentations/S4552-rt-voxel-based-global-illumination-gpus.pdf), GTC 2014: the clipmap in the octree's place, and its toroidal storage.
 - Alexander Sannikov, [*Radiance Cascades: A Novel High-Resolution Formal Solution for Multiresolution Global Illumination*](https://github.com/Raikiri/RadianceCascadesPaper): the cascades, intervals and merge of [Global illumination](global-illumination.md#global-illumination), in their screen-space form.
 - Cedrick Münstermann, Stefan Krumpen, Reinhard Klein, Christoph Peters, [*Moment-Based Order-Independent Transparency*](https://momentsingraphics.de/I3D2018.html), I3D 2018: the four power moments of [Transparency](transparency.md#transparency).
 - Johan Köhler, [*Practical Order Independent Transparency*](https://research.activision.com/content/dam/atvi/activision/atvi-touchui/research/tech-reports/docs/PracticalOIT.pdf), Treyarch: compute sprites, their tiles and their particle lightmap, which [Sprites](transparency.md#sprites) rasterizes into the moments.

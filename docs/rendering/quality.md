@@ -20,8 +20,8 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.virtual` | `bool` | A [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps) in place of the cascades, for a directional light that is not traced. Low has none |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
-| `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades` | The [global illumination](global-illumination.md#global-illumination), and with `Split_Cascades` its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes). `Split_Cascades` needs `Ray_Query` |
-| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), and the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`) |
+| `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones` | The [global illumination](global-illumination.md#global-illumination). `Split_Cascades` adds its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes), and needs `Ray_Query`. `Voxel_Cones` uses its [voxel cones](global-illumination.md#voxel-cones), needs no cap, and no preset chooses it |
+| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`), and the voxel cones' voxels, levels and cones (`GI_VOXEL_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
@@ -99,7 +99,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.shadows.virtual` | `true`, `false`; a file without it keeps the preset's |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
-| `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
+| `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |

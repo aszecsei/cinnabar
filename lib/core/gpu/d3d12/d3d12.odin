@@ -669,6 +669,10 @@ query_features :: proc(device: ^d3d.IDevice10) -> (features: gpu.Features) {
 	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS7, &options7, size_of(options7))) && options7.MeshShaderTier >= ._1 {
 		features += {.Mesh_Shaders}
 	}
+	options: d3d.FEATURE_DATA_OPTIONS
+	if win.SUCCEEDED(device->CheckFeatureSupport(.OPTIONS, &options, size_of(options))) && options.ConservativeRasterizationTier >= ._1 {
+		features += {.Conservative_Raster}
+	}
 	return
 }
 
