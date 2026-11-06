@@ -74,7 +74,7 @@ GI_SPLIT_PARAMS := [Quality_Level]Gi_Split_Params {
 	.Low    = {tile = {4, 4}, directions = 4, cascades = 3, voxel = -1, distance = 16, levels = 4, slots = 8192, min_slots = 256, history_frames = 16},
 	.Medium = {tile = {2, 2}, directions = 4, cascades = 4, voxel = -2, distance = 16, levels = 5, slots = 16384, min_slots = 256, history_frames = 12},
 	.High   = {tile = {2, 2}, directions = 6, cascades = 4, voxel = -2, distance = 24, levels = 5, slots = 16384, min_slots = 256, history_frames = 12},
-	.Ultra  = {tile = {1, 1}, directions = 8, cascades = 4, voxel = -3, distance = 32, levels = 5, slots = 32768, min_slots = 512, history_frames = 10},
+	.Ultra  = {tile = {1, 1}, directions = 8, cascades = 4, voxel = -3, distance = 32, levels = 5, slots = 32768, min_slots = 1024, history_frames = 10},
 }
 
 // The engine's split cascade shaders, by their .meta files.

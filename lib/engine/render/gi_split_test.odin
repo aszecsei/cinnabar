@@ -186,7 +186,7 @@ the_split_layout_fits_its_buffers_and_dispatches :: proc(t: ^testing.T) {
 		.Low    = 32 << 20,
 		.Medium = 64 << 20,
 		.High   = 128 << 20,
-		.Ultra  = 384 << 20,
+		.Ultra  = 448 << 20,
 	}
 	for params, level in GI_SPLIT_PARAMS {
 		l := split_layout(params)
