@@ -68,6 +68,8 @@ An attribute on an element that it means nothing on, such as `placeholder` on a 
 | `offset` | offset | boxes | Pixels that move the box from where its anchor puts it. |
 | `visible` | boolean | boxes | Whether the box and what is in it show, and take room. |
 | `clip` | boolean | containers | Whether the box cuts off what is in it at its edges. |
+| `overflow` | `visible`, `scroll` | containers | Whether a row or column lets out what does not fit in it, or scrolls it along its direction (see [UI: Scrolling](../../ui/design.md#scrolling)). On a stack it does nothing. |
+| `scroll_bar` | boolean | containers | Whether a box that scrolls shows its bar (see [Scroll bars](#scroll-bars)). It does unless this is `false`. |
 
 The containers are `box`, `row`, `column`, `stack` and `button`. The boxes are those, `text`, `image` and `field`.
 
@@ -147,6 +149,25 @@ A style is a set of attributes with a name. An element takes its styles in order
 A later style's attribute replaces an earlier one's, and the element's own attributes replace them all. A name is lowercase letters, digits, `_` and `-`, and is the document's only style of its name. A style that does not exist is an error.
 
 **A variant** is a style named for a base style and a state, `<base>:hover`, `:focus`, `:press` or `:disabled`, which applies while the element is in that state, after the base styles. A variant is not named in a `style` attribute: it applies with its base. One with no base is a warning, as nothing takes it. Since an element's own attributes win, an attribute that changes with the state belongs in a style, not on the element.
+
+### Scroll bars
+
+```xml
+<style name="scroll_track" fill="#ffffff10" width="6" padding="2" radius="3"/>
+<style name="scroll_thumb" fill="#ffffff50" radius="3"/>
+<style name="scroll_thumb:hover" fill="#ffffff90"/>
+<column id="saves" height="300" padding="0 12 0 0" overflow="scroll"/>
+```
+
+A box that scrolls draws a bar over its content, a track with a thumb in it (see [UI: Scrolling](../../ui/design.md#scrolling)). Every bar in a document takes the document's style named `scroll_track` for its track and `scroll_thumb` for its thumb, as an element takes the style named for its element. A bar uses only these attributes of them:
+
+| Attribute | Track | Thumb |
+|---|---|---|
+| `fill`, `border`, `radius`, `opacity` | Its paint. | Its paint. |
+| `width` | Its thickness in pixels. | |
+| `padding` | How far it is in from the box's edges. | How far it is in from the track's edges. |
+
+Without these styles, the track is clear, 6 pixels thick and 2 in from the box's edges, and the thumb is `#ffffff60`. Both have a radius of 3. Their variants apply: `:hover` while the pointer is over the box, `scroll_thumb:press` while the thumb is dragged, and `:disabled` while the box is disabled. The bar takes no room, so give the box padding on the bar's side to keep its content out from under it.
 
 ## Templates
 

@@ -6,7 +6,7 @@ Menus and HUDs: documents of boxes, text and images that the UI lays out each fr
 
 | Document | What it covers |
 |---|---|
-| [Design](design.md) | Documents on entities, the cascade, layout and the scale, text, the batch and its shader, input and focus, scripts, and hot reload. |
+| [Design](design.md) | Documents on entities, the cascade, layout and the scale, text, the batch and its shader, input and focus, scrolling, scripts, and hot reload. |
 
 ## Overview
 
@@ -36,6 +36,7 @@ The package is `lib/engine/ui`, on the game side:
 | `layout.odin` | The layout: sizes along each axis, fills, placing, clipping, the scale |
 | `text.odin` | Fonts placed for kb_text_shape, shaping, line breaks, bindings, carets |
 | `input.odin` | Hover, clicks, focus, navigation, modal documents, fields, events |
+| `scroll.odin` | Scroll boxes: their bars, the wheel, the right stick, Page Up and Page Down, and scrolling the focus into view |
 | `edit.odin` | What scripts do to a document: attributes, bindings, copies, removals |
 | `batch.odin`, `render.odin` | The instances of a frame, and the pass that draws them |
 | `scripts.odin` | The `Ui` library |
