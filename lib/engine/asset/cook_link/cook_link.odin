@@ -119,6 +119,7 @@ Asset_Kind :: enum u8 {
 	Animation,
 	Animation_Graph,
 	Audio,
+	Font,
 }
 
 Asset_Status :: enum u8 {

@@ -215,6 +215,9 @@ Asset_Kind :: enum u32 {
 	Animation_Graph,
 	// A sound as PCM, which an Audio_Source or a script plays.
 	Audio,
+	// A font's metrics, glyphs and outlines' file, which UI text is shaped and drawn with. Its atlas of distance fields is
+	// a Texture sub-asset.
+	Font,
 }
 
 // Slice is a range of a blob, in bytes from the blob's start.

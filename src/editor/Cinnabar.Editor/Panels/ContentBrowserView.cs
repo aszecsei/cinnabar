@@ -425,6 +425,7 @@ public sealed class ContentBrowserView : DockPanel
         AssetKind.Animation => "animation",
         AssetKind.AnimationGraph => "animation graph",
         AssetKind.Audio => "audio",
+        AssetKind.Font => "font",
         _ => "script",
     };
 

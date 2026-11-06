@@ -20,6 +20,7 @@ Read them in this order the first time.
 | [Effects](kinds/effects.md) | Emitters of particles, their modules and curves. |
 | [Animation graphs](kinds/animation-graphs.md) | Parameters, clips with their events, and the states, blends and transitions that an Animator plays. |
 | [Audio](kinds/audio.md) | Sounds: what the cooker decodes, the blob and its import settings, and the sample's sounds. |
+| [Fonts](kinds/fonts.md) | Fonts: the glyphs that the atlas holds, msdfgen's distance fields, the blob and its import settings. |
 | [Cook daemon](daemon-and-operations.md) | The daemon, asset operations and the cook link. |
 | [Blobs and loading](blobs-and-loading.md) | The blob format, the asset runtime and hot reload. |
 
@@ -51,7 +52,7 @@ The code is in three places:
 
 | Package | Files | What they hold |
 |---|---|---|
-| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `daemon`, `stage-report`, `--emit-link-schema` |
+| `tools/cook` | `main.odin` | The commands: `scripts`, `scenes`, `shaders`, `textures`, `models`, `meshes`, `stages`, `materials`, `effects`, `animation_graphs`, `audio`, `fonts`, `daemon`, `stage-report`, `--emit-link-schema` |
 | | `content.odin`, `assets.odin` | The one pass that every command shares: the scan of the roots, `.meta` files for new assets, and each kind's cook. `IMPORTERS`: each kind's extensions and import settings. |
 | | `scripts.odin`, `typecheck.odin`, `schema.odin`, `luau_tools.odin` | Scripts: requires, type checking against the definition file, behaviour fields read with the prelude, and the bindings to the Luau compiler and analyzer |
 | | `scenes.odin` | Scenes: the syntax check and the blob |
@@ -63,6 +64,7 @@ The code is in three places:
 | | `mesh_files.odin` | Mesh files: the parse and the bake from `format`, then the glTF path's second half. The game bakes the same files live while the editor edits them (see [Mesh editing](../editor/mesh-editing.md#live-meshes)) |
 | | `materials.odin`, `graphs.odin` | Shading models, materials, instances and functions: the generated HLSL, the variants, the parameter block; graphs to HLSL |
 | | `audio.odin`, `audio_encode.odin` | Sounds: decoding through `vendor:miniaudio` to PCM at the engine's rate, whether they stream, and their format |
+| | `fonts.odin`, `opentype.odin`, `msdf.odin`, `msdfgen/cn_msdf.cpp` | Fonts: the glyphs that GSUB reaches from the charset, the atlas's cells, and their distance fields through msdfgen's core |
 | | `daemon.odin`, `watch_windows.odin`, `index.odin`, `serve.odin` | The daemon: the watcher, the passes, the index of the content, and the cook link's server |
 | | `operations.odin`, `files_windows.odin`, `lock_windows.odin` | The asset operations, the file moves they need, and the cache lock |
 | | `problems.odin` | `Problem`: an error or warning with its file, line and column |
@@ -78,6 +80,7 @@ The sections below follow the same order: how an asset is identified, how each k
 - Arseny Kapoulkine, [niagara](https://github.com/zeux/niagara): a meshlet's `f16` culling sphere, and its 16-bit refs to its vertices from a base, with a fallback to whole words, in [Meshlets](kinds/meshes.md#meshlets).
 - Xiph.Org, [libvorbis and libogg](https://github.com/xiph/vorbis) and [Opus](https://github.com/xiph/opus): the encoders and the Opus decoder behind [Audio](kinds/audio.md#audio).
 - Sean Barrett, [stb_vorbis](https://github.com/nothings/stb): the Vorbis decoder in [Audio](kinds/audio.md#audio).
+- Viktor Chlumsky, [msdfgen](https://github.com/Chlumsky/msdfgen) and *Shape Decomposition for Multi-channel Distance Fields* (2015): the multi-channel and true distance fields in [Fonts](kinds/fonts.md#fonts), and msdf-atlas-gen's test of a shape's winding.
 - AMD, [Compressonator](https://github.com/GPUOpen-Tools/compressonator): the `CMP_Core` block encoders for BC1 to BC7 in [Textures](kinds/textures.md#textures).
 - Microsoft, [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler): the compiler that [Shaders](kinds/shaders.md#shaders) and [Materials](kinds/materials.md#materials) drive, and its `-Zi -Qembed_debug` flags.
 - Light Transport Entertainment, [TinyUSDZ](https://github.com/lighttransport/tinyusdz), now LightUSD: the USD reader, composition and Tydra converter behind [Stages](kinds/stages.md#stages).
