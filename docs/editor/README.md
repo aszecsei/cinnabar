@@ -15,6 +15,7 @@ Read them in this order the first time.
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Animation graph editor](animation-graph-editor.md) | The canvas for `.animation_graph` files, its reader and writer that keep every line, and the live view of an Animator in play mode. |
+| [UI editor](ui-editor.md) | The WYSIWYG editor for `.ui` documents: its reader and writer that keep every line, the canvas that the game draws at a screen's size and scale, picking, the tree, properties, styles and bindings. |
 | [Mesh editing](mesh-editing.md) | Level geometry as `.mesh` assets: mesh mode, the mesh and texture tools, and the live path that draws an unsaved mesh. |
 | [Prefabs](prefabs.md) | `.prefab` assets: instances and overrides in the scene format, their expansion into plain entities, editing instances and prefabs, and spawning them at run time. |
 | [Capture](capture.md) | Screenshots and GIFs of the host, the sidecar, and the automation socket that `editorctl` drives. |
@@ -54,6 +55,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `helpers.odin`, `icons.odin` | The shapes of lights, volumes and cameras as debug lines, and their clickable icons |
 | `commands.odin` | Game commands: registered by the game, shown in the ribbon, run through `poll` |
 | `preview.odin` | Material previews for the material editor, and effect previews (see [Rendering](../rendering/materials.md#material-previews) and [Particles](../rendering/particles.md#previews)) |
+| `ui_preview.odin` | UI documents' previews for the UI editor, in a `ui.State` of their own (see [UI editor](ui-editor.md#the-games-side)) |
 | `live.odin`, `mesh_overlay.odin` | Live meshes baked and made resident in place of their blobs, and mesh mode's overlay (see [Mesh editing](mesh-editing.md#live-meshes)) |
 | `link/link.odin` | The editor link's messages, shared with the host |
 

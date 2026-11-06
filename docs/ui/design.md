@@ -78,6 +78,8 @@ Every length in a document is in pixels at a UI scale of 1: sizes, padding, gaps
 | Image | The same box, with the texture in place of the fill, times `tint`. A color texture samples as linear light, so it is encoded again for the layer. |
 | Glyph | The median of the atlas's red, green and blue, with the range in screen pixels, as in [Text](#text). |
 
+**The view.** The pass draws an instance's pixel `p` at `p * view_scale + view_offset` in its target, which the game's UI takes as a scale of 1. The UI editor's preview lays a document out on a screen of its own size and draws it into a smaller target, zoomed and panned (see [UI editor](../editor/ui-editor.md#the-games-side)). The pixel shader works out the clip and the distances in the instance's pixels and scales them to the target's, so an edge is one target pixel wide at any zoom.
+
 Colors are as a designer picks them, sRGB-encoded with straight alpha, and each node's `opacity` times its ancestors' multiplies their alpha. The output is premultiplied, which the `Premultiplied` blend takes.
 
 ## Input and focus
