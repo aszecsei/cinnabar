@@ -20,13 +20,17 @@ struct Instance {
 	float2 gradient;
 };
 
-// Matches Push in lib/engine/ui/render.odin.
+// Matches Push in lib/engine/ui/render.odin. viewport is the target's size in pixels, and an instance's pixel p draws at
+// p * view_scale + view_offset in it: the game's UI at a scale of 1, and the editor's preview of a screen of another size
+// zoomed and panned (see docs/ui/design.md#drawing). Distances are worked out in the instance's pixels and scaled to the
+// target's, so an edge is one target pixel wide at any zoom.
 struct Push {
 	uint instances;
 	uint instances_offset;
 	uint sampler;
-	uint padding;
+	float view_scale;
 	float2 viewport;
+	float2 view_offset;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -60,13 +64,14 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	uint corner = vertex_id % 6;
 	static const float2 CORNERS[6] = {float2(0, 0), float2(1, 0), float2(0, 1), float2(0, 1), float2(1, 0), float2(1, 1)};
 	Instance i = load_instance(index);
-	float grow = (i.kind & 0xff) == KIND_GLYPH ? 0 : 1;
+	float grow = (i.kind & 0xff) == KIND_GLYPH ? 0 : 1 / push.view_scale;
 	float4 r = i.rect + float4(-grow, -grow, grow, grow);
 	float2 p = lerp(r.xy, r.zw, CORNERS[corner]);
 	p = clamp(p, i.clip.xy, i.clip.zw);
 	float2 t = (p - i.rect.xy) / max(i.rect.zw - i.rect.xy, 1e-6);
 	Varyings o;
-	o.position = float4(p / push.viewport * float2(2, -2) + float2(-1, 1), 0, 1);
+	float2 target = p * push.view_scale + push.view_offset;
+	o.position = float4(target / push.viewport * float2(2, -2) + float2(-1, 1), 0, 1);
 	o.uv = lerp(i.uv.xy, i.uv.zw, t);
 	o.instance = index;
 	return o;
@@ -87,7 +92,7 @@ float median(float3 v) {
 
 float4 ps_main(Varyings v) : SV_Target {
 	Instance i = load_instance(v.instance);
-	float2 p = v.position.xy;
+	float2 p = (v.position.xy - push.view_offset) / push.view_scale;
 	if (any(p < i.clip.xy) || any(p >= i.clip.zw)) {
 		discard;
 	}
@@ -97,13 +102,13 @@ float4 ps_main(Varyings v) : SV_Target {
 		Texture2D<float4> atlas = ResourceDescriptorHeap[NonUniformResourceIndex(i.texture)];
 		float3 m = atlas.SampleLevel(cn_sampler(push.sampler), v.uv, 0).rgb;
 		// The field's distance in screen pixels: its range in the atlas, as many pixels as the glyph is drawn at.
-		float coverage = saturate(i.width * (median(m) - 0.5) + 0.5);
+		float coverage = saturate(i.width * push.view_scale * (median(m) - 0.5) + 0.5);
 		color = unpack_color(i.fill);
 		color.a *= coverage;
 	} else {
 		float2 half_size = (i.rect.zw - i.rect.xy) * 0.5;
 		float d = rounded_box(p - (i.rect.xy + half_size), half_size, i.radii);
-		float coverage = saturate(0.5 - d);
+		float coverage = saturate(0.5 - d * push.view_scale);
 		float4 fill = unpack_color(i.fill);
 		if (kind == KIND_IMAGE) {
 			Texture2D<float4> image = ResourceDescriptorHeap[NonUniformResourceIndex(i.texture)];
@@ -116,7 +121,7 @@ float4 ps_main(Varyings v) : SV_Target {
 		}
 		// The border is the band within width of the edge; the fill is inside it. They blend premultiplied, so a clear
 		// fill shows nothing of the border's color through it.
-		float inner = i.width > 0 ? saturate(0.5 - (d + i.width)) : 1;
+		float inner = i.width > 0 ? saturate(0.5 - (d + i.width) * push.view_scale) : 1;
 		float4 border = unpack_color(i.border);
 		float3 rgb = border.rgb * border.a * (1 - inner) + fill.rgb * fill.a * inner;
 		float a = border.a * (1 - inner) + fill.a * inner;

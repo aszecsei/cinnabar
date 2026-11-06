@@ -17,6 +17,7 @@ import "cinnabar:engine/editor/link"
 import "cinnabar:engine/render"
 import "cinnabar:engine/scene"
 import "cinnabar:engine/script"
+import "cinnabar:engine/ui"
 
 // The entity list changes at most this often in the editor.
 SCAN_INTERVAL :: 0.1
@@ -57,6 +58,8 @@ Editor :: struct {
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
 	previews:     [MAX_PREVIEWS]Preview,
 	next_preview: int,
+	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
+	ui:           ui.State,
 	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin), and the renderer's
 	// residency that draws them, in Game_State, or nil without a renderer.
 	live_meshes:  map[format.Guid]Live_Mesh,
@@ -109,6 +112,9 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, re
 			picks = make([dynamic]link.Pick_Request, platform.heap_allocator),
 		},
 	}
+	if assets != nil {
+		ui.init(&e.ui, platform, assets, residency)
+	}
 }
 
 // reload sends the types again after a code reload: the new DLL may describe them differently. It forgets the commands,
@@ -118,6 +124,12 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.types_sent = false
 	clear(&e.commands)
 	sync_viewport_pipelines(e, force = true)
+	if e.ui.platform != nil {
+		ui.on_reload(&e.ui, platform)
+		if e.renderer != nil {
+			ui.sync_pipelines(&e.ui, force = true)
+		}
+	}
 }
 
 destroy :: proc(e: ^Editor) {
@@ -131,6 +143,9 @@ destroy :: proc(e: ^Editor) {
 	delete(e.viewport.hidden)
 	delete(e.viewport.picks)
 	close_previews(e)
+	if e.ui.platform != nil {
+		ui.destroy(&e.ui)
+	}
 	if e.viewport.gpu_ready {
 		destroy_viewport_gpu(e)
 	}
@@ -236,6 +251,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		send_values(e, w, scripts, out, frame)
 		send_animators(e, w, out, frame)
 		send_preview_views(e, out, frame)
+		send_ui_layouts(e, out, frame)
 	}
 	if now - e.last_stats >= STATS_INTERVAL {
 		e.last_stats = now

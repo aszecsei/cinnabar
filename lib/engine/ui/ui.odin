@@ -57,6 +57,8 @@ Node :: struct {
 	next_sibling: u32,
 	id:           Str,
 	id_hash:      u64,
+	// The node's element in the blob, by its index there: a template's copy has its template's element's.
+	source:       u32,
 	// The node's own attributes, in the document's props, and its styles, in its style refs.
 	props:        Range,
 	styles:       Range,
@@ -156,6 +158,10 @@ Document :: struct {
 	lines:        [dynamic]Line,
 	// Ids that a script named that no node has, which it warned of once.
 	warned_ids:   map[u64]bool,
+	// The states that the editor's preview shows on the nodes of a blob element, by its index there, in place of the
+	// player's (see set_forced_states).
+	forced_node:  u32,
+	forced:       bit_set[format.Ui_State],
 }
 
 // Font_Slot is a font that text uses: its blob, and kb_text_shape's font placed from it, which a code reload drops,
@@ -484,7 +490,7 @@ rebuild :: proc(s: ^State, d: ^Document) {
 		}
 		style_range := Range{u32(len(d.style_refs)), n.styles.count}
 		append(&d.style_refs, ..format.ui_range(refs, n.styles))
-		built[i] = add_node(d, n.element, parent, format.blob_string(data, n.id), add_props(d, data, format.ui_range(blob_props, n.props)), style_range, {})
+		built[i] = add_node(d, n.element, parent, format.blob_string(data, n.id), add_props(d, data, format.ui_range(blob_props, n.props)), style_range, {}, u32(i))
 	}
 	for op in d.structure {
 		switch op.kind {
@@ -501,11 +507,12 @@ rebuild :: proc(s: ^State, d: ^Document) {
 
 // add_node appends a node as its parent's last child, and gives its index.
 @(private)
-add_node :: proc(d: ^Document, element: format.Ui_Element, parent: u32, id: string, props, styles: Range, flags: Node_Flags) -> u32 {
+add_node :: proc(d: ^Document, element: format.Ui_Element, parent: u32, id: string, props, styles: Range, flags: Node_Flags, source: u32) -> u32 {
 	index := u32(len(d.nodes))
 	n := Node {
 		element      = element,
 		flags        = flags,
+		source       = source,
 		parent       = parent,
 		first_child  = NONE,
 		last_child   = NONE,
@@ -606,7 +613,7 @@ instantiate :: proc(s: ^State, d: ^Document, op: Structure_Op) -> bool {
 		}
 		style_range := Range{u32(len(d.style_refs)), n.styles.count}
 		append(&d.style_refs, ..format.ui_range(refs, n.styles))
-		built[i - first] = add_node(d, n.element, node_parent, id, props, style_range, {.Clone})
+		built[i - first] = add_node(d, n.element, node_parent, id, props, style_range, {.Clone}, i)
 	}
 	return true
 }
