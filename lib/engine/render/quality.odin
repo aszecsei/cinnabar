@@ -45,10 +45,13 @@ Gi_Technique :: enum u8 {
 	// (see docs/rendering/global-illumination.md#split-cascades). Needs Ray_Query. It was World_Probes, which the
 	// settings files still take.
 	Split_Cascades,
+	// Voxel cone tracing through a clipmap of voxels around the camera, which the rasterizer voxelizes (see
+	// docs/rendering/global-illumination.md#voxel-cones). It needs no ray queries.
+	Voxel_Cones,
 }
 
 // A code reload keeps a quality's technique by its value.
-#assert(int(Gi_Technique.Split_Cascades) == 2)
+#assert(int(Gi_Technique.Split_Cascades) == 2 && int(Gi_Technique.Voxel_Cones) == 3)
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one

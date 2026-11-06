@@ -71,11 +71,15 @@ static partial class EditorCommands
             icon: "frame"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportPreset>(ViewportQuality, "Quality", () => shell.ViewportSettings.QualityPreset,
             preset => shell.ViewportSettings = shell.ViewportSettings with { QualityPreset = preset }, preset => EditorShell.ViewportPresetNames[(int)preset],
-            description: "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too.",
+            description: "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too, and the global illumination is the preset's unless it is.",
             icon: "viewport"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportAa>(ViewportAntiAliasing, "Anti-Aliasing", () => shell.ViewportSettings.AntiAliasing,
             aa => shell.ViewportSettings = shell.ViewportSettings with { AntiAliasing = aa }, aa => EditorShell.ViewportAaNames[(int)aa],
             description: "Smooth the viewport's edges with a technique in place of the game's. FSR needs a GPU and the library that run it; elsewhere the viewport uses TAA.",
+            icon: "viewport"));
+        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportGi>(ViewportGiTechnique, "Global Illumination", () => shell.ViewportSettings.GlobalIllumination,
+            gi => shell.ViewportSettings = shell.ViewportSettings with { GlobalIllumination = gi }, gi => EditorShell.ViewportGiNames[(int)gi],
+            description: "Light the viewport's indirect light with a technique in place of the game's, at the quality's level. Split Cascades need ray queries; elsewhere the viewport uses Screen Cascades.",
             icon: "viewport"));
         commands.Register(new ChoiceCommand(ViewportRenderScale, "Render Scale", [.. EditorShell.ViewportRenderScales.Select(s => s.Label)],
             () => shell.ViewportRenderScale, shell.SetViewportRenderScale)

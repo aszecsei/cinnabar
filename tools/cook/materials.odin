@@ -19,7 +19,7 @@ import "core:strings"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks materials changes this, which invalidates every cooked material and instance.
-MATERIAL_COOK_VERSION :: "materials 9"
+MATERIAL_COOK_VERSION :: "materials 10"
 
 
 Shading_Input :: struct {
@@ -1141,6 +1141,10 @@ material_entries :: proc(decl: ^Material_Decl) -> []Material_Entry {
 		append(&entries, Material_Entry{.Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_depth"}})
 	}
 	append(&entries, Material_Entry{.Virtual_Depth, {.Pixel, "ps_" + SHADER_MODEL, "ps_virtual_depth"}})
+	// The voxels see every surface that the prepass draws but a ribbon, whose draw only the camera's view has.
+	if !decl.ribbon {
+		append(&entries, Material_Entry{.Voxelize, {.Pixel, "ps_" + SHADER_MODEL, "ps_voxelize"}})
+	}
 	// A patches material has no meshlets to draw, and a billboard draws its own quads.
 	if !decl.patches && decl.billboard == .None {
 		append(

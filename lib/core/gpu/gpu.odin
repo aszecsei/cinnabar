@@ -22,6 +22,8 @@ Feature :: enum u8 {
 	Mesh_Shaders,
 	Ray_Query,
 	Ray_Tracing_Pipeline,
+	// Conservative rasterization, which Graphics_Pipeline_Desc.conservative asks for.
+	Conservative_Raster,
 }
 
 Features :: bit_set[Feature]
@@ -613,6 +615,9 @@ Graphics_Pipeline_Desc :: struct {
 	// Clamps depth to the viewport's range instead of clipping, so geometry in front of the near plane still writes
 	// depth there, as directional shadow maps need.
 	depth_clamp:   bool,
+	// Rasterizes every pixel that the triangle touches at all, not only those whose centers it covers, where the device
+	// has Conservative_Raster; elsewhere the pipeline rasterizes as usual.
+	conservative:  bool,
 	stencil:       Stencil_State,
 	topology:      Topology,
 	cull:          Cull_Mode,

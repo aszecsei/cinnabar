@@ -597,6 +597,16 @@ Viewport_Aa :: enum u8 {
 	Fsr,
 }
 
+// The viewport's global illumination, in place of the quality's. Game keeps the quality's; the others match
+// render.Gi_Technique. Split_Cascades needs Ray_Query; without it, the viewport draws the screen cascades.
+Viewport_Gi :: enum u8 {
+	Game,
+	Off,
+	Screen_Cascades,
+	Split_Cascades,
+	Voxel_Cones,
+}
+
 // Editor to game: how the viewport draws while an editor is linked (see docs/editor/viewport.md#viewport). The editor sends it
 // when it changes, and when the link connects. The features are the ones that the viewport turns off.
 Viewport_Settings :: struct {
@@ -618,10 +628,11 @@ Viewport_Settings :: struct {
 	// Icons for the lights, volumes and cameras, which pick them.
 	show_icons:           bool,
 	helpers:              Helper_Mode,
-	// The quality that the viewport draws at, from the game's: a preset, the anti-aliasing, and the render scale, 0
-	// keeping the game's.
+	// The quality that the viewport draws at, from the game's: a preset, the anti-aliasing, the global illumination's
+	// technique, and the render scale, 0 keeping the game's.
 	quality_preset:       Viewport_Preset,
 	anti_aliasing:        Viewport_Aa,
+	global_illumination:  Viewport_Gi,
 	render_scale:         f32,
 }
 

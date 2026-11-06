@@ -83,6 +83,7 @@ static class DefaultRibbon
                     [
                         new ComboBox(EditorCommands.ViewportQuality),
                         new ComboBox(EditorCommands.ViewportAntiAliasing),
+                        new ComboBox(EditorCommands.ViewportGiTechnique),
                         new ComboBox(EditorCommands.ViewportRenderScale),
                     ]),
                     new RibbonGroup("Helpers", [new SmallStack([EditorCommands.Icons]), new ComboBox(EditorCommands.Helpers)]),

@@ -140,7 +140,9 @@ render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
 }
 
 // viewport_quality is the quality that the viewport draws at while an editor is linked: the renderer's, with the
-// viewport's preset, anti-aliasing and render scale in place of its own where the viewport chooses them. ok is false
+// viewport's preset, anti-aliasing, global illumination and render scale in place of its own where the viewport chooses
+// them. A preset sets the global illumination's technique with every feature, and a choice of technique replaces it,
+// at the preset's level or the game's. ok is false
 // when the viewport keeps the renderer's, or no editor is linked.
 viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality, ok: bool) {
 	if !active(e) {
@@ -158,6 +160,10 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality,
 		q.aa = render.Aa_Technique(int(s.anti_aliasing) - 1)
 		ok = true
 	}
+	if s.global_illumination != .Game {
+		q.gi.technique = render.Gi_Technique(int(s.global_illumination) - 1)
+		ok = true
+	}
 	if s.render_scale > 0 {
 		q.render_scale = s.render_scale
 		ok = true
@@ -167,6 +173,7 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality,
 
 #assert(int(max(link.Viewport_Preset)) == int(render.Quality_Preset.Ultra) + 1)
 #assert(int(max(link.Viewport_Aa)) == int(max(render.Aa_Technique)) + 1)
+#assert(int(max(link.Viewport_Gi)) == int(max(render.Gi_Technique)) + 1)
 
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.

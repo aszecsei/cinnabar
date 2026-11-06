@@ -20,8 +20,8 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `shadows.virtual` | `bool` | A [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps) in place of the cascades, for a directional light that is not traced. Low has none |
 | `ao.technique` | `Off`, `Gtao`, `Ssao`, `Hbao` | The [ambient occlusion](ambient-occlusion.md#techniques)'s search |
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
-| `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades` | The [global illumination](global-illumination.md#global-illumination), and with `Split_Cascades` its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes). `Split_Cascades` needs `Ray_Query` |
-| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), and the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`) |
+| `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones` | The [global illumination](global-illumination.md#global-illumination). `Split_Cascades` adds its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes), and needs `Ray_Query`. `Voxel_Cones` uses its [voxel cones](global-illumination.md#voxel-cones), needs no cap, and no preset chooses it |
+| `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`), and the voxel cones' voxels, levels and cones (`GI_VOXEL_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
@@ -99,7 +99,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.shadows.virtual` | `true`, `false`; a file without it keeps the preset's |
 | `quality.ao` | `Off`, `Gtao`, `Ssao`, `Hbao` |
 | `quality.ao.level` | `Low` … `Ultra` |
-| `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
+| `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
@@ -110,4 +110,4 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
 - **Scripts** read, set and save the quality through the `Render` bindings (see [Scripting: Render](../scripting/api.md#render)), which a game defines with `project.define_quality_bindings`.
 - **The editor** sets the project's preset and this machine's in the Game Window group, and draws its viewport at a quality of its own (see [Editor: Quality](../editor/viewport.md#quality)).
-- **The sample** applies the files' quality when they change. Its `quality_keys.luau` is a settings menu on keys, through the `Render` bindings: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale (1, 0.75, 0.67 and 0.5), and F6 the next anti-aliasing technique that the device runs; not Alt+F9, which the NVIDIA app takes. Each saves the quality to `project.user.settings`.
+- **The sample** applies the files' quality when they change. Its `quality_keys.luau` is a settings menu on keys, through the `Render` bindings: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale (1, 0.75, 0.67 and 0.5), F6 the next anti-aliasing technique that the device runs, and Shift+F6 the next global illumination technique that it runs; not Alt+F9, which the NVIDIA app takes. Each saves the quality to `project.user.settings`.

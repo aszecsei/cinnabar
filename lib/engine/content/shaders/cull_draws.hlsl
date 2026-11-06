@@ -72,6 +72,8 @@ static const uint VIEW_CAMERA = 0;
 static const uint VIEW_FIRST_SHADOW = 2;
 static const uint VIEW_CASTERS = 1;
 static const uint VIEW_MODEL = 2;
+// A view of the voxel cones' voxelization, which picks its own level of detail.
+static const uint VIEW_VOXELS = 16;
 struct Cull_View {
 	float4 planes[6];
 	float4 offset;
@@ -215,10 +217,11 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (view_index == VIEW_CAMERA || (view.flags & VIEW_LATE) != 0) {
 		cn_rw_buffer(cull.stats).InterlockedAdd((view.flags & VIEW_LATE) != 0 ? 4 : 0, 1);
 	}
-	// An item whose hierarchy was walked tests the meshlets that the walk picked, in its range of the frame's list.
+	// An item whose hierarchy was walked tests the meshlets that the walk picked, in its range of the frame's list. The
+	// walk is the camera's, so a voxelization view tests every level's meshlets for its own.
 	uint first = item.first;
 	uint count = item.count;
-	if ((item.flags & ITEM_HIERARCHY) != 0) {
+	if ((item.flags & ITEM_HIERARCHY) != 0 && (view.flags & VIEW_VOXELS) == 0) {
 		uint2 selection = cn_buffer(cull.selections).Load2(8 + id.x * 8);
 		if (selection.y != SELECTION_NONE) {
 			first = selection.x;

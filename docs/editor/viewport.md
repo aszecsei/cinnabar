@@ -38,8 +38,9 @@ The View tab's Quality group draws the viewport at a [render quality](../renderi
 |---|---|---|
 | Quality (`quality_preset`) | Game's, Low, Medium, High, Ultra | Every feature's technique and level, as `preset_quality` gives them |
 | Anti-Aliasing (`anti_aliasing`) | Game's, Off, TAA, FXAA, SMAA, FSR | `Quality.aa` |
+| Global Illumination (`global_illumination`) | Game's, Off, Screen Cascades, Split Cascades, Voxel Cones | `Quality.gi.technique`, at the preset's level or the game's (see [Rendering](../rendering/global-illumination.md#global-illumination)) |
 | Render Scale (`render_scale`) | Game's, 100%, 75%, 67%, 50% | `Quality.render_scale`; 0 is the game's |
 
-- **The game** gives them to its frame as `Frame_Desc.quality`, from `editor.viewport_quality(&editor, &renderer)`: the renderer's quality with the viewport's choices in place of its own, which `clamp_quality` limits to the device, so FSR is TAA where the device cannot run it. A preset leaves the anti-aliasing and the render scale the game's.
+- **The game** gives them to its frame as `Frame_Desc.quality`, from `editor.viewport_quality(&editor, &renderer)`: the renderer's quality with the viewport's choices in place of its own, which `clamp_quality` limits to the device, so FSR is TAA where the device cannot run it, and the split cascades are the screen cascades without `Ray_Query`. A preset leaves the anti-aliasing and the render scale the game's, and sets the global illumination's technique with every feature, which the Global Illumination choice then replaces. A script or `editorctl` sets it as `globalIllumination`, for example `editorctl viewport --set globalIllumination=VoxelCones`.
 - **Without an editor,** and with every choice the game's, the frame has the renderer's quality.
 - **The game's own settings** are the Game Window group's (see [Architecture](../overview/architecture.md#project-settings)): the project's quality preset, or By Hardware, and this machine's in place of it. A preset in a file replaces the file's other quality keys, such as those that a game's settings menu saved, which show as Custom.

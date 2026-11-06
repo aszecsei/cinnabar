@@ -129,6 +129,22 @@ struct Frame_Constants {
 	uint virtual_pool_pages;
 	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
 	uint virtual_draw;
+	// The global illumination's voxelization, whose views draw a level of its clipmap (see gi_voxel.hlsli): whether this
+	// view is one, the level's voxels across and their size, its first voxel's corner relative to the camera and its
+	// texel, and the albedo's, the normal's, the emission's and the mask's write views.
+	uint voxel_draw;
+	uint voxel_res;
+	float voxel_size;
+	float voxel_min_x;
+	float voxel_min_y;
+	float voxel_min_z;
+	int voxel_phase_x;
+	int voxel_phase_y;
+	int voxel_phase_z;
+	uint voxel_albedo;
+	uint voxel_normal;
+	uint voxel_emission;
+	uint voxel_mask;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

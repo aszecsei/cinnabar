@@ -495,6 +495,7 @@ graphics_task :: proc(desc: gpu.Graphics_Pipeline_Desc) -> (task: ^Compile_Task,
 			DepthBias = desc.depth_bias,
 			SlopeScaledDepthBias = desc.slope_bias,
 			DepthClipEnable = d3d.BOOL(!desc.depth_clamp),
+			ConservativeRaster = desc.conservative && .Conservative_Raster in dev.features ? .ON : .OFF,
 		},
 		DepthStencilState = {
 			DepthEnable = d3d.BOOL(desc.depth_format != .Unknown && (desc.depth_compare != .Always || desc.depth_write)),

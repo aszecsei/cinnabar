@@ -24,6 +24,8 @@ assert(q.preset == "High" and q.aa == "Taa" and q.render_scale == 1 and q.ray_tr
 assert(#Render.presets() == 4 and Render.presets()[1] == "Low")
 local caps = Render.caps()
 assert(table.find(caps.aa, "Fsr") and not caps.ray_query and caps.vendor == "Amd")
+-- Without Ray_Query, the split cascades are not among the global illumination's techniques, and the voxel cones are.
+assert(table.find(caps.gi, "Voxel_Cones") and table.find(caps.gi, "Screen_Cascades") and not table.find(caps.gi, "Split_Cascades"))
 
 -- The fields that a change gives, and the others as they were.
 Render.set_quality({ aa = "Fsr", render_scale = 0.5, ao = "Hbao", lod_error = 2 })

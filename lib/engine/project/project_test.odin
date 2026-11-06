@@ -145,6 +145,20 @@ a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T
 }
 
 @(test)
+the_voxel_cones_read_and_write_on_any_device :: proc(t: ^testing.T) {
+	// They need no ray queries, so a device without them keeps them.
+	caps := render.Caps{}
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = High\nquality.gi = Voxel_Cones\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	q := quality(s, caps)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Voxel_Cones)
+	testing.expect_value(t, quality_values(q, caps)[.Gi], "Voxel_Cones")
+	free_all(context.temp_allocator)
+}
+
+@(test)
 setting_a_value_keeps_the_files_other_lines :: proc(t: ^testing.T) {
 	text := "# The player's.\noutput = Sdr\nquality.fog = Low\n\nquality.fog = High\n"
 	testing.expect_value(t, set_value(text, "quality.fog", "Ultra"), "# The player's.\noutput = Sdr\n\nquality.fog = Ultra\n")

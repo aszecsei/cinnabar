@@ -148,11 +148,11 @@ set_quality_binding :: proc(L: ^luau.State) -> c.int {
 }
 
 // Render.caps() is what the device can do that the quality depends on: ray_query for traced shadows, the adapter's
-// vendor and video memory in bytes, and aa, the anti-aliasing techniques that it runs.
+// vendor and video memory in bytes, aa, the anti-aliasing techniques that it runs, and gi, the global illumination's.
 @(private = "file")
 caps_binding :: proc(L: ^luau.State) -> c.int {
 	caps := script_quality_of(L).renderer.caps
-	luau.createtable(L, 0, 4)
+	luau.createtable(L, 0, 5)
 	luau.pushboolean(L, b32(caps.ray_query))
 	luau.setfield(L, -2, "ray_query")
 	vendor, _ := reflect.enum_name_from_value(caps.vendor)
@@ -172,6 +172,18 @@ caps_binding :: proc(L: ^luau.State) -> c.int {
 		luau.rawseti(L, -2, n)
 	}
 	luau.setfield(L, -2, "aa")
+	luau.createtable(L, len(render.Gi_Technique), 0)
+	n = 0
+	for technique in render.Gi_Technique {
+		if render.clamp_quality({gi = {technique = technique}}, caps).gi.technique != technique {
+			continue
+		}
+		name, _ := reflect.enum_name_from_value(technique)
+		n += 1
+		luau.pushodinstring(L, name)
+		luau.rawseti(L, -2, n)
+	}
+	luau.setfield(L, -2, "gi")
 	return 1
 }
 

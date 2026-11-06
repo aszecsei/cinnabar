@@ -136,7 +136,7 @@ shutdown :: proc() {
 }
 
 // The null backend validates every optional feature's commands, so it reports all of them.
-FEATURES :: gpu.Features{.Mesh_Shaders, .Ray_Query, .Ray_Tracing_Pipeline}
+FEATURES :: gpu.Features{.Mesh_Shaders, .Ray_Query, .Ray_Tracing_Pipeline, .Conservative_Raster}
 
 features :: proc() -> gpu.Features {
 	return FEATURES

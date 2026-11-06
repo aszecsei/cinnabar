@@ -482,6 +482,9 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		// No attachments: the pixel shader writes depth to the virtual shadow map's pool, with its own bias, and clamps it.
 		.Virtual_Depth = {depth_clamp = true, cull = cull, label = label},
 		.Impostor_Virtual_Depth = {},
+		// No attachments: the pixel shader writes the voxels that it covers. A voxel's view sees either side of a surface,
+		// and a triangle smaller than a pixel still marks its voxel where the device rasterizes conservatively.
+		.Voxelize = {depth_clamp = true, conservative = true, cull = .None, label = label},
 	}
 	// An impostor's quad faces its view, and its pixels write their own depths, which the shadow maps' bias does not
 	// move, so the impostor's depth pass moves them itself.
@@ -501,6 +504,10 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 	}
 	if descs[.Impostor_Virtual_Depth].pixel != nil {
 		descs[.Impostor_Virtual_Depth].vertex = descs[.Impostor_Depth].vertex
+	}
+	// The voxelization draws with the prepass's other stages, whose varyings its pixel shader reads.
+	if descs[.Voxelize].pixel != nil {
+		descs[.Voxelize].vertex = descs[.Prepass].vertex
 	}
 	sorted := .Sorted in blob.flags
 	over := descs[.Transparent]
@@ -535,6 +542,12 @@ make_pipelines :: proc(r: ^Renderer, p: ^Material_Pipeline, data: []byte, blob: 
 		mesh_descs[.Virtual_Depth].vertex = nil
 		mesh_descs[.Virtual_Depth].amplification = mesh_descs[.Depth].amplification
 		mesh_descs[.Virtual_Depth].mesh = mesh_descs[.Depth].mesh
+	}
+	if descs[.Voxelize].pixel != nil {
+		mesh_descs[.Voxelize] = descs[.Voxelize]
+		mesh_descs[.Voxelize].vertex = nil
+		mesh_descs[.Voxelize].amplification = mesh_descs[.Prepass].amplification
+		mesh_descs[.Voxelize].mesh = mesh_descs[.Prepass].mesh
 	}
 	for &desc, pass in mesh_descs {
 		if !p.mesh_path {

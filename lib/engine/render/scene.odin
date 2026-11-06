@@ -152,6 +152,18 @@ Frame_Constants :: struct {
 	virtual_pool_pages:         u32,
 	// Whether this view is one of the levels, which its amplification shaders cull against the level's pages.
 	virtual_draw:               u32,
+	// The global illumination's voxelization, whose views draw a level of its clipmap (see Voxel_View): whether this view
+	// is one, the level's voxels across and their size, its first voxel's corner relative to the camera and its texel,
+	// and the albedo's, the normal's, the emission's and the mask's write views.
+	voxel_draw:                 u32,
+	voxel_res:                  u32,
+	voxel_size:                 f32,
+	voxel_min:                  [3]f32,
+	voxel_phase:                [3]i32,
+	voxel_albedo:               u32,
+	voxel_normal:               u32,
+	voxel_emission:             u32,
+	voxel_mask:                 u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -330,6 +342,9 @@ Cull_Item :: struct {
 // other view leaves out.
 VIEW_CASTERS :: 1
 VIEW_MODEL :: 2
+// A view of the voxel cones' voxelization, which picks its own level of detail from every level's meshlets, as the
+// camera's walk of a hierarchy does not.
+VIEW_VOXELS :: 16
 
 // Cull_View matches Cull_View in cull_draws.hlsl: a view's planes relative to the camera, the camera's offset from the
 // space of the view's instances, and its first draw.
@@ -489,7 +504,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 736 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 788 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1128,12 +1143,18 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		s.previous_view_model = view_model
 		s.previous_time = now
 	}
-	// The fog's injection reads the camera's constants, so they are written without draws too.
+	// The fog's injection and the voxel cones' read the camera's constants, so they are written without draws too.
 	has_items := len(sf.items) > 0
-	if !has_items && f.fog == nil {
+	voxels := f.gi != nil ? f.gi.voxel : nil
+	if !has_items && f.fog == nil && voxels == nil {
 		return
 	}
+	// The voxel cones' views come after the shadow views (see Voxel_View).
 	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
+	if voxels != nil {
+		voxels.first_view = sf.view_count
+		sf.view_count += len(voxels.views)
+	}
 	// With occlusion culling, the late view is one more, after the shadow views.
 	sf.occluding = has_items && occlusion_ready(f, f.no_occlusion)
 	sf.late_view = sf.view_count
@@ -1254,6 +1275,14 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.view_projection = jitter_projection(c.view_projection, f.jitter)
 			c.jitter = f.jitter
 		case:
+			if voxels != nil && v >= voxels.first_view {
+				view := voxels.views[v - voxels.first_view]
+				voxel_view_constants(&c, view, voxels.params.res)
+				views[v].planes = view.planes
+				views[v].flags = VIEW_VOXELS
+				c.cull_eye = {0, 0, 0, 1}
+				break
+			}
 			c.view_projection = shadows.matrices[v - FIRST_SHADOW_VIEW]
 			if v - FIRST_SHADOW_VIEW < shadows.virtual.count {
 				c.virtual_level, c.virtual_draw = u32(v - FIRST_SHADOW_VIEW), 1
@@ -2211,7 +2240,7 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	if pushes {
 		push = material_push(f, pass, group)
 	}
-	if pass != .Depth && pass != .Virtual_Depth {
+	if pass != .Depth && pass != .Virtual_Depth && pass != .Voxelize {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)
 	}
 	bin_count := len(sf.bin_pipelines)
@@ -2229,6 +2258,10 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 		// substitute without the path draws nothing there. An impostors' bin draws with the impostor passes, and the bins
 		// of mesh particles and of skinned entities with vertex pulling.
 		impostors := sf.bin_impostors[bin]
+		// An impostor's quad faces the camera, so the voxels do not see it.
+		if impostors && pass == .Voxelize {
+			continue
+		}
 		mesh_path := f.renderer.materials.pipelines[sf.bin_pipelines[bin]].mesh_path && group == .Opaque && !impostors && !sf.bin_particles[bin] && !sf.bin_skinned[bin]
 		if mesh_path {
 			pipelines[1] = p.meshes[pass]

@@ -289,6 +289,11 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.gi.split.deposit,
 		&r.gi.split.merge,
 		&r.gi.split.gather,
+		// The voxel cones, which a quality may choose in the cascades' place.
+		&r.gi.voxel.clear,
+		&r.gi.voxel.inject,
+		&r.gi.voxel.filter,
+		&r.gi.voxel.gather,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
@@ -325,6 +330,22 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		q.shadows = {level = .High, virtual = false}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
+		desc.quality = nil
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// The voxel cones, which need no ray queries: the views of the levels that voxelize draw the scene with no
+	// attachments after the shadow views, and the null backend validates their passes.
+	{
+		q := r.quality
+		q.gi = {technique = .Voxel_Cones, level = .Low}
+		desc.quality = &q
+		for _ in 0 ..< 2 {
+			testing.expect(t, draw_frame(r, w, desc), "the voxel cones' frame did not execute")
+			testing.expect(t, record.gi)
+		}
+		testing.expect(t, r.gi.voxel.running, "the voxel cones did not run")
+		testing.expect(t, r.gi.voxel.boxes[0].voxelized)
 		desc.quality = nil
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
