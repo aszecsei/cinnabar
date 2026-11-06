@@ -174,6 +174,7 @@ public sealed class ContentBrowser
             AssetTemplate.Prefab => "new_prefab",
             AssetTemplate.Effect => "new_effect",
             AssetTemplate.AnimationGraph => "new_animation_graph",
+            AssetTemplate.Ui => "new_ui",
             _ => "new_folder",
         };
         if (Folder?.Directory(assets) is not { } dir)
@@ -189,6 +190,7 @@ public sealed class ContentBrowser
             AssetTemplate.Prefab => assets.ExtensionOf(AssetKind.Prefab),
             AssetTemplate.Effect => assets.ExtensionOf(AssetKind.Effect),
             AssetTemplate.AnimationGraph => assets.ExtensionOf(AssetKind.AnimationGraph),
+            AssetTemplate.Ui => assets.ExtensionOf(AssetKind.Ui),
             null => "",
             _ => assets.ExtensionOf(AssetKind.Script),
         };

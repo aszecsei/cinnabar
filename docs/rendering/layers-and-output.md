@@ -38,7 +38,7 @@ A first-person view model needs its own field of view, and it must never go into
 - The UI draws into its own target in sRGB-encoded values, and blends them as encoded values, as design tools do. A color that a designer picks is the color on the screen.
 - The output pass combines the UI with the tone-mapped scene in its shader, not with fixed-function blending, so it can blend in sRGB space, and in HDR output, scale the UI to paper white (see [HDR output](#hdr-output)).
 - The UI target has the frame target's size. The scene can render at a lower resolution (see [Anti-aliasing](anti-aliasing.md#upscaling)), and the UI stays sharp.
-- The engine has no UI renderer of its own. A game writes into the UI target through the `ui` hook. The sample draws a HUD panel there, with colors picked as sRGB values, and the `Premultiplied` blend.
+- A game writes into the UI target through the `ui` hook. The UI system draws its documents there in one batch, from `ui.add_passes` (see [UI: Drawing](../ui/design.md#drawing)), and a game can add its own passes before or after it, with the `Premultiplied` blend.
 
 ### Debug
 

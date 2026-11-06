@@ -23,3 +23,6 @@
 [submodule "vendor/opus"]
 	path = vendor/opus
 	url = https://github.com/xiph/opus.git
+[submodule "vendor/msdfgen"]
+	path = vendor/msdfgen
+	url = https://github.com/Chlumsky/msdfgen

@@ -1,0 +1,29 @@
+ui 1
+<!-- Elements, styles, ids and templates that are wrong. -->
+<ui id="root" focus="nowhere"> <!-- problem -->
+	<style name="card" fill="#fff"/>
+	<style name="card:active"/> <!-- problem -->
+	<style name="card" fill="#000"/> <!-- problem -->
+	<style fill="#000"/> <!-- problem -->
+	<style name="Bad Name"/> <!-- problem -->
+	<style name="nested"><box/></style> <!-- problem -->
+	<panel/> <!-- problem -->
+	<box style="card missing"/> <!-- problem -->
+	<box style="card:focus"/> <!-- problem -->
+	<box id="twice"/>
+	<box id="twice"/> <!-- problem -->
+	<box id="Upper"/> <!-- problem -->
+	<box name="x"/> <!-- problem -->
+	<box>loose text</box> <!-- problem -->
+	<text><box/></text> <!-- problem -->
+	<button>Both <text>kinds</text></button> <!-- problem -->
+	<box nav_left="nowhere"/> <!-- problem -->
+	<column>
+		<template id="inner"><box/></template> <!-- problem -->
+		<style name="late"/> <!-- problem -->
+		<ui/> <!-- problem -->
+	</column>
+	<template><box/></template> <!-- problem -->
+	<template id="two"><box/><box/></template> <!-- problem -->
+	<template id="sized" width="4"><box id="twice" nav_up="twice"/></template> <!-- problem -->
+</ui>

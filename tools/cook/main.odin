@@ -24,6 +24,8 @@ USAGE :: `usage: cook scripts --cache <dir> --config dev|release [--definitions 
        cook effects --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook animation_graphs --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook audio --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook fonts --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
+       cook ui --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stages --cache <dir> --config dev|release --root <name>=<dir> [--root <name>=<dir>]...
        cook stage-report <stage>...
        cook daemon --cache <dir> [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]... [--link <port>] --root <name>=<dir> [--root <name>=<dir>]...
@@ -73,6 +75,14 @@ main :: proc() {
 	case "audio":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
 			ok = cook_batch(options, .Audio)
+		}
+	case "fonts":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Font)
+		}
+	case "ui":
+		if options, parsed = parse_cook_args(os.args[2:]); parsed {
+			ok = cook_batch(options, .Ui)
 		}
 	case "stages":
 		if options, parsed = parse_cook_args(os.args[2:]); parsed {
@@ -154,6 +164,9 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 			log.infof("cook: %d %s of stages cooked, %d up to date", pass.cooked[sub], kind_plural(sub), pass.current[sub])
 		}
 	}
+	if kind == .Font {
+		log.infof("cook: %d atlases of fonts cooked", pass.cooked[.Texture])
+	}
 	return pass.ok
 }
 
@@ -198,6 +211,10 @@ kind_plural :: proc(kind: format.Asset_Kind) -> string {
 		return "animation graphs"
 	case .Audio:
 		return "sounds"
+	case .Font:
+		return "fonts"
+	case .Ui:
+		return "UI documents"
 	}
 	return "assets"
 }

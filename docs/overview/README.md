@@ -92,6 +92,7 @@ cinnabar/
 │       ├── volume/          Volumes: settings that depend on where a point is
 │       ├── project/         The project settings file
 │       ├── debug/           The immediate-mode debug drawing API
+│       ├── ui/              The UI: documents, layout, MSDF text, the batch, focus and navigation, the Ui library
 │       ├── wire/            Framing, wire format and schema writer, shared by both links
 │       └── content/         Engine content: shaders, shading models, the default and placeholder materials, the preview meshes
 ├── src/
@@ -103,7 +104,7 @@ cinnabar/
 │   ├── editorctl/           Drives a running editor from a terminal: screenshots and GIFs
 │   └── ltc_fit/             Fits the area lights' lookup tables
 ├── samples/mygame/          The sample game: game.odin, main_release/, content/, project.settings
-└── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg (submodules); agility, dxc (downloaded)
+└── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg, msdfgen (submodules); agility, dxc (downloaded)
 ```
 
 Packages are small and single-purpose. A package's tests are beside it as `*_test.odin`, and the justfile's `test` recipe lists every package with tests.
@@ -130,6 +131,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/engine/project` | Game | The project's settings file and the user's file beside it, which the game reads again when they change (see [Project settings](architecture.md#project-settings)). |
 | `lib/core/audio` | Host | The boundary to an audio backend, and the mixer behind it, whose threads run through a code reload (see [Audio](../audio/README.md#overview)). |
 | `lib/engine/audio` | Game | `Audio_Source` and `Audio_Listener`, spatial sound from presented poses, occlusion by physics rays, and the `Audio` script binding (see [Audio](../audio/design.md#the-game-side)). It also holds the audio device's test tone (see [Core](../core/audio.md#test-tone)). |
+| `lib/engine/ui` | Game | The UI: `Ui_Document`, documents built from UI document assets, the cascade of styles, layout, text shaped with kb_text_shape and drawn from fonts' distance fields, one batch into the UI layer, focus and gamepad navigation, and the `Ui` script library (see [UI](../ui/README.md)). |
 | `lib/engine/debug` | Game | Immediate-mode debug drawing: lines, boxes, spheres, arrows and axes, in world positions (see [Rendering](../rendering/layers-and-output.md#debug)). |
 | `lib/engine/anim` | Game | Animation on skinned meshes: `Animator` and `Root_Motion`, the `animate` system in fixed ticks, animation events, and the poses that the renderer skins with (see [Animation](../animation/design.md#the-ecs)). |
 | `lib/engine/anim/graph` | Game | The animation graph: states, fades and blends of clips, events, root motion, and poses sampled, blended and composed into a palette. It imports nothing from the world, scripts or the renderer, so what it gives depends on its inputs alone (see [Animation](../animation/design.md#design)). |

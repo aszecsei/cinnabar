@@ -34,6 +34,10 @@ A skin blob holds its joints, parents first: each with its parent's index, its i
 
 An audio blob holds its frame count, its channels, whether it streams, its format, the frames that a pass skips, and its data at 48 kHz, which starts at 16 bytes: interleaved 16-bit PCM, blocks of IMA ADPCM, an Ogg Vorbis stream, or Opus packets each after its size in a little-endian `u16`. It starts with the source path after the header. A stream reads the header and then its data from the file as it plays, and never loads the blob. A sound that does not stream is loaded and, if it is compressed, decoded to PCM (see [Audio](kinds/audio.md#audio)).
 
+A font blob holds its atlas's GUID and size, its units per em, the atlas's texels to an em and its distance range, its line metrics in em, which font of a collection it is, its glyphs sorted by id (each its cell in the atlas and its plane from the pen), the font's file, which starts at 16 bytes, its family name and the source path. The atlas is a texture blob of its own (see [Fonts](kinds/fonts.md#the-blob)).
+
+A UI document blob holds its nodes in the order of a walk that visits each before its children (each its element, its parent, the end of its subtree, its line, its id, its attributes and its styles), its styles (each its name, its attributes and its variant for each state), its attributes (each an attribute and its value as text, which the runtime parses as it does a script's), the styles that each node takes, and the source path (see [UI documents](kinds/ui-documents.md#the-blob)).
+
 The format package has its own enum of texture formats, because it imports nothing from `lib/core/gpu`. The runtime maps it to `gpu.Format`.
 
 ## Loading

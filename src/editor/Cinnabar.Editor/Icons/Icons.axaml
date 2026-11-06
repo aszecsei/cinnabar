@@ -52,6 +52,8 @@
     <StreamGeometry x:Key="Icon.effect">M9 11.5A3.5 3.5 0 1 1 9 18.5A3.5 3.5 0 1 1 9 11.5ZM9 13A2 2 0 1 0 9 17A2 2 0 1 0 9 13ZM16 4A2.5 2.5 0 1 1 16 9A2.5 2.5 0 1 1 16 4ZM16 5.5A1 1 0 1 0 16 7.5A1 1 0 1 0 16 5.5ZM17.5 13A1.75 1.75 0 1 1 17.5 16.5A1.75 1.75 0 1 1 17.5 13Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.prefab">F0 M3 3H21V21H3ZM4.5 4.5V19.5H19.5V4.5ZM8 8H16V16H8Z</StreamGeometry>
     <!-- Not from Fluent: a sound, a speaker with a wave. -->
+    <StreamGeometry x:Key="Icon.ui-document">M3 4H21V20H3ZM4.5 5.5V18.5H19.5V5.5ZM6 7H18V9H6ZM6 14H13V17H6Z</StreamGeometry>
+    <StreamGeometry x:Key="Icon.font">M11 3H13L20 21H17.8L16 16.5H8L6.2 21H4ZM8.8 14.5H15.2L12 6.2Z</StreamGeometry>
     <StreamGeometry x:Key="Icon.audio">M3 9H7L12 4V20L7 15H3ZM4.5 10.5V13.5H7.6L10.5 16.4V7.6L7.6 10.5ZM15 8.2C16.3 9 17 10.4 17 12C17 13.6 16.3 15 15 15.8L14.2 14.5C15.1 14 15.5 13.1 15.5 12C15.5 10.9 15.1 10 14.2 9.5ZM17 4.8C19.6 6.2 21.5 8.9 21.5 12C21.5 15.1 19.6 17.8 17 19.2L16.2 17.9C18.4 16.7 20 14.5 20 12C20 9.5 18.4 7.3 16.2 6.1Z</StreamGeometry>
     <!-- Not from Fluent: an instance set, the poses of a point instancer, a scatter of points. -->
     <StreamGeometry x:Key="Icon.instance-set">M4 4H8V8H4ZM11 6H15V10H11ZM17 3H21V7H17ZM5 11H9V15H5ZM12 13H16V17H12ZM18 10H22V14H18ZM7 18H11V22H7ZM16 19H20V23H16Z</StreamGeometry>

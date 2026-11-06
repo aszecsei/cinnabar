@@ -42,10 +42,10 @@ A game finds its files beside its executable, never through the working director
 `samples/mygame/game.odin` is the best concrete walkthrough of how the parts fit. Its `update` does, in order:
 
 1. Reads the project settings and asks `core` for the output mode they name, and switches scenes if a key asked for it.
-2. Asks the editor package whether the world runs this frame (`editor.simulation`): yes without an editor, and in play mode; no in edit mode, where only transforms propagate so that edits show.
-3. If the world runs: the fixed ticks that are due, the `Update` systems, the script phase, and the `Late` systems, exactly the phases of [Frame](architecture.md#frame).
+2. Asks the editor package whether the world runs this frame (`editor.simulation`): yes without an editor, and in play mode; no in edit mode, where only transforms propagate so that edits show. While the pause menu shows, the world takes no time, but the script phase still runs.
+3. Matches the UI's documents to the world's `Ui_Document`s (`ui.sync`), and if the world runs: the fixed ticks that are due, the `Update` systems, the UI's input and its events (see [UI: Input and focus](../ui/design.md#input-and-focus)), the script phase, and the `Late` systems, exactly the phases of [Frame](architecture.md#frame).
 4. Picks the view: the editor's camera while an editor is linked, else the scene's `Camera` entity.
-5. Fills a `Frame_Desc` and calls `render.draw_frame`, adding its own passes through the renderer's hooks: culling on the compute queue, its own draws in the world pass, a HUD in the UI layer, and the editor's tools in the debug layer.
+5. Fills a `Frame_Desc` and calls `render.draw_frame`, adding its own passes through the renderer's hooks: culling on the compute queue, its own draws in the world pass, the UI's documents in the UI layer (`ui.add_passes`), and the editor's tools in the debug layer.
 6. At the end of the frame, polls the asset runtime for blobs that the cooker rewrote and reloads the scripts among them.
 
 `init` builds the world, the asset runtime, the script runtime, the renderer and the editor package in that order, and `on_reload` runs the same registration procedure as `init` so that every registration points at the new code.

@@ -262,3 +262,15 @@ physics_layers_and_ignored_pairs :: proc(t: ^testing.T) {
 	none: Settings
 	testing.expect_value(t, physics_layers(none).count, 1)
 }
+
+@(test)
+the_ui_scale_is_a_number_from_a_quarter_to_four :: proc(t: ^testing.T) {
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("ui.scale = 1.5\n", &s, &problems)
+	testing.expect_value(t, s.ui_scale, 1.5)
+	testing.expect_value(t, len(problems), 0)
+	parse("ui.scale = 9\nui.scale = big\n", &s, &problems)
+	testing.expect_value(t, s.ui_scale, 1.5)
+	testing.expect_value(t, len(problems), 2)
+}

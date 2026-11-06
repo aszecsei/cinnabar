@@ -119,3 +119,10 @@ The order in which animation was built (see [Animation](animation/README.md)).
 5. **The ECS and scripts:** graphs on `Animator`, `Root_Motion`, events for systems and behaviours, `System_Desc.data`, the `Animation` library, and the sample's walking fox.
 6. **The editor:** a canvas for animation graphs, a reader and writer of their text that keep every line, the cooker's problems on their nodes, a preview that plays the graph on a mesh apart from the world, with its parameters on the panel, and the selected entity's Animator live on the canvas ([Editor: Animation graph editor](editor/animation-graph-editor.md)).
 
+
+## UI
+The order in which the UI was built (see [UI](ui/README.md)).
+
+1. **Fonts:** msdfgen's core in `vendor/msdfgen` behind a C API of the cooker's, the `Font` kind with the glyphs that GSUB reaches from its charset, and its atlas of multi-channel and true distance fields as a texture sub-asset ([Content: Fonts](content/kinds/fonts.md)).
+2. **UI documents:** the `.ui` kind, its pseudo-XML with named styles and their variants and templates, the parser and checks in `format` that the runtime shares, the blob, and the editor's template ([Content: UI documents](content/kinds/ui-documents.md)).
+3. **The runtime:** `lib/engine/ui`, with `Ui_Document`, documents built from their blobs with what scripts set kept across rebuilds, the cascade, layout with fills and the UI scale, text shaped with kb_text_shape, one batch drawn by `ui.hlsl`, hover, focus, navigation with keys and gamepads, modal documents, fields with IME composition, and the `Ui` library ([Design](ui/design.md)).

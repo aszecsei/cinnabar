@@ -66,6 +66,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 | `Audio` | `play(sound, position?, gain?, bus?)` and `set_bus_gain(bus, gain)`. See [Audio: Scripts](../audio/design.md#scripts). |
 | `Physics` | Queries (`raycast`, `raycast_all`, `sphere_cast`, `box_cast`, `capsule_cast`, `overlap_sphere`, `overlap_box`, `overlap_capsule`), `layers(...)`, `gravity()` and `set_gravity`, the effects on a body, with its entity first (`add_force`, `add_impulse`, `velocity`, `set_velocity`, `sleep` and the rest), and a joint's `set_motor(entity, mode, target?, max?)` and `set_joint_enabled(entity, enabled)`, where the game defines it (see [Physics: Scripts](../physics/design.md#scripts)) |
+| `Ui` | A document's elements by its entity and their ids: `set`, `set_text`, `set_visible`, `focus`, `get_text`, `bind`, `add` and `remove`, and `wants_input()`, where the game defines it. The entity's behaviours get the document's events as `on_<event>(id)` (see [UI: Scripts](../ui/design.md#scripts)) |
 | `Animation` | An Animator's graph's parameters by name, with its entity first (`set_float`, `set_bool`, `trigger`, `reset_trigger`, `get_float`, `get_bool`), its current `state` and its `root_motion` in the world, where the game defines it (see [Animation: Scripts](../animation/design.md#scripts)) |
 
 - **Angles are in degrees**, as in Unity. Euler angles apply z, then x, then y, as in Unity.
@@ -147,6 +148,8 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `animator.SetFloat`, `SetBool`, `SetTrigger`, `ResetTrigger` | `Animation.set_float(entity, name, v)`, `set_bool`, `trigger`, `reset_trigger` (see [Animation: Scripts](../animation/design.md#scripts)) |
 | `AnimationEvent` | `on_animation_event(name, ...)`, from markers authored in the graph |
 | `OnAnimatorMove`, `animator.deltaPosition` | `Animation.root_motion(entity)` or the `RootMotion` component, which nothing applies until gameplay does |
+| UI Toolkit's `UIDocument`, `rootVisualElement.Q<Label>(name).text` | `Ui_Document`, `Ui.set_text(entity, id, text)` (see [UI: Scripts](../ui/design.md#scripts)) |
+| `Button.clicked` | `click="name"` in the document, and `on_name(id)` on the entity's behaviour |
 | `HingeJoint`, `OnJointBreak` | `Hinge_Joint` and the other joints, `on_joint_break(force, torque)` |
 | `GameObject.Find` | Not provided. Use entity fields. |
 | `Resources.Load` | Not provided. Content refers to content by GUID, so use an asset field. |
