@@ -1,8 +1,11 @@
 --!strict
 -- The pause menu's behaviour, on the entity whose Ui_Document is ui/pause.ui (see docs/ui/design.md#scripts). Escape or a
 -- gamepad's Start shows the menu and pauses the world; Resume, B or Escape hides it and runs the world again. Quality
--- takes the next render preset, as F9 does, and the name field greets whoever types into it.
+-- takes the next render preset, as F9 does, and the name field greets whoever types into it. The saves list is 50
+-- copies of the slot template, which scrolls.
 local PauseMenu = Behaviour.define("PauseMenu")
+
+local SLOTS = 50
 
 -- after is the value after one in a list, or the first after the last or when the list does not have it.
 local function after(list: { string }, value: string): string
@@ -31,6 +34,10 @@ end
 
 function PauseMenu:start()
 	Ui.bind(self.entity, "name", "stranger")
+	for i = 1, SLOTS do
+		local id = Ui.add(self.entity, "slots", "slot")
+		Ui.set_text(self.entity, id .. ".label", `Slot {i}`)
+	end
 end
 
 function PauseMenu:update(_dt: number)
@@ -58,6 +65,10 @@ end
 
 function PauseMenu:on_name_submitted(_id: string, text: string)
 	Debug.log("the pause menu's name is", text)
+end
+
+function PauseMenu:on_slot(id: string)
+	Debug.log("the pause menu's save is", id)
 end
 
 return PauseMenu

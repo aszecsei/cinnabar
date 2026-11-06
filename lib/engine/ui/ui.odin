@@ -71,6 +71,10 @@ Node :: struct {
 	// What its drawing is cut to, and what its children's are.
 	clip:         [4]f32,
 	child_clip:   [4]f32,
+	// A scroll box's offset along its direction, in pixels of the UI layer, and how far its content goes past it, which
+	// layout sets and clamps the offset to.
+	scroll:       f32,
+	scroll_max:   f32,
 	// Its text this frame, if it has any: the font, its size in pixels, its glyphs and its lines.
 	text:         Node_Text,
 	// Whether the node shows and is laid out: it and all of its ancestors are visible.
@@ -162,6 +166,9 @@ Document :: struct {
 	// player's (see set_forced_states).
 	forced_node:  u32,
 	forced:       bit_set[format.Ui_State],
+	// The styles named scroll_track and scroll_thumb, which scroll bars take, or UI_NONE.
+	track_style:  u32,
+	thumb_style:  u32,
 }
 
 // Font_Slot is a font that text uses: its blob, and kb_text_shape's font placed from it, which a code reload drops,
@@ -441,10 +448,16 @@ load_document :: proc(s: ^State, d: ^Document) {
 }
 
 // rebuild makes the document's nodes again from its blob, replays the scripts' changes to its tree, and keeps the
-// focus on the element of the same id.
+// focus and the scroll boxes' offsets on the elements of the same ids.
 @(private)
 rebuild :: proc(s: ^State, d: ^Document) {
 	focus_id := focused_id_hash(s, d)
+	scrolls := make(map[u64]f32, s.platform.frame_allocator)
+	for n in d.nodes {
+		if n.id_hash != 0 && n.scroll != 0 {
+			scrolls[n.id_hash] = n.scroll
+		}
+	}
 	clear(&d.nodes)
 	clear(&d.arena)
 	clear(&d.props)
@@ -455,11 +468,14 @@ rebuild :: proc(s: ^State, d: ^Document) {
 	clear(&d.lines)
 	d.built = true
 	d.generation += 1
+	d.track_style, d.thumb_style = format.UI_NONE, format.UI_NONE
 	blob, ok := format.ui_view(d.data)
 	if !ok {
 		return
 	}
 	data := d.data
+	d.track_style, _ = format.ui_find_style(data, blob, TRACK_STYLE)
+	d.thumb_style, _ = format.ui_find_style(data, blob, THUMB_STYLE)
 	blob_props := format.ui_props(data, blob)
 	add_props :: proc(d: ^Document, data: []byte, list: []format.Ui_Prop) -> Range {
 		r := Range{u32(len(d.props)), 0}
@@ -500,6 +516,11 @@ rebuild :: proc(s: ^State, d: ^Document) {
 			if n, found := find_node(d, op.target); found {
 				unlink(d, n)
 			}
+		}
+	}
+	for id_hash, scroll in scrolls {
+		if n, found := d.ids[id_hash]; found {
+			d.nodes[n].scroll = scroll
 		}
 	}
 	restore_focus(s, d, focus_id)

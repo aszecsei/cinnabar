@@ -23,7 +23,7 @@ sealed class UiDetails : ScrollViewer
     // The attributes' groups, as docs/content/kinds/ui-documents.md#attributes has them.
     static readonly (string Name, string[] Attributes)[] Groups =
     [
-        ("Layout", ["width", "height", "min_width", "max_width", "min_height", "max_height", "padding", "gap", "direction", "align", "cross", "anchor", "offset", "visible", "clip"]),
+        ("Layout", ["width", "height", "min_width", "max_width", "min_height", "max_height", "padding", "gap", "direction", "align", "cross", "anchor", "offset", "visible", "clip", "overflow", "scroll_bar"]),
         ("Paint", ["fill", "radius", "border", "opacity", "image", "tint", "slice"]),
         ("Text", ["text", "placeholder", "font", "size", "color", "text_align", "line_height", "wrap", "max_length"]),
         ("Interaction", ["focusable", "disabled", "click", "changed", "submit", "nav_up", "nav_down", "nav_left", "nav_right", "cancel", "focus", "modal"]),
@@ -38,6 +38,7 @@ sealed class UiDetails : ScrollViewer
         ["cross"] = ["start", "center", "end", "stretch"],
         ["anchor"] = ["top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom", "bottom_right", "fill"],
         ["text_align"] = ["start", "center", "end"],
+        ["overflow"] = ["visible", "scroll"],
     };
 
     const string Unset = "—";

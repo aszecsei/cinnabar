@@ -10,8 +10,9 @@ import format "cinnabar:engine/asset/format"
 
 // UI documents are .ui text files: a tree of boxes, text and images in a pseudo-XML with named styles (see
 // docs/content/kinds/ui-documents.md#ui-documents). The cooker checks one with format.ui_parse, checks that its fonts and
-// images are fonts and textures, and writes a Ui blob.
-UI_COOK_VERSION :: "ui 1"
+// images are fonts and textures, and writes a Ui blob. A blob keeps attributes by their place in format.Ui_Attr, so a
+// new attribute moves the version on.
+UI_COOK_VERSION :: "ui 2"
 
 // UI_TEMPLATE is a new UI document's text: a panel in the middle of the screen with a title and a button. Its text has
 // no font until the author gives the root one.

@@ -110,24 +110,7 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	}
 	st := &node.style
 	alpha := node.alpha
-	// The box, with its border, which a fill or a border shows.
-	if st.fill.colors[0].a > 0 || st.fill.colors[1].a > 0 || (st.border.width > 0 && st.border.color.a > 0) {
-		i := Instance {
-			rect     = node.rect,
-			clip     = node.clip,
-			radii    = st.radius * s.scale,
-			fill     = pack(st.fill.colors[0], alpha),
-			fill_end = pack(st.fill.colors[1], alpha),
-			border   = pack(st.border.color, alpha),
-			kind     = INSTANCE_RECT,
-			width    = st.border.width * s.scale,
-		}
-		if st.fill.gradient {
-			i.kind |= INSTANCE_GRADIENT
-			i.gradient = gradient_of(node.rect, st.fill.angle)
-		}
-		push(b, i)
-	}
+	batch_box(s, b, node.rect, node.clip, st, alpha)
 	batch_image(s, b, node, alpha)
 	if node.text.ok {
 		batch_text(s, b, d, index, n, now)
@@ -137,6 +120,34 @@ batch_node :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
 		batch_node(s, b, d, index, c, now)
 	}
+	// A scroll box's bar draws over its children.
+	if bar, ok := bar_of(s, d, n); ok {
+		batch_box(s, b, snap(bar.track), node.clip, &bar.track_style, alpha * bar.track_style.opacity)
+		batch_box(s, b, snap(bar.thumb), node.clip, &bar.thumb_style, alpha * bar.thumb_style.opacity)
+	}
+}
+
+// batch_box draws a box of a style, with its border, which a fill or a border shows.
+@(private)
+batch_box :: proc(s: ^State, b: ^Batch, rect, clip: [4]f32, st: ^Style, alpha: f32) {
+	if !(st.fill.colors[0].a > 0 || st.fill.colors[1].a > 0 || (st.border.width > 0 && st.border.color.a > 0)) {
+		return
+	}
+	i := Instance {
+		rect     = rect,
+		clip     = clip,
+		radii    = st.radius * s.scale,
+		fill     = pack(st.fill.colors[0], alpha),
+		fill_end = pack(st.fill.colors[1], alpha),
+		border   = pack(st.border.color, alpha),
+		kind     = INSTANCE_RECT,
+		width    = st.border.width * s.scale,
+	}
+	if st.fill.gradient {
+		i.kind |= INSTANCE_GRADIENT
+		i.gradient = gradient_of(rect, st.fill.angle)
+	}
+	push(b, i)
 }
 
 // gradient_of is the vector that a gradient at an angle runs along over a rectangle: its direction, over how far the

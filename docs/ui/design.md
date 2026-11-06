@@ -2,7 +2,7 @@
 
 How the UI works: from a document on an entity to the pixels of the UI layer and back to the scripts. Read the [overview](README.md#overview) first, and [Content: UI documents](../content/kinds/ui-documents.md#ui-documents) for the format.
 
-**In this document:** [Documents](#documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame) · [The sample](#the-sample)
+**In this document:** [Documents](#documents) · [The cascade](#the-cascade) · [Layout](#layout) · [Text](#text) · [Drawing](#drawing) · [Input and focus](#input-and-focus) · [Scrolling](#scrolling) · [Scripts](#scripts) · [Hot reload](#hot-reload) · [The frame](#the-frame) · [The sample](#the-sample)
 
 ## Documents
 
@@ -46,9 +46,9 @@ An element's own attribute holds in every state, so an attribute that changes wi
 5. **Wrap:** each text breaks into lines at the width that it resolved to.
 6. **Fit and resolve, along y,** the same way, with the lines. An image's fit keeps its texture's shape at the width that it resolved to.
 7. **Place:** a row or column puts its children one after the other, from where `align` says (`start`, `center`, `end`, or `space_between`, which spreads what is left between them), and across by `cross`. A stack puts each child by its `anchor`. `offset` moves a child from there. Each edge is then rounded to a whole pixel on its own, so neighbors share edges and leave no gaps.
-8. **Clip:** a node's drawing is cut to its parent's clip, and a node with `clip`, or a field, cuts its children's to its rectangle as well.
+8. **Clip:** a node's drawing is cut to its parent's clip, and a node with `clip`, a field, or a box that scrolls, cuts its children's to its rectangle as well.
 
-There is no shrinking: children that need more than their parent has overflow it, and `clip` cuts them off.
+There is no shrinking: children that need more than their parent has overflow it, and `clip` cuts them off, unless the parent scrolls them (see [Scrolling](#scrolling)).
 
 ### Scale
 
@@ -68,7 +68,7 @@ Every length in a document is in pixels at a UI scale of 1: sizes, padding, gaps
 
 `ui.add_passes`, which the game calls from its `ui` hook (see [Rendering: Layers and output](../rendering/layers-and-output.md#ui)), lays the documents out at the frame's output size and draws them all in one draw call.
 
-**The batch.** Each `Instance` (96 bytes) is a rectangle in the layer's pixels, its clip, its corners' radii, its UVs, its colors, its kind and its texture. The documents draw from the lowest order up, and each tree draws each node before its children: its box, its image, its text, and in a field its selection, its composition and its caret. A box draws if it has a fill or a border. An image draws once its texture is resident, as one instance or, with `slice`, nine, whose corners keep their size. A glyph draws once its font's atlas is resident. Instances of no size, or outside their clip, are left out, and a frame has at most `MAX_UI_INSTANCES` (16384). The instances go into the frame's upload ring, and the pass draws six vertices for each.
+**The batch.** Each `Instance` (96 bytes) is a rectangle in the layer's pixels, its clip, its corners' radii, its UVs, its colors, its kind and its texture. The documents draw from the lowest order up, and each tree draws each node before its children: its box, its image, its text, and in a field its selection, its composition and its caret. A box that scrolls draws its bar after its children (see [Scrolling](#scrolling)). A box draws if it has a fill or a border. An image draws once its texture is resident, as one instance or, with `slice`, nine, whose corners keep their size. A glyph draws once its font's atlas is resident. Instances of no size, or outside their clip, are left out, and a frame has at most `MAX_UI_INSTANCES` (16384). The instances go into the frame's upload ring, and the pass draws six vertices for each.
 
 **The shader** (`ui.hlsl`) pulls each instance from the upload buffer. Its vertex shader grows a rectangle by a pixel for its antialiased edge and cuts it to its clip, with the UVs of the rectangle as it was, so a cut never stretches an image. Its pixel shader discards what is outside the clip, and draws:
 
@@ -88,11 +88,28 @@ Colors are as a designer picks them, sRGB-encoded with straight alpha, and each 
 
 **Scope.** The documents that show take input, the highest order first. A document whose root is `modal` takes all of it while it shows, and none goes to those under it. When one comes to show, the focus goes into it, to its root's `focus` element or its first that takes focus, and the focus that was before is kept on a stack of `MAX_FOCUS_STACK` (8); when it goes, the focus goes back.
 
-**The pointer.** The element under the pointer that takes it, the topmost, is hovered: one that clicks, takes focus, or is a button or a field, and is not disabled. A press takes the focus if the element takes focus, and a release over the element that the press was on clicks it. A press anywhere else stops a field's editing.
+**The pointer.** The element under the pointer that takes it, the topmost, is hovered: one that clicks, takes focus, or is a button or a field, and is not disabled. A press takes the focus if the element takes focus, and a release over the element that the press was on clicks it. A press anywhere else stops a field's editing. A scroll bar is over its box's content, and takes the pointer before it (see [Scrolling](#scrolling)).
 
 **Navigation.** The arrows, the d-pad and the left stick move the focus; the stick points a way past `STICK_ENGAGE` (0.5) on its larger axis, and lets go under `STICK_RELEASE` (0.35). A held direction moves once, then again after `NAV_DELAY` (0.4 s), and then every `NAV_REPEAT` (0.1 s), in real time. The focus goes to the element that the focused one's `nav_up`, `nav_down`, `nav_left` or `nav_right` names, or else to the nearest that takes focus beyond its edge that way, by the gap that way plus twice the gap across. Tab and Shift+Tab follow the tree. With nothing focused, the first move focuses the document's first element. Enter, Space and A click the focused element; B and Escape send the `cancel` event of the topmost document that has one, with an empty id.
 
 **Fields.** A click on a field, or activating it, starts editing it. Committed text, with what an IME committed, goes in at the caret, over the selection, up to `max_length` characters. Backspace, Delete, Left and Right repeat after `NAV_DELAY` every `KEY_REPEAT` (0.033 s); Shift selects and Ctrl steps by words; Home and End go to the ends. The value is the field's `text`, set as a script's `Ui.set_text` would, so it outlives a rebuild. Each edit sends the field's `changed` event with its id and its text, and Enter its `submit` event, and stops editing. Escape, B and Tab stop editing. What an IME is composing draws at the caret, underlined, and is not part of the value until it commits. The caret goes between clusters, so in a ligature it is at its start or its end, and the field scrolls to keep it in view. While a field is being edited, or a modal document shows, `Ui.wants_input()` is true, which a game's own controls check.
+
+## Scrolling
+
+A row or column with `overflow="scroll"` scrolls its content along its direction (see [Content: UI documents](../content/kinds/ui-documents.md#attributes)). The code is in `scroll.odin`.
+
+**Layout.** The box's children share the larger of its content and what they need along its direction. They need the same as in its fit: a child of pixels takes its pixels, a percent takes that much of the content, and any other child takes its fit. So the children are laid out at their fit size, and a percent stays a part of the content that shows: `100%` is a page. When they do not fit, they are placed from the start whatever the box's `align`, moved back by its offset rounded to a whole pixel, and cut to its rectangle. Layout clamps the offset to how far the content goes past the box. The box's own fit is still its content's, so a box that scrolls needs a `height`, a `max_height`, or a `fill` in a parent of a set size.
+
+**The offset** is on the node, in the UI layer's pixels. A rebuild puts it back on the element of the same id, and an element without an id starts again at the start. On a stack, `overflow` does nothing, as a stack has no direction.
+
+**Input.**
+
+- **The wheel** scrolls the innermost box under the pointer that can move that way, by `WHEEL_STEP` (60) pixels a notch, along the box's direction, so a row scrolls sideways. At a list's end, the next box out scrolls.
+- **The right stick and Page Up and Page Down** scroll the boxes that the focus is in, or, if it is in none, those under the pointer. The stick scrolls up to `STICK_SCROLL` (1200) pixels a second: a column takes its y and a row its x, for at most `MAX_SCROLL_DT` (0.1 s) a frame. Page Up and Page Down move a view at a time, and do nothing while a field is being edited. Neither moves the focus.
+- **The focus.** When the focus moves to an element, by keys, a gamepad, Tab, `Ui.focus` or a modal document, the layout of the same frame scrolls each box that the element is in, the innermost first. Each box scrolls until the element is inside the box's padding, or its start is if it is larger. A pointer's press focuses without scrolling, so what it pressed stays under the release that clicks it.
+- **Hit testing and navigation** read the rectangles as they have scrolled. An element cut off out of view takes no pointer. The nearest element in a direction can be out of view, and moving the focus to it scrolls it in.
+
+**The bar.** A box that has more than it shows draws a bar over its children, along its end edge: a column's right edge and a row's bottom edge. `scroll_bar="false"` hides it. Its track and its thumb take the document's styles named `scroll_track` and `scroll_thumb` (see [Content: Scroll bars](../content/kinds/ui-documents.md#scroll-bars)). The thumb's length is the track's times the part of the content that shows, but at least `MIN_THUMB` (24) pixels. A press on the thumb drags it, and the offset follows the pointer in proportion until the button goes up. A press on the track moves a view toward the pointer. The bar does not click and does not take the focus. Its states are `hover` while the pointer is over the box, `press` on the thumb while it is dragged, and `disabled` with the box.
 
 ## Scripts
 
@@ -126,7 +143,7 @@ end
 
 ## Hot reload
 
-- **A new version of a document** builds it again, with the scripts' attributes, copies and removals, its bindings, and the focus on the same id. A copy whose template or parent is gone is left out.
+- **A new version of a document** builds it again, with the scripts' attributes, copies and removals, its bindings, and the focus and each scroll offset on the same id. A copy whose template or parent is gone is left out.
 - **A new version of a font** places its shaper again. A new version of the shader recreates the pipeline (`ui.sync_pipelines`).
 - **A code reload** keeps the documents, their nodes and what scripts set, which are all in host memory, and drops the fonts' shapers, which the next text places again (`ui.on_reload`). The `Ui` library is defined again with the game's other bindings.
 - **A soft restart** starts the UI from nothing.
@@ -150,6 +167,6 @@ A game calls the UI at these points of its frame (the sample's are in `samples/m
 `samples/mygame`'s main scene has two documents, on the entities HUD and Pause Menu, in Fira Sans (`content/fonts`, under the SIL Open Font License beside it):
 
 - **The HUD** (`content/ui/hud.ui`, `hud.luau`) is a panel in the top left with an accent stripe, which shows the frame rate that its behaviour binds, smoothed over real time.
-- **The pause menu** (`content/ui/pause.ui`, `pause_menu.luau`) is modal, with order 10, and hidden until Escape or a gamepad's Start shows it. It pauses the world through the sample's `Game.set_paused`, which makes the world take no time while the script phase and the UI run on. Resume, B or Escape hides it. Quality takes the next render preset and saves it, as F9 does. The name field greets whoever types into it, through a binding.
+- **The pause menu** (`content/ui/pause.ui`, `pause_menu.luau`) is modal, with order 10, and hidden until Escape or a gamepad's Start shows it. It pauses the world through the sample's `Game.set_paused`, which makes the world take no time while the script phase and the UI run on. Resume, B or Escape hides it. Quality takes the next render preset and saves it, as F9 does. The name field greets whoever types into it, through a binding. Saves is a list of 50 copies of the `slot` template, which the behaviour adds when it starts. It scrolls with the wheel, the right stick, Page Up and Page Down, and its bar, and keeps the focused slot in view.
 - `fly_camera.luau` and `hello.luau` leave the gamepad and Space and Tab alone while `Ui.wants_input()`.
 - `ui.scale` in the project's settings multiplies the UI scale.

@@ -94,6 +94,8 @@ Ui_Attr :: enum u16 {
 	Offset,
 	Visible,
 	Clip,
+	Overflow,
+	Scroll_Bar,
 	// Paint.
 	Fill,
 	Radius,
@@ -161,6 +163,7 @@ Ui_Value_Kind :: enum u8 {
 	Cross,
 	Anchor,
 	Text_Align,
+	Overflow,
 }
 
 // Ui_Length is a size: pixels at a UI scale of 1, a percent of the parent's, what the content needs, or a share of what
@@ -238,6 +241,13 @@ Ui_Text_Align :: enum u8 {
 	End,
 }
 
+// Ui_Overflow is what a row or column does with children that need more room than it has: let them out, or scroll
+// them along its direction.
+Ui_Overflow :: enum u8 {
+	Visible,
+	Scroll,
+}
+
 Ui_Value :: union {
 	f32,
 	bool,
@@ -254,6 +264,7 @@ Ui_Value :: union {
 	Ui_Cross,
 	Ui_Anchor,
 	Ui_Text_Align,
+	Ui_Overflow,
 }
 
 // Ui_Attr_Info is what an attribute is called, what it takes, which elements it means something on, and whether
@@ -291,6 +302,8 @@ UI_ATTRS := [Ui_Attr]Ui_Attr_Info {
 	.Offset      = {name = "offset", kind = .Offset, on = UI_BOXES},
 	.Visible     = {name = "visible", kind = .Boolean, on = UI_BOXES},
 	.Clip        = {name = "clip", kind = .Boolean, on = UI_CONTAINERS},
+	.Overflow    = {name = "overflow", kind = .Overflow, on = UI_CONTAINERS},
+	.Scroll_Bar  = {name = "scroll_bar", kind = .Boolean, on = UI_CONTAINERS},
 	.Fill        = {name = "fill", kind = .Paint, on = UI_BOXES},
 	.Radius      = {name = "radius", kind = .Corners, on = UI_BOXES},
 	.Border      = {name = "border", kind = .Border, on = UI_BOXES},
@@ -637,6 +650,11 @@ ui_parse_value :: proc(attr: Ui_Attr, text: string) -> (value: Ui_Value, message
 			return Ui_Text_Align(i), ""
 		}
 		return nil, fmt.tprintf("is %q, not start, center or end", t)
+	case .Overflow:
+		if i, ok := ui_enum(t, {"visible", "scroll"}); ok {
+			return Ui_Overflow(i), ""
+		}
+		return nil, fmt.tprintf("is %q, not visible or scroll", t)
 	}
 	return nil, "is not a value"
 }
