@@ -21,6 +21,9 @@ namespace Cinnabar.Editor.Panels;
 /// </summary>
 public sealed class FaceEditorView : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     readonly EditorShell _shell;
     readonly StackPanel _content = new() { Classes = { "properties" } };
     readonly Dictionary<string, FieldView> _views = [];

@@ -19,6 +19,9 @@ namespace Cinnabar.Editor.AnimationGraphs;
 /// </summary>
 sealed class AnimationGraphPanel : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     static readonly string[] Types = ["float", "bool", "trigger"];
 
     readonly EditorShell _shell;

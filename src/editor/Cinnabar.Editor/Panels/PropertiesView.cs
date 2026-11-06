@@ -21,6 +21,9 @@ namespace Cinnabar.Editor.Panels;
 /// </summary>
 public sealed class PropertiesView : ScrollViewer
 {
+    // A subclass takes ScrollViewer's template only by its style key.
+    protected override Type StyleKeyOverride => typeof(ScrollViewer);
+
     // The components that come from the entity's own keys or from the world. The header shows the parent, the name
     // and the active state, and the behaviours have groups of their own, so these do not show as components.
     static readonly HashSet<ulong> Derived = [3, 6, 7, 8, 16];
