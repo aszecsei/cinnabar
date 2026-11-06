@@ -42,6 +42,10 @@ layout_document :: proc(s: ^State, tf: Text_Frame, d: ^Document, index: int) {
 	everything := [4]f32{0, 0, s.size.x, s.size.y}
 	root.clip = everything
 	place_tree(s, d, 0, everything)
+	// A node that the focus has just moved to is scrolled into view, in the frame that it moved in.
+	if reveal(s, d, index) {
+		place_tree(s, d, 0, everything)
+	}
 }
 
 // style_tree runs the cascade on a node and its subtree, and works out which of them show and which take input.
@@ -208,7 +212,9 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 	st := &node.style
 	content := max(node.size[axis] - padding_of(s, st, axis), 0)
 	if main_axis(st) == axis {
-		resolve_main(s, d, node, axis, content)
+		// A scroll box's children share the larger of its content and what they need, which it scrolls through.
+		room := scroll_axis(st) == axis ? max(content, children_fit(s, d, node, axis, content)) : content
+		resolve_main(s, d, node, axis, content, room)
 	} else {
 		for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
 			child := &d.nodes[c]
@@ -232,12 +238,33 @@ resolve_tree :: proc(s: ^State, d: ^Document, n: u32, axis: int) {
 	}
 }
 
-// resolve_main sizes a row's or a column's children along it: fixed, percent and fit sizes first, then what is left
-// shared among the fills by weight. A fill that its min or max stops takes that size, and the rest is shared again.
+// children_fit is what a row's or a column's children need along it: each child of pixels at its pixels, of a percent
+// at that of the content, and any other at its fit, and the gaps between them.
 @(private)
-resolve_main :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f32) {
+children_fit :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content: f32) -> f32 {
 	gap := node.style.gap * s.scale
-	free := content
+	total: f32
+	count := 0
+	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
+		child := &d.nodes[c]
+		if !child.shown {
+			continue
+		}
+		size, _, _ := length_on(&child.style, axis)
+		px, fixed := resolve_length(s, size, content)
+		total += clamp_size(s, &child.style, axis, fixed ? px : child.fit[axis], content) + (count > 0 ? gap : 0)
+		count += 1
+	}
+	return total
+}
+
+// resolve_main sizes a row's or a column's children along it: fixed, percent and fit sizes first, then what is left of
+// the room shared among the fills by weight. A fill that its min or max stops takes that size, and the rest is shared
+// again. Percents are of the content; the room is more in a scroll box.
+@(private)
+resolve_main :: proc(s: ^State, d: ^Document, node: ^Node, axis: int, content, room: f32) {
+	gap := node.style.gap * s.scale
+	free := room
 	weight: f32
 	count := 0
 	for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
@@ -314,14 +341,16 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 	if node.parent != NONE {
 		node.clip = d.nodes[node.parent].child_clip
 	}
-	node.child_clip = st.clip ? intersect(node.clip, node.rect) : node.clip
+	axis := main_axis(st)
+	scrolling := axis >= 0 && scroll_axis(st) == axis
+	node.scroll_max = 0
+	node.child_clip = (st.clip || scrolling) ? intersect(node.clip, node.rect) : node.clip
 	content := [4]f32 {
 		rect[0] + st.padding[3] * s.scale,
 		rect[1] + st.padding[0] * s.scale,
 		rect[2] - st.padding[1] * s.scale,
 		rect[3] - st.padding[2] * s.scale,
 	}
-	axis := main_axis(st)
 	if axis < 0 {
 		for c := node.first_child; c != NONE; c = d.nodes[c].next_sibling {
 			child := &d.nodes[c]
@@ -345,6 +374,13 @@ place_tree :: proc(s: ^State, d: ^Document, n: u32, rect: [4]f32) {
 	}
 	free := (content[axis + 2] - content[axis]) - total
 	cursor := content[axis]
+	if scrolling {
+		// What does not fit is scrolled through from the start, whatever the alignment.
+		node.scroll_max = max(-free, 0)
+		node.scroll = clamp(node.scroll, 0, node.scroll_max)
+		free = max(free, 0)
+		cursor -= math.round(node.scroll)
+	}
 	switch st.align {
 	case .Start:
 	case .Center:

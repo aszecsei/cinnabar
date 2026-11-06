@@ -222,6 +222,9 @@ ui_values_parse_as_their_attributes_take_them :: proc(t: ^testing.T) {
 	check(t, .Visible, "false", false)
 	check(t, .Anchor, "bottom_right", Ui_Anchor.Bottom_Right)
 	check(t, .Align, "space_between", Ui_Align.Space_Between)
+	check(t, .Overflow, "scroll", Ui_Overflow.Scroll)
+	check(t, .Overflow, "visible", Ui_Overflow.Visible)
+	check(t, .Scroll_Bar, "false", false)
 	check(t, .Click, "start_game", "start_game")
 	check(t, .Text, "  keeps its spaces {x} {{ ", "  keeps its spaces {x} {{ ")
 	check(t, .Font, "$00112233445566778899aabbccddeeff", Guid{0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff})
@@ -229,7 +232,7 @@ ui_values_parse_as_their_attributes_take_them :: proc(t: ^testing.T) {
 	bad := []struct {
 		attr: Ui_Attr,
 		text: string,
-	}{{.Width, "-1"}, {.Width, "1e9"}, {.Width, "nan"}, {.Opacity, "2"}, {.Max_Length, "-1"}, {.Color, "#ggg"}, {.Click, "9lives"}, {.Text, "{"}, {.Text, "{a b}"}}
+	}{{.Width, "-1"}, {.Width, "1e9"}, {.Width, "nan"}, {.Opacity, "2"}, {.Max_Length, "-1"}, {.Color, "#ggg"}, {.Click, "9lives"}, {.Text, "{"}, {.Text, "{a b}"}, {.Overflow, "auto"}}
 	for b in bad {
 		_, message := ui_parse_value(b.attr, b.text)
 		testing.expectf(t, message != "", "%v %q parses", b.attr, b.text)

@@ -20,7 +20,9 @@ Style :: struct {
 	offset:                [2]f32,
 	visible:               bool,
 	clip:                  bool,
-	fill:                  format.Ui_Paint,
+	overflow:              format.Ui_Overflow,
+	scroll_bar:            bool,
+	fill:                 format.Ui_Paint,
 	radius:                [4]f32,
 	border:                format.Ui_Border,
 	opacity:               f32,
@@ -66,6 +68,7 @@ default_style :: proc(element: format.Ui_Element) -> Style {
 		max_width   = {.Px, MAX_SIZE},
 		max_height  = {.Px, MAX_SIZE},
 		visible     = true,
+		scroll_bar  = true,
 		opacity     = 1,
 		tint        = {255, 255, 255, 255},
 		size        = DEFAULT_TEXT_SIZE,
@@ -128,6 +131,10 @@ apply :: proc(st: ^Style, attr: format.Ui_Attr, value: format.Ui_Value) {
 		st.visible = value.(bool) or_else st.visible
 	case .Clip:
 		st.clip = value.(bool) or_else st.clip
+	case .Overflow:
+		st.overflow = value.(format.Ui_Overflow) or_else st.overflow
+	case .Scroll_Bar:
+		st.scroll_bar = value.(bool) or_else st.scroll_bar
 	case .Fill:
 		st.fill = value.(format.Ui_Paint) or_else st.fill
 	case .Radius:
@@ -194,6 +201,24 @@ apply_range :: proc(st: ^Style, d: ^Document, r: Range) {
 	}
 }
 
+// apply_styles applies styles in order, and then each one's variant for each state, in the order of the states.
+@(private)
+apply_styles :: proc(st: ^Style, d: ^Document, refs: []u32, states: bit_set[format.Ui_State]) {
+	for r in refs {
+		apply_range(st, d, d.styles[r].props)
+	}
+	for state in format.Ui_State {
+		if state not_in states {
+			continue
+		}
+		for r in refs {
+			if v := d.styles[r].variants[state]; v != format.UI_NONE && int(v) < len(d.styles) {
+				apply_range(st, d, d.styles[v].props)
+			}
+		}
+	}
+}
+
 // cascade gives a node its style (see docs/ui/design.md#the-cascade): its element's defaults, what it inherits of its
 // parent's text, its styles in order, their variants for its states, its own attributes, and last what scripts set on
 // it. states are the states that it is in.
@@ -208,20 +233,7 @@ cascade :: proc(d: ^Document, n: u32, parent: ^Style, states: bit_set[format.Ui_
 		st.line_height = parent.line_height
 		st.wrap = node.element == .Field ? false : parent.wrap
 	}
-	refs := d.style_refs[node.styles.first:][:node.styles.count]
-	for r in refs {
-		apply_range(&st, d, d.styles[r].props)
-	}
-	for state in format.Ui_State {
-		if state not_in states {
-			continue
-		}
-		for r in refs {
-			if v := d.styles[r].variants[state]; v != format.UI_NONE && int(v) < len(d.styles) {
-				apply_range(&st, d, d.styles[v].props)
-			}
-		}
-	}
+	apply_styles(&st, d, d.style_refs[node.styles.first:][:node.styles.count], states)
 	apply_range(&st, d, node.props)
 	if node.id_hash != 0 {
 		for o in d.overrides {

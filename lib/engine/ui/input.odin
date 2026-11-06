@@ -74,16 +74,31 @@ Input_State :: struct {
 	composition_cursor: int,
 	events:        [dynamic]Pending_Event,
 	wants_input:   bool,
+	// The innermost scroll box under the pointer, a scroll bar under it and which part, and a thumb that the pointer
+	// drags, from where on it the pointer took it, along its axis.
+	scroll_hovered: Node_Ref,
+	bar_hovered:   Node_Ref,
+	bar_part:      Bar_Part,
+	drag:          Node_Ref,
+	drag_grab:     f32,
+	// A node that the focus has moved to, which the next layout scrolls into view.
+	reveal:        Node_Ref,
+	// The time of the last frame's input, for the right stick's scrolling.
+	last_time:     f64,
 }
 
 @(private)
 init_input :: proc(s: ^State) {
 	s.input = {
-		focus   = NO_NODE,
-		hovered = NO_NODE,
-		pressed = NO_NODE,
-		modal   = -1,
-		events  = make([dynamic]Pending_Event, s.allocator),
+		focus          = NO_NODE,
+		hovered        = NO_NODE,
+		pressed        = NO_NODE,
+		scroll_hovered = NO_NODE,
+		bar_hovered    = NO_NODE,
+		drag           = NO_NODE,
+		reveal         = NO_NODE,
+		modal          = -1,
+		events         = make([dynamic]Pending_Event, s.allocator),
 	}
 }
 
@@ -156,7 +171,8 @@ restore_focus :: proc(s: ^State, d: ^Document, id_hash: u64) {
 @(private)
 forget_document :: proc(s: ^State, d: ^Document) {
 	index := index_of(s, d)
-	for r in ([]^Node_Ref{&s.input.focus, &s.input.hovered, &s.input.pressed}) {
+	refs := []^Node_Ref{&s.input.focus, &s.input.hovered, &s.input.pressed, &s.input.scroll_hovered, &s.input.bar_hovered, &s.input.drag, &s.input.reveal}
+	for r in refs {
 		if r.document == index {
 			r^ = NO_NODE
 		}
@@ -177,13 +193,22 @@ inside :: proc(r: [4]f32, p: [2]f32) -> bool {
 	return p.x >= r[0] && p.x < r[2] && p.y >= r[1] && p.y < r[3]
 }
 
-// hit is the topmost node under a point that takes the pointer, and whether a node with a fill is under it at all,
-// which a modal document blocks with.
+// hit is the topmost node under a point that takes the pointer, or the scroll box whose bar is under it and which part,
+// and whether a node with a fill or a scroll box is under it at all, which a modal document blocks with.
 @(private)
-hit :: proc(d: ^Document, n: u32, p: [2]f32) -> (found: u32, covered: bool) {
+hit :: proc(s: ^State, d: ^Document, n: u32, p: [2]f32) -> (found: u32, part: Bar_Part, covered: bool) {
 	node := &d.nodes[n]
 	if !node.shown {
-		return NONE, false
+		return NONE, .None, false
+	}
+	// A scroll bar draws over the box's children.
+	if bar, ok := bar_of(s, d, n); ok && !node.disabled {
+		if inside(intersect(bar.thumb, node.clip), p) {
+			return n, .Thumb, true
+		}
+		if inside(intersect(bar.track, node.clip), p) {
+			return n, .Track, true
+		}
 	}
 	// The children draw over their parent, the last over the first, so they are tried last to first.
 	children := make([dynamic]u32, 0, 8, context.temp_allocator)
@@ -191,17 +216,18 @@ hit :: proc(d: ^Document, n: u32, p: [2]f32) -> (found: u32, covered: bool) {
 		append(&children, c)
 	}
 	for i := len(children) - 1; i >= 0; i -= 1 {
-		f, cov := hit(d, children[i], p)
+		f, child_part, cov := hit(s, d, children[i], p)
 		if f != NONE {
-			return f, true
+			return f, child_part, true
 		}
 		covered ||= cov
 	}
 	within := inside(intersect(node.rect, node.clip), p)
 	if within && interactive(node) {
-		return n, true
+		return n, .None, true
 	}
-	return NONE, covered || (within && node.style.fill.colors[0].a + node.style.fill.colors[1].a > 0)
+	solid := node.style.fill.colors[0].a + node.style.fill.colors[1].a > 0 || scroll_axis(&node.style) >= 0
+	return NONE, .None, covered || (within && solid)
 }
 
 // scope is the documents that take input, the highest order first: a modal document that shows, alone, or every
@@ -264,6 +290,7 @@ initial_focus :: proc(s: ^State, d: ^Document) -> Node_Ref {
 set_focus :: proc(s: ^State, r: Node_Ref) {
 	if s.input.focus != r {
 		s.input.editing = false
+		s.input.reveal = r
 	}
 	s.input.focus = r
 }
@@ -318,16 +345,44 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 	}
 	s.input.last_mouse = mouse
 	s.input.hovered = NO_NODE
+	s.input.bar_hovered = NO_NODE
+	s.input.bar_part = .None
+	s.input.scroll_hovered = NO_NODE
+	// The document that the pointer is over: the one with what it hovers, or else the first that covers it.
+	pointer, covering := i32(-1), i32(-1)
 	for i in in_scope {
 		d := &s.documents[i]
-		n, covered := hit(d, 0, mouse)
+		n, part, covered := hit(s, d, 0, mouse)
 		if n != NONE {
-			s.input.hovered = ref(s, d, n)
+			if part == .None {
+				s.input.hovered = ref(s, d, n)
+			} else {
+				s.input.bar_hovered = ref(s, d, n)
+				s.input.bar_part = part
+			}
+			pointer = i
 			break
+		}
+		if covered && covering < 0 {
+			covering = i
 		}
 		if covered && d.nodes[0].style.modal {
 			break
 		}
+	}
+	if pointer < 0 {
+		pointer = covering
+	}
+	if s.input.drag != NO_NODE {
+		drag_thumb(s, input)
+		s.input.hovered = NO_NODE
+		s.input.bar_hovered = NO_NODE
+	}
+	dt := f32(clamp(now - s.input.last_time, 0, MAX_SCROLL_DT))
+	s.input.last_time = now
+	scroll_input(s, input, pointer, dt)
+	if s.input.drag != NO_NODE {
+		s.input.scroll_hovered = s.input.drag
 	}
 	if .Mouse_Left in input.pressed {
 		s.input.pressed = s.input.hovered
@@ -335,9 +390,14 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 		if s.input.hovered != s.input.focus {
 			s.input.editing = false
 		}
-		if d, n, ok := resolve(s, s.input.hovered); ok {
+		if bar_d, bar_n, on_bar := resolve(s, s.input.bar_hovered); on_bar {
+			press_bar(s, bar_d, bar_n, s.input.bar_part, mouse)
+		} else if d, n, ok := resolve(s, s.input.hovered); ok {
 			if d.nodes[n].style.focusable {
 				set_focus(s, s.input.hovered)
+				// What the pointer focuses is where the player sees it: scrolling it would move it from under the
+				// release that clicks it.
+				s.input.reveal = NO_NODE
 				if d.nodes[n].element == .Field {
 					s.input.editing = true
 					s.input.caret = caret_at(d, d.nodes[n].text, mouse.x - d.nodes[n].rect[0] - d.nodes[n].style.padding[3] * s.scale + s.input.scroll)

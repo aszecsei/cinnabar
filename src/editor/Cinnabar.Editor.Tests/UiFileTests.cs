@@ -119,11 +119,11 @@ public sealed class UiFileTests : IDisposable
     {
         var file = Read(Pause());
         Assert.Equal(Pause(), file.Text);
-        Assert.Equal(["ui", "box", "column", "text", "text", "button", "text", "button", "text", "row", "text", "field", "text"], file.Nodes.Select(n => n.Kind));
+        Assert.Equal(["ui", "box", "column", "text", "text", "button", "text", "button", "text", "row", "text", "field", "text", "column", "text", "template", "button", "text"], file.Nodes.Select(n => n.Kind));
         var resume = file.NodeById("resume")!;
         Assert.True(file.Nodes[resume.Index + 1].ButtonText);
         Assert.Equal("Resume", file.Nodes[resume.Index + 1].Element.Text);
-        Assert.Equal(["button", "button:hover", "button:focus", "button:press", "field", "field:focus", "caption"], file.Styles.Select(s => s.Name));
+        Assert.Equal(["button", "button:hover", "button:focus", "button:press", "field", "field:focus", "caption", "slot", "scroll_track", "scroll_thumb", "scroll_thumb:hover", "scroll_thumb:press"], file.Styles.Select(s => s.Name));
         Assert.Equal(["button"], file.StylesOf(resume).Select(s => s.Name));
     }
 
@@ -235,12 +235,12 @@ public sealed class UiFileTests : IDisposable
         var path = file.AddStyle("button:disabled");
         file.SetAttribute(file.At(path)!, "opacity", "0.5");
         Assert.Equal(["\t<style name=\"button:disabled\" opacity=\"0.5\"/>"], Diff(text, file.Text).Added);
-        Assert.Contains("<style name=\"caption\" size=\"15\" color=\"#ffffffa0\"/>\n\t<style name=\"button:disabled\"", file.Text);
+        Assert.Contains("<style name=\"scroll_thumb:press\" fill=\"#e34233\"/>\n\t<style name=\"button:disabled\"", file.Text);
 
         file = Read(text);
         file.RenameStyle("caption", "small");
         Assert.DoesNotContain("caption", file.Text.Replace("Quality takes", ""));
-        Assert.Equal(4, Diff(text, file.Text).Added.Length);
+        Assert.Equal(5, Diff(text, file.Text).Added.Length);
         file.RenameStyle("button", "action");
         Assert.Contains("<style name=\"action:hover\"", file.Text);
     }
