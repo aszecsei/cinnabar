@@ -3,7 +3,7 @@
 //   Clear: new storage zeroes every slot and every bin's accumulators.
 //   Index: empties every table and zeroes the counters.
 //   Rebuild: a thread for each slot moves its probe's key by the window's move, frees it when it left the window or
-//   went unused for the lifetime, and otherwise puts it back in its table and its cascade's active list. The free list
+//   went unused for its cascade's lifetime, and otherwise puts it back in its table and its active list. The free list
 //   is built anew, so no slot is taken and freed in one pass.
 //   Allocate: a thread for each traced pixel puts its cell's probe at each cascade, of each of its levels, in the
 //   tables. The first thread to claim a key takes a free slot; with none left, the key has no slot and the gather and
@@ -65,7 +65,7 @@ void rebuild(Split_Grid g, uint slot) {
 	uint level = split_key_level(record.x);
 	int3 u = int3(split_key_cell(record.x)) - (g.levels[level].delta.xyz >> k);
 	uint key = split_key(level, uint3(u));
-	if (!split_inside(u, k) || g.frame - record.y > g.lifetime || !split_insert(g.cascades[k], key, slot)) {
+	if (!split_inside(u, k) || g.frame - record.y > g.cascades[k].lifetime || !split_insert(g.cascades[k], key, slot)) {
 		slots.Store(slot * SPLIT_SLOT_SIZE, 0);
 		free_slot(g, k, slot);
 		return;

@@ -275,7 +275,9 @@ add_gi_passes :: proc(f: ^Frame) {
 	// Last frame's projection is known once the scene's constants are written.
 	gf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
 	// With the world probes, the split cascades take the screen cascades' place.
-	if add_gi_split_passes(f) {
+	split := add_gi_split_passes(f)
+	note_split_fallback(f, split)
+	if split {
 		f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
 		return
 	}

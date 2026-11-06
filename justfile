@@ -428,6 +428,12 @@ editorctl:
     mkdir -p "{{tools_dir}}"
     odin build tools/editorctl -collection:cinnabar=lib -out:"{{tools_dir}}/editorctl.exe" -o:speed
 
+# Build flickerstat, which measures how a still view changes over a directory of screenshots (see
+# docs/editor/capture.md#flicker)
+flickerstat:
+    mkdir -p "{{tools_dir}}"
+    odin build tools/flickerstat -collection:cinnabar=lib -out:"{{tools_dir}}/flickerstat.exe" -o:speed
+
 # Write a screenshot of the running editor's viewport, with a JSON sidecar, and print the files: just screenshot --view depth
 screenshot *args: editorctl
     "./{{tools_dir}}/editorctl.exe" screenshot {{args}}
@@ -542,7 +548,7 @@ intel-report: cook
 
 # The cooker's tests compile shaders, so they need DXC.
 test: luau jolt opus vorbis audio-plugin compressonator meshoptimizer lightusd link-schema install-dxc
-    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" || exit 1; done
+    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/project lib/engine/editor lib/engine/editor/link tools/cook tools/ltc_fit tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

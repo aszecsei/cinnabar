@@ -1,13 +1,14 @@
 // The split radiance cascades' merge (see docs/rendering/global-illumination.md#split-cascades): one pass for each
 // cascade, from the last to the first, a group for each 64 bins of each active probe, dispatched by the counts that
 // the table's arguments phase wrote. Each bin first takes its frame's rays into its history: the share of rays that
-// passed through and the mean light that the rest found, blended by the rays against the history's, which decays each
-// frame, so a bin that many rays reach follows a change within a few frames. Then it adds what passes through it from
+// passed through and the mean light that the rest found, blended by the rays against the history's, which decays with
+// each frame that rays reach the bin, so a bin that many rays reach follows a change within a few frames, and one ray
+// to a bin that few reach moves it as little as a ray's share of its history. Then it adds what passes through it from
 // beyond: the next cascade's light in the four finer directions that it splits into, at the eight probes of the next
-// cascade around it, each by its trilinear weight, three to one on each axis, and by its confidence. Where no such
-// probe has light, and beyond the last cascade, it is the world probes' light along the direction. The first
-// cascade's probes also write their tile of the atlas: the cosine-weighted mean of their merged light around each
-// direction, which the gather reads with one bilinear sample.
+// cascade around it, each by its trilinear weight, three to one on each axis, and by its confidence, of the bins that
+// rays reached. Where no such probe has light, and beyond the last cascade, it is the world probes' light along the
+// direction from where the bin's interval ends. The first cascade's probes also write their tile of the atlas: the
+// cosine-weighted mean of their merged light around each direction, which the gather reads with one bilinear sample.
 #include "gi_split.hlsli"
 
 groupshared uint g_parent_slots[8];
@@ -18,6 +19,10 @@ float3 load_merged_rw(uint bin) {
 	uint2 m = cn_rw_buffer(push.merged).Load2(bin * SPLIT_MERGED_SIZE);
 	return float3(f16tof32(m.x), f16tof32(m.x >> 16), f16tof32(m.y));
 }
+
+// A new bin counts as this many rays: its guess, the world probes' light, gives way to its first few rays. At 2, a bin
+// that few rays reach kept the guess for over a second, which showed after each turn.
+static const float NEW_BIN_RAYS = 0.5;
 
 // confidence_weight is how much a probe's light counts, from the rays that reached it, decayed as its bins' are.
 float confidence_weight(Split_Grid g, float confidence) {
@@ -45,7 +50,13 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 	int3 u = int3(split_key_cell(record.x));
 	Split_Level level = g.levels[l];
 	bool fresh = (record.z & SPLIT_FRESH) != 0;
-	float confidence = g.decay * (fresh ? 0 : asfloat(record.w)) + float(deposits.Load(slot * 4));
+	// As a bin's rays, the confidence decays only in frames that rays reach the probe, so one that goes out of view keeps
+	// its weight, and does not jump back when it returns.
+	float reached = float(deposits.Load(slot * 4));
+	float confidence = fresh ? reached : asfloat(record.w);
+	if (!fresh && reached > 0) {
+		confidence = confidence * g.decay + reached;
+	}
 
 	if (thread < 8) {
 		uint parent = SPLIT_NO_SLOT;
@@ -82,9 +93,18 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 		uint4 counts = accum.Load4(bin * SPLIT_ACCUM_SIZE);
 		uint blue = accum.Load(bin * SPLIT_ACCUM_SIZE + 16);
 		uint3 h = history.Load3(bin * SPLIT_HISTORY_SIZE);
-		float3 mean = fresh ? 0 : float3(f16tof32(h.x), f16tof32(h.x >> 16), f16tof32(h.y));
-		float through = fresh ? 1 : f16tof32(h.y >> 16);
-		float rays = fresh ? 0 : asfloat(h.z) * g.decay;
+		uint2 texel = uint2(b % c.side, b / c.side);
+		float3 mean = float3(f16tof32(h.x), f16tof32(h.x >> 16), f16tof32(h.y));
+		float through = f16tof32(h.y >> 16);
+		float rays = asfloat(h.z);
+		if (fresh) {
+			// A new bin is what the world probes see along its direction from the probe, occluders and all, with
+			// nothing passing through, until its rays outweigh it.
+			float3 direction = direction_of(texel, c.side, 0.5);
+			mean = beyond_light(split_center(level, u, k), direction, direction);
+			through = 0;
+			rays = NEW_BIN_RAYS;
+		}
 		if (counts.x > 0) {
 			accum.Store4(bin * SPLIT_ACCUM_SIZE, 0);
 			accum.Store(bin * SPLIT_ACCUM_SIZE + 16, 0);
@@ -92,7 +112,7 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 			float exposure = cn_buffer(push.exposure).Load<float>(0);
 			float3 frame_mean = float3(counts.z, counts.w, blue) / (g.radiance_scale * count * max(exposure, 1e-10));
 			float frame_through = (count - float(counts.y)) / count;
-			rays += count;
+			rays = rays * g.decay + count;
 			float alpha = count / rays;
 			mean = lerp(mean, frame_mean, alpha);
 			through = lerp(through, frame_through, alpha);
@@ -102,7 +122,6 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 
 		float3 beyond = 0;
 		if (through > 1e-3) {
-			uint2 texel = uint2(b % c.side, b / c.side);
 			float total = 0;
 			[unroll] for (uint i = 0; i < 8; i++) {
 				float weight = g_parent_weights[i];
@@ -110,19 +129,24 @@ void cs_main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex) {
 					continue;
 				}
 				Split_Cascade pc = g.cascades[k + 1];
-				float3 light = 0;
 				[unroll] for (uint q = 0; q < 4; q++) {
 					uint2 child = texel * 2 + uint2(q & 1, q >> 1);
-					light += load_merged_rw(split_bin(pc, g_parent_slots[i], child.y * pc.side + child.x));
+					uint parent_bin = split_bin(pc, g_parent_slots[i], child.y * pc.side + child.x);
+					// A bin that no ray reached still holds only a new bin's rays, all passing through, which says
+					// nothing about what is there, so it counts for nothing.
+					float reached = saturate(asfloat(history.Load(parent_bin * SPLIT_HISTORY_SIZE + 8)) - NEW_BIN_RAYS);
+					beyond += load_merged_rw(parent_bin) * weight * reached;
+					total += weight * reached;
 				}
-				beyond += light * 0.25 * weight;
-				total += weight;
 			}
 			if (total > 1e-4) {
 				beyond /= total;
 			} else {
+				// The world probes' light along the direction from where this cascade's interval ends: from the probe's
+				// center, it would hold again what the cascades already traced, and count every occluder twice.
 				float3 direction = direction_of(texel, c.side, 0.5);
-				beyond = beyond_light(split_center(level, u, k), direction, direction);
+				float end = g.interval * level.min.w * float(1u << (2 * k));
+				beyond = beyond_light(split_center(level, u, k) + direction * end, direction, direction);
 			}
 		}
 		merged = mean + through * beyond;

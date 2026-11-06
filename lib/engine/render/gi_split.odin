@@ -1,5 +1,6 @@
 package render
 
+import "core:log"
 import "core:math"
 
 import "cinnabar:core"
@@ -29,8 +30,10 @@ SPLIT_MERGED_SIZE :: 8
 SPLIT_COUNTERS_SIZE :: 16
 // A window's first cell is a multiple of this, so a cascade's cell is the first cascade's shifted right, exactly.
 SPLIT_SNAP :: 1 << MAX_SPLIT_CASCADES
-// A probe that no ray reached for this many frames is freed.
-SPLIT_LIFETIME :: 60
+// A probe that no ray reached for this many frames is freed, so a surface that leaves the view keeps its light when it
+// returns. A cascade that drops keys shortens this, to no less than SPLIT_MIN_LIFETIME (see split_lifetime).
+SPLIT_LIFETIME :: 600
+SPLIT_MIN_LIFETIME :: 8
 // The share of each level's distances that blends into the next.
 SPLIT_BAND :: 0.5
 // A ray starts this many pixels off its surface.
@@ -53,7 +56,7 @@ SPLIT_FORMAT :: gpu.Format.RGBA16_Float
 // probes have (directions << k)^2 directions. A level of detail's cells are 2^(voxel + L) meters, and it holds the
 // distances from distance cells of level 0 times 2^L, to twice that. The first cascade has slots probes, and each
 // after it a quarter of the one before, but no fewer than min_slots. The bins' histories hold about history_frames
-// frames of rays.
+// frames of rays, counting only the frames that rays reached them.
 Gi_Split_Params :: struct {
 	tile:           [2]u32,
 	directions:     u32,
@@ -71,7 +74,7 @@ GI_SPLIT_PARAMS := [Quality_Level]Gi_Split_Params {
 	.Low    = {tile = {4, 4}, directions = 4, cascades = 3, voxel = -1, distance = 16, levels = 4, slots = 8192, min_slots = 256, history_frames = 16},
 	.Medium = {tile = {2, 2}, directions = 4, cascades = 4, voxel = -2, distance = 16, levels = 5, slots = 16384, min_slots = 256, history_frames = 12},
 	.High   = {tile = {2, 2}, directions = 6, cascades = 4, voxel = -2, distance = 24, levels = 5, slots = 16384, min_slots = 256, history_frames = 12},
-	.Ultra  = {tile = {1, 1}, directions = 8, cascades = 4, voxel = -3, distance = 32, levels = 5, slots = 32768, min_slots = 512, history_frames = 10},
+	.Ultra  = {tile = {1, 1}, directions = 8, cascades = 4, voxel = -3, distance = 32, levels = 5, slots = 32768, min_slots = 1024, history_frames = 10},
 }
 
 // The engine's split cascade shaders, by their .meta files.
@@ -96,7 +99,7 @@ Split_Cascade :: struct {
 	first_bin:   u32,
 	side:        u32,
 	chunks:      u32,
-	padding:     u32,
+	lifetime:    u32,
 }
 
 // Split_Grid matches Split_Grid in gi_split.hlsli.
@@ -111,7 +114,6 @@ Split_Grid :: struct {
 	tile:            [2]u32,
 	tiles:           [2]u32,
 	rotation:        [2]u32,
-	lifetime:        u32,
 	ray_count:       u32,
 	level_distance:  f32,
 	band:            f32,
@@ -126,7 +128,7 @@ Split_Grid :: struct {
 	total_entries:   u32,
 	total_bins:      u32,
 	atlas_columns:   u32,
-	padding:         [3]u32,
+	padding:         [4]u32,
 }
 
 // Split_Push matches Split_Push in gi_split.hlsli.
@@ -213,6 +215,8 @@ Gi_Split :: struct {
 	rays:         gpu.Buffer,
 	ray_capacity: int,
 	windows:      [MAX_SPLIT_LEVELS]Split_Window,
+	// The frames that each cascade's probes live without a ray (see split_lifetime).
+	lifetimes:    [MAX_SPLIT_CASCADES]u32,
 	// Whether the storage is new since the last frame, so its slots and accumulators must be cleared.
 	fresh:        bool,
 	frame:        u32,
@@ -224,6 +228,8 @@ Gi_Split :: struct {
 	stats_copying: bool,
 	ran:           bool,
 	last_stats:    Gi_Split_Stats,
+	// Whether the last frame that wanted the split cascades had them, for note_split_fallback.
+	running:       bool,
 }
 
 // Gi_Split_Frame is one frame's split cascades, in frame memory.
@@ -504,6 +510,26 @@ split_rotation :: proc(frame: u32, tile: [2]u32) -> [2]u32 {
 	return {j % tile.x, j / tile.x}
 }
 
+// split_lifetime is a cascade's lifetime after a frame, from its table a frame or two ago. A key that found no room
+// halves it each frame, to SPLIT_MIN_LIFETIME, which frees the probes that went longest without a ray: after a turn,
+// the probes behind the camera were reached a frame ago, and until they are freed the probes in view have no slot. A
+// table that is only nearly full keeps its probes, as freeing them early would bring each one back new as it returns,
+// which flickered on Ultra. Below three quarters full, it lengthens by a frame each frame, as fast as a probe ages, so
+// lengthening frees nothing, and between the two it holds, so a table near its limit does not grow into dropping. A
+// cascade without stats keeps its lifetime.
+split_lifetime :: proc(lifetime: u32, stats: Split_Cascade_Stats) -> u32 {
+	if stats.slots == 0 {
+		return lifetime
+	}
+	if stats.dropped > 0 {
+		return max(lifetime / 2, SPLIT_MIN_LIFETIME)
+	}
+	if stats.active < stats.slots - stats.slots / 4 {
+		return min(lifetime + 1, SPLIT_LIFETIME)
+	}
+	return lifetime
+}
+
 // split_bytes is the split cascades' memory at a level, without the rays' buffers.
 split_bytes :: proc(params: Gi_Split_Params) -> int {
 	l := split_layout(params)
@@ -539,6 +565,9 @@ ensure_split_storage :: proc(r: ^Renderer, params: Gi_Split_Params, rays: int) {
 		s.atlas = platform.gpu_create_texture({size = size, format = SPLIT_FORMAT, usage = {.Sampled, .Storage}, label = "gi split atlas"}, nil)
 		s.params, s.layout = params, l
 		s.windows = {}
+		for &lifetime in s.lifetimes {
+			lifetime = SPLIT_LIFETIME
+		}
 		s.fresh = true
 	}
 	if rays > s.ray_capacity {
@@ -609,6 +638,10 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	}
 	l := s.layout
 	copy(grid.cascades[:], l.cascades[:])
+	for k in 0 ..< int(l.count) {
+		s.lifetimes[k] = split_lifetime(s.lifetimes[k], s.last_stats.cascades[k])
+		grid.cascades[k].lifetime = s.lifetimes[k]
+	}
 	offset := ecs.position_sub(f.view.position, r.scene.origin)
 	grid^ = {
 		levels          = grid.levels,
@@ -621,7 +654,6 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 		tile            = tile,
 		tiles           = tiles,
 		rotation        = split_rotation(s.frame, tile),
-		lifetime        = SPLIT_LIFETIME,
 		ray_count       = ray_count,
 		level_distance  = f32(params.distance) * math.pow(2, f32(params.voxel)),
 		band            = SPLIT_BAND,
@@ -717,6 +749,32 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	add_split_stats_copy(f, sf)
 	s.ran = true
 	return true
+}
+
+// note_split_fallback warns when a frame that wants the split cascades takes the screen cascades after a frame that had
+// them, which changes the whole frame's indirect light with nothing moving. It warns once, until they run again.
+@(private)
+note_split_fallback :: proc(f: ^Frame, ran: bool) {
+	r := f.renderer
+	s := &r.gi.split
+	if ran || f.gi.settings.technique != .Split_Cascades {
+		s.running = ran
+		return
+	}
+	if !s.running {
+		return
+	}
+	s.running = false
+	reason := "the upload ring has no room"
+	switch {
+	case f.gi.probes == nil:
+		reason = "the world probes did not run"
+	case !gi_split_ready(r):
+		reason = "their pipelines are not ready"
+	case !hit_shading_ready(f):
+		reason = "hit shading has no room"
+	}
+	log.warnf("gi: the split cascades gave way to the screen cascades: %s", reason)
 }
 
 // add_split_stats_copy copies the tables' counters to their next copy, after the merge, for read_gi_split_stats to

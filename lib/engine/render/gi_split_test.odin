@@ -186,7 +186,7 @@ the_split_layout_fits_its_buffers_and_dispatches :: proc(t: ^testing.T) {
 		.Low    = 32 << 20,
 		.Medium = 64 << 20,
 		.High   = 128 << 20,
-		.Ultra  = 384 << 20,
+		.Ultra  = 448 << 20,
 	}
 	for params, level in GI_SPLIT_PARAMS {
 		l := split_layout(params)
@@ -393,6 +393,8 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		finish_gi_split_stats(r)
 	}
 	testing.expect_value(t, split.stats_next, 3 % SPLIT_STATS_COPIES)
+	// New storage starts each cascade at the longest lifetime.
+	testing.expect_value(t, split.lifetimes[0], SPLIT_LIFETIME)
 
 	// With the Gi_Probes debug view, the gather draws the probes too.
 	passes := run_frame(t, r, &cache, instances, exposure, settings, meters(16, 2, -3), .Gi_Probes)
@@ -476,4 +478,84 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	tally(s, 0, 90, 0)
 	read_gi_split_stats(r)
 	testing.expect_value(t, gi_split_stats(r), Gi_Split_Stats{})
+}
+
+@(test)
+a_split_cascade_keeps_its_probes_until_its_slots_run_short :: proc(t: ^testing.T) {
+	roomy := Split_Cascade_Stats{active = 100, slots = 1024}
+	between := Split_Cascade_Stats{active = 800, slots = 1024}
+	full := Split_Cascade_Stats{active = 1000, slots = 1024}
+	dropping := Split_Cascade_Stats{active = 100, slots = 1024, dropped = 1}
+
+	// With room, it stays at its longest. A key that found no room, however few, halves it.
+	testing.expect_value(t, split_lifetime(SPLIT_LIFETIME, roomy), SPLIT_LIFETIME)
+	testing.expect_value(t, split_lifetime(400, dropping), 200)
+	// A table that is nearly full, or between that and room, holds it: it frees nothing early, and does not grow into
+	// dropping.
+	testing.expect_value(t, split_lifetime(400, full), 400)
+	testing.expect_value(t, split_lifetime(400, between), 400)
+	// Without stats, as when the split did not run last frame, it holds too.
+	testing.expect_value(t, split_lifetime(400, {}), 400)
+
+	// It grows no faster than a probe ages, so growing frees no probe that was alive.
+	testing.expect_value(t, split_lifetime(400, roomy), 401)
+
+	// One that drops keys after a turn frees the probes behind the camera within a few frames, and ends at the
+	// shortest; one with room again returns to the longest.
+	lifetime := u32(SPLIT_LIFETIME)
+	frames := 0
+	for lifetime > SPLIT_MIN_LIFETIME {
+		lifetime = split_lifetime(lifetime, dropping)
+		frames += 1
+	}
+	testing.expect(t, frames <= 8)
+	testing.expect_value(t, split_lifetime(lifetime, dropping), SPLIT_MIN_LIFETIME)
+	for _ in 0 ..< SPLIT_LIFETIME {
+		lifetime = split_lifetime(lifetime, roomy)
+	}
+	testing.expect_value(t, lifetime, SPLIT_LIFETIME)
+}
+
+@(test)
+a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
+	Warnings :: struct {
+		count: int,
+		text:  string,
+	}
+	warnings: Warnings
+	runner := context.logger
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, _: runtime.Logger_Options, _ := #caller_location) {
+			w := (^Warnings)(data)
+			if level == .Warning {
+				w.count += 1
+				w.text = text
+			}
+		},
+		data = &warnings,
+		lowest_level = .Warning,
+	}
+	r := new(Renderer)
+	defer free(r)
+	f := Frame{renderer = r, gi = &Gi_Frame{settings = {technique = .Split_Cascades}}}
+	// Waiting for its first frame is not losing it.
+	note_split_fallback(&f, false)
+	count_while_waiting := warnings.count
+	note_split_fallback(&f, true)
+	note_split_fallback(&f, false)
+	count_after_loss := warnings.count
+	reason := warnings.text
+	note_split_fallback(&f, false)
+	count_later := warnings.count
+	// A frame that asks for the screen cascades has not lost anything.
+	note_split_fallback(&f, true)
+	f.gi.settings.technique = .Screen_Cascades
+	note_split_fallback(&f, false)
+	count_by_choice := warnings.count
+	context.logger = runner
+	testing.expect_value(t, count_while_waiting, 0)
+	testing.expect_value(t, count_after_loss, 1)
+	testing.expect_value(t, reason, "gi: the split cascades gave way to the screen cascades: the world probes did not run")
+	testing.expect_value(t, count_later, 1)
+	testing.expect_value(t, count_by_choice, 1)
 }
