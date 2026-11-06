@@ -159,6 +159,7 @@ static partial class EditorCommands
     public const string ExposureReset = "view.exposureReset";
     public const string ViewportQuality = "view.quality";
     public const string ViewportAntiAliasing = "view.antiAliasing";
+    public const string ViewportGiTechnique = "view.giTechnique";
     public const string ViewportRenderScale = "view.renderScale";
     public const string RunGame = "game.run";
     public const string StopGame = "game.stop";

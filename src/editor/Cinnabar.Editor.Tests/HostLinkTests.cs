@@ -793,8 +793,9 @@ public sealed class HostLinkTests : IAsyncDisposable
             editor.Link.Send(EditorShell.DefaultViewportSettings with { DebugView = view, NoBloom = true, NoShadows = true, ExposureOffset = 1 });
             await Latest(editor, frames, target);
         }
-        // The viewport's quality in place of the game's: each preset, and each anti-aliasing at half the size, FSR
-        // included, which is temporal AA where the device cannot run it.
+        // The viewport's quality in place of the game's: each preset, each anti-aliasing at half the size, FSR
+        // included, which is temporal AA where the device cannot run it, and each global illumination, the split
+        // cascades included, which are the screen cascades where the device has no ray queries.
         foreach (var preset in Enum.GetValues<ViewportPreset>())
         {
             editor.Link.Send(EditorShell.DefaultViewportSettings with { QualityPreset = preset });
@@ -803,6 +804,11 @@ public sealed class HostLinkTests : IAsyncDisposable
         foreach (var aa in Enum.GetValues<ViewportAa>())
         {
             editor.Link.Send(EditorShell.DefaultViewportSettings with { AntiAliasing = aa, RenderScale = 0.5f });
+            await Latest(editor, frames, target);
+        }
+        foreach (var gi in Enum.GetValues<ViewportGi>())
+        {
+            editor.Link.Send(EditorShell.DefaultViewportSettings with { GlobalIllumination = gi, RenderScale = 0.5f });
             await Latest(editor, frames, target);
         }
         var scaled = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);

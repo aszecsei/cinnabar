@@ -15,7 +15,7 @@ public sealed partial class EditorShell
 {
     /// <summary>The settings of a viewport that shows the lit scene, with every feature, the icons and the selection's shapes.</summary>
     public static readonly ViewportSettings DefaultViewportSettings =
-        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, 0);
+        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, ViewportGi.Game, 0);
 
     /// <summary>The viewport's choice that keeps the game's quality.</summary>
     public const string GameQualityLabel = "Game's";
@@ -25,6 +25,9 @@ public sealed partial class EditorShell
 
     /// <summary>The viewport's anti-aliasing, as the ribbon shows it, in <see cref="ViewportAa"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportAaNames { get; } = [GameQualityLabel, "Off", "TAA", "FXAA", "SMAA", "FSR"];
+
+    /// <summary>The viewport's global illumination, as the ribbon shows it, in <see cref="ViewportGi"/>'s order.</summary>
+    public static IReadOnlyList<string> ViewportGiNames { get; } = [GameQualityLabel, "Off", "Screen Cascades", "Split Cascades", "Voxel Cones"];
 
     /// <summary>The viewport's render scales, as the ribbon shows them, and their values; 0 keeps the game's.</summary>
     public static IReadOnlyList<(string Label, float Scale)> ViewportRenderScales { get; } =

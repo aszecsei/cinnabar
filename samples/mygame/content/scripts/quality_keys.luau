@@ -1,9 +1,10 @@
 --!strict
 -- The sample's quality keys, as a settings menu sets the quality, through the Render bindings (see
 -- docs/scripting/api.md#render): F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the
--- next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, and F6 the next anti-aliasing technique that
--- the device runs. Each saves the quality to the user settings file, which the game reads back. hello.luau calls
--- update every frame. Anti-aliasing is not Alt+F9, which the NVIDIA app takes for itself.
+-- next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing technique that the
+-- device runs, and Shift+F6 the next global illumination technique that it runs. Each saves the quality to the user
+-- settings file, which the game reads back. hello.luau calls update every frame. Anti-aliasing is not Alt+F9, which the
+-- NVIDIA app takes for itself.
 local AMBIENT_OCCLUSION = { "Off", "Gtao", "Ssao", "Hbao" }
 local RENDER_SCALES = { 1, 0.75, 2 / 3, 0.5 }
 
@@ -24,14 +25,16 @@ local function next_scale(scale: number): number
 end
 
 local function update()
-	local anti_aliasing = Input.was_pressed(Key.F6)
-	if not Input.was_pressed(Key.F9) and not anti_aliasing then
+	local f6 = Input.was_pressed(Key.F6)
+	if not Input.was_pressed(Key.F9) and not f6 then
 		return
 	end
 	local shift = Input.is_down(Key.LeftShift) or Input.is_down(Key.RightShift)
 	local control = Input.is_down(Key.LeftControl) or Input.is_down(Key.RightControl)
 	local q = Render.quality()
-	if anti_aliasing then
+	if f6 and shift then
+		Render.set_quality({ gi = after(Render.caps().gi, q.gi) })
+	elseif f6 then
 		Render.set_quality({ aa = after(Render.caps().aa, q.aa) })
 	elseif shift and control then
 		Render.set_quality({ render_scale = next_scale(q.render_scale) })
@@ -52,9 +55,11 @@ local function update()
 		q.ao,
 		"anti-aliasing",
 		q.aa,
+		"global illumination",
+		q.gi,
 		"render scale",
 		q.render_scale,
-		"(F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing)"
+		"(F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing, Shift+F6 the next global illumination)"
 	)
 	if not Render.save_quality() then
 		Debug.warn("could not save the quality")

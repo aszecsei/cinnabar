@@ -917,6 +917,24 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	renderer.caps = {}
 	q, _ = viewport_quality(&f.editor, renderer)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
+	// The global illumination's technique replaces the game's, at its level, and the device limits it too: without
+	// Ray_Query, the split cascades are the screen cascades.
+	renderer.caps = {ray_query = true}
+	step(f, 1, link.Viewport_Settings{global_illumination = .Voxel_Cones})
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Voxel_Cones)
+	testing.expect_value(t, q.gi.level, render.Quality_Level.High)
+	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
+	step(f, 1, link.Viewport_Settings{quality_preset = .Low, global_illumination = .Split_Cascades})
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.gi, render.Gi_Quality{technique = .Split_Cascades, level = .Low})
+	renderer.caps = {}
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Screen_Cascades)
+	step(f, 1, link.Viewport_Settings{global_illumination = .Off})
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Off)
 	step(f, 0)
 	_, ok = viewport_quality(&f.editor, renderer)
 	testing.expect(t, !ok, "without an editor, the game's quality")

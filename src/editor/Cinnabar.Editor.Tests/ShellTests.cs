@@ -135,6 +135,7 @@ public sealed class ShellTests : IDisposable
 
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportQuality)).Select("Low");
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportAntiAliasing)).Select("FSR");
+            ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportGiTechnique)).Select("Voxel Cones");
             var scale = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportRenderScale);
             Assert.Equal(EditorShell.GameQualityLabel, scale.Selected);
             scale.Select("67%");
@@ -148,6 +149,7 @@ public sealed class ShellTests : IDisposable
         Assert.Equal(Link.Protocol.HelperMode.All, again.ViewportSettings.Helpers);
         Assert.Equal(Link.Protocol.ViewportPreset.Low, again.ViewportSettings.QualityPreset);
         Assert.Equal(Link.Protocol.ViewportAa.Fsr, again.ViewportSettings.AntiAliasing);
+        Assert.Equal(Link.Protocol.ViewportGi.VoxelCones, again.ViewportSettings.GlobalIllumination);
         Assert.Equal(2f / 3, again.ViewportSettings.RenderScale, 1e-4f);
         Assert.Empty(Problems(again));
     }

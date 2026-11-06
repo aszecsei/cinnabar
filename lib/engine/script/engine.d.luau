@@ -188,10 +188,12 @@ type RenderQualityChange = {
 	virtual_shadows: boolean?,
 }
 
--- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs.
+-- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, and gi the
+-- global illumination's.
 type RenderCaps = {
 	ray_query: boolean,
 	vendor: string,
 	video_memory: number,
 	aa: { string },
+	gi: { string },
 }
