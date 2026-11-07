@@ -187,11 +187,15 @@ Frame_Constants :: struct {
 	world_probes:                 u32,
 	world_probe_grid:             u32,
 	world_probe_grid_offset:      u32,
+	// The screen-space reflections are in Material_Push.reflections: only the camera's view reads them (see
+	// screen_reflections.odin).
+	reflections:                  u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
-// frame records. ambient_occlusion is white without it, fog is read only when Frame_Constants.fog says so, and the global
-// illumination only when Frame_Constants.gi does.
+// frame records. ambient_occlusion is white without it, fog is read only when Frame_Constants.fog says so, the global
+// illumination only when Frame_Constants.gi does, and the screen-space reflections only when Frame_Constants.reflections
+// does.
 Material_Push :: struct {
 	shadow_atlas:      u32,
 	shadow_mask:       u32,
@@ -208,6 +212,7 @@ Material_Push :: struct {
 	// Shading_Frame).
 	quad_counts:       u32,
 	shading_stats:     u32,
+	reflections:       u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -527,7 +532,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 856 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 860 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1266,6 +1271,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
+	constants.reflections = u32(f.ssr != nil)
 	cube := sky_cube_reads(f)
 	constants.sky_cube_current, constants.sky_cube_previous = cube.current, cube.previous
 	constants.sky_cube_blend, constants.sky_cube_mips = cube.blend, cube.mips
@@ -1288,6 +1294,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		c := constants
 		views[v].first_draw = u32(v * sf.draws_per_view)
 		views[v].offset = constants.camera_offset
+		// Only the camera's surfaces are in the screen-space reflections' texture.
+		if v != VIEW_CAMERA {
+			c.reflections = 0
+		}
 		switch v {
 		case VIEW_CAMERA, VIEW_VIEW_MODEL:
 			if v == VIEW_VIEW_MODEL {
@@ -2333,7 +2343,8 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -> Material_Push {
 	g := f.graph
 	white := gpu.read_index(f.renderer.materials.defaults[.White])
-	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
+	black := gpu.read_index(f.renderer.materials.defaults[.Black])
+	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, reflections = black}
 	if f.gi_diffuse != 0 {
 		push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
 		push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))
@@ -2357,6 +2368,9 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	}
 	if f.shadows.mask != 0 {
 		push.shadow_mask = gpu.read_index(gpu_texture(g, f.shadows.mask))
+	}
+	if f.reflections != 0 {
+		push.reflections = gpu.read_index(gpu_texture(g, f.reflections))
 	}
 	shading_push(f, &push.quad_counts, &push.shading_stats)
 	return push

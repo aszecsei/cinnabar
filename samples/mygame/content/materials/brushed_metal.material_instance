@@ -1,0 +1,7 @@
+material_instance 1
+# The room's glossy panel: the engine's default material as brushed steel, which blurs the screen-space reflections
+# by its roughness.
+parent = $88ea45540739212dbccaf95784e26fd6
+base_color = [0.8, 0.8, 0.8, 1]
+roughness = 0.3
+metallic = 1

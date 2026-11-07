@@ -30,6 +30,7 @@ static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 static const uint DEBUG_GI_PROBES = 21;
 static const uint DEBUG_QUAD_OVERDRAW = 22;
 static const uint DEBUG_ROUGHNESS = 24;
+static const uint DEBUG_REFLECTIONS = 26;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -100,6 +101,12 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	case DEBUG_GI_SPECULAR:
 		color = cn_texture(push.source).Load(pixel).rgb * exposure;
 		break;
+	case DEBUG_REFLECTIONS: {
+		// Pre-exposed already, and as bright as its weight.
+		float4 reflection = cn_texture(push.source).Load(pixel);
+		color = reflection.rgb * saturate(reflection.a);
+		break;
+	}
 	case DEBUG_GI_PROBES:
 		// The split cascades' gather drew the colors.
 		color = cn_texture(push.source).Load(pixel).rgb;

@@ -2,10 +2,12 @@
 # walls, a checker floor, a red pillar and a green partition, lit by a quad light under the ceiling (see
 # docs/content/kinds/meshes.md#mesh-files). The room's mesh is its collider too, and three boxes fall onto its floor when
 # the world runs (see docs/physics/design.md#shapes). A reflection probe's box reaches past the walls, so its fade ends
-# outside them, and its projection box is the walls', which lines the floor's reflections up with them at the Low
-# quality, which has the probes (see
-# docs/rendering/lighting-and-shadows.md#reflection-probes). The camera stands inside, near the front wall. Positions are raw
-# World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
+# outside them, and its projection box is the walls', which lines the floor's reflections up with them (see
+# docs/rendering/lighting-and-shadows.md#reflection-probes). On the floor, a mirror and a panel of brushed metal show the
+# screen-space reflections from the Medium quality up, sharp on the mirror and blurred by the panel's roughness, and the
+# probe where the screen has nothing to show (see docs/rendering/lighting-and-shadows.md#screen-space-reflections). The
+# camera stands inside, near the front wall. Positions are raw World_Position values in units of 2^-24 m. The editor
+# writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 1ce040845e87f2d5
@@ -72,6 +74,28 @@ component 54 Reflection_Probe
 	blend_distance = 0.25
 	box_projection = true
 	projection_extent = [3, 1.5, 4]
+
+entity 8e1039b4f9d545d5
+name = "Mirror"
+component 1 Transform
+	position = [2516582399978189619, 167772, -18454938]
+	rotation = [0, 0, 0, 1]
+	scale = [1.6, 0.02, 1.8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $0e355ed8248a4ab79b298a52d582e1ad
+component 65 Collider
+
+entity 2fce179827f44933
+name = "Brushed Panel"
+component 1 Transform
+	position = [2516582400021810381, 167772, -18454938]
+	rotation = [0, 0, 0, 1]
+	scale = [1.6, 0.02, 1.8]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $b402e1b406df4211824f890a5cbff4d9
+component 65 Collider
 
 entity f1a2b3c4d5e6f721
 name = "Falling Box 1"

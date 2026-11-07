@@ -24,6 +24,7 @@ Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
+	reflections:                                        bool,
 	// The exposure's histogram counts the background, which the sky drew.
 	sky_background:                                     bool,
 	temporal, upscaled, display:                        bool,
@@ -205,6 +206,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
+				rec.reflections = f.reflections != 0
 				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
 				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
@@ -299,13 +301,23 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.gi.voxel.inject,
 		&r.gi.voxel.filter,
 		&r.gi.voxel.gather,
+		// The screen-space reflections, which the default quality takes.
+		&r.ssr.depth,
+		&r.ssr.trace,
+		&r.ssr.resolve,
+		&r.ssr.temporal,
+		&r.ssr.lit,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
 	}
+	// The test's cache has no textures, so the ambient occlusion and the screen-space reflections take this one as
+	// their blue noise.
+	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
-		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky)
+		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky && record.reflections)
 		testing.expect(t, record.sky_background, "the histogram does not count the sky")
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
@@ -406,6 +418,28 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 		testing.expectf(t, record.occlusion == (technique != .Off), "%v: occlusion %v", technique, record.occlusion)
 	}
+	desc.quality = nil
+	// Until the blue noise is resident, neither the occlusion nor the screen-space reflections run.
+	noise := r.blue_noise.texture
+	r.blue_noise.texture = {}
+	testing.expect(t, draw_frame(r, w, desc), "the frame without the blue noise did not execute")
+	testing.expect(t, !record.occlusion && !record.reflections, "a pass ran without the blue noise")
+	r.blue_noise.texture = noise
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
+	// Only the Screen technique makes the screen-space reflections, at every level, and their debug view shows them.
+	for technique in Reflection_Technique {
+		for level in Quality_Level {
+			q := r.quality
+			q.reflections = {technique, level}
+			desc.quality = &q
+			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+			testing.expectf(t, record.reflections == (technique == .Screen), "%v at %v: reflections %v", technique, level, record.reflections)
+		}
+	}
+	desc.debug_view = .Reflections
+	testing.expect(t, draw_frame(r, w, desc), "the reflections' view did not execute")
+	desc.debug_view = .Lit
 	desc.quality = nil
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 

@@ -7,13 +7,15 @@
 #define AO_COMMON_HLSLI
 
 #include "cinnabar.hlsli"
+#include "blue_noise.hlsli"
 
 // Matches Ao_Constants in lib/engine/render/ambient_occlusion.odin. The view's axes in the world turn the normals into
 // view space. projection holds the camera's x and y scales and its near plane, and view_model the view model's, which
 // a pixel whose depth level 0 holds negated uses. levels and level4 are the depth levels. jitter is the camera's, which
-// the depth was drawn with. noise_index moves the noise from frame to frame, and is 0 without temporal AA, which would
-// average it. samples and steps are the level's search (see Ao_Params): GTAO's slices, HBAO's directions or SSAO's
-// samples, and the steps of each slice or direction, which SSAO does not use.
+// the depth was drawn with. noise is the blue noise texture, and noise_slice its slice, which moves the noise from frame
+// to frame and is 0 without temporal AA, which would average it. samples and steps are the level's search (see
+// Ao_Params): GTAO's slices, HBAO's directions or SSAO's samples, and the steps of each slice or direction, which SSAO
+// does not use.
 struct Constants {
 	float4 right;
 	float4 up;
@@ -29,12 +31,12 @@ struct Constants {
 	float2 jitter;
 	float radius;
 	float power;
-	uint noise_index;
+	uint noise;
+	uint noise_slice;
 	uint samples;
 	uint steps;
 	uint padding0;
 	uint padding1;
-	uint padding2;
 };
 CN_PASS_CONSTANTS(Constants, constants);
 
@@ -50,8 +52,6 @@ static const float MAX_PIXELS = 256;
 // A step this many pixels out reads level log2(pixels) - LEVEL_OFFSET, so each level's texel is a few times smaller
 // than the gap between steps.
 static const float LEVEL_OFFSET = 3.3;
-// The noise's tile, in pixels: a power of two.
-static const uint HILBERT_WIDTH = 64;
 
 float3 octahedral(float2 p) {
 	float3 n = float3(p, 1 - abs(p.x) - abs(p.y));
@@ -60,24 +60,6 @@ float3 octahedral(float2 p) {
 		n.xy = (1 - abs(n.yx)) * sign_xy;
 	}
 	return normalize(n);
-}
-
-// hilbert_index is a pixel's place along a Hilbert curve through its tile. The R2 sequence along the curve spreads the
-// noise evenly over the screen.
-uint hilbert_index(uint2 p) {
-	uint index = 0;
-	for (uint level = HILBERT_WIDTH / 2; level > 0; level /= 2) {
-		uint region_x = (p.x & level) > 0 ? 1 : 0;
-		uint region_y = (p.y & level) > 0 ? 1 : 0;
-		index += level * level * ((3 * region_x) ^ region_y);
-		if (region_y == 0) {
-			if (region_x == 1) {
-				p = HILBERT_WIDTH - 1 - p;
-			}
-			p = p.yx;
-		}
-	}
-	return index;
 }
 
 uint level_index(uint level) {
@@ -150,8 +132,8 @@ struct Ao_Pixel {
 	// stop at a hard edge.
 	float pixels;
 	float radius;
-	// One point of the R2 sequence, at the pixel's place along the Hilbert curve, so its two dimensions are independent
-	// and spread evenly over the screen. With temporal AA, every frame moves it 288 places, which temporal AA averages.
+	// The pixel's spatiotemporal blue noise, whose two dimensions are independent and spread evenly over the screen.
+	// With temporal AA, every frame takes the next slice, and temporal AA averages the slices.
 	float2 noise;
 };
 
@@ -187,8 +169,7 @@ bool ao_begin(uint3 id, out Ao_Pixel p) {
 		return false;
 	}
 	p.radius = constants.radius * p.pixels / full_pixels;
-	uint noise = hilbert_index(uint2(p.pixel) % HILBERT_WIDTH) + 288 * constants.noise_index;
-	p.noise = frac(0.5 + float(noise) * float2(0.7548777, 0.5698403));
+	p.noise = blue_noise(constants.noise, uint2(p.pixel), constants.noise_slice);
 	return true;
 }
 

@@ -168,6 +168,9 @@ struct Frame_Constants {
 	uint world_probes;
 	uint world_probe_grid;
 	uint world_probe_grid_offset;
+	// Whether this view reads the screen-space reflections in Material_Push.reflections: the camera's view does, and the
+	// view model, the probes' captures and the previews do not.
+	uint reflections;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -194,6 +197,8 @@ static const uint DEBUG_QUAD_OVERDRAW = 22;
 static const uint DEBUG_SHADOW_VIRTUAL = 23;
 // The reflection probe that counts the most at each pixel, each in a color of its own, and red where none does.
 static const uint DEBUG_REFLECTION_PROBES = 25;
+// The screen-space reflections, which debug_view.hlsl draws from their texture.
+static const uint DEBUG_REFLECTIONS = 26;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;
@@ -256,6 +261,8 @@ struct Material_Push {
 	// count_quad in material_forward.hlsli).
 	uint quad_counts;
 	uint shading_stats;
+	// The screen-space reflections, read when Frame_Constants.reflections says so (see material_forward.hlsli).
+	uint reflections;
 };
 #define MATERIAL_PUSH Material_Push
 #endif

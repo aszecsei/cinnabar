@@ -22,15 +22,15 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones` | The [global illumination](global-illumination.md#global-illumination). `Split_Cascades` adds its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes), and needs `Ray_Query`. `Voxel_Cones` uses its [voxel cones](global-illumination.md#voxel-cones), needs no cap, and no preset chooses it |
 | `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`), and the voxel cones' voxels, levels and cones (`GI_VOXEL_PARAMS`) |
-| `reflections.technique` | `Off`, `Probes` | The reflections. `Probes` looks up the [reflection probes](lighting-and-shadows.md#reflection-probes) in the forward pass, with the pixel's own normal and roughness, and runs on every device. Low gives `Probes`, and the other presets `Off` |
-| `reflections.level` | `Low` … `Ultra` | The technique's parameters (`REFLECTION_PARAMS`, a table for each technique, in `reflections.odin`). `Off`'s are empty. `Probes`' are the faces' size, the slots, the faces a frame and the roughness fade over the GI. At every technique, `Off` too, the sky's [cubemap](sky.md#specular-light)'s faces, format and samples (`SKY_CUBE_PARAMS`) |
+| `reflections.technique` | `Off`, `Probes`, `Screen` | The reflections. `Probes` looks up the [reflection probes](lighting-and-shadows.md#reflection-probes) in the forward pass, with the pixel's own normal and roughness. `Screen` adds the [screen-space reflections](lighting-and-shadows.md#screen-space-reflections) in front of the probes, which fill in where their rays find nothing. Both run on every device. Low gives `Probes`, and the other presets `Screen` |
+| `reflections.level` | `Low` … `Ultra` | The technique's parameters (`REFLECTION_PARAMS`, a table for each technique, in `reflections.odin`). `Off`'s are empty. `Probes`' are the faces' size, the slots, the faces a frame and the roughness fade over the GI, which `Screen` keeps for its probes. `Screen`'s are the resolution that the rays start from, the rays a pixel, the march's steps and the roughness cutoff. At every technique, `Off` too, the sky's [cubemap](sky.md#specular-light)'s faces, format and samples (`SKY_CUBE_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
-- **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere. `Reflection_Technique` has `Off` and `Probes`: each reflection technique adds its own value, with its preset and its clamp.
-- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades, the reflection probes at Low and no reflections above it, and temporal AA, a virtual shadow map from Medium up, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
+- **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere. `Reflection_Technique` has `Off`, `Probes` and `Screen`: each reflection technique adds its own value, with its preset and its clamp.
+- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades, the reflection probes at Low and the screen-space reflections above it, and temporal AA, a virtual shadow map from Medium up, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
 ## Order in the frame
@@ -103,7 +103,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.ao.level` | `Low` … `Ultra` |
 | `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
-| `quality.reflections` | `Off`, `Probes`; a file without it keeps the preset's |
+| `quality.reflections` | `Off`, `Probes`, `Screen`; a file without it keeps the preset's |
 | `quality.reflections.level` | `Low` … `Ultra`; a file without it keeps the preset's |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |

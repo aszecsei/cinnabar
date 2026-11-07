@@ -82,8 +82,12 @@ Renderer :: struct {
 	// The GPU scene's acceleration structure and hit shading (see docs/rendering/ray-scene.md#ray-scene).
 	ray_scene:       Ray_Scene,
 	previews:        Previews,
+	// The spatiotemporal blue noise that the ambient occlusion and the screen-space reflections sample.
+	blue_noise:      Blue_Noise,
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
+	// The screen-space reflections (see screen_reflections.odin).
+	ssr:             Screen_Reflections,
 	fog:             Volumetric_Fog,
 	sky:             Sky,
 	// The last frame's sky, which sky_texture_sun answers for.
@@ -232,6 +236,10 @@ Frame :: struct {
 	// The global illumination's diffuse and specular light, zero without it.
 	gi_diffuse:               Texture,
 	gi_specular:              Texture,
+	// The screen-space reflections: the specular light along each pixel's reflection, filtered for its roughness and
+	// pre-exposed, in rgb, and its weight in a, which the forward pass reads. Zero without them. The traced reflections
+	// write it too.
+	reflections:              Texture,
 	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering/transparency.md#transparency).
 	moments_zeroth:           Texture,
 	moments:                  Texture,
@@ -257,6 +265,8 @@ Frame :: struct {
 	ao:                       ^Ao_Frame,
 	// nil without global illumination.
 	gi:                       ^Gi_Frame,
+	// nil without the screen-space reflections.
+	ssr:                      ^Ssr_Frame,
 	// nil without fog.
 	fog:                      ^Fog_Frame,
 	// nil without an Atmosphere sky.
@@ -358,8 +368,10 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	shadows_init(&r.shadows, platform)
 	ray_scene_init(&r.ray_scene)
 	previews_init(&r.previews, r)
+	blue_noise_init(&r.blue_noise)
 	ao_init(&r.ao)
 	gi_init(&r.gi)
+	screen_reflections_init(&r.ssr)
 	fog_init(&r.fog)
 	sky_init(&r.sky)
 	sprites_init(&r.sprites)
@@ -409,6 +421,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	previews_destroy(&r.previews, r)
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
+	screen_reflections_destroy(&r.ssr, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	sky_destroy(&r.sky, r)
 	sprites_destroy(&r.sprites, r.platform)
@@ -493,6 +506,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	upload_reflection_probe_lights(f)
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, ambient)
+	begin_screen_reflections(f, settings.reflections)
 	add_scene_passes(f, ambient)
 	// Every request for the ray scene came before, so its build is before every pass that traces it.
 	add_ray_scene_passes(f)
@@ -529,6 +543,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_ao_passes(f, settings.ambient_occlusion)
 	add_gi_world_probes(f)
 	add_gi_passes(f)
+	add_screen_reflection_passes(f)
 	add_cluster_passes(f)
 	add_shadow_passes(f)
 	add_fog_passes(f)
@@ -555,11 +570,12 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	add_shading_stats_copy(f)
 	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
-	// illumination's lit scene, which keeps only the opaque surfaces.
+	// illumination's and the reflections' lit scenes, which keep only the opaque surfaces.
 	add_sky_background(f)
 	add_sky_texture_background(f)
 	add_fog_background(f)
 	add_gi_lit(f)
+	add_screen_reflection_lit(f)
 	add_transparency_passes(f)
 	if desc.hooks.after_world != nil {
 		desc.hooks.after_world(f)
@@ -651,6 +667,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_post_pipelines(r, force)
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
+	sync_screen_reflections(r, force)
 	sync_ray_scene_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_sky_pipelines(r, force)

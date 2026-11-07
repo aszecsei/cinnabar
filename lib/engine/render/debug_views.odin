@@ -59,6 +59,9 @@ Debug_View :: enum u8 {
 	// The reflection probe that counts the most at each pixel, each in a color of its own, and red where none does (see
 	// docs/rendering/lighting-and-shadows.md#reflection-probes).
 	Reflection_Probes,
+	// The screen-space reflections' light, as bright as their weight, which is black where the probes take over (see
+	// docs/rendering/lighting-and-shadows.md#screen-space-reflections).
+	Reflections,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -86,7 +89,7 @@ Features :: bit_set[Feature;u16]
 // are, which the output pass only encodes.
 debug_view_shaded :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission:
+	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission, .Reflections:
 		return true
 	}
 	return false
@@ -161,6 +164,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.gi_diffuse
 	case .Gi_Specular:
 		source = f.gi_specular
+	case .Reflections:
+		source = f.reflections
 	case .Gi_Probes:
 		source = f.gi != nil ? f.gi.probe_view : 0
 	case .Shadow_Mask:

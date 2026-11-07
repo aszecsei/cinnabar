@@ -175,6 +175,14 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	}
 	indirect.diffuse *= occlusion;
 	indirect.specular *= occlusion;
+#if !MATERIAL_TRANSPARENT
+	// The screen-space reflections in front of the rest, by their weight. They are pre-exposed and filtered for the
+	// roughness already, and a hit on the screen is occluded already, so the occlusion scales only what is below them.
+	if (frame.reflections != 0) {
+		float4 screen = load_screen(push.reflections, i.position.xy);
+		indirect.specular = lerp(indirect.specular, screen.rgb / max(frame_exposure(), 1e-10), saturate(screen.a));
+	}
+#endif
 	if (!direct_only && !fog_only) {
 		color += shade_indirect(s, p, indirect);
 	}
