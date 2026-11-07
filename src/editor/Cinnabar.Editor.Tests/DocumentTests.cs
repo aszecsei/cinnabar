@@ -156,6 +156,33 @@ public sealed class DocumentTests : IDisposable
     }
 
     [Fact]
+    public void ASaveWhileAnEntryIsOpenIsRefused()
+    {
+        var (document, _) = Open();
+        document.Apply("Rename", new Rename(1, "Saved"));
+        document.Save();
+
+        // A drag that is cancelled after the save leaves the file and the document as they were: clean.
+        document.Begin("Drag");
+        document.Preview(new Rename(1, "Dragged"));
+        Assert.Throws<InvalidOperationException>(() => document.Save());
+        document.Cancel();
+        Assert.False(document.IsDirty);
+        Assert.Equal("Saved", document.Scene.Find(1)!.Name);
+        Assert.Contains("name = \"Saved\"", File.ReadAllText(document.Path));
+        Assert.DoesNotContain("Dragged", File.ReadAllText(document.Path));
+
+        // With an unsaved edit before the drag, the document stays dirty and the file keeps what was saved.
+        document.Apply("Rename", new Rename(1, "Unsaved"));
+        document.Begin("Drag");
+        document.Preview(new Rename(1, "Dragged"));
+        Assert.Throws<InvalidOperationException>(() => document.Save());
+        document.Cancel();
+        Assert.True(document.IsDirty);
+        Assert.Contains("name = \"Saved\"", File.ReadAllText(document.Path));
+    }
+
+    [Fact]
     public void AnOperationThatDoesNotFitChangesNothing()
     {
         var (document, sent) = Open();

@@ -139,6 +139,46 @@ public sealed class AnimationGraphEditorTests : IDisposable
     }
 
     [Fact]
+    public void SaveIsRefusedDuringADrag()
+    {
+        var (shell, asset, text) = Fox();
+        using var _ = shell;
+        var editor = shell.OpenAnimationGraph(asset)!;
+        var save = shell.Commands.Get(EditorCommands.Save);
+        var path = _temp.Combine("fox.animation_graph");
+        var invalidated = 0;
+        save.Changed += () => invalidated++;
+        Assert.Same(editor, shell.ActiveGraphEditor);
+
+        editor.Select([1]);
+        var starts = editor.MoveStarts();
+        editor.BeginMove();
+        // The ribbon learns at the drag's start, before any step.
+        Assert.True(invalidated > 0);
+        Assert.False(save.CanExecute);
+        editor.MoveSelected(starts, new Vec2(40, 80));
+        Assert.False(save.Execute());
+        Assert.False(shell.SaveGraph(editor, overwrite: true));
+        Assert.Contains(shell.Console.Lines, l => l.Text.Contains("cannot save") && l.Text.Contains("drag"));
+        Assert.Equal(text, File.ReadAllText(path));
+
+        editor.EndMove(cancel: true);
+        Assert.True(save.CanExecute);
+        Assert.False(editor.Document.IsDirty);
+        Assert.Equal(text, File.ReadAllText(path));
+        Assert.Equal(text, editor.Document.Text);
+
+        // A drag that moves nothing ends without an entry, and Save can run again.
+        editor.BeginMove();
+        Assert.False(save.CanExecute);
+        invalidated = 0;
+        editor.EndMove();
+        Assert.True(invalidated > 0);
+        Assert.True(save.CanExecute);
+        Assert.False(editor.Document.IsDirty);
+    }
+
+    [Fact]
     public void ASaveDoesNotReplaceWhatAnotherProgramWroteWithoutAsking()
     {
         var (shell, asset, _) = Fox();

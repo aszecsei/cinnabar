@@ -23,17 +23,18 @@ static partial class EditorCommands
         // Save, Undo and Redo act on the graph editor whose document is active, and on the scene otherwise.
         commands.Register(new Command(Save, "Save", () => _ = shell.ActiveGraphEditor is { } graph ? shell.SaveGraph(graph) : shell.SaveScene())
         {
-            Description = "Write the scene, or the graph that the active graph editor shows, to its file.",
+            Description = "Write the scene, or the graph that the active graph editor shows, to its file. Not while a drag or a tool has an edit open.",
             Icon = "save",
             Shortcut = "Ctrl+S",
-            CanExecuteWhen = () => shell.ActiveGraphEditor != null || shell.Scene != null,
+            // An open entry's preview can still be put back, so the file waits for it to end.
+            CanExecuteWhen = () => shell.ActiveGraphEditor is { } graph ? !graph.Document.InTransaction : shell.Scene != null && shell.OpenEdit == null,
         });
         commands.Register(new Command(SaveAs, "Save As", shell.RequestSaveAs)
         {
-            Description = "Write the scene to a new file, which it then edits.",
+            Description = "Write the scene to a new file, which it then edits. Not while a drag or a tool has an edit open.",
             Icon = "save-as",
             Shortcut = "Ctrl+Shift+S",
-            CanExecuteWhen = () => shell.Scene != null,
+            CanExecuteWhen = () => shell.Scene != null && shell.OpenEdit == null,
         });
         commands.Register(new Command(Undo, "Undo", () =>
         {

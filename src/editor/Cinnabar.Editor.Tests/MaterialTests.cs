@@ -190,6 +190,28 @@ public sealed class MaterialTests : IDisposable
     }
 
     [Fact]
+    public void ASaveDuringADragIsRefused()
+    {
+        var graph = MaterialFile.Parse(Text(Checker), MaterialFileKind.Material).Graph!;
+        var path = _temp.Combine("checker.material");
+        Directory.CreateDirectory(_temp.Path);
+        var document = MaterialDocument.Of(path, MaterialGuid, graph);
+        document.Save();
+        var saved = File.ReadAllText(path);
+
+        // A step needs an open entry.
+        Assert.Throws<InvalidOperationException>(() => document.Step(g => g.Find(2)!.X = 0));
+
+        document.Begin("Move Tint");
+        document.Step(g => g.Find(2)!.X = 400);
+        Assert.Throws<InvalidOperationException>(() => document.Save());
+        document.Cancel();
+        Assert.False(document.IsDirty);
+        Assert.Equal(saved, File.ReadAllText(path));
+        Assert.Equal(document.Text, File.ReadAllText(path));
+    }
+
+    [Fact]
     public void TheCatalogGivesEachNodeItsPinsAndTheCanvasFindsThem()
     {
         var graph = MaterialFile.Parse(Text(Checker), MaterialFileKind.Material).Graph!;

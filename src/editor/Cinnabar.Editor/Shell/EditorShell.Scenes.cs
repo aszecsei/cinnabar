@@ -102,12 +102,17 @@ public sealed partial class EditorShell
 
     /// <summary>
     /// Saves the open scene, to its file or to a new path, and then every dirty mesh document of the scene. A failure
-    /// goes to the console.
+    /// goes to the console. Refused while an entry is open, whose preview the file must not get as saved.
     /// </summary>
     public bool SaveScene(string? path = null)
     {
         if (Scene == null)
         {
+            return false;
+        }
+        if (OpenEdit is { } open)
+        {
+            Console.Add(LogLevel.Warning, $"scene: cannot save while {open.Owner} has \"{open.Label}\" open. Finish or cancel it first.");
             return false;
         }
         var old = Scene.Path;
@@ -228,7 +233,10 @@ public sealed partial class EditorShell
             return null;
         }
         Scene.Begin(label);
-        return OpenEdit = new SceneEdit(this, Scene, label, owner, commitIfInterrupted);
+        OpenEdit = new SceneEdit(this, Scene, label, owner, commitIfInterrupted);
+        // Save waits while an entry is open.
+        Commands.InvalidateAll();
+        return OpenEdit;
     }
 
     // The one place where the open entry ends: a stale token does nothing, and the owner learns after the document.
@@ -240,6 +248,7 @@ public sealed partial class EditorShell
         }
         OpenEdit = null;
         edit.End(commit);
+        Commands.InvalidateAll();
         edit.RaiseEnded(commit);
     }
 
