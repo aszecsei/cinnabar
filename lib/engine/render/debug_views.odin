@@ -8,7 +8,7 @@ import "cinnabar:core/gpu"
 DEBUG_VIEW_SHADER :: #load("../content/shaders/debug_view.hlsl.meta", string)
 
 // Debug_View is what the frame shows. The forward pass draws the views up to Shadow_Cascades, Meshlets, Lod_Depth,
-// Emission and Shadow_Virtual, and a pass from the frame's textures the rest. Matches DEBUG_* in material_common.hlsli and
+// Emission, Shadow_Virtual and Reflection_Probes, and a pass from the frame's textures the rest. Matches DEBUG_* in material_common.hlsli and
 // debug_view.hlsl, and link.Debug_View, so a new view goes at the end.
 Debug_View :: enum u8 {
 	Lit,
@@ -56,6 +56,9 @@ Debug_View :: enum u8 {
 	Shadow_Virtual,
 	// The prepass's roughness, from black, smooth, to white, rough, and white where it drew nothing.
 	Roughness,
+	// The reflection probe that counts the most at each pixel, each in a color of its own, and red where none does (see
+	// docs/rendering/lighting-and-shadows.md#reflection-probes).
+	Reflection_Probes,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -92,7 +95,7 @@ debug_view_shaded :: proc(view: Debug_View) -> bool {
 // debug_view_from_textures is whether a view comes from the frame's textures, not the forward pass.
 debug_view_from_textures :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth, .Emission, .Shadow_Virtual:
+	case .Lit ..= .Shadow_Cascades, .Meshlets, .Lod_Depth, .Emission, .Shadow_Virtual, .Reflection_Probes:
 		return false
 	}
 	return true

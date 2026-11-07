@@ -276,6 +276,8 @@ assign_shadow_views :: proc(f: ^Frame, trace: bool, virtual := false) {
 		// Every view depth is beyond the last split, so no pixel looks for a cascade.
 		sf.cascade_splits = {}
 	}
+	// A reflection probe's capture takes a slot after the others for its own view of the directional light.
+	add_reflection_probe_shadow(f, sf, first_slot + next_slot, max_views)
 	if len(sf.views) > 0 {
 		ok: bool
 		sf.views_upload, ok = upload_bytes(r.platform, ([^]byte)(raw_data(sf.views))[:len(sf.views) * size_of(Shadow_View)])
@@ -400,6 +402,29 @@ add_cascades :: proc(f: ^Frame, sf: ^Shadow_Frame, direction: [3]f32) {
 		append(&sf.viewports, pixels)
 		start = split
 	}
+}
+
+// add_orthographic_shadow_view adds an orthographic view along a directional light's direction of a sphere relative to
+// the camera, in a slot of the atlas, as a cascade's is but for its snapping. Depth is clamped, not clipped.
+@(private)
+add_orthographic_shadow_view :: proc(sf: ^Shadow_Frame, direction, center: [3]f32, radius: f32, slot: int) {
+	light_right, light_up := light_basis(direction)
+	depth_range := 2 * radius
+	d := linalg.dot(direction, center)
+	m := matrix[4, 4]f32{
+		light_right.x / radius, light_right.y / radius, light_right.z / radius, -linalg.dot(light_right, center) / radius,
+		light_up.x / radius, light_up.y / radius, light_up.z / radius, -linalg.dot(light_up, center) / radius,
+		-direction.x / depth_range, -direction.y / depth_range, -direction.z / depth_range, (radius + d) / depth_range,
+		0, 0, 0, 1,
+	}
+	pixels, rect := slot_viewport(sf.params, slot, sf.params.slot)
+	planes := frustum_planes_6(m)
+	planes[4] = {0, 0, 0, 1}
+	append(&sf.matrices, m)
+	append(&sf.views, Shadow_View{rows = matrix_rows(m), rect = rect, texel = 2 * radius / f32(sf.params.slot)})
+	append(&sf.planes, planes)
+	append(&sf.eyes, [4]f32{direction.x, direction.y, direction.z, 0})
+	append(&sf.viewports, pixels)
 }
 
 // add_perspective_view adds a perspective view from a light's position, relative to the camera, along a direction,

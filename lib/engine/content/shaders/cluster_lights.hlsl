@@ -1,10 +1,13 @@
 // Assigns the punctual lights to clusters (see docs/rendering/lighting-and-shadows.md#lights-and-clusters): a thread for each cluster, a
 // tile of the screen and a depth slice, finds the lights whose spheres reach its box in view space, and writes their
-// indices into one list, at an offset that it takes with an atomic add.
+// indices into one list, at an offset that it takes with an atomic add. Then it finds the reflection probes whose
+// influence boxes reach its box, and writes the first MAX_CLUSTER_PROBES of them, in their records' order, which is
+// their priority's, into its own fixed list (see docs/rendering/lighting-and-shadows.md#reflection-probes).
 #include "cinnabar.hlsli"
 
 // Matches Cluster_Constants in lib/engine/render/lights.odin. The view's axes in the world turn positions relative to
-// the camera into view space. projection holds the projection's x and y scales, the near plane, and the slices' scale.
+// its eye, which is relative to the camera, into view space. projection holds the projection's x and y scales, the
+// near plane, and the slices' scale.
 struct Cluster_Constants {
 	float4 right;
 	float4 up;
@@ -21,8 +24,49 @@ struct Cluster_Constants {
 	uint indices;
 	uint counter;
 	uint capacity;
+	float eye_x;
+	float eye_y;
+	float eye_z;
+	uint probes;
+	uint probes_offset;
+	uint probe_count;
+	uint probe_clusters;
+	uint padding;
 };
 CN_PASS_CONSTANTS(Cluster_Constants, constants);
+
+// Match REFLECTION_PROBE_CLUSTER_STRIDE and MAX_CLUSTER_PROBES in lib/engine/render/reflection_probes.odin.
+static const uint REFLECTION_PROBE_CLUSTER_STRIDE = 32;
+static const uint MAX_CLUSTER_PROBES = 7;
+
+// Matches Reflection_Probe_Record in lib/engine/render/reflection_probes.odin; only its box matters here.
+struct Reflection_Probe_Record {
+	float3 center;
+	uint cube;
+	float4 axes[3];
+	float3 extent;
+	float blend;
+	float4 rest;
+};
+
+// to_view turns a point relative to the camera into the view's space.
+float3 to_view(float3 p) {
+	p -= float3(constants.eye_x, constants.eye_y, constants.eye_z);
+	return float3(dot(p, constants.right.xyz), dot(p, constants.up.xyz), dot(p, constants.forward.xyz));
+}
+
+// probe_reaches is whether a probe's influence box reaches a box in view space: the box in view space that holds the
+// probe's turned box overlaps it. Matches probe_reaches_box in lib/engine/render/reflection_probes.odin.
+bool probe_reaches(uint index, float3 box_min, float3 box_max) {
+	Reflection_Probe_Record p = cn_buffer(constants.probes).Load<Reflection_Probe_Record>(constants.probes_offset + index * sizeof(Reflection_Probe_Record));
+	float3 center = to_view(p.center);
+	float3 half_size = 0;
+	[unroll] for (uint a = 0; a < 3; a++) {
+		float3 axis = float3(dot(p.axes[a].xyz, constants.right.xyz), dot(p.axes[a].xyz, constants.up.xyz), dot(p.axes[a].xyz, constants.forward.xyz));
+		half_size += abs(axis) * p.extent[a];
+	}
+	return all(center - half_size <= box_max) && all(center + half_size >= box_min);
+}
 
 // Match CLUSTER_TILE and CLUSTER_SLICES in lib/engine/render/lights.odin. The last slice reaches to infinity, which
 // its box ends at LAST_SLICE_FAR for.
@@ -40,7 +84,7 @@ struct Light_Record {
 // reaches is whether a light's sphere reaches a box in view space.
 bool reaches(uint index, float3 box_min, float3 box_max) {
 	Light_Record l = cn_buffer(constants.lights).Load<Light_Record>(constants.lights_offset + index * sizeof(Light_Record));
-	float3 v = float3(dot(l.position, constants.right.xyz), dot(l.position, constants.up.xyz), dot(l.position, constants.forward.xyz));
+	float3 v = to_view(l.position);
 	float3 d = v - clamp(v, box_min, box_max);
 	return dot(d, d) <= l.range * l.range;
 }
@@ -90,4 +134,18 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		}
 	}
 	cn_rw_buffer(constants.clusters).Store2(id.x * 8, uint2(offset, count));
+
+	if (constants.probe_clusters == 0) {
+		return;
+	}
+	RWByteAddressBuffer probe_list = cn_rw_buffer(constants.probe_clusters);
+	uint at = id.x * REFLECTION_PROBE_CLUSTER_STRIDE;
+	uint probes = 0;
+	for (uint k = 0; k < constants.probe_count && probes < MAX_CLUSTER_PROBES; k++) {
+		if (probe_reaches(k, box_min, box_max)) {
+			probe_list.Store(at + 4 + probes * 4, k);
+			probes++;
+		}
+	}
+	probe_list.Store(at, probes);
 }

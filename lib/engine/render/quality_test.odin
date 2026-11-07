@@ -29,22 +29,29 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 }
 
-// No reflection technique exists yet, so every preset has them off, at its level, and a frame draws none.
+// Low takes the reflection probes, and the other presets have the reflections off, at their levels, until their own
+// techniques come.
 @(test)
-the_reflections_are_off_at_every_preset :: proc(t: ^testing.T) {
+the_reflection_probes_are_lows_reflections :: proc(t: ^testing.T) {
 	for caps in ([]Caps{{}, {ray_query = true}}) {
 		for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
 			q := preset_quality(preset, caps)
-			testing.expect_value(t, q.reflections, Reflection_Quality{.Off, Quality_Level(u8(preset))})
+			technique := preset == .Low ? Reflection_Technique.Probes : .Off
+			testing.expect_value(t, q.reflections, Reflection_Quality{technique, Quality_Level(u8(preset))})
 			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
+			testing.expect_value(t, quality_preset(q, caps), preset)
 			settings: Frame_Settings
 			apply_quality(&settings, q)
-			testing.expect(t, settings.reflections.off)
+			testing.expect_value(t, settings.reflections.off, technique == .Off)
 			testing.expect_value(t, settings.reflections.level, q.reflections.level)
-			testing.expect_value(t, settings.reflections.technique, Reflection_Technique.Off)
+			testing.expect_value(t, settings.reflections.technique, technique)
 		}
 	}
 	testing.expect_value(t, Quality{}.reflections.technique, Reflection_Technique.Off)
+	// The probes run at any level, on any device.
+	q := preset_quality(.Ultra, {})
+	q.reflections.technique = .Probes
+	testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{.Probes, .Ultra})
 }
 
 @(test)

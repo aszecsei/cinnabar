@@ -151,6 +151,23 @@ struct Frame_Constants {
 	float sky_cube_blend;
 	float sky_cube_mips;
 	uint sky_cube_sampler;
+	// The reflection probes (see material_reflections.hlsli): their records in the upload ring at this offset of its
+	// buffer, how many, 0 without them, their lists in the light clusters, their cube array and its mips, and the
+	// roughnesses between which they fade out over the global illumination's specular light.
+	uint reflection_probes;
+	uint reflection_probes_offset;
+	uint reflection_probe_count;
+	uint reflection_probe_clusters;
+	uint reflection_probe_cubes;
+	float reflection_probe_mips;
+	float reflection_probe_rough_start;
+	float reflection_probe_rough_end;
+	// Whether this view is a face of a reflection probe's capture, whose indirect light is the world probes', when the
+	// world probes run, at their grid in the upload ring, or the Environment's.
+	uint capture;
+	uint world_probes;
+	uint world_probe_grid;
+	uint world_probe_grid_offset;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -175,6 +192,8 @@ static const uint DEBUG_EMISSION = 20;
 static const uint DEBUG_QUAD_OVERDRAW = 22;
 // The virtual shadow map's level at each pixel, and whether its pages were allocated (see virtual_debug_color).
 static const uint DEBUG_SHADOW_VIRTUAL = 23;
+// The reflection probe that counts the most at each pixel, each in a color of its own, and red where none does.
+static const uint DEBUG_REFLECTION_PROBES = 25;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;

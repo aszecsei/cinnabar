@@ -55,3 +55,4 @@ component_types :: proc(w: ^ecs.World, allocator: runtime.Allocator) -> link.Com
 #assert(int(render.Debug_View.Quad_Overdraw) == int(link.Debug_View.Quad_Overdraw))
 #assert(int(render.Debug_View.Shadow_Virtual) == int(link.Debug_View.Shadow_Virtual))
 #assert(int(render.Debug_View.Roughness) == int(link.Debug_View.Roughness))
+#assert(int(render.Debug_View.Reflection_Probes) == int(link.Debug_View.Reflection_Probes))

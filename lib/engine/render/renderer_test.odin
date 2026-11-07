@@ -357,6 +357,41 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
+	// The reflection probes: a probe's capture draws its faces as views of the scene, with their own clusters and the
+	// probe's own shadow view, after the others, and the null backend validates their passes. Once captured, the clusters
+	// bin it and the forward pass reads its cube.
+	{
+		probe := ecs.spawn(w)
+		ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1, 3}), rotation = 1, scale = 1})
+		ecs.add(w, probe, Reflection_Probe{extent = {2, 1, 2}, box_projection = true})
+		rp := &r.reflection_probes
+		for p in ([]^Shader_Pipeline{&rp.face, &rp.downsample, &r.lights.pipeline}) {
+			p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+		}
+		q := r.quality
+		q.reflections = {technique = .Probes, level = .Medium}
+		desc.quality = &q
+		for k in 0 ..< 4 {
+			testing.expect(t, draw_frame(r, w, desc), "the reflection probes' frame did not execute")
+			stats := reflection_probe_stats(r)
+			testing.expect_value(t, stats.probes, 1)
+			testing.expect_value(t, stats.faces, k < 3 ? 2 : 0)
+			// The lights trace their shadows into the mask, which the faces cannot read, so while it captures, the probe has
+			// a shadow view of its own of the sun.
+			testing.expect_value(t, record.shadow_views, k < 3 ? 1 : 0)
+		}
+		testing.expect_value(t, reflection_probe_stats(r).slots, 1)
+		desc.debug_view = .Reflection_Probes
+		testing.expect(t, draw_frame(r, w, desc), "the reflection probes' view did not execute")
+		desc.debug_view = .Lit
+		q.reflections = {}
+		testing.expect(t, draw_frame(r, w, desc), "the frame without the reflection probes did not execute")
+		testing.expect(t, rp.cubes.texture == {}, "the reflection probes kept their cubes")
+		desc.quality = nil
+		ecs.despawn(w, probe)
+	}
+	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
+
 	// A Flat background is the clear color, which is not pre-exposed, so the histogram does not count it.
 	ecs.get(w, mist, Environment).mode = {true, .Flat}
 	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")

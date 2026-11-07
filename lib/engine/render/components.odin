@@ -20,6 +20,7 @@ LINE_LIGHT_ID :: ecs.Component_Id(41)
 SURFACE_RENDERER_ID :: ecs.Component_Id(51)
 // 52 is the Particle_System (see particles.odin).
 INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
+REFLECTION_PROBE_ID :: ecs.Component_Id(54)
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3
@@ -148,6 +149,35 @@ Line_Light :: struct {
 	cast_shadows: bool,
 }
 
+// A Reflection_Probe's influence box's half size, in meters, for an extent left at 0.
+DEFAULT_PROBE_EXTENT :: 5
+
+// Reflection_Probe_Update is when a reflection probe captures its cubemap again, after its first capture.
+Reflection_Probe_Update :: enum u8 {
+	// Once, when it first counts, ahead of the other probes.
+	On_Load,
+	// When its entity moves or a field of it changes.
+	On_Change,
+	// Over and over, in turn with the other Realtime probes, as the faces that each frame captures allow.
+	Realtime,
+}
+
+// Reflection_Probe captures the world around its entity's position into a cubemap, prefiltered by roughness, which the
+// surfaces inside its influence box reflect (see docs/rendering/lighting-and-shadows.md#reflection-probes). The box is
+// extent along the entity's x, y and z each way (0 means DEFAULT_PROBE_EXTENT), scaled by its Transform, and the probe
+// fades out over blend_distance meters inside it. With box_projection, a reflection is turned toward where it meets a box
+// of projection_extent (0 means extent), so that a room's probe lines up with its walls. Where boxes overlap, the higher
+// priority fills first. Its light is times intensity (0 means 1).
+Reflection_Probe :: struct {
+	extent:            [3]f32,
+	blend_distance:    f32 `editor:"range=0,100"`,
+	box_projection:    bool,
+	projection_extent: [3]f32,
+	priority:          i32,
+	intensity:         f32 `editor:"range=0,10"`,
+	update:            Reflection_Probe_Update,
+}
+
 // register_components registers the render components, with the settings components that volumes carry (see Fog and
 // the others in settings.odin). Call it with the engine's components and volume.register_components, in init and
 // on_reload.
@@ -164,6 +194,7 @@ register_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Surface_Renderer, SURFACE_RENDERER_ID)
 	ecs.register_component(r, Particle_System, PARTICLE_SYSTEM_ID)
 	ecs.register_component(r, Instanced_Mesh_Renderer, INSTANCED_MESH_RENDERER_ID)
+	ecs.register_component(r, Reflection_Probe, REFLECTION_PROBE_ID)
 	register_settings_components(r)
 }
 

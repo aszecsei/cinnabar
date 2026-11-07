@@ -142,16 +142,16 @@ the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
 
 	// The keys replace the preset's, and a value that does not fit is a problem.
 	s = {}
-	parse("quality.preset = Medium\nquality.reflections = Off\nquality.reflections.level = Ultra\nquality.reflections = Mirror\n", &s, &problems)
+	parse("quality.preset = Medium\nquality.reflections = Probes\nquality.reflections.level = Ultra\nquality.reflections = Mirror\n", &s, &problems)
 	testing.expect_value(t, len(problems), 1)
-	testing.expect_value(t, problems[0], `4: quality.reflections takes Off, not "Mirror"`)
+	testing.expect_value(t, problems[0], `4: quality.reflections takes Off, Probes, not "Mirror"`)
 	q := quality(s, caps)
-	testing.expect_value(t, q.reflections, render.Reflection_Quality{.Off, .Ultra})
+	testing.expect_value(t, q.reflections, render.Reflection_Quality{.Probes, .Ultra})
 	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
 
 	// They write and read back.
 	values := quality_values(q, caps)
-	testing.expect_value(t, values[.Reflections], "Off")
+	testing.expect_value(t, values[.Reflections], "Probes")
 	testing.expect_value(t, values[.Reflections_Level], "Ultra")
 	written: Settings
 	text := ""
