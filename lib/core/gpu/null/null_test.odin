@@ -354,15 +354,18 @@ frame_captures_are_ready_after_end_frame :: proc(t: ^testing.T) {
 	defer shutdown()
 
 	begin_frame({1280, 720})
-	testing.expect(t, request_frame_capture())
-	// A second request in the frame is the same capture.
-	testing.expect(t, request_frame_capture())
+	testing.expect(t, request_frame_capture(1))
+	// One a frame: the caller asks again next frame.
+	testing.expect(t, !request_frame_capture(2))
 	_, ok := poll_frame_capture()
 	testing.expect(t, !ok)
 	end_frame()
 
 	capture, ready := poll_frame_capture()
 	testing.expect(t, ready)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.source, gpu.Capture_Source.Frame)
+	testing.expect_value(t, capture.ticket, 1)
 	testing.expect_value(t, capture.size, [2]u32{1280, 720})
 	testing.expect_value(t, capture.format, gpu.FRAME_TARGET_FORMAT)
 	testing.expect(t, capture.row_pitch >= 4 * 1280 && capture.row_pitch % 256 == 0)
@@ -371,21 +374,85 @@ frame_captures_are_ready_after_end_frame :: proc(t: ^testing.T) {
 	testing.expect(t, !again)
 
 	// A held slot stays held until it is released; the others are free.
-	for _ in 1 ..< CAPTURE_SLOTS {
+	for i in 1 ..< CAPTURE_SLOTS {
 		begin_frame({1280, 720})
-		testing.expect(t, request_frame_capture())
+		testing.expect(t, request_frame_capture(u32(10 + i)))
 		end_frame()
 		held, got := poll_frame_capture()
 		testing.expect(t, got)
+		testing.expect_value(t, held.ticket, u32(10 + i))
 		release_frame_capture(held)
 	}
 	release_frame_capture(capture)
 	begin_frame({1280, 720})
-	testing.expect(t, request_frame_capture())
+	testing.expect(t, request_frame_capture(3))
 	end_frame()
 	last, got := poll_frame_capture()
 	testing.expect(t, got)
+	testing.expect_value(t, last.ticket, 3)
 	release_frame_capture(last)
+}
+
+@(test)
+a_frame_that_draws_nothing_cancels_its_capture :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+
+	// The host asks between frames, and the window is minimized before the next one.
+	begin_frame({64, 32})
+	end_frame()
+	testing.expect(t, request_frame_capture(1))
+	begin_frame({64, 32})
+	end_frame()
+	testing.expect(t, request_frame_capture(2))
+	begin_frame({0, 0})
+	end_frame()
+	// The request sees the minimized frame.
+	testing.expect(t, !request_frame_capture(99))
+	begin_frame({64, 32})
+	end_frame()
+	testing.expect(t, request_frame_capture(3))
+	begin_frame({64, 32})
+	end_frame()
+
+	// Each comes back with its own ticket, the cancelled one too.
+	want := [3]struct {
+		ticket: u32,
+		status: gpu.Capture_Status,
+	}{{1, .Ready}, {2, .Cancelled}, {3, .Ready}}
+	seen: [3]bool
+	for _ in 0 ..< 3 {
+		capture, ok := poll_frame_capture()
+		testing.expect(t, ok)
+		for w, i in want {
+			if w.ticket == capture.ticket {
+				testing.expect(t, !seen[i])
+				seen[i] = true
+				testing.expect_value(t, capture.status, w.status)
+				testing.expect_value(t, capture.source, gpu.Capture_Source.Frame)
+				testing.expect_value(t, len(capture.pixels) > 0, w.status == .Ready)
+			}
+		}
+		release_frame_capture(capture)
+	}
+	testing.expect_value(t, seen, [3]bool{true, true, true})
+	_, more := poll_frame_capture()
+	testing.expect(t, !more)
+
+	// Every slot is free again: each one can be held at once.
+	held: [CAPTURE_SLOTS]gpu.Frame_Capture
+	for &h, i in held {
+		testing.expect(t, request_frame_capture(u32(100 + i)))
+		begin_frame({64, 32})
+		end_frame()
+		got: bool
+		h, got = poll_frame_capture()
+		testing.expect(t, got)
+	}
+	for h in held {
+		release_frame_capture(h)
+	}
 }
 
 @(test)
@@ -402,18 +469,65 @@ a_texture_capture_comes_back_with_its_ticket :: proc(t: ^testing.T) {
 
 	capture, ok := poll_frame_capture()
 	testing.expect(t, ok)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.source, gpu.Capture_Source.Texture)
 	testing.expect_value(t, capture.ticket, 7)
 	testing.expect_value(t, capture.size, [2]u32{16, 8})
 	testing.expect_value(t, capture.mode, gpu.Output_Mode.Sdr)
 	testing.expect(t, int(capture.row_pitch) * 8 == len(capture.pixels))
 	release_frame_capture(capture)
 
-	// A copy of the frame target has none.
+	// A copy of the frame target says so, and its ticket is the frame request's own.
 	begin_frame({64, 32})
-	testing.expect(t, request_frame_capture())
+	testing.expect(t, request_frame_capture(7))
 	end_frame()
 	frame, frame_ok := poll_frame_capture()
 	testing.expect(t, frame_ok)
-	testing.expect_value(t, frame.ticket, 0)
+	testing.expect_value(t, frame.source, gpu.Capture_Source.Frame)
+	testing.expect_value(t, frame.ticket, 7)
 	release_frame_capture(frame)
+}
+
+@(test)
+a_failed_frame_copy_keeps_the_texture_copy :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	defer destroy_texture(texture)
+
+	testing.expect(t, request_frame_capture(1))
+	begin_frame({64, 32})
+	testing.expect(t, request_texture_capture(texture, 2))
+	fail_next_frame_copy()
+	end_frame()
+
+	frame_seen, texture_seen := false, false
+	for _ in 0 ..< 2 {
+		capture, ok := poll_frame_capture()
+		testing.expect(t, ok)
+		switch capture.source {
+		case .Frame:
+			frame_seen = true
+			testing.expect_value(t, capture.ticket, 1)
+			testing.expect_value(t, capture.status, gpu.Capture_Status.Cancelled)
+			testing.expect_value(t, len(capture.pixels), 0)
+		case .Texture:
+			texture_seen = true
+			testing.expect_value(t, capture.ticket, 2)
+			testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+			testing.expect_value(t, capture.size, [2]u32{16, 8})
+		}
+		release_frame_capture(capture)
+	}
+	testing.expect(t, frame_seen && texture_seen)
+
+	// The failure was the one copy's: the next frame copies.
+	testing.expect(t, request_frame_capture(3))
+	begin_frame({64, 32})
+	end_frame()
+	next, ok := poll_frame_capture()
+	testing.expect(t, ok)
+	testing.expect_value(t, next.status, gpu.Capture_Status.Ready)
+	release_frame_capture(next)
 }

@@ -255,18 +255,35 @@ Preview_Target :: struct {
 // Frame_Capture is a copy of a frame's final frame target in CPU memory, as the backend's readback gives it (see
 // docs/gpu/presentation.md#frame-capture). The pixels are the backend's, row_pitch bytes per row, and stay valid until
 // release_frame_capture. The format is the frame target's: RGBA8 sRGB bytes in Sdr, RGB10A2 PQ in Hdr10 and RGBA16F in
-// Scrgb, with the display's SDR white in nits for the HDR modes, or 0 when unknown.
+// Scrgb, with the display's SDR white in nits for the HDR modes, or 0 when unknown. A cancelled capture has only its
+// slot, source and ticket, and is released as a ready one is.
 Frame_Capture :: struct {
 	// The backend's slot, which release_frame_capture frees.
 	slot:      u32,
+	status:    Capture_Status,
+	source:    Capture_Source,
+	// What the request asked it to be called. The host gives a frame's copy its ticket, and the game a texture's.
+	ticket:    u32,
 	size:      [2]u32,
 	format:    Format,
 	mode:      Output_Mode,
 	sdr_white: f32,
 	row_pitch: u32,
 	pixels:    []byte,
-	// What request_texture_capture asked it to be called, or 0 for a copy of the frame target.
-	ticket:    u32,
+}
+
+// Capture_Status says whether a capture's copy was made. A frame that records nothing, or a copy that cannot get its
+// readback memory, cancels the capture, and the backend gives it back cancelled so that the caller's request ends.
+Capture_Status :: enum u8 {
+	Cancelled,
+	Ready,
+}
+
+// Capture_Source says which request made a capture: request_frame_capture's copy of the frame target, or
+// request_texture_capture's copy of a texture.
+Capture_Source :: enum u8 {
+	Frame,
+	Texture,
 }
 
 is_depth_format :: proc(format: Format) -> bool {

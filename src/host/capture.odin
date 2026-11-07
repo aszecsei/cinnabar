@@ -34,8 +34,10 @@ GIF_DELAY_CS :: 10
 
 Capture :: struct {
 	editor:    ^Link,
-	// Main thread: the copies the backend is making, oldest first, and the editor's requests that wait for a frame.
+	// Main thread: the copies the backend is making, which its answers name by ticket, the ticket that the next one
+	// gets, and the editor's requests that wait for a frame.
 	in_flight: [dynamic]In_Flight,
+	next_ticket: u32,
 	// The thumbnail that the game is drawing, and the file that it goes to, from the heap.
 	thumbnail_id:   u32,
 	thumbnail_path: string,
@@ -56,6 +58,7 @@ Capture :: struct {
 }
 
 In_Flight :: struct {
+	ticket: u32,
 	frame: u64,
 	tick:  time.Tick,
 	// The screenshot request that the frame answers, or 0 for a ring sample only.
@@ -193,8 +196,9 @@ capture_disconnect :: proc(c: ^Capture) {
 	c.thumbnail_id, c.thumbnail_path = 0, ""
 }
 
-// capture_tick runs on the main thread between frames: it collects the backend's finished copies for the worker,
-// sends the worker's results, and asks for the next copy when the ring is due or a screenshot waits.
+// capture_tick runs on the main thread between frames: it matches the backend's finished and cancelled copies to
+// their requests by ticket, gives the finished ones to the worker, sends the worker's results, and asks for the next
+// copy when the ring is due or a screenshot waits.
 capture_tick :: proc(c: ^Capture) {
 	c.frame += 1
 	for {
@@ -202,37 +206,11 @@ capture_tick :: proc(c: ^Capture) {
 		if !ok {
 			break
 		}
-		if done.ticket != 0 {
-			if done.ticket == c.thumbnail_id && c.thumbnail_path != "" {
-				post_job(c, Job{kind = .Thumbnail, capture = done, frame = c.frame, id = done.ticket, path = c.thumbnail_path})
-				c.thumbnail_id, c.thumbnail_path = 0, ""
-			} else {
-				core.release_frame_capture(done)
-			}
-			continue
-		}
-		if len(c.in_flight) == 0 {
-			// Nothing asked for it, which cannot happen: one request per frame, answered in order.
-			core.release_frame_capture(done)
-			continue
-		}
-		f := c.in_flight[0]
-		ordered_remove(&c.in_flight, 0)
-		if f.id != 0 {
-			post_job(
-				c,
-				Job {
-					kind = .Screenshot,
-					capture = done,
-					frame = f.frame,
-					tick = f.tick,
-					id = f.id,
-					path = f.path,
-					ring = f.ring,
-				},
-			)
-		} else {
-			post_job(c, Job{kind = .Ring_Sample, capture = done, frame = f.frame, tick = f.tick})
+		switch done.source {
+		case .Texture:
+			take_thumbnail(c, done)
+		case .Frame:
+			take_frame(c, done)
 		}
 	}
 
@@ -263,7 +241,8 @@ capture_tick :: proc(c: ^Capture) {
 	if !c.ring_due && screenshot < 0 {
 		return
 	}
-	if !core.request_frame_capture() {
+	c.next_ticket = max(c.next_ticket + 1, 1)
+	if !core.request_frame_capture(c.next_ticket) {
 		if screenshot >= 0 {
 			r := &c.requests[screenshot]
 			r.waited += 1
@@ -283,6 +262,7 @@ capture_tick :: proc(c: ^Capture) {
 		return
 	}
 	f := In_Flight {
+		ticket = c.next_ticket,
 		frame = c.frame,
 		tick  = time.tick_now(),
 		ring  = c.ring_due,
@@ -297,6 +277,65 @@ capture_tick :: proc(c: ^Capture) {
 		c.ring_last = f.tick
 	}
 	append(&c.in_flight, f)
+}
+
+// take_thumbnail gives the worker the thumbnail's copy, or answers that the backend cancelled it. Any other texture
+// copy is one that the editor no longer waits for.
+@(private = "file")
+take_thumbnail :: proc(c: ^Capture, done: gpu.Frame_Capture) {
+	if done.ticket != c.thumbnail_id || c.thumbnail_path == "" {
+		core.release_frame_capture(done)
+		return
+	}
+	switch done.status {
+	case .Ready:
+		post_job(c, Job{kind = .Thumbnail, capture = done, frame = c.frame, id = done.ticket, path = c.thumbnail_path})
+	case .Cancelled:
+		core.release_frame_capture(done)
+		if c.editor != nil && c.editor.linked {
+			link_send(c.editor, link.Capture_Result{id = done.ticket, kind = .Thumbnail, reason = "the backend could not copy the texture"})
+		}
+		delete(c.thumbnail_path, runtime.heap_allocator())
+	}
+	c.thumbnail_id, c.thumbnail_path = 0, ""
+}
+
+// take_frame gives the worker the frame's copy for the request with its ticket. A cancelled copy, of a frame that drew
+// nothing, puts its screenshot back to wait for the next frame, and its ring sample is taken again.
+@(private = "file")
+take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
+	index := -1
+	for f, i in c.in_flight {
+		if f.ticket == done.ticket {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		core.release_frame_capture(done)
+		return
+	}
+	f := c.in_flight[index]
+	ordered_remove(&c.in_flight, index)
+	switch done.status {
+	case .Ready:
+		if f.id != 0 {
+			post_job(c, Job{kind = .Screenshot, capture = done, frame = f.frame, tick = f.tick, id = f.id, path = f.path, ring = f.ring})
+		} else {
+			post_job(c, Job{kind = .Ring_Sample, capture = done, frame = f.frame, tick = f.tick})
+		}
+	case .Cancelled:
+		core.release_frame_capture(done)
+		if f.ring {
+			c.ring_due = true
+		}
+		if f.id != 0 && c.editor != nil && c.editor.linked {
+			// It waits as a request that found no free slot does, so a window that stays minimized fails it.
+			inject_at(&c.requests, 0, Request{id = f.id, kind = .Screenshot, path = f.path, waited = 1})
+		} else {
+			delete(f.path, runtime.heap_allocator())
+		}
+	}
 }
 
 @(private = "file")

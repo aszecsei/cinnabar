@@ -454,7 +454,9 @@ end_frame :: proc() {
 		// Resources destroyed this frame were last used by work that has already been signaled.
 		stamp_releases(dev.fence_value)
 		stamp_readbacks(dev.fence_value)
-		cancel_capture()
+		// The frame copies nothing, so its captures end cancelled.
+		cancel_frame_capture()
+		cancel_texture_capture()
 		return
 	}
 	when ODIN_DEBUG {

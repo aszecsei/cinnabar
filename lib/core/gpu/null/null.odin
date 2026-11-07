@@ -21,17 +21,29 @@ FRAMES_IN_FLIGHT :: 2
 // A frame capture's slots, as on a real backend (see docs/gpu/presentation.md#frame-capture).
 CAPTURE_SLOTS :: FRAMES_IN_FLIGHT + 2
 
-// Null_Capture is a frame capture: zeroed pixels with rows aligned as D3D12 aligns a copyable footprint, ready at
-// once.
+// Null_Capture is a capture's slot. A copy is zeroed pixels with rows aligned as D3D12 aligns a copyable footprint,
+// ready at the end of its frame.
 @(private = "file")
 Null_Capture :: struct {
-	taken:  bool,
-	ready:  bool,
-	size:   [2]u32,
-	format: gpu.Format,
-	mode:   gpu.Output_Mode,
-	pixels: []byte,
-	ticket: u32,
+	state:   Null_Capture_State,
+	status:  gpu.Capture_Status,
+	source:  gpu.Capture_Source,
+	ticket:  u32,
+	size:    [2]u32,
+	format:  gpu.Format,
+	mode:    gpu.Output_Mode,
+	pixels:  []byte,
+}
+
+@(private = "file")
+Null_Capture_State :: enum u8 {
+	Free,
+	// A request took it; end_frame makes the copy or cancels it.
+	Requested,
+	// end_frame finished it, ready or cancelled; poll_frame_capture gives it out.
+	Done,
+	// The caller holds it until release_frame_capture.
+	Taken,
 }
 
 // Null_Frame is a frame's fake GPU spans, until begin_frame gives them to the profiler.
@@ -87,19 +99,25 @@ state: struct {
 	frames:        [FRAMES_IN_FLIGHT]Null_Frame,
 	frame_index:   int,
 	timing_mutex:  sync.Mutex,
-	// Whether this frame copies the frame target, and the slots.
-	capture_requested: bool,
-	texture_requested: bool,
+	// Whether the last begin_frame records, as D3D12's does unless the window is minimized.
+	recording:         bool,
+	// The slots that this frame's end_frame copies the frame target and a texture into, or -1, and the texture.
+	frame_pending:     int,
+	texture_pending:   int,
 	texture:           gpu.Texture,
-	texture_ticket:    u32,
+	// Whether the next frame copy fails, as D3D12's does when it cannot make its readback buffer, for tests.
+	fail_frame_copy:   bool,
 	captures:          [CAPTURE_SLOTS]Null_Capture,
 }
 
 // The null backend has no shared mode and no adapter: it renders nothing to share.
 init :: proc(window: rawptr, size: [2]i32, shared_name := "", adapter: u64 = 0) -> bool {
 	state = {
-		frame_start = time.tick_now(),
-		output      = {format = gpu.FRAME_TARGET_FORMAT},
+		frame_start     = time.tick_now(),
+		output          = {format = gpu.FRAME_TARGET_FORMAT},
+		recording       = true,
+		frame_pending   = -1,
+		texture_pending = -1,
 	}
 	gpu.pool_init(&state.buffers, gpu.MAX_BUFFERS)
 	gpu.pool_init(&state.textures, gpu.MAX_TEXTURES)
@@ -214,6 +232,7 @@ begin_frame :: proc(size: [2]i32) {
 		time.sleep(FRAME_TIME - elapsed)
 	}
 	state.frame_start = time.tick_now()
+	state.recording = size.x > 0 && size.y > 0
 	mode := gpu.output_mode(state.request, {})
 	state.output = {mode = mode, format = gpu.output_format(mode)}
 	gpu.pool_get(&state.textures, state.frame_target)^ = frame_target_desc(size)
@@ -281,60 +300,66 @@ time_markers :: proc(buffers: []gpu.Command_Buffer, queue: gpu.Queue) {
 	f.end = max(f.end, clock^)
 }
 
-// end_frame checks that the game left the frame target in the render target layout, and fills a requested capture.
+// end_frame checks that the game left the frame target in the render target layout, and finishes the frame's captures:
+// a frame that records nothing cancels them.
 end_frame :: proc() {
 	if layout, _ := gpu.tracked_layout(&state.layouts, state.frame_target); layout != .Render_Target {
 		log.errorf("gpu: the frame target ends the frame in the %v layout", layout)
 	}
-	fill_texture_capture()
-	if state.capture_requested {
-		state.capture_requested = false
-		for &c in state.captures {
-			if c.taken {
-				continue
-			}
-			desc := gpu.pool_get(&state.textures, state.frame_target)
-			size := desc.size
-			delete(c.pixels)
-			c = {taken = true, ready = true, ticket = 0, size = size, format = desc.format, mode = state.output.mode, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
-			break
-		}
+	if state.texture_pending >= 0 {
+		finish_capture(state.texture_pending, state.texture, .Sdr, state.recording)
+		state.texture_pending = -1
+	}
+	if state.frame_pending >= 0 {
+		copied := state.recording && !state.fail_frame_copy
+		state.fail_frame_copy = false
+		finish_capture(state.frame_pending, state.frame_target, state.output.mode, copied)
+		state.frame_pending = -1
 	}
 }
 
-// fill_texture_capture fills the slot of a copy that request_texture_capture asked for.
+// finish_capture fills a requested slot with a copy of the texture, or cancels it.
 @(private = "file")
-fill_texture_capture :: proc() {
-	if !state.texture_requested {
+finish_capture :: proc(slot: int, texture: gpu.Texture, mode: gpu.Output_Mode, copied: bool) {
+	c := &state.captures[slot]
+	c.state = .Done
+	if !copied {
+		c.status = .Cancelled
 		return
 	}
-	state.texture_requested = false
-	for &c in state.captures {
-		if c.taken {
-			continue
-		}
-		desc := gpu.pool_get(&state.textures, state.texture)
-		size := desc.size
-		delete(c.pixels)
-		c = {taken = true, ready = true, ticket = state.texture_ticket, size = size, format = desc.format, mode = .Sdr, pixels = make([]byte, int(capture_row_pitch(size.x)) * int(size.y))}
-		break
-	}
+	desc := gpu.pool_get(&state.textures, texture)
+	c.status, c.size, c.format, c.mode = .Ready, desc.size, desc.format, mode
+	c.pixels = make([]byte, int(capture_row_pitch(desc.size.x)) * int(desc.size.y))
 }
 
-// request_texture_capture takes a slot for a copy of a texture at this frame's end, or is false when every slot is in use
-// or a copy is already asked for this frame.
-request_texture_capture :: proc(texture: gpu.Texture, ticket: u32) -> bool {
-	if state.texture_requested {
-		return false
-	}
-	for c in state.captures {
-		if !c.taken {
-			state.texture_requested = true
-			state.texture, state.texture_ticket = texture, ticket
-			return true
+// fail_next_frame_copy makes the next frame copy fail, as D3D12's does when it cannot make its readback buffer, so a
+// test can cancel a capture in a frame that records.
+@(private)
+fail_next_frame_copy :: proc() {
+	state.fail_frame_copy = true
+}
+
+// take_capture_slot gives a free slot to a request, or -1.
+@(private = "file")
+take_capture_slot :: proc(source: gpu.Capture_Source, ticket: u32) -> int {
+	for &c, i in state.captures {
+		if c.state == .Free {
+			c = {state = .Requested, source = source, ticket = ticket}
+			return i
 		}
 	}
-	return false
+	return -1
+}
+
+// request_texture_capture takes a slot for a copy of a texture at this frame's end, or is false when the frame records
+// nothing, every slot is in use or a copy is already asked for this frame.
+request_texture_capture :: proc(texture: gpu.Texture, ticket: u32) -> bool {
+	if !state.recording || state.texture_pending >= 0 {
+		return false
+	}
+	state.texture_pending = take_capture_slot(.Texture, ticket)
+	state.texture = texture
+	return state.texture_pending >= 0
 }
 
 // capture_row_pitch is a captured row's bytes: four per pixel, aligned to 256 as D3D12's footprints are.
@@ -342,27 +367,31 @@ capture_row_pitch :: proc(width: u32) -> u32 {
 	return (width * 4 + 255) &~ 255
 }
 
-// request_frame_capture takes a slot for this frame's frame target, or is false when every slot is held.
-request_frame_capture :: proc() -> bool {
-	if state.capture_requested {
-		return true
+// request_frame_capture takes a slot for this frame's frame target, or is false when the last frame recorded nothing,
+// every slot is held or a copy is already asked for this frame. Like D3D12's, it sees the last frame, so a frame that
+// then records nothing cancels the copy.
+request_frame_capture :: proc(ticket: u32) -> bool {
+	if !state.recording || state.frame_pending >= 0 {
+		return false
 	}
-	for c in state.captures {
-		if !c.taken {
-			state.capture_requested = true
-			return true
-		}
-	}
-	return false
+	state.frame_pending = take_capture_slot(.Frame, ticket)
+	return state.frame_pending >= 0
 }
 
-// poll_frame_capture gives a ready capture to the caller, which holds it until release_frame_capture.
+// poll_frame_capture gives a finished capture, ready or cancelled, to the caller, which holds it until
+// release_frame_capture.
 poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	for &c, i in state.captures {
-		if c.taken && c.ready {
-			c.ready = false
-			return {slot = u32(i), size = c.size, format = c.format, mode = c.mode, ticket = c.ticket, row_pitch = capture_row_pitch(c.size.x), pixels = c.pixels}, true
+		if c.state != .Done {
+			continue
 		}
+		c.state = .Taken
+		capture = {slot = u32(i), status = c.status, source = c.source, ticket = c.ticket}
+		if c.status == .Ready {
+			capture.size, capture.format, capture.mode = c.size, c.format, c.mode
+			capture.row_pitch, capture.pixels = capture_row_pitch(c.size.x), c.pixels
+		}
+		return capture, true
 	}
 	return
 }

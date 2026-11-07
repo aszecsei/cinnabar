@@ -9,8 +9,9 @@ import "cinnabar:core/gpu"
 // Frame captures copy the frame target to CPU memory for the host's screenshots and history ring (see
 // docs/gpu/presentation.md#frame-capture). A capture takes a slot: a readback buffer, grown to the frame target's
 // copyable footprint, that stays mapped. The copy goes on the frame's final graphics list, so it sees the whole
-// frame, and the slot is ready once the frame's fence passes. The host's worker thread frees it, so a slot's state is
-// atomic.
+// frame, and the slot is ready once the frame's fence passes. A capture that cannot be copied is cancelled, and
+// poll_frame_capture gives it back with its ticket, so the caller's request ends. The host's worker thread frees a slot,
+// so its state is atomic.
 @(private)
 CAPTURE_SLOTS :: FRAMES_IN_FLIGHT + 2
 
@@ -21,6 +22,9 @@ Capture_State :: enum u32 {
 	Requested,
 	// The copy is recorded. fence_value is 0 until end_frame signals the frame.
 	Copying,
+	// The frame recorded nothing, or the copy could not get its buffer. poll_frame_capture gives it back with its
+	// ticket.
+	Cancelled,
 	// poll_frame_capture gave it to the host, which holds the memory until release_frame_capture.
 	Taken,
 }
@@ -37,6 +41,8 @@ Capture_Slot :: struct {
 	mode:        gpu.Output_Mode,
 	sdr_white:   f32,
 	row_pitch:   u32,
+	// The request's, which poll_frame_capture gives back.
+	source:      gpu.Capture_Source,
 	ticket:      u32,
 }
 
@@ -45,37 +51,50 @@ Captures :: struct {
 	slots:   [CAPTURE_SLOTS]Capture_Slot,
 	// The slot that this frame's end_frame copies into, or -1.
 	pending: i32,
-	// The slot that this frame's end_frame copies a texture into, or -1, the texture and what to call the copy.
+	// The slot that this frame's end_frame copies a texture into, or -1, and the texture.
 	texture_pending: i32,
 	texture:         gpu.Texture,
-	texture_ticket:  u32,
 }
 
-// request_frame_capture asks for a copy of this frame's frame target. False when the window is minimized or every
-// slot is in use; true, without a second copy, when one is already requested for this frame. Call it on the main
-// thread between frames.
-request_frame_capture :: proc() -> bool {
+// request_frame_capture asks for a copy of this frame's frame target, which poll_frame_capture gives with the ticket.
+// False when the last frame was minimized, every slot is in use or a copy is already asked for this frame. It sees the
+// last frame, so a frame that then records nothing cancels the copy, and poll_frame_capture gives it back cancelled.
+// Call it on the main thread between frames.
+request_frame_capture :: proc(ticket: u32) -> bool {
 	c := &dev.captures
-	if !dev.recording {
+	if !dev.recording || c.pending >= 0 {
 		return false
 	}
-	if c.pending >= 0 {
-		return true
+	i, ok := take_slot(.Frame, ticket)
+	if ok {
+		c.pending = i
 	}
-	for &slot, i in c.slots {
-		if sync.atomic_load(&slot.state) == .Free {
-			sync.atomic_store(&slot.state, .Requested)
-			c.pending = i32(i)
-			return true
-		}
-	}
-	return false
+	return ok
 }
 
-// poll_frame_capture returns the oldest copy whose frame the GPU has finished. The host owns the pixels until it
-// calls release_frame_capture. Call it on the main thread.
+// take_slot gives a free slot to a request.
+@(private = "file")
+take_slot :: proc(source: gpu.Capture_Source, ticket: u32) -> (index: i32, ok: bool) {
+	for &slot, i in dev.captures.slots {
+		if sync.atomic_load(&slot.state) == .Free {
+			slot.source, slot.ticket = source, ticket
+			sync.atomic_store(&slot.state, .Requested)
+			return i32(i), true
+		}
+	}
+	return -1, false
+}
+
+// poll_frame_capture returns a cancelled capture, or else the oldest copy whose frame the GPU has finished. The host
+// owns the slot, and the pixels of a ready copy, until it calls release_frame_capture. Call it on the main thread.
 poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	c := &dev.captures
+	for &slot, i in c.slots {
+		if sync.atomic_load(&slot.state) == .Cancelled {
+			sync.atomic_store(&slot.state, .Taken)
+			return {slot = u32(i), status = .Cancelled, source = slot.source, ticket = slot.ticket}, true
+		}
+	}
 	completed := dev.fence->GetCompletedValue()
 	best := -1
 	for &slot, i in c.slots {
@@ -95,13 +114,15 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	sync.atomic_store(&slot.state, .Taken)
 	return gpu.Frame_Capture {
 			slot = u32(best),
+			status = .Ready,
+			source = slot.source,
+			ticket = slot.ticket,
 			size = slot.size,
 			format = slot.format,
 			mode = slot.mode,
 			sdr_white = slot.sdr_white,
 			row_pitch = slot.row_pitch,
 			pixels = slot.mapped[:int(slot.row_pitch) * int(slot.size.y)],
-				ticket = slot.ticket,
 		},
 		true
 }
@@ -140,16 +161,24 @@ pending_capture :: proc() -> ^Capture_Slot {
 	return &c.slots[c.pending]
 }
 
-// cancel_capture frees the frame's requested slot, when the frame recorded nothing.
+// cancel_frame_capture cancels this frame's copy of the frame target, when the frame recorded nothing or the copy
+// cannot get its buffer. poll_frame_capture gives it back with its ticket.
 @(private)
-cancel_capture :: proc() {
-	if slot := pending_capture(); slot != nil {
-		sync.atomic_store(&slot.state, .Free)
-		dev.captures.pending = -1
+cancel_frame_capture :: proc() {
+	c := &dev.captures
+	if c.pending >= 0 {
+		sync.atomic_store(&c.slots[c.pending].state, .Cancelled)
+		c.pending = -1
 	}
-	if i := dev.captures.texture_pending; i >= 0 {
-		sync.atomic_store(&dev.captures.slots[i].state, .Free)
-		dev.captures.texture_pending = -1
+}
+
+// cancel_texture_capture cancels this frame's copy of a texture, as cancel_frame_capture does the frame target's.
+@(private)
+cancel_texture_capture :: proc() {
+	c := &dev.captures
+	if c.texture_pending >= 0 {
+		sync.atomic_store(&c.slots[c.texture_pending].state, .Cancelled)
+		c.texture_pending = -1
 	}
 }
 
@@ -162,15 +191,12 @@ request_texture_capture :: proc(texture: gpu.Texture, ticket: u32) -> bool {
 	if !dev.recording || c.texture_pending >= 0 {
 		return false
 	}
-	for &slot, i in c.slots {
-		if sync.atomic_load(&slot.state) == .Free {
-			sync.atomic_store(&slot.state, .Requested)
-			c.texture_pending = i32(i)
-			c.texture, c.texture_ticket = texture, ticket
-			return true
-		}
+	i, ok := take_slot(.Texture, ticket)
+	if ok {
+		c.texture_pending = i
+		c.texture = texture
 	}
-	return false
+	return ok
 }
 
 // record_texture_capture copies the asked texture into its slot on the frame's final list, and leaves it as it was.
@@ -200,8 +226,7 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 			if ok {
 				resource->Release()
 			}
-			sync.atomic_store(&slot.state, .Free)
-			c.texture_pending = -1
+			cancel_texture_capture()
 			return
 		}
 		slot.resource = resource
@@ -225,7 +250,6 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 	slot.sdr_white = 1
 	slot.row_pitch = footprint.Footprint.RowPitch
 	slot.fence_value = 0
-	slot.ticket = c.texture_ticket
 	sync.atomic_store(&slot.state, .Copying)
 }
 
@@ -271,7 +295,8 @@ record_capture :: proc(
 				.RENDER_TARGET,
 				.PRESENT,
 			)
-			cancel_capture()
+			// Only the frame's copy: a texture's copy has a slot of its own and still runs.
+			cancel_frame_capture()
 			return
 		}
 		slot.resource = resource
@@ -315,7 +340,6 @@ record_capture :: proc(
 	slot.sdr_white = dev.output.display.sdr_white
 	slot.row_pitch = footprint.Footprint.RowPitch
 	slot.fence_value = 0
-	slot.ticket = 0
 	sync.atomic_store(&slot.state, .Copying)
 }
 
