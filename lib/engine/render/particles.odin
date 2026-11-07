@@ -1185,6 +1185,7 @@ add_particle_prepass :: proc(f: ^Frame) {
 	}, f)
 	color(g, p, f.normals, .Load)
 	color(g, p, f.velocity, .Load)
+	color(g, p, f.roughness, .Load)
 	depth(g, p, f.depth, .Load)
 	declare_scene_draws(f, p)
 }

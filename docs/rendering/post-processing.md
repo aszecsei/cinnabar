@@ -35,7 +35,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Light_Complexity` | The forward pass | The lights that shade each pixel, as heat colors up to 16 | No |
 | `Shadow_Cascades` | The forward pass | Each directional cascade in its color: red, green, blue, yellow, then grey beyond | No |
 | `Shadow_Virtual` | The forward pass | The [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps)'s level at each pixel in a color of its own, half red where it fell back to a coarser level, magenta where it found no page, and grey without a virtual shadow map | No |
-| `Normals`, `Depth`, `Velocity` | `debug_view.hlsl` | The prepass's: the world normal, the depth on a log scale to 1 km, the motion with grey where nothing moved | No |
+| `Normals`, `Depth`, `Velocity`, `Roughness` | `debug_view.hlsl` | The prepass's: the world normal, the depth on a log scale to 1 km, the motion with grey where nothing moved, and the roughness from black, smooth, to white, rough, white where nothing drew (see [Prepass](lighting-and-shadows.md#prepass)) | No |
 | `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color | No |
 | `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
 | `Entity_Ids` | `debug_view.hlsl` | Each entity in a color of its own | No |

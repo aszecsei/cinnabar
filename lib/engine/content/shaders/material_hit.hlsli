@@ -54,11 +54,6 @@ void cs_hit(uint3 id : SV_DispatchThreadID) {
 	white.specular = 0;
 	float3 albedo = shade_indirect(s, p, white);
 #endif
-#if SHADING_HAS_ROUGHNESS
-	float roughness = s.roughness;
-#else
-	float roughness = 1;
-#endif
 	float3 emission = min(shade_emission(s), 65000);
-	store_hit_surface(ray, pack_hit_surface(tri.position, normal, tri.facing, albedo, emission, roughness, flags));
+	store_hit_surface(ray, pack_hit_surface(tri.position, normal, tri.facing, albedo, emission, shading_roughness(s), flags));
 }

@@ -10,15 +10,16 @@ The renderer has one shading path: forward shading with a prepass.
 
 - **Many shading models cost nothing.** Each material's pixel shader runs its own shading model. A deferred path would have to pack every model's inputs into one G-buffer and branch on a model ID.
 - **Transparent surfaces** use the same light loop as opaque ones.
-- **The prepass gives the screen-space passes their inputs:** depth, a normal and a velocity for each pixel. Ambient occlusion and screen-space GI then run before the forward pass, and the forward pass applies them to indirect light only, which a deferred or a plain forward path gets wrong or gets a frame late.
+- **The prepass gives the screen-space passes their inputs:** depth, a normal, a velocity and a roughness for each pixel. Ambient occlusion and screen-space GI then run before the forward pass, and the forward pass applies them to indirect light only, which a deferred or a plain forward path gets wrong or gets a frame late.
 - **The clusters serve fog too.** The fog volume's froxels and the light clusters share their depth slices, so fog reads the same light lists.
 - **The prepass removes overdraw.** The forward pass tests depth with `Equal` and shades each pixel once.
 
 ### Prepass
 
 - Writes depth, the normal in the world (folded into the octahedron, `NORMAL_FORMAT`, `RG16_Float`) and the velocity: how far the surface moved on the screen since last frame, in UV (`VELOCITY_FORMAT`, `RG16_Float`), from the instance's last pose and last frame's camera and projection, without the camera's jitter. The pass clears the velocity to `VELOCITY_NONE` where it draws nothing, which temporal AA then moves with the camera.
+- **The roughness** (`Frame.roughness`, `ROUGHNESS_FORMAT`, `R8_Unorm`) is the shading model's `roughness` input, or 1 for a model without one, as [hit shading](ray-scene.md#hit-shading) takes it: both call `shading_roughness` in `material_vertex.hlsli`. The pass clears it to `ROUGHNESS_NONE`, 1, which reflects nothing sharp, where it draws nothing, so a game's own draws in `world_draw` have it too. It is its own target, not a channel beside the normal, which the ambient occlusion and the GI read as two channels. The `Roughness` [debug view](post-processing.md#debug-views) shows it.
 - **The IDs stay in the forward pass.** It shades each visible pixel once, so it writes each pixel's ID as the prepass would, and a game's own draws in `world_draw` write theirs in the same target.
-- The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material.
+- The normal is the material's normal, normal maps included. The prepass's pixel shader returns only the normal and the roughness, so DXC drops the parts of `evaluate` that only the other surface inputs need; the opacity still discards for a masked material. The vertex-pulling path, the mesh shader path and the impostors write the same targets.
 - The forward pass places vertices with the same code, `clip_position` in `material_vertex.hlsli`, whose result is `precise`, so its depths equal the prepass's for its `Equal` test.
 
 ### Quad overdraw

@@ -130,6 +130,40 @@ a_settings_file_from_before_the_virtual_shadow_map_reads_without_a_problem :: pr
 }
 
 @(test)
+the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
+	caps := render.Caps{ray_query = true}
+	// A file from before the reflections keeps the preset's.
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = Medium\nquality.gi = Screen_Cascades\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect(t, .Reflections not_in s.quality_given && .Reflections_Level not_in s.quality_given)
+	testing.expect_value(t, quality(s, caps).reflections, render.preset_quality(.Medium, caps).reflections)
+
+	// The keys replace the preset's, and a value that does not fit is a problem.
+	s = {}
+	parse("quality.preset = Medium\nquality.reflections = Off\nquality.reflections.level = Ultra\nquality.reflections = Mirror\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, problems[0], `4: quality.reflections takes Off, not "Mirror"`)
+	q := quality(s, caps)
+	testing.expect_value(t, q.reflections, render.Reflection_Quality{.Off, .Ultra})
+	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
+
+	// They write and read back.
+	values := quality_values(q, caps)
+	testing.expect_value(t, values[.Reflections], "Off")
+	testing.expect_value(t, values[.Reflections_Level], "Ultra")
+	written: Settings
+	text := ""
+	for value, k in values {
+		text = set_value(text, QUALITY_KEY_NAMES[k], value)
+	}
+	parse(text, &written)
+	testing.expect_value(t, quality(written, caps), q)
+	free_all(context.temp_allocator)
+}
+
+@(test)
 a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T) {
 	// World_Probes was Split_Cascades' name: a file that a build before the rename saved reads without a problem, and
 	// is written with the new name.

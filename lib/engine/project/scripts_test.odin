@@ -26,14 +26,20 @@ local caps = Render.caps()
 assert(table.find(caps.aa, "Fsr") and not caps.ray_query and caps.vendor == "Amd")
 -- Without Ray_Query, the split cascades are not among the global illumination's techniques, and the voxel cones are.
 assert(table.find(caps.gi, "Voxel_Cones") and table.find(caps.gi, "Screen_Cascades") and not table.find(caps.gi, "Split_Cascades"))
+-- The reflections have only Off.
+assert(#caps.reflections == 1 and caps.reflections[1] == "Off")
+assert(q.reflections == "Off" and q.reflections_level == "High")
 
 -- The fields that a change gives, and the others as they were.
-Render.set_quality({ aa = "Fsr", render_scale = 0.5, ao = "Hbao", lod_error = 2 })
+Render.set_quality({ aa = "Fsr", render_scale = 0.5, ao = "Hbao", lod_error = 2, reflections_level = "Low" })
 q = Render.quality()
 assert(q.aa == "Fsr" and q.render_scale == 0.5 and q.ao == "Hbao" and q.lod_error == 2 and q.shadows == "High" and q.preset == "Custom")
+assert(q.reflections == "Off" and q.reflections_level == "Low")
+local ok, err = pcall(Render.set_quality, { reflections = "Mirror" })
+assert(not ok and string.find(err, "quality.reflections takes"), err)
 
 -- A field that does not exist, or a value that does not fit, raises an error and changes nothing.
-local ok, err = pcall(Render.set_quality, { aa = "Msaa" })
+ok, err = pcall(Render.set_quality, { aa = "Msaa" })
 assert(not ok and string.find(err, "quality.aa takes"), err)
 ok, err = pcall(Render.set_quality, { speed = 2 })
 assert(not ok and string.find(err, "no quality field"), err)

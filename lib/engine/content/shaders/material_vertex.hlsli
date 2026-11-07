@@ -248,4 +248,13 @@ float3 shading_normal(Material_Inputs inputs, Surface s) {
 #endif
 }
 
+// shading_roughness is the shading model's roughness input, or 1 for a model without one, which reflects nothing sharp.
+float shading_roughness(Surface s) {
+#if SHADING_HAS_ROUGHNESS
+	return s.roughness;
+#else
+	return 1;
+#endif
+}
+
 #endif

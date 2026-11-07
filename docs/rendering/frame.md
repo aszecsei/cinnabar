@@ -6,7 +6,7 @@ How a frame is assembled: the passes and their order, the `Renderer` and `Frame_
 flowchart TB
     EXTRACT["Extraction<br/>instances, lights, views"]
     CULL["Culling<br/>frustum, per-pipeline bins"]
-    PRE["Prepass<br/>depth, normals, velocity, IDs"]
+    PRE["Prepass<br/>depth, normals, velocity, roughness, IDs"]
     VMPRE["View model prepass<br/>stencil bit"]
     SHADOW["Shadows<br/>shadow maps, ray-traced masks"]
     CLUSTER["Light clusters"]
@@ -44,7 +44,7 @@ flowchart TB
 | Hook | When | What it does |
 |---|---|---|
 | `before_world` | Before the prepass | Adds passes, such as culling on the compute queue |
-| `after_prepass` | After the prepass, before the ambient occlusion and the global illumination | Adds passes that read `Frame.depth`, `Frame.normals` and `Frame.velocity` |
+| `after_prepass` | After the prepass, before the ambient occlusion and the global illumination | Adds passes that read `Frame.depth`, `Frame.normals`, `Frame.velocity` and `Frame.roughness` |
 | `world_uses` | When the world pass is declared | Declares what `world_draw` reads |
 | `world_draw` | In the world pass, the forward pass, `world_pieces` pieces, after the meshes in piece 0 | Records draws into the world's targets |
 | `after_world` | After the world pass | Adds passes; a pass that makes a new scene color sets `Frame.scene` to it |
@@ -53,7 +53,7 @@ flowchart TB
 | `debug` | After the debug lines | Adds passes that draw into the debug layer, such as the editor's tools. With `no_debug` it still runs, with `Frame.debug` 0, for passes that need no layer, such as the editor's picks |
 
 - The hooks are procedures in the game DLL, so they are never stored in `Game_State`.
-- **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals or velocities, no shadows from the renderer, no clusters' lights, no ambient occlusion, no global illumination and no fog unless their shaders read them. They are in the lit scene that the global illumination's rays read, but not in the depth that the rays test, so their light reaches only the surfaces that the rays find behind them. They place vertices with `render.jittered_view_projection(f)`, so they cover the same pixels as the renderer's draws, and scale their colors by the exposure in `Frame.exposure`, because the scene is pre-exposed (see [Post-processing](post-processing.md#post-processing)). The sample's draws do both. Temporal AA moves their pixels with the camera, since they have no velocities, so a moving draw of a game's own leaves a short trail that the history's clipping limits.
+- **A game's own draws** in `world_draw` are not in the prepass. They test and write the depth that the prepass left, write the scene color and their IDs, and have no normals, velocities or roughness, no shadows from the renderer, no clusters' lights, no ambient occlusion, no global illumination and no fog unless their shaders read them. They are in the lit scene that the global illumination's rays read, but not in the depth that the rays test, so their light reaches only the surfaces that the rays find behind them. They place vertices with `render.jittered_view_projection(f)`, so they cover the same pixels as the renderer's draws, and scale their colors by the exposure in `Frame.exposure`, because the scene is pre-exposed (see [Post-processing](post-processing.md#post-processing)). The sample's draws do both. Temporal AA moves their pixels with the camera, since they have no velocities, so a moving draw of a game's own leaves a short trail that the history's clipping limits.
 - **Missing shaders:** a pass whose pipeline does not exist, because its shader is not cooked, records nothing, so the frame still validates.
 
 ## Settings
@@ -72,7 +72,7 @@ The settings that make the scene's look are settings components on [volumes](../
 | `Fog` | 38 | See [Volumetric fog](fog.md#volumetric-fog) |
 | `Shadows` | 50 | The directional cascades' `distance` (`SHADOW_DISTANCE`, 100 m) and `split_lambda` between even and exponential (`SHADOW_SPLIT_LAMBDA`, 0.75) |
 
-- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Fog_Settings` and `Sky_Settings`, from which `begin_sky` gives the frame's `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
+- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Reflection_Settings`, which no volume sets, `Fog_Settings` and `Sky_Settings`, from which `begin_sky` gives the frame's `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
 - **Quality:** the settings are the look, the same at every quality. `draw_frame` then gives them the frame's [quality](quality.md#order-in-the-frame), which sets each feature's level and can turn a feature off but never on, and then the editor's debug flags.
 - **Defaults:** each component registers its `DEFAULT_*` value (see [Volumes](../world/volumes.md#volumes)). Volumes blend from it, so a volume that reaches halfway sets a value halfway from the default, and a component added in the editor starts from it. Paper white and the peak have no fixed default, the display's, so their default is 0, which gives the display's. The exposure, the exposure range, the adaptation speed, the shadow distance and the ambient occlusion's radius and power also take their defaults at 0 in `Frame_Settings`, where 0 would mean nothing.
 - **The sample's scene** has a Global Volume with its background. The glass scene's has an atmosphere whose sun is the scene's directional light, with stars and a moon.

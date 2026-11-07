@@ -263,8 +263,8 @@ occlusion_constants :: proc(f: ^Frame) -> bool {
 }
 
 // add_occlusion_passes adds what follows the early prepass: the depth pyramid from its depth, the instance sets'
-// late phases, the late view's culling, and the late prepass, which draws the late view into the depth, the normals and
-// the velocity.
+// late phases, the late view's culling, and the late prepass, which draws the late view into the depth, the normals,
+// the velocity and the roughness.
 @(private)
 add_occlusion_passes :: proc(f: ^Frame) {
 	sf := f.scene_frame
@@ -306,6 +306,7 @@ add_occlusion_passes :: proc(f: ^Frame) {
 	}, f)
 	color(g, p, f.normals, .Load)
 	color(g, p, f.velocity, .Load)
+	color(g, p, f.roughness, .Load)
 	depth(g, p, f.depth, .Load)
 	declare_scene_draws(f, p)
 }

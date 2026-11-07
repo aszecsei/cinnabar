@@ -83,14 +83,14 @@ The render quality's bindings, for a settings menu in Luau (`lib/engine/project/
 |---|---|
 | `Render.quality()` | The renderer's quality as a `RenderQuality` table |
 | `Render.set_quality(t)` | Makes the fields that `t` gives the quality's from the next frame on, as far as the device can do them. A `preset` sets every feature first |
-| `Render.caps()` | What the device can do: `ray_query`, `vendor`, `video_memory` in bytes, `aa`, the anti-aliasing techniques that it runs, and `gi`, the global illumination's |
+| `Render.caps()` | What the device can do: `ray_query`, `vendor`, `video_memory` in bytes, `aa`, the anti-aliasing techniques that it runs, `gi`, the global illumination's, and `reflections`, the reflections' |
 | `Render.presets()` | `{ "Low", "Medium", "High", "Ultra" }` |
 | `Render.save_quality()` | Writes the quality to the user settings file, as the player's choice on this machine; false if it could not |
 
-- **A quality table** has the settings files' quality keys (see [Rendering: Saved quality](../rendering/quality.md#saved-quality)): `preset`, `shadows`, `ray_traced_shadows`, `ao`, `ao_level`, `gi`, `gi_level`, `fog`, `aa`, `render_scale`, `lod_error` and `virtual_shadows`. Enums are their names as strings (`"Ultra"`, `"Fsr"`), `ray_traced_shadows` and `virtual_shadows` booleans, `render_scale` and `lod_error` numbers. `preset` is `"Custom"` when the features match no preset.
+- **A quality table** has the settings files' quality keys (see [Rendering: Saved quality](../rendering/quality.md#saved-quality)): `preset`, `shadows`, `ray_traced_shadows`, `ao`, `ao_level`, `gi`, `gi_level`, `fog`, `aa`, `render_scale`, `lod_error`, `virtual_shadows`, `reflections` and `reflections_level`. Enums are their names as strings (`"Ultra"`, `"Fsr"`), `ray_traced_shadows` and `virtual_shadows` booleans, `render_scale` and `lod_error` numbers. `preset` is `"Custom"` when the features match no preset.
 - **`set_quality` checks** each field as the settings files' parser does, and raises an error, which changes nothing, for a field that does not exist or a value that does not fit, such as `aa = "Msaa"`. A technique that the device cannot run is limited as `clamp_quality` limits it: FSR becomes temporal AA.
 - **Types:** `RenderQuality`, `RenderQualityChange`, every field optional, and `RenderCaps` are in `engine.d.luau`.
-- **The sample's** `quality_keys.luau` is a settings menu on keys: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing technique in `Render.caps().aa`, and Shift+F6 the next global illumination technique in `Render.caps().gi`. Each saves.
+- **The sample's** `quality_keys.luau` is a settings menu on keys: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing technique in `Render.caps().aa`, Shift+F6 the next global illumination technique in `Render.caps().gi`, and Ctrl+F6 the next reflection technique in `Render.caps().reflections`. Each saves.
 
 ```lua
 -- The next anti-aliasing technique that the device runs, saved as the player's choice.

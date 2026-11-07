@@ -57,6 +57,7 @@ Read them in this order the first time.
 | `gi_probes.odin` | The world probes: their levels, schedule, storage and passes ([World probes](global-illumination.md#world-probes)) |
 | `gi_split.odin` | The split radiance cascades: their windows, tables, storage and passes ([Split cascades](global-illumination.md#split-cascades)) |
 | `gi_voxel.odin` | The voxel cones: their clipmap's levels, schedule, storage, voxelization views and passes ([Voxel cones](global-illumination.md#voxel-cones)) |
+| `reflections.odin` | The reflections' `REFLECTION_PARAMS` and `Reflection_Settings` ([Quality](quality.md#quality)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |

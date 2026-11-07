@@ -89,7 +89,7 @@ The cooker compiles each material for each pass and each vertex path:
 
 | Axis | Values |
 |---|---|
-| Pass | `Forward`, `Prepass` (depth, normals, velocity), `Depth` (shadow maps), and `Hit`, the compute entry `cs_hit` that evaluates an opaque or masked material of meshes at ray hits (see [Hit shading](ray-scene.md#hit-shading)) |
+| Pass | `Forward`, `Prepass` (depth, normals, velocity, roughness), `Depth` (shadow maps), and `Hit`, the compute entry `cs_hit` that evaluates an opaque or masked material of meshes at ray hits (see [Hit shading](ray-scene.md#hit-shading)) |
 | Vertex path | Vertex pulling, and for the opaque passes the mesh shader path's `as_cluster` with `ms_forward`, `ms_prepass` and `ms_depth` (see [GPU scene](gpu-scene.md#mesh-shader-path)) and the impostor path's `vs_impostor_*` with `ps_impostor_*`, as the passes `Impostor_Forward`, `Impostor_Prepass` and `Impostor_Depth` (see [Impostors](gpu-scene.md#impostors)); for a billboard, vertex pulling alone (see [Billboards](gpu-scene.md#billboards)); or for a `patches` material the patch path alone (see [Surfaces](surfaces.md#patches)) |
 | Static switches | Each combination that the material or an instance uses |
 

@@ -44,6 +44,8 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Render_Scale       = "render_scale",
 	.Lod_Error          = "lod_error",
 	.Virtual_Shadows    = "virtual_shadows",
+	.Reflections        = "reflections",
+	.Reflections_Level  = "reflections_level",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.
@@ -148,11 +150,12 @@ set_quality_binding :: proc(L: ^luau.State) -> c.int {
 }
 
 // Render.caps() is what the device can do that the quality depends on: ray_query for traced shadows, the adapter's
-// vendor and video memory in bytes, aa, the anti-aliasing techniques that it runs, and gi, the global illumination's.
+// vendor and video memory in bytes, aa, the anti-aliasing techniques that it runs, gi, the global illumination's, and
+// reflections, the reflections'.
 @(private = "file")
 caps_binding :: proc(L: ^luau.State) -> c.int {
 	caps := script_quality_of(L).renderer.caps
-	luau.createtable(L, 0, 5)
+	luau.createtable(L, 0, 6)
 	luau.pushboolean(L, b32(caps.ray_query))
 	luau.setfield(L, -2, "ray_query")
 	vendor, _ := reflect.enum_name_from_value(caps.vendor)
@@ -160,22 +163,28 @@ caps_binding :: proc(L: ^luau.State) -> c.int {
 	luau.setfield(L, -2, "vendor")
 	luau.pushnumber(L, f64(caps.video_memory))
 	luau.setfield(L, -2, "video_memory")
-	luau.createtable(L, len(render.Aa_Technique), 0)
-	n: c.int = 0
-	for technique in render.Aa_Technique {
-		if render.clamp_quality({aa = technique}, caps).aa != technique {
-			continue
-		}
-		name, _ := reflect.enum_name_from_value(technique)
-		n += 1
-		luau.pushodinstring(L, name)
-		luau.rawseti(L, -2, n)
-	}
+	push_techniques(L, render.Aa_Technique, caps, proc(t: render.Aa_Technique, caps: render.Caps) -> bool {
+		return render.clamp_quality({aa = t}, caps).aa == t
+	})
 	luau.setfield(L, -2, "aa")
-	luau.createtable(L, len(render.Gi_Technique), 0)
-	n = 0
-	for technique in render.Gi_Technique {
-		if render.clamp_quality({gi = {technique = technique}}, caps).gi.technique != technique {
+	push_techniques(L, render.Gi_Technique, caps, proc(t: render.Gi_Technique, caps: render.Caps) -> bool {
+		return render.clamp_quality({gi = {technique = t}}, caps).gi.technique == t
+	})
+	luau.setfield(L, -2, "gi")
+	push_techniques(L, render.Reflection_Technique, caps, proc(t: render.Reflection_Technique, caps: render.Caps) -> bool {
+		return render.clamp_quality({reflections = {technique = t}}, caps).reflections.technique == t
+	})
+	luau.setfield(L, -2, "reflections")
+	return 1
+}
+
+// push_techniques pushes a list of the names of the techniques that the device runs: those that clamp_quality keeps.
+@(private = "file")
+push_techniques :: proc(L: ^luau.State, $T: typeid, caps: render.Caps, runs: proc(technique: T, caps: render.Caps) -> bool) {
+	luau.createtable(L, len(T), 0)
+	n: c.int = 0
+	for technique in T {
+		if !runs(technique, caps) {
 			continue
 		}
 		name, _ := reflect.enum_name_from_value(technique)
@@ -183,8 +192,6 @@ caps_binding :: proc(L: ^luau.State) -> c.int {
 		luau.pushodinstring(L, name)
 		luau.rawseti(L, -2, n)
 	}
-	luau.setfield(L, -2, "gi")
-	return 1
 }
 
 // Render.presets() is the presets' names, from the cheapest: Custom is not one, but a quality's preset may be it.

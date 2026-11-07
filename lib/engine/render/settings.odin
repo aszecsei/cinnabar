@@ -255,6 +255,7 @@ Frame_Settings :: struct {
 	post:              Post_Settings,
 	ambient_occlusion: Ao_Settings,
 	gi:                Gi_Settings,
+	reflections:       Reflection_Settings,
 	fog:               Fog_Settings,
 	shadows:           Shadow_Settings,
 	// What is around the world: the background and the ambient light.

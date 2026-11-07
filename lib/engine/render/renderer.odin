@@ -12,7 +12,7 @@ import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
 
 // The frame's targets (see docs/rendering/layers-and-output.md#layers). The world draws into linear HDR colors, the editor's entity IDs
-// and reversed depth, which the prepass writes with the normals and the velocities (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
+// and reversed depth, which the prepass writes with the normals, the velocities and the roughness (see PREPASS_COLORS). The UI is premultiplied and sRGB-encoded, and blends as encoded values. The debug layer has an
 // sRGB view, so it blends in linear light, and the output pass encodes it.
 SCENE_FORMAT :: gpu.Format.RGBA16_Float
 // Each pixel holds entity_id of the entity drawn there, or 0, with the submesh drawn there in its high bits (see
@@ -168,7 +168,7 @@ Frame_Hooks :: struct {
 	data:         rawptr,
 	// Adds passes before the prepass, such as culling.
 	before_world:  proc(f: ^Frame),
-	// Adds passes after the prepass, which can read Frame.depth, Frame.normals and Frame.velocity.
+	// Adds passes after the prepass, which can read Frame.depth, Frame.normals, Frame.velocity and Frame.roughness.
 	after_prepass: proc(f: ^Frame),
 	// Declares the world pass's other uses, such as the buffers that world_draw reads.
 	world_uses:   proc(f: ^Frame, pass: Pass),
@@ -222,6 +222,8 @@ Frame :: struct {
 	depth:                    Texture,
 	normals:                  Texture,
 	velocity:                 Texture,
+	// Each pixel's roughness from the prepass, ROUGHNESS_NONE where it drew nothing.
+	roughness:                Texture,
 	// The ambient occlusion in r, which the forward pass reads, and the integrated fog volume: zero without them.
 	ambient_occlusion:        Texture,
 	fog_volume:               Texture,
@@ -450,6 +452,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.depth = create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
 	f.normals = create_texture(&g, {size = size, format = NORMAL_FORMAT, label = "scene normals"})
 	f.velocity = create_texture(&g, {size = size, format = VELOCITY_FORMAT, label = "scene velocity"})
+	f.roughness = create_texture(&g, {size = size, format = ROUGHNESS_FORMAT, label = "scene roughness"})
 	settings := desc.settings != nil ? desc.settings^ : resolve_settings(r, w, desc.view.position, desc.hidden)
 	apply_quality(&settings, quality)
 	apply_debug(&settings, desc.debug_view, desc.disable, desc.exposure_offset)
@@ -500,6 +503,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}, f)
 	color(&g, p, f.normals, .Clear)
 	color(&g, p, f.velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0})
+	color(&g, p, f.roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0})
 	depth(&g, p, f.depth, .Clear)
 	declare_scene_draws(f, p)
 	// With occlusion culling, that was the early view: the depth pyramid, the late view's culling and its prepass.
