@@ -22,9 +22,9 @@ public sealed partial class MeshToolRunner
 
     internal MeshToolRunner(MeshSession session, IMeshHost shell) => (_session, _shell) = (session, shell);
 
-    // A tool whose distance the next gizmo drag sets, with its undo entry open: each mesh's snapshot and selection from
-    // before it ran, and how to run it at a distance.
-    sealed record PendingDistance(string Label, Vec3 Axis, bool Magnitude, Dictionary<string, (MeshData Start, IReadOnlyList<int> Selected)> Meshes,
+    // A tool whose distance the next gizmo drag sets, with its undo entry open: the entry, each mesh's snapshot and
+    // selection from before it ran, and how to run it at a distance.
+    sealed record PendingDistance(SceneEdit Edit, Vec3 Axis, bool Magnitude, Dictionary<string, (MeshData Start, IReadOnlyList<int> Selected)> Meshes,
         Func<MeshData, IEnumerable<int>, double, ToolResult> Run);
 
     // What the last primitive was made from, so a parameter change makes it again in place of the same undo entry.
@@ -41,7 +41,10 @@ public sealed partial class MeshToolRunner
     /// <summary>A tool ran and waits for a drag of the gizmo to set its distance.</summary>
     public bool HasPendingDistance => _pending != null;
 
-    internal string? PendingLabel => _pending?.Label;
+    internal string? PendingLabel => _pending?.Edit.Label;
+
+    /// <summary>The pending distance's open entry, which the gizmo drag that sets the distance previews in.</summary>
+    internal SceneEdit? PendingEdit => _pending?.Edit;
 
     // Any edit but a primitive's own parameter change ends its parameters' editability.
     internal void ForgetStalePrimitive()

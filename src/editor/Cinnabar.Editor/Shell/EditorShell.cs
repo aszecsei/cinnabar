@@ -66,7 +66,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Settings = settings;
         _previewSlots = new PreviewSlots(PreviewOwners);
         Mesh = new MeshSession(this);
-        _gizmo = new GizmoController(BeginEdit, PreviewEdit, CommitEdit, CancelEdit, SendGizmo);
+        _gizmo = new GizmoController(label => TryBeginEdit(label, "the gizmo"), SendGizmo);
         Host = new HostSession(options);
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);

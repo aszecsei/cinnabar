@@ -15,8 +15,10 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class EditorShell
 {
-    // The instance that a drag of a prefab over the viewport shows, in its open undo entry.
-    ulong _prefabDrop;
+    // The instance that a drag of a prefab over the viewport shows, and the undo entry that shows it.
+    sealed record PrefabDrop(ulong Id, SceneEdit Edit);
+
+    PrefabDrop? _prefabDrop;
 
     /// <summary>The user asked to make a prefab of the selected entity. The window asks for a name, and calls <see cref="MakePrefab"/>.</summary>
     public event Action<string>? MakePrefabRequested;
@@ -389,27 +391,33 @@ public sealed partial class EditorShell
         {
             return;
         }
-        if (_prefabDrop != 0 && Scene.InTransaction)
+        if (_prefabDrop is { } drop)
         {
             var (_, moved) = DropPose(at, PartOf(guid, node));
-            PreviewEdit(new AddComponent(_prefabDrop, moved));
+            drop.Edit.Preview(new AddComponent(drop.Id, moved));
             return;
         }
-        if (Scene.InTransaction)
+        if (TryBeginEdit($"Create Instance {PrefabName(guid)}", "a prefab drop") is not { } edit)
         {
             return;
         }
-        BeginEdit($"Create Instance {PrefabName(guid)}");
         var (parent, pose) = DropPose(at, PartOf(guid, node));
         var create = PrefabEdits.CreateInstance(Scene, guid, parent, pose, node: node);
-        _prefabDrop = create.Id;
-        PreviewEdit(create);
-        if (Scene.Scene.Find(create.Id) == null)
+        if (!edit.Preview(create) || Scene.Scene.Find(create.Id) == null)
         {
             // The document refused it, as a prefab inside itself.
-            _prefabDrop = 0;
-            CancelEdit();
+            edit.Cancel();
+            return;
         }
+        var started = new PrefabDrop(create.Id, edit);
+        edit.Ended += _ =>
+        {
+            if (_prefabDrop == started)
+            {
+                _prefabDrop = null;
+            }
+        };
+        _prefabDrop = started;
     }
 
     PrefabNode? PartOf(string guid, ulong node) => node == 0 ? null : PrefabTreeOf(guid)?.Find(node);
@@ -442,38 +450,24 @@ public sealed partial class EditorShell
     /// </summary>
     public bool CommitPrefab(bool unpack = false)
     {
-        if (_prefabDrop == 0 || Scene is not { InTransaction: true })
+        if (_prefabDrop is not { } drop || Scene == null)
         {
-            _prefabDrop = 0;
             return false;
         }
-        var id = _prefabDrop;
-        _prefabDrop = 0;
         if (unpack)
         {
-            foreach (var op in PrefabEdits.UnpackCompletely(Scene, id))
+            foreach (var op in PrefabEdits.UnpackCompletely(Scene, drop.Id))
             {
-                PreviewEdit(op);
+                drop.Edit.Preview(op);
             }
         }
-        CommitEdit();
-        SelectScene(id);
+        drop.Edit.Commit();
+        SelectScene(drop.Id);
         return true;
     }
 
     /// <summary>Takes back the instance that a drag showed.</summary>
-    public void CancelPrefab()
-    {
-        if (_prefabDrop == 0)
-        {
-            return;
-        }
-        _prefabDrop = 0;
-        if (Scene is { InTransaction: true })
-        {
-            CancelEdit();
-        }
-    }
+    public void CancelPrefab() => _prefabDrop?.Edit.Cancel();
 
     /// <summary>
     /// Adds an instance of a prefab as a child of an entity, or with 0, as a root, as a drop onto the outliner does, and
@@ -506,13 +500,16 @@ public sealed partial class EditorShell
         var label = $"Create Instance {PrefabName(guid)}";
         if (unpack)
         {
-            BeginEdit(label);
-            PreviewEdit(create);
+            if (CannotEdit(label) || TryBeginEdit(label, "the outliner") is not { } edit)
+            {
+                return false;
+            }
+            edit.Preview(create);
             foreach (var op in PrefabEdits.UnpackCompletely(Scene, create.Id))
             {
-                PreviewEdit(op);
+                edit.Preview(op);
             }
-            CommitEdit();
+            edit.Commit();
         }
         else if (!Edit(label, create))
         {

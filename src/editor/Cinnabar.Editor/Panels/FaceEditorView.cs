@@ -290,7 +290,7 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
     const double ShiftStep = 0.01;
     const double DegreeStep = 0.5;
 
-    readonly ScrubSession _scrub = new(shell.Mesh.Texture.EndMappingScrub);
+    readonly ScrubSession<IReadOnlyDictionary<string, MeshData>> _scrub = new();
 
     public bool Commit(int axis, string text)
     {
@@ -326,20 +326,20 @@ sealed class MappingEditor(EditorShell shell, MappingField field) : IFieldEditor
 
     public void BeginScrub(int axis)
     {
-        if (field != MappingField.Material && shell.Mesh.Texture.BeginMappingScrub($"Drag Texture {field}"))
+        if (field != MappingField.Material && shell.Mesh.Texture.BeginMappingScrub($"Drag Texture {field}") is var (edit, starts))
         {
-            _scrub.Begin();
+            _scrub.Begin(edit, starts);
         }
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (!_scrub.Active)
+        if (_scrub.Open is not var (edit, starts))
         {
             return;
         }
         var delta = pixels * ScrubSession.Scale(modifiers);
-        shell.Mesh.Texture.PreviewMappings((_, _, m) => field switch
+        shell.Mesh.Texture.PreviewMappings(edit, starts, (_, _, m) => field switch
         {
             MappingField.Scale => axis == 0 ? m with { ScaleU = NonZero(m.ScaleU + delta * ScaleStep, m.ScaleU) } : m with { ScaleV = NonZero(m.ScaleV + delta * ScaleStep, m.ScaleV) },
             MappingField.Shift => axis == 0 ? m with { ShiftU = m.ShiftU + delta * ShiftStep } : m with { ShiftV = m.ShiftV + delta * ShiftStep },

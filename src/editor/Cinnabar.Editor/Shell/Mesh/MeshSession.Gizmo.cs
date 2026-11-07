@@ -98,12 +98,11 @@ public sealed partial class MeshSession
         var (width, height) = _shell.FrameSize;
         if (Tools.HasPendingDistance)
         {
-            if (_shell.HotPart == GizmoPart.None)
+            if (_shell.HotPart == GizmoPart.None || Tools.PendingEdit is not { } pending)
             {
                 return false;
             }
-            _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new MeshToolRunner.DistanceDrag(Tools, this), null);
-            return true;
+            return _shell.Gizmos.Start(new GizmoDrag(GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), new MeshToolRunner.DistanceDrag(Tools, this), pending);
         }
         if (Pivot.EditPivot)
         {
@@ -117,9 +116,8 @@ public sealed partial class MeshSession
             {
                 return false;
             }
-            _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
+            return _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), textureDrag,
                 $"{_shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Shift" }} Texture");
-            return true;
         }
         var drag = new MeshDrag(this, pivot, axes);
         if (drag.IsEmpty)
@@ -127,9 +125,8 @@ public sealed partial class MeshSession
             return false;
         }
         var verb = _shell.Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
+        return _shell.Gizmos.Start(new GizmoDrag(Gizmo.KindOf(_shell.Tool), _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), axes, pixel, width, height), drag,
             $"{verb} {ElementsLabel(MeshSelection.Count)}");
-        return true;
     }
 
 

@@ -249,6 +249,8 @@ public sealed partial class MeshToolRunner
         {
             return;
         }
+        // As every mesh tool does, a distance tool that waits ends first, so its entry does not refuse the Cut or Draw.
+        CommitPendingDistance();
         if (_planePoints.Count > 0)
         {
             var points = _planePoints.ToList();

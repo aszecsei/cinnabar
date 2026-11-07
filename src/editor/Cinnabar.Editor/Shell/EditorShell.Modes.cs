@@ -41,15 +41,10 @@ public sealed partial class EditorShell
         }
         if (Mode == EditorMode.Edit)
         {
-            // A drag or a scrub that is under way ends as it is, and mesh mode with it.
             Mesh.LeaveMeshMode();
-            CancelGizmo();
-            // A material that a drag only shows was never dropped.
-            CancelMaterial();
-            if (Scene is { InTransaction: true })
-            {
-                Scene.Commit();
-            }
+            // The open edit ends through its owner: a scrub as it is, while a gizmo drag, a distance tool, or a material
+            // or an instance that a drag only shows, is put back.
+            InterruptEdit();
             Console.Add(LogLevel.Info, "editor: playing. Edits wait until Stop.");
         }
         SetModeTo(EditorMode.Play);

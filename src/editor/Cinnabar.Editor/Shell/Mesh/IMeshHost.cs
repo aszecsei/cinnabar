@@ -94,20 +94,20 @@ interface IMeshHost
     /// <summary>Applies operations as one undo entry labelled for the history.</summary>
     bool Edit(string label, params Operation[] operations);
 
-    /// <summary>Opens an undo entry that previews fill.</summary>
-    void BeginEdit(string label);
+    /// <summary>The scene's open undo entry and its owner, or null.</summary>
+    SceneEdit? OpenEdit { get; }
 
-    /// <summary>Applies operations to the open entry in place of the last preview.</summary>
-    bool PreviewEdit(IReadOnlyList<Operation> ops);
-
-    /// <summary>Closes the open entry as an undo step.</summary>
-    void CommitEdit();
-
-    /// <summary>Closes the open entry and puts back what it changed.</summary>
-    void CancelEdit();
+    /// <summary>Opens an undo entry that previews fill, and gives its token to the owner. Null when another is open.</summary>
+    SceneEdit? TryBeginEdit(string label, string owner, bool commitIfInterrupted = false);
 
     /// <summary>Whether a GUID names a material or a material instance.</summary>
     bool IsMaterial(string guid);
+
+    /// <summary>What the material drop under way shows its material on, or null for none.</summary>
+    object? MaterialDropTarget { get; }
+
+    /// <summary>Shows a dropped material on a target with operations, in place of the last target's.</summary>
+    void ShowMaterialDrop(object target, IReadOnlyList<Operation> ops);
 
     /// <summary>Commits the material preview of a drop.</summary>
     bool CommitMaterial();
