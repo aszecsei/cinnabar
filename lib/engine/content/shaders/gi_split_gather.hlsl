@@ -4,7 +4,8 @@
 // cascade's along its reflection, blended between the four nearest directions. Each probe counts by its trilinear
 // weight, by whether it is in front of the surface, and by its confidence, and the levels blend by the pixel's
 // distance. The world probes' light counts too, a little everywhere, so a place that no probe has reached yet fades in
-// from it, and fully past the last level. The probes keep their light from frame to frame in world space, so no
+// from it, and fully past the last level: for the specular light, their radiance along the reflection, or where they
+// have none the sky's cubemap at the pixel's roughness. The probes keep their light from frame to frame in world space, so no
 // history follows the pixels and nothing smears. The view model's pixels take the light around the camera. With the
 // Gi_Probes debug view, it also draws the probe of each pixel's cell at its nearer level of detail into a texture of
 // its own, not into the light, which the lit scene keeps for the next frames' rays.
@@ -119,7 +120,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		}
 		float3 reflected = reflect(normalize(position), normal);
 		out_diffuse[pixel] = float4(surrounding_light(0, normal), 0);
-		out_specular[pixel] = float4(beyond_light(0, normal, reflected), 0);
+		out_specular[pixel] = float4(beyond_specular(0, normal, reflected, gather_roughness(pixel)), 0);
 		return;
 	}
 	float3 reflected = reflect(normalize(position), normal);
@@ -149,7 +150,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		diffuse += float4(surrounding_light(position, normal), 1) * prior;
 	}
 	if (prior > 0.01 * (specular.a + prior)) {
-		specular += float4(beyond_light(position, normal, reflected), 1) * prior;
+		specular += float4(beyond_specular(position, normal, reflected, gather_roughness(pixel)), 1) * prior;
 	}
 	out_diffuse[pixel] = float4(diffuse.rgb / max(diffuse.a, 1e-5), z);
 	out_specular[pixel] = float4(specular.rgb / max(specular.a, 1e-5), 1);

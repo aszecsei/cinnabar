@@ -1,6 +1,7 @@
 // The voxel cones' gather (see docs/rendering/global-illumination.md#voxel-cones): each pixel traces the level's diffuse
 // cones around its normal through the clipmap's light, each cone's light weighted by its cosine, and one narrow cone
-// along its reflection, each with the ambient light beyond what blocks it. The cones turn about the normal by a noise
+// along its reflection, each with the sky beyond what blocks it: the ambient light for the diffuse cones, and the
+// sky's cubemap at the pixel's roughness for the reflection's. The cones turn about the normal by a noise
 // of the pixel's that stays from frame to frame: a turn that moved each frame flickered, as the histories hold too few
 // frames to average it. Both lights blend into their histories, found by the velocity, as the screen cascades' gather's
 // do. The view model's pixels take the light around the camera. With the Gi_Probes debug view, it draws the
@@ -25,16 +26,16 @@ static const float HISTORY_TOLERANCE = 0.05;
 // Where the cones go: far past the last level, where they stop.
 static const float CONE_END = 1e6;
 
-// cone_light is the light that a cone brings to a point, with the ambient light past what blocks it.
-float3 cone_light(Voxel_Grid g, float3 origin, float3 direction, float aperture, float start) {
+// cone_light is the light that a cone brings to a point, with the sky's light past what blocks it.
+float3 cone_light(Voxel_Grid g, float3 origin, float3 direction, float aperture, float start, float3 sky) {
 	float4 c = cone_trace(g, origin, direction, aperture, start, CONE_END, 0);
-	return c.rgb + (1 - c.a) * sky_light(direction);
+	return c.rgb + (1 - c.a) * sky;
 }
 
 // gather_cones gives a point's diffuse light, the cosine-weighted mean of its cones' light, and its specular light along
-// a reflection. The cones start a voxel and a half of the point's level off its surface, past the trilinear reach of its
+// a reflection at its roughness. The cones start a voxel and a half of the point's level off its surface, past the trilinear reach of its
 // own voxel.
-void gather_cones(Voxel_Grid g, float3 p, float3 normal, float3 reflected, float turn, out float3 diffuse, out float3 specular) {
+void gather_cones(Voxel_Grid g, float3 p, float3 normal, float3 reflected, float roughness, float turn, out float3 diffuse, out float3 specular) {
 	uint k = min(voxel_level_of(g, 0, p, 1), g.level_count - 1);
 	float size = voxel_size(g.levels[k]);
 	float3 origin = p + normal * size * 1.5;
@@ -46,9 +47,9 @@ void gather_cones(Voxel_Grid g, float3 p, float3 normal, float3 reflected, float
 		float4 cone = g.cones[i];
 		float2 xy = float2(cone.x * c - cone.y * s, cone.x * s + cone.y * c);
 		float3 direction = normalize(t * xy.x + b * xy.y + normal * cone.z);
-		diffuse += cone.w * cone_light(g, origin, direction, g.cone_aperture, size);
+		diffuse += cone.w * cone_light(g, origin, direction, g.cone_aperture, size, sky_light(direction));
 	}
-	specular = cone_light(g, origin, reflected, g.specular_aperture, size);
+	specular = cone_light(g, origin, reflected, g.specular_aperture, size, sky_cube_light(reflected, roughness));
 }
 
 // voxel_view is the albedo of the first voxel that a view ray from the camera meets, black past the last level.
@@ -94,14 +95,15 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 normal = octahedral_normal(pixel);
 	float3 reflected = reflect(normalize(position), normal);
 	float turn = 6.28318531 * interleaved_noise(float2(pixel));
+	float roughness = gather_roughness(pixel);
 	float3 diffuse, specular;
 	if (!surface) {
-		gather_cones(g, 0, normal, reflected, turn, diffuse, specular);
+		gather_cones(g, 0, normal, reflected, roughness, turn, diffuse, specular);
 		out_diffuse[pixel] = float4(diffuse, 0);
 		out_specular[pixel] = float4(specular, 0);
 		return;
 	}
-	gather_cones(g, position, normal, reflected, turn, diffuse, specular);
+	gather_cones(g, position, normal, reflected, roughness, turn, diffuse, specular);
 
 	float4 diffuse_result = float4(diffuse, z);
 	float4 specular_result = float4(specular, 1);

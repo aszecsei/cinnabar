@@ -112,6 +112,13 @@ Gi_Constants :: struct {
 	probe_grid:       u32,
 	probe_grid_offset: u32,
 	directions:       u32,
+	// The gathers' roughness, and the sky's cubemap that their specular light takes past the probes (see
+	// Sky_Cube_Reads), which the sampler reads.
+	roughness:         u32,
+	sky_cube_current:  u32,
+	sky_cube_previous: u32,
+	sky_cube_blend:    f32,
+	sky_cube_mips:     f32,
 }
 
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
@@ -254,6 +261,9 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		steps          = gf.params.steps,
 		directions     = gf.params.directions,
 	}
+	cube := sky_cube_reads(f)
+	gf.constants.sky_cube_current, gf.constants.sky_cube_previous = cube.current, cube.previous
+	gf.constants.sky_cube_blend, gf.constants.sky_cube_mips = cube.blend, cube.mips
 	f.gi = gf
 }
 
@@ -322,7 +332,24 @@ add_gi_passes :: proc(f: ^Frame) {
 	write(g, p, gf.diffuse.current)
 	write(g, p, gf.specular.current)
 	declare_probe_reads(f, p)
+	declare_gather_specular(f, p)
 	f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
+}
+
+// declare_gather_specular declares what a gather's specular light reads past the probes: the roughness and the sky's
+// cubemap.
+@(private)
+declare_gather_specular :: proc(f: ^Frame, p: Pass) {
+	read(f.graph, p, f.roughness)
+	declare_sky_cube_reads(f, p)
+}
+
+// gather_constants are a gather's constants, with its roughness.
+@(private)
+gather_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Gi_Constants {
+	c := gi_constants(ctx, f)
+	c.roughness = gpu.read_index(gpu_texture(ctx.graph, f.roughness))
+	return c
 }
 
 // add_gi_lit adds the pass that keeps the scene for the next frame's rays, after the world pass.
@@ -401,7 +428,7 @@ run_gi_gather :: proc(ctx: ^Pass_Context) {
 	f := (^Frame)(ctx.data)
 	gf := f.gi
 	g := ctx.graph
-	c := gi_constants(ctx, f)
+	c := gather_constants(ctx, f)
 	c.cascades = gpu.read_index(gpu_texture(g, gf.cascades))
 	c.velocity = gpu.read_index(gpu_texture(g, f.velocity))
 	c.history_diffuse = gpu.read_index(gpu_texture(g, gf.diffuse.previous))

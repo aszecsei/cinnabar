@@ -746,6 +746,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 		write(g, p, gf.probe_view)
 	}
 	declare_probe_reads(f, p)
+	declare_gather_specular(f, p)
 	add_split_stats_copy(f, sf)
 	s.ran = true
 	return true
@@ -907,6 +908,7 @@ run_split_pass :: proc(ctx: ^Pass_Context) {
 		pipeline = s.merge.pipeline
 	case .Gather:
 		pipeline, dispatch = s.gather.pipeline, groups(f.size, POST_GROUP_SIZE)
+		c.roughness = gpu.read_index(gpu_texture(g, f.roughness))
 		c.out_diffuse = gpu.write_index(gpu_texture(g, gf.diffuse.current))
 		c.out_specular = gpu.write_index(gpu_texture(g, gf.specular.current))
 	}

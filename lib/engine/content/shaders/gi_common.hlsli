@@ -11,6 +11,7 @@
 #include "ambient.hlsli"
 #include "cinnabar.hlsli"
 #include "gi_probes.hlsli"
+#include "sky_cube.hlsli"
 
 // Matches Gi_Constants in lib/engine/render/gi.odin. previous maps a position relative to the camera to last frame's
 // clip space, the camera's motion included. right, up and forward are the view's axes in the world; projection holds
@@ -55,6 +56,13 @@ struct Gi_Constants {
 	uint probe_grid_offset;
 	// The level's directions across the first cascade's octahedron.
 	uint directions;
+	// The gathers' roughness, and the sky's cubemap that their specular light takes past the probes (see sky_cube.hlsli),
+	// which sampler_index reads.
+	uint roughness;
+	uint sky_cube_current;
+	uint sky_cube_previous;
+	float sky_cube_blend;
+	float sky_cube_mips;
 };
 CN_PASS_CONSTANTS(Gi_Constants, constants);
 
@@ -136,6 +144,32 @@ float3 beyond_light(float3 p, float3 normal, float3 direction) {
 		return light;
 	}
 	return sky_light(direction);
+}
+
+// sky_cube_light is the sky's light along a reflection at a roughness: its cubemap's, or the ambient light without one.
+float3 sky_cube_light(float3 direction, float roughness) {
+	Sky_Cube c;
+	c.current = constants.sky_cube_current;
+	c.previous = constants.sky_cube_previous;
+	c.blend = constants.sky_cube_blend;
+	c.mips = constants.sky_cube_mips;
+	c.sampler_index = constants.sampler_index;
+	return sky_specular(c, constants.ambient, direction, roughness);
+}
+
+// beyond_specular is a gather's specular light along a reflection, at its surface's roughness, from beyond what the
+// cascades trace: the world probes' radiance, or the sky's cubemap without them.
+float3 beyond_specular(float3 p, float3 normal, float3 direction, float roughness) {
+	float3 light;
+	if (constants.probes != 0 && sample_probes(load_probe_grid(constants.probe_grid, constants.probe_grid_offset), p, normal, direction, true, light)) {
+		return light;
+	}
+	return sky_cube_light(direction, roughness);
+}
+
+// gather_roughness is a pixel's roughness, from the prepass.
+float gather_roughness(int2 pixel) {
+	return cn_texture(constants.roughness).Load(int3(pixel, 0)).r;
 }
 
 // surrounding_light is the cosine-weighted mean light around a normal at a point relative to the camera: the world

@@ -33,7 +33,8 @@ struct Sky_Constants {
 };
 CN_PASS_CONSTANTS(Sky_Constants, sky);
 
-// Matches Sky_Push in lib/engine/render/sky.odin.
+// Matches Sky_Push in lib/engine/render/sky.odin. The cubemap's capture has the size of its mip's faces, the directions
+// that it averages across each texel, and the light's scale (see sky_cube_atmosphere.hlsl).
 struct Sky_Push {
 	uint transmittance;
 	uint multiscatter;
@@ -42,7 +43,9 @@ struct Sky_Push {
 	uint depth;
 	uint exposure;
 	uint sampler_index;
-	uint padding;
+	uint face;
+	uint subsamples;
+	float intensity;
 };
 CN_PUSH_CONSTANTS(Sky_Push, push);
 

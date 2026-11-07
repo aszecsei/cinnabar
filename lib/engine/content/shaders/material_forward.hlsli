@@ -13,6 +13,7 @@
 #include "material_mesh.hlsli"
 #include "material_lighting.hlsli"
 #include "fog_at.hlsli"
+#include "sky_cube.hlsli"
 
 // The scene's HDR colors, pre-exposed, and the entity IDs that the editor picks from.
 struct Targets {
@@ -41,6 +42,17 @@ void ms_forward(
 	if (thread < c.triangle_count) {
 		triangles[thread] = cluster_triangle(c, thread);
 	}
+}
+
+// frame_sky_specular is the sky's light along a reflection, from the frame's cubemap at a roughness.
+float3 frame_sky_specular(float3 d, float roughness) {
+	Sky_Cube c;
+	c.current = frame.sky_cube_current;
+	c.previous = frame.sky_cube_previous;
+	c.blend = frame.sky_cube_blend;
+	c.mips = frame.sky_cube_mips;
+	c.sampler_index = frame.sky_cube_sampler;
+	return sky_specular(c, frame.ambient, d, roughness);
 }
 
 // The colors of the directional lights' cascades, and beyond the last.
@@ -99,20 +111,27 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	if (!indirect_only && !fog_only) {
 		color += direct_light(s, p, inputs.normal, i.position);
 	}
-	// The global illumination's light, or without it the Environment's ambient light, which the ambient occlusion takes
-	// away from. The occlusion is the opaque surfaces', from the prepass, so a transparent surface has none.
+	// The global illumination's light, or without it the Environment's: its ambient light along the normal, and its sky's
+	// cubemap along the reflection at the surface's roughness. The ambient occlusion takes away from both. The occlusion
+	// is the opaque surfaces', from the prepass, so a transparent surface has none, and the global illumination's
+	// specular light is theirs too, so a transparent surface reflects the sky along its own normal.
 #if MATERIAL_TRANSPARENT
 	float occlusion = 1;
 #else
 	float occlusion = saturate(load_screen(push.ambient_occlusion, i.position.xy).r);
 #endif
+	float3 reflected = reflect(-p.view, p.normal);
 	Indirect indirect;
 	if (frame.gi != 0) {
 		indirect.diffuse = cn_texture(push.gi_diffuse).Load(int3(i.position.xy, 0)).rgb;
+#if MATERIAL_TRANSPARENT
+		indirect.specular = frame_sky_specular(reflected, shading_roughness(s));
+#else
 		indirect.specular = cn_texture(push.gi_specular).Load(int3(i.position.xy, 0)).rgb;
+#endif
 	} else {
 		indirect.diffuse = ambient_light(frame.ambient, p.normal);
-		indirect.specular = ambient_light(frame.ambient, reflect(-p.view, p.normal));
+		indirect.specular = frame_sky_specular(reflected, shading_roughness(s));
 	}
 	indirect.diffuse *= occlusion;
 	indirect.specular *= occlusion;

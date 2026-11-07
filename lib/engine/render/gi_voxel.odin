@@ -581,6 +581,7 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 	if gf.probe_view != 0 {
 		write(g, p, gf.probe_view)
 	}
+	declare_gather_specular(f, p)
 	f.gi_diffuse, f.gi_specular = gf.diffuse.current, gf.specular.current
 	return true
 }
@@ -669,7 +670,7 @@ run_voxel_pass :: proc(ctx: ^Pass_Context) {
 		gpu.cmd_dispatch(ctx.cb, groups)
 	case .Gather:
 		gf := f.gi
-		c := gi_constants(ctx, f)
+		c := gather_constants(ctx, f)
 		c.velocity = gpu.read_index(gpu_texture(g, f.velocity))
 		c.history_diffuse = gpu.read_index(gpu_texture(g, gf.diffuse.previous))
 		c.history_specular = gpu.read_index(gpu_texture(g, gf.specular.previous))
