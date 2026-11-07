@@ -124,10 +124,11 @@ Ao_Constants :: struct {
 	jitter:      [2]f32,
 	radius:      f32,
 	power:       f32,
-	noise_index: u32,
+	noise:       u32,
+	noise_slice: u32,
 	samples:     u32,
 	steps:       u32,
-	padding:     [3]u32,
+	padding:     [2]u32,
 }
 
 // Ao_Denoise_Push matches Push in gtao_denoise.hlsl.
@@ -203,8 +204,8 @@ sync_ao_pipelines :: proc(r: ^Renderer, force: bool) {
 }
 
 // add_ao_passes adds the ambient occlusion's passes after the prepass, on the compute queue, and sets
-// Frame.ambient_occlusion to the denoiser's result, which the forward pass reads. Without its pipelines or with off,
-// it adds nothing. It reads f.post, so it runs after begin_post.
+// Frame.ambient_occlusion to the denoiser's result, which the forward pass reads. Without its pipelines or the blue
+// noise, or with off, it adds nothing. It reads f.post, so it runs after begin_post.
 @(private)
 add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	r := f.renderer
@@ -215,6 +216,10 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	   !pipeline_ready(platform, &a.depth) ||
 	   !pipeline_ready(platform, &a.searches[settings.technique]) ||
 	   !pipeline_ready(platform, &a.denoise) {
+		return
+	}
+	noise := blue_noise(r)
+	if noise == {} {
 		return
 	}
 	g := f.graph
@@ -252,8 +257,9 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 		jitter      = f.jitter,
 		radius      = radius,
 		power       = settings.power > 0 ? settings.power : DEFAULT_AO_POWER,
+		noise       = gpu.read_index(noise),
 		// Without temporal AA nothing averages the noise over time, so it stays where it is.
-		noise_index = temporal ? a.frame % 64 : 0,
+		noise_slice = temporal ? a.frame % BLUE_NOISE_SLICES : 0,
 		samples     = AO_PARAMS[settings.technique][settings.level].samples,
 		steps       = AO_PARAMS[settings.technique][settings.level].steps,
 	}

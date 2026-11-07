@@ -1,7 +1,7 @@
-// tools/stbn makes the spatiotemporal blue noise that the screen-space reflections sample their rays with (see
-// docs/rendering/lighting-and-shadows.md#screen-space-reflections): SLICES textures of SIZE × SIZE uniform 2D values,
-// each slice blue noise over space and each pixel's sequence of values blue noise over time. Run `just stbn` and commit
-// the texture that it writes.
+// tools/stbn makes the spatiotemporal blue noise that the ambient occlusion's searches and the screen-space reflections'
+// rays sample (see docs/rendering/lighting-and-shadows.md#screen-space-reflections): SLICES textures of SIZE × SIZE
+// uniform 2D values, each slice blue noise over space and each pixel's sequence of values blue noise over time. Run
+// `just stbn` and commit the texture that it writes.
 //
 // The method is Wolfe, Morrical, Akenine-Möller and Ramamoorthi's, "Spatiotemporal Blue Noise Masks" (EGSR 2022), for
 // vector values: each slice starts with the same stratified set of values in a random order, and swaps of two of a

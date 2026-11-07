@@ -64,8 +64,8 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 	}
 	defer screen_reflections_destroy(s, &platform)
 	// No GUID, so the residency is never asked: the test's texture is the noise.
-	s.noise = platform.gpu_create_texture({size = {SSR_NOISE_SIZE, SSR_NOISE_SIZE}, layers = SSR_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
-	defer platform.gpu_destroy_texture(s.noise)
+	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
 	exposure := platform.gpu_create_buffer({size = 16, usage = {.Storage}, label = "exposure"}, nil)
 	defer platform.gpu_destroy_buffer(exposure)
 	cache: Texture_Cache
@@ -178,10 +178,10 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 	testing.expect(t, !res.reflections && res.passes["reflections depth"] == 0)
 	free_all(platform.frame_allocator)
 	s.trace.pipeline = trace
-	noise := s.noise
-	s.noise = {}
+	noise := r.blue_noise.texture
+	r.blue_noise.texture = {}
 	res = run_frame(t, r, &cache, exposure, {technique = .Screen, level = .High})
 	testing.expect(t, !res.reflections && res.passes["reflections depth"] == 0)
 	free_all(platform.frame_allocator)
-	s.noise = noise
+	r.blue_noise.texture = noise
 }

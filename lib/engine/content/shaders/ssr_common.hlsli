@@ -5,6 +5,7 @@
 #define SSR_COMMON_HLSLI
 
 #include "cinnabar.hlsli"
+#include "blue_noise.hlsli"
 
 // Matches Ssr_Constants in lib/engine/render/screen_reflections.odin. previous maps a position relative to the camera to
 // last frame's clip space, the camera's motion included. right, up and forward are the view's axes in the world, and
@@ -61,9 +62,6 @@ static const float MIN_ALPHA = 2e-3;
 static const float MAX_PDF = 60000;
 // The roughness over which a surface's reflection fades out below the cutoff.
 static const float CUTOFF_FADE = 0.1;
-// The noise texture's size and slices: tools/stbn's.
-static const uint NOISE_SIZE = 128;
-static const uint NOISE_SLICES = 32;
 
 uint level_index(uint i) {
 	return constants.levels[i / 4][i % 4];
@@ -76,8 +74,7 @@ uint2 level_size(uint i) {
 // noise is the spatiotemporal blue noise at a pixel this frame, offset for each ray and each use, so they are not
 // correlated.
 float2 noise(int2 pixel, uint offset) {
-	uint2 texel = (uint2(pixel) + uint2(offset * 64, offset * 37)) % NOISE_SIZE;
-	return cn_texture_array(constants.noise).Load(int4(texel, (constants.frame + offset * 11) % NOISE_SLICES, 0)).rg;
+	return blue_noise(constants.noise, uint2(pixel) + uint2(offset * 64, offset * 37), constants.frame + offset * 11);
 }
 
 // view_of is a position relative to the camera in view space: x right, y up, z forward.

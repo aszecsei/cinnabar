@@ -4,7 +4,6 @@ import "core:math/linalg"
 
 import "cinnabar:core"
 import "cinnabar:core/gpu"
-import format "cinnabar:engine/asset/format"
 
 // Stochastic screen-space reflections (see docs/rendering/lighting-and-shadows.md#screen-space-reflections):
 // Reflection_Technique.Screen. After the prepass, on the compute queue, a pass builds a pyramid of the nearest depth,
@@ -22,11 +21,6 @@ SSR_TRACE_SHADER :: #load("../content/shaders/ssr_trace.hlsl.meta", string)
 SSR_RESOLVE_SHADER :: #load("../content/shaders/ssr_resolve.hlsl.meta", string)
 SSR_TEMPORAL_SHADER :: #load("../content/shaders/ssr_temporal.hlsl.meta", string)
 SSR_LIT_SHADER :: #load("../content/shaders/ssr_lit.hlsl.meta", string)
-// The spatiotemporal blue noise that the rays sample, which tools/stbn makes: SSR_NOISE_SLICES layers of
-// SSR_NOISE_SIZE x SSR_NOISE_SIZE uniform 2D values. Match NOISE_SIZE and NOISE_SLICES in ssr_common.hlsli.
-SSR_NOISE_TEXTURE :: #load("../content/textures/stbn_vec2.png.meta", string)
-SSR_NOISE_SIZE :: 128
-SSR_NOISE_SLICES :: 32
 
 // The reflections, their history, their lit scene and the trace's rays and light. Match GI_FORMAT, so the global
 // illumination's lit scene serves at half resolution.
@@ -53,9 +47,6 @@ Screen_Reflections :: struct {
 	resolve:    Shader_Pipeline,
 	temporal:   Shader_Pipeline,
 	lit:        Shader_Pipeline,
-	noise_guid: format.Guid,
-	// The noise texture once it is resident, which the tests set.
-	noise:      gpu.Texture,
 	// Counts the frames, for the noise and the half resolution's pixel.
 	frame:      u32,
 }
@@ -139,7 +130,6 @@ screen_reflections_init :: proc(s: ^Screen_Reflections) {
 	s.resolve = shader_pipeline(SSR_RESOLVE_SHADER)
 	s.temporal = shader_pipeline(SSR_TEMPORAL_SHADER)
 	s.lit = shader_pipeline(SSR_LIT_SHADER)
-	s.noise_guid, _ = format.meta_guid(SSR_NOISE_TEXTURE)
 }
 
 screen_reflections_destroy :: proc(s: ^Screen_Reflections, platform: ^core.Platform_API) {
@@ -153,7 +143,7 @@ screen_reflection_pipelines :: proc(s: ^Screen_Reflections) -> [5]^Shader_Pipeli
 	return {&s.depth, &s.trace, &s.resolve, &s.temporal, &s.lit}
 }
 
-// sync_screen_reflections updates the pipelines, and takes the noise texture once it is resident.
+// sync_screen_reflections updates the pipelines.
 @(private)
 sync_screen_reflections :: proc(r: ^Renderer, force: bool) {
 	s := &r.ssr
@@ -163,19 +153,6 @@ sync_screen_reflections :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&s.resolve, r.platform, assets, {label = "reflections resolve"}, force)
 	sync_compute_pipeline(&s.temporal, r.platform, assets, {label = "reflections temporal"}, force)
 	sync_compute_pipeline(&s.lit, r.platform, assets, {label = "reflections lit scene"}, force)
-}
-
-// screen_reflection_noise is the noise texture, or 0 until it is resident. The texture is requested only by the
-// frames that take the reflections.
-@(private = "file")
-screen_reflection_noise :: proc(r: ^Renderer) -> gpu.Texture {
-	s := &r.ssr
-	if t, ready := resident_texture(&r.residency, s.noise_guid, .D2_Array); ready {
-		if t.size == {SSR_NOISE_SIZE, SSR_NOISE_SIZE} && t.layer_count == SSR_NOISE_SLICES {
-			s.noise = t.texture
-		}
-	}
-	return s.noise
 }
 
 // ssr_level_size is the size of a level of the depth pyramid.
@@ -200,7 +177,7 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 			return
 		}
 	}
-	noise := screen_reflection_noise(r)
+	noise := blue_noise(r)
 	if noise == {} {
 		return
 	}

@@ -311,9 +311,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
 	}
-	// The test's cache has no textures, so the screen-space reflections take this one as their noise.
-	r.ssr.noise = platform.gpu_create_texture({size = {SSR_NOISE_SIZE, SSR_NOISE_SIZE}, layers = SSR_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
-	defer platform.gpu_destroy_texture(r.ssr.noise)
+	// The test's cache has no textures, so the ambient occlusion and the screen-space reflections take this one as
+	// their blue noise.
+	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky && record.reflections)
@@ -418,6 +419,12 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expectf(t, record.occlusion == (technique != .Off), "%v: occlusion %v", technique, record.occlusion)
 	}
 	desc.quality = nil
+	// Until the blue noise is resident, neither the occlusion nor the screen-space reflections run.
+	noise := r.blue_noise.texture
+	r.blue_noise.texture = {}
+	testing.expect(t, draw_frame(r, w, desc), "the frame without the blue noise did not execute")
+	testing.expect(t, !record.occlusion && !record.reflections, "a pass ran without the blue noise")
+	r.blue_noise.texture = noise
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
 	// Only the Screen technique makes the screen-space reflections, at every level, and their debug view shows them.

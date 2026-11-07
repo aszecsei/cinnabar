@@ -82,6 +82,8 @@ Renderer :: struct {
 	// The GPU scene's acceleration structure and hit shading (see docs/rendering/ray-scene.md#ray-scene).
 	ray_scene:       Ray_Scene,
 	previews:        Previews,
+	// The spatiotemporal blue noise that the ambient occlusion and the screen-space reflections sample.
+	blue_noise:      Blue_Noise,
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
 	// The screen-space reflections (see screen_reflections.odin).
@@ -366,6 +368,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	shadows_init(&r.shadows, platform)
 	ray_scene_init(&r.ray_scene)
 	previews_init(&r.previews, r)
+	blue_noise_init(&r.blue_noise)
 	ao_init(&r.ao)
 	gi_init(&r.gi)
 	screen_reflections_init(&r.ssr)

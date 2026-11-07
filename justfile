@@ -478,7 +478,7 @@ ltc-fit:
     mkdir -p "{{tools_dir}}"
     odin run tools/ltc_fit -o:speed -out:"{{tools_dir}}/ltc_fit.exe" -- lib/engine/render/ltc_ggx.bin
 
-# Make the spatiotemporal blue noise that the screen-space reflections sample, into
+# Make the spatiotemporal blue noise that the ambient occlusion and the screen-space reflections sample, into
 # lib/engine/content/textures/stbn_vec2.png (see docs/rendering/lighting-and-shadows.md#screen-space-reflections). It is
 # the same for the same seed; commit the texture.
 stbn:
