@@ -101,6 +101,8 @@ public sealed class ResourceMonitorView : Grid
                 .. VirtualShadowRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
+                // The reflection probes, while the quality has them: the probes, the slots whose probe has a cube, and the faces captured.
+                .. ReflectionProbeRows(g),
                 ("Behaviours", $"{g.Behaviours:N0}"),
                 ("Script memory", ResourceStats.Bytes(g.ScriptBytes)),
                 ("Engine's part", ResourceStats.Bytes(g.ScriptBytes - Math.Min(modules, g.ScriptBytes))),
@@ -109,8 +111,7 @@ public sealed class ResourceMonitorView : Grid
         }
     }
 
-    // The shading's row, none while the viewport's shading stats are off: the forward pass's quads with the share of their
-    // lanes that cover a pixel (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
+    // The virtual shadow map's rows, none without one (see docs/rendering/lighting-and-shadows.md#virtual-shadow-maps).
     internal static IEnumerable<(string Name, string Value)> VirtualShadowRows(Link.Protocol.GameStats g)
     {
         if (g.VirtualPagesCapacity > 0)
@@ -121,11 +122,25 @@ public sealed class ResourceMonitorView : Grid
         }
     }
 
+    // The shading's row, none while the viewport's shading stats are off: the forward pass's quads with the share of their
+    // lanes that cover a pixel (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
     internal static IEnumerable<(string Name, string Value)> ShadingRows(Link.Protocol.GameStats g)
     {
         if (g.ForwardQuads > 0)
         {
             yield return ("Forward quads", $"{g.ForwardQuads:N0} ({g.ForwardPixels * 100.0 / (4.0 * g.ForwardQuads):0}% covered)");
+        }
+    }
+
+    // The reflection probes' rows, none without them (see docs/rendering/lighting-and-shadows.md#reflection-probes): the
+    // probes in the frame, the slots whose probe has a cube of the level's, and the faces that the frame captured.
+    internal static IEnumerable<(string Name, string Value)> ReflectionProbeRows(Link.Protocol.GameStats g)
+    {
+        if (g.ReflectionProbeCapacity > 0)
+        {
+            yield return ("Reflection probes", $"{g.ReflectionProbes:N0}");
+            yield return ("Reflection probe slots", $"{g.ReflectionProbeSlots:N0} / {g.ReflectionProbeCapacity:N0}");
+            yield return ("Reflection probe faces", $"{g.ReflectionProbeFaces:N0}");
         }
     }
 

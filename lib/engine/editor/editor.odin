@@ -272,6 +272,9 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				cascade = {active = gi.cascades[k].active, slots = gi.cascades[k].slots, dropped = gi.cascades[k].dropped}
 			}
 			stats.gi_cascades = cascades
+			rp := render.reflection_probe_stats(e.renderer)
+			stats.reflection_probes, stats.reflection_probe_slots = rp.probes, rp.slots
+			stats.reflection_probe_capacity, stats.reflection_probe_faces = rp.capacity, rp.faces
 		}
 		link.write_message(out, stats)
 	}
