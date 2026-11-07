@@ -76,6 +76,16 @@ The specular light along a reflection is the sky's cubemap, prefiltered by rough
 | Ultra | 256 | 7 | `RGBA16_Float` | 128 |
 
 - **Memory:** the source and three prefiltered cubes with their mips: 0.5 MB at Low, 2.1 MB at Medium, 4.2 MB at High and 16.8 MB at Ultra in all. A level of another size makes them again.
+- **Cost**, on an RTX 5090, in the editor's viewport at 911x481, the median of five captures:
+
+| Level | A whole update: capture + every mip | A frame of a sky that changes every frame: one mip, and a capture every few frames | A sky that does not change |
+|---|---|---|---|
+| Low | 0.025 + 0.008 = 0.034 ms | 0.006 + 0.026 / 5 ≈ 0.011 ms | 0 |
+| Medium | 0.027 + 0.016 = 0.043 ms | 0.010 + 0.027 / 6 ≈ 0.015 ms | 0 |
+| High | 0.027 + 0.016 = 0.044 ms | 0.011 + 0.027 / 6 ≈ 0.016 ms | 0 |
+| Ultra | 0.032 + 0.060 = 0.092 ms | 0.021 + 0.032 / 7 ≈ 0.025 ms | 0 |
+
+  The captures are the atmosphere's. A whole update is the first frame's, and one at a new level. A step of one mip is mostly the pass's own overhead: all six of High's mips take 0.016 ms, and one of them 0.011 ms. The readers cost nothing that the captures measure: in the Intel sample's Sponza at High, with the cube and with the readers' ambient light in its place, the world pass without the GI took 0.0696 and 0.0696 ms in the nave and 0.0286 and 0.0283 ms looking down at the atrium's floor; the voxel cones' gather took 0.3013 and 0.3011 ms, and the screen cascades' 0.0328 and 0.0330 ms, each within the captures' spread of about 0.002 to 0.004 ms.
 - **The ring and the updates.** The prefiltered cubes are a ring of three: the current one, which the readers sample; the previous one, which it blends in over; and the next one, which a build fills.
   - The first frame, and the first at a new level, makes every mip of the current cube at once. The readers sample it from the next frame, and until then take the ambient light.
   - When the sky's source or its inputs change, a build of the next cube starts. Its first frame captures the source and prefilters mip 0, and each frame after prefilters one more mip, so a build takes as many frames as there are mips. Then the ring turns, and the new cube blends in over the old one in as many frames: each reader takes both at the mip for its roughness and blends them.
