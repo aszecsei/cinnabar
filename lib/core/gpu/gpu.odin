@@ -381,7 +381,8 @@ Texture_Desc :: struct {
 	// and written in shaders.
 	depth:     u32,
 	// An array's layers, at most MAX_TEXTURE_LAYERS. 0 means a texture with no array view, and 1 an array of one layer. An
-	// array's or a cube's usage is Sampled and Streamed, and shaders read it with cn_texture_array or cn_texture_cube.
+	// array's or a cube's usage is Sampled and Streamed, or Sampled and Storage with no data. Shaders read it with
+	// cn_texture_array or cn_texture_cube, and write it with cn_rw_texture_array, every layer of one mip.
 	layers:    u32,
 	// A cube map: six square layers, in the order +x, -x, +y, -y, +z, -z.
 	cube:      bool,
@@ -391,6 +392,17 @@ Texture_Desc :: struct {
 	usage:     Texture_Usages,
 	scope:     Scope,
 	label:     string,
+}
+
+// Texture_View_Desc is a storage view of one mip of a Storage texture, every layer of it for an array or a cube, so a
+// shader writes a mip other than 0 (see docs/gpu/resources-and-pipelines.md#resources). The view is a texture
+// handle whose write_index is the view's. It has no layout of its own: barriers name the texture that it views, and it
+// has no read view. Destroy it with destroy_texture, before or after its texture.
+Texture_View_Desc :: struct {
+	texture: Texture,
+	mip:     u32,
+	scope:   Scope,
+	label:   string,
 }
 
 // initial_layout is the layout a new texture starts in. A texture created with data starts in the sampled layout.

@@ -79,7 +79,7 @@ A bindless index is a fixed function of the handle's pool index: `gpu.read_index
 The resource heap has five ranges, in order: buffer reads, buffer writes, texture reads, texture writes and acceleration structures. Each range has the capacity of its pool (`MAX_BUFFERS`, `MAX_TEXTURES`, `MAX_ACCEL_STRUCTS`). Only top-level acceleration structures have a view. Samplers use their pool index in the sampler heap. Vulkan descriptor arrays and Metal argument buffers can use the same fixed indices.
 
 - Every buffer but a `Readback` buffer has a read view (see [Readback](queues-streaming-readback.md#readback)). Buffers with the `Storage` usage also have a write view.
-- Textures with the `Sampled` usage have a read view. Textures with the `Storage` usage have a write view.
+- Textures with the `Sampled` usage have a read view. Textures with the `Storage` usage have a write view, of mip 0. A texture view is a handle of its own in the texture pool, so its write view of another mip has a fixed index too (see [Resources](resources-and-pipelines.md#resources)).
 
 ### Vertex pulling
 

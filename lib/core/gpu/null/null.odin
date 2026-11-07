@@ -77,6 +77,8 @@ state: struct {
 	layouts:       gpu.Layout_Tracker,
 	// Textures that have been streamed. Each is streamed once.
 	streamed:      map[gpu.Texture]bool,
+	// The texture views (see gpu.Texture_View_Desc), which have no layout.
+	views:         map[gpu.Texture]bool,
 	transfers:     u64,
 	// The memory of each Readback buffer. Nothing copies into it, so it stays zero.
 	readbacks:     map[gpu.Buffer][]byte,
@@ -117,6 +119,7 @@ shutdown :: proc() {
 	delete(state.upload_memory)
 	gpu.layout_tracker_destroy(&state.layouts)
 	delete(state.streamed)
+	delete(state.views)
 	for _, memory in state.readbacks {
 		delete(memory)
 	}
@@ -398,6 +401,27 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	return texture
 }
 
+// A view keeps its texture's description with the mip's size and the Storage usage alone.
+create_texture_view :: proc(desc: gpu.Texture_View_Desc) -> gpu.Texture {
+	parent, ok := gpu.pool_lookup(&state.textures, desc.texture)
+	if !ok {
+		log.errorf("gpu: texture view %q: an invalid texture", desc.label)
+		return {}
+	}
+	if err := gpu.validate_texture_view(desc, parent, desc.texture in state.views); err != .None {
+		log.errorf("gpu: texture view %q: %v", desc.label, err)
+		return {}
+	}
+	stored := parent
+	stored.size = {max(parent.size.x >> desc.mip, 1), max(parent.size.y >> desc.mip, 1)}
+	stored.mip_count, stored.usage, stored.scope, stored.label = 1, {.Storage}, desc.scope, ""
+	view := gpu.pool_add(&state.textures, stored)
+	if view != {} {
+		state.views[view] = true
+	}
+	return view
+}
+
 create_sampler :: proc(desc: gpu.Sampler_Desc) -> gpu.Sampler {
 	stored := desc
 	stored.label = ""
@@ -489,6 +513,7 @@ destroy_texture :: proc(texture: gpu.Texture) {
 		gpu.pool_free(&state.textures, texture.index)
 		gpu.untrack_layout(&state.layouts, texture)
 		delete_key(&state.streamed, texture)
+		delete_key(&state.views, texture)
 	}
 }
 

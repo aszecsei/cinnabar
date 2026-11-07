@@ -99,6 +99,33 @@ create_rejects_bad_descs :: proc(t: ^testing.T) {
 	testing.expect(t, create_graphics_pipeline({vertex = {0}, depth_format = .D32_Float}) != {})
 }
 
+// A Storage cube's views write each of its mips. A view has its own write slot and handle, and no view of its own.
+@(test)
+texture_views_write_a_cubes_mips :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {1280, 720}))
+	defer shutdown()
+
+	cube := create_texture({size = {16, 16}, layers = 6, cube = true, format = .RGBA16_Float, mip_count = 5, usage = {.Sampled, .Storage}}, nil)
+	testing.expect(t, cube != {})
+	views: [5]gpu.Texture
+	for &view, mip in views {
+		view = create_texture_view({texture = cube, mip = u32(mip)})
+		testing.expect(t, view != {} && view != cube)
+		testing.expect(t, gpu.write_index(view) != gpu.write_index(cube))
+	}
+	context.logger = testlog.expected_errors()
+	testing.expect_value(t, create_texture_view({texture = cube, mip = 5}), gpu.Texture{})
+	testing.expect_value(t, create_texture_view({texture = views[1]}), gpu.Texture{})
+	sampled := create_texture({size = {4, 4}, format = .RGBA8_Unorm, usage = {.Sampled}}, nil)
+	testing.expect_value(t, create_texture_view({texture = sampled}), gpu.Texture{})
+
+	destroy_texture(views[2])
+	testing.expect_value(t, create_texture_view({texture = views[2]}), gpu.Texture{})
+	destroy_texture(cube)
+	testing.expect_value(t, create_texture_view({texture = cube}), gpu.Texture{})
+}
+
 @(test)
 upload_ring_resets_each_frame :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)

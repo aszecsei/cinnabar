@@ -120,7 +120,8 @@ Platform_API :: struct {
 	// Creation returns the nil handle on failure. data may be nil. The backend copies the description and the data.
 	gpu_create_buffer:            proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer,
 	gpu_create_texture:           proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture,
-	gpu_create_sampler:           proc(desc: gpu.Sampler_Desc) -> gpu.Sampler,
+	gpu_create_texture_view:      proc(desc: gpu.Texture_View_Desc) -> gpu.Texture,
+	gpu_create_sampler:          proc(desc: gpu.Sampler_Desc) -> gpu.Sampler,
 	gpu_create_graphics_pipeline: proc(desc: gpu.Graphics_Pipeline_Desc) -> gpu.Pipeline,
 	gpu_create_compute_pipeline:  proc(desc: gpu.Compute_Pipeline_Desc) -> gpu.Pipeline,
 	// An update compiles a new version and keeps the current one in use until the new one is ready. It keeps the
