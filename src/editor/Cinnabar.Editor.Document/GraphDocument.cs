@@ -17,14 +17,17 @@ public interface IGraphDocument
 
     bool CanRedo { get; }
 
-    /// <summary>The graph changed: an edit, a step of a drag, undo or redo. Also the dirty state.</summary>
+    /// <summary>A drag's entry is open, so <see cref="Save"/> is refused.</summary>
+    bool InTransaction { get; }
+
+    /// <summary>The graph changed: an edit, a step of a drag, undo or redo. Also the dirty state, and a drag's entry opening or ending.</summary>
     event Action? Changed;
 
     void Undo();
 
     void Redo();
 
-    /// <summary>Writes the graph to its file.</summary>
+    /// <summary>Writes the graph to its file. Refused while an entry is open.</summary>
     void Save();
 
     /// <summary>The file moved, as when the content browser moves or renames it. Nothing is written.</summary>
@@ -111,11 +114,16 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         }
         _transaction = label;
         _transactionStart = _states[Position].Text;
+        Changed?.Invoke();
     }
 
     /// <summary>Changes the graph as a step of the open entry.</summary>
     public void Step(Action<TGraph> edit)
     {
+        if (_transaction == null)
+        {
+            throw new InvalidOperationException("no entry is open");
+        }
         edit(Graph);
         Changed?.Invoke();
     }
@@ -124,7 +132,11 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
     {
         var label = _transaction ?? throw new InvalidOperationException("no entry is open");
         _transaction = null;
-        Push(label);
+        // A drag that changed nothing leaves no entry, but its end is still news: Save can run again.
+        if (!Push(label))
+        {
+            Changed?.Invoke();
+        }
     }
 
     /// <summary>Ends the open entry, and puts the graph back as it was before it.</summary>
@@ -139,12 +151,13 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         Changed?.Invoke();
     }
 
-    void Push(string label)
+    // Adds an entry for the graph as it is now, unless it is the current entry's. Returns whether it added one.
+    bool Push(string label)
     {
         var text = WriteGraph();
         if (text == _states[Position].Text)
         {
-            return;
+            return false;
         }
         // A new edit drops the entries that were undone, and with them a saved position among them.
         _states.RemoveRange(Position + 1, _states.Count - Position - 1);
@@ -155,6 +168,7 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         _states.Add((label, text));
         Position = _states.Count - 1;
         Changed?.Invoke();
+        return true;
     }
 
     public void Undo()
@@ -183,8 +197,13 @@ public abstract class GraphDocument<TGraph> : IGraphDocument
         WriteGraph();
     }
 
+    /// <summary>Writes the graph to its file. Refused while an entry is open, whose steps can still be put back.</summary>
     public virtual void Save()
     {
+        if (_transaction != null)
+        {
+            throw new InvalidOperationException($"\"{_transaction}\" is still open");
+        }
         SceneDocument.WriteAtomically(Path, Text);
         SavedPosition = Position;
         Changed?.Invoke();

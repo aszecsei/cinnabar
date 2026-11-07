@@ -218,10 +218,15 @@ public sealed partial class EditorShell
     /// <summary>
     /// Writes a graph editor's graph to its file. A failure goes to the console. An animation graph or a UI document whose
     /// file another program changed since it was read is not written, and the window asks, unless
-    /// <paramref name="overwrite"/> says so.
+    /// <paramref name="overwrite"/> says so. Refused during a drag, whose steps the file must not get as saved.
     /// </summary>
     public bool SaveGraph(IGraphEditor editor, bool overwrite = false)
     {
+        if (editor.Document.InTransaction)
+        {
+            Console.Add(LogLevel.Warning, $"{editor.Noun}: cannot save {editor.Document.Path} while a drag is open. Finish or cancel it first.");
+            return false;
+        }
         if (!overwrite && editor.Document is AnimationGraphDocument { ChangedOnDisk: true } or UiDocument { ChangedOnDisk: true })
         {
             GraphOverwriteRequested?.Invoke(editor);

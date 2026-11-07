@@ -310,10 +310,15 @@ public sealed class SceneDocument
 
     /// <summary>
     /// Writes the scene to its file, or to another path, which the document then has, and every prefab that is dirty,
-    /// so a prefab that an edit made has its file when the scene that names it does.
+    /// so a prefab that an edit made has its file when the scene that names it does. Refused while an entry is open,
+    /// whose preview can still be put back.
     /// </summary>
     public void Save(string? path = null)
     {
+        if (_label != null)
+        {
+            throw new InvalidOperationException($"\"{_label}\" is still open");
+        }
         var target = path == null ? Path : System.IO.Path.GetFullPath(path);
         foreach (var prefab in Prefabs.Documents.Where(d => d.IsDirty))
         {

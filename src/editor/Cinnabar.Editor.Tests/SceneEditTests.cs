@@ -78,6 +78,38 @@ public sealed class SceneEditTests : IDisposable
     }
 
     [Fact]
+    public void SaveIsRefusedWhileAnEditIsOpen()
+    {
+        using var shell = NewShell();
+        var save = shell.Commands.Get(EditorCommands.Save);
+        var saveAs = shell.Commands.Get(EditorCommands.SaveAs);
+        var path = shell.Scene!.Path;
+        var file = File.ReadAllText(path);
+        var invalidated = 0;
+        save.Changed += () => invalidated++;
+
+        var edit = shell.TryBeginEdit("Move Door", "the gizmo")!;
+        edit.Preview(new Rename(1, "Dragged"));
+        Assert.True(invalidated > 0);
+        Assert.False(save.CanExecute);
+        Assert.False(saveAs.CanExecute);
+        Assert.False(save.Execute());
+        // A save that comes another way, as the close prompt's, is refused with the owner.
+        Assert.False(shell.SaveScene());
+        Assert.Contains(shell.Console.Lines, l => l.Level == LogLevel.Warning && l.Text.Contains("cannot save") && l.Text.Contains("the gizmo") && l.Text.Contains("\"Move Door\""));
+        Assert.Equal(file, File.ReadAllText(path));
+
+        invalidated = 0;
+        edit.Cancel();
+        Assert.True(invalidated > 0);
+        Assert.True(save.CanExecute);
+        Assert.True(saveAs.CanExecute);
+        Assert.False(shell.Scene.IsDirty);
+        Assert.Equal("Door", Name(shell));
+        Assert.Equal(file, File.ReadAllText(path));
+    }
+
+    [Fact]
     public void PlayDuringAScrubCommitsItAndTheScrubEndsQuietly()
     {
         using var shell = NewShell();
