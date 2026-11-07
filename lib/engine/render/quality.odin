@@ -60,7 +60,13 @@ Reflection_Technique :: enum u8 {
 	// Local reflection probes, looked up through the light clusters, with the sky's cubemap where none counts (see
 	// docs/rendering/lighting-and-shadows.md#reflection-probes).
 	Probes,
+	// Stochastic screen-space reflections, which march the depth buffer and take last frame's lit scene where they hit,
+	// in front of the probes, which fill in where they miss (see
+	// docs/rendering/lighting-and-shadows.md#screen-space-reflections).
+	Screen,
 }
+
+#assert(int(Reflection_Technique.Probes) == 1 && int(Reflection_Technique.Screen) == 2)
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
@@ -165,14 +171,14 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 }
 
 // preset_quality is every feature at a preset's level, with traced shadows and the world probes from High up where the
-// device has ray queries, and the reflection probes at Low. Custom gives High's.
+// device has ray queries, the reflection probes at Low, and the screen-space reflections above it. Custom gives High's.
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	return {
 		shadows = {level = level, ray_traced = caps.ray_query && level >= .High, virtual = level >= .Medium},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = caps.ray_query && level >= .High ? .Split_Cascades : .Screen_Cascades, level = level},
-		reflections = {technique = level == .Low ? .Probes : .Off, level = level},
+		reflections = {technique = level == .Low ? .Probes : .Screen, level = level},
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,

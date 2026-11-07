@@ -332,7 +332,8 @@ reflection_probe_memory :: proc(params: Reflection_Params) -> u64 {
 // begin_reflection_probes readies the frame's probes, after begin_sky_cube and before the shadows, which give the
 // capture its shadow view, and the scene's constants, which take the records and the capture's views: it extracts the
 // probes, gives them their slots, plans the capture's share of this frame, and uploads the records of the probes that
-// have a cube. Without the Probes technique, the cubes are freed.
+// have a cube. The probes run with every technique but Off, with the Probes technique's parameters at the level: the
+// screen-space reflections fall back to them. With Off, the cubes are freed.
 @(private)
 begin_reflection_probes :: proc(
 	f: ^Frame,
@@ -344,7 +345,7 @@ begin_reflection_probes :: proc(
 	r := f.renderer
 	rp := &r.reflection_probes
 	rp.stats = {}
-	if settings.off || settings.technique != .Probes {
+	if settings.off || settings.technique == .Off {
 		if rp.made {
 			destroy_reflection_probe_textures(rp, r)
 		}

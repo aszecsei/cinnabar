@@ -577,6 +577,13 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	testing.expect_value(t, run.frame.records[0].center, [3]f32{0, 1.5, 0})
 	testing.expect_value(t, run.frame.records[0].projection, [3]f32{3, 1.5, 4})
 
+	// The screen-space reflections keep the probes at the same level, with the probes' parameters, which fill in where
+	// the rays find nothing: the cube stays.
+	run = run_probe_frame(t, r, &cache, w, {technique = .Screen, level = .Medium})
+	testing.expect(t, !run.frame.capturing)
+	testing.expect_value(t, len(run.frame.records), 1)
+	testing.expect_value(t, rp.params, REFLECTION_PARAMS[.Probes][.Medium])
+
 	// A level of another size starts over, and Off frees the cubes.
 	run = run_probe_frame(t, r, &cache, w, {technique = .Probes, level = .Ultra})
 	testing.expect(t, run.frame.capturing && run.frame.finish)

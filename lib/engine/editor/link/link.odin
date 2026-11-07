@@ -571,6 +571,7 @@ Debug_View :: enum u8 {
 	Shadow_Virtual,
 	Roughness,
 	Reflection_Probes,
+	Reflections,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.

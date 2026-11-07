@@ -29,29 +29,49 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 }
 
-// Low takes the reflection probes, and the other presets have the reflections off, at their levels, until their own
-// techniques come.
+// Low takes the reflection probes, and the other presets the screen-space reflections, at their levels, on any device:
+// the traced reflections are not there yet to take High and Ultra with ray queries.
 @(test)
-the_reflection_probes_are_lows_reflections :: proc(t: ^testing.T) {
+low_takes_the_probes_and_the_others_the_screen_reflections :: proc(t: ^testing.T) {
 	for caps in ([]Caps{{}, {ray_query = true}}) {
 		for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
 			q := preset_quality(preset, caps)
-			technique := preset == .Low ? Reflection_Technique.Probes : .Off
+			technique := preset == .Low ? Reflection_Technique.Probes : .Screen
 			testing.expect_value(t, q.reflections, Reflection_Quality{technique, Quality_Level(u8(preset))})
 			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
 			testing.expect_value(t, quality_preset(q, caps), preset)
 			settings: Frame_Settings
 			apply_quality(&settings, q)
-			testing.expect_value(t, settings.reflections.off, technique == .Off)
+			testing.expect(t, !settings.reflections.off)
 			testing.expect_value(t, settings.reflections.level, q.reflections.level)
 			testing.expect_value(t, settings.reflections.technique, technique)
 		}
 	}
 	testing.expect_value(t, Quality{}.reflections.technique, Reflection_Technique.Off)
-	// The probes run at any level, on any device.
-	q := preset_quality(.Ultra, {})
-	q.reflections.technique = .Probes
-	testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{.Probes, .Ultra})
+	settings: Frame_Settings
+	apply_quality(&settings, Quality{})
+	testing.expect(t, settings.reflections.off)
+	// Both run at any level, on any device.
+	for technique in ([]Reflection_Technique{.Probes, .Screen}) {
+		q := preset_quality(.Ultra, {})
+		q.reflections.technique = technique
+		testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{technique, .Ultra})
+	}
+}
+
+// The screen-space reflections' levels go from half resolution and one short ray to full resolution and two long ones,
+// and take rougher surfaces at each.
+@(test)
+the_screen_reflections_levels_grow :: proc(t: ^testing.T) {
+	for level in Quality_Level {
+		p := REFLECTION_PARAMS[.Screen][level]
+		testing.expect_value(t, p.half, level <= .Medium)
+		testing.expect(t, p.rays >= 1 && p.rays <= 2 && p.steps > 0 && p.cutoff > 0 && p.cutoff <= 1)
+		if level > .Low {
+			before := REFLECTION_PARAMS[.Screen][Quality_Level(u8(level) - 1)]
+			testing.expectf(t, p.steps > before.steps && p.cutoff > before.cutoff, "%v takes no more than %v", level, Quality_Level(u8(level) - 1))
+		}
+	}
 }
 
 @(test)
