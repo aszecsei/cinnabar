@@ -1,0 +1,4 @@
+material_instance 1
+# The room's floor: the checker, polished, so it shows the room's reflection probe.
+parent = $f7eadea8bd278c0ae71b61b681352a82
+roughness = 0.08

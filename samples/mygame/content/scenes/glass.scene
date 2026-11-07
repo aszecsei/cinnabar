@@ -1,9 +1,10 @@
 # The transparency sample, which F7 in mygame switches to: tinted glass boxes that pass through each other and through
 # an opaque pillar, with moment-based transparency on the left and sorted draws on the right, nested glass spheres
 # around a gold one, an additive hologram behind them, a Particle_System whose smoke rises beside the glass and drifts
-# through it while its sparks bounce on the floor, and a spinner that draws a ribbon trail (see
+# through it while its sparks bounce on the floor, and a spinner that draws a ribbon trail and carries a lamp (see
 # docs/rendering/particles.md#particles), under an atmosphere's sky whose sun is the Sun's light (see
-# docs/rendering/sky.md#sky). The editor writes this file; see docs/editor.md#scenes.
+# docs/rendering/sky.md#sky). At the Low quality, two reflection probes overlap over the glass, the sorted side's
+# Realtime, so it follows the spinning lamp (see docs/rendering/lighting-and-shadows.md#reflection-probes). The editor writes this file; see docs/editor.md#scenes.
 scene 2
 
 entity 0c5c7fd0a6a3a450
@@ -133,6 +134,20 @@ component 52 Particle_System
 	paused = false
 	rate_scale = 1
 
+entity 7a1b2c3d4e5f6073
+name = "Spinning Lamp"
+parent = @7a1b2c3d4e5f6071
+component 1 Transform
+	position = [2516582400023488102, 30198989, -1677722]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 2 Local_Transform
+	offset = [0, 0.3, -0.6]
+component 35 Point_Light
+	color = [0.4, 0.7, 1]
+	intensity = 3
+	range = 5
+
 entity 8d116ece1738f7d9
 name = "Sorted Pillar"
 component 1 Transform
@@ -164,6 +179,27 @@ component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $a120bc6f08344b128690c05eac5a2125
 	cast_shadows = true
+
+entity c1d2e3f4a5b60718
+name = "Moments Probe"
+component 1 Transform
+	position = [2516582400005033165, 16777216, 16777216]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 54 Reflection_Probe
+	extent = [2.5, 2, 4]
+	blend_distance = 1
+
+entity c1d2e3f4a5b60719
+name = "Sorted Probe"
+component 1 Transform
+	position = [2516582400048653926, 16777216, 16777216]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 54 Reflection_Probe
+	extent = [2.5, 2, 4]
+	blend_distance = 1
+	update = Realtime
 
 entity d23f0824128b2f33
 name = "Lamp"
