@@ -116,10 +116,8 @@ Post :: struct {
 	unit_exposure:  gpu.Buffer,
 	histogram_bins: gpu.Buffer,
 	lut:            gpu.Texture,
-	// What the lookup table was last baked from, and the shader's version then.
-	lut_grading:    Grading,
-	lut_version:    u32,
-	lut_baked:      bool,
+	// What the lookup table holds, from the last frame that baked it and executed, or nil before.
+	lut_bake:       Maybe(Lut_Bake),
 	// Counts the frames with temporal AA, for the jitter.
 	jitter_index:   u32,
 	last_time:      f64,
@@ -138,6 +136,13 @@ Grading :: struct {
 	hdr:         bool,
 	paper_white: f32,
 	peak:        f32,
+}
+
+// Lut_Bake is what a bake of the lookup table was from: the grading and the shader's version.
+@(private)
+Lut_Bake :: struct {
+	grading: Grading,
+	version: u32,
 }
 
 // Post_Frame is what one frame's post passes need, in frame memory.
@@ -176,6 +181,10 @@ Post_Frame :: struct {
 	bloom_up:         [BLOOM_LEVELS]Texture,
 	bloom_sizes:      [BLOOM_LEVELS][2]u32,
 	grading:          Grading,
+	// What the lookup table holds for this frame's passes: this frame's bake, or the last one, or nil. baked is whether
+	// this frame bakes it.
+	lut:              Maybe(Lut_Bake),
+	baked:            bool,
 	// In HDR output, the UI's white in nits, which the output pass scales it to.
 	paper_white:      f32,
 	// A debug view that is not shaded is in the scene, which the output pass only encodes, and the tone mapping is off.
@@ -323,7 +332,7 @@ post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	platform.gpu_destroy_texture(p.lut)
-	p.lut, p.lut_baked = {}, false
+	p.lut, p.lut_bake = {}, nil
 	spatial_aa_destroy(&p.spatial, platform)
 	upscalers_destroy(&p.upscalers, platform)
 }
@@ -412,6 +421,27 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	p.last_time = now
 	f.exposure = import_buffer(f.graph, p.exposure)
 	f.lut = import_texture(f.graph, p.lut, .Storage)
+	pf.lut = p.lut_bake
+}
+
+// lut_ready is whether the frame's output passes tone map with the lookup table: it was baked this frame or before.
+@(private)
+lut_ready :: proc(f: ^Frame) -> bool {
+	return f.post != nil && f.post.lut != nil
+}
+
+// commit_post keeps what the frame's post passes did: the exposure has adapted, and the lookup table holds its bake.
+@(private = "file")
+commit_post :: proc(data: rawptr) {
+	f := (^Frame)(data)
+	p := &f.renderer.post
+	pf := f.post
+	if pf.exposure {
+		p.adapted = true
+	}
+	if pf.baked {
+		p.lut_bake = pf.lut
+	}
 }
 
 // add_post_passes adds the post passes after the world and the before_post hook: temporal AA, whose history becomes
@@ -425,6 +455,7 @@ add_post_passes :: proc(f: ^Frame) {
 	g := f.graph
 	platform := r.platform
 	s := pf.settings
+	on_executed(g, commit_post, f)
 
 	add_post_effects(f, .Before_Temporal_Aa)
 	if pf.temporal {
@@ -448,7 +479,6 @@ add_post_passes :: proc(f: ^Frame) {
 
 	if pf.exposure {
 		pf.reset = !p.adapted
-		p.adapted = true
 		pf.background = sky_draws(f)
 		pf.histogram = import_buffer(g, p.histogram_bins)
 		if pf.exposure_auto {
@@ -514,11 +544,12 @@ add_post_passes :: proc(f: ^Frame) {
 		pf.grading.hdr, pf.grading.peak, pf.grading.paper_white = true, peak, min(paper_white, peak)
 		pf.paper_white = pf.grading.paper_white
 	}
-	stale := !p.lut_baked || pf.grading != p.lut_grading || p.tone_lut.version != p.lut_version
-	if stale && pipeline_ready(platform, &p.tone_lut) {
+	bake := Lut_Bake{pf.grading, p.tone_lut.version}
+	if last, has_last := p.lut_bake.?;
+	   (!has_last || last != bake) && pipeline_ready(platform, &p.tone_lut) {
 		pass := add_compute_pass(g, "tone mapping lut", run_tone_lut, f)
 		write(g, pass, f.lut)
-		p.lut_baked, p.lut_grading, p.lut_version = true, pf.grading, p.tone_lut.version
+		pf.lut, pf.baked = bake, true
 	}
 	add_spatial_aa(f)
 }

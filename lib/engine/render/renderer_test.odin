@@ -29,6 +29,8 @@ Hook_Record :: struct {
 	// The exposure's histogram counts the background, which the sky drew.
 	sky_background:                                     bool,
 	temporal, upscaled, display:                        bool,
+	// The frame bakes the lookup table, and the sky's cubemap captures.
+	baked, sky_capture:                                 bool,
 	size, output_size, scene_size:                      [2]u32,
 	world_pieces:                                       int,
 	shadow_views:                                       int,
@@ -210,6 +212,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.reflections, rec.traced = f.reflections != 0, f.ssr != nil && f.ssr.traced != nil
 				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
+				rec.baked, rec.sky_capture = f.post.baked, f.sky_cube != nil && f.sky_cube.capture
 				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
 				// The editor's tools read the IDs and the depth after the debug lines.
 				p := add_compute_pass(f.graph, "pick", proc(_: ^Pass_Context) {}, nil)
@@ -319,15 +322,28 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	// their blue noise.
 	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
 	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	// A frame that does not execute changes nothing that its GPU work would have: the lookup table is not baked, the
+	// exposure has not adapted, the sky's cubemap and the split cascades' storage are as new, and the frames after
+	// start over as if it had not been.
+	platform.gpu_submit = fail_submit
+	testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
+	platform.gpu_submit = null.submit
+	testing.expect(t, record.baked && record.sky_capture, "the failed frame had no work to lose")
+	testing.expect(t, r.post.lut_bake == nil, "the failed frame baked the lookup table")
+	testing.expect(t, !r.post.adapted, "the failed frame adapted the exposure")
+	testing.expect(t, !r.sky.cube.ring.valid, "the failed frame made the sky's cubemap")
+	testing.expect(t, r.gi.split.slots == {} || r.gi.split.fresh, "the failed frame cleared the split cascades' storage")
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky && record.reflections)
 		testing.expect(t, record.sky_background, "the histogram does not count the sky")
 		testing.expect_value(t, record.history_valid, i > 0)
-		testing.expect(t, r.post.lut_baked)
+		testing.expect_value(t, record.baked, i == 0)
+		testing.expect_value(t, record.sky_capture, i == 0)
+		testing.expect(t, r.post.lut_bake != nil && r.post.adapted)
 		testing.expect(t, r.ray_scene.accel != {} && r.residency.accels, "the traced shadows did not request the ray scene")
 		// The first frame makes the sky's whole cubemap, from the atmosphere's tables.
-		testing.expect(t, r.sky.cube.valid && r.sky.cube.key.source == .Atmosphere)
+		testing.expect(t, r.sky.cube.ring.valid && r.sky.cube.ring.key.source == .Atmosphere)
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
@@ -510,9 +526,11 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		mode := gpu.output_mode(request, {})
 		testing.expect_value(t, platform.gpu_output().format, gpu.output_format(mode))
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
-		testing.expect_value(t, r.post.lut_grading.hdr, mode != .Sdr)
-		testing.expect_value(t, r.post.lut_grading.paper_white, mode != .Sdr ? DEFAULT_PAPER_WHITE : 0)
-		testing.expect_value(t, r.post.lut_grading.peak, mode != .Sdr ? DEFAULT_PEAK : 0)
+		bake, baked := r.post.lut_bake.?
+		testing.expect(t, baked)
+		testing.expect_value(t, bake.grading.hdr, mode != .Sdr)
+		testing.expect_value(t, bake.grading.paper_white, mode != .Sdr ? DEFAULT_PAPER_WHITE : 0)
+		testing.expect_value(t, bake.grading.peak, mode != .Sdr ? DEFAULT_PEAK : 0)
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 

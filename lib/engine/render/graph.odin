@@ -77,6 +77,15 @@ Pass_Context :: struct {
 // Each piece of a render pass starts with nothing bound, so it binds its own pipeline and constants.
 Pass_Proc :: #type proc(ctx: ^Pass_Context)
 
+// Commit_Proc changes state that lasts across frames to say that the frame's GPU work ran (see on_executed).
+Commit_Proc :: #type proc(data: rawptr)
+
+@(private)
+Commit :: struct {
+	commit: Commit_Proc,
+	data:   rawptr,
+}
+
 // Graph holds one frame's passes and resources in frame memory. Declare the passes in execution order, then call execute.
 Graph :: struct {
 	platform:  ^core.Platform_API,
@@ -85,6 +94,7 @@ Graph :: struct {
 	textures:  [dynamic]Texture_Node,
 	buffers:   [dynamic]Buffer_Node,
 	passes:    [dynamic]Pass_Node,
+	commits:   [dynamic]Commit,
 }
 
 // State is what a resource's last uses did. Buffers have no layout, so theirs stays Undefined.
@@ -189,7 +199,16 @@ begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache) -> Graph {
 		textures = make([dynamic]Texture_Node, allocator),
 		buffers = make([dynamic]Buffer_Node, allocator),
 		passes = make([dynamic]Pass_Node, allocator),
+		commits = make([dynamic]Commit, allocator),
 	}
+}
+
+// on_executed adds a commit, which execute runs after it submits the whole frame, in the order they were added. State
+// that the frame's GPU work makes, such as a built structure or a baked table, changes in a commit, never while the
+// passes are declared or recorded: a frame that fails runs no commit, so the next frame does the work again (see
+// docs/gpu/render-graph.md#commits). data must live until execute returns, as frame memory does.
+on_executed :: proc(g: ^Graph, commit: Commit_Proc, data: rawptr) {
+	append(&g.commits, Commit{commit, data})
 }
 
 // import_texture adds a texture that outlives the frame. Between frames, the texture is in the layout of
@@ -239,8 +258,8 @@ History :: struct {
 // history_texture adds a pair of textures that the graph's cache keeps between frames and swaps every frame, as
 // temporal passes need (see docs/gpu/render-graph.md#render-graph). A pass writes current in shaders, and the pass after it may
 // read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
-// Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history, or when
-// desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
+// Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history or did not
+// execute, or when desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
 // zero History when the cache has no room or the backend cannot create the textures.
 history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
 	current, previous, valid, ok := cache_history(g.cache, g.platform, desc)
@@ -408,14 +427,19 @@ Submission :: struct {
 	wait_for: gpu.Queues,
 }
 
-// execute records the graph and submits it. It returns false if recording or a submission failed.
-// Call it from the game's frame code or from a job: it waits for the recording jobs.
+// execute records the graph and submits it, then runs the commits (see on_executed) and marks the histories this frame
+// used as written. It returns false if recording or a submission failed, and then commits nothing, even when earlier
+// submissions went to the GPU. Call it from the game's frame code or from a job: it waits for the recording jobs.
 execute :: proc(g: ^Graph) -> bool {
 	submissions := record(g) or_return
 	profile.scope_text(&g.platform.profile, "Submit", .Render)
 	for s in submissions {
 		g.platform.gpu_submit(s.buffers[:], s.queue, s.wait_for) or_return
 	}
+	for c in g.commits {
+		c.commit(c.data)
+	}
+	cache_commit_frame(g.cache)
 	return true
 }
 

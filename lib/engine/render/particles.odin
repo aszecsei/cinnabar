@@ -78,7 +78,7 @@ Particle_Slot :: struct {
 	// The effect's blob version that the ranges are for, once started.
 	started:    bool,
 	version:    u32,
-	// Whether the effect's ranges are new this frame, so their particles start dead.
+	// Whether the effect's ranges are new, so their particles start dead, until a frame that resets them executes.
 	reset:      bool,
 	anchor:     ecs.World_Position,
 	// Seconds since the effect started, in the system's time.
@@ -309,6 +309,8 @@ Particle_Step :: struct {
 	modules:  [dynamic]format.Effect_Module,
 	curves:   [dynamic]format.Effect_Curve_Row,
 	capacity: int,
+	// The systems whose records reset their ranges, which stop resetting once the frame executes.
+	resets:   [dynamic]^Particle_Slot,
 }
 
 particles_init :: proc(p: ^Particles, w: ^ecs.World) {
@@ -460,6 +462,7 @@ new_particle_step :: proc(platform: ^core.Platform_API) -> ^Particle_Step {
 	step.emitters = make([dynamic]Emitter_Record, platform.frame_allocator)
 	step.modules = make([dynamic]format.Effect_Module, platform.frame_allocator)
 	step.curves = make([dynamic]format.Effect_Curve_Row, platform.frame_allocator)
+	step.resets = make([dynamic]^Particle_Slot, platform.frame_allocator)
 	return step
 }
 
@@ -579,7 +582,9 @@ step_slot :: proc(
 			step.capacity += int(rng.count)
 		}
 	}
-	slot.reset = false
+	if slot.reset {
+		append(&step.resets, slot)
+	}
 	slot.age = math.mod(slot.age + dt, 3600)
 	return
 }
@@ -630,6 +635,14 @@ finish_particles :: proc(f: ^Frame, step: ^Particle_Step, previous_view_projecti
 		near                     = f.view.near,
 	}
 	f.particles = pf
+	// The update resets the new systems' ranges. Until a frame does that and executes, each frame asks again.
+	if len(step.resets) > 0 {
+		on_executed(f.graph, proc(data: rawptr) {
+				for slot in (^Particle_Step)(data).resets {
+					slot.reset = false
+				}
+			}, step)
+	}
 }
 
 // begin_preview_particles steps an effect preview's system, after the preview's frame began its sprites: the effect at

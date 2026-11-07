@@ -29,8 +29,8 @@ Cache_Entry :: struct {
 	last_used:  u64,
 }
 
-// History_Entry is a history texture's pair (see history_texture). textures[current] is the one written in the frame
-// that last used it.
+// History_Entry is a history texture's pair (see history_texture). textures[current] is the one that the frame that
+// last used it writes. written is the last frame that used it and executed, so its texture holds what that frame wrote.
 @(private)
 History_Entry :: struct {
 	textures:   [2]gpu.Texture,
@@ -38,6 +38,7 @@ History_Entry :: struct {
 	label_hash: u64,
 	current:    int,
 	last_used:  u64,
+	written:    u64,
 }
 
 // cache_destroy destroys every cached texture. Call it from the game's shutdown.
@@ -117,7 +118,8 @@ cache_acquire :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 }
 
 // cache_history returns the history texture of a label for this frame: the texture to write and the one that holds
-// last frame's contents, which are valid only if the history was used in the last frame with the same description.
+// last frame's contents, which are valid only if the history was used in the last frame with the same description, and
+// that frame executed.
 // A new description, as a new view size gives, makes the pair again. It returns ok false when every history is in use
 // or the backend cannot create the textures.
 @(private)
@@ -140,7 +142,7 @@ cache_history :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 	if entry != nil {
 		assert(entry.last_used != cache.frame, "render: a history texture is used twice in a frame")
 		if entry.desc == key {
-			valid = entry.last_used == cache.frame - 1
+			valid = entry.written == cache.frame - 1
 			entry.current = 1 - entry.current
 			entry.last_used = cache.frame
 			return entry.textures[entry.current], entry.textures[1 - entry.current], valid, true
@@ -166,6 +168,16 @@ cache_history :: proc(cache: ^Texture_Cache, platform: ^core.Platform_API, desc:
 		return
 	}
 	return textures[0], textures[1], false, true
+}
+
+// cache_commit_frame marks the histories that this frame used as written. execute calls it once the frame is submitted.
+@(private)
+cache_commit_frame :: proc(cache: ^Texture_Cache) {
+	for &entry in cache.histories {
+		if entry.textures[0] != {} && entry.last_used == cache.frame {
+			entry.written = cache.frame
+		}
+	}
 }
 
 @(private = "file")

@@ -201,7 +201,7 @@ the_sky_cube_builds_a_mip_a_frame_and_blends_in :: proc(t: ^testing.T) {
 		run = run_sky_cube_frame(t, r, &cache, atmosphere, .High, day)
 		free_all(platform.frame_allocator)
 	}
-	testing.expect(t, c.key.source == .Atmosphere || c.build_key.source == .Atmosphere)
+	testing.expect(t, c.ring.key.source == .Atmosphere || c.ring.build_key.source == .Atmosphere)
 	// A texture sky whose texture is not resident takes the ambient light.
 	texture := flat
 	texture.mode, texture.texture_intensity = .Texture, 1
@@ -209,8 +209,8 @@ the_sky_cube_builds_a_mip_a_frame_and_blends_in :: proc(t: ^testing.T) {
 		run = run_sky_cube_frame(t, r, &cache, texture, .High, day)
 		free_all(platform.frame_allocator)
 	}
-	testing.expect_value(t, c.key.source, Sky_Cube_Source.Ambient)
-	testing.expect(t, c.key.ambient == day)
+	testing.expect_value(t, c.ring.key.source, Sky_Cube_Source.Ambient)
+	testing.expect(t, c.ring.key.ambient == day)
 
 	// Another level's size starts over: every mip, at once.
 	run = run_sky_cube_frame(t, r, &cache, flat, .Low, day)
@@ -250,7 +250,9 @@ an_atmosphere_without_its_tables_captures_the_ambient_light :: proc(t: ^testing.
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test"})
 	}
 	defer sky_cube_destroy(c, r)
-	g: Graph
+	g := Graph {
+		commits = make([dynamic]Commit, platform.frame_allocator),
+	}
 	f := Frame {
 		renderer = r,
 		graph    = &g,
@@ -265,5 +267,7 @@ an_atmosphere_without_its_tables_captures_the_ambient_light :: proc(t: ^testing.
 	begin_sky_cube(&f, s, .Medium, ambient)
 	testing.expect(t, f.sky_cube != nil && f.sky_cube.capture)
 	testing.expect_value(t, f.sky_cube.source, Sky_Cube_Source.Ambient)
-	testing.expect(t, c.key.ambient == ambient)
+	// The ring takes the capture's key only when the frame executes.
+	testing.expect(t, f.sky_cube.next.key.ambient == ambient)
+	testing.expect(t, !c.ring.valid)
 }

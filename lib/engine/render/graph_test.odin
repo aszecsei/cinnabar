@@ -648,9 +648,12 @@ history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc
 		p = add_render_pass(&g, "output", nothing)
 		read(&g, p, h.current)
 		color(&g, p, target, .Clear)
-		subs, ok := record(&g)
-		testing.expect(t, ok)
-		testing.expect(t, null.submit(all_buffers(subs)))
+		ok := execute(&g)
+		testing.expect(
+			t,
+			ok == (f.platform.gpu_submit == null.submit),
+			"a frame executed, or did not, against its submit",
+		)
 		null.end_frame()
 		current, previous, valid = gpu_texture(&g, h.current), gpu_texture(&g, h.previous), h.valid
 		virtual.arena_free_all(&f.arena)
@@ -676,4 +679,49 @@ history_textures_swap_every_frame_and_start_over_when_skipped_or_resized :: proc
 	// A new size makes the pair again.
 	_, _, valid5 := frame(t, &f, {32, 32})
 	testing.expect(t, !valid5, "a new size clears the history")
+	_, _, valid6 := frame(t, &f, {32, 32})
+	testing.expect(t, valid6)
+	// A frame that does not execute wrote nothing, so the frame after it has no history.
+	f.platform.gpu_submit = fail_submit
+	_, _, valid7 := frame(t, &f, {32, 32})
+	testing.expect(t, valid7, "the failed frame read a valid history")
+	f.platform.gpu_submit = null.submit
+	_, _, valid8 := frame(t, &f, {32, 32})
+	testing.expect(t, !valid8, "a frame after one that failed read its history")
+	_, _, valid9 := frame(t, &f, {32, 32})
+	testing.expect(t, valid9)
+}
+
+// fail_submit stands in for a submission that fails, as a lost device's does.
+@(private)
+fail_submit :: proc(
+	buffers: []gpu.Command_Buffer,
+	queue := gpu.Queue.Graphics,
+	wait_for := gpu.Queues{},
+) -> bool {
+	return false
+}
+
+@(test)
+commits_run_only_when_the_frame_executes :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	f: Fixture
+	setup(t, &f)
+	defer teardown(&f)
+
+	count := 0
+	submits := []type_of(f.platform.gpu_submit){null.submit, fail_submit, null.submit}
+	expected := []int{1, 1, 2}
+	for submit, i in submits {
+		f.platform.gpu_submit = submit
+		g := begin(&f.platform, &f.cache)
+		target := import_texture(&g, null.frame_target(), .Color)
+		p := add_render_pass(&g, "output", nothing)
+		color(&g, p, target, .Clear)
+		on_executed(&g, proc(data: rawptr) {(^int)(data)^ += 1}, &count)
+		testing.expect_value(t, execute(&g), submit == null.submit)
+		testing.expectf(t, count == expected[i], "frame %d: %d commits ran", i, count)
+		null.end_frame()
+		virtual.arena_free_all(&f.arena)
+	}
 }

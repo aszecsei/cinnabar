@@ -214,18 +214,18 @@ Gi_Split :: struct {
 	surfaces:     gpu.Buffer,
 	rays:         gpu.Buffer,
 	ray_capacity: int,
+	// Where the tables were last keyed, as of the last frame that executed.
 	windows:      [MAX_SPLIT_LEVELS]Split_Window,
 	// The frames that each cascade's probes live without a ray (see split_lifetime).
 	lifetimes:    [MAX_SPLIT_CASCADES]u32,
-	// Whether the storage is new since the last frame, so its slots and accumulators must be cleared.
+	// Whether the storage is new since the last frame that executed, so its slots and accumulators must be cleared.
 	fresh:        bool,
 	frame:        u32,
-	// The counters' copies, whether each holds a frame's that has not been read, the next copy to write, whether this
-	// frame wrote one, whether the split ran last frame, and the last stats that came back.
+	// The counters' copies, whether each holds a frame's that has not been read, the next copy to write, whether the
+	// split ran last frame, and the last stats that came back.
 	stats_copies:  [SPLIT_STATS_COPIES]gpu.Buffer,
 	stats_written: [SPLIT_STATS_COPIES]bool,
 	stats_next:    int,
-	stats_copying: bool,
 	ran:           bool,
 	last_stats:    Gi_Split_Stats,
 	// Whether the last frame that wanted the split cascades had them, for note_split_fallback.
@@ -239,6 +239,8 @@ Gi_Split_Frame :: struct {
 	grid:      Split_Grid,
 	upload:    gpu.Upload,
 	fresh:     bool,
+	// The windows as this frame keys the tables, which commit_gi_split keeps.
+	windows:   [MAX_SPLIT_LEVELS]Split_Window,
 	slots:     Buffer,
 	deposits:  Buffer,
 	index:     Buffer,
@@ -313,14 +315,13 @@ read_gi_split_stats :: proc(r: ^Renderer) {
 	}
 }
 
-// finish_gi_split_stats moves on to the next copy, once the frame has copied into this one.
-@(private)
-finish_gi_split_stats :: proc(r: ^Renderer) {
-	s := &r.gi.split
-	if !s.stats_copying {
-		return
-	}
-	s.stats_copying = false
+// commit_gi_split keeps what the frame's split passes did: the storage is cleared, the tables are keyed to the frame's
+// windows, and the counters' copy is written, so the next frame copies into the one after it.
+@(private = "file")
+commit_gi_split :: proc(data: rawptr) {
+	sf := (^Gi_Split_Frame)(data)
+	s := &sf.frame.renderer.gi.split
+	s.fresh, s.windows, s.ran = false, sf.windows, true
 	s.stats_written[s.stats_next] = true
 	s.stats_next = (s.stats_next + 1) % SPLIT_STATS_COPIES
 }
@@ -606,8 +607,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	s := &r.gi.split
 	g := f.graph
 	sf := new(Gi_Split_Frame, platform.frame_allocator)
-	sf.frame, sf.upload, sf.fresh = f, upload, s.fresh
-	s.fresh = false
+	sf.frame, sf.upload, sf.fresh, sf.windows = f, upload, s.fresh, s.windows
 	sf.slots = import_buffer(g, s.slots)
 	sf.deposits = import_buffer(g, s.deposits)
 	sf.index = import_buffer(g, s.index)
@@ -629,7 +629,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	grid := &sf.grid
 	for l in 0 ..< int(params.levels) {
 		exponent := params.voxel + i32(l)
-		w := &s.windows[l]
+		w := &sf.windows[l]
 		delta := place_split_window(w, f.view.position, exponent)
 		min := split_window_min(w.anchor, f.view.position, exponent)
 		// A move of a whole window or more frees every probe, however far it went.
@@ -748,7 +748,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	declare_probe_reads(f, p)
 	declare_gather_specular(f, p)
 	add_split_stats_copy(f, sf)
-	s.ran = true
+	on_executed(g, commit_gi_split, sf)
 	return true
 }
 
@@ -779,7 +779,7 @@ note_split_fallback :: proc(f: ^Frame, ran: bool) {
 }
 
 // add_split_stats_copy copies the tables' counters to their next copy, after the merge, for read_gi_split_stats to
-// take once it is back.
+// take once it is back. commit_gi_split moves on to the copy after it.
 @(private = "file")
 add_split_stats_copy :: proc(f: ^Frame, sf: ^Gi_Split_Frame) {
 	s := &f.renderer.gi.split
@@ -798,7 +798,6 @@ add_split_stats_copy :: proc(f: ^Frame, sf: ^Gi_Split_Frame) {
 	}, sf, queue = .Compute)
 	copy_source(g, p, sf.counters)
 	copy_dest(g, p, copy)
-	s.stats_copying = true
 }
 
 @(private = "file")

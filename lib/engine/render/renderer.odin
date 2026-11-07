@@ -638,7 +638,6 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			}
 		}
 		finish_cull_stats(f)
-		finish_gi_split_stats(r)
 		finish_shading_stats(r)
 		finish_virtual_stats(r)
 	}
@@ -827,16 +826,18 @@ tone_map_inputs :: proc(f: ^Frame, g: ^Graph, push: ^Output_Push) {
 @(private)
 output_push :: proc(f: ^Frame, scene: gpu.Texture, mode: gpu.Output_Mode) -> Output_Push {
 	r := f.renderer
+	// The table as this frame's passes see it: baked this frame, or by a frame before.
+	bake, has_lut := f.post.lut.?
 	return {
 		size          = f.output_size,
 		scene         = gpu.read_index(scene),
 		lut           = gpu.read_index(r.post.lut),
-		has_lut       = u32(r.post.lut_baked),
+		has_lut       = u32(has_lut),
 		sampler_index = gpu.sampler_index(r.post.sampler),
 		scene_scale   = 1,
-		lut_hdr       = u32(r.post.lut_grading.hdr),
+		lut_hdr       = u32(bake.grading.hdr),
 		mode          = u32(mode),
 		// An SDR frame whose table is still HDR, until it is baked again, reads it with the paper white it was baked with.
-		paper_white   = f.post.paper_white > 0 ? f.post.paper_white : max(r.post.lut_grading.paper_white, 1),
+		paper_white   = f.post.paper_white > 0 ? f.post.paper_white : max(bake.grading.paper_white, 1),
 	}
 }
