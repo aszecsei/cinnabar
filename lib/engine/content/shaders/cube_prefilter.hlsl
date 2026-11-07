@@ -4,7 +4,8 @@
 // sampled at Hammersley points, each weighted by its cosine, and each sample reads the source's mip whose texels cover
 // about the solid angle that the sample stands for (Krivanek and Colbert's filtered importance sampling), so a small
 // bright light, such as the glow around the sun, does not leave fireflies. Roughness 0 is the source's mip 0 as it is.
-// The source is any sampled cube with its mip chain. A group's z is the face.
+// The source is any sampled cube with its mip chain. A group's z is the face, which the output takes at first_layer
+// and the five layers after it, so the output may be one cube of a cube array.
 #include "cinnabar.hlsli"
 #include "sky_directions.hlsli"
 
@@ -19,6 +20,7 @@ struct Cube_Prefilter_Push {
 	uint samples;
 	uint sampler_index;
 	float roughness;
+	uint first_layer;
 };
 CN_PUSH_CONSTANTS(Cube_Prefilter_Push, push);
 
@@ -44,8 +46,9 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	TextureCube<float4> source = cn_texture_cube(push.source);
 	SamplerState s = cn_sampler(push.sampler_index);
 	float3 n = cube_texel_direction(id.z, id.xy, push.face, 0.5);
+	uint3 out_texel = uint3(id.xy, push.first_layer + id.z);
 	if (push.roughness <= 0) {
-		cn_rw_texture_array(push.output)[id] = float4(source.SampleLevel(s, n, 0).rgb, 1);
+		cn_rw_texture_array(push.output)[out_texel] = float4(source.SampleLevel(s, n, 0).rgb, 1);
 		return;
 	}
 	float a = max(push.roughness * push.roughness, 2e-3);
@@ -75,5 +78,5 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		light += source.SampleLevel(s, l, lod).rgb * nl;
 		total += nl;
 	}
-	cn_rw_texture_array(push.output)[id] = float4(light / max(total, 1e-6), 1);
+	cn_rw_texture_array(push.output)[out_texel] = float4(light / max(total, 1e-6), 1);
 }

@@ -124,6 +124,14 @@ texture_views_write_a_cubes_mips :: proc(t: ^testing.T) {
 	testing.expect_value(t, create_texture_view({texture = views[2]}), gpu.Texture{})
 	destroy_texture(cube)
 	testing.expect_value(t, create_texture_view({texture = cube}), gpu.Texture{})
+
+	// A cube array's views write a mip of every cube.
+	array := create_texture({size = {16, 16}, layers = 12, cube = true, format = .RG11B10_Float, mip_count = 3, usage = {.Sampled, .Storage}}, nil)
+	testing.expect(t, array != {})
+	array_view := create_texture_view({texture = array, mip = 2})
+	testing.expect(t, array_view != {})
+	destroy_texture(array_view)
+	destroy_texture(array)
 }
 
 @(test)

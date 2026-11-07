@@ -29,7 +29,7 @@ Transparent and additive surfaces draw after the world pass, the background's fo
 
 **Lighting.** Transparent surfaces have the light clusters, the shadow maps, the fog volume and the GI. They have no prepass, so they do not read the ambient occlusion or the shadow mask:
 - A light with a channel of the mask does not shadow them (see [Shadows](lighting-and-shadows.md#shadows)).
-- The GI's diffuse light is read at the pixel, which is the light at the opaque surface behind them. Their specular light is their own: the sky's [cubemap](sky.md#specular-light) along their reflection, at their roughness, with or without the GI.
+- The GI's diffuse light is read at the pixel, which is the light at the opaque surface behind them. Their specular light is their own, along their reflection and at their roughness, with or without the GI: the [reflection probes](lighting-and-shadows.md#reflection-probes) of their cluster, then the sky's [cubemap](sky.md#specular-light) for what the probes leave. So a glass pane reflects along its own normal, not the wall behind it.
 - The fog dims their color and adds its light in front of them, as for an opaque surface. An additive surface adds no fog light, since the fog's light is already in the scene behind it.
 
 **The editor.**

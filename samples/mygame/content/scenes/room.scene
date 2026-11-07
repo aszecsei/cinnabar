@@ -1,7 +1,10 @@
 # The room scene, which F7 in mygame cycles to: a room built by hand as a mesh file, meshes/room.mesh, with white
 # walls, a checker floor, a red pillar and a green partition, lit by a quad light under the ceiling (see
 # docs/content/kinds/meshes.md#mesh-files). The room's mesh is its collider too, and three boxes fall onto its floor when
-# the world runs (see docs/physics/design.md#shapes). The camera stands inside, near the front wall. Positions are raw
+# the world runs (see docs/physics/design.md#shapes). A reflection probe's box reaches past the walls, so its fade ends
+# outside them, and its projection box is the walls', which lines the floor's reflections up with them at the Low
+# quality, which has the probes (see
+# docs/rendering/lighting-and-shadows.md#reflection-probes). The camera stands inside, near the front wall. Positions are raw
 # World_Position values in units of 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
@@ -50,13 +53,25 @@ component 1 Transform
 component 33 Mesh_Renderer
 	mesh = $3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d
 	materials.0 = $a120bc6f08344b128690c05eac5a2125
-	materials.1 = $f7eadea8bd278c0ae71b61b681352a82
+	materials.1 = $91a447da31664d7ca41f1cd7c4f48e1e
 	materials.2 = $cbeb3ff7d07840a7a816ea35868ee5b0
 	materials.3 = $0633d94a72554cf9947b0f8c9911055c
 	cast_shadows = true
 component 65 Collider
 	shape = Mesh
 	mesh = $3b7f2c9e4d1a4f6b8c0d2e4f6a8b0c1d
+
+entity b7d3a1c9e5f20846
+name = "Room Probe"
+component 1 Transform
+	position = [2516582400000000000, 25165824, 0]
+	rotation = [0, 0, 0, 1]
+	scale = [1, 1, 1]
+component 54 Reflection_Probe
+	extent = [3.5, 2, 4.5]
+	blend_distance = 0.25
+	box_projection = true
+	projection_extent = [3, 1.5, 4]
 
 entity f1a2b3c4d5e6f721
 name = "Falling Box 1"

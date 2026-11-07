@@ -788,7 +788,7 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 		}
 	}
 	if desc.layers > 0 || desc.cube {
-		if desc.depth > 0 || desc.layers > MAX_TEXTURE_LAYERS || (desc.cube && (desc.layers != 6 || desc.size.x != desc.size.y)) {
+		if desc.depth > 0 || desc.layers > MAX_TEXTURE_LAYERS || (desc.cube && (desc.layers < 6 || desc.layers % 6 != 0 || desc.size.x != desc.size.y)) {
 			return .Bad_Layers
 		}
 		// A layered texture's way in is a stream, whose data has every layer, or its shaders' writes.

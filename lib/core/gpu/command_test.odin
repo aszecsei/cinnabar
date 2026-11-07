@@ -1040,6 +1040,16 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	testing.expect_value(t, validate_texture_view({mip = 4}, storage_cube, false), Desc_Error.None)
 	testing.expect_value(t, validate_texture_view({mip = 5}, storage_cube, false), Desc_Error.Bad_Mip_Count)
 	testing.expect_value(t, validate_texture_view({}, storage_cube, true), Desc_Error.Bad_Usage)
+	// A cube array is a whole number of cubes, whose views write each mip of every cube.
+	cube_array := storage_cube
+	cube_array.layers = 18
+	testing.expect_value(t, validate_texture_desc(cube_array, nil), Desc_Error.None)
+	testing.expect_value(t, validate_texture_view({mip = 4}, cube_array, false), Desc_Error.None)
+	for layers in ([]u32{3, 8, 13}) {
+		bad = cube_array
+		bad.layers = layers
+		testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
+	}
 	testing.expect_value(t, validate_texture_view({}, cube, false), Desc_Error.Bad_Usage)
 	testing.expect_value(t, validate_texture_view({}, volume, false), Desc_Error.None)
 

@@ -570,6 +570,7 @@ Debug_View :: enum u8 {
 	Quad_Overdraw,
 	Shadow_Virtual,
 	Roughness,
+	Reflection_Probes,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -1053,6 +1054,12 @@ Game_Stats :: struct {
 	// The split cascades' tables a frame or two ago, a cascade each, none without them (see
 	// docs/rendering/global-illumination.md#split-cascades).
 	gi_cascades:      []Gi_Cascade_Stats,
+	// The reflection probes in the last frame, the slots whose probe has a cube, of the level's slots, 0 without the
+	// probes, and the faces that the frame captured (see docs/rendering/lighting-and-shadows.md#reflection-probes).
+	reflection_probes:         u32,
+	reflection_probe_slots:    u32,
+	reflection_probe_capacity: u32,
+	reflection_probe_faces:    u32,
 }
 
 // Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no

@@ -114,7 +114,9 @@ ambient_constants :: proc(a: Ambient) -> [4][4]f32 {
 	}
 }
 
-// Cluster_Constants matches Cluster_Constants in cluster_lights.hlsl.
+// Cluster_Constants matches Cluster_Constants in cluster_lights.hlsl. The view's axes turn positions relative to its
+// eye, which is relative to the camera, into view space. The reflection probes' records and their lists are 0 without
+// them (see reflection_probe_cluster_fields).
 Cluster_Constants :: struct {
 	right:         [4]f32,
 	up:            [4]f32,
@@ -132,7 +134,15 @@ Cluster_Constants :: struct {
 	indices:       u32,
 	counter:       u32,
 	capacity:      u32,
+	eye:           [3]f32,
+	probes:        u32,
+	probes_offset: u32,
+	probe_count:   u32,
+	probe_clusters: u32,
+	padding:       u32,
 }
+
+#assert(size_of(Cluster_Constants) == 144)
 
 // Lights is the lights' state between frames, in the Renderer: the extractors of the light components, and the
 // clusters' buffers, which grow with the frame's size.
@@ -170,8 +180,10 @@ Light_Frame :: struct {
 	rows:              u32,
 	slice_scale:       f32,
 	slice_bias:        f32,
-	// Whether the clusters are made this frame. Without them the forward pass skips the punctual lights.
+	// Whether the clusters are made this frame. Without them the forward pass skips the punctual lights. With
+	// binned_probes, they bin the reflection probes too.
 	clustered:         bool,
+	binned_probes:     bool,
 	constants:         gpu.Upload,
 	zero:              gpu.Upload,
 	clusters:          Buffer,
@@ -426,7 +438,8 @@ upload_lights :: proc(f: ^Frame) {
 	copy(lf.upload.data, ([^]byte)(raw_data(lf.records))[:len(lf.records) * size_of(Light_Record)])
 
 	sync_compute_pipeline(&l.pipeline, platform, r.residency.assets, {label = "cluster lights"}, r.reloaded)
-	if l.pipeline.pipeline == {} || len(lf.records) == lf.directional_count {
+	// The reflection probes are binned with the lights, so the clusters are made for them without punctual lights too.
+	if l.pipeline.pipeline == {} || (len(lf.records) == lf.directional_count && !has_reflection_probes(f)) {
 		return
 	}
 	cluster_count := int(lf.columns * lf.rows) * CLUSTER_SLICES
@@ -466,6 +479,7 @@ upload_lights :: proc(f: ^Frame) {
 	if !ok {
 		return
 	}
+	lf.binned_probes = reflection_probe_cluster_fields(f, &constants, cluster_count)
 	(^Cluster_Constants)(raw_data(lf.constants.data))^ = constants
 	lf.clustered = true
 }
@@ -498,6 +512,11 @@ add_cluster_passes :: proc(f: ^Frame) {
 	write(g, p, lf.counter)
 	write(g, p, lf.clusters)
 	write(g, p, lf.indices)
+	if lf.binned_probes {
+		pf := f.reflection_probes
+		pf.clusters = import_buffer(g, f.renderer.reflection_probes.clusters)
+		write(g, p, pf.clusters)
+	}
 }
 
 // projection_scale is a projection's x and y scales: a view-space x maps to x * scale.x / z in normalized device

@@ -115,8 +115,9 @@ Sky_Cube_Push :: struct {
 	sampler_index: u32,
 }
 
-// Cube_Prefilter_Push matches Cube_Prefilter_Push in cube_prefilter.hlsl.
-@(private = "file")
+// Cube_Prefilter_Push matches Cube_Prefilter_Push in cube_prefilter.hlsl. The output's faces start at its layer
+// first_layer, 0 for a cube, and a multiple of six for a cube of a cube array.
+@(private)
 Cube_Prefilter_Push :: struct {
 	source:        u32,
 	output:        u32,
@@ -126,6 +127,7 @@ Cube_Prefilter_Push :: struct {
 	samples:       u32,
 	sampler_index: u32,
 	roughness:     f32,
+	first_layer:   u32,
 }
 
 // Sky_Cube_Frame is what one frame's sky cubemap needs, in frame memory: what the readers sample, and this frame's
@@ -233,7 +235,8 @@ ensure_sky_cube :: proc(r: ^Renderer, params: Sky_Cube_Params) -> bool {
 	return true
 }
 
-@(private = "file")
+// make_sky_cube_texture makes a cube of params' faces and format, or a cube array of cubes, with mips and their views.
+@(private)
 make_sky_cube_texture :: proc(
 	t: ^Sky_Cube_Texture,
 	create: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture,
@@ -241,10 +244,11 @@ make_sky_cube_texture :: proc(
 	params: Sky_Cube_Params,
 	mips: u32,
 	label: string,
+	cubes: u32 = 1,
 ) -> bool {
 	desc := gpu.Texture_Desc {
 		size      = {params.face, params.face},
-		layers    = 6,
+		layers    = 6 * cubes,
 		cube      = true,
 		format    = params.format,
 		mip_count = mips,
@@ -422,7 +426,7 @@ sky_cube_reads :: proc(f: ^Frame) -> Sky_Cube_Reads {
 	return f.sky_cube != nil ? f.sky_cube.reads : {}
 }
 
-@(private = "file")
+@(private)
 cube_groups :: proc(face: u32) -> [3]u32 {
 	gs := groups({face, face}, SKY_CUBE_GROUP_SIZE)
 	gs.z = 6

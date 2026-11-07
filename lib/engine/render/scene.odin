@@ -170,6 +170,23 @@ Frame_Constants :: struct {
 	sky_cube_blend:             f32,
 	sky_cube_mips:              f32,
 	sky_cube_sampler:           u32,
+	// The reflection probes (see Reflection_Probe_Reads): their records in the upload ring at this offset of its
+	// buffer, how many, 0 without them, their lists in the light clusters, their cube array and its mips, and the
+	// roughnesses between which they fade out over the global illumination's specular light.
+	reflection_probes:            u32,
+	reflection_probes_offset:     u32,
+	reflection_probe_count:       u32,
+	reflection_probe_clusters:    u32,
+	reflection_probe_cubes:       u32,
+	reflection_probe_mips:        f32,
+	reflection_probe_rough_start: f32,
+	reflection_probe_rough_end:   f32,
+	// Whether this view is a face of a reflection probe's capture (see reflection_probes.odin), whose indirect light is
+	// the world probes', when they run, at their grid in the upload ring, or the Environment's.
+	capture:                      u32,
+	world_probes:                 u32,
+	world_probe_grid:             u32,
+	world_probe_grid_offset:      u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -510,7 +527,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 808 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 856 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1155,11 +1172,15 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if !has_items && f.fog == nil && voxels == nil {
 		return
 	}
-	// The voxel cones' views come after the shadow views (see Voxel_View).
+	// The voxel cones' views come after the shadow views (see Voxel_View), then a reflection probe capture's faces.
 	sf.view_count = FIRST_SHADOW_VIEW + len(shadows.views)
 	if voxels != nil {
 		voxels.first_view = sf.view_count
 		sf.view_count += len(voxels.views)
+	}
+	if probes := f.reflection_probes; probes != nil && probes.capturing {
+		probes.first_view = sf.view_count
+		sf.view_count += int(probes.face_count)
 	}
 	// With occlusion culling, the late view is one more, after the shadow views.
 	sf.occluding = has_items && occlusion_ready(f, f.no_occlusion)
@@ -1249,6 +1270,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	constants.sky_cube_current, constants.sky_cube_previous = cube.current, cube.previous
 	constants.sky_cube_blend, constants.sky_cube_mips = cube.blend, cube.mips
 	constants.sky_cube_sampler = gpu.sampler_index(r.post.sampler)
+	reflection_probe_constants(&constants, f)
 	if shadows.virtual.count > 0 {
 		virtual_constants(&constants, f)
 	}
@@ -1285,6 +1307,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 			c.view_projection = jitter_projection(c.view_projection, f.jitter)
 			c.jitter = f.jitter
 		case:
+			if face, is_probe := reflection_probe_view(f, v); is_probe {
+				reflection_probe_view_constants(f, &c, &views[v], face)
+				break
+			}
 			if voxels != nil && v >= voxels.first_view {
 				view := voxels.views[v - voxels.first_view]
 				voxel_view_constants(&c, view, voxels.params.res)
@@ -2248,7 +2274,8 @@ draw_scene_view :: proc(f: ^Frame, cb: ^gpu.Command_Buffer, view: int, pass: for
 	pushes := pass == .Forward || pass == .Transparent
 	push: Material_Push
 	if pushes {
-		push = material_push(f, pass, group)
+		_, is_probe := reflection_probe_view(f, view)
+		push = is_probe ? reflection_probe_push(f) : material_push(f, pass, group)
 	}
 	if pass != .Depth && pass != .Virtual_Depth && pass != .Voxelize {
 		gpu.cmd_set_stencil_reference(cb, view == VIEW_VIEW_MODEL ? VIEW_MODEL_STENCIL : 0)

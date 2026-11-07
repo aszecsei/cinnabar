@@ -6,7 +6,9 @@ import "core:log"
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
-MAX_CACHED_TEXTURES :: 64
+// A frame's transient textures each take one, since no two share a texture in a frame: about 35 for a frame at High,
+// about 50 with every feature on, and each of the editor's previews adds its own targets.
+MAX_CACHED_TEXTURES :: 128
 MAX_HISTORY_TEXTURES :: 16
 // A cached texture or history is destroyed after this many frames without use.
 CACHE_LIFETIME :: 8

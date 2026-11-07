@@ -109,6 +109,8 @@ Renderer :: struct {
 	shading:         Shading,
 	// The particle systems' pool and state (see docs/rendering/particles.md#particles).
 	particles:       Particles,
+	// The reflection probes' cubes, slots and capture (see reflection_probes.odin).
+	reflection_probes: Reflection_Probes,
 	// What the device can do, and the quality that the frames have unless Frame_Desc.quality replaces it (see
 	// set_quality).
 	caps:            Caps,
@@ -263,6 +265,8 @@ Frame :: struct {
 	sky_texture:              ^Sky_Texture_Frame,
 	// nil when the sky's cubemap has no textures (see sky_cube.odin).
 	sky_cube:                 ^Sky_Cube_Frame,
+	// nil without the reflection probes (see reflection_probes.odin).
+	reflection_probes:        ^Reflection_Probe_Frame,
 	// Frame_Desc.disable has occlusion culling, or the hierarchy over meshlets.
 	no_occlusion:             bool,
 	no_meshlet_hierarchy:     bool,
@@ -360,6 +364,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	sky_init(&r.sky)
 	sprites_init(&r.sprites)
 	particles_init(&r.particles, w)
+	reflection_probes_init(&r.reflection_probes, r, w)
 	post_init(&r.post, platform)
 }
 
@@ -384,6 +389,7 @@ renderer_reload :: proc(r: ^Renderer, platform: ^core.Platform_API, w: ^ecs.Worl
 	volume.register(&r.volumes, w)
 	lights_register(&r.lights, w)
 	particles_register(&r.particles, w)
+	reflection_probes_register(&r.reflection_probes, w)
 	// The effects' procedures were in the old code, so the game registers them again.
 	r.effect_count = 0
 	r.reloaded = true
@@ -408,6 +414,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	sprites_destroy(&r.sprites, r.platform)
 	shading_destroy(&r.shading, r.platform)
 	particles_destroy(&r.particles, r.platform)
+	reflection_probes_destroy(&r.reflection_probes, r)
 	post_destroy(&r.post, r.platform)
 	for &p in r.output_pipelines {
 		destroy_shader_pipeline(&p, r.platform)
@@ -480,8 +487,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	// The sky tints its sun's light before the shadows and the upload take the lights.
 	ambient := begin_sky(f, settings.sky)
 	begin_sky_cube(f, settings.sky, settings.reflections.level, ambient)
+	begin_reflection_probes(f, w, desc.hidden, settings.reflections, ambient)
 	assign_shadows(f)
 	upload_lights(f)
+	upload_reflection_probe_lights(f)
 	begin_fog(f, settings.fog)
 	begin_gi(f, settings.gi, ambient)
 	add_scene_passes(f, ambient)
@@ -526,6 +535,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_sky_passes(f)
 	add_sky_texture_passes(f)
 	add_sky_cube_passes(f)
+	add_reflection_probe_passes(f)
 
 	// The sky draws over the background after the world pass, so the clear is black under it.
 	draws_sky := sky_draws(f)
@@ -646,6 +656,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_sky_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
 	sync_particle_pipelines(r, force)
+	sync_reflection_probe_pipelines(r, force)
 	sync_compute_pipeline(&r.debug_view, r.platform, assets, {label = "debug view"}, force)
 	sync_compute_pipeline(&r.transparency_composite, r.platform, assets, {label = "transparency composite"}, force)
 	debug_desc := gpu.Graphics_Pipeline_Desc {

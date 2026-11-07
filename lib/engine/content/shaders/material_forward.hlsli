@@ -14,6 +14,8 @@
 #include "material_lighting.hlsli"
 #include "fog_at.hlsli"
 #include "sky_cube.hlsli"
+#include "material_reflections.hlsli"
+#include "gi_probes.hlsli"
 
 // The scene's HDR colors, pre-exposed, and the entity IDs that the editor picks from.
 struct Targets {
@@ -55,6 +57,26 @@ float3 frame_sky_specular(float3 d, float roughness) {
 	return sky_specular(c, frame.ambient, d, roughness);
 }
 
+// capture_indirect is a reflection probe's capture's indirect light (see docs/rendering/lighting-and-shadows.md#reflection-probes):
+// the world probes' where they run, and otherwise the ambient light along the normal and the sky's cubemap along the
+// reflection. A capture has no screen-space light of its own.
+Indirect capture_indirect(float3 p, float3 normal, float3 reflected, float roughness) {
+	Indirect indirect;
+	indirect.diffuse = ambient_light(frame.ambient, normal);
+	indirect.specular = frame_sky_specular(reflected, roughness);
+	if (frame.world_probes != 0) {
+		Probe_Grid grid = load_probe_grid(frame.world_probe_grid, frame.world_probe_grid_offset);
+		float3 light;
+		if (sample_probes(grid, p, normal, normal, false, light)) {
+			indirect.diffuse = light;
+		}
+		if (sample_probes(grid, p, normal, reflected, true, light)) {
+			indirect.specular = light;
+		}
+	}
+	return indirect;
+}
+
 // The colors of the directional lights' cascades, and beyond the last.
 static const float3 CASCADE_COLORS[5] = {float3(1, 0.3, 0.3), float3(0.3, 1, 0.3), float3(0.3, 0.5, 1), float3(1, 1, 0.3), float3(0.4, 0.4, 0.4)};
 
@@ -94,6 +116,13 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	if (debug_view == DEBUG_LOD_DEPTH) {
 		return heat((i.cluster >> MESHLET_DEPTH_SHIFT) / 8.0) * lambert;
 	}
+	if (debug_view == DEBUG_REFLECTION_PROBES) {
+		float weight;
+		int strongest;
+		float3 reflected = reflect(-inputs.view, inputs.normal);
+		reflection_probe_specular(i.world, i.position, reflected, 0, weight, strongest);
+		return (strongest < 0 ? float3(1, 0.1, 0.1) : hash_color(uint(strongest) + 1)) * lambert;
+	}
 #if SHADING_HAS_BASE_COLOR
 	if (debug_view == DEBUG_LIGHTING_ONLY) {
 		s.base_color = 0.5;
@@ -111,27 +140,38 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	if (!indirect_only && !fog_only) {
 		color += direct_light(s, p, inputs.normal, i.position);
 	}
-	// The global illumination's light, or without it the Environment's: its ambient light along the normal, and its sky's
-	// cubemap along the reflection at the surface's roughness. The ambient occlusion takes away from both. The occlusion
-	// is the opaque surfaces', from the prepass, so a transparent surface has none, and the global illumination's
-	// specular light is theirs too, so a transparent surface reflects the sky along its own normal.
+	// The global illumination's diffuse light, or without it the Environment's ambient light along the normal. The
+	// specular light along the reflection is the reflection probes', where they count, over the sky's cubemap's at the
+	// surface's roughness, or with the global illumination over its specular light, which keeps its dynamic occlusion on
+	// rough surfaces, where the probes fade out. The ambient occlusion takes away from both. The occlusion is the opaque
+	// surfaces', from the prepass, so a transparent surface has none, and the global illumination's specular light is
+	// theirs too, so a transparent surface reflects the probes and the sky along its own normal.
 #if MATERIAL_TRANSPARENT
 	float occlusion = 1;
 #else
 	float occlusion = saturate(load_screen(push.ambient_occlusion, i.position.xy).r);
 #endif
 	float3 reflected = reflect(-p.view, p.normal);
+	float roughness = shading_roughness(s);
 	Indirect indirect;
-	if (frame.gi != 0) {
-		indirect.diffuse = cn_texture(push.gi_diffuse).Load(int3(i.position.xy, 0)).rgb;
-#if MATERIAL_TRANSPARENT
-		indirect.specular = frame_sky_specular(reflected, shading_roughness(s));
-#else
-		indirect.specular = cn_texture(push.gi_specular).Load(int3(i.position.xy, 0)).rgb;
-#endif
+	if (frame.capture != 0) {
+		indirect = capture_indirect(p.position, p.normal, reflected, roughness);
 	} else {
-		indirect.diffuse = ambient_light(frame.ambient, p.normal);
-		indirect.specular = frame_sky_specular(reflected, shading_roughness(s));
+		float probe_weight;
+		int strongest;
+		float3 probes = reflection_probe_specular(p.position, i.position, reflected, roughness, probe_weight, strongest);
+#if MATERIAL_TRANSPARENT
+		bool gi_specular = false;
+#else
+		bool gi_specular = frame.gi != 0;
+#endif
+		indirect.diffuse = frame.gi != 0 ? cn_texture(push.gi_diffuse).Load(int3(i.position.xy, 0)).rgb : ambient_light(frame.ambient, p.normal);
+		if (gi_specular) {
+			float fade = 1 - smoothstep(frame.reflection_probe_rough_start, frame.reflection_probe_rough_end, roughness);
+			indirect.specular = probes * fade + cn_texture(push.gi_specular).Load(int3(i.position.xy, 0)).rgb * (1 - probe_weight * fade);
+		} else {
+			indirect.specular = probes + frame_sky_specular(reflected, roughness) * (1 - probe_weight);
+		}
 	}
 	indirect.diffuse *= occlusion;
 	indirect.specular *= occlusion;

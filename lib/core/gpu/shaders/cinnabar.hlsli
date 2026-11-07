@@ -42,6 +42,8 @@ Texture3D<uint> cn_uint_texture3d(uint index) { return ResourceDescriptorHeap[in
 RWTexture3D<uint> cn_rw_uint_texture3d(uint index) { return ResourceDescriptorHeap[index]; }
 // A cube map, whose Texture_Desc has cube. It has no Load, so take a texel's middle with SampleLevel.
 TextureCube<float4> cn_texture_cube(uint index) { return ResourceDescriptorHeap[index]; }
+// A cube array, whose Texture_Desc has cube and more than six layers. Its location's w is the cube, not the layer.
+TextureCubeArray<float4> cn_texture_cube_array(uint index) { return ResourceDescriptorHeap[index]; }
 // A texture array, whose Texture_Desc has layers. A texture's view must match the type that reads it.
 Texture2DArray<float4> cn_texture_array(uint index) { return ResourceDescriptorHeap[index]; }
 // The storage view of an array's or a cube's layers, at mip 0 or at a texture view's mip. A cube's faces are its layers.

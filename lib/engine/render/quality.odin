@@ -53,10 +53,13 @@ Gi_Technique :: enum u8 {
 // A code reload keeps a quality's technique by its value.
 #assert(int(Gi_Technique.Split_Cascades) == 2 && int(Gi_Technique.Voxel_Cones) == 3)
 
-// The reflections' techniques (see docs/rendering/quality.md#quality), in the order that they were added. Each adds
-// its value with its preset and its clamp, and reads the prepass's roughness (see Frame.roughness).
+// The reflections' techniques (see docs/rendering/quality.md#quality), in the order that they were added, so a code
+// reload keeps a quality's choice. Each adds its value with its preset and its clamp.
 Reflection_Technique :: enum u8 {
 	Off,
+	// Local reflection probes, looked up through the light clusters, with the sky's cubemap where none counts (see
+	// docs/rendering/lighting-and-shadows.md#reflection-probes).
+	Probes,
 }
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
@@ -162,14 +165,14 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 }
 
 // preset_quality is every feature at a preset's level, with traced shadows and the world probes from High up where the
-// device has ray queries. Custom gives High's.
+// device has ray queries, and the reflection probes at Low. Custom gives High's.
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
 	return {
 		shadows = {level = level, ray_traced = caps.ray_query && level >= .High, virtual = level >= .Medium},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = caps.ray_query && level >= .High ? .Split_Cascades : .Screen_Cascades, level = level},
-		reflections = {level = level},
+		reflections = {technique = level == .Low ? .Probes : .Off, level = level},
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,
