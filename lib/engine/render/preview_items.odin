@@ -377,7 +377,7 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	pf.draw_count = u32(len(draws))
 	pf.instance_count = u32(len(instances))
 	if desc.complete != nil {
-		desc.complete^ = settled && ready && !table.waiting && r.post.lut_baked
+		desc.complete^ = settled && ready && !table.waiting && lut_ready(f)
 	}
 	write_preview_item_records(f, pf, instances, records, arguments, meshes, &table, view_projection, camera, view.near)
 

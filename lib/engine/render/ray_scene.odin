@@ -241,7 +241,6 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 			build_input(g, p, import_buffer(g, m.indices))
 			blases[i] = import_accel(g, m.accel)
 			build_accel(g, p, blases[i])
-			m.accel_built = true
 		}
 	}
 	// The skinned entities' structures, built the first time and refit after, over the positions that the skinning pass
@@ -262,9 +261,10 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 			build_input(g, p, import_buffer(g, refit.indices))
 			skinned[i] = import_accel(g, instance.accel)
 			build_accel(g, p, skinned[i])
-			refit.update, instance.accel_built = instance.accel_built, true
+			refit.update = instance.accel_built
 		}
 	}
+	on_executed(g, commit_ray_scene, f)
 	p := add_compute_pass(g, "build scene accel", proc(ctx: ^Pass_Context) {
 		f := (^Frame)(ctx.data)
 		instances := f.scene_frame.accel_instances
@@ -277,6 +277,23 @@ add_ray_scene_passes :: proc(f: ^Frame) {
 		build_input(g, p, blas)
 	}
 	build_accel(g, p, rf.accel)
+}
+
+// commit_ray_scene marks the structures that the frame built as built, once it executed. Until then, the next frame
+// builds a mesh's again, and builds a skinned entity's instead of refitting it.
+@(private = "file")
+commit_ray_scene :: proc(data: rawptr) {
+	f := (^Frame)(data)
+	for m in f.ray_scene.builds {
+		m.accel_built = true
+	}
+	if len(f.scene_frame.items) > 0 {
+		for refit in f.scene_frame.skin.refits {
+			if instance := &f.renderer.scene.skins.instances[refit.slot]; instance != nil {
+				instance.accel_built = true
+			}
+		}
+	}
 }
 
 // add_hit_entries adds a slot's records to the hit table: the slot's, and one for each of its items but impostors, with

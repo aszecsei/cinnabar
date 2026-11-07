@@ -392,7 +392,6 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		testing.expect_value(t, passes["gi split stats"], 1)
 		testing.expect_value(t, passes["gi trace"], 0)
 		free_all(platform.frame_allocator)
-		finish_gi_split_stats(r)
 	}
 	testing.expect_value(t, split.stats_next, 3 % SPLIT_STATS_COPIES)
 	// New storage starts each cascade at the longest lifetime.

@@ -284,7 +284,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		}
 		if desc.complete != nil {
 			// The output pass tone maps with the lookup table only once it is baked.
-			desc.complete^ = ready && !table.waiting && r.post.lut_baked && !desc.animated
+			desc.complete^ = ready && !table.waiting && lut_ready(f) && !desc.animated
 		}
 		if desc.animated && !patches {
 			pose_preview(f, pf, mesh)
@@ -384,7 +384,7 @@ add_ui_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	}
 	ready := desc.ui(sub)
 	if desc.complete != nil {
-		desc.complete^ = ready && r.post.lut_baked
+		desc.complete^ = ready && lut_ready(f)
 	}
 	p = add_render_pass(g, "preview output", draw_preview_output, pf)
 	read(g, p, pf.scene)

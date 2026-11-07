@@ -69,16 +69,23 @@ Sky_Cube_Texture :: struct {
 
 // Sky_Cube is the cubemap's state between frames, in Sky.
 Sky_Cube :: struct {
-	capture:      Shader_Pipeline,
-	atmosphere:   Shader_Pipeline,
-	prefilter:    Shader_Pipeline,
+	capture:    Shader_Pipeline,
+	atmosphere: Shader_Pipeline,
+	prefilter:  Shader_Pipeline,
 	// The textures, made for params, or not made when they could not be.
-	params:       Sky_Cube_Params,
-	made:         bool,
-	mips:         u32,
-	source:       Sky_Cube_Texture,
+	params:     Sky_Cube_Params,
+	made:       bool,
+	mips:       u32,
+	source:     Sky_Cube_Texture,
 	// The ring: current, the one after it that a build fills, and previous after that.
-	cubes:        [3]Sky_Cube_Texture,
+	cubes:      [3]Sky_Cube_Texture,
+	// What the cubes hold. It changes only when a frame executes (see begin_sky_cube).
+	ring:       Sky_Cube_Ring,
+}
+
+// Sky_Cube_Ring is what the ring's cubes hold, as of the last frame that executed.
+@(private)
+Sky_Cube_Ring :: struct {
 	current:      u32,
 	// Whether current holds a cubemap, key's, and whether previous holds the one that it blends in over.
 	valid:        bool,
@@ -146,6 +153,8 @@ Sky_Cube_Frame :: struct {
 	mip_count:   u32,
 	source_cube: Texture,
 	target_cube: Texture,
+	// The ring once this frame's work is done, which commit_sky_cube keeps when the frame executes.
+	next:        Sky_Cube_Ring,
 }
 
 // sky_cube_mips is a cubemap's mip count: from the face down to SKY_CUBE_MIN_FACE.
@@ -202,7 +211,7 @@ destroy_sky_cube_textures :: proc(c: ^Sky_Cube, r: ^Renderer) {
 		r.platform.gpu_destroy_texture(t.texture)
 		t^ = {}
 	}
-	c.made, c.valid, c.has_previous, c.building = false, false, false, false
+	c.made, c.ring = false, {}
 }
 
 // ensure_sky_cube makes the cubemap's textures for a level's params, again when they change, which starts over.
@@ -273,6 +282,7 @@ make_sky_cube_texture :: proc(
 // and the readers sample it from the next one. When the sky changes, a build of the next cube starts: its first frame
 // captures the source and prefilters mip 0, and each frame after prefilters one more. When it ends, the ring turns,
 // and the new cube blends in over as many frames, so a sky that changes every frame changes the reflections smoothly.
+// The ring changes only when the frame executes, so a frame that fails does its work again.
 @(private)
 begin_sky_cube :: proc(f: ^Frame, s: Sky_Settings, level: Quality_Level, ambient: Ambient) {
 	r := f.renderer
@@ -283,14 +293,17 @@ begin_sky_cube :: proc(f: ^Frame, s: Sky_Settings, level: Quality_Level, ambient
 	g := f.graph
 	cf := new(Sky_Cube_Frame, r.platform.frame_allocator)
 	f.sky_cube = cf
-	if c.valid {
-		current := c.cubes[c.current].texture
+	cf.next = c.ring
+	on_executed(g, commit_sky_cube, f)
+	n := &cf.next
+	if n.valid {
+		current := c.cubes[n.current].texture
 		previous, blend := current, f32(1)
-		if c.has_previous {
-			previous = c.cubes[(c.current + 2) % 3].texture
-			blend = min(1, f32(c.blend_frames + 1) / f32(c.mips))
+		if n.has_previous {
+			previous = c.cubes[(n.current + 2) % 3].texture
+			blend = min(1, f32(n.blend_frames + 1) / f32(c.mips))
 		}
-		c.blend_frames += 1
+		n.blend_frames += 1
 		cf.current = import_texture(g, current, .Storage)
 		cf.previous = import_texture(g, previous, .Storage)
 		cf.reads = {gpu.read_index(current), gpu.read_index(previous), blend, f32(c.mips)}
@@ -300,27 +313,34 @@ begin_sky_cube :: proc(f: ^Frame, s: Sky_Settings, level: Quality_Level, ambient
 	}
 	key, has_source := sky_cube_source(f, s, ambient, cf)
 	switch {
-	case !c.valid:
+	case !n.valid:
 		if !has_source {
 			return
 		}
-		c.building = false
-		cf.capture, cf.target, cf.first_mip, cf.mip_count = true, c.current, 0, c.mips
-		c.valid, c.has_previous, c.key = true, false, key
+		n.building = false
+		cf.capture, cf.target, cf.first_mip, cf.mip_count = true, n.current, 0, c.mips
+		n.valid, n.has_previous, n.key = true, false, key
 		return
-	case c.building:
-		cf.target, cf.first_mip, cf.mip_count = (c.current + 1) % 3, c.step, 1
-		c.step += 1
-	case has_source && key != c.key:
-		cf.capture, cf.target, cf.first_mip, cf.mip_count = true, (c.current + 1) % 3, 0, 1
-		c.building, c.build_key, c.step = true, key, 1
+	case n.building:
+		cf.target, cf.first_mip, cf.mip_count = (n.current + 1) % 3, n.step, 1
+		n.step += 1
+	case has_source && key != n.key:
+		cf.capture, cf.target, cf.first_mip, cf.mip_count = true, (n.current + 1) % 3, 0, 1
+		n.building, n.build_key, n.step = true, key, 1
 	case:
 		return
 	}
-	if c.step == c.mips {
-		c.current = (c.current + 1) % 3
-		c.key, c.has_previous, c.building, c.blend_frames = c.build_key, true, false, 0
+	if n.step == c.mips {
+		n.current = (n.current + 1) % 3
+		n.key, n.has_previous, n.building, n.blend_frames = n.build_key, true, false, 0
 	}
+}
+
+// commit_sky_cube keeps the ring that the frame's work made.
+@(private = "file")
+commit_sky_cube :: proc(data: rawptr) {
+	f := (^Frame)(data)
+	f.renderer.sky.cube.ring = f.sky_cube.next
 }
 
 // sky_cube_source chooses what the capture draws and gives its key: the atmosphere once its tables are made this frame,

@@ -121,6 +121,152 @@ a_material_has_a_hit_pipeline_only_with_ray_query :: proc(t: ^testing.T) {
 	}
 }
 
+// What a frame of the ray scene did: how many meshes' structures it built, and whether it refit the skinned entity's
+// structure or built it.
+@(private = "file")
+Accel_Frame :: struct {
+	builds:   int,
+	refit:    bool,
+	executed: bool,
+}
+
+// run_accel_frame builds a frame's ray scene over the residency's mesh and the skinned entity in slot 0, and executes
+// it with submit.
+@(private = "file")
+run_accel_frame :: proc(
+	r: ^Renderer,
+	cache: ^Texture_Cache,
+	indices: gpu.Buffer,
+	submit: proc(
+		buffers: []gpu.Command_Buffer,
+		queue := gpu.Queue.Graphics,
+		wait_for := gpu.Queues{},
+	) -> bool,
+) -> (
+	run: Accel_Frame,
+) {
+	platform := r.platform
+	platform.gpu_submit = submit
+	g := begin(platform, cache)
+	f := new(Frame, platform.frame_allocator)
+	f^ = {
+		renderer = r,
+		graph    = &g,
+		size     = {64, 32},
+	}
+	sf := new(Scene_Frame, platform.frame_allocator)
+	f.scene_frame = sf
+	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
+	sf.skin.refits = make([]Skin_Refit, 1, platform.frame_allocator)
+	sf.skin.refits[0] = {
+		slot    = 0,
+		indices = indices,
+	}
+	sf.accel_instances, _ = platform.gpu_upload(2 * size_of(gpu.Accel_Instance), 16)
+	sf.accel_count = 2
+	if request_ray_scene(f) {
+		add_ray_scene_passes(f)
+		run.builds, run.refit = len(f.ray_scene.builds), sf.skin.refits[0].update
+	}
+	run.executed = execute(&g)
+	free_all(platform.frame_allocator)
+	return
+}
+
+// A frame that does not execute builds no structure, so the next frame builds the mesh's again, and builds the skinned
+// entity's instead of refitting one that was never built.
+@(test)
+a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := core.Platform_API {
+		frame_allocator      = virtual.arena_allocator(&arena),
+		heap_allocator       = runtime.heap_allocator(),
+		jobs_run             = jobs.run,
+		jobs_wait            = jobs.wait,
+		gpu_submit           = null.submit,
+		gpu_upload           = null.upload,
+		gpu_create_buffer    = null.create_buffer,
+		gpu_destroy_buffer   = null.destroy_buffer,
+		gpu_create_accel     = null.create_accel,
+		gpu_destroy_accel    = null.destroy_accel,
+		gpu_destroy_texture  = null.destroy_texture,
+		gpu_destroy_pipeline = null.destroy_pipeline,
+	}
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	r.caps.ray_query = true
+	r.residency.platform = &platform
+	positions := platform.gpu_create_buffer(
+		{size = 36, usage = {.Storage}, label = "positions"},
+		nil,
+	)
+	indices := platform.gpu_create_buffer({size = 12, usage = {.Index}, label = "indices"}, nil)
+	posed := platform.gpu_create_buffer(
+		{size = 36, usage = {.Storage}, label = "posed positions"},
+		nil,
+	)
+	defer for b in ([]gpu.Buffer{positions, indices, posed}) {
+		platform.gpu_destroy_buffer(b)
+	}
+	// A ready mesh, whose structure the first request makes, and a skinned entity of it.
+	r.residency.count = 1
+	e := &r.residency.entries[0]
+	e.kind, e.ready = .Mesh, true
+	mesh := &e.current.mesh
+	mesh.positions, mesh.indices, mesh.vertex_count, mesh.index_count, mesh.index_format =
+		positions, indices, 3, 3, .U32
+	r.scene.skins.instances = make(map[u32]Skinned_Instance, platform.heap_allocator)
+	defer delete(r.scene.skins.instances)
+	r.scene.skins.instances[0] = {
+		positions    = posed,
+		vertex_count = 3,
+	}
+	skin_accel(&r.scene.skins, &platform, 0, mesh)
+	skin := &r.scene.skins.instances[0]
+	defer platform.gpu_destroy_accel(skin.accel)
+	defer platform.gpu_destroy_accel(mesh.accel)
+	defer ray_scene_destroy(&r.ray_scene, &platform)
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+
+	// The first frame fails: nothing counts as built.
+	run := run_accel_frame(r, &cache, indices, fail_submit)
+	testing.expect(t, !run.executed, "the frame executed with a submit that fails")
+	testing.expect(t, mesh.accel != {} && skin.accel != {})
+	testing.expect_value(t, run.builds, 1)
+	testing.expect(t, !run.refit, "the first frame refit a structure that was never built")
+	testing.expect(
+		t,
+		!mesh.accel_built && !skin.accel_built,
+		"the failed frame's structures count as built",
+	)
+
+	// The next builds both again, and the null backend validates the builds.
+	run = run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed, "the frame did not execute")
+	testing.expect_value(t, run.builds, 1)
+	testing.expect(
+		t,
+		!run.refit,
+		"the frame after a failed one refit a structure that was never built",
+	)
+	testing.expect(t, mesh.accel_built && skin.accel_built)
+
+	// Then the mesh's is done, and the skinned entity's refits.
+	run = run_accel_frame(r, &cache, indices, null.submit)
+	testing.expect(t, run.executed, "the frame did not execute")
+	testing.expect_value(t, run.builds, 0)
+	testing.expect(t, run.refit, "a built structure did not refit")
+}
+
 @(test)
 hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)

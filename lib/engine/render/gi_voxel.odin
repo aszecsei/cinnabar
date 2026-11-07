@@ -510,7 +510,6 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 		return false
 	}
 	g := f.graph
-	v := &f.renderer.gi.voxel
 	params := vf.params
 	step :: proc(vf: ^Gi_Voxel_Frame, pass: Voxel_Pass, level: u32 = 0) -> ^Voxel_Step {
 		return new_clone(Voxel_Step{vf, pass, level}, vf.frame.renderer.platform.frame_allocator)
@@ -525,8 +524,17 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 		write(g, p, vf.textures[l][.Normal])
 		write(g, p, vf.textures[l][.Emission])
 		write(g, p, vf.textures[l][.Mask])
-		v.boxes[l].voxelized = true
 	}
+	// The levels count as voxelized once the frame executes, so a frame that fails voxelizes them again.
+	on_executed(g, proc(data: rawptr) {
+			vf := (^Gi_Voxel_Frame)(data)
+			v := &vf.frame.renderer.gi.voxel
+			for l in 0 ..< int(vf.params.levels) {
+				if vf.voxelize[l] {
+					v.boxes[l].voxelized = true
+				}
+			}
+		}, vf)
 	if len(sf.items) > 0 && len(vf.views) > 0 {
 		p := add_render_pass(g, "gi voxelize", draw_voxel_views, vf)
 		rasterize_size(g, p, {params.res * 2, params.res * 2})

@@ -1132,7 +1132,14 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 		read(g, p, pf.source)
 		write(g, p, pf.cubes)
 	}
-	advance_reflection_probe_capture(rp, pf.face_count)
+	// The capture moves on only when the faces were drawn, so a frame that fails draws them again.
+	on_executed(g, proc(data: rawptr) {
+			f := (^Frame)(data)
+			advance_reflection_probe_capture(
+				&f.renderer.reflection_probes,
+				f.reflection_probes.face_count,
+			)
+		}, f)
 }
 
 // declare_reflection_probe_face_lighting declares what a face's forward pass reads: the shadow atlas, the sky's
