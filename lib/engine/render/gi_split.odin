@@ -705,7 +705,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	write(g, p, sf.hits)
 	// hit_shading_ready said that it can.
 	add_hit_shading(f, {hits = sf.hits, surfaces = sf.surfaces, count = ray_count}, .Compute)
-	add_hit_light_passes(f, pf, "gi split", sf.hits, sf.surfaces, sf.rays, ray_count)
+	add_hit_light_passes(f, &pf.hit_light, "gi split", sf.hits, sf.surfaces, sf.rays, ray_count)
 	p = add_compute_pass(g, "gi split deposit", run_split_pass, step(f, sf, .Deposit), queue = .Compute)
 	read(g, p, f.depth)
 	read(g, p, f.normals)

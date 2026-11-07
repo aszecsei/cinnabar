@@ -187,15 +187,15 @@ Frame_Constants :: struct {
 	world_probes:                 u32,
 	world_probe_grid:             u32,
 	world_probe_grid_offset:      u32,
-	// The screen-space reflections are in Material_Push.reflections: only the camera's view reads them (see
+	// The screen-space or traced reflections are in Material_Push.reflections: only the camera's view reads them (see
 	// screen_reflections.odin).
 	reflections:                  u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
 // frame records. ambient_occlusion is white without it, fog is read only when Frame_Constants.fog says so, the global
-// illumination only when Frame_Constants.gi does, and the screen-space reflections only when Frame_Constants.reflections
-// does.
+// illumination only when Frame_Constants.gi does, and the screen-space or traced reflections only when
+// Frame_Constants.reflections does.
 Material_Push :: struct {
 	shadow_atlas:      u32,
 	shadow_mask:       u32,
@@ -1294,7 +1294,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		c := constants
 		views[v].first_draw = u32(v * sf.draws_per_view)
 		views[v].offset = constants.camera_offset
-		// Only the camera's surfaces are in the screen-space reflections' texture.
+		// Only the camera's surfaces are in the reflections' texture.
 		if v != VIEW_CAMERA {
 			c.reflections = 0
 		}

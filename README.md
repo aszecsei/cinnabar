@@ -7,7 +7,7 @@ cinnabar is a game engine written in [Odin](https://odin-lang.org), with:
 - a **fiber-based job system** and a native **archetype ECS** with fixed-point world positions;
 - a **hot-reloaded game DLL** in development, and one statically linked executable in release;
 - a **bindless, render-graph-driven GPU layer** over D3D12, with mesh shaders and ray tracing where the hardware has them;
-- a **clustered forward renderer** with node-graph materials, GTAO, screen-space radiance cascades, reflection probes with stochastic screen-space reflections, volumetric fog, temporal AA and HDR output;
+- a **clustered forward renderer** with node-graph materials, GTAO, screen-space radiance cascades, reflection probes with stochastic screen-space or ray-traced reflections, volumetric fog, temporal AA and HDR output;
 - **sandboxed Luau scripting** with a Unity-style behaviour API that survives code reload;
 - an **asset cooker** and cook daemon with GUID identity and hot reload of every asset kind;
 - a **C# editor** built with Avalonia, which drives the game through a message link.

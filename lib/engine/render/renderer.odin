@@ -82,12 +82,14 @@ Renderer :: struct {
 	// The GPU scene's acceleration structure and hit shading (see docs/rendering/ray-scene.md#ray-scene).
 	ray_scene:       Ray_Scene,
 	previews:        Previews,
-	// The spatiotemporal blue noise that the ambient occlusion and the screen-space reflections sample.
+	// The spatiotemporal blue noise that the ambient occlusion and the screen-space and traced reflections sample.
 	blue_noise:      Blue_Noise,
 	ao:              Ao_Passes,
 	gi:              Gi_Passes,
 	// The screen-space reflections (see screen_reflections.odin).
 	ssr:             Screen_Reflections,
+	// The traced reflections (see traced_reflections.odin).
+	rtr:             Traced_Reflections,
 	fog:             Volumetric_Fog,
 	sky:             Sky,
 	// The last frame's sky, which sky_texture_sun answers for.
@@ -236,9 +238,8 @@ Frame :: struct {
 	// The global illumination's diffuse and specular light, zero without it.
 	gi_diffuse:               Texture,
 	gi_specular:              Texture,
-	// The screen-space reflections: the specular light along each pixel's reflection, filtered for its roughness and
-	// pre-exposed, in rgb, and its weight in a, which the forward pass reads. Zero without them. The traced reflections
-	// write it too.
+	// The screen-space or traced reflections: the specular light along each pixel's reflection, filtered for its
+	// roughness and pre-exposed, in rgb, and its weight in a, which the forward pass reads. Zero without them.
 	reflections:              Texture,
 	// Moment-based transparency's optical depth and moments, zero without it (see docs/rendering/transparency.md#transparency).
 	moments_zeroth:           Texture,
@@ -265,7 +266,7 @@ Frame :: struct {
 	ao:                       ^Ao_Frame,
 	// nil without global illumination.
 	gi:                       ^Gi_Frame,
-	// nil without the screen-space reflections.
+	// nil without the screen-space or traced reflections, whose Ssr_Frame.traced is set.
 	ssr:                      ^Ssr_Frame,
 	// nil without fog.
 	fog:                      ^Fog_Frame,
@@ -372,6 +373,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	ao_init(&r.ao)
 	gi_init(&r.gi)
 	screen_reflections_init(&r.ssr)
+	traced_reflections_init(&r.rtr)
 	fog_init(&r.fog)
 	sky_init(&r.sky)
 	sprites_init(&r.sprites)
@@ -422,6 +424,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	ao_destroy(&r.ao, r.platform)
 	gi_destroy(&r.gi, r.platform)
 	screen_reflections_destroy(&r.ssr, r.platform)
+	traced_reflections_destroy(&r.rtr, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	sky_destroy(&r.sky, r)
 	sprites_destroy(&r.sprites, r.platform)
@@ -668,6 +671,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_ao_pipelines(r, force)
 	sync_gi_pipelines(r, force)
 	sync_screen_reflections(r, force)
+	sync_traced_reflections(r, force)
 	sync_ray_scene_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_sky_pipelines(r, force)

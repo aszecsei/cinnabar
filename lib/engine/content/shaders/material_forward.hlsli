@@ -13,7 +13,6 @@
 #include "material_mesh.hlsli"
 #include "material_lighting.hlsli"
 #include "fog_at.hlsli"
-#include "sky_cube.hlsli"
 #include "material_reflections.hlsli"
 #include "gi_probes.hlsli"
 
@@ -44,17 +43,6 @@ void ms_forward(
 	if (thread < c.triangle_count) {
 		triangles[thread] = cluster_triangle(c, thread);
 	}
-}
-
-// frame_sky_specular is the sky's light along a reflection, from the frame's cubemap at a roughness.
-float3 frame_sky_specular(float3 d, float roughness) {
-	Sky_Cube c;
-	c.current = frame.sky_cube_current;
-	c.previous = frame.sky_cube_previous;
-	c.blend = frame.sky_cube_blend;
-	c.mips = frame.sky_cube_mips;
-	c.sampler_index = frame.sky_cube_sampler;
-	return sky_specular(c, frame.ambient, d, roughness);
 }
 
 // capture_indirect is a reflection probe's capture's indirect light (see docs/rendering/lighting-and-shadows.md#reflection-probes):
@@ -176,7 +164,7 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	indirect.diffuse *= occlusion;
 	indirect.specular *= occlusion;
 #if !MATERIAL_TRANSPARENT
-	// The screen-space reflections in front of the rest, by their weight. They are pre-exposed and filtered for the
+	// The screen-space or traced reflections in front of the rest, by their weight. They are pre-exposed and filtered for the
 	// roughness already, and a hit on the screen is occluded already, so the occlusion scales only what is below them.
 	if (frame.reflections != 0) {
 		float4 screen = load_screen(push.reflections, i.position.xy);

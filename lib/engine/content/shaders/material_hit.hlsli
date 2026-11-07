@@ -40,9 +40,11 @@ void cs_hit(uint3 id : SV_DispatchThreadID) {
 	}
 #endif
 	float3 normal = shading_normal(inputs, s);
-	// The diffuse albedo is the shading model's indirect light from a white surrounding, without its specular part.
+	// The diffuse albedo is the shading model's indirect light from a white surrounding, without its specular part, and
+	// the specular albedo its specular part alone, along the ray: a metal's color, or a dielectric's Fresnel.
 #if SHADING_NO_LIGHTING
 	float3 albedo = 0;
+	float3 specular = 0;
 	flags |= HIT_SURFACE_NO_LIGHTING;
 #else
 	Shading_Point p;
@@ -53,7 +55,10 @@ void cs_hit(uint3 id : SV_DispatchThreadID) {
 	white.diffuse = 1;
 	white.specular = 0;
 	float3 albedo = shade_indirect(s, p, white);
+	white.diffuse = 0;
+	white.specular = 1;
+	float3 specular = shade_indirect(s, p, white);
 #endif
-	float3 emission = min(shade_emission(s), 65000);
-	store_hit_surface(ray, pack_hit_surface(tri.position, normal, tri.facing, albedo, emission, shading_roughness(s), flags));
+	float3 emission = shade_emission(s);
+	store_hit_surface(ray, pack_hit_surface(tri.position, normal, tri.facing, albedo, specular, emission, shading_roughness(s), flags));
 }

@@ -83,7 +83,7 @@ The render quality's bindings, for a settings menu in Luau (`lib/engine/project/
 |---|---|
 | `Render.quality()` | The renderer's quality as a `RenderQuality` table |
 | `Render.set_quality(t)` | Makes the fields that `t` gives the quality's from the next frame on, as far as the device can do them. A `preset` sets every feature first |
-| `Render.caps()` | What the device can do: `ray_query`, `vendor`, `video_memory` in bytes, `aa`, the anti-aliasing techniques that it runs, `gi`, the global illumination's, and `reflections`, the reflections' |
+| `Render.caps()` | What the device can do: `ray_query`, `vendor`, `video_memory` in bytes, `aa`, the anti-aliasing techniques that it runs, `gi`, the global illumination's, and `reflections`, the reflections', with `Ray_Traced` only where the device has `ray_query` |
 | `Render.presets()` | `{ "Low", "Medium", "High", "Ultra" }` |
 | `Render.save_quality()` | Writes the quality to the user settings file, as the player's choice on this machine; false if it could not |
 

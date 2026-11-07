@@ -1,5 +1,7 @@
 package render
 
+import "core:strings"
+
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
@@ -46,12 +48,12 @@ Hit_Record :: struct {
 
 // Hit_Surface matches Hit_Surface in ray_scene.hlsli: the surface at one ray's hit, which hit shading writes.
 Hit_Surface :: struct {
-	position:             [3]f32,
-	normal:               u32,
-	geometric:            u32,
-	albedo:               u32,
-	emission_rg:          u32,
-	emission_b_roughness: u32,
+	position:           [3]f32,
+	normal:             u32,
+	geometric:          u32,
+	albedo:             u32,
+	emission:           u32,
+	specular_roughness: u32,
 }
 
 #assert(size_of(Hit_Record) == 32 && size_of(Hit_Surface) == 32)
@@ -336,9 +338,10 @@ hit_shading_ready :: proc(f: ^Frame) -> bool {
 }
 
 // add_hit_shading evaluates the materials at a client's hits, after the client's pass that writes them: it bins the
-// hits by their materials, then dispatches each bin's material on its rays, indirectly by the bin's count. It is false,
-// and adds nothing, when hit_shading_ready is not, or the batch has no rays or more than MAX_HIT_RAYS.
-add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics) -> bool {
+// hits by their materials, then dispatches each bin's material on its rays, indirectly by the bin's count. A client's
+// name, when it gives one, starts its passes' names, so the profiler tells its batch apart. It is false, and adds
+// nothing, when hit_shading_ready is not, or the batch has no rays or more than MAX_HIT_RAYS.
+add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics, name := "") -> bool {
 	r := f.renderer
 	rf := f.ray_scene
 	sf := f.scene_frame
@@ -378,10 +381,13 @@ add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics
 		}
 		(^Hit_Bin_Constants)(raw_data(upload.data))^ = constants
 	}
-	for name, phase in HIT_PHASES {
+	pass_name :: proc(client, name: string, allocator := context.allocator) -> string {
+		return client == "" ? name : strings.concatenate({client, " ", name}, allocator)
+	}
+	for phase_name, phase in HIT_PHASES {
 		step := new_clone(data^, platform.frame_allocator)
 		step.phase = phase
-		p := add_compute_pass(g, name, run_hit_phase, step, queue = queue)
+		p := add_compute_pass(g, pass_name(name, phase_name, platform.frame_allocator), run_hit_phase, step, queue = queue)
 		write(g, p, data.bins)
 		switch phase {
 		case 1:
@@ -394,7 +400,7 @@ add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics
 			write(g, p, data.order)
 		}
 	}
-	p := add_compute_pass(g, "hit shading", run_hit_shading, data, queue = queue)
+	p := add_compute_pass(g, pass_name(name, "hit shading", platform.frame_allocator), run_hit_shading, data, queue = queue)
 	read(g, p, batch.hits)
 	read(g, p, data.order)
 	read(g, p, data.bins)

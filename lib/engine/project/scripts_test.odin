@@ -26,8 +26,8 @@ local caps = Render.caps()
 assert(table.find(caps.aa, "Fsr") and not caps.ray_query and caps.vendor == "Amd")
 -- Without Ray_Query, the split cascades are not among the global illumination's techniques, and the voxel cones are.
 assert(table.find(caps.gi, "Voxel_Cones") and table.find(caps.gi, "Screen_Cascades") and not table.find(caps.gi, "Split_Cascades"))
--- The reflections have Off, the probes and the screen-space reflections, which every device runs, and High takes the
--- screen-space reflections.
+-- Without Ray_Query, the reflections have Off, the probes and the screen-space reflections, which every device runs, and
+-- not the traced reflections, and High takes the screen-space reflections.
 assert(#caps.reflections == 3 and caps.reflections[1] == "Off" and caps.reflections[2] == "Probes" and caps.reflections[3] == "Screen")
 assert(q.reflections == "Screen" and q.reflections_level == "High")
 

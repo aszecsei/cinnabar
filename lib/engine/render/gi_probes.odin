@@ -155,18 +155,32 @@ Probe_Push :: struct {
 // Gi_Probe_Frame is one frame's world probes, in frame memory.
 @(private)
 Gi_Probe_Frame :: struct {
-	grid:        Probe_Grid,
-	upload:      gpu.Upload,
-	jobs:        []u32,
-	lights:      gpu.Upload,
-	light_count: u32,
+	grid:       Probe_Grid,
+	upload:     gpu.Upload,
+	jobs:       []u32,
+	radiance:   Texture,
+	irradiance: Texture,
+	states:     Buffer,
+	hits:       Buffer,
+	surfaces:   Buffer,
+	rays:       Buffer,
+	// What the probes' hits and the split cascades' are lit by: these probes, their lights, and the global
+	// illumination's lit scene of last frame, which the hits that the screen shows take their light from.
+	hit_light:  Hit_Light_Inputs,
+}
+
+// Hit_Light_Inputs are what lights a batch of hits beside the frame constants (see add_hit_light_passes): the probe grid,
+// whose probes' light the hits take, with its textures and states, which are 0 for a grid of no levels; the punctual
+// lights that the hits see, after every directional light; and a lit scene of last frame, for the hits that the screen
+// shows.
+@(private)
+Hit_Light_Inputs :: struct {
+	grid:        gpu.Upload,
 	radiance:    Texture,
 	irradiance:  Texture,
 	states:      Buffer,
-	hits:        Buffer,
-	surfaces:    Buffer,
-	rays:        Buffer,
-	// The global illumination's lit scene of last frame, which the hits that the screen shows take their light from.
+	lights:      gpu.Upload,
+	light_count: u32,
 	lit:         History,
 }
 
@@ -411,7 +425,6 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	p := &r.gi.probes
 	g := f.graph
 	pf := new(Gi_Probe_Frame, platform.frame_allocator)
-	pf.lit = lit
 	pf.radiance = import_texture(g, p.radiance, .Storage)
 	pf.irradiance = import_texture(g, p.irradiance, .Storage)
 	pf.states = import_buffer(g, p.states)
@@ -440,7 +453,6 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	copy(jobs_upload.data, ([^]byte)(raw_data(pf.jobs))[:len(pf.jobs) * 4])
 	lights := probe_lights(f, reach)
 	copy(lights_upload.data, ([^]byte)(raw_data(lights))[:len(lights) * 4])
-	pf.lights, pf.light_count = lights_upload, u32(len(lights))
 	p.frame += 1
 	grid^ = {
 		levels         = grid.levels,
@@ -462,10 +474,19 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	}
 	(^Probe_Grid)(raw_data(grid_upload.data))^ = grid^
 	pf.upload = grid_upload
+	pf.hit_light = {
+		grid        = grid_upload,
+		radiance    = pf.radiance,
+		irradiance  = pf.irradiance,
+		states      = pf.states,
+		lights      = lights_upload,
+		light_count = u32(len(lights)),
+		lit         = lit,
+	}
 	ray_count := u32(len(pf.jobs)) * params.rays
 
 	step :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, pass: Probe_Pass, ray_count: u32) -> ^Probe_Step {
-		return new_clone(Probe_Step{f, pf, pass, ray_count, pf.hits, pf.surfaces, pf.rays}, f.renderer.platform.frame_allocator)
+		return new_clone(Probe_Step{f, pf, &pf.hit_light, pass, ray_count, pf.hits, pf.surfaces, pf.rays}, f.renderer.platform.frame_allocator)
 	}
 	pass := add_compute_pass(g, "gi probe reset", run_probe_pass, step(f, pf, .Reset, ray_count), queue = .Compute)
 	write(g, pass, pf.states)
@@ -474,7 +495,7 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	write(g, pass, pf.hits)
 	// hit_shading_ready said that it can.
 	add_hit_shading(f, {hits = pf.hits, surfaces = pf.surfaces, count = ray_count}, .Compute)
-	add_hit_light_passes(f, pf, "gi probe", pf.hits, pf.surfaces, pf.rays, ray_count)
+	add_hit_light_passes(f, &pf.hit_light, "gi probe", pf.hits, pf.surfaces, pf.rays, ray_count)
 	pass = add_compute_pass(g, "gi probe update", run_probe_pass, step(f, pf, .Update, ray_count), queue = .Compute)
 	read(g, pass, pf.rays)
 	write(g, pass, pf.radiance)
@@ -485,29 +506,53 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 
 // add_hit_light_passes lights a batch of hits after its hit shading, into a float4 for each ray in rays: the hits'
 // light (gi_probe_light.hlsl), then, with a lit scene of last frame, the light there of the hits that the screen shows
-// (gi_probe_screen.hlsl), in a pass of its own. The world probes' rays and the split cascades' take their light so.
+// (gi_probe_screen.hlsl), in a pass of its own. The world probes' rays, the split cascades' and the traced reflections'
+// take their light so.
 @(private)
-add_hit_light_passes :: proc(f: ^Frame, pf: ^Gi_Probe_Frame, name: string, hits, surfaces, rays: Buffer, ray_count: u32) {
+add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string, hits, surfaces, rays: Buffer, ray_count: u32) {
 	g := f.graph
 	allocator := f.renderer.platform.frame_allocator
 	light_name := strings.concatenate({name, " light"}, allocator)
-	pass := add_compute_pass(g, light_name, run_probe_pass, new_clone(Probe_Step{f, pf, .Light, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+	pass := add_compute_pass(g, light_name, run_probe_pass, new_clone(Probe_Step{f, nil, inputs, .Light, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
 	read_accel(g, pass, ray_scene_accel(f))
 	read(g, pass, hits)
 	read(g, pass, surfaces)
-	read(g, pass, pf.radiance)
-	read(g, pass, pf.irradiance)
-	read(g, pass, pf.states)
+	if inputs.radiance != 0 {
+		read(g, pass, inputs.radiance)
+		read(g, pass, inputs.irradiance)
+		read(g, pass, inputs.states)
+	}
 	write(g, pass, rays)
-	if pf.lit.valid {
+	if inputs.lit.valid {
 		screen_name := strings.concatenate({name, " screen"}, allocator)
-		pass = add_compute_pass(g, screen_name, run_probe_pass, new_clone(Probe_Step{f, pf, .Screen, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
+		pass = add_compute_pass(g, screen_name, run_probe_pass, new_clone(Probe_Step{f, nil, inputs, .Screen, ray_count, hits, surfaces, rays}, allocator), queue = .Compute)
 		read(g, pass, hits)
 		read(g, pass, surfaces)
 		read(g, pass, f.depth)
-		read(g, pass, pf.lit.previous)
+		read(g, pass, inputs.lit.previous)
 		write(g, pass, rays)
 	}
+}
+
+// hit_light_inputs are what lights a client's hits other than the probes' own: the frame's world probes where they run,
+// and otherwise a grid of no levels, whose hits take the ambient light; the punctual lights whose spheres come within
+// reach of the camera; and a lit scene of last frame. ok is false when an upload fails.
+@(private)
+hit_light_inputs :: proc(f: ^Frame, reach: f32, lit: History) -> (inputs: Hit_Light_Inputs, ok: bool) {
+	r := f.renderer
+	platform := r.platform
+	lights_upload := platform.gpu_upload(GI_MAX_PROBE_LIGHTS * 4, 16) or_return
+	lights := probe_lights(f, reach)
+	copy(lights_upload.data, ([^]byte)(raw_data(lights))[:len(lights) * 4])
+	inputs = {lights = lights_upload, light_count = u32(len(lights)), lit = lit}
+	if f.gi != nil && f.gi.probes != nil {
+		pf := f.gi.probes
+		inputs.grid, inputs.radiance, inputs.irradiance, inputs.states = pf.upload, pf.radiance, pf.irradiance, pf.states
+		return inputs, true
+	}
+	inputs.grid = platform.gpu_upload(size_of(Probe_Grid), 16) or_return
+	(^Probe_Grid)(raw_data(inputs.grid.data))^ = {sampler_index = gpu.sampler_index(r.post.sampler)}
+	return inputs, true
 }
 
 @(private = "file")
@@ -525,11 +570,12 @@ Probe_Pass :: enum {
 }
 
 // Probe_Step is one probe pass's data, in frame memory: the rays' buffers are the probes', or another batch's whose
-// hits the probes' light pass lights.
+// hits the light passes light by inputs. probes is nil for the light passes, which read only inputs.
 @(private = "file")
 Probe_Step :: struct {
 	frame:     ^Frame,
 	probes:    ^Gi_Probe_Frame,
+	inputs:    ^Hit_Light_Inputs,
 	pass:      Probe_Pass,
 	ray_count: u32,
 	hits:      Buffer,
@@ -545,26 +591,27 @@ run_probe_pass :: proc(ctx: ^Pass_Context) {
 	step := (^Probe_Step)(ctx.data)
 	f := step.frame
 	pf := step.probes
+	inputs := step.inputs
 	probes := &f.renderer.gi.probes
 	g := ctx.graph
 	hits, rays := gpu_buffer(g, step.hits), gpu_buffer(g, step.rays)
 	push := Probe_Push {
-		grid          = gpu.read_index(pf.upload.buffer),
-		grid_offset   = pf.upload.offset,
+		grid          = gpu.read_index(inputs.grid.buffer),
+		grid_offset   = inputs.grid.offset,
 		hits          = step.pass == .Trace ? gpu.write_index(hits) : gpu.read_index(hits),
 		surfaces      = gpu.read_index(gpu_buffer(g, step.surfaces)),
 		rays          = step.pass == .Light || step.pass == .Screen ? gpu.write_index(rays) : gpu.read_index(rays),
 		accel         = gpu.read_index(gpu_accel(g, ray_scene_accel(f))),
-		lights        = gpu.read_index(pf.lights.buffer),
-		lights_offset = pf.lights.offset,
-		light_count   = pf.light_count,
+		lights        = gpu.read_index(inputs.lights.buffer),
+		lights_offset = inputs.lights.offset,
+		light_count   = inputs.light_count,
 		ray_count     = step.ray_count,
-		lit_valid     = u32(pf.lit.valid),
+		lit_valid     = u32(inputs.lit.valid),
 	}
 	if step.pass == .Screen {
 		push.depth = gpu.read_index(gpu_texture(g, f.depth))
-		if pf.lit.valid {
-			push.lit = gpu.read_index(gpu_texture(g, pf.lit.previous))
+		if inputs.lit.valid {
+			push.lit = gpu.read_index(gpu_texture(g, inputs.lit.previous))
 		}
 	}
 	ray_groups := (step.ray_count + HIT_GROUP_SIZE - 1) / HIT_GROUP_SIZE

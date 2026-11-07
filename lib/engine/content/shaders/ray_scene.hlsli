@@ -50,14 +50,15 @@ static const uint HIT_SURFACE_BACK = 8;
 // Matches Hit_Surface in lib/engine/render/ray_scene.odin: what hit shading gives for one ray's hit. position is
 // relative to the render origin. normal is the shading normal and geometric the triangle's, toward the side the ray came
 // from, each folded into the octahedron as snorm16. albedo is the diffuse albedo as unorm8, with the flags in its high
-// byte. emission is its light, and roughness the shading model's, or 1, as halves.
+// byte. emission is its light as RGB9E5. specular_roughness is the specular albedo along the ray as unorm8, which
+// reflects the light along the hit's own reflection, with the shading model's roughness, or 1, in its high byte.
 struct Hit_Surface {
 	float3 position;
 	uint normal;
 	uint geometric;
 	uint albedo;
-	uint emission_rg;
-	uint emission_b_roughness;
+	uint emission;
+	uint specular_roughness;
 };
 
 // Match Hit_Instance and Hit_Submesh in lib/engine/render/ray_scene.odin: the hit table, which the frame uploads. A
@@ -171,24 +172,52 @@ uint hit_flags(Hit_Surface s) {
 	return s.albedo >> 24;
 }
 
+// RGB9E5's largest value: a mantissa of 511/512 at the largest exponent, 2^15.
+static const float RGB9E5_MAX = 65408;
+
+// pack_rgb9e5 packs a color of non-negative channels as three 9-bit mantissas over a shared 5-bit exponent, as
+// DXGI_FORMAT_R9G9B9E5_SHAREDEXP does: 1/512 of the brightest channel is its precision.
+uint pack_rgb9e5(float3 color) {
+	float3 c = clamp(color, 0, RGB9E5_MAX);
+	float largest = max(c.r, max(c.g, c.b));
+	int exponent = max(-16, int(floor(log2(max(largest, 1e-30))))) + 1 + 15;
+	float scale = exp2(float(exponent - 15 - 9));
+	if (uint(round(largest / scale)) == 512) {
+		exponent += 1;
+		scale *= 2;
+	}
+	uint3 m = min(uint3(round(c / scale)), 511u);
+	return m.r | (m.g << 9) | (m.b << 18) | (uint(exponent) << 27);
+}
+
+float3 unpack_rgb9e5(uint word) {
+	uint3 m = uint3(word, word >> 9, word >> 18) & 0x1ff;
+	return float3(m) * exp2(float(int(word >> 27) - 15 - 9));
+}
+
 float3 hit_emission(Hit_Surface s) {
-	return float3(f16tof32(s.emission_rg), f16tof32(s.emission_rg >> 16), f16tof32(s.emission_b_roughness));
+	return unpack_rgb9e5(s.emission);
+}
+
+float3 hit_specular(Hit_Surface s) {
+	return float3(s.specular_roughness & 0xff, (s.specular_roughness >> 8) & 0xff, (s.specular_roughness >> 16) & 0xff) / 255.0;
 }
 
 float hit_roughness(Hit_Surface s) {
-	return f16tof32(s.emission_b_roughness >> 16);
+	return float(s.specular_roughness >> 24) / 255.0;
 }
 
 // pack_hit_surface gives a surface as hit shading writes it.
-Hit_Surface pack_hit_surface(float3 position, float3 normal, float3 geometric, float3 albedo, float3 emission, float roughness, uint flags) {
+Hit_Surface pack_hit_surface(float3 position, float3 normal, float3 geometric, float3 albedo, float3 specular, float3 emission, float roughness, uint flags) {
 	uint3 a = uint3(round(saturate(albedo) * 255));
+	uint3 c = uint3(round(saturate(specular) * 255));
 	Hit_Surface s;
 	s.position = position;
 	s.normal = hit_pack_unit(normal);
 	s.geometric = hit_pack_unit(geometric);
 	s.albedo = a.x | (a.y << 8) | (a.z << 16) | (flags << 24);
-	s.emission_rg = f32tof16(emission.r) | (f32tof16(emission.g) << 16);
-	s.emission_b_roughness = f32tof16(emission.b) | (f32tof16(roughness) << 16);
+	s.emission = pack_rgb9e5(emission);
+	s.specular_roughness = c.x | (c.y << 8) | (c.z << 16) | (uint(round(saturate(roughness) * 255)) << 24);
 	return s;
 }
 
