@@ -29,14 +29,20 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 }
 
-// Low takes the reflection probes, and the other presets the screen-space reflections, at their levels, on any device:
-// the traced reflections are not there yet to take High and Ultra with ray queries.
+// Low takes the reflection probes, Medium the screen-space reflections, and High and Ultra the traced reflections where
+// the device has ray queries, and the screen-space reflections where it does not, at their levels.
 @(test)
-low_takes_the_probes_and_the_others_the_screen_reflections :: proc(t: ^testing.T) {
+low_takes_the_probes_medium_the_screen_and_high_the_traced_reflections :: proc(t: ^testing.T) {
 	for caps in ([]Caps{{}, {ray_query = true}}) {
 		for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
 			q := preset_quality(preset, caps)
-			technique := preset == .Low ? Reflection_Technique.Probes : .Screen
+			technique := Reflection_Technique.Screen
+			switch {
+			case preset == .Low:
+				technique = .Probes
+			case preset >= .High && caps.ray_query:
+				technique = .Ray_Traced
+			}
 			testing.expect_value(t, q.reflections, Reflection_Quality{technique, Quality_Level(u8(preset))})
 			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
 			testing.expect_value(t, quality_preset(q, caps), preset)
@@ -57,6 +63,13 @@ low_takes_the_probes_and_the_others_the_screen_reflections :: proc(t: ^testing.T
 		q.reflections.technique = technique
 		testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{technique, .Ultra})
 	}
+	// The traced reflections run at any level with ray queries, and are the screen-space reflections without.
+	for level in Quality_Level {
+		q := preset_quality(.Ultra, {})
+		q.reflections = {.Ray_Traced, level}
+		testing.expect_value(t, clamp_quality(q, {ray_query = true}).reflections, q.reflections)
+		testing.expect_value(t, clamp_quality(q, {}).reflections, Reflection_Quality{.Screen, level})
+	}
 }
 
 // The screen-space reflections' levels go from half resolution and one short ray to full resolution and two long ones,
@@ -65,12 +78,47 @@ low_takes_the_probes_and_the_others_the_screen_reflections :: proc(t: ^testing.T
 the_screen_reflections_levels_grow :: proc(t: ^testing.T) {
 	for level in Quality_Level {
 		p := REFLECTION_PARAMS[.Screen][level]
-		testing.expect_value(t, p.half, level <= .Medium)
+		testing.expect_value(t, p.stride, level <= .Medium ? [2]u32{2, 2} : [2]u32{1, 1})
 		testing.expect(t, p.rays >= 1 && p.rays <= 2 && p.steps > 0 && p.cutoff > 0 && p.cutoff <= 1)
 		if level > .Low {
 			before := REFLECTION_PARAMS[.Screen][Quality_Level(u8(level) - 1)]
 			testing.expectf(t, p.steps > before.steps && p.cutoff > before.cutoff, "%v takes no more than %v", level, Quality_Level(u8(level) - 1))
 		}
+	}
+}
+
+// The traced reflections' levels trace more pixels' rays, further, and take rougher surfaces at each.
+@(test)
+the_traced_reflections_levels_grow :: proc(t: ^testing.T) {
+	strides := [Quality_Level][2]u32 {
+		.Low    = {2, 2},
+		.Medium = {2, 2},
+		.High   = {2, 1},
+		.Ultra  = {1, 1},
+	}
+	for level in Quality_Level {
+		p := REFLECTION_PARAMS[.Ray_Traced][level]
+		testing.expect_value(t, p.stride, strides[level])
+		testing.expect(t, p.rays == 1 && p.cutoff > 0 && p.cutoff <= 1 && p.distance > 0)
+		if level > .Low {
+			before := REFLECTION_PARAMS[.Ray_Traced][Quality_Level(u8(level) - 1)]
+			testing.expectf(t, p.distance > before.distance && p.cutoff > before.cutoff, "%v takes no more than %v", level, Quality_Level(u8(level) - 1))
+		}
+	}
+}
+
+// A frame whose every pixel's ray would not fit one hit shading batch traces one pixel of a larger block.
+@(test)
+the_traced_reflections_stride_fits_a_batch :: proc(t: ^testing.T) {
+	testing.expect_value(t, reflection_stride({2560, 1440}, {1, 1}), [2]u32{1, 1})
+	testing.expect_value(t, reflection_stride({3840, 2160}, {1, 1}), [2]u32{2, 1})
+	testing.expect_value(t, reflection_stride({3840, 2160}, {2, 1}), [2]u32{2, 1})
+	testing.expect_value(t, reflection_stride({7680, 4320}, {1, 1}), [2]u32{4, 2})
+	testing.expect_value(t, reflection_stride({15360, 8640}, {1, 1}), [2]u32{8, 4})
+	for size in ([][2]u32{{1, 1}, {7680, 4320}, {65535, 65535}}) {
+		s := reflection_stride(size, {1, 1})
+		trace := (size + s - 1) / s
+		testing.expect(t, trace.x * trace.y <= MAX_HIT_RAYS)
 	}
 }
 
@@ -103,6 +151,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	// Without Ray_Query, the world probes are the screen-space cascades alone.
 	testing.expect_value(t, q.gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, clamp_quality(q, {}).gi.technique, Gi_Technique.Screen_Cascades)
+	testing.expect_value(t, clamp_quality(q, {}).reflections.technique, Reflection_Technique.Screen)
 	testing.expect_value(t, clamp_quality(q, {ray_query = true}), q)
 	// The voxel cones need no ray queries, and no preset chooses them.
 	voxels := q
@@ -159,12 +208,14 @@ the_default_quality_follows_the_video_memory :: proc(t: ^testing.T) {
 	testing.expect_value(t, quality_preset(default_quality(gigabytes(16)), gigabytes(16)), Quality_Preset.Ultra)
 	// Unknown memory, as on an adapter that shares the CPU's, is High.
 	testing.expect_value(t, quality_preset(default_quality({}), {}), Quality_Preset.High)
-	// Traced shadows and the world probes from High up, where the device has them.
+	// Traced shadows, the world probes and the traced reflections from High up, where the device has them.
 	testing.expect(t, !default_quality({ray_query = true, video_memory = 3 << 30}).shadows.ray_traced)
 	testing.expect(t, default_quality({ray_query = true}).shadows.ray_traced)
 	testing.expect_value(t, default_quality({ray_query = true, video_memory = 3 << 30}).gi.technique, Gi_Technique.Screen_Cascades)
 	testing.expect_value(t, default_quality({ray_query = true}).gi.technique, Gi_Technique.Split_Cascades)
 	testing.expect_value(t, default_quality({}).gi.technique, Gi_Technique.Screen_Cascades)
+	testing.expect_value(t, default_quality({ray_query = true}).reflections.technique, Reflection_Technique.Ray_Traced)
+	testing.expect_value(t, default_quality({}).reflections.technique, Reflection_Technique.Screen)
 }
 
 @(test)

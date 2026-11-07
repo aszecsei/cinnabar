@@ -59,8 +59,8 @@ Debug_View :: enum u8 {
 	// The reflection probe that counts the most at each pixel, each in a color of its own, and red where none does (see
 	// docs/rendering/lighting-and-shadows.md#reflection-probes).
 	Reflection_Probes,
-	// The screen-space reflections' light, as bright as their weight, which is black where the probes take over (see
-	// docs/rendering/lighting-and-shadows.md#screen-space-reflections).
+	// The screen-space or traced reflections' light, as bright as their weight, which is black where the probes take
+	// over (see docs/rendering/lighting-and-shadows.md#screen-space-reflections).
 	Reflections,
 }
 

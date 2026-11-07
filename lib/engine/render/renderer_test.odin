@@ -24,7 +24,8 @@ Hook_Record :: struct {
 	before_world, world_uses, after_world, before_post, ui, debug: bool,
 	// What the debug hook, which runs after post-processing, saw.
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
-	reflections:                                        bool,
+	// The reflections, and whether they traced the ray scene.
+	reflections, traced:                                bool,
 	// The exposure's histogram counts the background, which the sky drew.
 	sky_background:                                     bool,
 	temporal, upscaled, display:                        bool,
@@ -206,7 +207,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.debug = f.debug != 0
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
-				rec.reflections = f.reflections != 0
+				rec.reflections, rec.traced = f.reflections != 0, f.ssr != nil && f.ssr.traced != nil
 				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
 				rec.size, rec.output_size, rec.scene_size = f.size, f.output_size, f.scene_size
@@ -307,6 +308,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.ssr.resolve,
 		&r.ssr.temporal,
 		&r.ssr.lit,
+		// The traced reflections, which the default quality takes with ray queries.
+		&r.rtr.trace,
+		&r.rtr.light,
 	}
 	for p in compute {
 		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
@@ -427,14 +431,17 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	r.blue_noise.texture = noise
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 
-	// Only the Screen technique makes the screen-space reflections, at every level, and their debug view shows them.
+	// Only the Screen and Ray_Traced techniques make the reflections, at every level, and their debug view shows them.
+	// The test's world draws no meshes, so hit shading has nothing to shade, and Ray_Traced takes the screen-space
+	// reflections (traced_reflections_test.odin traces them).
 	for technique in Reflection_Technique {
 		for level in Quality_Level {
 			q := r.quality
 			q.reflections = {technique, level}
 			desc.quality = &q
 			testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
-			testing.expectf(t, record.reflections == (technique == .Screen), "%v at %v: reflections %v", technique, level, record.reflections)
+			testing.expectf(t, record.reflections == (technique == .Screen || technique == .Ray_Traced), "%v at %v: reflections %v", technique, level, record.reflections)
+			testing.expectf(t, !record.traced, "%v at %v traced with nothing to shade", technique, level)
 		}
 	}
 	desc.debug_view = .Reflections

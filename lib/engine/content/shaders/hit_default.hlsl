@@ -14,5 +14,5 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	}
 	Hit_Triangle tri = load_hit_triangle(ray);
 	uint flags = HIT_SURFACE_FALLBACK | (tri.front ? 0 : HIT_SURFACE_BACK);
-	store_hit_surface(ray, pack_hit_surface(tri.position, tri.facing, tri.facing, FALLBACK_ALBEDO, 0, 1, flags));
+	store_hit_surface(ray, pack_hit_surface(tri.position, tri.facing, tri.facing, FALLBACK_ALBEDO, 0, 0, 1, flags));
 }

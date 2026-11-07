@@ -1,6 +1,7 @@
 // The light that a traced ray's hit sends back along the ray (see docs/rendering/global-illumination.md#world-probes):
 // its emission, the direct light of every directional light and of a list of punctual lights, each shadowed by a ray
-// toward it, and the world probes' light at the hit, so light bounces once more each time. A ray that hit nothing sees
+// toward it, and the world probes' light at the hit, so light bounces once more each time, for its diffuse part and its
+// specular part alike, or the sky's along the hit's reflection for the specular part where no probe counts. A ray that hit nothing sees
 // the ambient light. A back face of a one-sided surface is black, and its distance is negative, which tells the world
 // probes that a probe may be inside geometry. A pass includes it after material_lighting.hlsli, whose lights it reads,
 // with the camera's frame constants set.
@@ -76,10 +77,18 @@ float4 hit_light(Hit_Record hit, uint surfaces, uint ray, Hit_Lights lights, Pro
 			direct += hit_direct(lights.accel, load_light(index), origin, normal);
 		}
 		float3 bounce;
-		if (!sample_probes(grid, p, normal, normal, false, bounce)) {
+		bool probes = sample_probes(grid, p, normal, normal, false, bounce);
+		if (!probes) {
 			bounce = ambient_light(frame.ambient, normal);
 		}
 		light += albedo / PI * direct + albedo * bounce;
+		// The specular part, so a metal is not black: where the probes count, the light that they give around the normal,
+		// and elsewhere the sky's cubemap along the reflection, at the hit's roughness. A second probe lookup along the
+		// reflection hung the GPU on an RTX 5090, as the screen light did here (see gi_hit_screen.hlsli).
+		float3 specular = hit_specular(s);
+		if (any(specular > 0)) {
+			light += specular * (probes ? bounce : frame_sky_specular(reflect(direction, normal), hit_roughness(s)));
+		}
 	}
 	return float4(light, hit.t);
 }

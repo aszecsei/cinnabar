@@ -13,7 +13,8 @@ import "cinnabar:core/gpu"
 // whose rgb is the specular light along the reflection, filtered for the pixel's roughness and pre-exposed, and whose
 // alpha is its weight: the forward pass puts it in front of the probes, the global illumination or the sky's cubemap.
 // After the world pass, another pass keeps the lit scene for the next frame's rays, unless the global illumination's
-// serves.
+// serves. The traced reflections (see traced_reflections.odin) are a frame's Ssr_Frame too: their rays trace the ray
+// scene in place of the trace, through the same resolve and temporal pass.
 
 // The engine's screen-space reflection shaders, by their .meta files.
 SSR_DEPTH_SHADER :: #load("../content/shaders/ssr_depth.hlsl.meta", string)
@@ -36,9 +37,19 @@ SSR_DEPTH_GROUP_SIZE :: 16
 // cutoff, whose noise needs the most averaging.
 SSR_MIN_FRAMES :: 2
 SSR_MAX_FRAMES :: 16
-// At half resolution, the pixel of each 2x2 block that the rays start from, in turn from frame to frame.
+// The pixel of each 2x2 block that the rays start from, in turn from frame to frame, the diagonal first.
 @(rodata)
 SSR_HALF_OFFSETS := [4][2]u32{{0, 0}, {1, 1}, {1, 0}, {0, 1}}
+
+// ssr_offset is the pixel of each block of a stride that the rays start from at a frame: each in turn, across the rows
+// first, and the diagonal first in a 2x2 block.
+ssr_offset :: proc(stride: [2]u32, frame: u32) -> [2]u32 {
+	if stride == {2, 2} {
+		return SSR_HALF_OFFSETS[frame % 4]
+	}
+	k := frame % max(stride.x * stride.y, 1)
+	return {k % stride.x, k / stride.x}
+}
 
 // Screen_Reflections is the screen-space reflections' state between frames, in the Renderer.
 Screen_Reflections :: struct {
@@ -52,7 +63,7 @@ Screen_Reflections :: struct {
 }
 
 // Ssr_Constants matches Ssr_Constants in ssr_common.hlsli.
-@(private = "file")
+@(private)
 Ssr_Constants :: struct {
 	previous:      matrix[4, 4]f32,
 	right:         [4]f32,
@@ -91,16 +102,21 @@ Ssr_Constants :: struct {
 	source:        u32,
 	min_frames:    f32,
 	max_frames:    f32,
-	padding:       u32,
+	reach:         f32,
+	stride:        [2]u32,
+	padding:       [2]u32,
 }
 
-#assert(size_of(Ssr_Constants) == 336)
+#assert(size_of(Ssr_Constants) == 352)
 
 // Ssr_Frame is what one frame's screen-space reflections need, in frame memory.
 @(private)
 Ssr_Frame :: struct {
 	constants:  Ssr_Constants,
 	params:     Reflection_Params,
+	level:      Quality_Level,
+	// The block that a trace texel covers, and the trace's size, a texel for each block.
+	stride:     [2]u32,
 	trace_size: [2]u32,
 	lit_size:   [2]u32,
 	// The lit scene: the reflections' own, or the global illumination's, which the lit pass then leaves to it.
@@ -115,6 +131,8 @@ Ssr_Frame :: struct {
 	// The scene that the lit pass keeps: later passes replace Frame.scene before the passes record.
 	scene:      Texture,
 	depth:      [2]Ssr_Depth_Pass,
+	// The traced reflections' frame, nil for the screen-space reflections.
+	traced:     ^Rtr_Frame,
 }
 
 // Ssr_Depth_Pass is one dispatch of the depth pass.
@@ -161,15 +179,17 @@ ssr_level_size :: proc(size: [2]u32, level: int) -> [2]u32 {
 	return {(size.x + round) >> u32(level), (size.y + round) >> u32(level)}
 }
 
-// begin_screen_reflections decides whether the frame has screen-space reflections, before the scene's constants are
-// written, which say so, and after begin_gi, whose lit scene serves at half resolution. Without the Screen technique,
-// with off, or without its pipelines or its noise, it does nothing, and Frame.ssr stays nil.
+// begin_screen_reflections decides whether the frame has screen-space or traced reflections, before the scene's
+// constants are written, which say so, and after begin_gi, whose lit scene serves at half resolution. Without the
+// Screen or Ray_Traced technique, with off, or without the screen-space reflections' pipelines or their noise, it does
+// nothing, and Frame.ssr stays nil. A frame that cannot trace yet (see begin_traced_reflections) has the screen-space
+// reflections at the same level.
 @(private)
 begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	r := f.renderer
 	s := &r.ssr
 	platform := r.platform
-	if settings.off || settings.technique != .Screen {
+	if settings.off || (settings.technique != .Screen && settings.technique != .Ray_Traced) {
 		return
 	}
 	for p in screen_reflection_pipelines(s) {
@@ -182,14 +202,27 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		return
 	}
 	g := f.graph
+	technique := settings.technique
+	traced: ^Rtr_Frame
+	if technique == .Ray_Traced {
+		traced = begin_traced_reflections(f)
+		if traced == nil {
+			technique = .Screen
+		}
+	}
 	sf := new(Ssr_Frame, platform.frame_allocator)
-	sf.params = REFLECTION_PARAMS[.Screen][settings.level]
-	half := (f.size + 1) / 2
-	sf.trace_size = sf.params.half ? half : f.size
-	if sf.params.half && f.gi != nil {
+	sf.traced = traced
+	sf.params = REFLECTION_PARAMS[technique][settings.level]
+	sf.level = settings.level
+	sf.stride = technique == .Ray_Traced ? reflection_stride(f.size, sf.params.stride) : sf.params.stride
+	sf.trace_size = (f.size + sf.stride - 1) / sf.stride
+	// A trace of one pixel of each 2x2 block, or fewer, takes a lit scene at half resolution.
+	half_size := (f.size + 1) / 2
+	half := sf.stride.x >= 2 && sf.stride.y >= 2
+	if half && f.gi != nil {
 		sf.lit, sf.lit_size, sf.shares_lit = f.gi.lit, f.gi.lit_size, true
 	} else {
-		sf.lit_size = sf.params.half ? half : f.size
+		sf.lit_size = half ? half_size : f.size
 		sf.lit = history_texture(g, {size = sf.lit_size, format = SSR_FORMAT, label = "reflections lit scene"})
 	}
 	sf.history = history_texture(g, {size = f.size, format = SSR_FORMAT, label = "reflections"})
@@ -210,7 +243,7 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		size          = f.size,
 		trace_size    = sf.trace_size,
 		lit_size      = sf.lit_size,
-		offset        = sf.params.half ? SSR_HALF_OFFSETS[s.frame % 4] : {},
+		offset        = ssr_offset(sf.stride, s.frame),
 		ray_count     = max(min(sf.params.rays, 2), 1),
 		steps         = sf.params.steps,
 		cutoff        = sf.params.cutoff,
@@ -219,12 +252,19 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		history_valid = u32(sf.history.valid),
 		min_frames    = SSR_MIN_FRAMES,
 		max_frames    = SSR_MAX_FRAMES,
+		reach         = sf.params.distance,
+		stride        = sf.stride,
+	}
+	if traced != nil {
+		sf.constants.ray_count = 1
 	}
 	f.ssr = sf
 }
 
-// add_screen_reflection_passes adds the depth pyramid, the trace, the resolve and the temporal pass after the prepass,
-// on the compute queue, and sets Frame.reflections, which the forward pass reads.
+// add_screen_reflection_passes adds the depth pyramid and the trace, or the traced reflections' passes, then the resolve
+// and the temporal pass, after the prepass, on the compute queue, and sets Frame.reflections, which the forward pass
+// reads. The traced reflections need the pyramid only to march the screen first. A frame whose hits cannot be shaded
+// after all takes the screen-space reflections' trace at the same level.
 @(private)
 add_screen_reflection_passes :: proc(f: ^Frame) {
 	sf := f.ssr
@@ -234,42 +274,20 @@ add_screen_reflection_passes :: proc(f: ^Frame) {
 	g := f.graph
 	// Last frame's projection is known once the scene's constants are written.
 	sf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
-	for &level, i in sf.levels {
-		level = create_texture(g, {size = ssr_level_size(f.size, i), format = SSR_DEPTH_FORMAT, label = "reflections depth"})
+	if sf.traced != nil && !add_traced_reflection_passes(f) {
+		sf.traced = nil
+		screen := REFLECTION_PARAMS[.Screen][sf.level]
+		sf.constants.ray_count = max(min(screen.rays, 2), 1)
+		sf.constants.steps = screen.steps
 	}
-	sf.depth[0] = {f, true}
-	p := add_compute_pass(g, "reflections depth", run_ssr_depth, &sf.depth[0], queue = .Compute)
-	read(g, p, f.depth)
-	for level in sf.levels[:5] {
-		write(g, p, level)
+	if sf.traced == nil {
+		add_ssr_depth(f)
+		add_ssr_trace(f)
 	}
-	sf.depth[1] = {f, false}
-	p = add_compute_pass(g, "reflections depth", run_ssr_depth, &sf.depth[1], queue = .Compute)
-	read(g, p, sf.levels[4])
-	for level in sf.levels[5:] {
-		write(g, p, level)
-	}
-
 	rays := int(sf.constants.ray_count)
-	for i in 0 ..< rays {
-		sf.rays[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections rays"})
-		sf.radiance[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections radiance"})
-	}
-	p = add_compute_pass(g, "reflections trace", run_ssr_trace, f, queue = .Compute)
-	declare_ssr_surface(f, p)
-	for level in sf.levels {
-		read(g, p, level)
-	}
-	read(g, p, sf.lit.previous)
-	read(g, p, f.exposure)
-	for i in 0 ..< rays {
-		write(g, p, sf.rays[i])
-		write(g, p, sf.radiance[i])
-	}
-
 	sf.resolved = create_texture(g, {size = f.size, format = SSR_FORMAT, label = "reflections resolved"})
 	sf.distance = create_texture(g, {size = f.size, format = SSR_DISTANCE_FORMAT, label = "reflections distance"})
-	p = add_compute_pass(g, "reflections resolve", run_ssr_resolve, f, queue = .Compute)
+	p := add_compute_pass(g, "reflections resolve", run_ssr_resolve, f, queue = .Compute)
 	declare_ssr_surface(f, p)
 	for i in 0 ..< rays {
 		read(g, p, sf.rays[i])
@@ -289,6 +307,61 @@ add_screen_reflection_passes :: proc(f: ^Frame) {
 	f.reflections = sf.history.current
 }
 
+// add_ssr_depth adds the depth pyramid's two dispatches, once a frame.
+@(private)
+add_ssr_depth :: proc(f: ^Frame) {
+	sf := f.ssr
+	if sf.levels[0] != 0 {
+		return
+	}
+	g := f.graph
+	for &level, i in sf.levels {
+		level = create_texture(g, {size = ssr_level_size(f.size, i), format = SSR_DEPTH_FORMAT, label = "reflections depth"})
+	}
+	sf.depth[0] = {f, true}
+	p := add_compute_pass(g, "reflections depth", run_ssr_depth, &sf.depth[0], queue = .Compute)
+	read(g, p, f.depth)
+	for level in sf.levels[:5] {
+		write(g, p, level)
+	}
+	sf.depth[1] = {f, false}
+	p = add_compute_pass(g, "reflections depth", run_ssr_depth, &sf.depth[1], queue = .Compute)
+	read(g, p, sf.levels[4])
+	for level in sf.levels[5:] {
+		write(g, p, level)
+	}
+}
+
+// create_ssr_rays creates the trace's ray and radiance textures, a pair for each ray.
+@(private)
+create_ssr_rays :: proc(f: ^Frame) {
+	sf := f.ssr
+	g := f.graph
+	for i in 0 ..< int(sf.constants.ray_count) {
+		sf.rays[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections rays"})
+		sf.radiance[i] = create_texture(g, {size = sf.trace_size, format = SSR_FORMAT, label = "reflections radiance"})
+	}
+}
+
+// add_ssr_trace adds the screen-space reflections' trace.
+@(private = "file")
+add_ssr_trace :: proc(f: ^Frame) {
+	sf := f.ssr
+	g := f.graph
+	create_ssr_rays(f)
+	p := add_compute_pass(g, "reflections trace", run_ssr_trace, f, queue = .Compute)
+	declare_ssr_surface(f, p)
+	for level in sf.levels {
+		read(g, p, level)
+	}
+	read(g, p, sf.lit.previous)
+	read(g, p, f.exposure)
+	for i in 0 ..< int(sf.constants.ray_count) {
+		write(g, p, sf.rays[i])
+		write(g, p, sf.radiance[i])
+	}
+}
+
 // add_screen_reflection_lit adds the pass that keeps the scene for the next frame's rays, after the world pass, unless
 // the global illumination's lit scene serves.
 @(private)
@@ -306,7 +379,7 @@ add_screen_reflection_lit :: proc(f: ^Frame) {
 }
 
 // declare_ssr_surface declares the prepass's targets that a pass reads its pixels' surfaces from.
-@(private = "file")
+@(private)
 declare_ssr_surface :: proc(f: ^Frame, p: Pass) {
 	g := f.graph
 	read(g, p, f.depth)
@@ -315,7 +388,7 @@ declare_ssr_surface :: proc(f: ^Frame, p: Pass) {
 }
 
 // ssr_constants are the frame's constants with the prepass's targets, which exist once the passes record.
-@(private = "file")
+@(private)
 ssr_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Ssr_Constants {
 	g := ctx.graph
 	c := f.ssr.constants
@@ -328,7 +401,8 @@ ssr_constants :: proc(ctx: ^Pass_Context, f: ^Frame) -> Ssr_Constants {
 	return c
 }
 
-@(private = "file")
+// dispatch_ssr dispatches a pass with the frame's constants, over a size in groups of group x group threads.
+@(private)
 dispatch_ssr :: proc(ctx: ^Pass_Context, f: ^Frame, pipeline: gpu.Pipeline, c: Ssr_Constants, size: [2]u32, group: u32) {
 	upload, ok := f.renderer.platform.gpu_upload(size_of(Ssr_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {

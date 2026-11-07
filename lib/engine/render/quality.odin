@@ -64,9 +64,12 @@ Reflection_Technique :: enum u8 {
 	// in front of the probes, which fill in where they miss (see
 	// docs/rendering/lighting-and-shadows.md#screen-space-reflections).
 	Screen,
+	// Ray-traced reflections, which trace the ray scene and shade their hits through hit shading, in front of the probes
+	// (see docs/rendering/lighting-and-shadows.md#ray-traced-reflections). Needs Ray_Query.
+	Ray_Traced,
 }
 
-#assert(int(Reflection_Technique.Probes) == 1 && int(Reflection_Technique.Screen) == 2)
+#assert(int(Reflection_Technique.Probes) == 1 && int(Reflection_Technique.Screen) == 2 && int(Reflection_Technique.Ray_Traced) == 3)
 
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
@@ -170,15 +173,24 @@ device_caps :: proc(platform: ^core.Platform_API) -> (caps: Caps) {
 	return
 }
 
-// preset_quality is every feature at a preset's level, with traced shadows and the world probes from High up where the
-// device has ray queries, the reflection probes at Low, and the screen-space reflections above it. Custom gives High's.
+// preset_quality is every feature at a preset's level, with traced shadows, the world probes and the traced reflections
+// from High up where the device has ray queries, the reflection probes at Low, and the screen-space reflections between.
+// Custom gives High's.
 preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 	level := preset == .Custom ? Quality_Level.High : Quality_Level(u8(preset))
+	traced := caps.ray_query && level >= .High
+	reflections := Reflection_Technique.Screen
+	switch {
+	case level == .Low:
+		reflections = .Probes
+	case traced:
+		reflections = .Ray_Traced
+	}
 	return {
-		shadows = {level = level, ray_traced = caps.ray_query && level >= .High, virtual = level >= .Medium},
+		shadows = {level = level, ray_traced = traced, virtual = level >= .Medium},
 		ao = {technique = .Gtao, level = level},
-		gi = {technique = caps.ray_query && level >= .High ? .Split_Cascades : .Screen_Cascades, level = level},
-		reflections = {technique = level == .Low ? .Probes : .Screen, level = level},
+		gi = {technique = traced ? .Split_Cascades : .Screen_Cascades, level = level},
+		reflections = {technique = reflections, level = level},
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,
@@ -212,8 +224,8 @@ default_quality :: proc(caps: Caps) -> Quality {
 }
 
 // clamp_quality turns off what the device cannot do, and puts each enum back in its range, since a settings file or a
-// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too, and the
-// world probes without Ray_Query give the screen-space cascades alone.
+// script may give any number. An upscaler that the device does not run gives temporal AA, which upscales too, the world
+// probes without Ray_Query give the screen-space cascades alone, and the traced reflections the screen-space ones.
 clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	q := q
 	clamp_enum :: proc(value: $T, fallback: T) -> T {
@@ -230,6 +242,9 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	}
 	q.gi.level = clamp_enum(q.gi.level, .High)
 	q.reflections.technique = clamp_enum(q.reflections.technique, .Off)
+	if q.reflections.technique == .Ray_Traced && !caps.ray_query {
+		q.reflections.technique = .Screen
+	}
 	q.reflections.level = clamp_enum(q.reflections.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
 	q.aa = clamp_enum(q.aa, .Off)

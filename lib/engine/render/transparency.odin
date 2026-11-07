@@ -161,7 +161,7 @@ add_transparent_id_pass :: proc(f: ^Frame, keep_ids: bool) {
 
 // declare_lighting declares what the forward template reads: the exposure, the clusters, the shadow maps, the fog
 // volume, the global illumination, the sky's cubemap and the reflection probes, and for opaque surfaces the shadow mask,
-// the ambient occlusion and the screen-space reflections.
+// the ambient occlusion and the screen-space or traced reflections.
 @(private)
 declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
 	g := f.graph

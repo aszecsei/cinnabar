@@ -5,7 +5,19 @@
 #define MATERIAL_LIGHTING_HLSLI
 
 #include "material_common.hlsli"
+#include "sky_cube.hlsli"
 #include "virtual_shadow.hlsli"
+
+// frame_sky_specular is the sky's light along a reflection, from the frame's cubemap at a roughness.
+float3 frame_sky_specular(float3 d, float roughness) {
+	Sky_Cube c;
+	c.current = frame.sky_cube_current;
+	c.previous = frame.sky_cube_previous;
+	c.blend = frame.sky_cube_blend;
+	c.mips = frame.sky_cube_mips;
+	c.sampler_index = frame.sky_cube_sampler;
+	return sky_specular(c, frame.ambient, d, roughness);
+}
 
 // Match CLUSTER_TILE and CLUSTER_SLICES in lib/engine/render/lights.odin.
 static const uint CLUSTER_TILE = 64;

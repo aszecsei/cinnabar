@@ -31,8 +31,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 view = -normalize(position);
 	float n_v = dot(normal, view);
 	float alpha = ggx_alpha(roughness);
-	bool half_size = any(constants.trace_size != constants.size);
-	int2 own = half_size ? pixel / 2 : pixel;
+	int2 own = pixel / int2(constants.stride);
 	int2 last = int2(constants.trace_size) - 1;
 	uint turn = uint(noise(pixel, 3).x * 8);
 	float sum_weight = 0;
@@ -41,7 +40,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float sum_distance = 0;
 	[unroll] for (uint n = 0; n < 4; n++) {
 		int2 texel = clamp(own + (n == 0 ? int2(0, 0) : RING[(turn + n * 3) % 8]), 0, last);
-		int2 source = min(half_size ? texel * 2 + int2(constants.offset) : texel, int2(constants.size) - 1);
+		int2 source = trace_pixel(uint2(texel));
 		float3 origin;
 		if (!surface_at(source, origin)) {
 			continue;

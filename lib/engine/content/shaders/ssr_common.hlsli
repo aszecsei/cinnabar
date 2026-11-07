@@ -11,6 +11,8 @@
 // last frame's clip space, the camera's motion included. right, up and forward are the view's axes in the world, and
 // projection holds the camera's x and y scales and its near plane. levels are the depth pyramid's, written by the
 // depth pass and read by the trace. rays are the trace's ray textures, then its radiance textures, a pair for each ray.
+// The rays start from one pixel of each block of stride, at offset in it, which a trace texel covers. reach is the
+// traced reflections' distance, past which a hit has no weight.
 struct Ssr_Constants {
 	float4x4 previous;
 	float4 right;
@@ -49,7 +51,9 @@ struct Ssr_Constants {
 	uint source;
 	float min_frames;
 	float max_frames;
-	uint padding;
+	float reach;
+	uint2 stride;
+	uint2 padding;
 };
 CN_PASS_CONSTANTS(Ssr_Constants, constants);
 
@@ -107,6 +111,11 @@ bool surface_at(int2 pixel, out float3 position) {
 	bool view_model = (cn_stencil_texture(constants.stencil).Load(int3(pixel, 0)).g & VIEW_MODEL_STENCIL) != 0;
 	position = position_at((float2(pixel) + 0.5) / float2(constants.size), depth);
 	return depth > 0 && !view_model;
+}
+
+// trace_pixel is the pixel that a trace texel's rays start from this frame.
+int2 trace_pixel(uint2 texel) {
+	return min(int2(texel * constants.stride + constants.offset), int2(constants.size) - 1);
 }
 
 float3 octahedral_decode(float2 p) {
@@ -196,6 +205,29 @@ float3 sample_vndf(float3 v, float alpha, float2 u) {
 	p2 = (1 - s) * sqrt(max(1 - p1 * p1, 0)) + s * p2;
 	float3 nh = p1 * t1 + p2 * t2 + sqrt(max(0, 1 - p1 * p1 - p2 * p2)) * vh;
 	return normalize(float3(alpha * nh.x, alpha * nh.y, max(nh.z, 0)));
+}
+
+// sample_ray is a ray from a pixel's surface at a position, with its normal: the view direction reflected by a normal
+// from GGX's distribution of visible normals at the pixel's roughness, from the blue noise of ray r. ray holds its
+// direction, folded into the octahedron, and its pdf in w. It is false where the pixel faces away from the view.
+bool sample_ray(int2 pixel, float3 position, float roughness, uint r, out float3 normal, out float3 direction, out float4 ray) {
+	normal = normal_at(pixel);
+	direction = 0;
+	ray = 0;
+	float3 view = -normalize(position);
+	float3 t, b;
+	basis(normal, t, b);
+	float3 v = float3(dot(view, t), dot(view, b), dot(view, normal));
+	if (v.z <= 0) {
+		return false;
+	}
+	float alpha = ggx_alpha(roughness);
+	float3 h = sample_vndf(v, alpha, noise(pixel, r));
+	float3 l = reflect(-v, h);
+	float pdf = min(vndf_pdf(v.z, h.z, alpha), MAX_PDF);
+	direction = normalize(t * l.x + b * l.y + normal * l.z);
+	ray = float4(octahedral_encode(direction), 0, pdf);
+	return true;
 }
 
 // The weight that fades a point out near the screen's edges, over this share of the screen.
