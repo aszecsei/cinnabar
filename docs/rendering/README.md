@@ -21,7 +21,7 @@ Read them in this order the first time.
 | [Ambient occlusion](ambient-occlusion.md) | GTAO as XeGTAO builds it, and HBAO and SSAO in its place. |
 | [Global illumination](global-illumination.md) | Screen-space radiance cascades; world probes and split radiance cascades traced with ray queries; and voxel cone tracing. |
 | [Volumetric fog](fog.md) | The froxel volume. |
-| [Sky](sky.md) | The Environment: the Flat background, the atmosphere's sky, its sun, moon and stars, and the ambient light. |
+| [Sky](sky.md) | The Environment: the Flat background, the atmosphere's sky, its sun, moon and stars, the ambient light, and the sky's prefiltered cubemap for the specular light. |
 | [Post-processing](post-processing.md) | Temporal AA, exposure, bloom, tone mapping, debug views and post effects. |
 | [Anti-aliasing](anti-aliasing.md) | The quality's techniques: temporal AA, FSR, FXAA and SMAA 1x, upscaling, and the tone map pass before FXAA and SMAA. |
 | [Assets and components](assets.md) | GPU residency, asset fields and the renderer's components. |
@@ -58,6 +58,7 @@ Read them in this order the first time.
 | `gi_split.odin` | The split radiance cascades: their windows, tables, storage and passes ([Split cascades](global-illumination.md#split-cascades)) |
 | `gi_voxel.odin` | The voxel cones: their clipmap's levels, schedule, storage, voxelization views and passes ([Voxel cones](global-illumination.md#voxel-cones)) |
 | `reflections.odin` | The reflections' `REFLECTION_PARAMS` and `Reflection_Settings` ([Quality](quality.md#quality)) |
+| `sky_cube.odin` | The sky's cubemap: its capture, its prefilter by roughness, its ring and its builds a mip a frame ([Specular light](sky.md#specular-light)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
 | `spatial_aa.odin` | The tone map pass, FXAA and SMAA 1x ([Anti-aliasing](anti-aliasing.md#anti-aliasing)) |
@@ -66,7 +67,7 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `hit_bin`, `hit_default`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `hit_bin`, `hit_default`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `sky*`, `cube_prefilter`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 
@@ -116,7 +117,8 @@ Each entry names the section that follows it.
 - Christopher Burns, Warren Hunt, [*The Visibility Buffer: A Cache-Friendly Approach to Deferred Shading*](https://jcgt.org/published/0002/02/04/), JCGT 2013: the [Visibility buffer](lighting-and-shadows.md#visibility-buffer) that was measured against clustered forward.
 - Ola Olsson, Markus Billeter, Ulf Assarsson, [*Clustered Deferred and Forward Shading*](https://efficientshading.com/2012/01/01/clustered-deferred-and-forward-shading/), HPG 2012: [Lights and clusters](lighting-and-shadows.md#lights-and-clusters).
 - Nathan Reed, [*Depth Precision Visualized*](https://developer.nvidia.com/content/depth-precision-visualized), 2015: the reversed infinite Z in [Decisions](#decisions).
-- Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013: the `Lit` shading model's GGX, Smith visibility, Schlick Fresnel and the environment BRDF fit in [Shading models](materials.md#shading-models).
+- Brian Karis, [*Real Shading in Unreal Engine 4*](https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf), SIGGRAPH 2013: the `Lit` shading model's GGX, Smith visibility, Schlick Fresnel and the environment BRDF fit in [Shading models](materials.md#shading-models), and the split sum's prefiltered environment, its GGX importance sampling at Hammersley points and the normal, view and reflection taken as one, in the sky's [cubemap](sky.md#specular-light).
+- Jaroslav Křivánek, Mark Colbert, [*Real-time Shading with Filtered Importance Sampling*](https://doi.org/10.1111/j.1467-8659.2008.01253.x), EGSR 2008, and GPU Gems 3, chapter 20: the sky [cubemap](sky.md#specular-light)'s prefilter, whose samples read the source's mip for their solid angle.
 - Brian Karis, [*High Quality Temporal Supersampling*](https://de45xmedrsdbp.cloudfront.net/Resources/files/TemporalAA_small-59732822.pdf), SIGGRAPH 2014, and Lasse Jon Fuglsang Pedersen, [*Temporal Reprojection Anti-Aliasing in INSIDE*](https://www.gdcvault.com/play/1022970/Temporal-Reprojection-Anti-Aliasing-in), GDC 2016: the velocity dilation, YCoCg clipping and reversible tone map of [Post-processing](post-processing.md#post-processing)'s temporal AA.
 - Jorge Jimenez, [*Next Generation Post Processing in Call of Duty: Advanced Warfare*](https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/), SIGGRAPH 2014: the 13-tap downsample with luminance weighting, the tent upsample and the Halton jitter in [Post-processing](post-processing.md#post-processing).
 - Timothy Lottes, [*FXAA*](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf), NVIDIA 2011, and FXAA 3.11: the edge search and subpixel blend of [Anti-aliasing](anti-aliasing.md#fxaa)'s FXAA.
