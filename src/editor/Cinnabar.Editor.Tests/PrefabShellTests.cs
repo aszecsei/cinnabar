@@ -100,12 +100,12 @@ public sealed class PrefabShellTests : IDisposable
         Index(shell, _temp.Path);
         var frame = InDoor(0x2000000000000002);
 
-        shell.BeginEdit("Move Frame");
+        var edit = shell.TryBeginEdit("Move Frame", "the test")!;
         foreach (var x in new[] { 0.1, 0.2, 0.3 })
         {
-            shell.PreviewEdit(new SetField(frame, SceneEdits.LocalTransformId, "offset", SceneEdits.Floats(x, 0, 0)));
+            edit.Preview(new SetField(frame, SceneEdits.LocalTransformId, "offset", SceneEdits.Floats(x, 0, 0)));
         }
-        shell.CommitEdit();
+        edit.Commit();
 
         Assert.Single(shell.Scene!.History);
         Assert.True(shell.IsOverridden(frame));

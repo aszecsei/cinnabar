@@ -22,7 +22,7 @@ public sealed partial class MeshToolRunner
     public bool BeginDistanceTool(string label, Func<MeshData, IEnumerable<int>, double, ToolResult> run, bool magnitude = false, MeshElement? requires = null)
     {
         CommitPendingDistance();
-        if (!CanRunMeshTool(requires) || _shell.Scene is not { InTransaction: false })
+        if (!CanRunMeshTool(requires) || _shell.Scene == null || _shell.OpenEdit != null)
         {
             return false;
         }
@@ -49,50 +49,49 @@ public sealed partial class MeshToolRunner
             return false;
         }
         axis = axis.Length > 1e-9 ? axis.Normalized() : Vec3.UnitY;
-        _shell.BeginEdit(label);
-        _pending = new PendingDistance(label, axis, magnitude, meshes, run);
+        if (_shell.TryBeginEdit(label, "a mesh tool") is not { } edit)
+        {
+            return false;
+        }
+        var pending = new PendingDistance(edit, axis, magnitude, meshes, run);
+        edit.Ended += committed => OnPendingEnded(pending, committed);
+        _pending = pending;
         _session.OnMeshModeChanged();
         _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()}: drag the gizmo for the {(magnitude ? "width" : "distance")}, or Escape");
         return true;
     }
 
-    /// <summary>Ends a pending distance tool as it is: with its drag's last distance, or with no entry when nothing was dragged.</summary>
-    public void CommitPendingDistance()
-    {
-        if (_pending == null)
-        {
-            return;
-        }
-        _pending = null;
-        if (!_shell.Gizmos.IsDragging)
-        {
-            _shell.CommitEdit();
-        }
-        _session.OnMeshModeChanged();
-    }
+    /// <summary>
+    /// Ends a pending distance tool as it is: with its drag's last distance, or with no entry when nothing was dragged.
+    /// A drag of its distance that is under way ends with it.
+    /// </summary>
+    public void CommitPendingDistance() => _pending?.Edit.Commit();
 
     /// <summary>Cancels a pending distance tool: the mesh is as before it.</summary>
-    public void CancelPendingDistance()
+    public void CancelPendingDistance() => _pending?.Edit.Cancel();
+
+    // The pending tool's entry ended, by the tool, by the gizmo drag that set its distance, or by the shell.
+    void OnPendingEnded(PendingDistance pending, bool committed)
     {
-        if (_pending == null)
+        if (_pending != pending)
         {
             return;
         }
         _pending = null;
-        _shell.Gizmos.Drop();
-        _shell.CancelEdit();
-        _session.PruneMeshSelection();
-        _shell.SendGizmo();
+        if (!committed)
+        {
+            _session.PruneMeshSelection();
+            _shell.SendGizmo();
+        }
         _session.OnMeshModeChanged();
     }
 
     // A gizmo drag with a distance pending: each step runs the tool at the change along the axis, or its length, on
-    // every mesh, replacing the step before. Releasing ends the tool; one that ended during the drag ignores it.
+    // every mesh, replacing the step before. Releasing commits the tool's entry, and Escape cancels it.
     internal sealed class DistanceDrag(MeshToolRunner tools, MeshSession session) : IGizmoTarget
     {
         MeshElement? _kind;
         List<MeshItem> _items = [];
-        bool _pending;
 
         public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
@@ -121,25 +120,6 @@ public sealed partial class MeshToolRunner
         public void Previewed()
         {
             session.PreviewMeshSelection(_kind, _items);
-        }
-
-        public void Ending()
-        {
-            _pending = tools._pending != null;
-            tools._pending = null;
-        }
-
-        public void Ended(bool committed)
-        {
-            if (!_pending)
-            {
-                return;
-            }
-            if (!committed)
-            {
-                session.PruneMeshSelection();
-            }
-            session.OnMeshModeChanged();
         }
     }
 }

@@ -231,11 +231,13 @@ public sealed class MeshTextureModeTests : IDisposable
         using var shell = NewShell();
         var front = Front(shell);
         SelectFaces(shell, front);
-        Assert.True(shell.Mesh.Texture.BeginMappingScrub("Drag Texture Scale"));
-        shell.Mesh.Texture.PreviewMappings((_, _, m) => m with { ScaleU = 2 });
-        shell.Mesh.Texture.PreviewMappings((_, _, m) => m with { ScaleU = 3 });
+        var (edit, starts) = shell.Mesh.Texture.BeginMappingScrub("Drag Texture Scale")!.Value;
+        // Another drag does not start while it is open.
+        Assert.Null(shell.Mesh.Texture.BeginMappingScrub("Drag Texture Shift"));
+        shell.Mesh.Texture.PreviewMappings(edit, starts, (_, _, m) => m with { ScaleU = 2 });
+        shell.Mesh.Texture.PreviewMappings(edit, starts, (_, _, m) => m with { ScaleU = 3 });
         Assert.Equal(3, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);
-        shell.Mesh.Texture.EndMappingScrub();
+        edit.Commit();
         Assert.Single(shell.Scene!.History);
         shell.Scene.Undo();
         Assert.Equal(1, MeshFixtures.Mesh(shell).Faces[front].Mapping.ScaleU);

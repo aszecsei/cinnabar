@@ -13,74 +13,67 @@ interface IGizmoTarget
     /// <summary>After a step's operations previewed.</summary>
     void Previewed() { }
 
-    /// <summary>After the drag stops and before its edit commits or cancels.</summary>
-    void Ending() { }
-
-    /// <summary>After the drag's edit commits or cancels and the gizmo is sent.</summary>
+    /// <summary>After the drag's edit commits or cancels, by the drag or by another, and the gizmo is sent.</summary>
     void Ended(bool committed) { }
 }
 
 /// <summary>
 /// A gizmo drag from press to release (see docs/editor/viewport.md#viewport): the drag's math and its target, the undo entry it
-/// opens, the steps it previews in it, and the commit or cancel at its end.
+/// previews its steps in, and the commit or cancel at its end. The drag lasts as long as its edit: one that another ends
+/// ends the drag too.
 /// </summary>
-sealed class GizmoController(Action<string> begin, Func<IReadOnlyList<Operation>, bool> preview, Action commit, Action cancel, Action sent)
+sealed class GizmoController(Func<string, SceneEdit?> begin, Action sent)
 {
-    GizmoDrag? _drag;
+    sealed record Active(GizmoDrag Drag, IGizmoTarget Target, SceneEdit Edit);
 
-    public IGizmoTarget? Target { get; private set; }
+    Active? _active;
 
-    public bool IsDragging => _drag != null;
+    public IGizmoTarget? Target => _active?.Target;
 
-    /// <summary>Starts a drag. With no label, the undo entry is already open, as a pending distance's is.</summary>
-    public void Start(GizmoDrag drag, IGizmoTarget target, string? label)
+    public bool IsDragging => _active != null;
+
+    /// <summary>Starts a drag in a new undo entry. False when another edit is open.</summary>
+    public bool Start(GizmoDrag drag, IGizmoTarget target, string label) => begin(label) is { } edit && Start(drag, target, edit);
+
+    /// <summary>Starts a drag in an entry that is open already, as a pending distance's. False for a stale one.</summary>
+    public bool Start(GizmoDrag drag, IGizmoTarget target, SceneEdit edit)
     {
-        (_drag, Target) = (drag, target);
-        if (label != null)
+        if (!edit.IsOpen || _active != null)
         {
-            begin(label);
+            return false;
         }
+        _active = new Active(drag, target, edit);
+        edit.Ended += committed => OnEnded(edit, committed);
         sent();
+        return true;
     }
 
     public void Drag(Vec2 pixel, bool snap)
     {
-        if (_drag == null || Target == null)
+        if (_active is not { } active)
         {
             return;
         }
-        var ops = Target.Drag(_drag, pixel, snap);
-        if (ops.Count > 0 && preview(ops))
+        var ops = active.Target.Drag(active.Drag, pixel, snap);
+        if (ops.Count > 0 && active.Edit.Preview(ops))
         {
-            Target.Previewed();
+            active.Target.Previewed();
         }
     }
 
-    public void Release() => End(committed: true);
+    public void Release() => _active?.Edit.Commit();
 
     /// <summary>Ends the drag and puts what it edited back.</summary>
-    public void Cancel() => End(committed: false);
+    public void Cancel() => _active?.Edit.Cancel();
 
-    /// <summary>Forgets the drag and leaves its undo entry to the caller.</summary>
-    public void Drop() => (_drag, Target) = (null, null);
-
-    void End(bool committed)
+    void OnEnded(SceneEdit edit, bool committed)
     {
-        if (_drag == null || Target is not { } target)
+        if (_active is not { } active || active.Edit != edit)
         {
             return;
         }
-        Drop();
-        target.Ending();
-        if (committed)
-        {
-            commit();
-        }
-        else
-        {
-            cancel();
-        }
+        _active = null;
         sent();
-        target.Ended(committed);
+        active.Target.Ended(committed);
     }
 }

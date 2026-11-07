@@ -1,12 +1,15 @@
 using Avalonia;
+using Avalonia.Input;
 using Cinnabar.Editor.Commands;
 using Cinnabar.Editor.Document;
 using Cinnabar.Editor.Link.Cook;
 using Cinnabar.Editor.Maths;
 using Cinnabar.Editor.Mesh;
+using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Shell;
 using Cinnabar.Editor.Tools;
 using EntityInfo = Cinnabar.Editor.Link.Protocol.EntityInfo;
+using FieldKind = Cinnabar.Editor.Link.Protocol.FieldKind;
 using EntitySnapshot = Cinnabar.Editor.Link.Protocol.EntitySnapshot;
 
 namespace Cinnabar.Editor.Tests;
@@ -164,6 +167,52 @@ public sealed class MeshToolModeTests : IDisposable
         // The new face extrudes inward like a doorway: an Extrude by a negative distance.
         Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
         shell.Mesh.Tools.CommitPendingDistance();
+    }
+
+    [Fact]
+    public void AScrubDoesNotTakeOverAWaitingDistanceTool()
+    {
+        using var shell = NewShell();
+        SelectFaces(shell, 5);
+        Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
+        var scale = FieldEditor.ForComponent(shell, 1, SceneEdits.TransformId, TestFields.Of(FieldKind.Vector3, name: "scale"))!;
+        scale.Current = SceneEdits.Floats(1, 1, 1);
+        var before = shell.Scene!.Scene.Find(1)!.Components.Single(c => c.Id == SceneEdits.TransformId).Fields.Find(f => f.Name == "scale")?.Value;
+
+        // Extrude's entry is open, so the scrub does not start, and previews nothing into it.
+        scale.BeginScrub(0);
+        scale.Scrub(0, 50, KeyModifiers.None);
+        scale.EndScrub();
+        Assert.True(shell.Mesh.Tools.HasPendingDistance);
+        Assert.Equal("Extrude", shell.OpenEdit!.Label);
+        Assert.Equal(before, shell.Scene.Scene.Find(1)!.Components.Single(c => c.Id == SceneEdits.TransformId).Fields.Find(f => f.Name == "scale")?.Value);
+
+        // The next mesh action ends the tool, which was never dragged, and runs.
+        shell.Mesh.Tools.CommitPendingDistance();
+        Assert.Null(shell.OpenEdit);
+        Assert.Empty(shell.Scene.History);
+        Assert.True(shell.Commands.Get(EditorCommands.MeshInvert).Execute());
+        Assert.Equal("Invert", Assert.Single(shell.Scene.History).Label);
+    }
+
+    [Fact]
+    public void EnterAppliesADrawAfterADistanceToolThatWaits()
+    {
+        using var shell = NewShell();
+        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
+        foreach (var corner in new[] { new Vec3(-0.25, -0.25, -0.5), new Vec3(0.25, -0.25, -0.5), new Vec3(0.25, 0.25, -0.5), new Vec3(-0.25, 0.25, -0.5) })
+        {
+            Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, corner)));
+        }
+        SelectFaces(shell, 5);
+        Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
+        Assert.True(shell.Mesh.Tools.HasPendingDistance);
+
+        shell.Mesh.Tools.ApplyToolPoints();
+
+        Assert.False(shell.Mesh.Tools.HasPendingDistance);
+        Assert.Equal("Draw", Assert.Single(shell.Scene!.History).Label);
+        Assert.Equal(8, MeshFixtures.Mesh(shell).Faces.Length);
     }
 
     [Fact]

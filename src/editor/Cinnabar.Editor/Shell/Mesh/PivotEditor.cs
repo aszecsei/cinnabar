@@ -68,9 +68,8 @@ public sealed class PivotEditor
             return false;
         }
         var (width, height) = _shell.FrameSize;
-        _shell.Gizmos.Start(new GizmoDrag(Link.Protocol.GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), Quat.Identity, pixel, width, height),
+        return _shell.Gizmos.Start(new GizmoDrag(Link.Protocol.GizmoKind.Translate, _shell.HotPart, _shell.Camera, _shell.Camera.RelativeTo(pivot), Quat.Identity, pixel, width, height),
             new PivotDrag(this, _session, poseEdit, pivot, guid, mesh, placement), "Edit Pivot");
-        return true;
     }
 
     // An Edit Pivot drag: the mesh being moved under its entity, from the start of the drag.
@@ -119,7 +118,7 @@ public sealed class PivotEditor
     bool MovePivot(string label, Func<MeshData, MeshPlacement, Vec3, Vec3> translation)
     {
         _session.Tools.CommitPendingDistance();
-        if (PivotMesh() is not var (guid, entity) || _session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement || _shell.Scene is not { InTransaction: false }
+        if (PivotMesh() is not var (guid, entity) || _session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement || _shell.Scene == null || _shell.OpenEdit != null
             || _shell.Scene.Expanded.Flat.Find(entity) is not { } document || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, document) is not { } pose)
         {
             return false;

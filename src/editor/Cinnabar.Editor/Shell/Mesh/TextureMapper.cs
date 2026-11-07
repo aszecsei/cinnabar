@@ -63,8 +63,6 @@ public sealed class TextureMapper
 
     public static readonly IReadOnlyList<string> DensityOptions = ["32", "64", "128", "256", "512", "1024", "2048"];
 
-    Dictionary<string, MeshData>? _mappingStarts;
-    internal string? FaceMaterialKey { get; set; }
     double? _texelDensityOverride;
 
     /// <summary>The face last clicked in the Faces kind, which Align to Face copies from, or null.</summary>
@@ -166,7 +164,7 @@ public sealed class TextureMapper
     public bool EditMappings(string label, Func<MeshData, int, Mapping, Mapping> change)
     {
         _session.Tools.CommitPendingDistance();
-        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
+        if (!CanRunTextureTool || _shell.Scene == null || _shell.OpenEdit != null)
         {
             return false;
         }
@@ -192,42 +190,29 @@ public sealed class TextureMapper
         return true;
     }
 
-    /// <summary>Starts a drag of the Face panel's mapping fields: one undo entry until <see cref="EndMappingScrub"/>.</summary>
-    public bool BeginMappingScrub(string label)
+    /// <summary>
+    /// Starts a drag of the Face panel's mapping fields: one undo entry until the drag commits it, and each selected
+    /// mesh as it was. Null when no texture tool can run or another edit is open.
+    /// </summary>
+    public (SceneEdit Edit, IReadOnlyDictionary<string, MeshData> Starts)? BeginMappingScrub(string label)
     {
         _session.Tools.CommitPendingDistance();
-        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false })
+        if (!CanRunTextureTool || _shell.TryBeginEdit(label, "a texture drag", commitIfInterrupted: true) is not { } edit)
         {
-            return false;
+            return null;
         }
-        _mappingStarts = SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => _session.FindMeshData(g)!);
-        _shell.BeginEdit(label);
-        return true;
+        edit.Ended += _ => _session.OnMeshModeChanged();
+        return (edit, SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => _session.FindMeshData(g)!));
     }
 
     /// <summary>A step of the drag: the change from where each mapping was at the start.</summary>
-    public void PreviewMappings(Func<MeshData, int, Mapping, Mapping> change)
+    public void PreviewMappings(SceneEdit edit, IReadOnlyDictionary<string, MeshData> starts, Func<MeshData, int, Mapping, Mapping> change)
     {
-        if (_mappingStarts is not { } starts || _shell.Scene is not { InTransaction: true })
-        {
-            return;
-        }
         var ops = MappingOperations(starts.GetValueOrDefault, change);
         if (ops.Count > 0)
         {
-            _shell.PreviewEdit(ops);
+            edit.Preview(ops);
         }
-    }
-
-    public void EndMappingScrub()
-    {
-        if (_mappingStarts == null)
-        {
-            return;
-        }
-        _mappingStarts = null;
-        _shell.CommitEdit();
-        _session.OnMeshModeChanged();
     }
 
     /// <summary>Shift: moves the texture by steps of an eighth of a repeat along the mapping's axes, as it shows on the face.</summary>
@@ -293,7 +278,7 @@ public sealed class TextureMapper
     bool AlignTextureToEdges()
     {
         _session.Tools.CommitPendingDistance();
-        if (!_session.Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene is not { InTransaction: false })
+        if (!_session.Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene == null || _shell.OpenEdit != null)
         {
             _shell.Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
             return false;
@@ -377,7 +362,7 @@ public sealed class TextureMapper
     public bool SetFaceMaterial(string guid)
     {
         _session.Tools.CommitPendingDistance();
-        if (!CanRunTextureTool || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
+        if (!CanRunTextureTool || _shell.Scene == null || _shell.OpenEdit != null || !IsMaterialOrNone(guid))
         {
             return false;
         }
@@ -469,12 +454,12 @@ public sealed class TextureMapper
     {
         var target = pixel is { } p ? DropTarget(p) : null;
         var key = target is var (meshGuid, faces) ? $"{meshGuid}:{string.Join(",", faces.Order())}:{guid}" : null;
-        if (key == FaceMaterialKey)
+        if (Equals(key, _shell.MaterialDropTarget))
         {
             return;
         }
         _shell.CancelMaterial();
-        if (target == null || _shell.Scene is not { InTransaction: false } || !IsMaterialOrNone(guid))
+        if (key == null || target == null || !IsMaterialOrNone(guid))
         {
             return;
         }
@@ -483,9 +468,7 @@ public sealed class TextureMapper
         {
             return;
         }
-        _shell.BeginEdit("Set Material");
-        FaceMaterialKey = key;
-        _shell.PreviewEdit(ops);
+        _shell.ShowMaterialDrop(key, ops);
     }
 
     /// <summary>Drops a material on the faces under a pixel, keeping the preview as one undo entry.</summary>

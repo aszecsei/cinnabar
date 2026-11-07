@@ -19,7 +19,13 @@ public sealed partial class EditorShell
     /// <summary>A Mesh_Renderer's material slots, one for each of its mesh's first submeshes (MAX_MATERIAL_SLOTS).</summary>
     public const int MaterialSlots = 8;
 
-    MaterialTarget? _materialTarget;
+    // A material drop under way: what it shows the material on, a slot or a mesh's faces, and the entry that shows it.
+    sealed record MaterialDrop(object Target, SceneEdit Edit);
+
+    MaterialDrop? _materialDrop;
+
+    /// <summary>What the material drop under way shows its material on: a <see cref="MaterialTarget"/>, a mesh's faces, or null.</summary>
+    public object? MaterialDropTarget => _materialDrop?.Target;
 
     /// <summary>Whether an asset is one that a material slot takes: a material or a material instance.</summary>
     public bool IsMaterial(string guid) => Assets.Find(guid)?.Kind is AssetKind.Material or AssetKind.MaterialInstance;
@@ -51,19 +57,38 @@ public sealed partial class EditorShell
     /// </summary>
     public void PreviewMaterial(MaterialTarget? target, string guid)
     {
-        if (target == _materialTarget)
+        if (Equals(target, MaterialDropTarget))
         {
             return;
         }
         CancelMaterial();
-        // Another drag's open entry, such as the gizmo's, is not the drop's.
-        if (target == null || Scene is not { InTransaction: false } || !IsEditing)
+        if (target != null)
+        {
+            ShowMaterialDrop(target, [new SetField(target.SceneId, SceneEdits.MeshRendererId, $"materials.{target.Slot}", SceneValue.AssetRef(guid))]);
+        }
+    }
+
+    /// <summary>
+    /// Shows a dropped material on a target, in place of the last target's, in an entry of its own. While another edit
+    /// is open, such as a gizmo drag, it shows nothing.
+    /// </summary>
+    public void ShowMaterialDrop(object target, IReadOnlyList<Operation> ops)
+    {
+        CancelMaterial();
+        if (TryBeginEdit("Set Material", "a material drop") is not { } edit)
         {
             return;
         }
-        BeginEdit("Set Material");
-        _materialTarget = target;
-        PreviewEdit(new SetField(target.SceneId, SceneEdits.MeshRendererId, $"materials.{target.Slot}", SceneValue.AssetRef(guid)));
+        var drop = new MaterialDrop(target, edit);
+        edit.Ended += _ =>
+        {
+            if (_materialDrop == drop)
+            {
+                _materialDrop = null;
+            }
+        };
+        _materialDrop = drop;
+        edit.Preview(ops);
     }
 
     /// <summary>
@@ -84,32 +109,14 @@ public sealed partial class EditorShell
     /// <summary>Keeps the previewed material as one undo entry. Returns false when nothing was previewed.</summary>
     public bool CommitMaterial()
     {
-        if (_materialTarget == null && Mesh.Texture.FaceMaterialKey == null)
+        if (_materialDrop is not { } drop)
         {
             return false;
         }
-        _materialTarget = null;
-        Mesh.Texture.FaceMaterialKey = null;
-        if (Scene is not { InTransaction: true })
-        {
-            return false;
-        }
-        CommitEdit();
+        drop.Edit.Commit();
         return true;
     }
 
-    /// <summary>Puts back the slot that the drag previewed a material on.</summary>
-    public void CancelMaterial()
-    {
-        if (_materialTarget == null && Mesh.Texture.FaceMaterialKey == null)
-        {
-            return;
-        }
-        _materialTarget = null;
-        Mesh.Texture.FaceMaterialKey = null;
-        if (Scene is { InTransaction: true })
-        {
-            CancelEdit();
-        }
-    }
+    /// <summary>Puts back the slot or the faces that the drag previewed a material on.</summary>
+    public void CancelMaterial() => _materialDrop?.Edit.Cancel();
 }

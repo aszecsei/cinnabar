@@ -53,7 +53,7 @@ public sealed partial class MeshToolRunner
 
     // The last primitive's entry is the last edit, and nothing is open.
     bool CanRemakePrimitive(LastPrimitive last) =>
-        _shell.Scene != null && !_shell.Scene.InTransaction && _shell.Scene.Position == last.Position && _shell.Scene.History.Count == last.Position;
+        _shell.Scene != null && _shell.OpenEdit == null &&_shell.Scene.Position == last.Position && _shell.Scene.History.Count == last.Position;
 
     // The primitive filling a box, as faces of an edited mesh or as a new mesh and entity.
     internal void MakePrimitive(long[] corner, Vec3 size, int axis, string? mesh)

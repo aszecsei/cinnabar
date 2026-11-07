@@ -162,13 +162,8 @@ public sealed partial class EditorShell
     /// <summary>Applies operations to the open scene as one undo entry. One that does not fit goes to the console.</summary>
     public bool Edit(string label, params Operation[] operations)
     {
-        if (Scene == null || operations.Length == 0)
+        if (Scene == null || operations.Length == 0 || CannotEdit(label))
         {
-            return false;
-        }
-        if (!IsEditing)
-        {
-            Console.Add(LogLevel.Warning, $"edit: cannot {label.ToLowerInvariant()} while the game plays. Stop it to edit the scene.");
             return false;
         }
         try
@@ -181,6 +176,22 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Error, $"edit: cannot {label.ToLowerInvariant()}: {e.Message}");
             return false;
         }
+    }
+
+    // Says in the console why an edit cannot apply now: the game plays, or another edit is open, which stays.
+    bool CannotEdit(string label)
+    {
+        if (!IsEditing)
+        {
+            Console.Add(LogLevel.Warning, $"edit: cannot {label.ToLowerInvariant()} while the game plays. Stop it to edit the scene.");
+            return true;
+        }
+        if (OpenEdit is { } open)
+        {
+            Console.Add(LogLevel.Warning, $"edit: cannot {label.ToLowerInvariant()} while {open.Owner} has \"{open.Label}\" open");
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -202,39 +213,44 @@ public sealed partial class EditorShell
         return Edit(label, operations);
     }
 
-    /// <summary>The steps of a drag: <see cref="SceneDocument.Begin"/>, then a preview per step, then commit or cancel.</summary>
-    public void BeginEdit(string label)
+    /// <summary>The scene's open undo entry and its owner, or null when none is open.</summary>
+    public SceneEdit? OpenEdit { get; private set; }
+
+    /// <summary>
+    /// Opens an undo entry that a drag previews its steps in, and gives its owner the token that previews, commits and
+    /// cancels it. Null without a scene, while the game plays, or while another entry is open: the open one stays.
+    /// <paramref name="commitIfInterrupted"/> keeps the entry when the shell ends it, as Play does; otherwise it is put back.
+    /// </summary>
+    public SceneEdit? TryBeginEdit(string label, string owner, bool commitIfInterrupted = false)
     {
-        if (Scene is { InTransaction: false } && IsEditing)
+        if (Scene == null || !IsEditing || OpenEdit != null)
         {
-            Scene.Begin(label);
+            return null;
         }
+        Scene.Begin(label);
+        return OpenEdit = new SceneEdit(this, Scene, label, owner, commitIfInterrupted);
     }
 
-    public bool PreviewEdit(Operation op) => PreviewEdit([op]);
-
-    /// <summary>Previews operations in the open drag. One that does not fit goes to the console, and is false.</summary>
-    public bool PreviewEdit(IReadOnlyList<Operation> ops)
+    // The one place where the open entry ends: a stale token does nothing, and the owner learns after the document.
+    internal void EndEdit(SceneEdit edit, bool commit)
     {
-        if (Scene is not { InTransaction: true })
+        if (OpenEdit != edit)
         {
-            return false;
+            return;
         }
-        try
-        {
-            Scene.Preview(ops);
-            return true;
-        }
-        catch (InvalidOperationException e)
-        {
-            Console.Add(LogLevel.Error, $"edit: {e.Message}");
-            return false;
-        }
+        OpenEdit = null;
+        edit.End(commit);
+        edit.RaiseEnded(commit);
     }
 
-    public void CommitEdit() => Scene?.Commit();
-
-    public void CancelEdit() => Scene?.Cancel();
+    /// <summary>Ends the open entry for its owner, as it asked when it opened it, and the owner learns that it ended.</summary>
+    public void InterruptEdit()
+    {
+        if (OpenEdit is { } edit)
+        {
+            EndEdit(edit, edit.CommitIfInterrupted);
+        }
+    }
 
     /// <summary>The primary selected entity as the document has it, or null for none, or for one that the game spawned.</summary>
     /// In play mode the host's world is not the document's, so there is none.
@@ -377,6 +393,8 @@ public sealed partial class EditorShell
 
     void Attach(SceneDocument document)
     {
+        // The old document's drag or drop ends with it, and its owner learns.
+        OpenEdit?.Cancel();
         if (Scene != null)
         {
             Scene.Applied -= SendOperations;

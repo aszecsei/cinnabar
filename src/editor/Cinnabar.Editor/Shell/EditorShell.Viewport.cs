@@ -226,10 +226,9 @@ public sealed partial class EditorShell
         var (width, height) = FrameSize;
         var count = poseEdit.Moved.Count();
         var verb = Tool switch { Tool.Rotate => "Rotate", Tool.Scale => "Scale", _ => "Move" };
-        _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height),
+        return _gizmo.Start(new GizmoDrag(Gizmo.KindOf(Tool), HotPart, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height),
             new PoseTarget(this, poseEdit, pivot, axes),
             count == 1 ? $"{verb} {Label(Scene.Expanded.Flat.Find(poseEdit.Moved.First())!)}" : $"{verb} {count} Entities");
-        return true;
     }
 
     /// <summary>Moves the drag to a pixel. <paramref name="invertSnap"/> is Ctrl, which snaps when snapping is off and the other way round.</summary>

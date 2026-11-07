@@ -300,7 +300,7 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
 {
     const double DegreeStep = 0.5;
 
-    readonly ScrubSession<(double Azimuth, double Elevation)> _scrub = new(shell.CommitEdit);
+    readonly ScrubSession<(double Azimuth, double Elevation)> _scrub = new();
 
     string Label => elevation ? "Set Sun Elevation" : "Set Sun Azimuth";
 
@@ -331,23 +331,20 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
 
     public void BeginScrub(int axis)
     {
-        if (Current is not { } current || !shell.IsEditing)
+        if (Current is { } current)
         {
-            return;
+            _scrub.Begin(shell.TryBeginEdit(Label, "a field drag", commitIfInterrupted: true), current);
         }
-        _scrub.Begin(current);
-        shell.BeginEdit(Label);
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (!_scrub.Active)
+        if (_scrub.Open is not var (edit, start))
         {
             return;
         }
-        var start = _scrub.Start;
         var step = DegreeStep * ScrubSession.Scale(modifiers);
-        shell.PreviewEdit(Aim(start, (elevation ? start.Elevation : start.Azimuth) + pixels * step));
+        edit.Preview(Aim(start, (elevation ? start.Elevation : start.Azimuth) + pixels * step));
     }
 
     public void EndScrub() => _scrub.End();
@@ -358,9 +355,9 @@ sealed class SunAngleEditor(EditorShell shell, bool elevation) : IFieldEditor
         {
             return;
         }
-        if (_scrub.Active)
+        if (_scrub.Open is var (edit, start))
         {
-            shell.PreviewEdit(Aim(_scrub.Start, values[0]));
+            edit.Preview(Aim(start, values[0]));
         }
         else if (Current is { } current)
         {

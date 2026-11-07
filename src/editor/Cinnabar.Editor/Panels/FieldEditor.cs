@@ -53,12 +53,11 @@ sealed class FieldEditor : IFieldEditor
     readonly SceneValue?[] _currents;
     readonly (Int128 Min, Int128 Max) _range;
     readonly EnumValue[] _enum;
-    readonly ScrubSession<SceneValue?[]> _scrub;
+    readonly ScrubSession<SceneValue?[]> _scrub = new();
 
     FieldEditor(EditorShell shell, ulong[] entities, string label, EditKind kind, Func<ulong, SceneValue?, Operation> operation, (Int128, Int128) range = default, EnumValue[]? enumValues = null, Func<ulong, SceneValue?, Operation>? flag = null)
     {
         _shell = shell;
-        _scrub = new ScrubSession<SceneValue?[]>(shell.CommitEdit);
         _entities = entities;
         _currents = new SceneValue?[entities.Length];
         _label = label;
@@ -308,17 +307,15 @@ sealed class FieldEditor : IFieldEditor
         {
             return;
         }
-        _scrub.Begin([.. _currents]);
-        _shell.BeginEdit($"Drag {_label["Set ".Length..]}");
+        _scrub.Begin(_shell.TryBeginEdit($"Drag {_label["Set ".Length..]}", "a field drag", commitIfInterrupted: true), [.. _currents]);
     }
 
     public void Scrub(int axis, double pixels, KeyModifiers modifiers)
     {
-        if (!_scrub.Active)
+        if (_scrub.Open is not var (edit, starts))
         {
             return;
         }
-        var starts = _scrub.Start!;
         var scale = ScrubSession.Scale(modifiers);
         // Each entity changes by the same amount from its own value.
         SceneValue? Value(SceneValue start) => _kind switch
@@ -334,7 +331,7 @@ sealed class FieldEditor : IFieldEditor
         var ops = _entities.SelectMany((id, i) => Value(starts[i]!) is { } v ? Set(id, v) : []).ToList();
         if (ops.Count > 0)
         {
-            _shell.PreviewEdit(ops);
+            edit.Preview(ops);
         }
     }
 
@@ -352,9 +349,9 @@ sealed class FieldEditor : IFieldEditor
         {
             return;
         }
-        if (_scrub.Active)
+        if (_scrub.Open is var (edit, _))
         {
-            _shell.PreviewEdit(Operations(value));
+            edit.Preview(Operations(value));
         }
         else
         {
