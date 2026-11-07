@@ -1026,6 +1026,23 @@ validate_copies_and_streams :: proc(t: ^testing.T) {
 	bad.mip_count = 1
 	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Layers)
 
+	// Or shaders write a cube or an array, which then has no data, and its views write each mip.
+	storage_cube := cube
+	storage_cube.format, storage_cube.usage = .RGBA16_Float, {.Sampled, .Storage}
+	testing.expect_value(t, validate_texture_desc(storage_cube, nil), Desc_Error.None)
+	storage_array := storage_cube
+	storage_array.cube, storage_array.layers = false, 3
+	testing.expect_value(t, validate_texture_desc(storage_array, nil), Desc_Error.None)
+	testing.expect_value(t, validate_texture_desc(storage_cube, make([]byte, 16 * 16 * 8, allocator)), Desc_Error.Bad_Usage)
+	bad = storage_cube
+	bad.usage = {.Sampled, .Storage, .Render_Target}
+	testing.expect_value(t, validate_texture_desc(bad, nil), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_texture_view({mip = 4}, storage_cube, false), Desc_Error.None)
+	testing.expect_value(t, validate_texture_view({mip = 5}, storage_cube, false), Desc_Error.Bad_Mip_Count)
+	testing.expect_value(t, validate_texture_view({}, storage_cube, true), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_texture_view({}, cube, false), Desc_Error.Bad_Usage)
+	testing.expect_value(t, validate_texture_view({}, volume, false), Desc_Error.None)
+
 	data := make([]byte, mip_chain_size(streamed), allocator)
 	testing.expect_value(t, validate_stream_texture(streamed, false, data), Desc_Error.None)
 	testing.expect_value(t, validate_stream_texture(streamed, true, data), Desc_Error.Bad_Usage)

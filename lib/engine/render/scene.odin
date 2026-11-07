@@ -164,6 +164,12 @@ Frame_Constants :: struct {
 	voxel_normal:               u32,
 	voxel_emission:             u32,
 	voxel_mask:                 u32,
+	// The sky's cubemap, which the specular light takes along the reflection (see Sky_Cube_Reads): no mips without one.
+	sky_cube_current:           u32,
+	sky_cube_previous:          u32,
+	sky_cube_blend:             f32,
+	sky_cube_mips:              f32,
+	sky_cube_sampler:           u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -504,7 +510,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 788 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 808 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1239,6 +1245,10 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		selected_meshlets        = gpu.read_index(s.meshlet_select.selected),
 	}
 	constants.gi = u32(f.gi != nil)
+	cube := sky_cube_reads(f)
+	constants.sky_cube_current, constants.sky_cube_previous = cube.current, cube.previous
+	constants.sky_cube_blend, constants.sky_cube_mips = cube.blend, cube.mips
+	constants.sky_cube_sampler = gpu.sampler_index(r.post.sampler)
 	if shadows.virtual.count > 0 {
 		virtual_constants(&constants, f)
 	}

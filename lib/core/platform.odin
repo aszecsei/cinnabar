@@ -188,6 +188,7 @@ init :: proc(
 		gpu_read_buffer              = backend.read_buffer,
 		gpu_create_buffer            = backend.create_buffer,
 		gpu_create_texture           = backend.create_texture,
+		gpu_create_texture_view      = backend.create_texture_view,
 		gpu_create_sampler           = backend.create_sampler,
 		gpu_create_graphics_pipeline = backend.create_graphics_pipeline,
 		gpu_create_compute_pipeline  = backend.create_compute_pipeline,

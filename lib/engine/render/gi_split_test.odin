@@ -336,10 +336,12 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
 		f.velocity = create_texture(&g, {size = f.size, format = .RG16_Float, label = "velocity"})
+		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
 		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
 		depth(&g, prepass, f.depth, .Clear)
 		color(&g, prepass, f.normals, .Clear)
 		color(&g, prepass, f.velocity, .Clear)
+		color(&g, prepass, f.roughness, .Clear)
 		f.exposure = import_buffer(&g, exposure)
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf

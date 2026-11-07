@@ -1,8 +1,8 @@
 # Sky
 
-The world's surroundings: the background where nothing draws, and the ambient light until global illumination. Both come from the `Environment` settings (stable ID 49, see [Settings](frame.md#settings)), on a volume at the camera (`lib/engine/render/settings.odin`, `sky.odin`).
+The world's surroundings: the background where nothing draws, the ambient light until global illumination, and the specular light that reflects the sky. Both come from the `Environment` settings (stable ID 49, see [Settings](frame.md#settings)), on a volume at the camera (`lib/engine/render/settings.odin`, `sky.odin`).
 
-**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Texture](#texture) · [Ambient light](#ambient-light) · [Passes](#passes) · [Limits](#limits)
+**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Texture](#texture) · [Ambient light](#ambient-light) · [Specular light](#specular-light) · [Passes](#passes) · [Limits](#limits)
 
 ## Modes
 
@@ -53,7 +53,49 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 - **`Ambient`** is a linear function of the direction, per channel: `constant + x·d.x + y·d.y + z·d.z`. It holds the Flat sky's light from above and the ground's from below exactly, so `flat_ambient` gives the same light as before. Shaders evaluate it with `ambient_light` (`ambient.hlsli`), from four float4s in `Frame_Constants.ambient` and the global illumination's constants.
 - **In `Atmosphere`**, the CPU integrates the sky in 64 directions spread over the sphere (`sky_ambient`), with the sun's and the moon's light, and the ground's below the horizon. It takes the sky's first spherical harmonics, convolved with the cosine: the constant is the sky's average light, and the gradient twice the average of the light times its direction. Multiple scattering on the CPU is an even share of the light that each point scatters, not the table. The renderer keeps the result until the atmosphere, the camera's height or a light changes.
 - **In `Texture`**, the GPU integrates it from the texture (see [Texture](#texture)).
-- **Its readers:** the forward pass without global illumination, for the diffuse light along the normal and the specular light along the reflection; the global illumination's sky beyond its last cascade; the fog's injection and the sprites, which take its constant, the light from every direction alike.
+- **Its readers:** the forward pass without global illumination, for the diffuse light along the normal; the global illumination's sky beyond its last cascade, and its gathers' diffuse light past their probes; the fog's injection and the sprites, which take its constant, the light from every direction alike. The specular light along a reflection is the [cubemap](#specular-light)'s, once it is ready.
+- **The diffuse light stays linear:** a linear function of the direction is already the right integral of the sky over a cosine lobe, as far as its first harmonics go.
+
+## Specular light
+
+The specular light along a reflection is the sky's cubemap, prefiltered by roughness (`sky_cube.odin`, `sky_cube*.hlsl`, `cube_prefilter.hlsl`, `sky_cube.hlsli`). It runs at every [quality](quality.md#quality), reflections `Off` included: it is a small cubemap that seldom changes.
+
+- **The capture** (`sky cube capture`) draws the sky into a source cube, every mip, each texel the mean of `min(2^mip, 8)²` directions across it, so the coarse mips are box-filtered without a read of the cube. It is not pre-exposed. Its source:
+  - **Atmosphere:** the sky view table (`sky_cube_atmosphere.hlsl`), times `ambient_intensity`, once the frame makes the tables.
+  - **Texture:** the texture (`sky_cube_capture.hlsl`), turned and scaled as the background is, times `ambient_intensity`, once it is resident, at the texture's mip whose texels are about as wide as a direction.
+  - **Ambient:** otherwise the frame's linear `Ambient`: Flat's colors, an atmosphere whose pipelines are not ready, or a texture that is not resident. So the cubemap always matches the diffuse light's fallback.
+  - The sun's and the moon's discs and the stars are left out. The directional lights give the specular highlights, so a disc would count them twice, and a star is narrower than a texel.
+- **The prefilter** (`sky cube prefilter`, `cube_prefilter.hlsl`) convolves the source with a GGX lobe for each mip: the split sum's first term, whose second is the environment BRDF fit that `shade_indirect` applies (`lit.hlsli`). Mip 0 is a mirror, the source's mip 0 as it is, and mip `m` of `n` is roughness `m / (n − 1)`, so the last is roughness 1. The lobe takes the normal, the view and the reflection as one direction, as Karis does, and is importance sampled at Hammersley points, each weighted by its cosine. Each sample reads the source's mip whose texels cover about the solid angle that the sample stands for, `0.5 · log2(Ωs / Ωp) + 1` (filtered importance sampling, Křivánek and Colbert), so a small bright light, such as the glow around the sun, leaves no fireflies at any roughness. It takes any sampled cube with its mip chain, not only the sky's.
+- **Parameters:** `SKY_CUBE_PARAMS` at the reflections' level (see [Quality](quality.md#quality)). The mips go down to faces `SKY_CUBE_MIN_FACE` (4) wide.
+
+| Level | Faces | Mips | Format | Samples per texel |
+|---|---|---|---|---|
+| Low | 64 | 5 | `RG11B10_Float` | 32 |
+| Medium | 128 | 6 | `RG11B10_Float` | 64 |
+| High | 128 | 6 | `RGBA16_Float` | 64 |
+| Ultra | 256 | 7 | `RGBA16_Float` | 128 |
+
+- **Memory:** the source and three prefiltered cubes with their mips: 0.5 MB at Low, 2.1 MB at Medium, 4.2 MB at High and 16.8 MB at Ultra in all. A level of another size makes them again.
+- **Cost**, on an RTX 5090, in the editor's viewport at 911x481, the median of five captures:
+
+| Level | A whole update: capture + every mip | A frame of a sky that changes every frame: one mip, and a capture every few frames | A sky that does not change |
+|---|---|---|---|
+| Low | 0.025 + 0.008 = 0.034 ms | 0.006 + 0.026 / 5 ≈ 0.011 ms | 0 |
+| Medium | 0.027 + 0.016 = 0.043 ms | 0.010 + 0.027 / 6 ≈ 0.015 ms | 0 |
+| High | 0.027 + 0.016 = 0.044 ms | 0.011 + 0.027 / 6 ≈ 0.016 ms | 0 |
+| Ultra | 0.032 + 0.060 = 0.092 ms | 0.021 + 0.032 / 7 ≈ 0.025 ms | 0 |
+
+  The captures are the atmosphere's. A whole update is the first frame's, and one at a new level. A step of one mip is mostly the pass's own overhead: all six of High's mips take 0.016 ms, and one of them 0.011 ms. The readers cost nothing that the captures measure: in the Intel sample's Sponza at High, with the cube and with the readers' ambient light in its place, the world pass without the GI took 0.0696 and 0.0696 ms in the nave and 0.0286 and 0.0283 ms looking down at the atrium's floor; the voxel cones' gather took 0.3013 and 0.3011 ms, and the screen cascades' 0.0328 and 0.0330 ms, each within the captures' spread of about 0.002 to 0.004 ms.
+- **The ring and the updates.** The prefiltered cubes are a ring of three: the current one, which the readers sample; the previous one, which it blends in over; and the next one, which a build fills.
+  - The first frame, and the first at a new level, makes every mip of the current cube at once. The readers sample it from the next frame, and until then take the ambient light.
+  - When the sky's source or its inputs change, a build of the next cube starts. Its first frame captures the source and prefilters mip 0, and each frame after prefilters one more mip, so a build takes as many frames as there are mips. Then the ring turns, and the new cube blends in over the old one in as many frames: each reader takes both at the mip for its roughness and blends them.
+  - **Flat** changes when its colors or `ambient_intensity` do, **Texture** when its texture is resident, or its version, rotation or intensities change, and **Atmosphere** when the sun, the moon, the camera's height or the settings do. A time of day that moves every frame starts each build as the last one ends, so the reflections follow it smoothly, a build or two behind, with no pops.
+  - A sky that does not change adds no passes.
+- **Its readers** (`sky_specular` in `sky_cube.hlsli`) take the cubemap along the reflection at `roughness · (mips − 1)`:
+  - **The forward pass without the GI:** in place of the ambient light along the reflection, at the surface's roughness (`shading_roughness`).
+  - **The GI's gathers:** where they took the ambient light along the reflection. That is the screen cascades' gather past its probes, the split cascades' gather past its last level and where the world probes have no light, and the voxel cones' reflection cone past what blocks it. Each takes the roughness of its pixel from the prepass (`Frame.roughness`).
+  - **The transparent surfaces:** always, along their own normal and at their own roughness, in place of the opaque surface's GI specular light at their pixel.
+  - The material previews have none and take the ambient light.
 
 ## Passes
 
@@ -68,6 +110,8 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 
 `Texture` has two passes of its own, when its texture is resident and their pipelines exist: `sky texture` draws over the background where `sky` would, and `sky texture ambient`, with its copy to the readback buffer, runs only in a frame that integrates the texture.
 
+Every mode has the [cubemap](#specular-light)'s two passes, in a frame that updates it: `sky cube capture`, which writes every mip of the source cube, and `sky cube prefilter`, which writes one mip of the next cube, or every mip at once when there is no current one. They run after the tables, which the atmosphere's capture reads.
+
 - The tables are made again each frame, since the blended settings can change each frame. They are small.
 - The world pass clears the scene to black under the sky. The fog over the background then dims the sky by the whole fog volume, as it did the background color (see [Volumetric fog](fog.md#volumetric-fog)).
 - **Precision:** the planet's radius is thousands of kilometers, and a float keeps only about a meter of it, which can be the camera's whole height. The shaders keep a point as its height above the ground and the cosine of a direction from its zenith, and find each height along a ray from a difference that keeps it (`height_along` in `sky_common.hlsli`). The CPU works in f64.
@@ -76,6 +120,7 @@ The settings are in the `atmosphere` struct, as `atmosphere.<field>` in a scene.
 
 - **No aerial perspective:** the air between the camera and the world's surfaces does not dim or color them. The fog does that within its 500 m.
 - **No clouds**, and the stars do not turn with the time.
-- **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's: reflections see only its linear function, not the image.
+- **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's. Its reflections are the image's, through the [cubemap](#specular-light).
+- **Reflections show no discs and no stars:** the cubemap leaves out the sun's and the moon's discs, whose highlights are the directional lights', and the stars, which are narrower than its texels. A mirror at night shows the air's light but not the stars.
 - **The sky's sun lights nothing without a link.** A scene that wants sunlight links a directional light, which the Atmosphere tab does (see [Editor](../editor/shell-and-panels.md#atmosphere)).
 - The camera stays inside the atmosphere: its height is clamped between 1 m and 1 m below the top.

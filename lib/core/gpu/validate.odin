@@ -791,13 +791,25 @@ validate_texture_desc :: proc(desc: Texture_Desc, data: []byte) -> Desc_Error {
 		if desc.depth > 0 || desc.layers > MAX_TEXTURE_LAYERS || (desc.cube && (desc.layers != 6 || desc.size.x != desc.size.y)) {
 			return .Bad_Layers
 		}
-		// A layered texture's only way in is a stream, whose data has every layer.
-		if desc.usage != {.Sampled, .Streamed} {
+		// A layered texture's way in is a stream, whose data has every layer, or its shaders' writes.
+		if desc.usage != {.Sampled, .Streamed} && (desc.usage != {.Sampled, .Storage} || data != nil) {
 			return .Bad_Usage
 		}
 	}
 	if data != nil && (.Sampled not_in desc.usage || len(data) != surface_size(desc.format, desc.size.x, desc.size.y)) {
 		return .Bad_Data_Size
+	}
+	return .None
+}
+
+// validate_texture_view checks a view against the description of the texture that it views, which is not a view
+// itself.
+validate_texture_view :: proc(desc: Texture_View_Desc, texture: Texture_Desc, texture_is_view: bool) -> Desc_Error {
+	if texture_is_view || .Storage not_in texture.usage {
+		return .Bad_Usage
+	}
+	if desc.mip >= max(texture.mip_count, 1) {
+		return .Bad_Mip_Count
 	}
 	return .None
 }

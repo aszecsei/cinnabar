@@ -82,6 +82,7 @@ test_platform :: proc(arena: ^virtual.Arena) -> core.Platform_API {
 		gpu_submit                   = null.submit,
 		gpu_upload                   = null.upload,
 		gpu_create_texture           = null.create_texture,
+		gpu_create_texture_view      = null.create_texture_view,
 		gpu_destroy_texture          = null.destroy_texture,
 		gpu_destroy_buffer           = null.destroy_buffer,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
@@ -270,6 +271,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.sky.multiscatter,
 		&r.sky.view,
 		&r.sky.background,
+		// The sky's cubemap, which the atmosphere captures from its tables.
+		&r.sky.cube.capture,
+		&r.sky.cube.atmosphere,
+		&r.sky.cube.prefilter,
 		&r.post.upscalers.motion,
 		&r.scene.select_pipeline,
 		&r.scene.cull_patches_pipeline,
@@ -305,6 +310,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect(t, r.post.lut_baked)
 		testing.expect(t, r.ray_scene.accel != {} && r.residency.accels, "the traced shadows did not request the ray scene")
+		// The first frame makes the sky's whole cubemap, from the atmosphere's tables.
+		testing.expect(t, r.sky.cube.valid && r.sky.cube.key.source == .Atmosphere)
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 

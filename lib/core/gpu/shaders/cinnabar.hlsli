@@ -44,6 +44,8 @@ RWTexture3D<uint> cn_rw_uint_texture3d(uint index) { return ResourceDescriptorHe
 TextureCube<float4> cn_texture_cube(uint index) { return ResourceDescriptorHeap[index]; }
 // A texture array, whose Texture_Desc has layers. A texture's view must match the type that reads it.
 Texture2DArray<float4> cn_texture_array(uint index) { return ResourceDescriptorHeap[index]; }
+// The storage view of an array's or a cube's layers, at mip 0 or at a texture view's mip. A cube's faces are its layers.
+RWTexture2DArray<float4> cn_rw_texture_array(uint index) { return ResourceDescriptorHeap[index]; }
 // The stencil plane of a D32_Float_S8_Uint texture, from gpu.stencil_index. The stencil is in g.
 Texture2D<uint2> cn_stencil_texture(uint index) { return ResourceDescriptorHeap[index]; }
 SamplerState cn_sampler(uint index) { return SamplerDescriptorHeap[index]; }

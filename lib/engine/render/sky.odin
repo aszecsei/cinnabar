@@ -102,6 +102,8 @@ Sky :: struct {
 	ambient_valid: bool,
 	// The Texture mode's (see sky_texture.odin).
 	texture:       Sky_Texture_State,
+	// The cubemap of the sky's specular light (see sky_cube.odin).
+	cube:          Sky_Cube,
 }
 
 // Sky_Light_Key is what the ambient light of an Atmosphere depends on.
@@ -142,8 +144,9 @@ Sky_Constants :: struct {
 	size:             [2]u32,
 }
 
-// Sky_Push matches Sky_Push in sky_common.hlsli: the textures of one sky pass.
-@(private = "file")
+// Sky_Push matches Sky_Push in sky_common.hlsli: the textures of one sky pass, and the cubemap capture's mip (see
+// sky_cube.odin).
+@(private)
 Sky_Push :: struct {
 	transmittance: u32,
 	multiscatter:  u32,
@@ -152,7 +155,9 @@ Sky_Push :: struct {
 	depth:         u32,
 	exposure:      u32,
 	sampler_index: u32,
-	padding:       u32,
+	face:          u32,
+	subsamples:    u32,
+	intensity:     f32,
 }
 
 // Sky_Frame is what one frame's sky passes need, in frame memory.
@@ -173,6 +178,7 @@ sky_init :: proc(s: ^Sky) {
 	s.view = shader_pipeline(SKY_VIEW_SHADER)
 	s.background = shader_pipeline(SKY_BACKGROUND_SHADER)
 	sky_texture_init(&s.texture)
+	sky_cube_init(&s.cube)
 }
 
 sky_destroy :: proc(s: ^Sky, r: ^Renderer) {
@@ -180,6 +186,7 @@ sky_destroy :: proc(s: ^Sky, r: ^Renderer) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 	sky_texture_destroy(&s.texture, r)
+	sky_cube_destroy(&s.cube, r)
 }
 
 @(private)
@@ -191,6 +198,7 @@ sync_sky_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&s.view, r.platform, assets, {label = "sky view"}, force)
 	sync_compute_pipeline(&s.background, r.platform, assets, {label = "sky"}, force)
 	sync_sky_texture_pipelines(r, force)
+	sync_sky_cube_pipelines(r, force)
 }
 
 // sky_settings takes the Sky_Settings from a blended Environment.

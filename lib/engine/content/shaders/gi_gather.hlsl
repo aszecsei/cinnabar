@@ -3,7 +3,8 @@
 // normal (see direction_weight), and its specular light the second cascade's along its reflection, blended between directions, each at the four probes around it, weighted
 // by how near they are, whether they are on the same surface (see probe_weight) and how alike their normals are. Then both blend into their histories, found by the velocity,
 // and a history whose depth is not where this frame's point was last frame starts over. The view model's pixels take
-// the light around the camera: the world probes', or the ambient light.
+// the light around the camera: the world probes', or the ambient light, and along the reflection the sky's cubemap at
+// their roughness, as a pixel that no probe matches does.
 #include "gi_common.hlsli"
 
 // A history counts while its depth is within this share of the pixel's.
@@ -47,7 +48,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	if (!surface_at(pixel, position, z)) {
 		float3 reflected = reflect(normalize(position), normal);
 		out_diffuse[pixel] = float4(surrounding_light(0, normal), 0);
-		out_specular[pixel] = float4(beyond_light(0, normal, reflected), 0);
+		out_specular[pixel] = float4(beyond_specular(0, normal, reflected, gather_roughness(pixel)), 0);
 		return;
 	}
 	float3 reflected = reflect(normalize(position), normal);
@@ -106,7 +107,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		specular_total += weights[n];
 	}
 	diffuse = diffuse_total > 0 ? diffuse / diffuse_total : surrounding_light(position, normal);
-	specular = specular_total > 0 ? specular / specular_total : beyond_light(position, normal, reflected);
+	specular = specular_total > 0 ? specular / specular_total : beyond_specular(position, normal, reflected, gather_roughness(pixel));
 
 	float4 diffuse_result = float4(diffuse, z);
 	float4 specular_result = float4(specular, 1);

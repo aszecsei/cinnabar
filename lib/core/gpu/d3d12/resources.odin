@@ -29,7 +29,9 @@ Texture_Entry :: struct {
 	resource: ^d3d.IResource,
 	// A Streamed texture is streamed once.
 	streamed: bool,
-	rtv:      d3d.CPU_DESCRIPTOR_HANDLE,
+	// A view of another texture's resource, which it holds a reference to (see gpu.Texture_View_Desc).
+	view:     bool,
+	rtv:     d3d.CPU_DESCRIPTOR_HANDLE,
 	dsv:      d3d.CPU_DESCRIPTOR_HANDLE,
 }
 
@@ -300,6 +302,42 @@ create_texture :: proc(desc: gpu.Texture_Desc, data: []byte) -> gpu.Texture {
 	return texture
 }
 
+// A view shares its texture's resource, with a storage view of one mip in its own write slot. It has no layout to track:
+// barriers name its texture.
+create_texture_view :: proc(desc: gpu.Texture_View_Desc) -> gpu.Texture {
+	parent := gpu.pool_get(&dev.textures, desc.texture)
+	if parent == nil {
+		log.errorf("gpu: texture view %q: an invalid texture", desc.label)
+		return {}
+	}
+	if err := gpu.validate_texture_view(desc, parent.desc, parent.view); err != .None {
+		log.errorf("gpu: texture view %q: %v", desc.label, err)
+		return {}
+	}
+	stored := parent.desc
+	stored.size = {max(parent.desc.size.x >> desc.mip, 1), max(parent.desc.size.y >> desc.mip, 1)}
+	stored.mip_count, stored.usage, stored.scope = 1, {.Storage}, desc.scope
+	resource := parent.resource
+	resource->AddRef()
+	view := gpu.pool_add(&dev.textures, Texture_Entry{desc = stored, resource = resource, view = true})
+	if view == {} {
+		log.errorf("gpu: texture view %q: more than %d textures", desc.label, gpu.MAX_TEXTURES)
+		resource->Release()
+		return {}
+	}
+	uav := d3d.UNORDERED_ACCESS_VIEW_DESC {
+		Format        = view_format(stored.format),
+		ViewDimension = .TEXTURE2D,
+	}
+	uav.Texture2D = {MipSlice = desc.mip}
+	if stored.layers > 0 {
+		uav.ViewDimension = .TEXTURE2DARRAY
+		uav.Texture2DArray = {MipSlice = desc.mip, ArraySize = stored.layers}
+	}
+	dev.device->CreateUnorderedAccessView(resource, nil, &uav, resource_handle(gpu.texture_write_index(view)))
+	return view
+}
+
 @(private = "file")
 write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 	desc := entry.desc
@@ -336,6 +374,9 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		if desc.depth > 0 {
 			uav.ViewDimension = .TEXTURE3D
 			uav.Texture3D = {WSize = desc.depth}
+		} else if desc.layers > 0 {
+			uav.ViewDimension = .TEXTURE2DARRAY
+			uav.Texture2DArray = {ArraySize = desc.layers}
 		}
 		dev.device->CreateUnorderedAccessView(entry.resource, nil, &uav, resource_handle(gpu.texture_write_index(texture)))
 	}

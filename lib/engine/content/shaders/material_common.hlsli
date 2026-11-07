@@ -145,6 +145,12 @@ struct Frame_Constants {
 	uint voxel_normal;
 	uint voxel_emission;
 	uint voxel_mask;
+	// The sky's cubemap, which the specular light takes along the reflection (see sky_cube.hlsli): no mips without one.
+	uint sky_cube_current;
+	uint sky_cube_previous;
+	float sky_cube_blend;
+	float sky_cube_mips;
+	uint sky_cube_sampler;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 

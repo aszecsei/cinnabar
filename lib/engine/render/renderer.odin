@@ -261,6 +261,8 @@ Frame :: struct {
 	sky:                      ^Sky_Frame,
 	// nil without a Texture sky whose texture is resident.
 	sky_texture:              ^Sky_Texture_Frame,
+	// nil when the sky's cubemap has no textures (see sky_cube.odin).
+	sky_cube:                 ^Sky_Cube_Frame,
 	// Frame_Desc.disable has occlusion culling, or the hierarchy over meshlets.
 	no_occlusion:             bool,
 	no_meshlet_hierarchy:     bool,
@@ -477,6 +479,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	}
 	// The sky tints its sun's light before the shadows and the upload take the lights.
 	ambient := begin_sky(f, settings.sky)
+	begin_sky_cube(f, settings.sky, settings.reflections.level, ambient)
 	assign_shadows(f)
 	upload_lights(f)
 	begin_fog(f, settings.fog)
@@ -522,6 +525,7 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_fog_passes(f)
 	add_sky_passes(f)
 	add_sky_texture_passes(f)
+	add_sky_cube_passes(f)
 
 	// The sky draws over the background after the world pass, so the clear is black under it.
 	draws_sky := sky_draws(f)
