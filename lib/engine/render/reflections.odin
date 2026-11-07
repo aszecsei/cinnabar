@@ -33,8 +33,8 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 			probes = 16,
 			faces = 1,
 			samples = 32,
-			rough_start = 0.4,
-			rough_end = 0.7,
+			rough_start = 0.2,
+			rough_end = 0.45,
 		},
 		.Medium = {
 			face = 128,
@@ -42,8 +42,8 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 			probes = 32,
 			faces = 2,
 			samples = 64,
-			rough_start = 0.45,
-			rough_end = 0.75,
+			rough_start = 0.2,
+			rough_end = 0.45,
 		},
 		.High = {
 			face = 128,
@@ -51,8 +51,8 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 			probes = 64,
 			faces = 3,
 			samples = 64,
-			rough_start = 0.5,
-			rough_end = 0.8,
+			rough_start = 0.2,
+			rough_end = 0.45,
 		},
 		.Ultra = {
 			face = 256,
@@ -60,8 +60,8 @@ REFLECTION_PARAMS := [Reflection_Technique][Quality_Level]Reflection_Params {
 			probes = 64,
 			faces = 6,
 			samples = 128,
-			rough_start = 0.5,
-			rough_end = 0.8,
+			rough_start = 0.2,
+			rough_end = 0.45,
 		},
 	},
 }

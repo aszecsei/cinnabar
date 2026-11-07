@@ -129,14 +129,18 @@ What they show:
   - A probe samples its cube along the reflection, at the mip for the surface's roughness, times its intensity. With a projection box, the reflection is box-projected first.
   - The rest of the light comes from the sky's cubemap.
 - **With the GI**, on opaque surfaces, the probes blend over the GI's specular light below a roughness fade, from `rough_start` to `rough_end`, so rough surfaces keep the GI's dynamic occlusion. The ambient occlusion scales the probes' light, which has no local occlusion of its own. Transparent surfaces take the probes and then the sky's cubemap, never the GI's specular light.
-- **Parameters:** `REFLECTION_PARAMS[.Probes]` at the reflections' level (see [Quality](quality.md#quality)), with the sky cubemap's samples per texel. The roughness fades are starting points. A measurement on content with both GI and probes should set them.
+- **The fade's range**, 0.2 to 0.45 at every level, comes from Intel's Sponza at Ultra with the voxel cones and a probe filling its courtyard.
+  - A capture has no GI, so its walls take the sky's ambient light without occlusion, and its rough mips are brighter than the GI's light inside the arcades.
+  - With the fade at 0.5 to 0.8, Sponza's stone, at roughness 0.5 to 0.75, took much of that light: the frame's mean brightness rose from 52 to 70, and the columns and arches turned milky.
+  - From 0.2 to 0.45, the stone and the curtains keep the GI's specular light, which is within capture noise of the frame without probes, and only glossy surfaces take the probe.
+- **Parameters:** `REFLECTION_PARAMS[.Probes]` at the reflections' level (see [Quality](quality.md#quality)), with the sky cubemap's samples per texel.
 
 | Level | Faces | Mips | Slots | Faces a frame | Fade | Memory |
 |---|---|---|---|---|---|---|
-| Low | 64 | 5 | 16 | 1 | 0.4 to 0.7 | 2.25 MiB |
-| Medium | 128 | 6 | 32 | 2 | 0.45 to 0.75 | 17.0 MiB |
-| High | 128 | 6 | 64 | 3 | 0.5 to 0.8 | 33.0 MiB |
-| Ultra | 256 | 7 | 64 | 6 | 0.5 to 0.8 | 132.0 MiB |
+| Low | 64 | 5 | 16 | 1 | 0.2 to 0.45 | 2.25 MiB |
+| Medium | 128 | 6 | 32 | 2 | 0.2 to 0.45 | 17.0 MiB |
+| High | 128 | 6 | 64 | 3 | 0.2 to 0.45 | 33.0 MiB |
+| Ultra | 256 | 7 | 64 | 6 | 0.2 to 0.45 | 132.0 MiB |
 
 - **Memory** is the array's cubes, with the spare, and the source cube, with their mips (`reflection_probe_memory`).
 - **Cost** was measured on an RTX 5090, in the editor's viewport at 911x481, in the glass scene with its `Realtime` probe. Each level ran at its own preset, and each figure is the mean of three captures of 16 frames.
