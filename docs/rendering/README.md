@@ -59,6 +59,7 @@ Read them in this order the first time.
 | `gi_voxel.odin` | The voxel cones: their clipmap's levels, schedule, storage, voxelization views and passes ([Voxel cones](global-illumination.md#voxel-cones)) |
 | `reflections.odin` | The reflections' `REFLECTION_PARAMS` and `Reflection_Settings` ([Quality](quality.md#quality)) |
 | `reflection_probes.odin` | The reflection probes: their slots, the capture's turns and faces, its prefilter into the cube array, and their records ([Reflection probes](lighting-and-shadows.md#reflection-probes)) |
+| `screen_reflections.odin` | The screen-space reflections: the depth pyramid, the trace, the resolve, the temporal pass and the lit scene, and `Frame.reflections` ([Screen-space reflections](lighting-and-shadows.md#screen-space-reflections)) |
 | `sky_cube.odin` | The sky's cubemap: its capture, its prefilter by roughness, its ring and its builds a mip a frame ([Specular light](sky.md#specular-light)) |
 | `fog.odin` | The froxel fog volume ([Volumetric fog](fog.md#volumetric-fog)) |
 | `post.odin` | Temporal AA, exposure, bloom, the tone mapping lookup table ([Post-processing](post-processing.md#post-processing)) |
@@ -68,7 +69,7 @@ Read them in this order the first time.
 | `debug_views.odin` | The editor's debug views and feature toggles ([Debug views](post-processing.md#debug-views)) |
 | `preview.odin` | Material previews into their own shared targets ([Material previews](materials.md#material-previews)) |
 
-The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `hit_bin`, `hit_default`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `sky*`, `cube_prefilter`, `cube_downsample`, `reflection_probe_face`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
+The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asset per pass (`cull_draws`, `select_patches`, `cull_patches`, `cluster_lights`, `shadow_mask`, `hit_bin`, `hit_default`, `gtao*`, `hbao`, `ssao`, `gi_*`, `fog_*`, `sky*`, `cube_prefilter`, `cube_downsample`, `reflection_probe_face`, `ssr_*`, `transparency_composite`, `sprite_*`, `particle_*`, `temporal_aa`, `exposure_*`, `bloom`, `tone_lut`, `tone_map`, `fxaa`, `smaa_*`, `output`, `debug_view`, `debug`, and the editor's `overlay`, `pick` and `icons`), and the material templates as `.hlsli` includes (`material_passes.hlsli` and the files it includes). Shading models are in `lib/engine/content/shading`.
 
 **How a frame is built.** The game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `draw_frame` resolves the settings at the camera, extracts the lights and the GPU scene's instances, builds a `render.Graph` in frame memory with every pass that the settings and the frame need, calls the game's hooks at their points, and executes the graph, which records the barriers and submits ([Frame](frame.md#frame)). The main types:
 

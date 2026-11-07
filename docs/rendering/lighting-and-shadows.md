@@ -1,8 +1,8 @@
 # Lighting and shadows
 
-Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, local reflection probes, and shadows as maps, virtual maps or traced masks.
+Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, local reflection probes, stochastic screen-space reflections, and shadows as maps, virtual maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Reflection probes](#reflection-probes) · [Shadows](#shadows) · [Virtual shadow maps](#virtual-shadow-maps)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Reflection probes](#reflection-probes) · [Screen-space reflections](#screen-space-reflections) · [Shadows](#shadows) · [Virtual shadow maps](#virtual-shadow-maps)
 
 ## Clustered forward
 
@@ -89,7 +89,7 @@ What they show:
 
 ### Reflection probes
 
-`Reflection_Technique.Probes`, the Low preset's reflections (`reflection_probes.odin`, `material_reflections.hlsli`, `reflection_probe_face.hlsl`, `cube_downsample.hlsl`): cubemaps captured at placed points, prefiltered by roughness, and looked up for each pixel in the forward pass with a box projection. Where no probe counts, the sky's [cubemap](sky.md#specular-light) fills in.
+`Reflection_Technique.Probes`, the Low preset's reflections, which also run under the [screen-space reflections](#screen-space-reflections) and fill in where their rays find nothing (`reflection_probes.odin`, `material_reflections.hlsli`, `reflection_probe_face.hlsl`, `cube_downsample.hlsl`): cubemaps captured at placed points, prefiltered by roughness, and looked up for each pixel in the forward pass with a box projection. Where no probe counts, the sky's [cubemap](sky.md#specular-light) fills in.
 
 - **The component:** `Reflection_Probe` (54) has these fields:
   - `extent` is the influence box's half size along its entity's x, y and z (0 means `DEFAULT_PROBE_EXTENT`, 5 m), scaled by its `Transform`.
@@ -102,7 +102,7 @@ What they show:
 - **Slots and storage:** a cube array of `RG11B10_Float` cubes holds a cube for each of the level's slots and one spare. A separate source cube is what the capture draws into.
   - With more probes than slots, the probes with the highest priority, then the nearest to the camera, take the slots. A probe past the slots keeps its own until a ranked probe needs it.
   - A probe whose slot has no cube yet counts for nothing, so its pixels take the sky's cubemap.
-  - When the quality leaves the technique, the cubes are freed. A level of another size makes them again and captures every probe again.
+  - When the quality turns the reflections `Off`, the cubes are freed. `Screen` keeps them, with `REFLECTION_PARAMS[.Probes]` at its level. A level of another size makes them again and captures every probe again.
 - **The capture's turns:** the level gives a budget of faces a frame. One probe captures at a time, in this order:
   1. The `On_Load` probes with no cube yet, the nearest first.
   2. The other probes with no cube yet, the nearest first.
@@ -160,11 +160,98 @@ What they show:
 - **The sample:**
   - The room scene's probe fills the room, and its projection box is the walls. Its polished floor reflects the pillar at the pillar's foot.
   - The glass scene has two probes that overlap over the glass. The sorted side's probe is `Realtime`, so it follows the lamp that the spinner carries.
-  - Both show at the Low quality.
+  - Both show at every quality but `Off`. From Medium up, the screen-space reflections are in front of them.
 - **Limits:**
   - A capture sees no patch surfaces, particles or transparent surfaces.
   - A probe's light is the light at its position. The box projection corrects the parallax only for its box.
   - A probe has no occlusion of its own beyond the ambient occlusion, so the reflections in a dark corner are as bright as in the middle of the probe.
+
+### Screen-space reflections
+
+`Reflection_Technique.Screen`, the reflections of the Medium, High and Ultra presets (`screen_reflections.odin`, `ssr_common.hlsli`, `ssr_depth.hlsl`, `ssr_trace.hlsl`, `ssr_resolve.hlsl`, `ssr_temporal.hlsl`, `ssr_lit.hlsl`): stochastic screen-space reflections, after Stachowiak's "Stochastic Screen-Space Reflections" (SIGGRAPH 2015). Rays from each pixel's surface, sampled by its roughness, march the depth buffer and take last frame's lit scene where they hit. Where they find nothing on the screen, the [reflection probes](#reflection-probes) fill in, which run under this technique too, over the GI or the sky's cubemap.
+
+- **The frame's reflections:** `Frame.reflections` is an `RGBA16_Float` texture at the scene's size.
+  - Its rgb is the specular light along the reflection, already filtered for the pixel's roughness, and pre-exposed. Its alpha is its weight.
+  - The forward pass's specular light becomes `lerp(below, reflections.rgb, reflections.a)`. `below` is the probes over the GI or over the sky's cubemap. The ambient occlusion scales `below` only, because a hit on the screen is already occluded.
+  - Only the camera's view reads it. `Frame_Constants.reflections` is 1 in the camera's constants and 0 in the constants of the view model, the probes' captures and the material previews. Transparent surfaces do not read it, because they have no prepass.
+  - The traced reflections (issue #263) will write the same texture, with the same contract.
+- **When it runs:** `begin_screen_reflections` decides, after `begin_gi` and before the scene's constants are written. Some frames have no texture and no pass, and their `Frame.ssr` is nil:
+  - a frame whose technique is not `Screen`, or whose settings have `off`;
+  - a frame before the five pipelines are ready;
+  - a frame before the noise texture is resident.
+- **The passes** run on the compute queue after the prepass, beside the ambient occlusion and the GI:
+  1. **The depth pyramid** (`reflections depth`, two dispatches):
+     - The occlusion's [depth pyramid](gpu-scene.md#occlusion-culling) holds the farthest depth of the early prepass, so it does not serve.
+     - This pyramid holds the nearest depth of the whole prepass. With the depth reversed, the nearest depth is the largest.
+     - Level 0 is the depth at the scene's size, with the view model's pixels at the far plane, because the view model is not where it seems to be. Each later level is half the one before, rounded up, to `SSR_DEPTH_LEVELS` (9).
+     - A group covers 16x16 texels of its source and writes four levels through group-shared memory. The first dispatch writes levels 0 to 4. The second reads level 4 and writes levels 5 to 8.
+     - Each level is an `R32_Float` texture of its own, because the graph has no views of a transient texture's mips.
+  2. **The trace** (`reflections trace`):
+     - A thread starts from each pixel. At half resolution, it starts from one pixel of each 2x2 block, which changes from frame to frame (`SSR_HALF_OFFSETS`).
+     - Its rays reflect the view direction about a normal sampled from GGX's distribution of visible normals, at the pixel's roughness (Heitz, "Sampling the GGX Distribution of Visible Normals", JCGT 2018).
+     - Each ray marches the pyramid on the screen, where the reversed depth is linear. In front of a texel, the ray skips to the texel's edge or to the depth that the texel holds, and climbs a level. Behind a texel, it descends a level. This continues until the ray is behind a texel of level 0.
+     - The ray hits there if it is within 3% of the surface's view depth (`THICKNESS`). If it is further behind, it has passed behind the surface and finds nothing.
+     - A hit takes the light in last frame's lit scene at the place where the hit point was then, times this frame's exposure.
+     - Each ray keeps its direction, its distance to the hit (0 for a miss) and its pdf. The pdf is clamped to `MAX_PDF` (60000) so that it fits a half float.
+  3. **The resolve** (`reflections resolve`, at the scene's size):
+     - Each pixel reuses the rays of its own trace texel and of three neighbors, from a ring that the noise turns each frame.
+     - A ray counts by this pixel's GGX specular times the cosine, without Fresnel, divided by the ray's own pdf. This is Stachowiak's ratio estimator: the weighted light divided by the sum of the weights is the light filtered by the pixel's own lobe.
+     - The ray's direction from this pixel goes toward the ray's hit, or along the ray for a miss.
+     - The resolve also keeps the mean distance to the hits.
+  4. **The temporal pass** (`reflections temporal`) blends the resolve into last frame's result:
+     - It reprojects the place where the reflected point was. A mirror shows that point at the hit's distance behind the surface, along the view ray, so a reflection does not smear as the camera moves.
+     - A pixel whose rays found nothing reprojects its surface, by its velocity.
+     - The history is rescaled by the change in exposure, clamped to the 3x3 neighborhood's mean ± 1.25 standard deviations, and blended in with a weight of 1 / frames.
+     - The frames grow from `SSR_MIN_FRAMES` (2) on a mirror, whose reflection changes with every move, to `SSR_MAX_FRAMES` (16) at the cutoff, whose noise needs the most averaging.
+     - The result is `Frame.reflections`.
+- **The lit scene:** the rays read last frame's scene without its pre-exposure.
+  - At half resolution, the [GI's lit scene](global-illumination.md#global-illumination) serves when the GI runs. It is half the scene's size, a mean of each 2x2 block, and holds the fog in front of each surface, which is acceptable at Low and Medium.
+  - Otherwise, the pass `reflections lit scene` keeps a copy of its own after the world pass, on the graphics queue. From High up, the copy is at the scene's size.
+  - Both copies hold only the opaque surfaces, the sky and the fog.
+- **The weight** is 0 for these rays:
+  - a miss, which includes a ray that leaves the screen or passes behind a surface;
+  - a hit on a surface that faces away from the ray, because the lit scene does not have the surface's back;
+  - a hit whose point was off the screen last frame.
+
+  The weight also fades out over the last 10% of the screen toward each edge, at the hit point, and over the 0.1 of roughness below the level's cutoff (`CUTOFF_FADE`). Above the cutoff, a pixel traces nothing.
+- **Noise:** the rays and the resolve's ring read spatiotemporal blue noise from `stbn_vec2.png`: 32 layers of 128x128 uniform 2D values. `tools/stbn` makes the texture (`just stbn`).
+  - The method is Wolfe, Morrical, Akenine-Möller and Ramamoorthi's, "Spatiotemporal Blue Noise Masks" (EGSR 2022), for vector values. Each slice starts with the same stratified set of values in a random order, so each slice's values stay exactly uniform. A swap of two values in a slice is kept when it lowers Georgiev and Fajardo's energy, with σ = 1.9 in space and in time. The energy is summed over the pairs of texels in each slice and the pairs of slices at each pixel, with a half share each.
+  - Multiplying the space and time terms instead, over a window in space and time, gives too little of the energy to the pairs at one pixel. On a 16x16x8 test, the product left 41% of white noise's low-frequency power in space and 73% in time. The sum left 4% and 18%.
+  - At its 256 swaps a texel, the texture keeps 4.3% of white noise's power at the lowest spatial frequencies and 4.5% at the lowest temporal frequency. The tool takes 33 s on 32 threads, and the same seed gives the same bytes.
+  - The texture's `.meta` file sets `usage = data`, so it is not compressed, and `layout = array_strip`, so it cooks into a 2 MiB array. Each pixel's rays read it at their own offsets, and the slice changes each frame.
+- **Parameters:** `REFLECTION_PARAMS[.Screen]` at the reflections' level (see [Quality](quality.md#quality)). The table gives the memory at 2560x1440. Kept is what stays between frames: the history and the lit scene of its own. Transient is the pyramid, the rays and the resolve.
+
+| Level | Rays from | Rays a pixel | Steps | Cutoff | Kept | Transient |
+|---|---|---|---|---|---|---|
+| Low | 1 pixel of 2x2 | 1 | 16 | 0.3 | 56 MiB, or 70 MiB without the GI | 68 MiB |
+| Medium | 1 pixel of 2x2 | 1 | 32 | 0.4 | 56 MiB, or 70 MiB without the GI | 68 MiB |
+| High | Each pixel | 1 | 48 | 0.5 | 113 MiB | 110 MiB |
+| Ultra | Each pixel | 2 | 64 | 0.6 | 113 MiB | 167 MiB |
+
+- **Cost** was measured on an RTX 5090, in the room scene, with the camera inside the room and looking down it at the mirror and the brushed panel.
+  - Each level ran at its own preset, with `Screen` at that level, in the editor's viewport at 2563x835. Each figure is the median of five captures, and each capture is an average over a quarter of a second.
+  - The monitors are 2560x1440, so the editor's viewport cannot be that size. The 1440p figures are the measured figures scaled by the number of pixels, 1.72 times. Every pass is per pixel, so the estimate is close, but the trace's rays are also longer on a larger screen.
+  - At Low and Medium, the GI's lit scene serves, so these levels have no lit pass.
+
+| Level | Depth | Trace | Resolve | Temporal | Lit scene | Total at 2563x835 | Total at 1440p, scaled |
+|---|---|---|---|---|---|---|---|
+| Low | 22 µs | 18 µs | 31 µs | 21 µs | None | 92 µs | About 0.16 ms |
+| Medium | 22 µs | 25 µs | 31 µs | 22 µs | None | 100 µs | About 0.17 ms |
+| High | 22 µs | 73 µs | 32 µs | 22 µs | 20 µs | 169 µs | About 0.29 ms |
+| Ultra | 22 µs | 136 µs | 46 µs | 22 µs | 20 µs | 246 µs | About 0.42 ms |
+
+- **The debug view** `Reflections` shows the texture's rgb times its weight. It is black where the probes take over.
+- **The sample:**
+  - The room scene has a mirror on its floor, which shows the green partition sharply.
+  - A panel of brushed metal at roughness 0.3 blurs the red pillar.
+  - The checker floor, at roughness 0.08, reflects the walls.
+  - When the camera strafes and turns, neither reflection leaves a trail.
+- **Limits:**
+  - The screen has only what the camera sees. The back of a surface, what is behind it and what is off the screen come from the probes.
+  - A ray that passes behind a thin object finds nothing past it, because the march stops there.
+  - On a glossy surface, a fine grain stays in the debug view. Temporal AA averages it in the lit frame.
+  - The lit scene is last frame's, so a light that turns on shows in reflections one frame late.
+  - A moving object's reflection is reprojected as if the reflected point were still. The neighborhood clamp limits the error.
 
 ### Shadows
 

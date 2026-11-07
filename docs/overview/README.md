@@ -102,7 +102,8 @@ cinnabar/
 │   ├── cook/                The cooker: one file per asset kind, the daemon, the index, operations, the cook link
 │   ├── viewer/              Shows a host's shared frames without the editor
 │   ├── editorctl/           Drives a running editor from a terminal: screenshots and GIFs
-│   └── ltc_fit/             Fits the area lights' lookup tables
+│   ├── ltc_fit/             Fits the area lights' lookup tables
+│   └── stbn/                Makes the screen-space reflections' spatiotemporal blue noise
 ├── samples/mygame/          The sample game: game.odin, main_release/, content/, project.settings
 └── vendor/                  luau, compressonator, meshoptimizer, jolt, opus, vorbis, ogg, msdfgen (submodules); agility, dxc (downloaded)
 ```

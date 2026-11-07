@@ -39,6 +39,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Normals`, `Depth`, `Velocity`, `Roughness` | `debug_view.hlsl` | The prepass's: the world normal, the depth on a log scale to 1 km, the motion with grey where nothing moved, and the roughness from black, smooth, to white, rough, white where nothing drew (see [Prepass](lighting-and-shadows.md#prepass)) | No |
 | `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color | No |
 | `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
+| `Reflections` | `debug_view.hlsl` | The [screen-space reflections](lighting-and-shadows.md#screen-space-reflections)' light times their weight: black where the probes take over, and black without them | Yes |
 | `Entity_Ids` | `debug_view.hlsl` | Each entity in a color of its own | No |
 | `Luminance` | `debug_view.hlsl` | The scene's EV100 as heat colors, from -4 to 16 | No |
 | `Transparent_Overdraw` | `debug_view.hlsl` | The transparent layers at each pixel, sprites included, which the moments passes count, as heat colors from 1 to 8 | No |

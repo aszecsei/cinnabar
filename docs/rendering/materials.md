@@ -44,12 +44,13 @@ float3 shade_indirect(Surface s, Shading_Point p, Indirect indirect);
 - The engine's forward template owns the light loop. For each directional light and each light in the pixel's cluster, it calls `shade_direct` with the light's color after its falloff and its shadow, or `shade_area` for an area light (see [Lights and clusters](lighting-and-shadows.md#lights-and-clusters)). Then it calls `shade_indirect`, and adds the emission. `Unlit` has `No_Lighting` and only emits.
 - The indirect diffuse light is the [global illumination](global-illumination.md#global-illumination)'s, or without it the `Environment`'s [ambient light](sky.md#ambient-light) along the normal.
 - The indirect specular light is along the reflection, at the mip for the surface's roughness (`shading_roughness`, 1 for a shading model without one). It comes in layers, each filling in where the one before it has nothing:
-  1. The [reflection probes](lighting-and-shadows.md#reflection-probes) of the pixel's cluster, where their boxes reach.
-  2. Without the global illumination, and for every transparent surface, the sky's [cubemap](sky.md#specular-light).
-  3. With the global illumination, on opaque surfaces, its specular light instead of the cubemap. The probes fade out over it on rough surfaces, so they keep its dynamic occlusion.
+  1. With the `Screen` technique, on the camera's opaque surfaces, the [screen-space reflections](lighting-and-shadows.md#screen-space-reflections), by their weight.
+  2. The [reflection probes](lighting-and-shadows.md#reflection-probes) of the pixel's cluster, where their boxes reach.
+  3. Without the global illumination, and for every transparent surface, the sky's [cubemap](sky.md#specular-light).
+  4. With the global illumination, on opaque surfaces, its specular light instead of the cubemap. The probes fade out over it on rough surfaces, so they keep its dynamic occlusion.
 
-  A transparent surface never takes the global illumination's specular light, which is the opaque surface's behind it. A reflection probe's capture takes the world probes' light, or the ambient light and the cubemap.
-- The template scales both the diffuse and the specular light by the [ambient occlusion](ambient-occlusion.md#ambient-occlusion) before it calls `shade_indirect`. Its fit of the environment BRDF is the split sum's second term; the prefilter of the cubemap and of the probes is its first.
+  A transparent surface never takes the global illumination's specular light or the screen-space reflections, which are the opaque surface's behind it. A reflection probe's capture takes the world probes' light, or the ambient light and the cubemap.
+- The template scales both the diffuse and the specular light by the [ambient occlusion](ambient-occlusion.md#ambient-occlusion) before it calls `shade_indirect`, except the screen-space reflections, which are occluded already. Its fit of the environment BRDF is the split sum's second term; the prefilter of the cubemap and of the probes is its first.
 - The material graph's output node has one input for each surface input of its shading model. The cook link sends the shading models to the editor with the importers, so the editor shows the right inputs.
 - Fog, exposure, the ambient occlusion and the shadow mask are applied by the template, not by shading models.
 

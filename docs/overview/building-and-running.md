@@ -15,7 +15,7 @@ Everything goes through the [justfile](../../justfile). The recipes that matter 
 | `just release` | Cooks the `release` configuration and builds the statically linked `mygame.exe` into `build/release`, with its content and settings beside it. |
 | `just test` | Runs every Odin package's tests, the script tests with direct field access on and off, and the editor's .NET tests. |
 | `just check`, `vet`, `lint`, `fmt` | Type checks and lints every package, and formats the source. |
-| `just script-types`, `link-schema`, `ltc-fit` | Regenerate derived files: the Luau definition file, the links' JSON schemas, and the area lights' tables. |
+| `just script-types`, `link-schema`, `ltc-fit`, `stbn` | Regenerate derived files: the Luau definition file, the links' JSON schemas, the area lights' tables, and the screen-space reflections' blue noise. |
 | `just screenshot`, `just gif` | With the editor open, write a screenshot or a GIF of its viewport, with a JSON sidecar, into `build/captures` and print the files; `just screenshot --view depth` adds a debug view (see [Editor: Capture](../editor/capture.md#automation)). |
 
 The justfile's variables are the single source of versions: the Agility SDK, DXC, the GPU backend collection, and the `LUAU_*` defines. A change there flows into the cache keys of the assets it affects, so the next cook rebuilds them.
@@ -29,7 +29,7 @@ build/
 ├── dev/        host.exe, mygame.dll (and the mygame_N.dll copies the host loads), luau.dll,
 │               D3D12/ and the FSR libraries, content/        the development loose cache
 ├── release/    mygame.exe, D3D12/ and the FSR libraries, content/, project.settings
-├── tools/      cook.exe, viewer.exe, ltc_fit.exe, editorctl.exe
+├── tools/      cook.exe, viewer.exe, ltc_fit.exe, stbn.exe, editorctl.exe
 ├── captures/   the editor's screenshots, GIFs and their sidecars
 └── obj/        luau/, compressonator/, meshoptimizer/, clusterlod/, opus/, vorbis/   the CMake builds the executables link
                 pdb/, link/, script-types/, dotnet/, editor/autosave/, editor/automation.json
