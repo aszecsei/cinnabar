@@ -382,9 +382,11 @@ Texture_Desc :: struct {
 	depth:     u32,
 	// An array's layers, at most MAX_TEXTURE_LAYERS. 0 means a texture with no array view, and 1 an array of one layer. An
 	// array's or a cube's usage is Sampled and Streamed, or Sampled and Storage with no data. Shaders read it with
-	// cn_texture_array or cn_texture_cube, and write it with cn_rw_texture_array, every layer of one mip.
+	// cn_texture_array, cn_texture_cube or cn_texture_cube_array, and write it with cn_rw_texture_array, every layer of
+	// one mip.
 	layers:    u32,
-	// A cube map: six square layers, in the order +x, -x, +y, -y, +z, -z.
+	// A cube map: six square layers, in the order +x, -x, +y, -y, +z, -z. With more than six layers, a whole number of
+	// cubes, it is a cube array, each cube six layers after the one before, which shaders read with cn_texture_cube_array.
 	cube:      bool,
 	format:    Format,
 	// 0 means 1.

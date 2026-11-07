@@ -351,6 +351,9 @@ write_texture_views :: proc(texture: gpu.Texture, entry: ^Texture_Entry) {
 		if desc.depth > 0 {
 			srv.ViewDimension = .TEXTURE3D
 			srv.Texture3D = {MipLevels = 1}
+		} else if desc.cube && desc.layers > 6 {
+			srv.ViewDimension = .TEXTURECUBEARRAY
+			srv.TextureCubeArray = {MipLevels = desc.mip_count, NumCubes = desc.layers / 6}
 		} else if desc.cube {
 			srv.ViewDimension = .TEXTURECUBE
 			srv.TextureCube = {MipLevels = desc.mip_count}
