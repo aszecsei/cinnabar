@@ -2,8 +2,8 @@
 -- The sample's quality keys, as a settings menu sets the quality, through the Render bindings (see
 -- docs/scripting/api.md#render): F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the
 -- next ambient occlusion technique, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing technique that the
--- device runs, and Shift+F6 the next global illumination technique that it runs. Each saves the quality to the user
--- settings file, which the game reads back. hello.luau calls update every frame. Anti-aliasing is not Alt+F9, which the
+-- device runs, Shift+F6 the next global illumination technique that it runs, and Ctrl+F6 the next reflection technique
+-- that it runs. Each saves the quality to the user settings file, which the game reads back. hello.luau calls update every frame. Anti-aliasing is not Alt+F9, which the
 -- NVIDIA app takes for itself.
 local AMBIENT_OCCLUSION = { "Off", "Gtao", "Ssao", "Hbao" }
 local RENDER_SCALES = { 1, 0.75, 2 / 3, 0.5 }
@@ -34,6 +34,8 @@ local function update()
 	local q = Render.quality()
 	if f6 and shift then
 		Render.set_quality({ gi = after(Render.caps().gi, q.gi) })
+	elseif f6 and control then
+		Render.set_quality({ reflections = after(Render.caps().reflections, q.reflections) })
 	elseif f6 then
 		Render.set_quality({ aa = after(Render.caps().aa, q.aa) })
 	elseif shift and control then
@@ -57,9 +59,11 @@ local function update()
 		q.aa,
 		"global illumination",
 		q.gi,
+		"reflections",
+		q.reflections,
 		"render scale",
 		q.render_scale,
-		"(F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing, Shift+F6 the next global illumination)"
+		"(F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion, Ctrl+Shift+F9 the next render scale, F6 the next anti-aliasing, Shift+F6 the next global illumination, Ctrl+F6 the next reflections)"
 	)
 	if not Render.save_quality() then
 		Debug.warn("could not save the quality")

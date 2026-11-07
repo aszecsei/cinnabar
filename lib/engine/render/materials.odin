@@ -125,10 +125,14 @@ material_pipeline_destroy :: proc(p: ^Material_Pipeline, platform: ^core.Platfor
 	platform.gpu_destroy_pipeline(p.hit)
 }
 
-// The prepass's targets: the surface's normal in the world, folded into the octahedron, and the velocity in UV.
+// The prepass's targets: the surface's normal in the world, folded into the octahedron, the velocity in UV, and the
+// shading model's roughness, 1 for a model without one.
 NORMAL_FORMAT :: gpu.Format.RG16_Float
 VELOCITY_FORMAT :: gpu.Format.RG16_Float
-PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}}
+ROUGHNESS_FORMAT :: gpu.Format.R8_Unorm
+PREPASS_COLORS :: []gpu.Color_Target{{format = NORMAL_FORMAT}, {format = VELOCITY_FORMAT}, {format = ROUGHNESS_FORMAT}}
+// The roughness where the prepass draws nothing, which reflects nothing sharp.
+ROUGHNESS_NONE :: 1
 
 // Material_Table is one frame's material table: a parameter block for each material or instance that the frame draws,
 // with its textures' bindless indices written. It is in frame memory, and the frame uploads it.

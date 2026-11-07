@@ -54,6 +54,8 @@ Debug_View :: enum u8 {
 	// The virtual shadow map's level at each pixel in a color of its own, half red where its pages were not allocated and
 	// it fell back to a coarser level, magenta where it found none, and grey without a virtual shadow map.
 	Shadow_Virtual,
+	// The prepass's roughness, from black, smooth, to white, rough, and white where it drew nothing.
+	Roughness,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -148,6 +150,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.depth
 	case .Velocity:
 		source = f.velocity
+	case .Roughness:
+		source = f.roughness
 	case .Ambient_Occlusion:
 		source = f.ambient_occlusion
 	case .Gi_Diffuse:

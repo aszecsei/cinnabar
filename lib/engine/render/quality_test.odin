@@ -29,6 +29,24 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect(t, settings.ambient_occlusion.off && settings.gi.off && settings.post.no_aa)
 }
 
+// No reflection technique exists yet, so every preset has them off, at its level, and a frame draws none.
+@(test)
+the_reflections_are_off_at_every_preset :: proc(t: ^testing.T) {
+	for caps in ([]Caps{{}, {ray_query = true}}) {
+		for preset in Quality_Preset.Low ..= Quality_Preset.Ultra {
+			q := preset_quality(preset, caps)
+			testing.expect_value(t, q.reflections, Reflection_Quality{.Off, Quality_Level(u8(preset))})
+			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
+			settings: Frame_Settings
+			apply_quality(&settings, q)
+			testing.expect(t, settings.reflections.off)
+			testing.expect_value(t, settings.reflections.level, q.reflections.level)
+			testing.expect_value(t, settings.reflections.technique, Reflection_Technique.Off)
+		}
+	}
+	testing.expect_value(t, Quality{}.reflections.technique, Reflection_Technique.Off)
+}
+
 @(test)
 the_virtual_shadow_map_takes_every_level_but_low :: proc(t: ^testing.T) {
 	testing.expect(t, !preset_quality(.Low, {}).shadows.virtual, "the cascades stay for Low")
@@ -74,6 +92,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	bad.shadows.level = Quality_Level(200)
 	bad.ao.technique = Ao_Technique(200)
 	bad.gi.technique = Gi_Technique(200)
+	bad.reflections = {Reflection_Technique(200), Quality_Level(200)}
 	bad.aa = Aa_Technique(200)
 	bad.render_scale = 0.1
 	clamped := clamp_quality(bad, {})
@@ -93,6 +112,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, clamped.shadows.level, Quality_Level.High)
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
 	testing.expect_value(t, clamped.gi.technique, Gi_Technique.Off)
+	testing.expect_value(t, clamped.reflections, Reflection_Quality{.Off, .High})
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
 
 	// An upscaler that the device does not run gives temporal AA, which upscales too.

@@ -80,6 +80,8 @@ Quality_Key :: enum u8 {
 	Render_Scale,
 	Lod_Error,
 	Virtual_Shadows,
+	Reflections,
+	Reflections_Level,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
@@ -98,6 +100,8 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Render_Scale       = "quality.render_scale",
 	.Lod_Error          = "quality.lod_error",
 	.Virtual_Shadows    = "quality.shadows.virtual",
+	.Reflections        = "quality.reflections",
+	.Reflections_Level  = "quality.reflections.level",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -294,6 +298,10 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				case:
 					problem(problems, line, "%s takes true or false, not %q", key, value)
 				}
+			case .Reflections:
+				ok = enum_value(problems, line, key, value, &q.reflections.technique)
+			case .Reflections_Level:
+				ok = enum_value(problems, line, key, value, &q.reflections.level)
 			}
 			if ok {
 				settings.quality_given += {k}
@@ -348,6 +356,8 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Render_Scale in given {q.render_scale = s.render_scale}
 	if .Lod_Error in given {q.lod_error = s.lod_error}
 	if .Virtual_Shadows in given {q.shadows.virtual = s.shadows.virtual}
+	if .Reflections in given {q.reflections.technique = s.reflections.technique}
+	if .Reflections_Level in given {q.reflections.level = s.reflections.level}
 	return render.clamp_quality(q, caps)
 }
 
@@ -370,6 +380,8 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Render_Scale       = fmt.tprintf("%v", q.render_scale),
 		.Lod_Error          = fmt.tprintf("%v", q.lod_error),
 		.Virtual_Shadows    = q.shadows.virtual ? "true" : "false",
+		.Reflections        = name(q.reflections.technique),
+		.Reflections_Level  = name(q.reflections.level),
 	}
 	return
 }

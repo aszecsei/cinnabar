@@ -170,6 +170,8 @@ type RenderQuality = {
 	render_scale: number,
 	lod_error: number,
 	virtual_shadows: boolean,
+	reflections: string,
+	reflections_level: string,
 }
 
 -- What Render.set_quality changes: the fields that it gives. A preset sets every feature first.
@@ -186,14 +188,17 @@ type RenderQualityChange = {
 	render_scale: number?,
 	lod_error: number?,
 	virtual_shadows: boolean?,
+	reflections: string?,
+	reflections_level: string?,
 }
 
--- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, and gi the
--- global illumination's.
+-- What the device can do that the quality depends on. aa lists the anti-aliasing techniques that it runs, gi the
+-- global illumination's, and reflections the reflections'.
 type RenderCaps = {
 	ray_query: boolean,
 	vendor: string,
 	video_memory: number,
 	aa: { string },
 	gi: { string },
+	reflections: { string },
 }

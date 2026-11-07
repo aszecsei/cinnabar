@@ -28,7 +28,7 @@ The [quality](quality.md#quality) chooses the anti-aliasing's technique (`Qualit
 
 | Size | What has it |
 |---|---|
-| `Frame.size`, the scene's: `render_size(Frame_Desc.size, render_scale)`, rounded, at least a pixel | The world's targets (scene color, depth, normals, velocity, IDs), every pass before temporal AA (the ambient occlusion, the GI, the fog's tiles, the clusters, the shadow mask, transparency, the debug views), the projection's aspect, the jitter, and the debug layer |
+| `Frame.size`, the scene's: `render_size(Frame_Desc.size, render_scale)`, rounded, at least a pixel | The world's targets (scene color, depth, normals, velocity, roughness, IDs), every pass before temporal AA (the ambient occlusion, the GI, the fog's tiles, the clusters, the shadow mask, transparency, the debug views), the projection's aspect, the jitter, and the debug layer |
 | `Frame.output_size`, the frame's: `Frame_Desc.size` | The frame target, the UI, and temporal AA's history |
 | `Frame.scene_size`, `Frame.scene`'s | `Frame.size` until temporal AA, and `output_size` after it upscales. The exposure's histogram, bloom, the bloom composite, the tone map pass, FXAA and SMAA, and a game's post effects after temporal AA take it |
 

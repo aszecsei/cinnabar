@@ -53,6 +53,12 @@ Gi_Technique :: enum u8 {
 // A code reload keeps a quality's technique by its value.
 #assert(int(Gi_Technique.Split_Cascades) == 2 && int(Gi_Technique.Voxel_Cones) == 3)
 
+// The reflections' techniques (see docs/rendering/quality.md#quality), in the order that they were added. Each adds
+// its value with its preset and its clamp, and reads the prepass's roughness (see Frame.roughness).
+Reflection_Technique :: enum u8 {
+	Off,
+}
+
 // The anti-aliasing's techniques (see docs/rendering/anti-aliasing.md#anti-aliasing), in the order that they were
 // added: temporal AA, the sharpest on still images and the softest in motion, then FXAA and SMAA 1x, which see one
 // frame and do not blur in motion, then AMD's FSR, an upscaler in temporal AA's place where the device runs it.
@@ -84,12 +90,18 @@ Gi_Quality :: struct {
 	level:     Quality_Level,
 }
 
+Reflection_Quality :: struct {
+	technique: Reflection_Technique,
+	level:     Quality_Level,
+}
+
 // Quality is plain data, so it lives in Game_State and a code reload keeps it. Its zero value is the cheapest frame
 // at full resolution, with every feature that can be off off; preset_quality and default_quality give the others.
 Quality :: struct {
 	shadows:      Shadow_Quality,
 	ao:           Ao_Quality,
 	gi:           Gi_Quality,
+	reflections:  Reflection_Quality,
 	fog:          Quality_Level,
 	aa:           Aa_Technique,
 	// The share of the frame's width and height that the scene renders at, from MIN_RENDER_SCALE to 1, 0 giving 1.
@@ -157,6 +169,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		shadows = {level = level, ray_traced = caps.ray_query && level >= .High, virtual = level >= .Medium},
 		ao = {technique = .Gtao, level = level},
 		gi = {technique = caps.ray_query && level >= .High ? .Split_Cascades : .Screen_Cascades, level = level},
+		reflections = {level = level},
 		fog = level,
 		aa = .Taa,
 		render_scale = 1,
@@ -207,6 +220,8 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 		q.gi.technique = .Screen_Cascades
 	}
 	q.gi.level = clamp_enum(q.gi.level, .High)
+	q.reflections.technique = clamp_enum(q.reflections.technique, .Off)
+	q.reflections.level = clamp_enum(q.reflections.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
 	q.aa = clamp_enum(q.aa, .Off)
 	if kind, upscales := upscaler_kind(q.aa); upscales && kind not_in caps.upscalers {
@@ -243,6 +258,9 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.gi.technique = q.gi.technique
 	settings.gi.level = q.gi.level
 	settings.gi.off ||= q.gi.technique == .Off
+	settings.reflections.technique = q.reflections.technique
+	settings.reflections.level = q.reflections.level
+	settings.reflections.off ||= q.reflections.technique == .Off
 	settings.fog.level = q.fog
 	settings.post.aa = q.aa
 	settings.post.no_aa ||= q.aa == .Off

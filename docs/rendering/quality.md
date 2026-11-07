@@ -22,13 +22,15 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `ao.level` | `Low` … `Ultra` | The search's samples and steps (`AO_PARAMS`, a table for each technique) |
 | `gi.technique` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones` | The [global illumination](global-illumination.md#global-illumination). `Split_Cascades` adds its [split cascades](global-illumination.md#split-cascades) and [world probes](global-illumination.md#world-probes), and needs `Ray_Query`. `Voxel_Cones` uses its [voxel cones](global-illumination.md#voxel-cones), needs no cap, and no preset chooses it |
 | `gi.level` | `Low` … `Ultra` | The cascades, their probe spacing and directions, the rays' steps and the history's length (`GI_PARAMS`), the world probes' levels, spacing, rays and budget (`GI_PROBE_PARAMS`), the split cascades' tiles, directions, cells and slots (`GI_SPLIT_PARAMS`), and the voxel cones' voxels, levels and cones (`GI_VOXEL_PARAMS`) |
+| `reflections.technique` | `Off` | The reflections. `Off` is the only value, and every preset gives it. The [prepass](lighting-and-shadows.md#prepass)'s roughness is each technique's input |
+| `reflections.level` | `Low` … `Ultra` | The technique's parameters (`REFLECTION_PARAMS`, a table for each technique, in `reflections.odin`). `Off`'s are empty |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
 
-- **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere.
-- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades and temporal AA, a virtual shadow map from Medium up, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
+- **Each enum lists only what exists**, so a menu never offers a choice that draws nothing. A menu offers `Fsr` where `Caps.upscalers` has it: `clamp_quality` gives temporal AA in its place elsewhere. `Reflection_Technique` has only `Off`: each reflection technique adds its own value, with its preset and its clamp.
+- **Presets:** `preset_quality(preset, caps)` puts every feature at one level, with GTAO, the screen cascades, no reflections and temporal AA, a virtual shadow map from Medium up, and traced shadows and the split cascades from High up where the device has `Ray_Query`. `quality_preset(q, caps)` names the preset that a quality is, or `Custom`.
 - **The zero `Quality`** is the cheapest frame at full resolution, with every feature that can be off off. The renderer never starts from it: `renderer_init` takes `default_quality`.
 
 ## Order in the frame
@@ -36,7 +38,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 `draw_frame` takes the frame's settings in three steps, and each step can only turn a feature off:
 
 1. `resolve_settings` blends the volumes at the camera, or the game gives `Frame_Desc.settings`.
-2. `apply_quality` writes each feature's level into its settings (`Shadow_Settings.level`, `Ao_Settings.level`, and so on) and turns off the features whose technique is `Off`.
+2. `apply_quality` writes each feature's level into its settings (`Shadow_Settings.level`, `Ao_Settings.level`, `Reflection_Settings.level`, and so on) and turns off the features whose technique is `Off`.
 3. `apply_debug` turns off the features that the editor's viewport turns off (see [Debug views](post-processing.md#debug-views)).
 
 So a room whose volume turns the ambient occlusion off has none at Ultra, and a quality without ambient occlusion has none in any room.
@@ -101,6 +103,8 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.ao.level` | `Low` … `Ultra` |
 | `quality.gi` | `Off`, `Screen_Cascades`, `Split_Cascades`, `Voxel_Cones`; `World_Probes`, its name before the split cascades, reads as `Split_Cascades` |
 | `quality.gi.level` | `Low` … `Ultra` |
+| `quality.reflections` | `Off`; a file without it keeps the preset's |
+| `quality.reflections.level` | `Low` … `Ultra`; a file without it keeps the preset's |
 | `quality.fog` | `Low` … `Ultra` |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
 | `quality.render_scale` | A number from 0.5 to 1 |
@@ -110,4 +114,4 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 - **Saving:** `project.save_quality(platform, path, q, caps)` writes every key to the user's file through `Platform_API.file_write`, so the user's file alone gives the quality. It changes each key's line in place and keeps the file's other lines, as the editor's `ProjectSettings.Set` does. The next `project.refresh` reads it back.
 - **Scripts** read, set and save the quality through the `Render` bindings (see [Scripting: Render](../scripting/api.md#render)), which a game defines with `project.define_quality_bindings`.
 - **The editor** sets the project's preset and this machine's in the Game Window group, and draws its viewport at a quality of its own (see [Editor: Quality](../editor/viewport.md#quality)).
-- **The sample** applies the files' quality when they change. Its `quality_keys.luau` is a settings menu on keys, through the `Render` bindings: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale (1, 0.75, 0.67 and 0.5), F6 the next anti-aliasing technique that the device runs, and Shift+F6 the next global illumination technique that it runs; not Alt+F9, which the NVIDIA app takes. Each saves the quality to `project.user.settings`.
+- **The sample** applies the files' quality when they change. Its `quality_keys.luau` is a settings menu on keys, through the `Render` bindings: F9 takes the next preset, Shift+F9 turns traced shadows on or off, Ctrl+F9 takes the next ambient occlusion technique, Ctrl+Shift+F9 the next render scale (1, 0.75, 0.67 and 0.5), F6 the next anti-aliasing technique that the device runs, Shift+F6 the next global illumination technique that it runs, and Ctrl+F6 the next reflection technique that it runs; not Alt+F9, which the NVIDIA app takes. Each saves the quality to `project.user.settings`.

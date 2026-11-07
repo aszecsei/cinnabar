@@ -298,6 +298,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		pf.depth = create_texture(g, {size = size, format = DEPTH_FORMAT, label = "preview depth"})
 		normals := create_texture(g, {size = size, format = NORMAL_FORMAT, label = "preview normals"})
 		velocity := create_texture(g, {size = size, format = VELOCITY_FORMAT, label = "preview velocity"})
+		roughness := create_texture(g, {size = size, format = ROUGHNESS_FORMAT, label = "preview roughness"})
 		ids := create_texture(g, {size = size, format = ID_FORMAT, label = "preview ids"})
 		pf.instances = import_buffer(g, r.previews.instances)
 		pf.draws = import_buffer(g, r.previews.draws)
@@ -326,6 +327,7 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		p = add_render_pass(g, "preview prepass", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Prepass)}, pf)
 		color(g, p, normals, .Clear, store = .Discard)
 		color(g, p, velocity, .Clear, store = .Discard)
+		color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, .Discard)
 		depth(g, p, pf.depth, .Clear)
 		declare_preview_draws(g, p, pf)
 		if pf.pipeline != nil && material_group(pf.pipeline) != .Opaque {
@@ -468,6 +470,7 @@ add_effect_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	add_particle_passes(sub)
 
 	velocity := create_texture(g, {size = size, format = VELOCITY_FORMAT, label = "preview velocity"})
+	roughness := create_texture(g, {size = size, format = ROUGHNESS_FORMAT, label = "preview roughness"})
 	ids := create_texture(g, {size = size, format = ID_FORMAT, label = "preview ids"})
 	pf.instances = import_buffer(g, r.previews.instances)
 	pf.draws = import_buffer(g, r.previews.draws)
@@ -479,6 +482,7 @@ add_effect_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	p = add_render_pass(g, "preview prepass", proc(ctx: ^Pass_Context) {draw_preview(ctx, .Prepass)}, pf)
 	color(g, p, sub.normals, .Clear)
 	color(g, p, velocity, .Clear, store = .Discard)
+	color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, .Discard)
 	depth(g, p, pf.depth, .Clear)
 	declare_preview_draws(g, p, pf)
 	add_particle_history_pass(sub)

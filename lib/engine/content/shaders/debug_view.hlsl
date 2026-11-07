@@ -29,6 +29,7 @@ static const uint DEBUG_LUMINANCE = 16;
 static const uint DEBUG_TRANSPARENT_OVERDRAW = 17;
 static const uint DEBUG_GI_PROBES = 21;
 static const uint DEBUG_QUAD_OVERDRAW = 22;
+static const uint DEBUG_ROUGHNESS = 24;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -92,6 +93,7 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		break;
 	}
 	case DEBUG_AMBIENT_OCCLUSION:
+	case DEBUG_ROUGHNESS:
 		color = saturate(cn_texture(push.source).Load(pixel).r);
 		break;
 	case DEBUG_GI_DIFFUSE:

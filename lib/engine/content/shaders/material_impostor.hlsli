@@ -246,6 +246,7 @@ Impostor_Targets ps_impostor_forward(Impostor_Varyings i) {
 struct Impostor_Prepass_Targets {
 	float2 normal : SV_Target0;
 	float2 velocity : SV_Target1;
+	float roughness : SV_Target2;
 	float depth : SV_Depth;
 };
 
@@ -263,6 +264,7 @@ Impostor_Prepass_Targets ps_impostor_prepass(Impostor_Varyings i) {
 	float4 current = clip_position(hit.v.world);
 	float4 previous = mul(frame.previous_view_projection, float4(hit.previous, 1));
 	o.velocity = (current.xy / current.w - frame.jitter - previous.xy / previous.w) * float2(0.5, -0.5);
+	o.roughness = shading_roughness(s);
 	o.depth = hit.depth;
 	return o;
 }

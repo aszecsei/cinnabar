@@ -1,5 +1,6 @@
-// The prepass of every material (see docs/rendering/lighting-and-shadows.md#prepass): depth, the surface's normal and the velocity. The
-// pixel shader evaluates only what the normal and the opacity mask need; DXC drops the rest of evaluate.
+// The prepass of every material (see docs/rendering/lighting-and-shadows.md#prepass): depth, the surface's normal, the velocity
+// and the roughness. The pixel shader evaluates only what the normal, the roughness and the opacity mask need; DXC
+// drops the rest of evaluate.
 #ifndef MATERIAL_PREPASS_HLSLI
 #define MATERIAL_PREPASS_HLSLI
 
@@ -14,9 +15,12 @@ struct Prepass_Varyings {
 
 // The normal in the world, folded into the octahedron, and the velocity: how far the surface moved on the screen since
 // last frame, in UV, without the camera's jitter. The pass clears it to render.VELOCITY_NONE where it draws nothing.
+// The roughness is shading_roughness, which the target's UNORM format clamps to [0, 1]; the pass clears it to
+// render.ROUGHNESS_NONE.
 struct Prepass_Targets {
 	float2 normal : SV_Target0;
 	float2 velocity : SV_Target1;
+	float roughness : SV_Target2;
 };
 
 Prepass_Varyings prepass_varyings(Material_Vertex v) {
@@ -61,6 +65,7 @@ Prepass_Targets ps_prepass(Prepass_Varyings i, bool front : SV_IsFrontFace) {
 	float2 current = i.current.xy / i.current.w - frame.jitter;
 	float2 previous = i.previous.xy / i.previous.w;
 	o.velocity = (current - previous) * float2(0.5, -0.5);
+	o.roughness = shading_roughness(s);
 	return o;
 }
 
