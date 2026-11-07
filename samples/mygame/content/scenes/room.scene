@@ -5,9 +5,11 @@
 # outside them, and its projection box is the walls', which lines the floor's reflections up with them (see
 # docs/rendering/lighting-and-shadows.md#reflection-probes). On the floor, a mirror and a panel of brushed metal show the
 # screen-space reflections from the Medium quality up, sharp on the mirror and blurred by the panel's roughness, and the
-# probe where the screen has nothing to show (see docs/rendering/lighting-and-shadows.md#screen-space-reflections). The
-# camera stands inside, near the front wall. Positions are raw World_Position values in units of 2^-24 m. The editor
-# writes this file; see docs/editor/document-and-scenes.md#scenes.
+# probe where the screen has nothing to show (see docs/rendering/lighting-and-shadows.md#screen-space-reflections). On the
+# far wall, a mirror faces the camera, which stands inside, near the front wall, with a gold box behind it: from High up,
+# with ray queries, the traced reflections show the box in the mirror, and the screen-space reflections cannot (see
+# docs/rendering/lighting-and-shadows.md#ray-traced-reflections). Positions are raw World_Position values in units of
+# 2^-24 m. The editor writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
 entity 1ce040845e87f2d5
@@ -96,6 +98,27 @@ component 33 Mesh_Renderer
 	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
 	materials.0 = $b402e1b406df4211824f890a5cbff4d9
 component 65 Collider
+
+entity f4655f670752e8e9
+name = "Wall Mirror"
+component 1 Transform
+	position = [2516582400000000000, 25165824, 66605548]
+	rotation = [0, 0, 0, 1]
+	scale = [1.2, 1.4, 0.02]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $0e355ed8248a4ab79b298a52d582e1ad
+
+entity c72c379ad225d6ff
+name = "Gold Box"
+component 1 Transform
+	position = [2516582400000000000, 20132659, -60397978]
+	rotation = [0, 0.3826834, 0, 0.9238795]
+	scale = [0.5, 0.5, 0.5]
+component 33 Mesh_Renderer
+	mesh = $89fc38c8aa19f0cf0cc161d2ab5e015b
+	materials.0 = $f6d3de3190e2dfb97d6834ed5101c4c0
+	cast_shadows = true
 
 entity f1a2b3c4d5e6f721
 name = "Falling Box 1"
