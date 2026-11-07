@@ -174,4 +174,6 @@ frame_capture_type_is_shared_with_the_backends :: proc(t: ^testing.T) {
 	// The capture's pixels are the backend's; nothing here frees them.
 	c: gpu.Frame_Capture
 	testing.expect_value(t, len(c.pixels), 0)
+	// A capture that nothing filled in does not read as a copy.
+	testing.expect_value(t, c.status, gpu.Capture_Status.Cancelled)
 }
