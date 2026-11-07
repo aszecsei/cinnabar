@@ -92,9 +92,10 @@ The specular light along a reflection is the sky's cubemap, prefiltered by rough
   - **Flat** changes when its colors or `ambient_intensity` do, **Texture** when its texture is resident, or its version, rotation or intensities change, and **Atmosphere** when the sun, the moon, the camera's height or the settings do. A time of day that moves every frame starts each build as the last one ends, so the reflections follow it smoothly, a build or two behind, with no pops.
   - A sky that does not change adds no passes.
 - **Its readers** (`sky_specular` in `sky_cube.hlsli`) take the cubemap along the reflection at `roughness · (mips − 1)`:
-  - **The forward pass without the GI:** in place of the ambient light along the reflection, at the surface's roughness (`shading_roughness`).
+  - **The forward pass without the GI:** in place of the ambient light along the reflection, at the surface's roughness (`shading_roughness`), for the share of the light that the [reflection probes](lighting-and-shadows.md#reflection-probes) leave.
   - **The GI's gathers:** where they took the ambient light along the reflection. That is the screen cascades' gather past its probes, the split cascades' gather past its last level and where the world probes have no light, and the voxel cones' reflection cone past what blocks it. Each takes the roughness of its pixel from the prepass (`Frame.roughness`).
-  - **The transparent surfaces:** always, along their own normal and at their own roughness, in place of the opaque surface's GI specular light at their pixel.
+  - **The transparent surfaces:** always, along their own normal and at their own roughness, for what the reflection probes leave, in place of the opaque surface's GI specular light at their pixel.
+  - **A reflection probe's capture:** its faces' specular light without the world probes, and where a face draws nothing, its background.
   - The material previews have none and take the ambient light.
 
 ## Passes

@@ -1,8 +1,8 @@
 # Lighting and shadows
 
-Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, and shadows as maps, virtual maps or traced masks.
+Why the renderer is clustered forward with a prepass, the prepass's outputs, the forward pass's quad overdraw and the visibility buffer that was measured against it, lights and their clusters, area lights with linearly transformed cosines, local reflection probes, and shadows as maps, virtual maps or traced masks.
 
-**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Shadows](#shadows) · [Virtual shadow maps](#virtual-shadow-maps)
+**In this document:** [Clustered forward](#clustered-forward) · [Prepass](#prepass) · [Quad overdraw](#quad-overdraw) · [Visibility buffer](#visibility-buffer) · [Lights and clusters](#lights-and-clusters) · [Area lights](#area-lights) · [Reflection probes](#reflection-probes) · [Shadows](#shadows) · [Virtual shadow maps](#virtual-shadow-maps)
 
 ## Clustered forward
 
@@ -69,7 +69,7 @@ What they show:
 
 - **Light components:** `Directional_Light`, `Point_Light` and `Spot_Light`, and the [area lights](#area-lights) `Quad_Light`, `Disk_Light` and `Line_Light` (see [Components](assets.md#components)). Each frame, `extract_lights` writes them relative to the camera into the upload ring (`Light_Record`), the directional ones first, at most `MAX_LIGHTS` (1024), of which `MAX_DIRECTIONAL_LIGHTS` (4). The editor's hidden entities light nothing.
 - **A light's falloff:** its color times its intensity. A punctual light falls off with the square of the distance, windowed to 0 at its range: `saturate(1 - (d / range)^4)^2 / d^2`. A spot light's cone also falls off from 1 at its inner angle to 0 at its outer angle, squared.
-- **Clusters:** a compute pass (`cluster_lights.hlsl`) assigns the punctual and area lights to clusters: tiles of `CLUSTER_TILE` (64) pixels, in `CLUSTER_SLICES` (32) depth slices, exponential from the near plane to `CLUSTER_FAR` (500 m); the last slice reaches on to infinity. A thread for each cluster tests each light's sphere against the cluster's box in view space, so a spot light counts as its whole sphere. It takes room for its lights in one index list with an atomic add, and writes its offset and count. The list has room for `CLUSTER_AVERAGE_LIGHTS` (32) lights per cluster on average; a cluster that finds it full gets fewer. The clusters' buffers live in the `Renderer` and grow with the frame's size.
+- **Clusters:** a compute pass (`cluster_lights.hlsl`) assigns the punctual and area lights to clusters: tiles of `CLUSTER_TILE` (64) pixels, in `CLUSTER_SLICES` (32) depth slices, exponential from the near plane to `CLUSTER_FAR` (500 m); the last slice reaches on to infinity. A thread for each cluster tests each light's sphere against the cluster's box in view space, so a spot light counts as its whole sphere. It takes room for its lights in one index list with an atomic add, and writes its offset and count. The list has room for `CLUSTER_AVERAGE_LIGHTS` (32) lights per cluster on average; a cluster that finds it full gets fewer. The clusters' buffers live in the `Renderer` and grow with the frame's size. The same thread then bins the [reflection probes](#reflection-probes) into a list of its own, and with probes the frame makes the clusters without punctual lights too.
 - **The forward pass** finds its pixel's cluster from its position and its depth (`cluster_of`), and calls the shading model's `shade_direct` for each directional light, then for each light of its cluster, with the light's shadow (`material_lighting.hlsli`). It calls `shade_area` for an area light. Without the cluster pipeline, the forward pass leaves the punctual and area lights out.
 - The directional lights are not clustered. Every pixel loops over them.
 - **The sun:** an `Environment` in Atmosphere mode can name a directional light as its sun. The air between the camera and the sun then dims and colors that light's own light, to 0 below the horizon (see [The sun](sky.md#the-sun)).
@@ -86,6 +86,81 @@ What they show:
 - **The tables:** two 64x64 `RGBA32_Float` textures (`ltc_ggx.bin`, which `lights_init` uploads). The first holds the inverse matrices, by roughness across and by sqrt(1 − cos θ) of the view down. The second holds the specular's magnitude and Fresnel term, and the horizon-clipped sphere's form factor.
 - **Fitting:** `just ltc-fit` fits the tables (`tools/ltc_fit`). For each texel, Nelder–Mead finds the matrix whose lobe best matches `shade_direct`'s GGX specular without Fresnel, first about the specular's average direction, then tilted. The tool prints how much of the light each fit puts in the wrong place: little except at grazing views, where linearly transformed cosines cannot follow GGX. Run it after a change to Lit's specular, and commit the table.
 - **Fog** sees an area light as a point light at its middle, whose light a quad or a disk sends out with the cosine of its face.
+
+### Reflection probes
+
+`Reflection_Technique.Probes`, the Low preset's reflections (`reflection_probes.odin`, `material_reflections.hlsli`, `reflection_probe_face.hlsl`, `cube_downsample.hlsl`): cubemaps captured at placed points, prefiltered by roughness, and looked up for each pixel in the forward pass with a box projection. Where no probe counts, the sky's [cubemap](sky.md#specular-light) fills in.
+
+- **The component:** `Reflection_Probe` (54) has these fields:
+  - `extent` is the influence box's half size along its entity's x, y and z (0 means `DEFAULT_PROBE_EXTENT`, 5 m), scaled by its `Transform`.
+  - `blend_distance` is how far inside the box the probe fades out.
+  - With `box_projection`, a reflection turns toward where it meets the box of `projection_extent` (0 means `extent`), so a room's probe lines up with its walls. Make the influence box a little larger than the walls and set the projection box to the walls, so the fade ends outside the room.
+  - `priority` orders overlapping probes, the higher first.
+  - `intensity` scales the probe's light (0 means 1).
+  - `update` is when the probe captures again: `On_Load` never, `On_Change` when its entity moves or one of its fields changes, and `Realtime` over and over, in turn with the other `Realtime` probes.
+  - The editor's hidden entities have no probe.
+- **Slots and storage:** a cube array of `RG11B10_Float` cubes holds a cube for each of the level's slots and one spare. A separate source cube is what the capture draws into.
+  - With more probes than slots, the probes with the highest priority, then the nearest to the camera, take the slots. A probe past the slots keeps its own until a ranked probe needs it.
+  - A probe whose slot has no cube yet counts for nothing, so its pixels take the sky's cubemap.
+  - When the quality leaves the technique, the cubes are freed. A level of another size makes them again and captures every probe again.
+- **The capture's turns:** the level gives a budget of faces a frame. One probe captures at a time, in this order:
+  1. The `On_Load` probes with no cube yet, the nearest first.
+  2. The other probes with no cube yet, the nearest first.
+  3. An `On_Change` probe whose key changed since its capture.
+  4. The `Realtime` probes, the one whose capture is oldest first.
+
+  A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
+- **Each face** is a view of the GPU scene, after the voxel cones' views: a square 90° view along the face, as a `TextureCube` samples it, from `REFLECTION_PROBE_NEAR` (5 cm).
+  - It draws the opaque and masked surfaces, in a prepass and a forward pass of its own, into targets that all of the frame's faces share. It draws no view model, particles, transparent surfaces, patch surfaces or post-processing.
+  - It takes the camera's level of detail, as the shadow views do, so it draws the meshlets that the camera's walk of their hierarchy picked.
+  - **Its light** is linear, not pre-exposed. Its indirect light is the [world probes](global-illumination.md#world-probes)' light where they run. Without them, it is the ambient light along the normal and the sky's cubemap along the reflection. It has no screen-space GI, ambient occlusion, fog or reflection probes.
+  - **Its lights:** the face bins the punctual and area lights into clusters of its own, from the probe's position (`cluster_lights.hlsl`). It uses a copy of the lights without mask channels, because the mask covers only the camera's screen. The punctual lights keep their shadow maps, which are in world space. A light traced into the mask has no shadow in a capture.
+  - **The directional light's shadow:** the camera's cascades do not cover a probe far from the camera. So while a probe captures, the first directional light that casts shadows gets a shadow view of its own, in a slot of the atlas (`add_orthographic_shadow_view`). It is an orthographic view of the sphere around the probe's boxes, from 1 m to 200 m across. The faces take every depth in their first cascade, which is that view. The other directional lights have no shadow in a capture.
+  - **The copy** (`reflection probe copy`) writes the face into mip 0 of the source cube. Where the face drew nothing, it writes the sky's cubemap's light along the texel.
+- **After the last face:**
+  - The source's mip chain is made one pass per mip, each mip the mean of the one before it (`reflection probe downsample`).
+  - The sky's [prefilter](sky.md#specular-light) convolves the source into the spare cube, from a mirror at mip 0 to roughness 1 at the last.
+  - The probe uses that cube from the next frame on. Its old cube, or a cube that no slot holds, becomes the spare. So a probe's cube never changes while a frame reads it.
+- **Binning:** the records of the probes with a cube are in the upload ring, in this order: highest priority first, then the smallest box, so a room's probe wins over the hall around it, then by slot.
+  - The cluster pass tests each probe's turned influence box against the cluster's box, using the box around it in view space. `probe_reaches_box` is the matching Odin test.
+  - Each cluster keeps the first `MAX_CLUSTER_PROBES` (7) probes in a fixed list: its count, then its indices.
+- **The lookup** (`reflection_probe_specular`): the forward pass finds its cluster from its point, as it does for the lights, so the view model and the transparent surfaces get their probes too.
+  - Each probe's weight is its box's fade at the point, times what the probes before it left, until the weights reach 1.
+  - A probe samples its cube along the reflection, at the mip for the surface's roughness, times its intensity. With a projection box, the reflection is box-projected first.
+  - The rest of the light comes from the sky's cubemap.
+- **With the GI**, on opaque surfaces, the probes blend over the GI's specular light below a roughness fade, from `rough_start` to `rough_end`, so rough surfaces keep the GI's dynamic occlusion. The ambient occlusion scales the probes' light, which has no local occlusion of its own. Transparent surfaces take the probes and then the sky's cubemap, never the GI's specular light.
+- **Parameters:** `REFLECTION_PARAMS[.Probes]` at the reflections' level (see [Quality](quality.md#quality)), with the sky cubemap's samples per texel. The roughness fades are starting points. A measurement on content with both GI and probes should set them.
+
+| Level | Faces | Mips | Slots | Faces a frame | Fade | Memory |
+|---|---|---|---|---|---|---|
+| Low | 64 | 5 | 16 | 1 | 0.4 to 0.7 | 2.25 MiB |
+| Medium | 128 | 6 | 32 | 2 | 0.45 to 0.75 | 17.0 MiB |
+| High | 128 | 6 | 64 | 3 | 0.5 to 0.8 | 33.0 MiB |
+| Ultra | 256 | 7 | 64 | 6 | 0.5 to 0.8 | 132.0 MiB |
+
+- **Memory** is the array's cubes, with the spare, and the source cube, with their mips (`reflection_probe_memory`).
+- **Cost** was measured on an RTX 5090, in the editor's viewport at 911x481, in the glass scene with its `Realtime` probe. Each level ran at its own preset, and each figure is the mean of three captures of 16 frames.
+  - A face is its prepass, its forward pass and its copy. A capture's end is its mips and its prefilter, after every sixth face.
+  - A frame with faces also bins the faces' lights, which takes 4 to 5 µs.
+  - At Ultra, the probes add about 0.4 ms to the frame: 1.99 ms with them, against 1.57 ms with the reflections off.
+
+| Level | A face | A capture's end |
+|---|---|---|
+| Low | 30 µs | about 19 µs |
+| Medium | 26 µs | about 30 µs |
+| High | 28 µs | about 30 µs |
+| Ultra | 24 µs | 82 µs |
+
+- **The debug view** `Reflection_Probes` colors each pixel by its strongest probe's cube, and red where no probe counts.
+- **The Resource Monitor** shows the probes, the slots whose probe has a cube, and the faces that the frame captured (`reflection_probe_stats`).
+- **The sample:**
+  - The room scene's probe fills the room, and its projection box is the walls. Its polished floor reflects the pillar at the pillar's foot.
+  - The glass scene has two probes that overlap over the glass. The sorted side's probe is `Realtime`, so it follows the lamp that the spinner carries.
+  - Both show at the Low quality.
+- **Limits:**
+  - A capture sees no patch surfaces, particles or transparent surfaces.
+  - A probe's light is the light at its position. The box projection corrects the parallax only for its box.
+  - A probe has no occlusion of its own beyond the ambient occlusion, so the reflections in a dark corner are as bright as in the middle of the probe.
 
 ### Shadows
 

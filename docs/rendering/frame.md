@@ -15,6 +15,7 @@ flowchart TB
     FOG["Fog volume"]
     SKYLUT["Sky tables<br/>transmittance, multiple scattering, view"]
     SKYCUBE["Sky cubemap<br/>capture, prefilter"]
+    PROBES["Reflection probe faces<br/>clusters, prepass, forward, prefilter"]
     SKY["Sky<br/>where nothing drew"]
     FWD["Forward<br/>opaque"]
     VMFWD["View model forward"]
@@ -31,6 +32,7 @@ flowchart TB
     SHADOW & CLUSTER & AO & GI & FOG --> FWD
     SKYLUT --> SKY
     SKYLUT --> SKYCUBE -.->|"next frames"| GI & FWD & TRANS
+    SHADOW & SKYCUBE --> PROBES -.->|"next frames"| FWD & TRANS
     FWD --> VMFWD --> SKY --> TRANS --> POST --> TONE --> OUT
     UI --> OUT
     DEBUG --> OUT
@@ -40,6 +42,7 @@ flowchart TB
 - With a feature that traces, such as traced shadows, the frame builds the ray scene's acceleration structures after the culling and before the prepass, so every pass after can trace them (see [Ray scene](ray-scene.md#ray-scene)). The global illumination's [world probes](global-illumination.md#world-probes) update after the prepass, on the compute queue, before the cascades, which read them.
 - The ambient occlusion and the global illumination run on the compute queue (see [GPU](../gpu/queues-streaming-readback.md#queues)). They depend only on the prepass and on textures from last frame, so they overlap with the light clusters and the shadow maps. The clusters, the fog volume and the exposure run on the graphics queue: the fog reads the shadow maps, which are drawn just before it, after the [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps)'s marking and allocation, which read the prepass's depth, and the exposure is explained in [Post-processing](post-processing.md#post-processing).
 - The sky's [cubemap](sky.md#specular-light) is captured and prefiltered after the sky's tables, on the graphics queue. The global illumination, the forward pass and the transparent surfaces sample only cubes that earlier frames finished, so they do not wait for it.
+- A [reflection probe](lighting-and-shadows.md#reflection-probes)'s capture draws its share of faces after the shadow maps and the sky's cubemap, which its faces read, and before the world pass, on the graphics queue. The forward pass and the transparent surfaces sample only probes' cubes that earlier frames finished.
 - The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the ray scene's acceleration structure (`render.Ray_Scene`, see [Ray scene](ray-scene.md#ray-scene)), the volumes' query, the ambient occlusion's, the global illumination's and the fog's pipelines (`render.Ao_Passes`, `render.Gi_Passes`, `render.Volumetric_Fog`), and post-processing's pipelines, exposure and lookup table (`render.Post`). It holds handles only, so a code reload keeps it (see [Hot reload](../overview/hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
 - A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, whether the frame has no debug layer (`no_debug`, the editor's outside Edit, see [Layers and output](layers-and-output.md#debug)), the entity slots not to draw (the editor's hidden ones), the frame's settings or nil for the volumes' (see [Settings](#settings)), the hooks, the editor's material previews to draw (see [Material previews](materials.md#material-previews)), the sprites to draw (see [Sprites](transparency.md#sprites)), the time that the particles step and the systems that play while it is 0 (see [Particles](particles.md#time)). The lights are components (see [Lights and clusters](lighting-and-shadows.md#lights-and-clusters)).
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
@@ -85,3 +88,4 @@ The settings that make the scene's look are settings components on [volumes](../
 - A `render.View` is a camera: its pose, its projection, its viewport, and its layers. The editor's camera and the game's camera both give one (see [Editor](../editor/viewport.md#viewport)).
 - A frame has one main view, and in the editor the [material previews](materials.md#material-previews). Every view uses the same [GPU scene](gpu-scene.md#gpu-scene), because its poses have no camera rotation (see [World](../world/render-extraction.md#render-extraction)).
 - A view's constants hold its offset from the render origin as an `f32` vector, with its rotation and projection.
+- **The culling's views** are the GPU scene's views of one frame, each with its own `Frame_Constants` and draws: the camera, the view model, the shadow views, the voxel cones' views, and the faces of a [reflection probe](lighting-and-shadows.md#reflection-probes)'s capture, with the late view of occlusion culling last. A capture face is a square 90° view from the probe. It draws the opaque surfaces in a prepass and a forward pass of its own, after the shadow maps and before the world pass, with its own clusters, and it takes the camera's level of detail.
