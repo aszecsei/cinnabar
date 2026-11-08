@@ -397,9 +397,7 @@ public sealed class ContentBrowserView : DockPanel
                 + (failed == "" ? "" : $", {failed}"),
             CookState.Linked when failed != "" => failed,
             CookState.Linked => "Up to date",
-            CookState.Starting => "Starting the cook daemon",
-            CookState.Exited => $"The cook daemon exited with code {cook.ExitCode}",
-            _ => "The cook daemon is stopped",
+            var state => $"Cook daemon: {state.Describe()}",
         };
     }
 

@@ -62,7 +62,7 @@ static partial class EditorCommands
         {
             Description = "Stop the host. The viewport goes blank until it starts again.",
             Icon = "stop",
-            CanExecuteWhen = () => shell.Host.State == HostState.Running,
+            CanExecuteWhen = () => shell.Host.State is HostState.Running,
         });
         commands.Register(new Command(RestartCook, "Restart Cook Daemon", shell.StartCook)
         {

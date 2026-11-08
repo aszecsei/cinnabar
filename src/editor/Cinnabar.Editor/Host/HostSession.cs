@@ -1,64 +1,176 @@
-using System.Net;
+using System.Diagnostics;
 using System.Net.Sockets;
-using Avalonia.Threading;
 using Cinnabar.Editor.Content;
 using Cinnabar.Editor.Link;
 using Cinnabar.Editor.Link.Protocol;
 
 namespace Cinnabar.Editor.Host;
 
-public enum HostState
+/// <summary>
+/// Where the host session is (see docs/editor/processes-and-projects.md#crash-recovery). Each state carries what belongs
+/// to it: the running ones their process, the linked ones their link and game, and the failed ones their reason or
+/// code. Only <see cref="HostSession"/> makes them.
+/// </summary>
+public abstract record HostState
 {
+    private protected HostState()
+    {
+    }
+
     /// <summary>The viewport has not yet found the adapter that the host must render on.</summary>
-    Waiting,
-    Running,
+    public sealed record Waiting : HostState;
+
     /// <summary>The user stopped the host.</summary>
-    Stopped,
+    public sealed record Stopped : HostState;
+
+    /// <summary>The host could not start, as when it is not built.</summary>
+    public sealed record FailedToStart(string Reason) : HostState;
+
+    /// <summary>The host refused the editor link, as when its protocol is another. The editor stopped it.</summary>
+    public sealed record Refused(string Reason) : HostState;
+
+    /// <summary>The host did not link within the time. The editor stopped it.</summary>
+    public sealed record TimedOut(TimeSpan After) : HostState;
+
     /// <summary>The host exited by itself: it crashed or quit.</summary>
-    Exited,
+    public sealed record Exited(int Code) : HostState;
+
+    /// <summary>The host runs. Only the tests' link has no run.</summary>
+    public abstract record Running : HostState
+    {
+        private protected Running(HostRun? run) => Run = run;
+
+        internal override HostRun? Run { get; }
+    }
+
+    /// <summary>The host runs, and the editor connects to its editor link.</summary>
+    public sealed record Connecting : Running
+    {
+        internal Connecting(HostRun run, CancellationTokenSource deadline) : base(run) => Deadline = deadline;
+
+        internal override CancellationTokenSource Deadline { get; }
+    }
+
+    /// <summary>The editor is connected and waits for the host's Welcome.</summary>
+    public sealed record Handshaking : Running
+    {
+        internal Handshaking(HostRun run, CancellationTokenSource deadline, LinkClient link) : base(run) => (Deadline, Link) = (deadline, link);
+
+        internal override CancellationTokenSource Deadline { get; }
+
+        internal override LinkClient Link { get; }
+    }
+
+    /// <summary>The host sent its Welcome, and runs a game.</summary>
+    public sealed record Linked : Running
+    {
+        internal Linked(HostRun? run, LinkClient? link, Action<ILinkMessage> send, string game) : base(run) => (Link, Send, Game) = (link, send, game);
+
+        public string Game { get; }
+
+        // Null only for the tests' link.
+        internal override LinkClient? Link { get; }
+
+        internal Action<ILinkMessage> Send { get; }
+    }
+
+    /// <summary>The editor link closed while the host runs, and the editor connects again.</summary>
+    public sealed record LinkLost : Running
+    {
+        internal LinkLost(HostRun run, CancellationTokenSource deadline, string reason) : base(run) => (Deadline, Reason) = (deadline, reason);
+
+        public string Reason { get; }
+
+        internal override CancellationTokenSource Deadline { get; }
+    }
+
+    internal virtual HostRun? Run => null;
+
+    internal virtual LinkClient? Link => null;
+
+    // Ends the connect and the handshake.
+    internal virtual CancellationTokenSource? Deadline => null;
+
+    /// <summary>The state's name, for the automation status.</summary>
+    public string Name => GetType().Name;
+
+    /// <summary>What the status bar says, with the game, the reason or the exit code.</summary>
+    public string Describe() => this switch
+    {
+        Waiting => "waiting for the viewport",
+        Stopped => "stopped",
+        FailedToStart failed => $"cannot start: {failed.Reason}",
+        Refused refused => $"refused the editor link: {refused.Reason}",
+        TimedOut timedOut => $"did not open the editor link within {timedOut.After.TotalSeconds:0.#} s",
+        Exited exited => $"exited with code {exited.Code}",
+        Connecting => "starting",
+        Handshaking => "linking",
+        Linked linked => $"running {linked.Game}, linked",
+        LinkLost lost => $"lost the editor link ({lost.Reason}), linking again",
+        _ => throw new UnreachableException(),
+    };
+}
+
+/// <summary>A run of the host: its process, the port of its link, and the shared target name that it renders under.</summary>
+internal sealed class HostRun(IChildProcess process, int port, string sharedName)
+{
+    public IChildProcess Process => process;
+
+    public int Port => port;
+
+    public string SharedName => sharedName;
 }
 
 /// <summary>
 /// The host's lifetime and its editor link (see docs/editor/processes-and-projects.md#processes): start, stop, restart, crashes, and the
-/// connection to the running host. Events are raised on the UI thread.
+/// connection to the running host. Events are raised on the synchronization context that the session was made on,
+/// which is the UI thread in the editor.
 /// </summary>
 public sealed class HostSession : IDisposable
 {
     // The host listens soon after it starts, but loading the game can take a while on a cold disk.
-    static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(30);
+    static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(30);
     static readonly TimeSpan ConnectRetry = TimeSpan.FromMilliseconds(100);
 
     readonly EditorOptions _options;
-    ChildProcess? _process;
-    LinkClient? _link;
-    // Where Send goes while linked: the link's, or a test's.
-    Action<ILinkMessage>? _send;
-    CancellationTokenSource? _connecting;
+    readonly SynchronizationContext? _context;
+    readonly StartProcess _start;
+    readonly TimeSpan _connectTimeout;
     ulong _adapter;
     int _starts;
 
-    public HostState State { get; private set; } = HostState.Waiting;
+    internal HostSession(EditorOptions options) : this(options, ChildProcess.Start, DefaultConnectTimeout)
+    {
+    }
 
-    /// <summary>The exit code, when <see cref="State"/> is <see cref="HostState.Exited"/>.</summary>
-    public int ExitCode { get; private set; }
+    /// <summary>For tests: starts the host with <paramref name="start"/>, and waits <paramref name="connectTimeout"/> for its link.</summary>
+    internal HostSession(EditorOptions options, StartProcess start, TimeSpan connectTimeout)
+    {
+        _options = options;
+        _start = start;
+        _connectTimeout = connectTimeout;
+        _context = SynchronizationContext.Current;
+    }
 
-    /// <summary>The shared target name that the running host renders under. Each start gets a new one.</summary>
-    public string? SharedName { get; private set; }
+    public HostState State { get; private set; } = new HostState.Waiting();
 
-    /// <summary>True between the host's Welcome and the end of the link.</summary>
-    public bool Linked { get; private set; }
+    /// <summary>The host sent its Welcome, and the link is up.</summary>
+    public bool Linked => State is HostState.Linked;
 
     /// <summary>The game that the linked host runs.</summary>
-    public string? Game { get; private set; }
+    public string? Game => (State as HostState.Linked)?.Game;
+
+    /// <summary>The shared target name that the running host renders under. Each start gets a new one.</summary>
+    public string? SharedName => State.Run?.SharedName;
 
     /// <summary>The running host's process id, for the capture sidecar and the automation status.</summary>
-    public int? ProcessId => _process?.Id;
+    public int? ProcessId => State.Run?.Process.Id;
 
     /// <summary>The host can start once the viewport has found the adapter.</summary>
     public bool CanStart => _adapter != 0;
 
-    /// <summary><see cref="State"/> or <see cref="Linked"/> changed.</summary>
-    public event Action? StateChanged;
+    /// <summary><see cref="State"/> changed, from the state that it gives. It is raised once for each change.</summary>
+    public event Action<HostState>? StateChanged;
 
     /// <summary>A line of the host's output that did not come through its logger, or a line about the host from the editor.</summary>
     public event Action<string>? Output;
@@ -73,8 +185,6 @@ public sealed class HostSession : IDisposable
     /// <summary>A message from the game's side of the link, such as the entity list.</summary>
     public event Action<ILinkMessage>? GameMessage;
 
-    internal HostSession(EditorOptions options) => _options = options;
-
     /// <summary>Starts the host on the adapter whose LUID the viewport found.</summary>
     public void Start(ulong adapter)
     {
@@ -88,96 +198,115 @@ public sealed class HostSession : IDisposable
         {
             return;
         }
-        StopProcess();
+        Stop();
         var name = $"cinnabar-editor-{Environment.ProcessId}-{++_starts}";
         var port = LinkClient.FreePort();
-        ChildProcess process;
+        IChildProcess process;
         try
         {
-            process = ChildProcess.Start(_options.HostPath,
+            process = _start(_options.HostPath,
                 _options.HostArguments("--shared", name, "--adapter", _adapter.ToString("x16"), "--link", port.ToString()),
                 _options.HostDirectory);
         }
         catch (Exception e)
         {
             Output?.Invoke($"editor: cannot start {_options.HostPath}: {e.Message}");
-            SetState(HostState.Exited, -1);
+            Become(new HostState.FailedToStart($"{_options.HostPath}: {e.Message}"));
             return;
         }
-        process.Output += line => Dispatcher.UIThread.Post(() => Output?.Invoke(line));
-        process.Exited += code => Dispatcher.UIThread.Post(() => OnExited(process, code));
-        _process = process;
-        SharedName = name;
-        SetState(HostState.Running);
-        _connecting = new CancellationTokenSource(ConnectTimeout);
-        _ = ConnectAsync(process, port, _connecting.Token);
+        var run = new HostRun(process, port, name);
+        process.Output += line => Post(() => Output?.Invoke(line));
+        process.Exited += code => Post(() => OnExited(run, code));
+        var deadline = NewDeadline();
+        Become(new HostState.Connecting(run, deadline));
+        _ = ConnectAsync(run, deadline);
     }
 
     public void Stop()
     {
-        if (State == HostState.Running)
+        if (State is HostState.Running)
         {
-            StopProcess();
-            SetState(HostState.Stopped);
+            Become(new HostState.Stopped());
         }
     }
 
     /// <summary>Sends a message to the host, if it is linked.</summary>
     public void Send(ILinkMessage message)
     {
-        if (Linked)
+        if (State is HostState.Linked linked)
         {
-            _send?.Invoke(message);
+            linked.Send(message);
         }
     }
 
     /// <summary>For tests: links to no host, as a <c>Welcome</c> does, and gives what the editor sends to <paramref name="send"/>.</summary>
-    internal void LinkForTests(Action<ILinkMessage> send)
+    internal void LinkForTests(Action<ILinkMessage> send) => Become(new HostState.Linked(null, null, send, "test"));
+
+    // A deadline for one connect and its handshake. When it passes, the session times out if it still waits on it.
+    CancellationTokenSource NewDeadline()
     {
-        _send = send;
-        Linked = true;
-        StateChanged?.Invoke();
+        var deadline = new CancellationTokenSource(_connectTimeout);
+        deadline.Token.Register(() => Post(() => OnTimedOut(deadline)));
+        return deadline;
     }
 
-    async Task ConnectAsync(ChildProcess process, int port, CancellationToken cancel)
+    // Connects until the deadline. The state may change meanwhile, so OnConnected checks that it still waits.
+    async Task ConnectAsync(HostRun run, CancellationTokenSource deadline)
     {
-        while (process == _process)
+        while (!deadline.IsCancellationRequested)
         {
             try
             {
-                var link = await LinkClient.ConnectAsync(port, LinkMessages.Read, cancel);
-                if (process != _process)
-                {
-                    await link.DisposeAsync();
-                    return;
-                }
-                _link = link;
-                _send = message => link.Send(message);
-                link.Received += (message, _) => Dispatcher.UIThread.Post(() => OnReceived(link, message));
-                link.Closed += error => Dispatcher.UIThread.Post(() => OnLinkClosed(link, error));
-                link.Start();
-                link.Send(new Hello(LinkMessages.ProtocolVersion, "cinnabar editor"));
+                var link = await LinkClient.ConnectAsync(run.Port, LinkMessages.Read, deadline.Token);
+                Post(() => OnConnected(run, deadline, link));
                 return;
             }
             catch (SocketException)
             {
                 // The host is not listening yet.
-                await Task.Delay(ConnectRetry, CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
-                if (process == _process)
-                {
-                    Output?.Invoke($"editor: the host did not open the editor link on port {port} within {ConnectTimeout.TotalSeconds} s");
-                }
+                return;
+            }
+            try
+            {
+                await Task.Delay(ConnectRetry, deadline.Token);
+            }
+            catch (OperationCanceledException)
+            {
                 return;
             }
         }
     }
 
+    void OnConnected(HostRun run, CancellationTokenSource deadline, LinkClient link)
+    {
+        if (State is not (HostState.Connecting or HostState.LinkLost) || State.Run != run || State.Deadline != deadline)
+        {
+            _ = link.DisposeAsync();
+            return;
+        }
+        link.Received += (message, _) => Post(() => OnReceived(link, message));
+        link.Closed += error => Post(() => OnLinkClosed(link, error));
+        Become(new HostState.Handshaking(run, deadline, link));
+        link.Start();
+        link.Send(new Hello(LinkMessages.ProtocolVersion, "cinnabar editor"));
+    }
+
+    void OnTimedOut(CancellationTokenSource deadline)
+    {
+        if (State.Deadline != deadline)
+        {
+            return;
+        }
+        Output?.Invoke($"editor: the host did not open the editor link on port {State.Run!.Port} within {_connectTimeout.TotalSeconds:0.#} s");
+        Become(new HostState.TimedOut(_connectTimeout));
+    }
+
     void OnReceived(LinkClient link, ILinkMessage message)
     {
-        if (link == _link)
+        if (State.Link == link)
         {
             Receive(message);
         }
@@ -189,14 +318,19 @@ public sealed class HostSession : IDisposable
         switch (message)
         {
             case Welcome welcome:
-                Linked = true;
-                Game = welcome.Game;
-                Output?.Invoke($"editor: linked to the host, which runs {welcome.Game}");
-                StateChanged?.Invoke();
+                if (State is HostState.Handshaking handshaking)
+                {
+                    var link = handshaking.Link;
+                    Output?.Invoke($"editor: linked to the host, which runs {welcome.Game}");
+                    Become(new HostState.Linked(handshaking.Run, link, m => link.Send(m), welcome.Game));
+                }
                 break;
             case Refused refused:
                 Output?.Invoke($"editor: the host refused the editor link: {refused.Reason}");
-                _ = _link?.DisposeAsync();
+                if (State is HostState.Handshaking)
+                {
+                    Become(new HostState.Refused(refused.Reason));
+                }
                 break;
             case Log log:
                 LogReceived?.Invoke(log);
@@ -218,59 +352,80 @@ public sealed class HostSession : IDisposable
 
     void OnLinkClosed(LinkClient link, Exception? error)
     {
-        if (link != _link)
+        if (State.Link != link)
         {
             return;
         }
-        _link = null;
-        _send = null;
-        if (error != null)
-        {
-            Output?.Invoke($"editor: the editor link failed: {error.Message}");
-        }
-        if (Linked)
-        {
-            Linked = false;
-            StateChanged?.Invoke();
-        }
+        var reason = error?.Message ?? "the host closed it";
+        Output?.Invoke($"editor: the editor link closed: {reason}. Connecting again.");
+        var run = State.Run!;
+        // A link that closes during its handshake keeps its deadline, so a host that keeps closing it times out.
+        var deadline = State is HostState.Handshaking handshaking ? handshaking.Deadline : NewDeadline();
+        Become(new HostState.LinkLost(run, deadline, reason));
+        _ = ConnectAsync(run, deadline);
     }
 
-    void OnExited(ChildProcess process, int code)
+    void OnExited(HostRun run, int code)
     {
         // A process that the editor stopped or replaced has already been dealt with.
-        if (process != _process)
+        if (State.Run != run)
         {
             return;
         }
-        StopProcess();
         Output?.Invoke($"editor: the host exited with code {code}");
-        SetState(HostState.Exited, code);
+        Become(new HostState.Exited(code));
     }
 
-    void StopProcess()
+    static bool Allowed(HostState from, HostState to) => (from, to) switch
     {
-        _connecting?.Cancel();
-        _connecting = null;
-        if (_link != null)
+        (not HostState.Running, HostState.Connecting or HostState.FailedToStart) => true,
+        (HostState.Connecting, HostState.Handshaking or HostState.TimedOut) => true,
+        (HostState.Handshaking, HostState.Linked or HostState.Refused or HostState.TimedOut or HostState.LinkLost) => true,
+        (HostState.Linked, HostState.LinkLost) => true,
+        (HostState.LinkLost, HostState.Handshaking or HostState.TimedOut) => true,
+        (HostState.Running, HostState.Exited or HostState.Stopped) => true,
+        // The tests' link, which has no host.
+        (not HostState.Linked, HostState.Linked { Run: null }) => true,
+        _ => false,
+    };
+
+    // The one writer of State. It ends what the old state had and the new one does not carry: the deadline, the link
+    // and the process.
+    void Become(HostState next)
+    {
+        var previous = State;
+        if (!Allowed(previous, next))
         {
-            _ = _link.DisposeAsync();
-            _link = null;
+            throw new InvalidOperationException($"the host session cannot go from {previous.Name} to {next.Name}");
         }
-        _send = null;
-        Linked = false;
-        Game = null;
-        // Closing the job kills the host.
-        _process?.Dispose();
-        _process = null;
-        SharedName = null;
+        State = next;
+        if (previous.Deadline is { } deadline && deadline != next.Deadline)
+        {
+            deadline.Cancel();
+        }
+        if (previous.Link is { } link && link != next.Link)
+        {
+            _ = link.DisposeAsync();
+        }
+        if (previous.Run is { } run && run != next.Run)
+        {
+            // Closing the job kills the host.
+            run.Process.Dispose();
+        }
+        StateChanged?.Invoke(previous);
     }
 
-    void SetState(HostState state, int exitCode = 0)
+    void Post(Action action)
     {
-        State = state;
-        ExitCode = exitCode;
-        StateChanged?.Invoke();
+        if (_context == null)
+        {
+            action();
+        }
+        else
+        {
+            _context.Post(_ => action(), null);
+        }
     }
 
-    public void Dispose() => StopProcess();
+    public void Dispose() => Stop();
 }

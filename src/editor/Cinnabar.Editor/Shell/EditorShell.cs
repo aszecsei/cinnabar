@@ -39,7 +39,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public KeyBindings KeyBindings { get; }
 
     bool _ribbonCollapsed;
-    bool _linked;
 
     public bool RibbonCollapsed
     {
@@ -193,14 +192,13 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         yield return new PanelTool("profiler", "Profiler", "stats", EditorLayout.BottomDock, () => new ProfilerView(this));
     }
 
-    void OnHostStateChanged()
+    void OnHostStateChanged(HostState previous)
     {
-        // A new link is a host that has its own world, from a start, a restart or a crash.
-        if (Host.Linked && !_linked)
+        // A new link is a host that has its own world, from a start, a restart, a crash or a lost link.
+        if (Host.Linked && previous is not HostState.Linked)
         {
             OnNewGameState();
         }
-        _linked = Host.Linked;
         if (!Host.Linked)
         {
             Viewport.Disconnect();
@@ -223,7 +221,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             // The viewport asked before the host could hear it.
             Host.Send(new ViewportSize(size.Width, size.Height));
         }
-        Context.Set("host.running", Host.State == HostState.Running);
+        Context.Set("host.running", Host.State is HostState.Running);
         Commands.InvalidateAll();
     }
 

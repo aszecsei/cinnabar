@@ -692,6 +692,8 @@ public sealed class AnimationGraphEditorTests : IDisposable
             TestAssets.Make(Survey, AssetKind.Animation, "fox.gltf"),
             TestAssets.Make(Walk, AssetKind.Texture, "walk.png"),
         ], []));
+        // The cook session links once the index comes.
+        shell.Assets.SetLinked(true);
         var problem = Assert.Single(editor.Problems);
         Assert.False(problem.Error);
         Assert.Contains("walk", problem.Text);

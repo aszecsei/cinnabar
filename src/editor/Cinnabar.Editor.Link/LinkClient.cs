@@ -52,6 +52,9 @@ public sealed class LinkClient : IAsyncDisposable
         }
     }
 
+    /// <summary>For tests: the other end of a link, over a connection that a listener accepted.</summary>
+    internal static LinkClient Accept(TcpClient tcp, MessageReader read) => new(tcp, read);
+
     /// <summary>
     /// A port on this machine that was free a moment ago, for a child process to listen on. Another program could take
     /// it before the child listens, and then the editor reports that the link did not open.

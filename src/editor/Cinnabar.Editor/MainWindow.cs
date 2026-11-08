@@ -29,6 +29,7 @@ public sealed class MainWindow : Window
     Border? _status;
     readonly Ellipse _hostDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
     readonly Ellipse _cookDot = new() { Width = 8, Height = 8, VerticalAlignment = VerticalAlignment.Center };
+    static readonly IBrush LinkedBrush = Brush.Parse("#4caf50");
     // The autosave is due at most every 30 s, so a check every few seconds is close enough.
     readonly DispatcherTimer _autosave = new() { Interval = TimeSpan.FromSeconds(5) };
     // Set once the user has answered about unsaved changes, so the second Close goes through.
@@ -87,7 +88,7 @@ public sealed class MainWindow : Window
 
         AttachKeys(this);
 
-        shell.Host.StateChanged += UpdateHostStatus;
+        shell.Host.StateChanged += _ => UpdateHostStatus();
         UpdateHostStatus();
         shell.Cook.StateChanged += UpdateCookStatus;
         UpdateCookStatus();
@@ -502,26 +503,30 @@ public sealed class MainWindow : Window
 
     void UpdateCookStatus()
     {
-        var cook = _shell.Cook;
-        (_cookStatus.Text, _cookDot.Fill) = cook.State switch
+        var state = _shell.Cook.State;
+        _cookStatus.Text = $"Cook: {state.Describe()}";
+        // A reason can be longer than the status bar.
+        ToolTip.SetTip(_cookStatus, _cookStatus.Text);
+        _cookDot.Fill = state switch
         {
-            CookState.Linked => ("Cook: watching", Brush.Parse("#4caf50")),
-            CookState.Starting => ("Cook: starting, linking", Palette.WarningBrush),
-            CookState.Stopped => ("Cook: stopped", Brushes.Gray),
-            _ => ($"Cook: exited with code {cook.ExitCode}", Palette.ErrorBrush),
+            CookState.Linked => LinkedBrush,
+            CookState.Running => Palette.WarningBrush,
+            CookState.Stopped => Brushes.Gray,
+            _ => Palette.ErrorBrush,
         };
     }
 
     void UpdateHostStatus()
     {
-        var host = _shell.Host;
-        (_hostStatus.Text, _hostDot.Fill) = host.State switch
+        var state = _shell.Host.State;
+        _hostStatus.Text = $"Host: {state.Describe()}";
+        ToolTip.SetTip(_hostStatus, _hostStatus.Text);
+        _hostDot.Fill = state switch
         {
-            HostState.Waiting => ("Host: waiting for the viewport", Brushes.Gray),
-            HostState.Running when host.Linked => ($"Host: running {host.Game}, linked", Brush.Parse("#4caf50")),
-            HostState.Running => ("Host: starting, linking", Palette.WarningBrush),
-            HostState.Stopped => ("Host: stopped", Brushes.Gray),
-            _ => ($"Host: exited with code {host.ExitCode}", Palette.ErrorBrush),
+            HostState.Linked => LinkedBrush,
+            HostState.Running => Palette.WarningBrush,
+            HostState.Waiting or HostState.Stopped => Brushes.Gray,
+            _ => Palette.ErrorBrush,
         };
     }
 }

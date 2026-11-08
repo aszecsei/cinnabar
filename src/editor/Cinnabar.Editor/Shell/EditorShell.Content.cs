@@ -176,7 +176,7 @@ public sealed partial class EditorShell
         // A new cook link has cooked no previews.
         Cook.StateChanged += () =>
         {
-            if (Cook.State == CookState.Linked)
+            if (Cook.Linked)
             {
                 foreach (var editor in GraphEditors)
                 {
@@ -192,7 +192,7 @@ public sealed partial class EditorShell
         Content.Model.PrefabViews = PrefabContentsOf;
         // A game that plays is not to be disturbed, and a game that is not linked cannot draw.
         Thumbnails = new ThumbnailQueue(Assets, Host.Send, () => Host.Linked && Mode == Link.Protocol.EditorMode.Edit);
-        Host.StateChanged += () => Thumbnails.Restart(DateTime.UtcNow);
+        Host.StateChanged += _ => Thumbnails.Restart(DateTime.UtcNow);
         ModeChanged += () => Thumbnails.Pump(DateTime.UtcNow);
         // A cook can change any prefab's text.
         Cook.Cooked += _ => _prefabTrees.Clear();

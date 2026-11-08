@@ -70,7 +70,7 @@ public sealed partial class EditorShell
         {
             case "status":
                 return new AutomationResponse(request.Id, true,
-                    Status: new AutomationStatus(Host.Linked, Host.State.ToString(), Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId));
+                    Status: new AutomationStatus(Host.Linked, Host.State.Name, Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId));
             case "screenshot":
                 List<DebugView> views = [];
                 foreach (var name in request.Views ?? [])

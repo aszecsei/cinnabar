@@ -53,7 +53,7 @@ public sealed class CookLinkTests : IDisposable
         var output = new List<string>();
         session.Output += line => { lock (output) { output.Add(line); } };
 
-        await Until(() => session.State == CookState.Linked && index.Assets.Count == 4, session, output);
+        await Until(() => session.Linked && index.Assets.Count == 4, session, output);
         Assert.Equal("game", Assert.Single(index.Roots).Name);
         var door = index.Assets.Values.Single(a => a.Path == "scripts/door.luau");
         var util = index.Assets.Values.Single(a => a.Path == "scripts/util.luau");
@@ -89,7 +89,7 @@ public sealed class CookLinkTests : IDisposable
         using var session = Start(index);
         var output = new List<string>();
         session.Output += line => { lock (output) { output.Add(line); } };
-        await Until(() => session.State == CookState.Linked && index.Assets.Count == 4, session, output);
+        await Until(() => session.Linked && index.Assets.Count == 4, session, output);
         var script = Assert.Single(index.Importers, i => i.Kind == AssetKind.Script);
         Assert.Equal(".luau", script.Extension);
         Assert.Contains(script.Settings, s => s.Key == "native" && s.Default == "false");
@@ -130,7 +130,7 @@ public sealed class CookLinkTests : IDisposable
         using var session = Start(index);
         var output = new List<string>();
         session.Output += line => { lock (output) { output.Add(line); } };
-        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Path == "textures/dot.png"), session, output);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Path == "textures/dot.png"), session, output);
 
         var dot = index.Assets.Values.Single(a => a.Path == "textures/dot.png");
         Assert.True(dot.ThumbnailReady);
@@ -147,7 +147,7 @@ public sealed class CookLinkTests : IDisposable
         using var session = Start(index);
         var output = new List<string>();
         session.Output += line => { lock (output) { output.Add(line); } };
-        await Until(() => session.State == CookState.Linked && index.Assets.Count == 4, session, output);
+        await Until(() => session.Linked && index.Assets.Count == 4, session, output);
         var door = index.Assets.Values.Single(a => a.Path == "scripts/door.luau");
         var util = index.Assets.Values.Single(a => a.Path == "scripts/util.luau");
         var cooks = 0;
@@ -181,7 +181,7 @@ public sealed class CookLinkTests : IDisposable
         session.Start();
         var output = new List<string>();
         session.Output += line => { lock (output) { output.Add(line); } };
-        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Material) && index.ShadingModels.Count == 1, session, output);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Material) && index.ShadingModels.Count == 1, session, output);
 
         Assert.Contains(index.Nodes, n => n.Kind == "output" && n.PinsFrom == NodePinsFrom.ShadingModel);
         Assert.Contains(index.Nodes, n => n.Kind == "texture_sample" && n.Inputs.Any(p => p.Name == "uv" && p.DefaultLabel == "UV0"));
@@ -211,7 +211,7 @@ public sealed class CookLinkTests : IDisposable
         Write("fox.animation_graph", fox);
         var index = new AssetIndex();
         using var session = Start(index);
-        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.AnimationGraph && a.Status == AssetStatus.Current), session, []);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.AnimationGraph && a.Status == AssetStatus.Current), session, []);
         var asset = index.Assets.Values.Single(a => a.Kind == AssetKind.AnimationGraph);
         var blob = Path.Combine(_dir, "cache", asset.Guid + ".blob");
         var written = File.GetLastWriteTimeUtc(blob);
@@ -255,7 +255,7 @@ public sealed class CookLinkTests : IDisposable
         Write("menu.ui", Menu);
         var index = new AssetIndex();
         using var session = Start(index);
-        await Until(() => session.State == CookState.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Ui && a.Status == AssetStatus.Current), session, []);
+        await Until(() => session.Linked && index.Assets.Values.Any(a => a.Kind == AssetKind.Ui && a.Status == AssetStatus.Current), session, []);
         var asset = index.Assets.Values.Single(a => a.Kind == AssetKind.Ui);
         Assert.Contains(index.UiAttributes, a => a.Name == "padding" && a.Kind == "edges");
         var preview = Path.Combine(_dir, "cache", "preview", asset.Guid + ".blob");
@@ -292,7 +292,7 @@ public sealed class CookLinkTests : IDisposable
         File.Copy(Path.Combine(fox, "..", "shapes.gltf"), Path.Combine(_content, "shapes.gltf"));
         var index = new AssetIndex();
         using var session = Start(index);
-        await Until(() => session.State == CookState.Linked && index.Assets.Values.Count(a => a.Kind == AssetKind.Animation) == 3, session, []);
+        await Until(() => session.Linked && index.Assets.Values.Count(a => a.Kind == AssetKind.Animation) == 3, session, []);
 
         // The index reads them after the model's parse has been freed.
         Assert.Equal(["Run", "Survey", "Walk"], index.Assets.Values.Where(a => a.Kind == AssetKind.Animation).Select(a => a.Subasset).Order(StringComparer.Ordinal));
@@ -312,15 +312,14 @@ public sealed class CookLinkTests : IDisposable
     {
         var first = new AssetIndex();
         using var running = Start(first);
-        await Until(() => running.State == CookState.Linked, running, []);
+        await Until(() => running.Linked, running, []);
 
         var second = new AssetIndex();
         using var refused = Start(second);
         var output = new List<string>();
         refused.Output += line => { lock (output) { output.Add(line); } };
-        await Until(() => refused.State == CookState.Exited, refused, output);
-        Assert.NotEqual(0, refused.ExitCode);
-        Assert.Equal(CookState.Linked, running.State);
+        await Until(() => refused.State is CookState.Exited { Code: not 0 }, refused, output);
+        Assert.True(running.Linked);
     }
 
     static async Task Until(Func<bool> condition, CookSession session, List<string> output)

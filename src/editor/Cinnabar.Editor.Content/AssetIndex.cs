@@ -42,7 +42,10 @@ public sealed class AssetIndex
     /// <summary>The shading models that cook, by name.</summary>
     public IReadOnlyList<ShadingModelInfo> ShadingModels => _shadingModels;
 
-    /// <summary>The cook link is up, so the index is the daemon's latest.</summary>
+    /// <summary>
+    /// The cook session is linked, so the index is the daemon's latest. Only <see cref="CookSession"/> sets it, from its
+    /// state.
+    /// </summary>
     public bool Linked { get; private set; }
 
     /// <summary>The roots, the assets, the folders, the problems or <see cref="Linked"/> changed.</summary>
@@ -112,7 +115,6 @@ public sealed class AssetIndex
                     _assets[asset.Guid] = asset;
                 }
                 _folders.UnionWith(snapshot.Folders);
-                Linked = true;
                 ForgetLists();
                 break;
             case AssetDelta delta:
@@ -146,12 +148,12 @@ public sealed class AssetIndex
         return true;
     }
 
-    /// <summary>The cook link closed. The index keeps what it has.</summary>
-    public void Unlink()
+    /// <summary>The cook session linked or unlinked. Unlinked, the index keeps what it has.</summary>
+    internal void SetLinked(bool linked)
     {
-        if (Linked)
+        if (Linked != linked)
         {
-            Linked = false;
+            Linked = linked;
             Changed?.Invoke();
         }
     }

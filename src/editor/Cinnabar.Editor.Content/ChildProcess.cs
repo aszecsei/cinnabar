@@ -5,11 +5,26 @@ using Microsoft.Win32.SafeHandles;
 
 namespace Cinnabar.Editor.Content;
 
+/// <summary>A process that a session runs: <see cref="ChildProcess"/>, or a test's.</summary>
+public interface IChildProcess : IDisposable
+{
+    int Id { get; }
+
+    /// <summary>A line of the process's output. Raised on any thread.</summary>
+    event Action<string>? Output;
+
+    /// <summary>The process's exit code. Raised on any thread, and not after <see cref="IDisposable.Dispose"/>.</summary>
+    event Action<int>? Exited;
+}
+
+/// <summary>Starts a process. The editor's sessions use <see cref="ChildProcess.Start"/>, and tests their own.</summary>
+public delegate IChildProcess StartProcess(string path, IEnumerable<string> args, string workingDirectory);
+
 /// <summary>
 /// A child process of the editor, such as <c>host.exe</c> or the cook daemon (see docs/editor/processes-and-projects.md#processes). It runs in
 /// a Job Object that kills it when the job's handle closes, so it exits with the editor even when the editor crashes.
 /// </summary>
-public sealed partial class ChildProcess : IDisposable
+public sealed partial class ChildProcess : IChildProcess
 {
     readonly Process _process;
 
