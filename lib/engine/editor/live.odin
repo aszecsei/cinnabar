@@ -39,11 +39,11 @@ handle_live_message :: proc(e: ^Editor, message: link.Message) -> bool {
 			return true
 		}
 		release_live_mesh(e, guid)
-		e.live_meshes[guid] = {source = source}
+		e.session.live_meshes[guid] = {source = source}
 		bake_live_mesh(e, guid)
 	case link.Live_Mesh_Vertices:
 		guid := format.Guid(m.guid)
-		live, found := &e.live_meshes[guid]
+		live, found := &e.session.live_meshes[guid]
 		buffer: [32]u8
 		if !found {
 			log.warnf("editor: a drag step came for %s, which is not a live mesh", format.guid_format(guid, &buffer))
@@ -75,20 +75,20 @@ handle_live_message :: proc(e: ^Editor, message: link.Message) -> bool {
 @(private)
 release_live_meshes :: proc(e: ^Editor) {
 	clear_mesh_overlay(e)
-	for guid, &live in e.live_meshes {
+	for guid, &live in e.session.live_meshes {
 		free_live(e, &live)
 		if e.residency != nil {
 			render.clear_live(e.residency, guid)
 		}
 	}
-	clear(&e.live_meshes)
+	clear(&e.session.live_meshes)
 }
 
 @(private = "file")
 release_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
-	if live, found := &e.live_meshes[guid]; found {
+	if live, found := &e.session.live_meshes[guid]; found {
 		free_live(e, live)
-		delete_key(&e.live_meshes, guid)
+		delete_key(&e.session.live_meshes, guid)
 	}
 }
 
@@ -106,7 +106,7 @@ free_live :: proc(e: ^Editor, live: ^Live_Mesh) {
 // its index, as the cooker logs it at its line.
 @(private = "file")
 bake_live_mesh :: proc(e: ^Editor, guid: format.Guid) {
-	live := &e.live_meshes[guid]
+	live := &e.session.live_meshes[guid]
 	blob, problems, bake := live_blob(guid, live.source, e.platform.frame_allocator)
 	heap := e.platform.heap_allocator
 	delete(live.bake_positions, heap)

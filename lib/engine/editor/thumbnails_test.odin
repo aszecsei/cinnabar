@@ -161,7 +161,7 @@ preview_quietly :: proc(f: ^Bake_Fixture, others_waiting: bool) -> (desc: render
 first_drawing :: proc(f: ^Bake_Fixture) -> (desc: render.Preview_Desc, draw: bool) {
 	for _ in 0 ..< 4 {
 		desc, draw = preview_quietly(f, false)
-		if draw || f.editor.thumbnail.phase == .Idle {
+		if draw || f.editor.session.thumbnail.phase == .Idle {
 			return
 		}
 		render.residency_update(&f.renderer.residency)
@@ -210,10 +210,10 @@ a_bake_captures_once_when_complete :: proc(t: ^testing.T) {
 	desc.captured^ = true
 	_, draw = preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.phase, Thumbnail_Phase.Idle)
+	testing.expect_value(t, f.editor.session.thumbnail.phase, Thumbnail_Phase.Idle)
 	_, draw = preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed, "")
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "")
 }
 
 @(test)
@@ -244,7 +244,7 @@ a_bake_waits_for_a_new_generation :: proc(t: ^testing.T) {
 	bake(f, 1, .Mesh, BAKE_MESH)
 	_, draw := preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.phase, Thumbnail_Phase.Waiting)
+	testing.expect_value(t, f.editor.session.thumbnail.phase, Thumbnail_Phase.Waiting)
 
 	asset.poll(&f.assets)
 	testing.expect(t, asset.current(&f.assets))
@@ -263,9 +263,9 @@ a_bake_that_never_completes_says_why :: proc(t: ^testing.T) {
 	bake_now += THUMBNAIL_TIMEOUT_SECONDS
 	_, draw = preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.phase, Thumbnail_Phase.Idle)
-	testing.expect_value(t, f.editor.thumbnail.failed_id, 9)
-	testing.expect_value(t, f.editor.thumbnail.failed, "it was not ready in time")
+	testing.expect_value(t, f.editor.session.thumbnail.phase, Thumbnail_Phase.Idle)
+	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 9)
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "it was not ready in time")
 
 	// The editor hears of it once.
 	out: [dynamic]byte
@@ -285,21 +285,21 @@ a_bake_of_what_cannot_be_drawn_says_why :: proc(t: ^testing.T) {
 	bake(f, 1, .Prefab, BAKE_PREFAB)
 	_, draw := preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed, "its blob cannot be read")
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "its blob cannot be read")
 
 	write_scene(t, f, BAKE_PREFAB, BAKE_EMPTY_TEXT)
 	bake(f, 2, .Prefab, BAKE_PREFAB)
 	_, draw = preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed, "it draws nothing")
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "it draws nothing")
 
 	// With nothing that it draws in the cache, there is no picture to keep.
 	missing := [16]u8{0 ..< 16 = 0x33}
 	bake(f, 3, .Mesh, missing)
 	_, draw = first_drawing(f)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed_id, 3)
-	testing.expect_value(t, f.editor.thumbnail.failed, "what it draws could not be loaded")
+	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 3)
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "what it draws could not be loaded")
 }
 
 // One mesh that is missing does not cost a prefab its picture.
@@ -348,8 +348,8 @@ a_bake_leaves_the_world_room_in_the_tables :: proc(t: ^testing.T) {
 	bake(f, 3, .Mesh, BAKE_MESH)
 	_, draw := preview_quietly(f, false)
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed_id, 3)
-	testing.expect_value(t, f.editor.thumbnail.failed, "the renderer's tables are nearly full")
+	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 3)
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "the renderer's tables are nearly full")
 	testing.expect_value(t, f.renderer.residency.count, 0)
 
 	f.renderer.materials.pipeline_count = render.MAX_MATERIAL_PIPELINES - render.PREVIEW_ROOM
@@ -374,7 +374,7 @@ a_bake_refuses_a_mesh_that_is_being_edited :: proc(t: ^testing.T) {
 	_, draw := preview_quietly(f, false)
 	f.renderer.residency.entries[i].live = false
 	testing.expect(t, !draw)
-	testing.expect_value(t, f.editor.thumbnail.failed, "a mesh that it draws is being edited")
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "a mesh that it draws is being edited")
 }
 
 @(test)
@@ -409,7 +409,7 @@ a_bake_of_a_node_draws_only_what_is_under_it :: proc(t: ^testing.T) {
 	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 1, kind = .Prefab, asset = BAKE_PREFAB, node = 2, width = 64, height = 64})
 	preview_quietly(f, false)
 	// Its one mesh is the one that is not in the cache, so what it draws is not its prefab's other.
-	testing.expect_value(t, f.editor.thumbnail.failed, "what it draws could not be loaded")
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "what it draws could not be loaded")
 
 	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 2, kind = .Prefab, asset = BAKE_PREFAB, node = 1, width = 64, height = 64})
 	desc, draw := first_drawing(f)
@@ -419,8 +419,8 @@ a_bake_of_a_node_draws_only_what_is_under_it :: proc(t: ^testing.T) {
 
 	handle_thumbnail_message(&f.editor, link.Bake_Thumbnail{id = 3, kind = .Prefab, asset = BAKE_PREFAB, node = 99, width = 64, height = 64})
 	preview_quietly(f, false)
-	testing.expect_value(t, f.editor.thumbnail.failed_id, 3)
-	testing.expect_value(t, f.editor.thumbnail.failed, "it draws nothing")
+	testing.expect_value(t, f.editor.session.thumbnail.failed_id, 3)
+	testing.expect_value(t, f.editor.session.thumbnail.failed, "it draws nothing")
 }
 
 // What only thumbnails asked for goes a while after the last one, and not before.
@@ -432,14 +432,14 @@ a_bake_gives_back_what_it_loaded :: proc(t: ^testing.T) {
 	desc, _ := first_drawing(f)
 	desc.complete^, desc.captured^ = true, true
 	preview_quietly(f, false)
-	testing.expect(t, f.editor.thumbnail.baked)
+	testing.expect(t, f.editor.session.thumbnail.baked)
 
 	bake_now += THUMBNAIL_RELEASE_SECONDS - 1
 	preview_quietly(f, false)
-	testing.expect(t, f.editor.thumbnail.baked)
+	testing.expect(t, f.editor.session.thumbnail.baked)
 	bake_now += 1
 	preview_quietly(f, false)
-	testing.expect(t, !f.editor.thumbnail.baked)
+	testing.expect(t, !f.editor.session.thumbnail.baked)
 	testing.expect_value(t, f.renderer.residency.count, 0)
 }
 

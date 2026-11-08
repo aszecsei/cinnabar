@@ -358,6 +358,49 @@ another_connection_starts_over :: proc(t: ^testing.T) {
 	testing.expect(t, is_snapshot)
 }
 
+// A new connection ends the old one's session, so the new editor inherits none of what the old one sent.
+@(test)
+another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	f.platform.gpu_release_preview_target = proc(id: int) {}
+	e := spawn(f, {})
+	step(
+		f,
+		1,
+		link.Watch_Entity{u64(e)},
+		link.Editor_Camera{rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05},
+		link.Set_Selection{entities = {u64(e)}},
+		link.Set_Hidden{entities = {u64(e)}},
+		link.Gizmo_State{kind = .Translate, rotation = {0, 0, 0, 1}, size = 1},
+		link.Viewport_Settings{no_bloom = true},
+		link.Pick_Request{id = 1, width = 1, height = 1},
+		link.Open_Preview{id = 1},
+		link.Set_Mode{mode = .Paused},
+		link.Step_Frame{},
+	)
+	s := &f.editor.session
+	testing.expect(t, s.previews[1].open)
+	testing.expect(t, s.view.has_camera)
+	testing.expect_value(t, len(s.view.picks), 1)
+	testing.expect_value(t, s.steps, 1)
+
+	step(f, 2)
+
+	testing.expect_value(t, s.connection, 2)
+	testing.expect_value(t, len(s.watched), 0)
+	testing.expect(t, !s.view.has_camera)
+	testing.expect_value(t, len(s.view.selection), 0)
+	testing.expect_value(t, len(s.view.hidden), 0)
+	testing.expect_value(t, s.view.gizmo.kind, link.Gizmo_Kind.None)
+	testing.expect(t, !s.view.settings.no_bloom)
+	testing.expect_value(t, len(s.view.picks), 0)
+	testing.expect(t, !s.previews[1].open)
+	testing.expect_value(t, s.next_preview, 0)
+	testing.expect_value(t, s.mode, link.Editor_Mode.Edit)
+	testing.expect_value(t, s.steps, 0)
+}
+
 @(test)
 a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 	f := setup(t)
@@ -400,7 +443,7 @@ a_scene_from_the_editor_replaces_the_world :: proc(t: ^testing.T) {
 		}
 	}
 	// The old entity was watched, and its watch went with it.
-	testing.expect_value(t, len(f.editor.watched), 0)
+	testing.expect_value(t, len(f.editor.session.watched), 0)
 }
 
 @(private = "file")
@@ -542,13 +585,13 @@ the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect_value(t, v.position.raw, [3]i64{1 << 24, 0, -(2 << 24)})
 	testing.expect_value(t, v.near, 0.05)
-	testing.expect_value(t, len(f.editor.viewport.selection), 1)
+	testing.expect_value(t, len(f.editor.session.view.selection), 1)
 
 	// Another editor has its own camera and selection.
 	step(f, 2)
 	_, has_view = view(&f.editor)
 	testing.expect(t, !has_view)
-	testing.expect_value(t, len(f.editor.viewport.selection), 0)
+	testing.expect_value(t, len(f.editor.session.view.selection), 0)
 }
 
 @(test)
@@ -981,7 +1024,7 @@ live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
 	// A Live_Mesh bakes as the cooker does and streams in place of the asset, which is not even cooked.
 	step(f, 1, live_message(guid, box, context.temp_allocator))
 	testing.expect(t, render.is_live(residency, guid))
-	testing.expect_value(t, len(f.editor.live_meshes), 1)
+	testing.expect_value(t, len(f.editor.session.live_meshes), 1)
 	render.residency_update(residency)
 	mesh, ready := render.resident_mesh(residency, guid)
 	testing.expect(t, ready)
@@ -1013,7 +1056,7 @@ live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
 	// Letting go leaves the asset, which is not cooked, so nothing draws.
 	step(f, 1, link.Release_Live_Mesh{guid = ([16]u8)(guid)})
 	testing.expect(t, !render.is_live(residency, guid))
-	testing.expect_value(t, len(f.editor.live_meshes), 0)
+	testing.expect_value(t, len(f.editor.session.live_meshes), 0)
 	render.residency_update(residency)
 	_, ready = render.resident_mesh(residency, guid)
 	testing.expect(t, !ready)
@@ -1023,7 +1066,7 @@ live_meshes_bake_and_draw_in_place_of_their_assets :: proc(t: ^testing.T) {
 	testing.expect(t, render.is_live(residency, guid))
 	step(f, 2)
 	testing.expect(t, !render.is_live(residency, guid))
-	testing.expect_value(t, len(f.editor.live_meshes), 0)
+	testing.expect_value(t, len(f.editor.session.live_meshes), 0)
 }
 
 @(test)
@@ -1109,7 +1152,7 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	step(f, 1, link.Mesh_Overlay{})
 	testing.expect_value(t, count(f, view), 0)
 	step(f, 1, overlay)
-	testing.expect(t, f.editor.mesh_overlay.active)
+	testing.expect(t, f.editor.session.mesh_overlay.active)
 	step(f, 2)
-	testing.expect(t, !f.editor.mesh_overlay.active)
+	testing.expect(t, !f.editor.session.mesh_overlay.active)
 }

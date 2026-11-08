@@ -58,7 +58,7 @@ register_command :: proc(e: ^Editor, command: Command) {
 		}
 	}
 	append(&e.commands, command)
-	e.types_sent = false
+	e.session.types_sent = false
 }
 
 // scene_id is an entity's scene ID, or 0 for one that the game spawned, which no operation can name.
@@ -121,8 +121,8 @@ run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: r
 			world      = w,
 			scripts    = scripts,
 			user       = user,
-			selection  = e.viewport.selection[:],
-			camera     = e.viewport.camera,
+			selection  = e.session.view.selection[:],
+			camera     = e.session.view.camera,
 			operations = make([dynamic]link.Operation, allocator),
 			allocator  = allocator,
 		}

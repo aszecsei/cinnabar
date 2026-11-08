@@ -224,7 +224,7 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 
 	// Nothing goes out until it has started, which its first drawing does.
 	testing.expect_value(t, len(views(f, open)), 0)
-	p := &f.editor.previews[id]
+	p := &f.editor.session.previews[id]
 	testing.expect(t, p.open)
 	p.instance.key = KEY
 	p.instance.state, p.instance.source = 1, anim_graph.NONE
@@ -249,7 +249,7 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 
 	// A preview that is not open, or a graph that has not started, is left alone.
 	views(f, link.Set_Preview_Parameter{2, "speed", 9})
-	testing.expect_value(t, f.editor.previews[2].instance.parameters[0], 0)
+	testing.expect_value(t, f.editor.session.previews[2].instance.parameters[0], 0)
 	p.instance.key = KEY + 1
 	views(f, link.Set_Preview_Parameter{id, "speed", 9})
 	testing.expect_value(t, p.instance.parameters[0], 5)

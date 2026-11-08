@@ -69,7 +69,7 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id >= MAX_PREVIEWS {
 			return true
 		}
-		p := &e.previews[m.id]
+		p := &e.session.previews[m.id]
 		material := format.Guid(m.material)
 		if !p.open || p.material != material || p.unsaved != m.unsaved {
 			free_preview_data(e, p)
@@ -79,7 +79,7 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id >= MAX_PREVIEWS {
 			return true
 		}
-		p := &e.previews[m.id]
+		p := &e.session.previews[m.id]
 		p.settings, p.has_settings, p.dirty = m, true, true
 	case link.Close_Preview:
 		if m.id < MAX_PREVIEWS {
@@ -87,7 +87,7 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Set_Preview_Parameter:
 		if m.id < MAX_PREVIEWS {
-			p := &e.previews[m.id]
+			p := &e.session.previews[m.id]
 			if data := preview_graph_data(e, p); data != nil {
 				if blob, ok := format.animation_graph_view(data); ok && blob.header.key == p.instance.key {
 					set_instance_parameter(data, blob, &p.instance, m.name, m.value)
@@ -96,11 +96,11 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Restart_Preview:
 		if m.id < MAX_PREVIEWS {
-			e.previews[m.id].instance = {}
+			e.session.previews[m.id].instance = {}
 		}
 	case link.Ui_Preview_Settings:
 		if m.id < MAX_PREVIEWS {
-			set_ui_preview_settings(e, &e.previews[m.id], m)
+			set_ui_preview_settings(e, &e.session.previews[m.id], m)
 		}
 	case:
 		return false
@@ -110,7 +110,7 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 
 @(private)
 close_preview :: proc(e: ^Editor, id: int) {
-	p := &e.previews[id]
+	p := &e.session.previews[id]
 	if !p.open && p.data == nil {
 		return
 	}
@@ -148,11 +148,11 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		return nil
 	}
 	for id in 0 ..< MAX_PREVIEWS {
-		refresh_preview(e, &e.previews[id])
+		refresh_preview(e, &e.session.previews[id])
 	}
 	// A preview that the user looks at comes first, but one that plays in every frame shares them with a thumbnail.
 	playing := false
-	for &p in e.previews {
+	for &p in e.session.previews {
 		playing ||= p.open && p.has_settings && (p.dirty || !p.complete || reads_time(e, p = &p))
 	}
 	if thumbnail, draw := thumbnail_preview(e, playing); draw {
@@ -161,8 +161,8 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		return descs
 	}
 	for n in 0 ..< MAX_PREVIEWS {
-		id := (e.next_preview + n) % MAX_PREVIEWS
-		p := &e.previews[id]
+		id := (e.session.next_preview + n) % MAX_PREVIEWS
+		p := &e.session.previews[id]
 		if !p.open || !p.has_settings || !(p.dirty || !p.complete || reads_time(e, p)) {
 			continue
 		}
@@ -176,7 +176,7 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 			p.announce = {id = u32(id), prefix = string(p.prefix[:copied]), generation = target.generation, width = i32(target.size.x), height = i32(target.size.y)}
 			p.told, p.told_generation = true, target.generation
 		}
-		e.next_preview = (id + 1) % MAX_PREVIEWS
+		e.session.next_preview = (id + 1) % MAX_PREVIEWS
 		p.dirty, p.complete = false, false
 		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
 		descs[0] = preview_desc(p, id, target)
@@ -263,7 +263,7 @@ play_animation_graph :: proc(e: ^Editor, p: ^Preview) -> [][3][4]f32 {
 // send_preview_views tells the editor what each animation graph's preview plays, when it changed.
 @(private)
 send_preview_views :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allocator) {
-	for &p in e.previews {
+	for &p in e.session.previews {
 		data := preview_graph_data(e, &p)
 		if data == nil {
 			continue
@@ -371,7 +371,7 @@ preview_desc :: proc(p: ^Preview, id: int, target: gpu.Preview_Target) -> render
 // send_preview_targets tells the editor of each preview target that is new, or of a new generation.
 @(private)
 send_preview_targets :: proc(e: ^Editor, out: ^[dynamic]byte) {
-	for &p in e.previews {
+	for &p in e.session.previews {
 		if p.announce.prefix != "" {
 			link.write_message(out, p.announce)
 			p.announce = {}

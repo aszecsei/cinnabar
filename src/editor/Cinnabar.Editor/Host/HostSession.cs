@@ -31,6 +31,8 @@ public sealed class HostSession : IDisposable
     readonly EditorOptions _options;
     ChildProcess? _process;
     LinkClient? _link;
+    // Where Send goes while linked: the link's, or a test's.
+    Action<ILinkMessage>? _send;
     CancellationTokenSource? _connecting;
     ulong _adapter;
     int _starts;
@@ -125,8 +127,16 @@ public sealed class HostSession : IDisposable
     {
         if (Linked)
         {
-            _link?.Send(message);
+            _send?.Invoke(message);
         }
+    }
+
+    /// <summary>For tests: links to no host, as a <c>Welcome</c> does, and gives what the editor sends to <paramref name="send"/>.</summary>
+    internal void LinkForTests(Action<ILinkMessage> send)
+    {
+        _send = send;
+        Linked = true;
+        StateChanged?.Invoke();
     }
 
     async Task ConnectAsync(ChildProcess process, int port, CancellationToken cancel)
@@ -142,6 +152,7 @@ public sealed class HostSession : IDisposable
                     return;
                 }
                 _link = link;
+                _send = message => link.Send(message);
                 link.Received += (message, _) => Dispatcher.UIThread.Post(() => OnReceived(link, message));
                 link.Closed += error => Dispatcher.UIThread.Post(() => OnLinkClosed(link, error));
                 link.Start();
@@ -166,10 +177,15 @@ public sealed class HostSession : IDisposable
 
     void OnReceived(LinkClient link, ILinkMessage message)
     {
-        if (link != _link)
+        if (link == _link)
         {
-            return;
+            Receive(message);
         }
+    }
+
+    /// <summary>Handles a message from the linked host. Tests call it in place of the link.</summary>
+    internal void Receive(ILinkMessage message)
+    {
         switch (message)
         {
             case Welcome welcome:
@@ -180,7 +196,7 @@ public sealed class HostSession : IDisposable
                 break;
             case Refused refused:
                 Output?.Invoke($"editor: the host refused the editor link: {refused.Reason}");
-                _ = link.DisposeAsync();
+                _ = _link?.DisposeAsync();
                 break;
             case Log log:
                 LogReceived?.Invoke(log);
@@ -207,6 +223,7 @@ public sealed class HostSession : IDisposable
             return;
         }
         _link = null;
+        _send = null;
         if (error != null)
         {
             Output?.Invoke($"editor: the editor link failed: {error.Message}");
@@ -239,6 +256,7 @@ public sealed class HostSession : IDisposable
             _ = _link.DisposeAsync();
             _link = null;
         }
+        _send = null;
         Linked = false;
         Game = null;
         // Closing the job kills the host.

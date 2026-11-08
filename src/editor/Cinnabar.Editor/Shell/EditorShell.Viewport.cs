@@ -339,7 +339,7 @@ public sealed partial class EditorShell
         }
     }
 
-    // A new link knows none of the tools' state.
+    // A new game state knows none of the tools' state and answers none of the old state's picks (see OnNewGameState).
     void SendViewportTools()
     {
         _sentGizmo = "";

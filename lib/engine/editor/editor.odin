@@ -27,46 +27,59 @@ VALUES_INTERVAL :: 0.05
 STATS_INTERVAL :: 0.25
 MAX_WATCHED :: 64
 
-// Editor is what the editor has been told. It lives in Game_State. Its arrays use the host's heap, so they survive
-// a code reload, and a soft restart starts a new one, which sends everything again.
+// Editor is the game's side of the editor link. It lives in Game_State. Its arrays use the host's heap, so they
+// survive a code reload. What one editor connection has told the game, and has been told, is its session. A soft
+// restart makes a new Editor, with a new session, which sends everything again.
 Editor :: struct {
 	platform:    ^core.Platform_API,
 	// The game's asset runtime, in Game_State, which the viewport tools load their shaders from.
 	assets:      ^asset.Assets,
-	// The connection that this state is for. Another one means a new editor, which gets everything.
-	connection:  u64,
-	types_sent:  bool,
-	// What the editor knows of each entity slot, by entity index.
-	known:       [dynamic]Known,
-	// The version that the last scan took, and how many entities the world had despawned at it.
-	scan_version: u64,
-	despawned:   u64,
-	watched:     [dynamic]Watched,
-	// The entity of each scene ID, for the editor's operations (see find_scene_entity).
+	session:     Session,
+	// The entity of each scene ID, for the editor's operations (see find_scene_entity). It follows the world, not the
+	// session.
 	by_scene_id: map[u64]ecs.Entity,
+	// The viewport tools' GPU objects (see viewport.odin).
 	viewport:    Viewport,
-	// The mode that the editor set (see modes.odin).
-	mode:        link.Editor_Mode,
-	free_camera: bool,
-	// Step_Frame messages that wait for a paused frame.
-	steps:       int,
-	last_scan:   f64,
-	last_values: f64,
-	last_stats:  f64,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
 	commands:    [dynamic]Command,
+	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
+	ui:          ui.State,
+	// The renderer's residency, which draws the live meshes, in Game_State, or nil without a renderer.
+	residency:   ^render.Residency,
+	// The renderer, which answers where the texture sky's sun is.
+	renderer:    ^render.Renderer,
+}
+
+// Session is the state of one editor connection: what the editor has sent the game, and what the game has sent the
+// editor. begin_session starts one and end_session ends it, for each connection and for none (connection 0), so state
+// that a new editor must not inherit belongs here, and end_session frees it (see
+// docs/overview/conventions.md#state-with-a-lifecycle).
+Session :: struct {
+	// The connection that this session is for. Another one means a new editor, which gets everything.
+	connection:   u64,
+	types_sent:   bool,
+	// What the editor knows of each entity slot, by entity index.
+	known:        [dynamic]Known,
+	// The version that the last scan took, and how many entities the world had despawned at it.
+	scan_version: u64,
+	despawned:    u64,
+	watched:      [dynamic]Watched,
+	// The editor's camera, selection and gizmo, and its picks (see viewport.odin).
+	view:         View,
+	// The mode that the editor set (see modes.odin).
+	mode:         link.Editor_Mode,
+	free_camera:  bool,
+	// Step_Frame messages that wait for a paused frame.
+	steps:        int,
+	last_scan:    f64,
+	last_values:  f64,
+	last_stats:   f64,
 	// The material editor's previews, by ID, and the one to draw next (see preview.odin).
 	previews:     [MAX_PREVIEWS]Preview,
 	next_preview: int,
-	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
-	ui:           ui.State,
-	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin), and the renderer's
-	// residency that draws them, in Game_State, or nil without a renderer.
-	live_meshes:  map[format.Guid]Live_Mesh,
-	residency:    ^render.Residency,
-	// The renderer, which answers where the texture sky's sun is.
-	renderer:     ^render.Renderer,
 	thumbnail:    Thumbnail,
+	// The meshes that the editor edits, drawn from memory in place of their assets (see live.odin).
+	live_meshes:  map[format.Guid]Live_Mesh,
 	// What mesh mode draws over the live meshes (see mesh_overlay.odin), in the host's heap.
 	mesh_overlay: link.Mesh_Overlay,
 }
@@ -101,27 +114,54 @@ init :: proc(e: ^Editor, platform: ^core.Platform_API, assets: ^asset.Assets, re
 		assets      = assets,
 		residency   = residency,
 		renderer    = renderer,
-		live_meshes = make(map[format.Guid]Live_Mesh, platform.heap_allocator),
-		known       = make([dynamic]Known, platform.heap_allocator),
-		watched     = make([dynamic]Watched, platform.heap_allocator),
 		by_scene_id = make(map[u64]ecs.Entity, platform.heap_allocator),
-		commands = make([dynamic]Command, platform.heap_allocator),
-		viewport = {
-			selection = make([dynamic]ecs.Entity, platform.heap_allocator),
-			hidden = make([dynamic]ecs.Entity, platform.heap_allocator),
-			picks = make([dynamic]link.Pick_Request, platform.heap_allocator),
-		},
+		commands    = make([dynamic]Command, platform.heap_allocator),
 	}
 	if assets != nil {
 		ui.init(&e.ui, platform, assets, residency)
 	}
+	begin_session(e, 0)
+}
+
+// begin_session starts the session of a connection, or of none (0). The session before it must have ended.
+@(private)
+begin_session :: proc(e: ^Editor, connection: u64) {
+	heap := e.platform.heap_allocator
+	e.session = {
+		connection  = connection,
+		known       = make([dynamic]Known, heap),
+		watched     = make([dynamic]Watched, heap),
+		live_meshes = make(map[format.Guid]Live_Mesh, heap),
+		view = {
+			selection = make([dynamic]ecs.Entity, heap),
+			hidden    = make([dynamic]ecs.Entity, heap),
+			picks     = make([dynamic]link.Pick_Request, heap),
+		},
+	}
+}
+
+// end_session ends the session: it closes the previews and the thumbnail, releases the live meshes and the mesh
+// overlay, frees the session's arrays, and zeroes it. A pick that the GPU still runs comes back with an old ticket, so
+// nothing reads it.
+@(private)
+end_session :: proc(e: ^Editor) {
+	s := &e.session
+	release_live_meshes(e)
+	close_previews(e)
+	delete(s.live_meshes)
+	delete(s.known)
+	delete(s.watched)
+	delete(s.view.selection)
+	delete(s.view.hidden)
+	delete(s.view.picks)
+	s^ = {}
 }
 
 // reload sends the types again after a code reload: the new DLL may describe them differently. It forgets the commands,
 // whose procedures are the old DLL's, so register them again after it.
 reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 	e.platform = platform
-	e.types_sent = false
+	e.session.types_sent = false
 	clear(&e.commands)
 	sync_viewport_pipelines(e, force = true)
 	if e.ui.platform != nil {
@@ -133,16 +173,9 @@ reload :: proc(e: ^Editor, platform: ^core.Platform_API) {
 }
 
 destroy :: proc(e: ^Editor) {
-	release_live_meshes(e)
-	delete(e.live_meshes)
-	delete(e.known)
-	delete(e.watched)
+	end_session(e)
 	delete(e.by_scene_id)
 	delete(e.commands)
-	delete(e.viewport.selection)
-	delete(e.viewport.hidden)
-	delete(e.viewport.picks)
-	close_previews(e)
 	if e.ui.platform != nil {
 		ui.destroy(&e.ui)
 	}
@@ -157,15 +190,9 @@ destroy :: proc(e: ^Editor) {
 poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u64, incoming: []core.Editor_Message, out: ^[dynamic]byte, user: rawptr = nil) {
 	profile.scope_text(&e.platform.profile, "Editor poll", .Editor)
 	snapshot := false
-	if connection != e.connection {
-		e.connection = connection
-		e.types_sent = false
-		clear(&e.known)
-		clear(&e.watched)
-		reset_viewport(e)
-		close_previews(e)
-		release_live_meshes(e)
-		e.mode, e.free_camera, e.steps = .Edit, false, 0
+	if connection != e.session.connection {
+		end_session(e)
+		begin_session(e, connection)
 		// A new editor is in Edit, so its first scene replaces the world without the old behaviours' callbacks.
 		if scripts != nil {
 			script.set_quiet(scripts, connection != 0)
@@ -193,9 +220,9 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			link.write_message(out, edit_problems(problems[:], true, frame))
 			// Every entity is new, so the editor gets a snapshot, and its watches, its selection and what it hides are
 			// of entities that are gone.
-			clear(&e.watched)
-			clear(&e.viewport.selection)
-			clear(&e.viewport.hidden)
+			clear(&e.session.watched)
+			clear(&e.session.view.selection)
+			clear(&e.session.view.hidden)
 			snapshot = true
 		case link.Apply_Operations:
 			problems := make([dynamic]scene.Problem, frame)
@@ -204,9 +231,9 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				link.write_message(out, edit_problems(problems[:], false, frame))
 			}
 		case link.Set_Mode:
-			e.mode, e.free_camera = v.mode, v.free_camera
+			e.session.mode, e.session.free_camera = v.mode, v.free_camera
 			if v.mode != .Paused {
-				e.steps = 0
+				e.session.steps = 0
 			}
 			// The edits that follow in this poll run no script code outside Play.
 			if scripts != nil {
@@ -222,8 +249,8 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			}
 			link.write_message(out, answer)
 		case link.Step_Frame:
-			if e.mode == .Paused {
-				e.steps += 1
+			if e.session.mode == .Paused {
+				e.session.steps += 1
 			}
 		case:
 			if !handle_thumbnail_message(e, message) && !handle_preview_message(e, message) && !handle_viewport_message(e, message) && !handle_live_message(e, message) {
@@ -234,27 +261,28 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	finish_pick(e, w, out, frame)
 	send_preview_targets(e, out)
 	send_thumbnail_failed(e, out)
-	if !e.types_sent {
+	s := &e.session
+	if !s.types_sent {
 		link.write_message(out, component_types(w, frame))
 		link.write_message(out, command_infos(e, frame))
-		e.types_sent = true
+		s.types_sent = true
 	}
 	now := e.platform.time_seconds()
-	if snapshot || now - e.last_scan >= SCAN_INTERVAL {
-		e.last_scan = now
+	if snapshot || now - s.last_scan >= SCAN_INTERVAL {
+		s.last_scan = now
 		if message, changed := scan(e, w, snapshot, frame); changed {
 			link.write_message(out, message)
 		}
 	}
-	if now - e.last_values >= VALUES_INTERVAL {
-		e.last_values = now
+	if now - s.last_values >= VALUES_INTERVAL {
+		s.last_values = now
 		send_values(e, w, scripts, out, frame)
 		send_animators(e, w, out, frame)
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)
 	}
-	if now - e.last_stats >= STATS_INTERVAL {
-		e.last_stats = now
+	if now - s.last_stats >= STATS_INTERVAL {
+		s.last_stats = now
 		stats := game_stats(w, scripts, frame)
 		if e.renderer != nil {
 			c := render.cull_stats(e.renderer)
@@ -301,23 +329,23 @@ game_stats :: proc(w: ^ecs.World, scripts: ^script.Runtime, allocator: runtime.A
 
 @(private)
 watch :: proc(e: ^Editor, entity: ecs.Entity) {
-	for w in e.watched {
+	for w in e.session.watched {
 		if w.entity == entity {
 			return
 		}
 	}
-	if len(e.watched) == MAX_WATCHED {
+	if len(e.session.watched) == MAX_WATCHED {
 		log.warnf("editor: the editor watches more than %d entities, so %v is not watched", MAX_WATCHED, entity)
 		return
 	}
-	append(&e.watched, Watched{entity = entity})
+	append(&e.session.watched, Watched{entity = entity})
 }
 
 @(private)
 unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
-	for w, i in e.watched {
+	for w, i in e.session.watched {
 		if w.entity == entity {
-			ordered_remove(&e.watched, i)
+			ordered_remove(&e.session.watched, i)
 			return
 		}
 	}
@@ -330,14 +358,14 @@ unwatch :: proc(e: ^Editor, entity: ecs.Entity) {
 // with its Parent or its Name, so a delta visits only the chunks where those changed since the last scan.
 @(private)
 scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator) -> (message: link.Message, changed: bool) {
-	since := full ? 0 : e.scan_version
-	e.scan_version = ecs.take_version(w)
+	since := full ? 0 : e.session.scan_version
+	e.session.scan_version = ecs.take_version(w)
 	infos := make([dynamic]link.Entity_Info, allocator)
 	destroyed := make([dynamic]u64, allocator)
 	// First, so that an entity in the slot of one that died finds the slot empty.
-	if full || e.despawned != w.despawned {
-		e.despawned = w.despawned
-		for &k in e.known {
+	if full || e.session.despawned != w.despawned {
+		e.session.despawned = w.despawned
+		for &k in e.session.known {
 			if k.entity != 0 && !ecs.is_alive(w, k.entity) {
 				append(&destroyed, u64(k.entity))
 				k = {}
@@ -348,8 +376,8 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 	it := ecs.world_iter_changed(w, since, watched[:])
 	for entity, archetype, components in ecs.world_next(&it) {
 		index := int(ecs.entity_index(entity))
-		if index >= len(e.known) {
-			resize(&e.known, index + 1)
+		if index >= len(e.session.known) {
+			resize(&e.session.known, index + 1)
 		}
 		parent: ecs.Entity
 		if p := (^ecs.Parent)(ecs.get_raw(w, entity, ecs.PARENT_ID)); p != nil {
@@ -358,7 +386,7 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 		_, inactive := find(components, ecs.INACTIVE_ID)
 		name := ecs.name_of(w, entity)
 		now := Known{entity, archetype, parent, !inactive, hash.fnv64a(transmute([]byte)name)}
-		k := &e.known[index]
+		k := &e.session.known[index]
 		if full || k.entity != now.entity || k.archetype != now.archetype || k.parent != now.parent || k.active != now.active || k.name != now.name {
 			ids := make([]u64, len(components), allocator)
 			for id, i in components {
@@ -392,10 +420,10 @@ scan :: proc(e: ^Editor, w: ^ecs.World, full: bool, allocator: runtime.Allocator
 // entity that died is no longer watched; the delta tells the editor that it is gone.
 @(private)
 send_values :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, out: ^[dynamic]byte, allocator: runtime.Allocator) {
-	for i := 0; i < len(e.watched); {
-		watched := &e.watched[i]
+	for i := 0; i < len(e.session.watched); {
+		watched := &e.session.watched[i]
 		if !ecs.is_alive(w, watched.entity) {
-			ordered_remove(&e.watched, i)
+			ordered_remove(&e.session.watched, i)
 			continue
 		}
 		i += 1

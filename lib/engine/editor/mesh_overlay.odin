@@ -61,27 +61,27 @@ set_mesh_overlay :: proc(e: ^Editor, m: link.Mesh_Overlay) {
 		o.meshes[i].selected_faces = slice.clone(mesh.selected_faces, heap)
 		o.meshes[i].marks = slice.clone(mesh.marks, heap)
 	}
-	e.mesh_overlay = o
+	e.session.mesh_overlay = o
 }
 
 @(private)
 clear_mesh_overlay :: proc(e: ^Editor) {
 	heap := e.platform.heap_allocator
-	for mesh in e.mesh_overlay.meshes {
+	for mesh in e.session.mesh_overlay.meshes {
 		delete(mesh.selected_vertices, heap)
 		delete(mesh.selected_edges, heap)
 		delete(mesh.selected_faces, heap)
 		delete(mesh.marks, heap)
 	}
-	delete(e.mesh_overlay.meshes, heap)
-	e.mesh_overlay = {}
+	delete(e.session.mesh_overlay.meshes, heap)
+	e.session.mesh_overlay = {}
 }
 
 // mesh_overlay_vertices builds the overlay's triangles, relative to the view, into out: nothing without an active
 // overlay. Widths are in pixels of a frame height pixels tall.
 @(private)
 mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, height: u32, out: ^[dynamic]Gizmo_Vertex) {
-	o := e.mesh_overlay
+	o := e.session.mesh_overlay
 	if !o.active {
 		return
 	}
@@ -93,7 +93,7 @@ mesh_overlay_vertices :: proc(e: ^Editor, w: ^ecs.World, view: render.View, heig
 		return max(linalg.dot(p, forward), 0.01) * pixel * pixels
 	}
 	for mesh in o.meshes {
-		live, found := e.live_meshes[format.Guid(mesh.guid)]
+		live, found := e.session.live_meshes[format.Guid(mesh.guid)]
 		if !found {
 			continue
 		}

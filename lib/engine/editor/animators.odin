@@ -72,7 +72,7 @@ instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^a
 // empty view for an Animator that has gone, so the editor keeps no old state.
 @(private)
 send_animators :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: runtime.Allocator) {
-	for &watched in e.watched {
+	for &watched in e.session.watched {
 		view := animator_view(e, w, watched.entity, allocator)
 		if view.graph == {} {
 			if watched.animator_sent != 0 {
