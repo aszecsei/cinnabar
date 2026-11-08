@@ -232,7 +232,7 @@ a_field_takes_typed_text_and_its_keys :: proc(t: ^testing.T) {
 <ui font=$%s><field id="name" width="300" max_length="5" changed="edited" submit="named" placeholder="Name"/></ui>`, TEST_FONT))
 	step(f)
 	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
-	testing.expect(t, f.ui.input.editing)
+	testing.expect(t, f.ui.input.edit != nil)
 	testing.expect(t, wants_input(&f.ui))
 	typed := core.Input{}
 	core.input_text_append(&typed.text, "Alic")
@@ -250,8 +250,8 @@ a_field_takes_typed_text_and_its_keys :: proc(t: ^testing.T) {
 	step(f, {down = {.Left}, pressed = {.Left}})
 	test_now = 5.02
 	step(f, {down = {.Left, .Left_Shift}, pressed = {.Left}})
-	testing.expect_value(t, f.ui.input.caret, 2)
-	testing.expect_value(t, f.ui.input.anchor, 3)
+	testing.expect_value(t, f.ui.input.edit.?.caret, 2)
+	testing.expect_value(t, f.ui.input.edit.?.anchor, 3)
 	typed = {}
 	core.input_text_append(&typed.text, "e")
 	step(f, typed)
@@ -267,8 +267,87 @@ a_field_takes_typed_text_and_its_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, events(f), `edited(name, "Alcx") `)
 	step(f, key(.Enter))
 	testing.expect_value(t, events(f), `named(name, "Alcx") `)
-	testing.expect(t, !f.ui.input.editing)
+	testing.expect(t, f.ui.input.edit == nil)
 	d := document_of(&f.ui, e)
 	text, _ := text_of(&f.ui, d, "name")
 	testing.expect_value(t, text, "Alcx")
+}
+
+@(test)
+escape_or_b_in_a_field_ends_the_edit_and_the_next_cancels :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	show(t, f, MENU, fmt.tprintf(`ui 1
+<ui font=$%s cancel="back"><field id="name" width="300" changed="edited"/></ui>`, TEST_FONT))
+	step(f)
+	click_at :: proc(f: ^Fixture, p: [2]f32) {
+		step(f, {mouse_position = p, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+		step(f, {mouse_position = p, released = {.Mouse_Left}})
+	}
+	click_at(f, {10, 10})
+	typed := core.Input{mouse_position = {10, 10}}
+	core.input_text_append(&typed.text, "Alic")
+	step(f, typed)
+	testing.expect_value(t, events(f), `edited(name, "Alic") `)
+	// Escape in the field ends its edit, and the document does not cancel.
+	step(f, key(.Escape))
+	testing.expect(t, f.ui.input.edit == nil)
+	testing.expect(t, !wants_input(&f.ui))
+	testing.expect_value(t, events(f), "")
+	step(f)
+	step(f, key(.Escape))
+	testing.expect_value(t, events(f), "back() ")
+	// So does B.
+	click_at(f, {10, 10})
+	testing.expect(t, f.ui.input.edit != nil)
+	b := core.Input{mouse_position = {10, 10}, gamepads = {0 = {connected = true, down = {.B}, pressed = {.B}}}}
+	step(f, b)
+	testing.expect(t, f.ui.input.edit == nil)
+	testing.expect_value(t, events(f), "")
+	step(f)
+	step(f, b)
+	testing.expect_value(t, events(f), "back() ")
+}
+
+@(test)
+a_click_in_a_field_places_the_caret_by_that_fields_own_scroll :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(t, f, MENU, fmt.tprintf(`ui 1
+<ui font=$%s><column gap="10"><field id="a" width="60"/><field id="b" width="300" text="Alic Alic"/></column></ui>`, TEST_FONT))
+	step(f)
+	a := node_rect(t, f, e, "a")
+	b := node_rect(t, f, e, "b")
+	middle := (a[1] + a[3]) * 0.5
+	step(f, {mouse_position = {a[0] + 5, middle}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	typed := core.Input{}
+	core.input_text_append(&typed.text, "Alic Alic Alic Alic")
+	step(f, typed)
+	// The layout scrolls a to keep its caret in view.
+	scroll := f.ui.input.edit.?.scroll
+	testing.expectf(t, scroll > 0, "a scrolled %v", scroll)
+	// A press in b at its fourth character, as b shows unscrolled, puts the caret there.
+	d := document_of(&f.ui, e)
+	n, _ := find_node(d, "b")
+	x := b[0] + d.nodes[n].style.padding[3] * f.ui.scale + caret_x(d, d.nodes[n].text, 3) + 1
+	step(f, {mouse_position = {x, (b[1] + b[3]) * 0.5}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	edit, editing_b := f.ui.input.edit.?
+	testing.expect(t, editing_b && edit.field.node == n)
+	testing.expect_value(t, edit.caret, 3)
+	testing.expect_value(t, edit.scroll, 0)
+}
+
+@(test)
+a_document_that_goes_away_ends_the_edit_of_its_field :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(t, f, MENU, fmt.tprintf(`ui 1
+<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT))
+	step(f)
+	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	testing.expect(t, f.ui.input.edit != nil)
+	ecs.despawn(&f.world, e)
+	step(f)
+	testing.expect(t, f.ui.input.edit == nil)
+	testing.expect(t, !wants_input(&f.ui))
 }

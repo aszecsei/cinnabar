@@ -238,6 +238,31 @@ a_new_version_of_the_document_keeps_what_scripts_set_copied_and_focused :: proc(
 }
 
 @(test)
+a_new_version_of_the_document_keeps_the_edit_of_its_field_while_the_field_is_there :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	e := show(t, f, DOC, fmt.tprintf(`ui 1
+<ui font=$%s><field id="name" width="300"/></ui>`, TEST_FONT))
+	step(f)
+	step(f, {mouse_position = {10, 10}, down = {.Mouse_Left}, pressed = {.Mouse_Left}})
+	d := document_of(&f.ui, e)
+	rewrite(t, f, DOC, fmt.tprintf(`ui 1
+<ui font=$%s><column><text>Name</text><field id="name" width="300"/></column></ui>`, TEST_FONT))
+	step(f)
+	edit, editing := f.ui.input.edit.?
+	testing.expect(t, editing && edit.field == f.ui.input.focus)
+	field_d, field_n, found := resolve(&f.ui, edit.field)
+	testing.expect(t, found && field_d == d && id_of(d, field_n) == "name")
+	testing.expect(t, wants_input(&f.ui))
+	// A version without the field ends its edit.
+	rewrite(t, f, DOC, fmt.tprintf(`ui 1
+<ui font=$%s><text>Name</text></ui>`, TEST_FONT))
+	step(f)
+	testing.expect(t, f.ui.input.edit == nil)
+	testing.expect(t, !wants_input(&f.ui))
+}
+
+@(test)
 documents_come_and_go_with_their_entities :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(t, f)

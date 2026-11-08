@@ -43,6 +43,16 @@ Pending_Event :: struct {
 	text:   Maybe(string),
 }
 
+// Field_Edit is the editing of a field: its caret and the other end of its selection, in bytes, how far its text is
+// scrolled, in pixels, and when the caret last moved, which its blink starts from. begin_edit and end_edit start and end
+// it.
+Field_Edit :: struct {
+	field:         Node_Ref,
+	caret, anchor: u32,
+	scroll:        f32,
+	caret_time:    f64,
+}
+
 Input_State :: struct {
 	focus:         Node_Ref,
 	focus_stack:   [MAX_FOCUS_STACK]Node_Ref,
@@ -62,13 +72,8 @@ Input_State :: struct {
 	// The key that a field repeats, and when.
 	key_held:      core.Key,
 	key_next:      f64,
-	// A field that is being edited: its caret and the other end of its selection, in bytes, and how far its text is
-	// scrolled, in pixels.
-	editing:       bool,
-	caret, anchor: u32,
-	scroll:        f32,
-	// When the caret last moved, which its blink starts from.
-	caret_time:    f64,
+	// The field that is being edited, which is the focus.
+	edit:          Maybe(Field_Edit),
 	// What the IME is composing, and its cursor, this frame, for the field to draw. It points into input.
 	composition:   string,
 	composition_cursor: int,
@@ -157,20 +162,60 @@ focused_id_hash :: proc(s: ^State, d: ^Document) -> u64 {
 	return 0
 }
 
+// restore_focus puts the focus back on the element of a rebuilt document that had it, and the edit of a field with it.
+// An edit whose field is gone ends.
 @(private)
 restore_focus :: proc(s: ^State, d: ^Document, id_hash: u64) {
-	if id_hash == 0 {
-		return
+	index := index_of(s, d)
+	edit, ok := &s.input.edit.?
+	edits_here := ok && edit.field.document == index
+	if id_hash != 0 {
+		if n, found := d.ids[id_hash]; found && .Removed not_in d.nodes[n].flags {
+			s.input.focus = ref(s, d, n)
+			if edits_here {
+				edit.field = s.input.focus
+			}
+			return
+		}
 	}
-	if n, found := d.ids[id_hash]; found && .Removed not_in d.nodes[n].flags {
-		s.input.focus = ref(s, d, n)
+	if edits_here {
+		end_edit(s)
 	}
+}
+
+// begin_edit starts editing a field, unscrolled, with its caret at a byte.
+@(private)
+begin_edit :: proc(s: ^State, field: Node_Ref, caret: u32, now: f64) {
+	s.input.edit = Field_Edit {
+		field      = field,
+		caret      = caret,
+		anchor     = caret,
+		caret_time = now,
+	}
+}
+
+@(private)
+end_edit :: proc(s: ^State) {
+	s.input.edit = nil
+}
+
+// editing is the edit of a field, if it is being edited.
+@(private)
+editing :: proc(s: ^State, d: ^Document, n: u32) -> (^Field_Edit, bool) {
+	edit, ok := &s.input.edit.?
+	if !ok || edit.field != ref(s, d, n) {
+		return nil, false
+	}
+	return edit, true
 }
 
 // forget_document drops what the input holds of a document that goes away.
 @(private)
 forget_document :: proc(s: ^State, d: ^Document) {
 	index := index_of(s, d)
+	if edit, ok := s.input.edit.?; ok && edit.field.document == index {
+		end_edit(s)
+	}
 	refs := []^Node_Ref{&s.input.focus, &s.input.hovered, &s.input.pressed, &s.input.scroll_hovered, &s.input.bar_hovered, &s.input.drag, &s.input.reveal}
 	for r in refs {
 		if r.document == index {
@@ -289,7 +334,7 @@ initial_focus :: proc(s: ^State, d: ^Document) -> Node_Ref {
 @(private)
 set_focus :: proc(s: ^State, r: Node_Ref) {
 	if s.input.focus != r {
-		s.input.editing = false
+		end_edit(s)
 		s.input.reveal = r
 	}
 	s.input.focus = r
@@ -310,16 +355,13 @@ queue_event :: proc(s: ^State, d: ^Document, name: string, id: string, text: May
 
 // click sends a node's click event, and starts editing a field.
 @(private)
-click :: proc(s: ^State, d: ^Document, n: u32) {
+click :: proc(s: ^State, d: ^Document, n: u32, now: f64) {
 	node := &d.nodes[n]
 	if node.disabled {
 		return
 	}
 	if node.element == .Field {
-		s.input.editing = true
-		value := node.style.text
-		s.input.caret = u32(len(value))
-		s.input.anchor = s.input.caret
+		begin_edit(s, ref(s, d, n), u32(len(node.style.text)), now)
 	}
 	queue_event(s, d, node.style.click, id_of(d, n))
 }
@@ -333,9 +375,9 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 	input := input
 	in_scope := scope(s)
 	update_modal(s, in_scope)
-	s.input.wants_input = s.input.modal >= 0 || s.input.editing
+	s.input.wants_input = s.input.modal >= 0 || s.input.edit != nil
 	// The composition draws after scripts run, so it is kept in frame memory.
-	s.input.composition = strings.clone(core.input_text_string(&input.composition), s.platform.frame_allocator) if s.input.editing else ""
+	s.input.composition = strings.clone(core.input_text_string(&input.composition), s.platform.frame_allocator) if s.input.edit != nil else ""
 	s.input.composition_cursor = int(input.composition_cursor)
 
 	// The pointer.
@@ -388,7 +430,7 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 		s.input.pressed = s.input.hovered
 		// A press anywhere but the field that is being edited stops its editing.
 		if s.input.hovered != s.input.focus {
-			s.input.editing = false
+			end_edit(s)
 		}
 		if bar_d, bar_n, on_bar := resolve(s, s.input.bar_hovered); on_bar {
 			press_bar(s, bar_d, bar_n, s.input.bar_part, mouse)
@@ -399,10 +441,15 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 				// release that clicks it.
 				s.input.reveal = NO_NODE
 				if d.nodes[n].element == .Field {
-					s.input.editing = true
-					s.input.caret = caret_at(d, d.nodes[n].text, mouse.x - d.nodes[n].rect[0] - d.nodes[n].style.padding[3] * s.scale + s.input.scroll)
-					s.input.anchor = s.input.caret
-					s.input.caret_time = now
+					// The press is against the text as it showed: scrolled if the field is being edited, else not.
+					x := mouse.x - d.nodes[n].rect[0] - d.nodes[n].style.padding[3] * s.scale
+					if edit, is_edited := editing(s, d, n); is_edited {
+						edit.caret = caret_at(d, d.nodes[n].text, x + edit.scroll)
+						edit.anchor = edit.caret
+						edit.caret_time = now
+					} else {
+						begin_edit(s, s.input.hovered, caret_at(d, d.nodes[n].text, x), now)
+					}
 				}
 			}
 		}
@@ -410,7 +457,7 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 	if .Mouse_Left in input.released {
 		if s.input.pressed == s.input.hovered {
 			if d, n, ok := resolve(s, s.input.pressed); ok && d.nodes[n].element != .Field {
-				click(s, d, n)
+				click(s, d, n, now)
 			}
 		}
 		s.input.pressed = NO_NODE
@@ -434,25 +481,26 @@ handle_input :: proc(s: ^State, input: core.Input, now: f64) {
 		s.input.modality = .Keys
 	}
 
-	if s.input.editing {
-		if d, n, ok := resolve(s, s.input.focus); ok && d.nodes[n].element == .Field && !d.nodes[n].disabled {
-			edit_field(s, d, n, input, pad_pressed, now)
+	// Escape and B in a field end its edit and do nothing else; with no field being edited, they cancel.
+	if edit, ok := &s.input.edit.?; ok {
+		if d, n, found := resolve(s, edit.field); found && d.nodes[n].element == .Field && !d.nodes[n].disabled {
+			edit_field(s, d, n, edit, input, pad_pressed, now)
 		} else {
-			s.input.editing = false
+			end_edit(s)
 		}
 	} else {
 		navigate(s, in_scope, input, pad_pressed, pad_down, stick, now)
-	}
-	if !s.input.editing && (.Escape in input.pressed || .B in pad_pressed) {
-		for i in in_scope {
-			d := &s.documents[i]
-			if cancel := d.nodes[0].style.cancel; cancel != "" {
-				queue_event(s, d, cancel, "")
-				break
+		if .Escape in input.pressed || .B in pad_pressed {
+			for i in in_scope {
+				d := &s.documents[i]
+				if cancel := d.nodes[0].style.cancel; cancel != "" {
+					queue_event(s, d, cancel, "")
+					break
+				}
 			}
 		}
 	}
-	s.input.wants_input = s.input.modal >= 0 || s.input.editing
+	s.input.wants_input = s.input.modal >= 0 || s.input.edit != nil
 }
 
 // update_modal moves the focus into a modal document that has come to show, and back out to where it was when one goes.
@@ -547,7 +595,7 @@ navigate :: proc(s: ^State, in_scope: []i32, input: core.Input, pad_pressed, pad
 	if activate {
 		if d, n, ok := resolve(s, s.input.focus); ok && d.nodes[n].shown && !d.nodes[n].disabled {
 			s.input.key_pressing = true
-			click(s, d, n)
+			click(s, d, n, now)
 		}
 	}
 	if !(.Enter in input.down || .Space in input.down || .A in pad_down) {
@@ -617,11 +665,11 @@ repeat :: proc(s: ^State, input: core.Input, key: core.Key, now: f64) -> bool {
 // edit_field types into the focused field: the committed text at the caret, over the selection, and its keys. The value
 // is the field's text, which the edit sets as a script's Ui.set_text would, so it outlives a rebuild.
 @(private)
-edit_field :: proc(s: ^State, d: ^Document, n: u32, input: core.Input, pad_pressed: core.Gamepad_Buttons, now: f64) {
+edit_field :: proc(s: ^State, d: ^Document, n: u32, edit: ^Field_Edit, input: core.Input, pad_pressed: core.Gamepad_Buttons, now: f64) {
 	input := input
 	node := &d.nodes[n]
 	value := strings.clone(node.style.text, s.platform.frame_allocator)
-	caret, anchor := min(s.input.caret, u32(len(value))), min(s.input.anchor, u32(len(value)))
+	caret, anchor := min(edit.caret, u32(len(value))), min(edit.anchor, u32(len(value)))
 	changed := false
 	shift := .Left_Shift in input.down || .Right_Shift in input.down
 	ctrl := .Left_Control in input.down || .Right_Control in input.down
@@ -704,10 +752,10 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, input: core.Input, pad_press
 	if !changed && !shift && (.Left in input.down || .Right in input.down || .Home in input.pressed || .End in input.pressed) {
 		anchor = caret
 	}
-	if caret != s.input.caret || changed {
-		s.input.caret_time = now
+	if caret != edit.caret || changed {
+		edit.caret_time = now
 	}
-	s.input.caret, s.input.anchor = caret, anchor
+	edit.caret, edit.anchor = caret, anchor
 	if changed {
 		set_override(s, d, id_of(d, n), node.id_hash, .Text, value)
 		node.style.text = value
@@ -715,10 +763,9 @@ edit_field :: proc(s: ^State, d: ^Document, n: u32, input: core.Input, pad_press
 	}
 	if .Enter in input.pressed {
 		queue_event(s, d, node.style.submit, id_of(d, n), value)
-		s.input.editing = false
-	}
-	if .Escape in input.pressed || .B in pad_pressed || .Tab in input.pressed {
-		s.input.editing = false
+		end_edit(s)
+	} else if .Escape in input.pressed || .B in pad_pressed || .Tab in input.pressed {
+		end_edit(s)
 	}
 }
 

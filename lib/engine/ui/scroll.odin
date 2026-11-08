@@ -289,7 +289,7 @@ scroll_input :: proc(s: ^State, input: core.Input, pointer: i32, dt: f32) {
 		}
 	}
 	pages: f32
-	if !s.input.editing {
+	if s.input.edit == nil {
 		if .Page_Down in input.pressed {
 			pages += 1
 		}

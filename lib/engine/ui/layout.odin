@@ -46,6 +46,27 @@ layout_document :: proc(s: ^State, tf: Text_Frame, d: ^Document, index: int) {
 	if reveal(s, d, index) {
 		place_tree(s, d, 0, everything)
 	}
+	follow_caret(s, d, index)
+}
+
+// follow_caret scrolls the field that is being edited, if it is in a document, to keep its caret in view.
+@(private)
+follow_caret :: proc(s: ^State, d: ^Document, index: int) {
+	edit, ok := &s.input.edit.?
+	if !ok || edit.field.document != i32(index) || edit.field.generation != d.generation || int(edit.field.node) >= len(d.nodes) {
+		return
+	}
+	node := &d.nodes[edit.field.node]
+	if !node.shown {
+		return
+	}
+	x := caret_x(d, node.text, edit.caret)
+	width := node.rect[2] - node.rect[0] - (node.style.padding[1] + node.style.padding[3]) * s.scale
+	if x - edit.scroll > width - CARET_WIDTH * s.scale {
+		edit.scroll = x - width + CARET_WIDTH * s.scale
+	} else if x < edit.scroll {
+		edit.scroll = x
+	}
 }
 
 // style_tree runs the cascade on a node and its subtree, and works out which of them show and which take input.
