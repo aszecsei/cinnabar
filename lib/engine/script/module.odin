@@ -19,8 +19,8 @@ Module :: struct {
 	state:  Module_State,
 	// A registry reference to the module's result, once it is Loaded.
 	result: c.int,
-	// For a Main module: the registry reference of its thread, which the scheduler runs.
-	thread: c.int,
+	// For a Main module: the waiter that runs its thread.
+	main:   Waiter_Id,
 }
 
 // Main_Script is a script that spawn_script started. It stays valid when a script hot reload restarts the script.
@@ -34,6 +34,8 @@ Module_State :: enum u8 {
 	Loaded,
 	// It runs as a thread from spawn_script, and has no result to require.
 	Main,
+	// It ran as a main script, and its thread returned, failed or was stopped. spawn_script can start it again.
+	Ended,
 }
 
 // spawn_script starts a script asset on a new sandboxed thread, which runs until its first wait. Then the scheduler
@@ -44,7 +46,9 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (script: Main_Script, ok
 	if m == nil {
 		return
 	}
-	if m.state != .Unloaded {
+	switch m.state {
+	case .Unloaded, .Ended:
+	case .Loading, .Loaded, .Main:
 		log.errorf("script: %s already runs", guid_text(r, guid))
 		return
 	}
@@ -54,14 +58,28 @@ spawn_script :: proc(r: ^Runtime, guid: format.Guid) -> (script: Main_Script, ok
 	return Main_Script(module_index(r, m) + 1), true
 }
 
-// stop ends a script that spawn_script started.
+// stop ends a script that spawn_script started. A script that ended already is left alone.
 stop :: proc(r: ^Runtime, script: Main_Script) {
 	if int(script) < 1 || int(script) > r.module_count {
 		return
 	}
 	m := &r.modules[script - 1]
 	if m.state == .Main {
-		stop_thread(r, m.thread)
+		stop_waiter_id(r, m.main)
+	}
+}
+
+// end_main makes a main script Ended when the scheduler frees the waiter that runs it. A waiter of an earlier run
+// of the script does not match, so it cannot end a run that a restart began.
+@(private)
+end_main :: proc(r: ^Runtime, script: Main_Script, id: Waiter_Id) {
+	if int(script) < 1 || int(script) > r.module_count {
+		return
+	}
+	m := &r.modules[script - 1]
+	if m.state == .Main && m.main == id {
+		m.state = .Ended
+		m.main = {}
 	}
 }
 
@@ -80,10 +98,11 @@ start_main :: proc(r: ^Runtime, m: ^Module) -> bool {
 		return false
 	}
 	compile_native(r, co, native)
-	m.state = .Main
-	index := add_waiter(r, L, {})
+	index := add_waiter(r, L, Main_Script(module_index(r, m) + 1))
 	luau.pop(L, 1)
-	m.thread = r.waiters[index].thread
+	// A thread that returns or fails on its first resume ends the script through free_waiter.
+	m.state = .Main
+	m.main = {index, r.waiters[index].seq}
 	switch run_waiter(r, index) {
 	case .OK, .YIELD:
 		return true
@@ -120,9 +139,12 @@ reload_module :: proc(r: ^Runtime, m: ^Module) {
 	case .Unloaded, .Loading:
 		// It loads the new version when it is next required.
 		return
+	case .Ended:
+		// It runs the new version when it is next spawned.
+		return
 	case .Main:
-		stop_thread(r, m.thread)
-		m.state = .Unloaded
+		// The stop frees the waiter, which ends the script. If the new version cannot start, it stays Ended.
+		stop_waiter_id(r, m.main)
 		if start_main(r, m) {
 			log.infof("script: restarted %s", module_name(r, m))
 		}
@@ -303,7 +325,7 @@ push_module :: proc(r: ^Runtime, L: ^luau.State, guid: format.Guid) -> c.int {
 		return 1
 	case .Loading:
 		raise(L, fmt.aprintf("require cycle at %s", module_name(r, m), allocator = frame(r)))
-	case .Main:
+	case .Main, .Ended:
 		raise(L, fmt.aprintf("%s runs as a script, so it cannot be required", module_name(r, m), allocator = frame(r)))
 	case .Unloaded:
 	}
