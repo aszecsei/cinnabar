@@ -19,12 +19,15 @@ public sealed partial class MeshToolRunner
     /// the tool at the distance along the selection's normal, or by the drag's length for a width. Until the drag,
     /// nothing changes, and an entry without a drag leaves no history.
     /// </summary>
-    public bool BeginDistanceTool(string label, Func<MeshData, IEnumerable<int>, double, ToolResult> run, bool magnitude = false, MeshElement? requires = null)
+    public bool BeginDistanceTool(string label, Func<MeshData, IEnumerable<int>, double, ToolResult> run, bool magnitude = false, MeshElement? requires = null) =>
+        _session.Begin(() => StartDistanceTool(label, run, magnitude, requires)) != null;
+
+    // The distance tool's start, once the interaction before it ended: its entry, and what it runs on.
+    MeshInteraction.PendingDistance? StartDistanceTool(string label, Func<MeshData, IEnumerable<int>, double, ToolResult> run, bool magnitude, MeshElement? requires)
     {
-        CommitPendingDistance();
         if (!CanRunMeshTool(requires) || _shell.Scene == null || _shell.OpenEdit != null)
         {
-            return false;
+            return null;
         }
         var meshes = new Dictionary<string, (MeshData, IReadOnlyList<int>)>();
         var axis = Vec3.Zero;
@@ -46,38 +49,38 @@ public sealed partial class MeshToolRunner
         }
         if (meshes.Count == 0)
         {
-            return false;
+            return null;
         }
         axis = axis.Length > 1e-9 ? axis.Normalized() : Vec3.UnitY;
         if (_shell.TryBeginEdit(label, "a mesh tool") is not { } edit)
         {
-            return false;
+            return null;
         }
-        var pending = new PendingDistance(edit, axis, magnitude, meshes, run);
+        var pending = new MeshInteraction.PendingDistance(edit, axis, magnitude, meshes, run);
         edit.Ended += committed => OnPendingEnded(pending, committed);
-        _pending = pending;
-        _session.OnMeshModeChanged();
         _shell.Console.Add(LogLevel.Info, $"mesh: {label.ToLowerInvariant()}: drag the gizmo for the {(magnitude ? "width" : "distance")}, or Escape");
-        return true;
+        return pending;
     }
 
     /// <summary>
     /// Ends a pending distance tool as it is: with its drag's last distance, or with no entry when nothing was dragged.
     /// A drag of its distance that is under way ends with it.
     /// </summary>
-    public void CommitPendingDistance() => _pending?.Edit.Commit();
+    public void CommitPendingDistance()
+    {
+        if (HasPendingDistance)
+        {
+            _session.Settle();
+        }
+    }
 
     /// <summary>Cancels a pending distance tool: the mesh is as before it.</summary>
-    public void CancelPendingDistance() => _pending?.Edit.Cancel();
+    public void CancelPendingDistance() => _session.Cancel<MeshInteraction.PendingDistance>();
 
     // The pending tool's entry ended, by the tool, by the gizmo drag that set its distance, or by the shell.
-    void OnPendingEnded(PendingDistance pending, bool committed)
+    void OnPendingEnded(MeshInteraction.PendingDistance pending, bool committed)
     {
-        if (_pending != pending)
-        {
-            return;
-        }
-        _pending = null;
+        _session.Ended(pending);
         if (!committed)
         {
             _session.PruneMeshSelection();
@@ -95,7 +98,7 @@ public sealed partial class MeshToolRunner
 
         public IReadOnlyList<Operation> Drag(GizmoDrag drag, Vec2 pixel, bool snap)
         {
-            if (tools._pending is not { } pending)
+            if (tools.Pending is not { } pending)
             {
                 return [];
             }

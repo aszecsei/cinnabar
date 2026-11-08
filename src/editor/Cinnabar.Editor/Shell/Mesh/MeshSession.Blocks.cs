@@ -24,35 +24,32 @@ public sealed partial class MeshSession
         {
             return false;
         }
-        Tools.CommitPendingDistance();
         var (origin, axis) = GridPlane();
         if (PointOnGrid(pixel, origin, axis) is not { } start)
         {
             return false;
         }
-        _blockDrag = new BlockDrag(origin, axis, start, start);
-        OnMeshModeChanged();
-        return true;
+        return Begin(() => new MeshInteraction.BlockDrag(origin, axis, start, start)) != null;
     }
 
     public void DragBlock(Vec2 pixel)
     {
-        if (_blockDrag is not { } drag || PointOnGrid(pixel, drag.Origin, drag.Axis) is not { } corner)
+        if (Interaction is not MeshInteraction.BlockDrag drag || PointOnGrid(pixel, drag.Origin, drag.Axis) is not { } corner)
         {
             return;
         }
-        _blockDrag = drag with { Corner = corner };
-        OnMeshModeChanged();
+        Update(drag, drag with { Corner = corner });
     }
 
     /// <summary>Ends a Block drag: a new mesh and entity with the footprint, a grid cell high, or faces of the primary edited mesh.</summary>
     public void EndBlock(bool forceEntity = false)
     {
-        if (_blockDrag is not { } drag)
+        if (Interaction is not MeshInteraction.BlockDrag drag)
         {
             return;
         }
-        _blockDrag = null;
+        // The drag ends with the primitive that it makes, or with nothing for a footprint smaller than half a cell.
+        Cancel();
         var size = Vec3.Between(drag.Start, drag.Corner);
         if (size.Length < GridSize * 0.5)
         {
@@ -68,17 +65,10 @@ public sealed partial class MeshSession
         Tools.MakePrimitive(corner, max - min, drag.Axis, primary);
     }
 
-    public void CancelBlock()
-    {
-        if (_blockDrag != null)
-        {
-            _blockDrag = null;
-            OnMeshModeChanged();
-        }
-    }
+    public void CancelBlock() => Cancel<MeshInteraction.BlockDrag>();
 
     /// <summary>The block being dragged: its footprint's corners as raw positions, or null.</summary>
-    public (long[] Start, long[] Corner)? BlockFootprint => _blockDrag is { } d ? (d.Start, d.Corner) : null;
+    public (long[] Start, long[] Corner)? BlockFootprint => Interaction is MeshInteraction.BlockDrag d ? (d.Start, d.Corner) : null;
 
     internal long[]? PointOnGrid(Vec2 pixel, long[] origin, int axis)
     {
@@ -112,7 +102,6 @@ public sealed partial class MeshSession
     public const string DevGrayMaterial = "5a1c3e7f9b2d4f608a1c3e5f7a9b0c2d";
 
     // The dragged block's footprint: the grid plane and the two snapped corners.
-    readonly record struct BlockDrag(long[] Origin, int Axis, long[] Start, long[] Corner);
 }
 
 /// <summary>

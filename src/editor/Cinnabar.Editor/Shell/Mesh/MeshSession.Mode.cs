@@ -35,7 +35,6 @@ public sealed partial class MeshSession
     readonly Dictionary<string, ulong> _editedMeshes = [];
     MeshItem? _hovered;
     string _sentOverlay = "";
-    BlockDrag? _blockDrag;
 
     public bool InMeshMode { get; private set; }
 
@@ -58,7 +57,7 @@ public sealed partial class MeshSession
 
     public MeshTool MeshTool { get; private set; } = MeshTool.Select;
 
-    public bool IsDraggingBlock => _blockDrag != null;
+    public bool IsDraggingBlock => Interaction is MeshInteraction.BlockDrag;
 
     /// <summary>The mode, the element kind, the sub-selection, the grid or the tool changed.</summary>
     public event Action? MeshModeChanged;
@@ -162,10 +161,9 @@ public sealed partial class MeshSession
         {
             return;
         }
-        Tools.CancelPendingDistance();
-        _shell.CancelGizmo();
-        CancelBlock();
+        Cancel();
         Tools.CancelToolPoints();
+        _shell.CancelGizmo();
         InMeshMode = false;
         MeshTool = MeshTool.Select;
         MeshSelection = new MeshSelection(MeshElement, []);
@@ -188,18 +186,13 @@ public sealed partial class MeshSession
         }
     }
 
-    /// <summary>Escape in mesh mode: cancels a tool that waits, clears the sub-selection, or with none, leaves the mode.</summary>
+    /// <summary>
+    /// Escape in mesh mode: cancels what is under way (a block drag, a distance tool that waits, a Cut's or a Draw's points),
+    /// or else goes back to the Select tool, clears the sub-selection, or with none, leaves the mode.
+    /// </summary>
     public void EscapeMeshMode()
     {
-        if (_blockDrag != null)
-        {
-            CancelBlock();
-        }
-        else if (Tools.HasPendingDistance)
-        {
-            Tools.CancelPendingDistance();
-        }
-        else if (Tools.ToolPointCount > 0)
+        if (Cancel())
         {
             Tools.CancelToolPoints();
         }
@@ -248,7 +241,7 @@ public sealed partial class MeshSession
         {
             return;
         }
-        Tools.CommitPendingDistance();
+        EndOpenEntry();
         _shell.CancelGizmo();
         MeshElement = kind;
         MeshSelection = MeshSelection.As(kind, FindMeshData);
@@ -256,6 +249,7 @@ public sealed partial class MeshSession
         OnMeshModeChanged();
     }
 
+    /// <summary>Changes the tool, which drops the old tool's block drag or points. A distance tool that waits goes on waiting.</summary>
     public void SetMeshTool(MeshTool tool)
     {
         CancelBlock();
@@ -298,7 +292,7 @@ public sealed partial class MeshSession
     /// <summary>Sets the sub-selection, converted to the current kind, or with <paramref name="switchKind"/>, switching to its kind as a tool's result does.</summary>
     public void SetMeshSelection(MeshSelection selection, bool switchKind = false)
     {
-        Tools.CommitPendingDistance();
+        EndOpenEntry();
         if (switchKind)
         {
             MeshElement = selection.Kind;
