@@ -18,6 +18,33 @@ public sealed record ContentFolder(string Root, string Path)
         assets.FindRoot(Root) is { } root ? System.IO.Path.Combine(root.Dir, Path) : null;
 }
 
+/// <summary>
+/// Where the content browser is, as one value: a folder; a file of it, whose sub-assets show; or a prefab, a file of the
+/// folder or a sub-asset of a file, whose entity's children show, with 0 for its root. The folder of a file or a prefab is
+/// where it is, so it follows it when it moves.
+/// </summary>
+public abstract record ContentLocation(ContentFolder Folder)
+{
+    public sealed record InFolder(ContentFolder Folder) : ContentLocation(Folder);
+
+    public sealed record InFile(ContentFolder Folder, string File) : ContentLocation(Folder);
+
+    public sealed record InPrefab(ContentFolder Folder, string? File, string Prefab, ulong Node) : ContentLocation(Folder);
+
+    /// <summary>The folder that an asset is in, or that a sub-asset's file is in.</summary>
+    public static ContentFolder FolderOf(Asset asset) => new(asset.Root, AssetIndex.Parent(asset.Path));
+
+    /// <summary>Inside an asset: a file's sub-assets, or a prefab's root, or null for a sub-asset that is not a prefab.</summary>
+    public static ContentLocation? Into(Asset asset) => asset.Kind == AssetKind.Prefab
+        ? new InPrefab(FolderOf(asset), AssetIndex.IsSubasset(asset) ? asset.Parent : null, asset.Guid, 0)
+        : AssetIndex.IsSubasset(asset) ? null
+        : new InFile(FolderOf(asset), asset.Guid);
+
+    /// <summary>Where an asset shows: a sub-asset in its file, and a file in its folder.</summary>
+    public static ContentLocation Around(Asset asset) =>
+        AssetIndex.IsSubasset(asset) ? new InFile(FolderOf(asset), asset.Parent) : new InFolder(FolderOf(asset));
+}
+
 /// <summary>An asset, by its GUID, or a folder, which an operation such as Rename or Delete acts on.</summary>
 public sealed record ContentItem(string? Guid, ContentFolder? Folder)
 {
@@ -179,17 +206,25 @@ public sealed class ContentBrowserModel
         return rows;
     }
 
-    /// <summary>The open folder, where new assets go.</summary>
-    public ContentFolder? Folder { get; private set; }
+    /// <summary>Where the browser is: a folder, a file in it, or a prefab's entity, or null without a root. <see cref="Place"/> sets it.</summary>
+    public ContentLocation? Location { get; private set; }
+
+    /// <summary>The open folder, where new assets go: the location's, which follows its file when the file moves.</summary>
+    public ContentFolder? Folder => Location?.Folder;
 
     /// <summary>The file whose sub-assets show in place of its folder's assets, by GUID, or null.</summary>
-    public string? OpenFile { get; private set; }
+    public string? OpenFile => Location switch
+    {
+        ContentLocation.InFile f => f.File,
+        ContentLocation.InPrefab p => p.File,
+        _ => null,
+    };
 
     /// <summary>The prefab whose entities show, by GUID, or null: a sub-asset of the open file, or a file of the open folder.</summary>
-    public string? OpenPrefab { get; private set; }
+    public string? OpenPrefab => (Location as ContentLocation.InPrefab)?.Prefab;
 
     /// <summary>The entity of the open prefab whose children show, or 0 for its root.</summary>
-    public ulong OpenNode { get; private set; }
+    public ulong OpenNode => (Location as ContentLocation.InPrefab)?.Node ?? 0;
 
     /// <summary>Finds what a prefab's entity shows, with 0 for its root, or null for a prefab with no tree. The shell gives it.</summary>
     public Func<string, ulong, PrefabContents?>? PrefabViews { get; set; }
@@ -322,7 +357,7 @@ public sealed class ContentBrowserModel
     /// <summary>The path over the assets: the root, each folder, and the open file.</summary>
     public IReadOnlyList<ContentCrumb> Crumbs()
     {
-        if (Folder is not { } folder)
+        if (Location?.Folder is not { } folder)
         {
             return [];
         }
@@ -419,21 +454,36 @@ public sealed class ContentBrowserModel
         Changed?.Invoke();
     }
 
-    /// <summary>Opens a folder, and ends the search and any open file.</summary>
+    /// <summary>Opens a folder, and ends the search and any open file or prefab.</summary>
     public void Open(ContentFolder folder)
     {
-        if (Folder == folder && _search == "" && OpenFile == null)
+        var to = new ContentLocation.InFolder(folder);
+        if (Location == to && _search == "")
         {
             return;
         }
-        Folder = folder;
-        OpenFile = null;
-        OpenPrefab = null;
-        OpenNode = 0;
+        GoTo(to, clearFilter: false);
+    }
+
+    /// <summary>
+    /// Goes to a location, and ends the search, and with clearFilter the kinds and tags too. Every move that a person or a
+    /// reveal makes comes here.
+    /// </summary>
+    void GoTo(ContentLocation? to, bool clearFilter)
+    {
+        Place(to);
         _search = "";
+        if (clearFilter)
+        {
+            _kinds.Clear();
+            _filterTags.Clear();
+        }
         ItemsMoved();
         ContextChanged?.Invoke();
     }
+
+    // The one writer of Location.
+    void Place(ContentLocation? to) => Location = to;
 
     /// <summary>
     /// Shows what a file makes in place of its folder's assets, or a prefab's entities, whether it is a file or a sub-asset
@@ -445,28 +495,18 @@ public sealed class ContentBrowserModel
         {
             return;
         }
-        var prefab = asset.Kind == AssetKind.Prefab;
-        if (AssetIndex.IsSubasset(asset) && !prefab)
+        if (ContentLocation.Into(asset) is { } to)
         {
-            return;
+            GoTo(to, clearFilter: false);
         }
-        Folder = new ContentFolder(asset.Root, AssetIndex.Parent(asset.Path));
-        OpenFile = AssetIndex.IsSubasset(asset) ? asset.Parent : prefab ? null : guid;
-        OpenPrefab = prefab ? guid : null;
-        OpenNode = 0;
-        _search = "";
-        ItemsMoved();
-        ContextChanged?.Invoke();
     }
 
     /// <summary>Shows what is under an entity of the open prefab, with 0 for its root.</summary>
     public void EnterNode(ulong id)
     {
-        if (OpenPrefab != null)
+        if (Location is ContentLocation.InPrefab prefab)
         {
-            OpenNode = id;
-            _search = "";
-            ItemsMoved();
+            GoTo(prefab with { Node = id }, clearFilter: false);
         }
     }
 
@@ -476,40 +516,24 @@ public sealed class ContentBrowserModel
     /// </summary>
     public void Leave()
     {
-        if (OpenPrefab is { } prefab)
+        switch (Location)
         {
-            if (OpenNode != 0)
-            {
-                var trail = PrefabViews?.Invoke(prefab, OpenNode)?.Trail ?? [];
-                var left = OpenNode;
-                OpenNode = trail.Count >= 2 ? trail[^2].Id : 0;
-                _selection = [PartKey(prefab, left)];
-                _anchor = _cursor = _selection[0];
-                _search = "";
-                ItemsMoved();
-                ContextChanged?.Invoke();
-                return;
-            }
-            OpenPrefab = null;
-            _kinds.Clear();
-            _filterTags.Clear();
-            _search = "";
-            _selection = [prefab];
-            _anchor = _cursor = prefab;
-            ItemsMoved();
-            ContextChanged?.Invoke();
-            return;
-        }
-        if (OpenFile is { } file)
-        {
-            OpenFile = null;
-            _kinds.Clear();
-            _filterTags.Clear();
-            _search = "";
-            _selection = [file];
-            _anchor = _cursor = file;
-            ItemsMoved();
-            ContextChanged?.Invoke();
+        case ContentLocation.InPrefab { Node: not 0 } at:
+            var trail = PrefabViews?.Invoke(at.Prefab, at.Node)?.Trail ?? [];
+            _selection = [PartKey(at.Prefab, at.Node)];
+            _anchor = _cursor = _selection[0];
+            GoTo(at with { Node = trail.Count >= 2 ? trail[^2].Id : 0 }, clearFilter: false);
+            break;
+        case ContentLocation.InPrefab at:
+            _selection = [at.Prefab];
+            _anchor = _cursor = at.Prefab;
+            GoTo(at.File is { } file ? new ContentLocation.InFile(at.Folder, file) : new ContentLocation.InFolder(at.Folder), clearFilter: true);
+            break;
+        case ContentLocation.InFile at:
+            _selection = [at.File];
+            _anchor = _cursor = at.File;
+            GoTo(new ContentLocation.InFolder(at.Folder), clearFilter: true);
+            break;
         }
     }
 
@@ -579,13 +603,7 @@ public sealed class ContentBrowserModel
                 _expandedFolders.Add($"{folder.Root}/{path}");
             }
             _expandedFolders.Add(folder.Root + "/");
-            Folder = folder;
-            OpenFile = null;
-            OpenPrefab = null;
-            OpenNode = 0;
-            _search = "";
-            ItemsMoved();
-            ContextChanged?.Invoke();
+            GoTo(new ContentLocation.InFolder(folder), clearFilter: false);
         }
     }
 
@@ -597,17 +615,9 @@ public sealed class ContentBrowserModel
             _expandedFolders.Add($"{asset.Root}/{path}");
         }
         // A sub-asset shows in its file. What is revealed shows, whatever the filter hid.
-        OpenFile = AssetIndex.IsSubasset(asset) ? asset.Parent : null;
-        OpenPrefab = null;
-        OpenNode = 0;
-        Folder = new ContentFolder(asset.Root, folder);
-        _search = "";
-        _kinds.Clear();
-        _filterTags.Clear();
         _selection = [asset.Guid];
         _anchor = _cursor = asset.Guid;
-        ItemsMoved();
-        ContextChanged?.Invoke();
+        GoTo(ContentLocation.Around(asset), clearFilter: true);
         Revealed?.Invoke(asset);
     }
 
@@ -616,10 +626,7 @@ public sealed class ContentBrowserModel
     {
         if (Folder != folder)
         {
-            Folder = folder;
-            OpenFile = null;
-            OpenPrefab = null;
-            OpenNode = 0;
+            Place(folder is { } f ? new ContentLocation.InFolder(f) : null);
             _tiles = null;
             Changed?.Invoke();
         }
@@ -634,26 +641,11 @@ public sealed class ContentBrowserModel
         {
             _expandedFolders.Add(root.Name + "/");
         }
-        // The open folder can go, with its root or by a delete or a move, and so can the open file.
-        var context = false;
-        if (Folder is not { } folder || _index.FindRoot(folder.Root) == null || (folder.Path != "" && !_index.Folders.Contains(new(folder.Root, folder.Path))))
-        {
-            var fallback = _index.Roots.Count > 0 ? new ContentFolder(_index.Roots[0].Name, "") : null;
-            context = Folder != fallback;
-            Folder = fallback;
-            OpenFile = null;
-            OpenPrefab = null;
-            OpenNode = 0;
-        }
-        if (OpenFile != null && _index.Find(OpenFile) == null)
-        {
-            OpenFile = null;
-        }
-        if (OpenPrefab != null && _index.Find(OpenPrefab) == null)
-        {
-            OpenPrefab = null;
-            OpenNode = 0;
-        }
+        // The open file and prefab can move, and the location follows them; they can go, with their folder, and so can the
+        // open folder, with its root or by a delete or a move.
+        var followed = Follow(Location);
+        var context = followed != Location;
+        Place(followed);
         var existing = _selection.Where(k => k.Contains(':') || _index.Find(k) != null).ToList();
         if (existing.Count != _selection.Count)
         {
@@ -665,6 +657,27 @@ public sealed class ContentBrowserModel
         if (context)
         {
             ContextChanged?.Invoke();
+        }
+    }
+
+    // Where a location is once the index changed: an open file or prefab where it is now, so its folder follows it; what
+    // is left when it went; and the first root's top when the folder went too.
+    ContentLocation? Follow(ContentLocation? at)
+    {
+        switch (at)
+        {
+        case ContentLocation.InPrefab p:
+            if (_index.Find(p.Prefab) is { } prefab && ContentLocation.Into(prefab) is ContentLocation.InPrefab moved)
+            {
+                return moved with { Node = p.Node };
+            }
+            return Follow(p.File is { } file ? new ContentLocation.InFile(p.Folder, file) : new ContentLocation.InFolder(p.Folder));
+        case ContentLocation.InFile f:
+            return _index.Find(f.File) is { } asset && ContentLocation.Into(asset) is { } into ? into : Follow(new ContentLocation.InFolder(f.Folder));
+        case ContentLocation.InFolder { Folder: var folder } when _index.FindRoot(folder.Root) != null && (folder.Path == "" || _index.Folders.Contains(new(folder.Root, folder.Path))):
+            return at;
+        default:
+            return _index.Roots.Count > 0 ? new ContentLocation.InFolder(new ContentFolder(_index.Roots[0].Name, "")) : null;
         }
     }
 

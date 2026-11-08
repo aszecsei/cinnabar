@@ -457,6 +457,47 @@ public sealed class ContentModelTests : IDisposable
     }
 
     [Fact]
+    public void AnOpenFileThatMovesTakesTheFolderAlong()
+    {
+        using var shell = NewShell();
+        var model = shell.Content.Model;
+        model.Enter(Kit);
+        var told = 0;
+        model.ContextChanged += () => told++;
+
+        // The file moves out of the folder that the browser shows it in, with its sub-asset.
+        shell.Assets.Apply(new AssetDelta(
+        [
+            TestAssets.Make(Kit, AssetKind.Model, "art/kit.glb"),
+            TestAssets.Make(Wall, AssetKind.Mesh, "art/kit.glb", parent: Kit, subasset: "Wall"),
+        ], [], [new Folder("game", "art")], []));
+
+        Assert.Equal(new ContentLocation.InFile(new ContentFolder("game", "art"), Kit), model.Location);
+        Assert.Equal(["game", "art", "kit.glb"], model.Crumbs().Select(c => c.Name));
+        Assert.Equal(1, told);
+        // New assets go to the folder that the crumbs show.
+        Assert.Equal(new ContentFolder("game", "art"), shell.Content.Folder);
+        model.Leave();
+        Assert.Equal(new ContentLocation.InFolder(new ContentFolder("game", "art")), model.Location);
+    }
+
+    [Fact]
+    public void TheFolderCrumbLeavesAPrefab()
+    {
+        const string Gate = "20202020202020202020202020202020";
+        using var shell = NewShell();
+        shell.Assets.Apply(new AssetDelta([TestAssets.Make(Gate, AssetKind.Prefab, "lib/gate.prefab")], [], [], []));
+        var model = shell.Content.Model;
+        model.Enter(Gate);
+        Assert.Equal(new ContentLocation.InPrefab(new ContentFolder("game", "lib"), null, Gate, 0), model.Location);
+
+        model.Open(new ContentFolder("game", "lib"));
+
+        Assert.Equal(new ContentLocation.InFolder(new ContentFolder("game", "lib")), model.Location);
+        Assert.Null(model.OpenPrefab);
+    }
+
+    [Fact]
     public void RootsStartExpandedAndStayAsTheUserLeftThem()
     {
         using var shell = NewShell();
