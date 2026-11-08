@@ -17,7 +17,7 @@ How sound gets from a component or a script to the speakers. Read [Hot reload](.
 
 `update` takes `run`, whether the world runs this frame. While it does not, as in the editor's edit mode or while paused, the backend is paused: voices hold their place, and no new one starts.
 
-A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not both, because the device takes one writer. `mygame` chooses with `audio_test_tone`.
+A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not both, because the device takes one writer. The device enforces it: the writer that writes first keeps it, and the other's frames are dropped with one error. `mygame` chooses with `audio_test_tone`.
 
 ## Sources and the listener
 

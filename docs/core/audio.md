@@ -10,7 +10,7 @@ The host owns the whole device, so a code reload does not touch it.
 
 - **The queue** is a ring of about 2.7 seconds (`AUDIO_RING_FRAMES`) on the host's heap, not in the permanent arena, so a soft restart keeps it too.
 - **The device thread** moves frames from the queue to the default output endpoint through WASAPI, in shared mode. The endpoint's event wakes it about every 10 ms. It runs at the Pro Audio multimedia priority.
-- **`audio_write`** copies frames into the queue and returns how many fit. It needs no lock, and it takes one writer at a time. Its first frames start the thread. A game that writes nothing has no thread, no stream and no entry in the Volume Mixer.
+- **`audio_write`** copies frames into the queue and returns how many fit. It needs no lock, and it takes one writer: the game, through `audio_write`, or the audio backend's mixer, through `audio_device_write`. The first write claims the device for its writer, by a compare-and-swap of `Audio_Device.writer`, and starts the thread. A write from the other writer after that is refused: it queues nothing, returns 0, and the first refusal logs an error. A game that writes nothing has no thread, no stream and no entry in the Volume Mixer.
 
 `core.shutdown` stops the thread first, so what is still queued does not play. A soft restart does nothing to the device: what the old game queued plays out, and the stream stays open for the new game.
 

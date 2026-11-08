@@ -40,6 +40,15 @@ Audio_Ring :: struct {
 	write:  Audio_Index,
 }
 
+// Audio_Writer is who writes to the device: the game, through Platform_API.audio_write, or the audio backend's mixer
+// thread, through audio_device_write. The queue takes one producer, so the first write claims the device for its writer
+// for good, and the other writer is refused.
+Audio_Writer :: enum u32 {
+	None,
+	Game,
+	Backend,
+}
+
 @(private)
 Audio_Device :: struct {
 	ring:           Audio_Ring,
@@ -47,8 +56,10 @@ Audio_Device :: struct {
 	starved:        u64,
 	open:           bool,
 	closing:        bool,
-	// The writer's: whether its first write has started the thread.
-	started:        bool,
+	// Who writes, which the first write claims (see audio_claim_writer). The device thread starts with the claim.
+	writer:         Audio_Writer,
+	// Whether a write from the other writer was refused and logged, so that it logs once.
+	refused:        bool,
 	thread:         ^thread.Thread,
 	// The host's. A write can come from the game, whose context holds procedures in its DLL.
 	thread_context: runtime.Context,
@@ -121,7 +132,7 @@ audio_init :: proc(device: ^Audio_Device) {
 
 @(private)
 audio_shutdown :: proc(device: ^Audio_Device) {
-	if device.started {
+	if sync.atomic_load(&device.writer) != .None {
 		sync.atomic_store_explicit(&device.closing, true, .Release)
 		thread.join(device.thread)
 		thread.destroy(device.thread)
@@ -130,20 +141,47 @@ audio_shutdown :: proc(device: ^Audio_Device) {
 	delete(device.ring.frames, runtime.heap_allocator())
 }
 
-// audio_write is Platform_API's. The first frames start the device thread, so a game without sound opens no stream.
+// audio_claim_writer claims the device for who, once: ok is true for the writer that holds it, and first for the write
+// that claimed it, which starts the device thread. The other writer is refused, and the first refusal logs an error.
 @(private)
-audio_write :: proc(frames: []Audio_Frame) -> int {
-	device := &platform.audio
+audio_claim_writer :: proc(device: ^Audio_Device, who: Audio_Writer) -> (ok: bool, first: bool) {
+	assert(who != .None)
+	writer, claimed := sync.atomic_compare_exchange_strong(&device.writer, Audio_Writer.None, who)
+	if claimed {
+		return true, true
+	}
+	if writer == who {
+		return true, false
+	}
+	if !sync.atomic_exchange(&device.refused, true) {
+		log.errorf("core: the audio device takes frames from one writer, the %v, so the %v's are dropped", writer, who)
+	}
+	return false, false
+}
+
+// audio_write_as queues frames from who, when the device is its. The first frames start the device thread, so a game
+// without sound opens no stream.
+@(private)
+audio_write_as :: proc(device: ^Audio_Device, who: Audio_Writer, frames: []Audio_Frame) -> int {
 	if len(frames) == 0 {
 		return 0
 	}
+	ok, first := audio_claim_writer(device, who)
+	if !ok {
+		return 0
+	}
 	count := audio_ring_write(&device.ring, frames)
-	if !device.started {
-		device.started = true
+	if first {
 		context = device.thread_context
 		device.thread = thread.create_and_start_with_data(device, _audio_thread, device.thread_context, .High, name = "audio")
 	}
 	return count
+}
+
+// audio_write is Platform_API's, the game's writer.
+@(private)
+audio_write :: proc(frames: []Audio_Frame) -> int {
+	return audio_write_as(&platform.audio, .Game, frames)
 }
 
 // audio_device_write and audio_device_status are the device as an audio backend sees it (see
@@ -151,7 +189,7 @@ audio_write :: proc(frames: []Audio_Frame) -> int {
 @(private)
 audio_device_write :: proc "c" (frames: [^]audio.Device_Frame, count: i32) -> i32 {
 	context = platform.audio.thread_context
-	return i32(audio_write(frames[:count]))
+	return i32(audio_write_as(&platform.audio, .Backend, frames[:count]))
 }
 
 @(private)

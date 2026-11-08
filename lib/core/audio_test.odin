@@ -1,5 +1,6 @@
 package core
 
+import "base:runtime"
 import "core:slice"
 import "core:testing"
 import "core:thread"
@@ -136,4 +137,52 @@ audio_device_skip_counts_what_it_drains :: proc(t: ^testing.T) {
 	audio_device_skip(&device, 100)
 	testing.expect_value(t, device.played, 3)
 	testing.expect_value(t, audio_ring_queued(&device.ring), 0)
+}
+
+@(test)
+audio_device_takes_frames_from_the_writer_that_wrote_first :: proc(t: ^testing.T) {
+	errors := 0
+	context.logger = {
+		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, options: runtime.Logger_Options, location := #caller_location) {
+			(^int)(data)^ += 1
+		},
+		data = &errors,
+		lowest_level = .Error,
+	}
+	device: Audio_Device
+	// The game writes first and claims the device; its first write starts the thread, and its later ones do not.
+	ok, first := audio_claim_writer(&device, .Game)
+	testing.expect(t, ok && first)
+	ok, first = audio_claim_writer(&device, .Game)
+	testing.expect(t, ok && !first)
+	// The mixer's writes are refused, and the first refusal logs an error, once.
+	ok, first = audio_claim_writer(&device, .Backend)
+	testing.expect(t, !ok && !first)
+	_, _ = audio_claim_writer(&device, .Backend)
+	testing.expect_value(t, errors, 1)
+	testing.expect_value(t, device.writer, Audio_Writer.Game)
+
+	// Two writers that race for a new device: one claims it, and only one write starts the thread.
+	for _ in 0 ..< 64 {
+		race: Audio_Device
+		Racer :: struct {
+			device: ^Audio_Device,
+			who:    Audio_Writer,
+			first:  bool,
+		}
+		racers := [2]Racer{{&race, .Game, false}, {&race, .Backend, false}}
+		threads: [2]^thread.Thread
+		for &r, i in racers {
+			threads[i] = thread.create_and_start_with_data(&r, proc(data: rawptr) {
+				r := (^Racer)(data)
+				context.logger = {}
+				_, r.first = audio_claim_writer(r.device, r.who)
+			})
+		}
+		for th in threads {
+			thread.join(th)
+			thread.destroy(th)
+		}
+		testing.expect(t, racers[0].first != racers[1].first, "both writers or neither claimed the device")
+	}
 }
