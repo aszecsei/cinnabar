@@ -414,11 +414,16 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 		return nil
 	}
 	params := GI_PROBE_PARAMS[settings.level]
-	// The uploads come first: once the levels move, the reset must run.
+	// The uploads and hit shading's turn come first: once the levels move, the reset must run, and the probes' hits must
+	// be shaded.
 	jobs_upload, jobs_ok := platform.gpu_upload(int(params.budget) * 4, 16)
 	lights_upload, lights_ok := platform.gpu_upload(GI_MAX_PROBE_LIGHTS * 4, 16)
 	grid_upload, grid_ok := platform.gpu_upload(size_of(Probe_Grid), 16)
 	if !jobs_ok || !lights_ok || !grid_ok {
+		return nil
+	}
+	reservation, reserved := reserve_hit_shading(f, params.budget * params.rays).?
+	if !reserved {
 		return nil
 	}
 	ensure_probe_storage(r, params, int(params.budget * params.rays))
@@ -493,9 +498,8 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	pass = add_compute_pass(g, "gi probe trace", run_probe_pass, step(f, pf, .Trace, ray_count), queue = .Compute)
 	read_accel(g, pass, ray_scene_accel(f))
 	write(g, pass, pf.hits)
-	// hit_shading_ready said that it can.
-	add_hit_shading(f, {hits = pf.hits, surfaces = pf.surfaces, count = ray_count}, .Compute)
-	add_hit_light_passes(f, &pf.hit_light, "gi probe", pf.hits, pf.surfaces, pf.rays, ray_count)
+	shaded := add_hit_shading(f, reservation, {hits = pf.hits, surfaces = pf.surfaces, count = ray_count}, .Compute)
+	add_hit_light_passes(f, &pf.hit_light, "gi probe", shaded, pf.rays)
 	pass = add_compute_pass(g, "gi probe update", run_probe_pass, step(f, pf, .Update, ray_count), queue = .Compute)
 	read(g, pass, pf.rays)
 	write(g, pass, pf.radiance)
@@ -507,9 +511,10 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 // add_hit_light_passes lights a batch of hits after its hit shading, into a float4 for each ray in rays: the hits'
 // light (gi_probe_light.hlsl), then, with a lit scene of last frame, the light there of the hits that the screen shows
 // (gi_probe_screen.hlsl), in a pass of its own. The world probes' rays, the split cascades' and the traced reflections'
-// take their light so.
+// take their light so. It takes the batch that add_hit_shading shaded this frame, so it never reads old surfaces.
 @(private)
-add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string, hits, surfaces, rays: Buffer, ray_count: u32) {
+add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string, shaded: Hit_Shaded, rays: Buffer) {
+	hits, surfaces, ray_count := shaded.hits, shaded.surfaces, shaded.count
 	g := f.graph
 	allocator := f.renderer.platform.frame_allocator
 	light_name := strings.concatenate({name, " light"}, allocator)

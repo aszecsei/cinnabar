@@ -156,6 +156,22 @@ Hit_Table :: struct {
 	used:      [MAX_HIT_BINS]bool,
 }
 
+// Hit_Reservation is a batch's turn at hit shading, which reserve_hit_shading takes and add_hit_shading spends: the
+// batch's scratch, for up to count rays, and the uploads of its binning's constants.
+Hit_Reservation :: struct {
+	scratch:   ^Hit_Scratch,
+	count:     u32,
+	constants: [len(HIT_PHASES)]gpu.Upload,
+}
+
+// Hit_Shaded is a batch whose hits add_hit_shading shaded this frame: surfaces holds a Hit_Surface for each of count
+// rays that hit. add_hit_light_passes takes it, so a hit's light never reads surfaces that this frame did not write.
+Hit_Shaded :: struct {
+	hits:     Buffer,
+	surfaces: Buffer,
+	count:    u32,
+}
+
 @(private = "file")
 Hit_Shading :: struct {
 	frame:     ^Frame,
@@ -354,20 +370,50 @@ hit_shading_ready :: proc(f: ^Frame) -> bool {
 	return pipeline_ready(r.platform, &r.ray_scene.bin_pipeline) && pipeline_ready(r.platform, &r.ray_scene.fallback)
 }
 
-// add_hit_shading evaluates the materials at a client's hits, after the client's pass that writes them: it bins the
-// hits by their materials, then dispatches each bin's material on its rays, indirectly by the bin's count. A client's
-// name, when it gives one, starts its passes' names, so the profiler tells its batch apart. It is false, and adds
-// nothing, when hit_shading_ready is not, or the batch has no rays or more than MAX_HIT_RAYS.
-add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics, name := "") -> bool {
+// reserve_hit_shading takes a batch's turn at hit shading for up to count rays: its scratch, sized for count, and the
+// uploads of its constants. A client reserves before it changes anything that its passes must then run for, so that a
+// frame that cannot shade its hits changes nothing. It is nil, and takes nothing, when hit_shading_ready is not, count
+// is 0 or more than MAX_HIT_RAYS, or an upload fails.
+reserve_hit_shading :: proc(f: ^Frame, count: u32) -> Maybe(Hit_Reservation) {
 	r := f.renderer
 	rf := f.ray_scene
+	if !hit_shading_ready(f) || count == 0 || count > MAX_HIT_RAYS {
+		return nil
+	}
+	reservation := Hit_Reservation {
+		count = count,
+	}
+	for &upload in reservation.constants {
+		ok: bool
+		upload, ok = r.platform.gpu_upload(size_of(Hit_Bin_Constants), gpu.PASS_CONSTANTS_ALIGN)
+		if !ok {
+			return nil
+		}
+	}
+	reservation.scratch = ensure_hit_scratch(r, rf.batches, int(count))
+	rf.batches += 1
+	return reservation
+}
+
+// add_hit_shading evaluates the materials at a client's hits, after the client's pass that writes them: it bins the
+// hits by their materials, then dispatches each bin's material on its rays, indirectly by the bin's count. A client's
+// name, when it gives one, starts its passes' names, so the profiler tells its batch apart. It spends a reservation
+// from reserve_hit_shading, so it cannot fail: the batch is shaded, and add_hit_light_passes takes what it gives. A
+// batch of no rays adds no pass.
+add_hit_shading :: proc(f: ^Frame, reservation: Hit_Reservation, batch: Hit_Batch, queue := gpu.Queue.Graphics, name := "") -> Hit_Shaded {
+	r := f.renderer
 	sf := f.scene_frame
 	platform := r.platform
-	if !hit_shading_ready(f) || batch.count == 0 || batch.count > MAX_HIT_RAYS {
-		return false
+	assert(batch.count <= reservation.count, "a batch has more rays than its reservation")
+	shaded := Hit_Shaded {
+		hits     = batch.hits,
+		surfaces = batch.surfaces,
+		count    = batch.count,
 	}
-	scratch := ensure_hit_scratch(r, rf.batches, int(batch.count))
-	rf.batches += 1
+	if batch.count == 0 {
+		return shaded
+	}
+	scratch := reservation.scratch
 	g := f.graph
 	data := new(Hit_Shading, platform.frame_allocator)
 	data^ = {
@@ -389,13 +435,9 @@ add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics
 		hit_submeshes_offset = sf.hit_submeshes.offset,
 		instance_count       = u32(sf.hit_instance_count),
 	}
-	for &upload, phase in data.constants {
+	data.constants = reservation.constants
+	for upload, phase in data.constants {
 		constants.phase = u32(phase)
-		ok: bool
-		upload, ok = platform.gpu_upload(size_of(Hit_Bin_Constants), gpu.PASS_CONSTANTS_ALIGN)
-		if !ok {
-			return false
-		}
 		(^Hit_Bin_Constants)(raw_data(upload.data))^ = constants
 	}
 	pass_name :: proc(client, name: string, allocator := context.allocator) -> string {
@@ -425,7 +467,7 @@ add_hit_shading :: proc(f: ^Frame, batch: Hit_Batch, queue := gpu.Queue.Graphics
 	read(g, p, sf.instances)
 	declare_skinned_reads(f, p)
 	write(g, p, batch.surfaces)
-	return true
+	return shaded
 }
 
 // ensure_hit_scratch grows a batch's buffers to hold count rays.

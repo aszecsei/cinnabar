@@ -603,6 +603,11 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	if !ok {
 		return false
 	}
+	// Hit shading's turn comes before anything moves on, so the frame's hits are shaded once the cascades run.
+	reservation, reserved := reserve_hit_shading(f, ray_count).?
+	if !reserved {
+		return false
+	}
 	ensure_split_storage(r, params, int(ray_count))
 	s := &r.gi.split
 	g := f.graph
@@ -703,9 +708,8 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	read(g, p, f.normals)
 	read_accel(g, p, ray_scene_accel(f))
 	write(g, p, sf.hits)
-	// hit_shading_ready said that it can.
-	add_hit_shading(f, {hits = sf.hits, surfaces = sf.surfaces, count = ray_count}, .Compute)
-	add_hit_light_passes(f, &pf.hit_light, "gi split", sf.hits, sf.surfaces, sf.rays, ray_count)
+	shaded := add_hit_shading(f, reservation, {hits = sf.hits, surfaces = sf.surfaces, count = ray_count}, .Compute)
+	add_hit_light_passes(f, &pf.hit_light, "gi split", shaded, sf.rays)
 	p = add_compute_pass(g, "gi split deposit", run_split_pass, step(f, sf, .Deposit), queue = .Compute)
 	read(g, p, f.depth)
 	read(g, p, f.normals)
