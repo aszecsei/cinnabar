@@ -4,14 +4,18 @@ import "base:runtime"
 import "core:math"
 import "core:math/linalg"
 import "core:mem/virtual"
+import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:testing"
+import "core:time"
 
 import core "cinnabar:core"
 import "cinnabar:core/gpu"
 import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
+import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/ecs"
 
 // cube_direction_of matches cube_direction in sky_directions.hlsli: the direction of a point of a cube's face, with x
@@ -141,6 +145,55 @@ the_slots_go_to_the_highest_priority_then_the_nearest :: proc(t: ^testing.T) {
 	testing.expect_value(t, probe_slot_of(rp, far_high.entity), -1)
 }
 
+// frame runs a frame of the captures' turns, whose inputs are complete or not: it gives the probes their slots, plans
+// the capture, and records the faces as drawn. It gives the probe that captured.
+@(private = "file")
+frame :: proc(
+	rp: ^Reflection_Probes,
+	candidates: []Reflection_Probe_Candidate,
+	faces: u32,
+	complete := true,
+) -> (
+	e: ecs.Entity,
+	first, count: u32,
+	ok: bool,
+) {
+	rp.frame += 1
+	cs := make([]Reflection_Probe_Candidate, len(candidates), context.temp_allocator)
+	copy(cs, candidates)
+	rank_reflection_probes(cs)
+	assign_reflection_probe_slots(rp, cs, int(rp.params.probes))
+	slot: int
+	slot, first, count, ok = plan_reflection_probe_capture(rp, faces, complete)
+	if ok {
+		e = rp.slots[slot].entity
+		advance_reflection_probe_capture(rp, count, complete)
+	}
+	return
+}
+
+// cube_of is a probe's cube, nil without a slot or a capture.
+@(private = "file")
+cube_of :: proc(rp: ^Reflection_Probes, e: ecs.Entity) -> Maybe(Reflection_Probe_Cube) {
+	slot := probe_slot_of(rp, e)
+	return slot >= 0 ? rp.slots[slot].cube : nil
+}
+
+@(private = "file")
+cubes_are_apart :: proc(t: ^testing.T, rp: ^Reflection_Probes) {
+	for &a, i in rp.slots[:rp.params.probes] {
+		x, has_x := a.cube.?
+		if !a.used || !has_x {
+			continue
+		}
+		testing.expect(t, x.index != rp.spare, "a slot holds the spare cube")
+		for &b in rp.slots[i + 1:rp.params.probes] {
+			y, has_y := b.cube.?
+			testing.expect(t, !b.used || !has_y || x.index != y.index, "two slots hold one cube")
+		}
+	}
+}
+
 // The captures take turns by a budget of faces a frame: the On_Load probes first, the nearest first, then the others
 // that have no cube, then an On_Change probe that moved, and the Realtime ones in turn. A finished capture takes the
 // spare cube, and no two slots ever hold the same cube.
@@ -156,40 +209,6 @@ the_captures_take_turns_within_the_budget :: proc(t: ^testing.T) {
 	load_near := probe_candidate(1, 0, 5, .On_Load)
 	change := probe_candidate(2, 0, 1, .On_Change)
 	realtime := probe_candidate(3, 0, 2, .Realtime)
-	frame :: proc(
-		rp: ^Reflection_Probes,
-		candidates: []Reflection_Probe_Candidate,
-		faces: u32,
-	) -> (
-		e: ecs.Entity,
-		first, count: u32,
-		ok: bool,
-	) {
-		rp.frame += 1
-		cs := make([]Reflection_Probe_Candidate, len(candidates), context.temp_allocator)
-		copy(cs, candidates)
-		rank_reflection_probes(cs)
-		assign_reflection_probe_slots(rp, cs, int(rp.params.probes))
-		slot: int
-		slot, first, count, ok = plan_reflection_probe_capture(rp, faces)
-		if ok {
-			e = rp.slots[slot].entity
-			advance_reflection_probe_capture(rp, count)
-		}
-		return
-	}
-	cubes_are_apart :: proc(t: ^testing.T, rp: ^Reflection_Probes) {
-		for &a, i in rp.slots[:rp.params.probes] {
-			testing.expect(t, !a.used || a.cube != rp.spare, "a slot holds the spare cube")
-			for &b in rp.slots[i + 1:rp.params.probes] {
-				testing.expect(
-					t,
-					!a.used || !b.used || a.cube < 0 || a.cube != b.cube,
-					"two slots hold one cube",
-				)
-			}
-		}
-	}
 	all := []Reflection_Probe_Candidate{load_far, load_near, change, realtime}
 	order := []ecs.Entity{load_near.entity, load_far.entity, change.entity, realtime.entity}
 	for want in order {
@@ -201,7 +220,7 @@ the_captures_take_turns_within_the_budget :: proc(t: ^testing.T) {
 			testing.expect_value(t, count, faces)
 		}
 		cubes_are_apart(t, rp)
-		testing.expect(t, rp.slots[probe_slot_of(rp, want)].cube >= 0)
+		testing.expect(t, cube_of(rp, want) != nil)
 	}
 	// Every probe has a cube: only the Realtime one captures again, over and over.
 	for _ in 0 ..< 6 {
@@ -224,14 +243,14 @@ the_captures_take_turns_within_the_budget :: proc(t: ^testing.T) {
 	for _ in 0 ..< 2 {
 		frame(rp, moved, faces)
 	}
-	testing.expect_value(t, rp.slots[probe_slot_of(rp, change.entity)].captured, moved[2].key)
+	testing.expect_value(t, (cube_of(rp, change.entity).?).key, moved[2].key)
 	// Back to the Realtime probe, which has waited longest.
 	e, _, _, _ = frame(rp, moved, faces)
 	testing.expect_value(t, e, realtime.entity)
 	cubes_are_apart(t, rp)
 
 	// A probe that is gone mid-capture ends the capture, and its cube frees for another.
-	rp.capture = {}
+	rp.capture = nil
 	without := []Reflection_Probe_Candidate{moved[0], moved[1], moved[2]}
 	frame(rp, without, faces)
 	testing.expect_value(t, probe_slot_of(rp, realtime.entity), -1)
@@ -246,7 +265,88 @@ the_captures_take_turns_within_the_budget :: proc(t: ^testing.T) {
 	)
 	testing.expect_value(t, e, fresh.entity)
 	testing.expect(t, first == 0 && count == 6)
-	testing.expect(t, rp.slots[probe_slot_of(rp, fresh.entity)].cube >= 0)
+	testing.expect(t, cube_of(rp, fresh.entity) != nil)
+	cubes_are_apart(t, rp)
+}
+
+// A capture whose inputs were not complete is provisional. Its probe does not capture again while the frames' inputs
+// stay incomplete; once a frame's are complete, it captures again after the probes with no cube and before an On_Change
+// probe whose key changed. A capture that one incomplete frame drew a share of is provisional too.
+@(test)
+a_provisional_capture_takes_its_turn_once_the_inputs_are_complete :: proc(t: ^testing.T) {
+	rp := new(Reflection_Probes)
+	defer free(rp)
+	rp.params = REFLECTION_PARAMS[.Probes][.Medium]
+	rp.params.probes = 4
+	rp.spare = 4
+	faces := u32(2)
+	near := probe_candidate(0, 0, 1, .On_Load)
+	far := probe_candidate(1, 0, 10, .On_Load)
+	change := probe_candidate(2, 0, 0.5, .On_Change)
+	captures :: proc(
+		t: ^testing.T,
+		rp: ^Reflection_Probes,
+		candidates: []Reflection_Probe_Candidate,
+		faces: u32,
+		want: ecs.Entity,
+		complete: bool,
+		loc := #caller_location,
+	) {
+		for k in u32(0) ..< 3 {
+			e, first, _, ok := frame(rp, candidates, faces, complete)
+			testing.expect(t, ok, loc = loc)
+			testing.expect_value(t, e, want, loc = loc)
+			testing.expect_value(t, first, k * faces, loc = loc)
+		}
+		cube, captured := cube_of(rp, want).?
+		testing.expect(t, captured, loc = loc)
+		testing.expect_value(t, cube.complete, complete, loc = loc)
+	}
+	idle :: proc(
+		t: ^testing.T,
+		rp: ^Reflection_Probes,
+		candidates: []Reflection_Probe_Candidate,
+		faces: u32,
+		complete: bool,
+		loc := #caller_location,
+	) {
+		e, _, _, ok := frame(rp, candidates, faces, complete)
+		testing.expectf(t, !ok, "%v captured", e, loc = loc)
+	}
+	all := []Reflection_Probe_Candidate{near, far, change}
+
+	// While the level streams in, the On_Load probes capture, and their captures are provisional.
+	captures(t, rp, all, faces, near.entity, false)
+	captures(t, rp, all, faces, far.entity, false)
+	// Once the inputs are complete, the probe with no cube still comes first.
+	captures(t, rp, all, faces, change.entity, true)
+	// While the inputs are not complete, the provisional probes wait.
+	for _ in 0 ..< 3 {
+		idle(t, rp, all, faces, false)
+	}
+
+	// The On_Change probe moves. With complete inputs, the provisional probes come first, the nearest first, then the
+	// probe that moved.
+	moved := []Reflection_Probe_Candidate{near, far, change}
+	moved[2].key.position = ecs.position_offset({}, {0, 2, 0})
+	captures(t, rp, moved, faces, near.entity, true)
+	captures(t, rp, moved, faces, far.entity, true)
+	captures(t, rp, moved, faces, change.entity, true)
+	// Every capture is complete, so none captures again: a probe whose inputs are complete captures once.
+	idle(t, rp, moved, faces, true)
+	idle(t, rp, moved, faces, false)
+	cubes_are_apart(t, rp)
+
+	// One incomplete frame of three makes the capture provisional, and it waits for a complete frame to capture again.
+	moved[2].key.position = ecs.position_offset({}, {0, 3, 0})
+	for complete in ([]bool{true, false, true}) {
+		e, _, _, _ := frame(rp, moved, faces, complete)
+		testing.expect_value(t, e, change.entity)
+	}
+	testing.expect(t, !(cube_of(rp, change.entity).?).complete)
+	idle(t, rp, moved, faces, false)
+	captures(t, rp, moved, faces, change.entity, true)
+	idle(t, rp, moved, faces, true)
 	cubes_are_apart(t, rp)
 }
 
@@ -269,13 +369,17 @@ the_records_are_in_priority_order :: proc(t: ^testing.T) {
 		rp.slots[i] = {
 			used = true,
 			entity = ecs.Entity(i + 1),
-			cube = cube,
 			key = {
 				position = ecs.position_offset({}, {f32(i), 0, 0}),
 				rotation = 1,
 				scale = scale,
 				probe = {priority = priority, extent = extent},
 			},
+		}
+		if cube >= 0 {
+			rp.slots[i].cube = Reflection_Probe_Cube {
+				index = cube,
+			}
 		}
 	}
 	slot(rp, 0, 3, 0, {4, 4, 4})
@@ -386,6 +490,45 @@ Probe_Run :: struct {
 	frame:     Reflection_Probe_Frame,
 }
 
+// The platform of a test's probe frames, over the null backend, which streams assets too.
+@(private = "file")
+probe_platform :: proc(arena: ^virtual.Arena) -> core.Platform_API {
+	return {
+		frame_allocator = virtual.arena_allocator(arena),
+		heap_allocator = runtime.heap_allocator(),
+		asset_allocator = runtime.heap_allocator(),
+		file_read = core.file_read,
+		file_modified = core.file_modified,
+		jobs_run = jobs.run,
+		jobs_wait = jobs.wait,
+		memory_reserve = proc(size: int) -> rawptr {
+			data, err := virtual.reserve(uint(size))
+			return err == nil ? raw_data(data) : nil
+		},
+		memory_commit = proc(ptr: rawptr, size: int) -> bool {
+			return virtual.commit(ptr, uint(size)) == nil
+		},
+		memory_release = proc(ptr: rawptr, size: int) {
+			virtual.release(ptr, uint(size))
+		},
+		gpu_frame_target = null.frame_target,
+		gpu_submit = null.submit,
+		gpu_upload = null.upload,
+		gpu_create_texture = null.create_texture,
+		gpu_create_texture_view = null.create_texture_view,
+		gpu_destroy_texture = null.destroy_texture,
+		gpu_create_buffer = null.create_buffer,
+		gpu_destroy_buffer = null.destroy_buffer,
+		gpu_stream_buffer = null.stream_buffer,
+		gpu_stream_texture = null.stream_texture,
+		gpu_transfer_done = null.transfer_done,
+		gpu_create_sampler = null.create_sampler,
+		gpu_destroy_sampler = null.destroy_sampler,
+		gpu_create_compute_pipeline = null.create_compute_pipeline,
+		gpu_destroy_pipeline = null.destroy_pipeline,
+	}
+}
+
 @(private = "file")
 run_probe_frame :: proc(
 	t: ^testing.T,
@@ -393,6 +536,7 @@ run_probe_frame :: proc(
 	cache: ^Texture_Cache,
 	w: ^ecs.World,
 	settings: Reflection_Settings,
+	scene: []gpu.Buffer = nil,
 ) -> (
 	run: Probe_Run,
 ) {
@@ -434,6 +578,16 @@ run_probe_frame :: proc(
 	f.shadows.planes = make([dynamic][6][4]f32, platform.frame_allocator)
 	f.shadows.eyes = make([dynamic][4]f32, platform.frame_allocator)
 	f.shadows.viewports = make([dynamic][4]u32, platform.frame_allocator)
+	// With a scene, the frame has an item to draw, though its views draw none of it. scene is its draws' five buffers:
+	// the arguments, the mesh arguments, the counts, the draws and the instances.
+	if scene != nil {
+		sf := new(Scene_Frame, platform.frame_allocator)
+		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
+		sf.arguments, sf.mesh_arguments = import_buffer(&g, scene[0]), import_buffer(&g, scene[1])
+		sf.counts, sf.draws, sf.instances =
+			import_buffer(&g, scene[2]), import_buffer(&g, scene[3]), import_buffer(&g, scene[4])
+		f.scene_frame = sf
+	}
 	begin_reflection_probes(f, w, nil, settings, DEFAULT_AMBIENT)
 	if pf := f.reflection_probes; pf != nil && pf.capturing {
 		add_reflection_probe_shadow(f, f.shadows, 0, max_shadow_views(f.shadows.params))
@@ -478,34 +632,7 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	defer jobs.shutdown()
 	testing.expect(t, null.init(nil, {64, 32}))
 	defer null.shutdown()
-	platform := core.Platform_API {
-		frame_allocator = virtual.arena_allocator(&arena),
-		heap_allocator = runtime.heap_allocator(),
-		jobs_run = jobs.run,
-		jobs_wait = jobs.wait,
-		memory_reserve = proc(size: int) -> rawptr {
-			data, err := virtual.reserve(uint(size))
-			return err == nil ? raw_data(data) : nil
-		},
-		memory_commit = proc(ptr: rawptr, size: int) -> bool {
-			return virtual.commit(ptr, uint(size)) == nil
-		},
-		memory_release = proc(ptr: rawptr, size: int) {
-			virtual.release(ptr, uint(size))
-		},
-		gpu_frame_target = null.frame_target,
-		gpu_submit = null.submit,
-		gpu_upload = null.upload,
-		gpu_create_texture = null.create_texture,
-		gpu_create_texture_view = null.create_texture_view,
-		gpu_destroy_texture = null.destroy_texture,
-		gpu_create_buffer = null.create_buffer,
-		gpu_destroy_buffer = null.destroy_buffer,
-		gpu_create_sampler = null.create_sampler,
-		gpu_destroy_sampler = null.destroy_sampler,
-		gpu_create_compute_pipeline = null.create_compute_pipeline,
-		gpu_destroy_pipeline = null.destroy_pipeline,
-	}
+	platform := probe_platform(&arena)
 	w := new(ecs.World)
 	defer free(w)
 	testing.expect(t, ecs.init(w, &platform))
@@ -562,7 +689,7 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 		testing.expect_value(t, run.frame.shadow_view, 0)
 		testing.expect_value(t, len(run.frame.records), 0)
 	}
-	testing.expect(t, rp.slots[0].cube >= 0)
+	testing.expect(t, rp.slots[0].cube != nil)
 
 	// The probe has its cube: its record goes out, and On_Load never captures again.
 	run := run_probe_frame(t, r, &cache, w, medium)
@@ -593,6 +720,109 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	run = run_probe_frame(t, r, &cache, w, {technique = .Off, off = true})
 	testing.expect(t, !rp.made && rp.cubes.texture == {})
 	testing.expect_value(t, run.stats, Reflection_Probe_Stats{})
+}
+
+// An On_Load probe that captures while a mesh streams keeps a provisional capture. It does not capture again while
+// the mesh streams, captures again once the mesh is resident, and then never again.
+@(test)
+an_on_load_probe_captures_again_once_the_level_streams_in :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := probe_platform(&arena)
+	dir, err := os.make_directory_temp("", "reflection_probes_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	guid := format.guid_parse("5f0a7c1e9b2d4e6f8a1b3c5d7e9f0a2b") or_else {}
+	write_mesh(t, dir, guid, 3, time.now())
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+
+	w := new(ecs.World)
+	defer free(w)
+	testing.expect(t, ecs.init(w, &platform))
+	defer ecs.destroy(w)
+	ecs.register_engine_components(&w.registry)
+	register_components(&w.registry)
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	residency_init(&r.residency, &platform, &assets)
+	defer residency_destroy(&r.residency)
+	reflection_probes_init(&r.reflection_probes, r, w)
+	defer reflection_probes_destroy(&r.reflection_probes, r)
+	rp := &r.reflection_probes
+	for p in ([]^Shader_Pipeline{&rp.face, &rp.downsample, &r.sky.cube.prefilter, &r.lights.pipeline}) {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test"})
+	}
+	defer destroy_shader_pipeline(&r.sky.cube.prefilter, &platform)
+	defer destroy_shader_pipeline(&r.lights.pipeline, &platform)
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+	scene: [5]gpu.Buffer
+	for &b in scene {
+		b = platform.gpu_create_buffer({size = 256, usage = {.Storage, .Indirect}, label = "scene"}, nil)
+	}
+	defer for b in scene {
+		platform.gpu_destroy_buffer(b)
+	}
+
+	probe := ecs.spawn(w)
+	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1})
+	ecs.add(w, probe, Reflection_Probe{extent = {3, 1.5, 4}})
+	medium := Reflection_Settings {
+		technique = .Probes,
+		level     = .Medium,
+	}
+	// Medium captures two faces a frame, so three frames capture the probe.
+	capture :: proc(
+		t: ^testing.T,
+		r: ^Renderer,
+		cache: ^Texture_Cache,
+		w: ^ecs.World,
+		settings: Reflection_Settings,
+		scene: []gpu.Buffer,
+		loc := #caller_location,
+	) {
+		for k in u32(0) ..< 3 {
+			run := run_probe_frame(t, r, cache, w, settings, scene)
+			testing.expect(t, run.frame.capturing, loc = loc)
+			testing.expect_value(t, run.frame.first_face, 2 * k, loc = loc)
+		}
+	}
+
+	// The level's mesh streams, so the capture is provisional.
+	_, ready := resident_mesh(&r.residency, guid)
+	testing.expect(t, !ready)
+	testing.expect_value(t, resident_streaming(&r.residency), 1)
+	capture(t, r, &cache, w, medium, scene[:])
+	cube, captured := rp.slots[0].cube.?
+	testing.expect(t, captured && !cube.complete)
+	// The frames look its cube up, and it waits while the mesh streams.
+	for _ in 0 ..< 2 {
+		run := run_probe_frame(t, r, &cache, w, medium, scene[:])
+		testing.expect(t, !run.frame.capturing)
+		testing.expect_value(t, len(run.frame.records), 1)
+	}
+
+	// The mesh lands: the probe captures again, and its capture is complete.
+	residency_update(&r.residency)
+	_, ready = resident_mesh(&r.residency, guid)
+	testing.expect(t, ready)
+	testing.expect_value(t, resident_streaming(&r.residency), 0)
+	capture(t, r, &cache, w, medium, scene[:])
+	cube, captured = rp.slots[0].cube.?
+	testing.expect(t, captured && cube.complete)
+	for _ in 0 ..< 2 {
+		run := run_probe_frame(t, r, &cache, w, medium, scene[:])
+		testing.expect(t, !run.frame.capturing)
+	}
 }
 
 // A capture face's constants: its own projection, clusters and lights, a linear color without screen-space light, fog

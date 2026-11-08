@@ -80,29 +80,37 @@ Reflection_Probe_Candidate :: struct {
 	distance2: f32,
 }
 
-// Reflection_Probe_Slot is a probe that holds a slot: its key this frame and at its last capture's start, its cube of
-// the array, -1 before its first capture, the frame of that capture, the frame it was last seen, and its distance and
-// rank this frame.
+// Reflection_Probe_Slot is a probe that holds a slot: its key this frame, its last finished capture, nil before its
+// first, the frame it was last seen, and its distance and rank this frame.
 Reflection_Probe_Slot :: struct {
-	used:           bool,
-	entity:         ecs.Entity,
-	key:            Reflection_Probe_Key,
-	captured:       Reflection_Probe_Key,
-	cube:           i32,
-	captured_frame: u64,
-	seen:           u64,
-	distance2:      f32,
-	rank:           int,
+	used:      bool,
+	entity:    ecs.Entity,
+	key:       Reflection_Probe_Key,
+	cube:      Maybe(Reflection_Probe_Cube),
+	seen:      u64,
+	distance2: f32,
+	rank:      int,
 }
 
-// Reflection_Probe_Capture is the capture in flight: its slot and entity, the key that it captures, and its faces
-// drawn so far.
+// Reflection_Probe_Cube is a slot's last finished capture: its cube of the array, the key at that capture's start, the
+// frame that it finished, and whether every one of its faces drew complete inputs (see
+// reflection_probe_inputs_complete). A capture that is not complete is provisional, and captures again once a frame's
+// inputs are complete.
+Reflection_Probe_Cube :: struct {
+	index:    i32,
+	key:      Reflection_Probe_Key,
+	frame:    u64,
+	complete: bool,
+}
+
+// Reflection_Probe_Capture is the capture in flight: its slot and entity, the key that it captures, its faces drawn so
+// far, and of those, the faces that frames with complete inputs drew.
 Reflection_Probe_Capture :: struct {
-	active: bool,
-	slot:   int,
-	entity: ecs.Entity,
-	key:    Reflection_Probe_Key,
-	faces:  u32,
+	slot:           int,
+	entity:         ecs.Entity,
+	key:            Reflection_Probe_Key,
+	faces:          u32,
+	complete_faces: u32,
 }
 
 // Reflection_Probe_Stats are the probes' counts, which the editor's Resource Monitor shows: the probes in the frame, the
@@ -138,7 +146,8 @@ Reflection_Probes :: struct {
 	slots:                 [MAX_REFLECTION_PROBES]Reflection_Probe_Slot,
 	// The cube that no slot holds, which a finished capture prefilters into.
 	spare:                 i32,
-	capture:               Reflection_Probe_Capture,
+	// nil when no capture is in flight.
+	capture:               Maybe(Reflection_Probe_Capture),
 	frame:                 u64,
 	stats:                 Reflection_Probe_Stats,
 }
@@ -157,6 +166,9 @@ Reflection_Probe_Frame :: struct {
 	cubes:             Texture,
 	clusters:          Buffer,
 	capturing:         bool,
+	// Whether the frame's inputs are complete, once its passes are added, which the capture records when the frame
+	// executes.
+	complete:          bool,
 	center:            [3]f32,
 	radius:            f32,
 	first_face:        u32,
@@ -271,7 +283,7 @@ destroy_reflection_probe_textures :: proc(rp: ^Reflection_Probes, r: ^Renderer) 
 	}
 	rp.made = false
 	rp.slots = {}
-	rp.capture = {}
+	rp.capture = nil
 }
 
 // ensure_reflection_probes makes the cubes for a level's params, again when they change, which starts every probe over.
@@ -367,7 +379,8 @@ begin_reflection_probes :: proc(
 	pf.shadow_view, pf.shadow_light = -1, -1
 	pf.cubes = import_texture(f.graph, rp.cubes.texture, .Storage)
 	if reflection_probe_pipelines_ready(r) {
-		if slot, first, count, ok := plan_reflection_probe_capture(rp, params.faces); ok {
+		complete := reflection_probe_inputs_complete(f)
+		if slot, first, count, ok := plan_reflection_probe_capture(rp, params.faces, complete); ok {
 			key := rp.slots[slot].key
 			pf.capturing, pf.first_face, pf.face_count = true, first, count
 			pf.finish = first + count == 6
@@ -393,7 +406,7 @@ begin_reflection_probes :: proc(
 		}
 	}
 	for &s in rp.slots[:params.probes] {
-		rp.stats.slots += u32(s.used && s.cube >= 0)
+		rp.stats.slots += u32(s.used && s.cube != nil)
 	}
 	rp.stats.probes = u32(len(candidates))
 	rp.stats.capacity = params.probes
@@ -408,6 +421,24 @@ reflection_probe_pipelines_ready :: proc(r: ^Renderer) -> bool {
 		pipeline_ready(r.platform, &rp.downsample) &&
 		pipeline_ready(r.platform, &r.sky.cube.prefilter) \
 	)
+}
+
+// reflection_probe_inputs_complete is whether a capture this frame draws the level as it stays: no asset streams to
+// the GPU, every material that the scene draws has its textures resident and its own pipelines compiled, so no bin
+// draws a stand-in, and the scene has an item to draw. Without an item, a capture draws only the sky.
+@(private)
+reflection_probe_inputs_complete :: proc(f: ^Frame) -> bool {
+	r := f.renderer
+	sf := f.scene_frame
+	if sf == nil || len(sf.items) == 0 || sf.waiting || resident_streaming(&r.residency) > 0 {
+		return false
+	}
+	for index in sf.bin_pipelines {
+		if !material_ready(r.platform, &r.materials.pipelines[index]) {
+			return false
+		}
+	}
+	return true
 }
 
 // extract_reflection_probes gives the frame's probes, but those of hidden entities, ranked: the highest priority first,
@@ -512,7 +543,6 @@ assign_reflection_probe_slots :: proc(
 			used      = true,
 			entity    = c.entity,
 			key       = c.key,
-			cube      = -1,
 			seen      = rp.frame,
 			distance2 = c.distance2,
 			rank      = rank,
@@ -522,59 +552,66 @@ assign_reflection_probe_slots :: proc(
 
 @(private = "file")
 free_reflection_probe_slot :: proc(rp: ^Reflection_Probes, slot: int) {
-	if rp.capture.active && rp.capture.slot == slot {
-		rp.capture = {}
+	if c, active := rp.capture.?; active && c.slot == slot {
+		rp.capture = nil
 	}
-	rp.slots[slot] = {
-		cube = -1,
-	}
+	rp.slots[slot] = {}
 }
 
 // plan_reflection_probe_capture gives the capture's faces for this frame, at most faces of them, and starts a capture
 // when none is in flight. A capture whose probe changed starts over, and one whose probe lost its slot ends. The next
-// capture is, in order: a probe On_Load with no cube yet, the nearest first; any other probe with no cube yet; a probe
-// On_Change whose key changed since its capture; then the Realtime probes, the longest since its capture first.
+// capture is, in order: a probe On_Load with no cube yet, the nearest first; any other probe with no cube yet; when the
+// frame's inputs are complete, a probe whose capture is provisional, the nearest first; a probe On_Change whose key
+// changed since its capture; then the Realtime probes, the longest since its capture first.
 plan_reflection_probe_capture :: proc(
 	rp: ^Reflection_Probes,
 	faces: u32,
+	complete: bool,
 ) -> (
 	slot: int,
 	first_face, face_count: u32,
 	ok: bool,
 ) {
-	c := &rp.capture
-	if c.active {
+	if c, active := rp.capture.?; active {
 		s := &rp.slots[c.slot]
 		if !s.used || s.entity != c.entity {
-			c^ = {}
+			rp.capture = nil
 		} else if s.key != c.key {
-			c.key, c.faces = s.key, 0
+			rp.capture = Reflection_Probe_Capture {
+				slot   = c.slot,
+				entity = c.entity,
+				key    = s.key,
+			}
 		}
 	}
-	if !c.active {
-		best, best_class := -1, 4
+	if rp.capture == nil {
+		best, best_class := -1, 5
 		for &s, i in rp.slots[:min(int(rp.params.probes), MAX_REFLECTION_PROBES)] {
 			if !s.used {
 				continue
 			}
+			cube, has_cube := s.cube.?
 			class: int
 			switch {
-			case s.cube < 0 && s.key.probe.update == .On_Load:
+			case !has_cube && s.key.probe.update == .On_Load:
 				class = 0
-			case s.cube < 0:
+			case !has_cube:
 				class = 1
-			case s.key.probe.update == .On_Change && s.key != s.captured:
+			case complete && !cube.complete:
 				class = 2
-			case s.key.probe.update == .Realtime:
+			case s.key.probe.update == .On_Change && s.key != cube.key:
 				class = 3
+			case s.key.probe.update == .Realtime:
+				class = 4
 			case:
 				continue
 			}
 			better := class < best_class
 			if class == best_class {
 				b := &rp.slots[best]
-				if class == 3 && s.captured_frame != b.captured_frame {
-					better = s.captured_frame < b.captured_frame
+				// A Realtime probe has a cube, so b does too.
+				if class == 4 && cube.frame != (b.cube.?).frame {
+					better = cube.frame < (b.cube.?).frame
 				} else {
 					better = s.distance2 < b.distance2
 				}
@@ -586,44 +623,53 @@ plan_reflection_probe_capture :: proc(
 		if best < 0 {
 			return
 		}
-		c^ = {
-			active = true,
+		rp.capture = Reflection_Probe_Capture {
 			slot   = best,
 			entity = rp.slots[best].entity,
 			key    = rp.slots[best].key,
 		}
 	}
+	c := rp.capture.?
 	return c.slot, c.faces, min(max(faces, 1), 6 - c.faces), true
 }
 
-// advance_reflection_probe_capture records that this frame drew face_count more of the capture's faces. With the last,
-// the probe takes the spare cube, which this frame prefilters, and its old cube, or a cube that no slot holds, becomes
-// the spare.
-advance_reflection_probe_capture :: proc(rp: ^Reflection_Probes, face_count: u32) {
-	c := &rp.capture
-	if !c.active {
+// advance_reflection_probe_capture records that this frame drew face_count more of the capture's faces, with complete
+// inputs or not. With the last, the probe takes the spare cube, which this frame prefilters, complete only if every face
+// was, and its old cube, or a cube that no slot holds, becomes the spare.
+advance_reflection_probe_capture :: proc(rp: ^Reflection_Probes, face_count: u32, complete: bool) {
+	c, active := &rp.capture.?
+	if !active {
 		return
 	}
 	c.faces += face_count
+	if complete {
+		c.complete_faces += face_count
+	}
 	if c.faces < 6 {
 		return
 	}
 	s := &rp.slots[c.slot]
-	old := s.cube
-	s.cube, s.captured, s.captured_frame = rp.spare, c.key, rp.frame
-	c^ = {}
-	if old >= 0 {
-		rp.spare = old
+	old, had_cube := s.cube.?
+	s.cube = Reflection_Probe_Cube {
+		index    = rp.spare,
+		key      = c.key,
+		frame    = rp.frame,
+		complete = c.complete_faces == 6,
+	}
+	rp.capture = nil
+	if had_cube {
+		rp.spare = old.index
 		return
 	}
 	count := min(int(rp.params.probes), MAX_REFLECTION_PROBES)
-	for cube in 0 ..= i32(count) {
+	for index in 0 ..= i32(count) {
 		held := false
 		for &other in rp.slots[:count] {
-			held ||= other.used && other.cube == cube
+			cube, has_cube := other.cube.?
+			held ||= other.used && has_cube && cube.index == index
 		}
 		if !held {
-			rp.spare = cube
+			rp.spare = index
 			return
 		}
 	}
@@ -652,7 +698,7 @@ reflection_probe_records :: proc(
 	count := min(int(rp.params.probes), MAX_REFLECTION_PROBES)
 	order := make([dynamic]int, 0, count, allocator)
 	for &s, i in rp.slots[:count] {
-		if s.used && s.cube >= 0 {
+		if s.used && s.cube != nil {
 			append(&order, i)
 		}
 	}
@@ -683,7 +729,7 @@ reflection_probe_records :: proc(
 		z := linalg.normalize(linalg.quaternion128_mul_vector3(s.key.rotation, [3]f32{0, 0, 1}))
 		records[k] = {
 			center     = ecs.position_sub(s.key.position, origin),
-			cube       = u32(s.cube),
+			cube       = u32((s.cube.?).index),
 			axes       = {{x.x, x.y, x.z, 0}, {y.x, y.y, y.z, 0}, {z.x, z.y, z.z, 0}},
 			extent     = extent,
 			blend      = min(max(p.blend_distance, 0), min(extent.x, extent.y, extent.z)),
@@ -1132,13 +1178,13 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 		read(g, p, pf.source)
 		write(g, p, pf.cubes)
 	}
+	// The scene's passes are added, and a full upload ring takes its items, so the inputs are known now.
+	pf.complete = reflection_probe_inputs_complete(f)
 	// The capture moves on only when the faces were drawn, so a frame that fails draws them again.
 	on_executed(g, proc(data: rawptr) {
 			f := (^Frame)(data)
-			advance_reflection_probe_capture(
-				&f.renderer.reflection_probes,
-				f.reflection_probes.face_count,
-			)
+			pf := f.reflection_probes
+			advance_reflection_probe_capture(&f.renderer.reflection_probes, pf.face_count, pf.complete)
 		}, f)
 }
 

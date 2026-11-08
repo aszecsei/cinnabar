@@ -642,6 +642,8 @@ Scene_Frame :: struct {
 	bin_skinned:     []bool,
 	bin_offsets:     []u32,
 	bin_counts:      []u32,
+	// A texture of a material that the frame draws is not resident yet, so it samples its default.
+	waiting:         bool,
 	// The draws of one view: the items, with each surface's reserved patches.
 	draws_per_view:  int,
 	// The patch surfaces' records, and their upload.
@@ -942,6 +944,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	}
 	sf.bin_pipelines, sf.groups = sort_bins(sorting, items[:], r.platform.frame_allocator)
 	sf.bin_draws = bin_draws(r, sf.bin_pipelines)
+	sf.waiting = table.waiting
 	sf.bin_impostors = bin_impostors(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.bin_particles = bin_particles(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)
 	sf.bin_skinned = bin_skinned(items[:], len(sf.bin_pipelines), r.platform.frame_allocator)

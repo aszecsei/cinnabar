@@ -106,10 +106,17 @@ What they show:
 - **The capture's turns:** the level gives a budget of faces a frame. One probe captures at a time, in this order:
   1. The `On_Load` probes with no cube yet, the nearest first.
   2. The other probes with no cube yet, the nearest first.
-  3. An `On_Change` probe whose key changed since its capture.
-  4. The `Realtime` probes, the one whose capture is oldest first.
+  3. When the frame's inputs are complete, the probes whose capture is provisional, the nearest first.
+  4. An `On_Change` probe whose key changed since its capture.
+  5. The `Realtime` probes, the one whose capture is oldest first.
 
   A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
+- **Provisional captures:** a capture records whether its inputs were complete (`reflection_probe_inputs_complete`). A frame's inputs are complete when all of these are true:
+  - No asset streams to the GPU.
+  - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in.
+  - The scene has at least one item to draw.
+
+  A capture is provisional if the inputs of any frame that drew its faces were not complete. For example, an `On_Load` probe captures in the first frames of a level, while the meshes still stream. The probe uses its provisional cube and does not capture again while the inputs stay incomplete. In the first frame whose inputs are complete, it captures again. A texture that never becomes resident keeps the inputs incomplete, so the probe keeps its provisional cube.
 - **Each face** is a view of the GPU scene, after the voxel cones' views: a square 90° view along the face, as a `TextureCube` samples it, from `REFLECTION_PROBE_NEAR` (5 cm).
   - It draws the opaque and masked surfaces, in a prepass and a forward pass of its own, into targets that all of the frame's faces share. It draws no view model, particles, transparent surfaces, patch surfaces or post-processing.
   - It takes the camera's level of detail, as the shadow views do, so it draws the meshlets that the camera's walk of their hierarchy picked.
