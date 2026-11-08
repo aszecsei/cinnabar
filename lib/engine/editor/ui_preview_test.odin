@@ -198,8 +198,8 @@ a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_wen
 a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	missing := Missing_Blobs{next = context.logger}
-	context.logger = {count_missing_blobs, &missing, .Debug, {}}
+	missing := Counted_Log{text = "no blob for", next = context.logger}
+	context.logger = {count_log, &missing, .Debug, {}}
 	guid, _ := format.guid_parse(DOCUMENT)
 	settings := link.Ui_Preview_Settings{id = 2, screen_width = 1920, screen_height = 1080, width = 960, height = 540, forced_node = max(u32)}
 	exchange(f, link.Open_Preview{id = 2, material = ([16]u8)(guid)}, settings)
@@ -234,6 +234,8 @@ a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document
 a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_blob :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
+	warnings := Counted_Log{text = "cooked with another build", next = context.logger}
+	context.logger = {count_log, &warnings, .Debug, {}}
 	guid, _ := format.guid_parse(DOCUMENT)
 	cooked, err := os.read_entire_file(fmt.tprintf("%s/%s.blob", f.cache, DOCUMENT), context.temp_allocator)
 	testing.expect(t, err == nil)
@@ -264,6 +266,8 @@ a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_
 	testing.expect(t, p.complete)
 	testing.expect_value(t, draw(f), 0)
 	testing.expect_value(t, len(exchange(f)), 0)
+	// It says why, once.
+	testing.expect_value(t, warnings.count, 1)
 
 	// A blob of another key builds.
 	header.key, header.layout = 79, header.layout - 1
@@ -273,6 +277,7 @@ a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_
 	testing.expect(t, ok)
 	testing.expect(t, f.editor.ui.documents[slot].used)
 	testing.expect_value(t, f.editor.ui.documents[slot].nodes[1].source, 1)
+	testing.expect_value(t, warnings.count, 1)
 }
 
 @(private = "file")

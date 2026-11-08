@@ -266,8 +266,8 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 a_preview_that_shows_another_asset_starts_its_graph_over :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
-	missing := Missing_Blobs{next = context.logger}
-	context.logger = {count_missing_blobs, &missing, .Debug, {}}
+	missing := Counted_Log{text = "no blob for", next = context.logger}
+	context.logger = {count_log, &missing, .Debug, {}}
 	open := link.Open_Preview {
 		id       = 1,
 		material = ([16]u8)(f.graph),
