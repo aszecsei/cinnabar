@@ -175,7 +175,7 @@ resident_textures_are_created_as_their_blobs_say :: proc(t: ^testing.T) {
 
 // mesh_bytes is a mesh blob of one triangle with vertex_count vertices, at the runtime's alignment, with a hierarchy
 // over its one meshlet when nodes, and a skin stream when skinned.
-@(private = "file")
+@(private)
 mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned := false) -> []byte {
 	stride := int(format.mesh_attribute_stride({}))
 	indices := []u16{0, 1, 2}
@@ -210,7 +210,7 @@ mesh_bytes :: proc(guid: format.Guid, vertex_count: u32, nodes := false, skinned
 
 // write_mesh writes a mesh blob of one triangle with vertex_count vertices, and a generation file at modified, as a
 // cook does.
-@(private = "file")
+@(private)
 write_mesh :: proc(t: ^testing.T, dir: string, guid: format.Guid, vertex_count: u32, modified: time.Time) {
 	buffer: [32]u8
 	path := fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer))
