@@ -17,11 +17,14 @@ import "cinnabar:engine/ui"
 // ui.State, which no world syncs and no input reaches, so the game's UI is not touched. Where each element went goes
 // back to the editor, which outlines and picks elements by it.
 
-// Ui_Preview is a UI preview's state: its document, while it has one, the editor's settings, and the bindings, whose
-// strings are on the heap.
+// Ui_Preview is a UI preview's state: its document, while it has one, or the key of a blob that did not build, the
+// editor's settings, and the bindings, whose strings are on the heap.
 @(private)
 Ui_Preview :: struct {
-	document: Maybe(Ui_Document),
+	document: union {
+		Ui_Document,
+		Ui_Build_Failed,
+	},
 	settings: link.Ui_Preview_Settings,
 	bindings: [dynamic]link.Ui_Preview_Binding,
 	// The settings and bindings changed since the document last took them.
@@ -37,6 +40,13 @@ Ui_Document :: struct {
 	laid_out:    bool,
 	scale:       f32,
 	layout_sent: u64,
+}
+
+// Ui_Build_Failed is a blob that did not build, by its key. It is not built again until a blob of another key comes,
+// and the preview draws nothing.
+@(private)
+Ui_Build_Failed :: struct {
+	key: u64,
 }
 
 // set_ui_preview_settings keeps the editor's settings of a UI preview, which take the place of Preview_Settings.
@@ -79,7 +89,7 @@ close_ui_preview :: proc(e: ^Editor, p: ^Preview) {
 // drop_ui_document frees a UI preview's document, when it has one, and keeps its settings and bindings.
 @(private)
 drop_ui_document :: proc(e: ^Editor, u: ^Ui_Preview) {
-	if doc, ok := u.document.?; ok {
+	if doc, ok := u.document.(Ui_Document); ok {
 		ui.close_document(&e.ui, doc.slot)
 	}
 	u.document = nil
@@ -100,39 +110,24 @@ ui_preview_data :: proc(e: ^Editor, p: ^Preview) -> []byte {
 }
 
 // sync_ui_preview builds a UI preview's document from its blob when the blob is new, and gives it the editor's states
-// and bindings when they changed. It is false while there is no document to draw.
+// and bindings when they changed. It is nil while there is no document to draw.
 @(private = "file")
-sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> bool {
+sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> ^Ui_Document {
 	u := &p.ui_preview
 	if e.ui.platform == nil {
-		return false
+		return nil
 	}
 	// Without a renderer, as in tests, nothing draws, so there is no pipeline to make.
 	if e.renderer != nil {
 		ui.sync_pipelines(&e.ui)
 	}
 	data := ui_preview_data(e, p)
-	header, valid := format.blob_header(data)
-	if valid && header.kind == .Ui {
-		if doc, ok := &u.document.?; !ok {
-			slot, opened := ui.open_document(&e.ui, p.material, data)
-			if !opened {
-				return false
-			}
-			u.document = Ui_Document{slot = slot, key = header.key}
-			u.apply = true
-		} else if header.key != doc.key {
-			if !ui.set_document_data(&e.ui, doc.slot, data) {
-				drop_ui_document(e, u)
-				return false
-			}
-			doc.key, doc.laid_out = header.key, false
-			u.apply = true
-		}
+	if header, valid := format.blob_header(data); valid && header.kind == .Ui {
+		build_ui_document(e, p, data, header.key)
 	}
-	doc, ok := u.document.?
+	doc, ok := &u.document.(Ui_Document)
 	if !ok {
-		return false
+		return nil
 	}
 	if u.apply {
 		u.apply = false
@@ -143,7 +138,38 @@ sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> bool {
 			ui.set_binding(&e.ui, d, b.name, b.value)
 		}
 	}
-	return true
+	return doc
+}
+
+// build_ui_document builds a UI preview's document from a blob of a key that it has not built or tried. A document
+// that is open builds again in its slot; one that does not build frees its slot.
+@(private = "file")
+build_ui_document :: proc(e: ^Editor, p: ^Preview, data: []byte, key: u64) {
+	u := &p.ui_preview
+	switch &d in u.document {
+	case Ui_Document:
+		if d.key == key {
+			return
+		}
+		if ui.set_document_data(&e.ui, d.slot, data) {
+			d.key, d.laid_out, u.apply = key, false, true
+			return
+		}
+		drop_ui_document(e, u)
+		u.document = Ui_Build_Failed{key}
+		return
+	case Ui_Build_Failed:
+		if d.key == key {
+			return
+		}
+	}
+	slot, ok := ui.open_document(&e.ui, p.material, data)
+	if !ok {
+		u.document = Ui_Build_Failed{key}
+		return
+	}
+	u.document = Ui_Document{slot = slot, key = key}
+	u.apply = true
 }
 
 // Ui_Draw is what a UI preview's hook draws, in frame memory.
@@ -174,16 +200,18 @@ ui_preview_desc :: proc(e: ^Editor, p: ^Preview, id: int, target: gpu.Preview_Ta
 	}
 }
 
-// draw_ui_preview lays a UI preview's document out on its screen and draws it into the preview's UI layer.
+// draw_ui_preview lays a UI preview's document out on its screen and draws it into the preview's UI layer. A blob that
+// did not build draws nothing, and that drawing is complete.
 @(private = "file")
 draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 	draw := (^Ui_Draw)(f.data)
 	e, p := draw.e, draw.p
-	if !sync_ui_preview(e, p) {
-		return false
-	}
 	u := &p.ui_preview
-	doc := &u.document.?
+	doc := sync_ui_preview(e, p)
+	if doc == nil {
+		_, failed := u.document.(Ui_Build_Failed)
+		return failed
+	}
 	s := u.settings
 	screen := [2]f32{f32(max(s.screen_width, 1)), f32(max(s.screen_height, 1))}
 	scale := s.scale > 0 ? s.scale : max(screen.y / ui.REFERENCE_HEIGHT, ui.MIN_SCALE)
@@ -198,7 +226,7 @@ draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 send_ui_layouts :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allocator) {
 	for &p, id in e.session.previews {
 		u := &p.ui_preview
-		doc, ok := &u.document.?
+		doc, ok := &u.document.(Ui_Document)
 		if !p.open || p.kind != .Ui || !ok || !doc.laid_out {
 			continue
 		}

@@ -32,20 +32,14 @@ Preview :: struct {
 	data:            []byte,
 	modified:        i64,
 	version:         u32,
-	// The cooked blob's version when the preview last looked, which a new cook changes.
+	// The cooked blob's version when the preview last looked, which a new cook changes, or 0.
 	asset_version:   u32,
 	// What the blob shows, which preview_kind finds and forget_kind forgets when the blob changes.
 	kind:            Preview_Kind,
 	// A UI document's preview (see ui_preview.odin).
 	ui_preview:      Ui_Preview,
-	// An animation graph's instance, which plays apart from any entity; when it last moved; and the hash of the view
-	// that the editor last got, or 0.
-	instance:        anim_graph.Instance,
-	last_tick:       f64,
-	view_sent:       u64,
-	// A graph that could not load, as with a clip's GUID that the content does not have, looks again at this time, so it
-	// does not report it in every frame.
-	retry_at:        f64,
+	// An animation graph's play.
+	play:            Graph_Play,
 	// Draw at the next chance. The renderer sets complete when a drawing showed everything; until then, it draws again.
 	dirty:           bool,
 	complete:        bool,
@@ -54,6 +48,18 @@ Preview :: struct {
 	told:            bool,
 	announce:        link.Preview_Target,
 	prefix:          [128]u8,
+}
+
+// Graph_Play is an animation graph's play in a preview, apart from any entity: its instance, when it last moved, and
+// the hash of the view that the editor last got, or 0. A graph that could not pose, as with a clip's GUID that the
+// content does not have, tries again at retry_at, so it does not report it in every frame. show and Restart_Preview
+// start it over.
+@(private)
+Graph_Play :: struct {
+	instance:  anim_graph.Instance,
+	last_tick: f64,
+	view_sent: u64,
+	retry_at:  f64,
 }
 
 // Preview_Kind is what a preview's blob shows. Load_Failed is a look that could not load the cooked blob. It lasts
@@ -76,15 +82,7 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id >= MAX_PREVIEWS {
 			return true
 		}
-		p := &e.session.previews[m.id]
-		material := format.Guid(m.material)
-		if p.material != material {
-			drop_ui_document(e, &p.ui_preview)
-		}
-		if !p.open || p.material != material || p.unsaved != m.unsaved {
-			free_preview_data(e, p)
-		}
-		p.open, p.material, p.unsaved, p.dirty = true, material, m.unsaved, true
+		show(e, &e.session.previews[m.id], format.Guid(m.material), m.unsaved)
 	case link.Preview_Settings:
 		if m.id >= MAX_PREVIEWS {
 			return true
@@ -99,14 +97,14 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		if m.id < MAX_PREVIEWS {
 			p := &e.session.previews[m.id]
 			if data := preview_graph_data(e, p); data != nil {
-				if blob, ok := format.animation_graph_view(data); ok && blob.header.key == p.instance.key {
-					set_instance_parameter(data, blob, &p.instance, m.name, m.value)
+				if blob, ok := format.animation_graph_view(data); ok && blob.header.key == p.play.instance.key {
+					set_instance_parameter(data, blob, &p.play.instance, m.name, m.value)
 				}
 			}
 		}
 	case link.Restart_Preview:
 		if m.id < MAX_PREVIEWS {
-			e.session.previews[m.id].instance = {}
+			e.session.previews[m.id].play = {}
 		}
 	case link.Ui_Preview_Settings:
 		if m.id < MAX_PREVIEWS {
@@ -116,6 +114,23 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		return false
 	}
 	return true
+}
+
+// show makes a preview show an asset, by its unsaved blob or its cooked one. It is the one place that a preview's
+// state of what it shows is reset: another source forgets the blob that it last saw, and another asset also drops its
+// UI document and its graph's play. An Open_Preview of what the preview already shows, as when the host links again,
+// keeps them.
+@(private = "file")
+show :: proc(e: ^Editor, p: ^Preview, material: format.Guid, unsaved: bool) {
+	if p.material != material {
+		drop_ui_document(e, &p.ui_preview)
+		p.play = {}
+	}
+	if !p.open || p.material != material || p.unsaved != unsaved {
+		free_preview_data(e, p)
+		p.asset_version = 0
+	}
+	p.open, p.material, p.unsaved, p.dirty = true, material, unsaved, true
 }
 
 @(private)
@@ -260,14 +275,15 @@ play_animation_graph :: proc(e: ^Editor, p: ^Preview) -> [][3][4]f32 {
 		return nil
 	}
 	now := e.platform.time_seconds()
-	if now < p.retry_at {
+	g := &p.play
+	if now < g.retry_at {
 		return nil
 	}
-	step := p.last_tick == 0 ? 0 : min(f32(now - p.last_tick), MAX_STEP)
-	p.last_tick = now
-	palette, _, ok := anim.preview_pose(e.assets, data, &p.instance, step, e.platform.frame_allocator)
+	step := g.last_tick == 0 ? 0 : min(f32(now - g.last_tick), MAX_STEP)
+	g.last_tick = now
+	palette, _, ok := anim.preview_pose(e.assets, data, &g.instance, step, e.platform.frame_allocator)
 	if !ok {
-		p.retry_at = now + 1
+		g.retry_at = now + 1
 		return nil
 	}
 	return palette
@@ -282,16 +298,16 @@ send_preview_views :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.A
 			continue
 		}
 		blob, ok := format.animation_graph_view(data)
-		if !ok || blob.header.key != p.instance.key {
+		if !ok || blob.header.key != p.play.instance.key {
 			continue
 		}
 		view: link.Animator_View
-		instance_view(data, blob, &p.instance, p.material, &view, allocator)
+		instance_view(data, blob, &p.play.instance, p.material, &view, allocator)
 		encoded := make([dynamic]byte, allocator)
 		link.write_message(&encoded, view)
 		h := max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
-		if h != p.view_sent {
-			p.view_sent = h
+		if h != p.play.view_sent {
+			p.play.view_sent = h
 			append(out, ..encoded[:])
 		}
 	}

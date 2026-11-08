@@ -226,8 +226,8 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 	testing.expect_value(t, len(views(f, open)), 0)
 	p := &f.editor.session.previews[id]
 	testing.expect(t, p.open)
-	p.instance.key = KEY
-	p.instance.state, p.instance.source = 1, anim_graph.NONE
+	p.play.instance.key = KEY
+	p.play.instance.state, p.play.instance.source = 1, anim_graph.NONE
 
 	// The mode is Edit, and it plays. An entity of 0 says that the view is a preview's.
 	list := views(f)
@@ -239,23 +239,57 @@ a_preview_plays_a_graph_whatever_the_mode_and_the_editor_sets_its_parameters :: 
 
 	// A float, a bool and a trigger, which shows until a tick sees it and can be reset.
 	views(f, link.Set_Preview_Parameter{id, "speed", 5}, link.Set_Preview_Parameter{id, "grounded", 1})
-	testing.expect_value(t, p.instance.parameters[0], 5)
-	testing.expect_value(t, p.instance.parameters[1], 1)
+	testing.expect_value(t, p.play.instance.parameters[0], 5)
+	testing.expect_value(t, p.play.instance.parameters[1], 1)
 	list = views(f, link.Set_Preview_Parameter{id, "look", 1})
-	testing.expect_value(t, p.instance.triggers, 1 << 2)
+	testing.expect_value(t, p.play.instance.triggers, 1 << 2)
 	testing.expect_value(t, list[0].parameters[2].value, 1)
 	views(f, link.Set_Preview_Parameter{id, "look", 0})
-	testing.expect_value(t, p.instance.triggers, 0)
+	testing.expect_value(t, p.play.instance.triggers, 0)
 
 	// A preview that is not open, or a graph that has not started, is left alone.
 	views(f, link.Set_Preview_Parameter{2, "speed", 9})
-	testing.expect_value(t, f.editor.session.previews[2].instance.parameters[0], 0)
-	p.instance.key = KEY + 1
+	testing.expect_value(t, f.editor.session.previews[2].play.instance.parameters[0], 0)
+	p.play.instance.key = KEY + 1
 	views(f, link.Set_Preview_Parameter{id, "speed", 9})
-	testing.expect_value(t, p.instance.parameters[0], 5)
+	testing.expect_value(t, p.play.instance.parameters[0], 5)
 
 	// Restart gives it a new instance, which its next drawing starts.
 	views(f, link.Restart_Preview{id})
-	testing.expect_value(t, p.instance.key, 0)
-	testing.expect_value(t, p.instance.parameters[0], 0)
+	testing.expect_value(t, p.play.instance.key, 0)
+	testing.expect_value(t, p.play.instance.parameters[0], 0)
+}
+
+// An Open_Preview of another asset starts the preview's graph over, so a graph that could not pose does not hold back
+// the next one. An Open_Preview of the same asset, as when the host links again, keeps it.
+@(test)
+a_preview_that_shows_another_asset_starts_its_graph_over :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	missing := Missing_Blobs{next = context.logger}
+	context.logger = {count_missing_blobs, &missing, .Debug, {}}
+	open := link.Open_Preview {
+		id       = 1,
+		material = ([16]u8)(f.graph),
+	}
+	views(f, open)
+	p := &f.editor.session.previews[1]
+	p.play.instance.key = KEY
+	p.play.instance.state, p.play.instance.source = 1, anim_graph.NONE
+	p.play.last_tick, p.play.retry_at = 5, 1e9
+	testing.expect_value(t, len(views(f)), 1)
+	testing.expect(t, p.play.view_sent != 0)
+	previews(&f.editor)
+	testing.expect_value(t, p.asset_version, 1)
+
+	views(f, open)
+	testing.expect_value(t, p.play.instance.key, KEY)
+	testing.expect_value(t, p.play.retry_at, 1e9)
+
+	other := ([16]u8)(f.graph)
+	other[0] ~= 1
+	views(f, link.Open_Preview{id = 1, material = other})
+	testing.expect(t, p.play == Graph_Play{})
+	testing.expect_value(t, p.asset_version, 0)
+	testing.expect_value(t, missing.count, 1)
 }
