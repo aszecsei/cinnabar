@@ -70,6 +70,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Watches = new EntityWatches(Selection, Host);
         Visibility = new SceneVisibility(World, Selection, Host, settings, Console, () => Scene?.Path, WriteSetting, Commands.InvalidateAll);
         Cook = new CookSession(options.Cook, Assets);
+        PreviewCooker = Cook;
         Content = new ContentBrowser(Assets, Cook, Console, MovingScene, Commands.InvalidateAll, ProjectTags.PathFor(options.ProjectPath));
         WireCook();
         Mesh.Subscribe();

@@ -17,6 +17,9 @@ public sealed partial class EditorShell
 
     public CookSession Cook { get; }
 
+    /// <summary>What the editors cook their previews' unsaved text with: <see cref="Cook"/>, or a fake one in tests.</summary>
+    internal IPreviewCooker PreviewCooker { get; set; }
+
     /// <summary>The pictures that the host draws for the content browser, while it can.</summary>
     public ThumbnailQueue Thumbnails { get; private set; } = null!;
 
