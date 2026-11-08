@@ -92,17 +92,14 @@ fixed_events :: proc(r: ^Runtime) {
 @(private = "file")
 begin_fixed :: proc(r: ^Runtime) {
 	r.bindings.ctx = context
-	r.commands = {}
+	enter_phase(r, .Fixed)
 	set_time(r, 1 / f64(r.world.clock.tick_rate), time.duration_seconds(ecs.tick_time(r.world)), true)
 }
 
-// end_fixed applies the step's structural changes and runs the callbacks for them. The collector's step stays the
-// script phase's.
+// end_fixed applies the step's structural changes and runs the callbacks for them, after the step ends, as end_phase
+// does. The collector's step stays the script phase's.
 @(private = "file")
 end_fixed :: proc(r: ^Runtime) {
-	if r.commands.data.allocator.procedure != nil {
-		ecs.apply(r.world, {r.commands})
-	}
-	r.commands = {}
+	leave_phase(r, .Fixed)
 	drain_log(r)
 }

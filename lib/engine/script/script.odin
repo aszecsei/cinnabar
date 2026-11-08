@@ -58,7 +58,9 @@ Runtime :: struct {
 	pending_gamepad_pressed:  [core.MAX_GAMEPADS]core.Gamepad_Buttons,
 	pending_gamepad_released: [core.MAX_GAMEPADS]core.Gamepad_Buttons,
 	pending_text:             core.Input_Text,
-	// The script phase's structural changes, in frame memory. See end_phase.
+	// The script step that runs, and its structural changes, in frame memory, which its end applies. The buffer is
+	// empty while no step runs: entity:destroy applies at once then. Only enter_phase and leave_phase change them.
+	phase:            Phase,
 	commands:         ecs.Commands,
 	// Behaviours and the scheduler. See behaviour.odin and scheduler.odin.
 	instances:        [MAX_INSTANCES]Instance,
@@ -93,6 +95,14 @@ Runtime :: struct {
 	coroutine_name:    profile.Name,
 }
 
+// Phase is the script step that runs: none, the script phase (begin_phase to end_phase), or a fixed step (fixed_update
+// or fixed_events). See docs/scripting/behaviours.md#outside-a-phase.
+Phase :: enum u8 {
+	None,
+	Variable,
+	Fixed,
+}
+
 // runtime_of is the Runtime of a VM, for bindings.
 runtime_of :: proc "contextless" (L: ^luau.State) -> ^Runtime {
 	return container_of((^script_host.Bindings)(luau.callbacks(L).userdata), Runtime, "bindings")
@@ -124,6 +134,8 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, asset
 	r.instance_used = 0
 	r.waiter_used = 0
 	r.current_waiter = -1
+	r.phase = .None
+	r.commands = {}
 	r.bindings.ctx = context
 	r.L = platform.script_open(&r.bindings)
 	if r.L == nil {

@@ -14,7 +14,7 @@ begin_phase :: proc(r: ^Runtime, dt: time.Duration, input: core.Input) {
 	r.bindings.ctx = context
 	r.frame += 1
 	r.input = input
-	r.commands = {}
+	enter_phase(r, .Variable)
 	// A frame that ran no fixed tick keeps its input edges for the next tick (see
 	// docs/world/time.md#fixed-and-variable-rate).
 	if !r.fixed_ran {
@@ -75,14 +75,34 @@ set_input :: proc(r: ^Runtime, input: core.Input) {
 }
 
 // end_phase applies the scripts' structural changes, such as entity:destroy, and runs the callbacks for them: phase
-// 6 of the frame. Then it runs the collector's step for the frame.
+// 6 of the frame. The phase ends before the callbacks, so a destroy in them applies at once. Then it runs the
+// collector's step for the frame.
 end_phase :: proc(r: ^Runtime) {
-	if r.world != nil && r.commands.data.allocator.procedure != nil {
-		ecs.apply(r.world, {r.commands})
-	}
-	r.commands = {}
+	leave_phase(r, .Variable)
 	drain_log(r)
 	step(r)
+}
+
+// enter_phase starts a script step, whose entity:destroy calls go into a buffer in frame memory. No step may run.
+@(private)
+enter_phase :: proc(r: ^Runtime, kind: Phase) {
+	assert(kind != .None)
+	assert(r.phase == .None, "script: a script step began while another runs")
+	assert(len(r.commands.data) == 0, "script: structural changes were recorded outside a script step")
+	r.phase = kind
+	r.commands = ecs.commands(frame(r))
+}
+
+// leave_phase ends the step that enter_phase began and applies its structural changes. It runs no callbacks.
+@(private)
+leave_phase :: proc(r: ^Runtime, kind: Phase) {
+	assert(r.phase == kind, "script: a script step ended that does not run")
+	commands := r.commands
+	r.commands = {}
+	r.phase = .None
+	if r.world != nil {
+		ecs.apply(r.world, {commands})
+	}
 }
 
 @(private = "file")

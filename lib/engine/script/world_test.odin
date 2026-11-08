@@ -99,7 +99,9 @@ setup_world :: proc(t: ^testing.T) -> ^World_Fixture {
 	register_components(&f.world.registry)
 	context.user_ptr = f
 	testing.expect(t, init(&f.runtime, &f.platform, &f.world, nil, register_world_test))
+	// One phase sets Time and Input. The test's code runs outside a phase, as a main script's top level does at spawn.
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
+	end_phase(&f.runtime)
 	return f
 }
 
@@ -282,6 +284,7 @@ destroy_waits_for_the_end_of_the_phase :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	context.logger = capture_world_errors(f)
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect(t, run(t, f, `
 local e = World.spawn()
 e:add(Health)
@@ -293,6 +296,27 @@ Test.report(e:is_alive() and 1 or 0)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect(t, run(t, f, "Test.report(#World.query(Health))"))
 	expect_reports(t, f, {0})
+	end_phase(&f.runtime)
+}
+
+@(test)
+destroy_outside_a_phase_applies_at_once :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	context.logger = capture_world_errors(f)
+	e := ecs.spawn(&f.world)
+	ecs.add(&f.world, e, Health{})
+	// No phase runs, as when spawn_script runs a main script's top level at init.
+	testing.expect(t, run(t, f, `
+local e = World.query(Health)[1]
+e:destroy()
+Test.report(e:is_alive() and 1 or 0)
+`))
+	expect_reports(t, f, {0})
+	testing.expect(t, !ecs.is_alive(&f.world, e))
+	phase(f)
+	testing.expect(t, !ecs.is_alive(&f.world, e))
 }
 
 @(test)
@@ -301,6 +325,7 @@ a_destroyed_entity_raises_an_error :: proc(t: ^testing.T) {
 	defer teardown_world(f)
 	context.user_ptr = f
 	context.logger = capture_world_errors(f)
+	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	thread, ok := spawn_source(&f.runtime, "=stale", `
 local e = World.spawn()
 local h = e:add(Health)
@@ -312,6 +337,7 @@ local _ = h.value
 	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Failed)
+	end_phase(&f.runtime)
 	expect_world_error(t, f, "stale:6: the entity is destroyed")
 	release(&f.runtime, thread)
 }
@@ -448,8 +474,10 @@ end
 `)
 	testing.expect(t, ok)
 	expect_reports(t, f, {0.016, 1, 20, 2})
+	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 32 * time.Millisecond, {mouse_position = {10, 40}})
 	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Yielded)
+	end_phase(&f.runtime)
 	expect_reports(t, f, {0.032, 0, 40, 3})
 	release(&f.runtime, thread)
 }
@@ -492,6 +520,7 @@ end
 `,
 	)
 	testing.expect(t, ok)
+	end_phase(&f.runtime)
 	expect_reports(t, f, {0, 1, 1, 1, 1, 0, 0.5, 0, 0, 0, 0, 0, 0})
 	release(&f.runtime, thread)
 }
@@ -521,8 +550,10 @@ end
 	)
 	testing.expect(t, ok)
 	expect_reports(t, f, {1, 6, 1, 3})
+	end_phase(&f.runtime)
 	begin_phase(&f.runtime, 16 * time.Millisecond, {})
 	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Yielded)
+	end_phase(&f.runtime)
 	expect_reports(t, f, {0, 0, 0, 0})
 	release(&f.runtime, thread)
 }
