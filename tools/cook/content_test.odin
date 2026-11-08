@@ -2,7 +2,11 @@ package cook
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
+import "core:sync"
 import "core:testing"
+import "core:thread"
+import "core:time"
 
 import format "cinnabar:engine/asset/format"
 
@@ -104,12 +108,141 @@ one_cook_at_a_time_uses_a_cache :: proc(t: ^testing.T) {
 	testing.expect_value(t, first, Lock_Result.Locked)
 	_, second := lock_cache(cache)
 	testing.expect_value(t, second, Lock_Result.Held)
-	unlock_cache(&held)
+	unlock(&held)
 	again, third := lock_cache(cache)
 	testing.expect_value(t, third, Lock_Result.Locked)
-	unlock_cache(&again)
+	unlock(&again)
 	// The lock deletes itself, so it never looks held after a crash.
 	testing.expect(t, !os.exists(fmt.tprintf("%s/%s", cache, LOCK_FILE)))
+}
+
+// Root_Cook is a cook of scripts on a thread of its own, as another cook process would be, such as a release cook
+// while the daemon runs.
+@(private = "file")
+Root_Cook :: struct {
+	options: Cook_Options,
+	// The files to find in the pass, by the end of their paths, and the GUID that the pass gave each one, or none.
+	names:   []string,
+	guids:   []format.Guid,
+	ok:      bool,
+	errors:  int,
+	// Set when the cook starts, so a test can wait for it.
+	started: sync.Sema,
+}
+
+@(private = "file")
+start_root_cook :: proc(c: ^Root_Cook) -> ^thread.Thread {
+	return thread.create_and_start_with_poly_data(c, proc(c: ^Root_Cook) {
+		sync.sema_post(&c.started)
+		pass := cook(c.options, {.Script}, log_problems = false)
+		c.ok = pass.ok
+		for p in pass.problems.list {
+			c.errors += int(p.error)
+		}
+		// The pass is in this thread's temporary allocator, so the GUIDs are copied out.
+		for a in pass.assets {
+			for name, i in c.names {
+				if strings.has_suffix(a.path, name) {
+					c.guids[i] = a.meta.guid
+				}
+			}
+		}
+	})
+}
+
+@(private = "file")
+root_cook :: proc(tree: Tree, cache: string, names: []string) -> Root_Cook {
+	options := tree_options(tree)
+	options.cache = fmt.tprintf("%s/%s", tree.dir, cache)
+	return {options = options, names = names, guids = make([]format.Guid, len(names), context.temp_allocator)}
+}
+
+@(test)
+two_cooks_of_one_root_give_a_new_file_one_guid :: proc(t: ^testing.T) {
+	COUNT :: 32
+	files := make([]struct {
+			path, text: string,
+		}, COUNT, context.temp_allocator)
+	names := make([]string, COUNT, context.temp_allocator)
+	for i in 0 ..< COUNT {
+		names[i] = fmt.tprintf("/s%02d.luau", i)
+		files[i] = {fmt.tprintf("content%s", names[i]), fmt.tprintf("return %d", i)}
+	}
+	tree := make_tree(t, files)
+	defer remove_tree(tree)
+
+	// Two caches, as the daemon's and a release cook's, and one root, whose files have no .meta files yet.
+	cooks := [2]Root_Cook{root_cook(tree, "cache_a", names), root_cook(tree, "cache_b", names)}
+	threads: [2]^thread.Thread
+	for &c, i in cooks {
+		threads[i] = start_root_cook(&c)
+	}
+	for th in threads {
+		thread.join(th)
+		thread.destroy(th)
+	}
+	for c in cooks {
+		testing.expect(t, c.ok)
+		testing.expect_value(t, c.errors, 0)
+	}
+	for name, i in names {
+		guid := tree_guid(t, tree, name[1:])
+		for c in cooks {
+			testing.expectf(t, c.guids[i] == guid, "%s: a cook used %s, and its .meta file has %s", name, guid_text(c.guids[i]), guid_text(guid))
+			testing.expectf(t, os.exists(fmt.tprintf("%s/%s.blob", config_dir(c.options), guid_text(guid))), "%s has no blob in %s", name, c.options.cache)
+		}
+	}
+	testing.expect(t, !os.exists(fmt.tprintf("%s/content/%s", tree.dir, LOCK_FILE)))
+}
+
+@(test)
+a_cook_looks_again_under_the_roots_lock_before_it_gives_a_guid :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.luau", "return 1"}})
+	defer remove_tree(tree)
+	root := fmt.tprintf("%s/content", tree.dir)
+	lock, locked := lock_root(root)
+	testing.expect(t, locked)
+
+	c := root_cook(tree, "cache", {"/a.luau"})
+	th := start_root_cook(&c)
+	sync.sema_wait(&c.started)
+	time.sleep(100 * time.Millisecond)
+	// Another cook gives the file its GUID while this one waits for the lock.
+	meta := "guid = 00112233445566778899aabbccddeeff\n"
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/a.luau.meta", root), transmute([]byte)meta) == nil)
+	unlock(&lock)
+	thread.join(th)
+	thread.destroy(th)
+
+	testing.expect(t, c.ok)
+	testing.expect_value(t, guid_text(c.guids[0]), "00112233445566778899aabbccddeeff")
+	data, err := os.read_entire_file(fmt.tprintf("%s/a.luau.meta", root), context.temp_allocator)
+	testing.expect(t, err == nil && string(data) == meta)
+}
+
+@(test)
+an_asset_that_leaves_during_the_scan_gets_no_meta :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}})
+	defer remove_tree(tree)
+	root := fmt.tprintf("%s/content", tree.dir)
+	lock, locked := lock_root(root)
+	testing.expect(t, locked)
+
+	c := root_cook(tree, "cache", {"/a.luau", "/b.luau"})
+	th := start_root_cook(&c)
+	sync.sema_wait(&c.started)
+	time.sleep(100 * time.Millisecond)
+	// An operation moves or deletes the file while the cook waits to give it a GUID.
+	testing.expect(t, os.remove(fmt.tprintf("%s/a.luau", root)) == nil)
+	unlock(&lock)
+	thread.join(th)
+	thread.destroy(th)
+
+	testing.expect(t, c.ok)
+	testing.expect_value(t, c.errors, 0)
+	testing.expect_value(t, c.guids[0], format.Guid{})
+	testing.expect(t, !os.exists(fmt.tprintf("%s/a.luau.meta", root)))
+	testing.expect(t, c.guids[1] == tree_guid(t, tree, "b.luau"))
 }
 
 @(test)

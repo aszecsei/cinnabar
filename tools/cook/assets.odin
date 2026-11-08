@@ -295,10 +295,13 @@ found_entry :: proc(
 		dependencies = make([dynamic]format.Guid, context.temp_allocator),
 		subassets = make([dynamic]Subasset, context.temp_allocator),
 	}
-	if !read_asset(&a, problems) {
+	switch read_asset(root.dir, &a, problems) {
+	case .Read:
+		append(found, a)
+	case .Gone:
+	case .Failed:
 		return false
 	}
-	append(found, a)
 	return true
 }
 
@@ -441,35 +444,70 @@ assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []int {
 }
 
 @(private = "file")
-read_asset :: proc(a: ^Asset_Source, problems: ^Problems) -> bool {
+Read_Result :: enum {
+	Read,
+	// The asset moved or was deleted while the scan read it, so the next pass finds it where it went.
+	Gone,
+	Failed,
+}
+
+@(private = "file")
+read_asset :: proc(root_dir: string, a: ^Asset_Source, problems: ^Problems) -> Read_Result {
 	source, err := os.read_entire_file(a.path, context.temp_allocator)
 	if err != nil {
 		report_error(problems, a.path, 0, 0, "%v", err)
-		return false
+		return .Failed
 	}
 	a.source = source
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
 	meta_bytes, meta_err := os.read_entire_file(meta_path, context.temp_allocator)
 	if meta_err == .Not_Exist {
-		text, _ := new_meta(initial_settings(a.kind, a.path))
-		if write_err := os.write_entire_file(meta_path, transmute([]byte)text); write_err != nil {
-			report_error(problems, meta_path, 0, 0, "%v", write_err)
-			return false
+		result: Read_Result
+		if meta_bytes, result = assign_guid(root_dir, a, meta_path, problems); result != .Read {
+			return result
 		}
-		log.infof("cook: assigned a GUID to %s", a.name)
-		meta_bytes = transmute([]byte)text
 	} else if meta_err != nil {
 		report_error(problems, meta_path, 0, 0, "%v", meta_err)
-		return false
+		return .Failed
 	}
 	a.meta_text = string(meta_bytes)
 	meta, meta_ok := format.meta_parse(a.meta_text, context.temp_allocator)
 	if !meta_ok {
 		report_error(problems, meta_path, 0, 0, "needs `guid = <32 hex digits>`, and `key = value` lines")
-		return false
+		return .Failed
 	}
 	a.meta = meta
-	return true
+	return .Read
+}
+
+// assign_guid writes the .meta file of an asset that had none, under the root's lock. Another cook, or an operation
+// of the daemon's, may have written it, or moved the asset, since the scan looked, so it looks again first.
+@(private = "file")
+assign_guid :: proc(root_dir: string, a: ^Asset_Source, meta_path: string, problems: ^Problems) -> (meta_bytes: []byte, result: Read_Result) {
+	lock, locked := lock_root(root_dir)
+	if !locked {
+		report_error(problems, meta_path, 0, 0, "cannot take the lock of its root to give the asset a GUID")
+		return nil, .Failed
+	}
+	defer unlock(&lock)
+	meta_err: os.Error
+	if meta_bytes, meta_err = os.read_entire_file(meta_path, context.temp_allocator); meta_err == nil {
+		return meta_bytes, .Read
+	}
+	if meta_err != .Not_Exist {
+		report_error(problems, meta_path, 0, 0, "%v", meta_err)
+		return nil, .Failed
+	}
+	if !os.exists(a.path) {
+		return nil, .Gone
+	}
+	text, _ := new_meta(initial_settings(a.kind, a.path))
+	if !write_blob(meta_path, transmute([]byte)text) {
+		report_error(problems, meta_path, 0, 0, "cannot write the asset's GUID")
+		return nil, .Failed
+	}
+	log.infof("cook: assigned a GUID to %s", a.name)
+	return transmute([]byte)text, .Read
 }
 
 // new_meta is the text of a .meta file with a new GUID and import settings.
@@ -531,11 +569,73 @@ subasset_kind_name :: proc(kind: format.Asset_Kind) -> string {
 // assign_subassets gives each sub-asset that a file makes its GUID: the one in the .meta file for its kind and name, or
 // a new one, which it writes into the .meta file, and adds them to the asset's sub-assets. A line whose sub-asset is
 // gone stays, with a warning, so one renamed back gets its GUID again, until a re-import drops it.
-assign_subassets :: proc(a: ^Asset_Source, wanted: []Subasset, force: bool, problems: ^Problems) -> bool {
+assign_subassets :: proc(root_dir: string, a: ^Asset_Source, wanted: []Subasset, force: bool, problems: ^Problems) -> bool {
 	meta_path := fmt.tprintf("%s%s", a.path, format.META_EXTENSION)
-	lines := make([dynamic]format.Meta_Subasset, 0, len(wanted), context.temp_allocator)
+	if !subassets_changed(a.meta, wanted, force) {
+		subasset_lines(a, meta_path, wanted, force, problems)
+		return true
+	}
+	// The .meta file changes, so it is written under the root's lock, from the file as it is now: another cook may have
+	// given a sub-asset its GUID, or the daemon changed an import setting, since the scan read it.
+	lock, locked := lock_root(root_dir)
+	if !locked {
+		report_error(problems, meta_path, 0, 0, "cannot take the lock of its root to write the sub-assets' GUIDs")
+		return false
+	}
+	defer unlock(&lock)
+	data, err := os.read_entire_file(meta_path, context.temp_allocator)
+	if err != nil {
+		report_error(problems, meta_path, 0, 0, "%v", err)
+		return false
+	}
+	meta, meta_ok := format.meta_parse(string(data), context.temp_allocator)
+	if !meta_ok || meta.guid != a.meta.guid {
+		report_error(problems, meta_path, 0, 0, "changed while the asset cooked. Cook it again.")
+		return false
+	}
+	a.meta_text = string(data)
+	a.meta = meta
+	lines, changed := subasset_lines(a, meta_path, wanted, force, problems)
+	if !changed {
+		return true
+	}
+	text := meta_with(a.meta.guid, a.meta_text, a.meta.settings, lines)
+	if !write_blob(meta_path, transmute([]byte)text) {
+		report_error(problems, meta_path, 0, 0, "cannot write the sub-assets' GUIDs")
+		return false
+	}
+	return true
+}
+
+// subassets_changed says whether the sub-assets need another .meta file than meta: one that meta has no GUID for, or
+// a line that a re-import drops.
+@(private = "file")
+subassets_changed :: proc(meta: format.Meta, wanted: []Subasset, force: bool) -> bool {
+	for w in wanted {
+		if _, found := format.meta_subasset(meta, subasset_kind_name(w.kind), w.name); !found {
+			return true
+		}
+	}
+	if !force {
+		return false
+	}
+	outer: for s in meta.subassets {
+		for w in wanted {
+			if s.kind == subasset_kind_name(w.kind) && s.name == w.name {
+				continue outer
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// subasset_lines gives each sub-asset its GUID from the asset's .meta file, or a new one, and adds them to the asset's
+// sub-assets. It returns the .meta file's sub-asset lines, and whether they changed.
+@(private = "file")
+subasset_lines :: proc(a: ^Asset_Source, meta_path: string, wanted: []Subasset, force: bool, problems: ^Problems) -> (lines: []format.Meta_Subasset, changed: bool) {
+	result := make([dynamic]format.Meta_Subasset, 0, len(wanted), context.temp_allocator)
 	current := make(map[string]bool, len(wanted), context.temp_allocator)
-	changed := false
 	for w in wanted {
 		kind := subasset_kind_name(w.kind)
 		guid, found := format.meta_subasset(a.meta, kind, w.name)
@@ -543,7 +643,7 @@ assign_subassets :: proc(a: ^Asset_Source, wanted: []Subasset, force: bool, prob
 			_, guid = new_meta(nil)
 			changed = true
 		}
-		append(&lines, format.Meta_Subasset{kind, w.name, guid})
+		append(&result, format.Meta_Subasset{kind, w.name, guid})
 		// The pass's index reads the names after the file's parse, which they may point into, is freed.
 		append(&a.subassets, Subasset{w.kind, strings.clone(w.name, context.temp_allocator), guid})
 		current[fmt.tprintf("%s.%s", kind, w.name)] = true
@@ -557,17 +657,9 @@ assign_subassets :: proc(a: ^Asset_Source, wanted: []Subasset, force: bool, prob
 			continue
 		}
 		report_warning(problems, meta_path, 0, 0, "%s.%s is no longer in the file. Its GUID stays here until the file is re-imported.", s.kind, s.name)
-		append(&lines, s)
+		append(&result, s)
 	}
-	if !changed {
-		return true
-	}
-	text := meta_with(a.meta.guid, a.meta_text, a.meta.settings, lines[:])
-	if !write_blob(meta_path, transmute([]byte)text) {
-		report_error(problems, meta_path, 0, 0, "cannot write the sub-assets' GUIDs")
-		return false
-	}
-	return true
+	return result[:], changed
 }
 
 // cooked_key reads the key of a cooked blob. It returns 0 if there is none, or if the blob is of another kind or from
@@ -594,7 +686,9 @@ cooked_key :: proc(output: string, kind: format.Asset_Kind, layout: u64) -> u64 
 WRITE_BLOB_ATTEMPTS :: 10
 WRITE_BLOB_WAIT :: 20 * time.Millisecond
 
-// write_blob writes a blob to a temporary file and renames it, so the running game never reads a partial blob.
+// write_blob writes a blob or a .meta file to a temporary file and renames it, so no reader sees a partial file: not
+// the running game a blob, nor another cook's scan or the editor a .meta file. Every .meta file that a cook writes goes
+// through it.
 write_blob :: proc(output: string, blob: []byte) -> bool {
 	temporary := fmt.tprintf("%s.tmp", output)
 	if err := os.write_entire_file(temporary, blob); err != nil {

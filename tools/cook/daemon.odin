@@ -39,7 +39,7 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	if locked != .Locked {
 		return false
 	}
-	defer unlock_cache(&lock)
+	defer unlock(&lock)
 
 	dirs := make([dynamic]string)
 	for root in d.options.roots {

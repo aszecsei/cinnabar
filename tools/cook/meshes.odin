@@ -167,7 +167,7 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	for anim in animations {
 		append(&wanted, Subasset{kind = .Animation, name = anim.name})
 	}
-	if !assign_subassets(a, wanted[:], force, problems) {
+	if !assign_subassets(options.roots[a.root].dir, a, wanted[:], force, problems) {
 		return .Failed
 	}
 	// The sub-assets are the meshes', then the skins', then the animations', in the order of wanted.

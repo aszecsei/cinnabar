@@ -19,12 +19,13 @@ Without `--dxc`, every shader fails with a problem that says so.
 - **Orphans:** a `.meta` file without its asset is a warning that belongs to no asset (see [Asset operations](#asset-operations)).
 - **Watching:** the daemon watches each root, and the definition file's directory, with `ReadDirectoryChangesW`. It does not read what changed, because the next pass scans everything, so a change that Windows drops when its buffer fills loses nothing. After a change, it waits until 100 ms pass without another, then makes one pass. A new definition file makes every script dirty, because it is part of every script's key.
 - **Problems:** an asset that fails is tried again at each pass until it cooks. The daemon logs an asset's problems when they change, and not again at each pass, and a pass that cooks something says how much. A `.meta` file that the daemon writes for a new asset is a change too, so it makes one more pass, which finds nothing to cook.
-- **One writer:** the daemon holds the cache's lock while it runs. A second daemon of the same cache stops with an error.
+- **One writer:** the daemon holds the cache's lock while it runs. A second daemon of the same cache stops with an error. A batch cook of another cache, such as a release cook, can run at the same time, and the roots' locks keep the two from giving one asset two GUIDs (see [Cooking](identity-and-cooking.md#cooking)).
 
 ### Asset operations
 
 The daemon is the only program that writes `.meta` files, and it moves every asset with its `.meta` file. The editor asks the daemon for every change to the content roots, except the text of a scene that it saves (see [Editor](../editor/shell-and-panels.md#content-browser)). The operations are in `tools/cook/operations.odin`.
 
+- **The roots' locks:** each operation that changes which `.meta` file is next to which asset (all except create folder and re-import) holds every root's lock while it runs, in the roots' order. A batch cook that scans the roots meanwhile never sees an asset half moved, created or deleted, and gives it no GUID of its own. Each `.meta` file goes through a temporary file and a rename.
 - **All or nothing:** an operation checks everything first: the root, the folder, each name, and that no file is in the way. It then fails without changing anything, or does all of it. A move that fails halfway moves back what it moved.
 - **Names** are what Windows takes and the scan does not skip: no `<>:"/\|?*`, no name that starts with a dot or ends with a dot or a space, and no device name such as `CON`. An asset's name is without its extension, which the daemon adds.
 - **Then a pass:** after the operations that the editor sent, the daemon makes a pass, sends what changed, and then answers each operation. The editor's index therefore has the change when the answer comes. The watcher's events for the operation make one more pass, which finds nothing to cook.
