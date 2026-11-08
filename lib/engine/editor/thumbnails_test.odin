@@ -365,14 +365,15 @@ a_bake_refuses_a_mesh_that_is_being_edited :: proc(t: ^testing.T) {
 	{
 		context.logger = log.nil_logger()
 		render.resident_mesh(&f.renderer.residency, format.Guid(BAKE_MESH))
+		// A blob that cannot stream still makes the mesh live.
+		render.set_live(&f.renderer.residency, format.Guid(BAKE_MESH), nil)
 	}
-	i := f.renderer.residency.index[{format.Guid(BAKE_MESH), .Mesh}]
-	f.renderer.residency.entries[i].live = true
+	testing.expect(t, render.is_live(&f.renderer.residency, format.Guid(BAKE_MESH)))
 
 	// Its picture would show what is not saved, under the name of what is.
 	bake(f, 5, .Mesh, BAKE_MESH)
 	_, draw := preview_quietly(f, false)
-	f.renderer.residency.entries[i].live = false
+	render.clear_live(&f.renderer.residency, format.Guid(BAKE_MESH))
 	testing.expect(t, !draw)
 	testing.expect_value(t, f.editor.session.thumbnail.failed, "a mesh that it draws is being edited")
 }
