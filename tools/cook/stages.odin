@@ -303,7 +303,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&wanted, Subasset{kind = .Instance_Set, name = set.name})
 	}
 	append(&wanted, Subasset{kind = .Prefab, name = STAGE_PREFAB_NAME})
-	if !assign_subassets(a, wanted[:], pass.force[a.meta.guid], problems) {
+	if !assign_subassets(options.roots[a.root].dir, a, wanted[:], pass.force[a.meta.guid], problems) {
 		return .Failed
 	}
 	guid_of := make(map[string]format.Guid, len(a.subassets), context.temp_allocator)

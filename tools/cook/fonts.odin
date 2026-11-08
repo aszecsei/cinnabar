@@ -113,7 +113,7 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 		return .Failed
 	}
 	guid := a.meta.guid
-	if !assign_subassets(a, {{kind = .Texture, name = format.FONT_ATLAS_NAME}}, pass.force[guid], problems) {
+	if !assign_subassets(options.roots[a.root].dir, a, {{kind = .Texture, name = format.FONT_ATLAS_NAME}}, pass.force[guid], problems) {
 		return .Failed
 	}
 	atlas_guid: format.Guid

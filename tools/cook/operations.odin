@@ -26,6 +26,21 @@ run_operation :: proc(
 	result: cook_link.Operation_Result,
 	is_operation: bool,
 ) {
+	// An operation that changes which .meta file is next to which asset holds every root's lock, as it may move an
+	// asset between roots, so another cook's scan never sees an asset without its .meta file half way through it.
+	pairs := false
+	#partial switch _ in message {
+	case cook_link.Create_Asset, cook_link.Move_Assets, cook_link.Rename_Asset, cook_link.Rename_Folder, cook_link.Duplicate_Assets, cook_link.Delete_Assets, cook_link.Set_Import_Settings:
+		pairs = true
+	}
+	locks: []Lock
+	if pairs {
+		locked: bool
+		if locks, locked = lock_roots(roots); !locked {
+			return failed("another cook is writing .meta files in the content roots. Try again."), true
+		}
+	}
+	defer unlock_all(locks)
 	is_operation = true
 	#partial switch op in message {
 	case cook_link.Create_Asset:
@@ -97,9 +112,9 @@ create_asset :: proc(roots: []Root, op: cook_link.Create_Asset) -> cook_link.Ope
 		return failed("cannot write %s: %s", display(roots, path), os.error_string(err))
 	}
 	meta, guid := new_meta(nil)
-	if err := os.write_entire_file(meta_of(path), transmute([]byte)meta); err != nil {
+	if !write_blob(meta_of(path), transmute([]byte)meta) {
 		os.remove(path)
-		return failed("cannot write %s: %s", display(roots, meta_of(path)), os.error_string(err))
+		return failed("cannot write %s", display(roots, meta_of(path)))
 	}
 	log.infof("cook: created %s", display(roots, path))
 	return {guids = guid_strings({guid})}
@@ -280,9 +295,9 @@ duplicate_assets :: proc(roots: []Root, index: ^Index, op: cook_link.Duplicate_A
 			return failed("cannot write %s: %s", display(roots, c.to), os.error_string(err))
 		}
 		meta, guid := new_meta(c.settings)
-		if err := os.write_entire_file(meta_of(c.to), transmute([]byte)meta); err != nil {
+		if !write_blob(meta_of(c.to), transmute([]byte)meta) {
 			os.remove(c.to)
-			return failed("cannot write %s: %s", display(roots, meta_of(c.to)), os.error_string(err))
+			return failed("cannot write %s", display(roots, meta_of(c.to)))
 		}
 		append(&guids, guid)
 		log.infof("cook: copied %s to %s", display(roots, c.from), display(roots, c.to))

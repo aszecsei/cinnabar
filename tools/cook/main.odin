@@ -148,7 +148,7 @@ cook_batch :: proc(options: Cook_Options, kind: format.Asset_Kind) -> bool {
 	case .Failed:
 		return false
 	}
-	defer unlock_cache(&lock)
+	defer unlock(&lock)
 	pass := cook(options, {kind})
 	log.infof("cook: %d %s cooked, %d up to date", pass.cooked[kind], kind_plural(kind), pass.current[kind])
 	if kind == .Scene {
