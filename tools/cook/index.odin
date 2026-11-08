@@ -64,12 +64,16 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 			continue
 		}
 		root := roots[a.root]
+		// Every kind's pass settles each of its assets, so a Pending one is a pass that missed it.
+		when ODIN_DEBUG || ODIN_TEST {
+			assert(a.result != .Pending, fmt.tprintf("the pass did not settle %s", a.name))
+		}
 		entry := cook_link.Asset {
 			guid      = guids[i],
 			kind      = link_kind(a.kind),
 			root      = clone(root.name, allocator),
 			path      = clone(a.name[len(root.name) + 1:], allocator),
-			status    = a.failed ? .Failed : .Current,
+			status    = link_status(a.result),
 			behaviour = clone(a.behaviour, allocator),
 			permutations = u32(a.permutations),
 			size      = a.size,
@@ -125,7 +129,7 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 	index.folders = folders
 	models := make([dynamic]cook_link.Shading_Model_Info, allocator)
 	for decl in pass.shadings {
-		if !decl.ok {
+		if !shading_usable(pass.assets, decl) {
 			continue
 		}
 		inputs := make([]cook_link.Node_Pin, len(decl.inputs), allocator)
@@ -137,6 +141,17 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 	}
 	slice.sort_by(models[:], proc(a, b: cook_link.Shading_Model_Info) -> bool {return a.name < b.name})
 	index.shading = {models[:]}
+}
+
+// link_status is an asset's status in the index: current when its blob is up to date, and failed otherwise, also when
+// no pass reached it.
+link_status :: proc(result: Asset_Result) -> cook_link.Asset_Status {
+	switch result {
+	case .Current, .Cooked:
+		return .Current
+	case .Pending, .Failed, .Blocked:
+	}
+	return .Failed
 }
 
 index_destroy :: proc(index: ^Index) {

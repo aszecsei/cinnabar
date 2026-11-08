@@ -138,7 +138,7 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	elapsed := time.tick_since(start)
 	failed := 0
 	for a in pass.assets {
-		failed += int(a.failed)
+		failed += int(asset_failed(a.result))
 	}
 	cooked := make([dynamic]cook_link.Cooked_Count, context.temp_allocator)
 	parts := make([dynamic]string, context.temp_allocator)

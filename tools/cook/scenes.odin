@@ -5,7 +5,6 @@ package cook
 
 import "core:fmt"
 import "core:hash"
-import "core:os"
 import "core:slice"
 
 import format "cinnabar:engine/asset/format"
@@ -34,8 +33,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 		}
 	}
 	out_dir := config_dir(options)
-	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-		report_error(problems, out_dir, 0, 0, "%v", err)
+	if !make_output_dir(pass, out_dir, {.Scene, .Prefab}) {
 		return false
 	}
 	// Each prefab that parses, by GUID, for the expansions, and the source of every prefab, for the scenes' keys.
@@ -75,7 +73,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			}
 			// A scene or a prefab with errors keeps its old blob, so the running game keeps the last good version.
 			if !scene_ok || !settings_ok {
-				s.failed = true
+				settle(pass, i, .Failed)
 				ok = false
 				continue
 			}
@@ -106,15 +104,15 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			buffer: [32]u8
 			output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 			if cooked_key(output, kind, format.scene_layout()) == key && !pass.force[s.meta.guid] {
-				pass.current[kind] += 1
+				settle(pass, i, .Current)
 				continue
 			}
 			if !write_blob(output, format.scene_write(flat, s.meta.guid, key, kind, context.temp_allocator)) {
-				s.failed = true
+				settle(pass, i, .Failed)
 				ok = false
 				continue
 			}
-			pass.cooked[kind] += 1
+			settle(pass, i, .Cooked)
 		}
 	}
 	return ok

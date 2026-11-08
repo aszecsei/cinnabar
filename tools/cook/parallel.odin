@@ -61,13 +61,6 @@ parallel_for :: proc(count: int, data: rawptr, work: proc(data: rawptr, index: i
 	}
 }
 
-// Cook_Result is what came of one job of a cook: it failed, its blob was up to date, or it cooked.
-Cook_Result :: enum {
-	Failed,
-	Current,
-	Cooked,
-}
-
 // Scratch is an arena for one sub-asset's cook, so its memory goes as soon as its blob is written. Problems reported
 // inside it are copied out when it ends.
 Scratch :: struct {
@@ -117,16 +110,22 @@ scratch_merge :: proc(s: ^Scratch, pass: ^Pass) {
 	virtual.arena_destroy(&s.arena)
 }
 
-// finish_job counts a job of a kind in the pass, moves its problems into the pass's and frees its scratch, on the
-// thread that called parallel_for. It returns whether the job succeeded.
-finish_job :: proc(result: Cook_Result, s: ^Scratch, kind: format.Asset_Kind, pass: ^Pass) -> bool {
-	switch result {
-	case .Failed:
-	case .Current:
-		pass.current[kind] += 1
-	case .Cooked:
-		pass.cooked[kind] += 1
-	}
+// finish_job counts a sub-asset's job of a kind in the pass, moves its problems into the pass's and frees its scratch,
+// on the thread that called parallel_for. It returns whether the job succeeded.
+finish_job :: proc(result: Asset_Result, s: ^Scratch, kind: format.Asset_Kind, pass: ^Pass) -> bool {
+	count_subassets(pass, kind, result)
 	scratch_merge(s, pass)
-	return result != .Failed
+	return !asset_failed(result)
+}
+
+// count_subassets counts sub-assets of a kind that a cook made or found up to date, which have no Asset_Source to
+// settle: a model's meshes, a font's atlas, a stage's textures.
+count_subassets :: proc(pass: ^Pass, kind: format.Asset_Kind, result: Asset_Result, n := 1, loc := #caller_location) {
+	assert(result != .Pending, "a job ends with a result", loc)
+	#partial switch result {
+	case .Current:
+		pass.current[kind] += n
+	case .Cooked:
+		pass.cooked[kind] += n
+	}
 }

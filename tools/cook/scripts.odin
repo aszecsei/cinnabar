@@ -48,8 +48,6 @@ Script_Source :: struct {
 	native_comment:    bool,
 	// The resolved requires, sorted by path.
 	resolved:  [dynamic]Resolved_Require,
-	// The script cannot cook: it has an error, or it requires a script that has one.
-	failed:    bool,
 	// The class that it defines, if it is a behaviour.
 	behaviour: string,
 }
@@ -70,11 +68,10 @@ Found_Require :: struct {
 // scripts still cook. It reports every failure, and returns false if any.
 cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
-	scripts := collect_scripts(assets, problems)
-	// The index learns what each script depends on, whether it cooked, and its behaviour class.
+	scripts := collect_scripts(pass)
+	// The index learns what each script depends on and its behaviour class.
 	defer for s in scripts {
 		a := &assets[s.asset]
-		a.failed = s.failed
 		for r in s.resolved {
 			append(&a.dependencies, r.entry.target)
 		}
@@ -85,38 +82,37 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		by_path[s.path] = i
 	}
 	for &s in scripts {
-		if s.failed || !find_requires(&s, problems) {
-			s.failed = true
+		if script_result(pass, s) != .Pending {
 			continue
 		}
-		if !resolve_requires(scripts, by_path, &s, problems) {
-			s.failed = true
+		if !find_requires(&s, problems) || !resolve_requires(scripts, by_path, &s, problems) {
+			settle(pass, s.asset, .Failed)
 		}
 	}
-	check_cycles(scripts, problems)
-	fail_dependents(scripts, problems)
+	check_cycles(pass, scripts)
+	fail_dependents(pass, scripts)
 	ok := true
 	for s in scripts {
-		ok &&= !s.failed
+		ok &&= !asset_failed(script_result(pass, s))
 	}
 
 	out_dir := config_dir(options)
-	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-		report_error(problems, out_dir, 0, 0, "%v", err)
+	if !make_output_dir(pass, out_dir, {.Script}) {
 		return false
 	}
 	definitions := definitions_hash(options.definitions)
 	// The type checker and the VM that reads behaviours' fields open on the first script that needs them, so a cook
 	// that finds everything up to date stays quick.
 	checker: Type_Checker
-	checker_open := false
+	checker_state: Tool_State
 	defer type_checker_close(&checker)
 	vm: Schema_VM
+	vm_state: Tool_State
 	defer schema_vm_close(&vm)
 	step_begin(pass, .Script, "", len(scripts))
 	for &s, index in scripts {
 		defer step_advance(pass)
-		if s.failed {
+		if script_result(pass, s) != .Pending {
 			continue
 		}
 		key := script_key(options.config, s, dependency_hash(scripts, index) ~ definitions)
@@ -124,53 +120,75 @@ cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked, behaviour := cooked_script(output); cooked == key && !pass.force[s.meta.guid] {
 			s.behaviour = behaviour
-			pass.current[.Script] += 1
+			settle(pass, s.asset, .Current)
 			continue
 		}
-		if !checker_open {
-			if !type_checker_open(&checker, options.definitions, scripts, problems) {
-				s.failed = true
-				return false
-			}
-			checker_open = true
+		if checker_state == .Closed {
+			checker_state = .Open if type_checker_open(&checker, options.definitions, scripts, problems) else .Broken
+		}
+		if checker_state == .Broken {
+			report_error(problems, s.path, 0, 0, "not cooked, because the definition file is not valid")
+			settle(pass, s.asset, .Failed)
+			ok = false
+			continue
 		}
 		if !type_check(&checker, s, problems) {
-			s.failed = true
+			settle(pass, s.asset, .Failed)
 			ok = false
 			continue
 		}
 		class_name: string
 		fields: []format.Field_Entry
 		if s.defines_behaviour {
-			if vm.L == nil && !schema_vm_open(&vm, options.config, scripts, problems) {
-				s.failed = true
-				return false
+			if vm_state == .Closed {
+				vm_state = .Open if schema_vm_open(&vm, options.config, scripts, problems) else .Broken
+			}
+			if vm_state == .Broken {
+				report_error(problems, s.path, 0, 0, "not cooked, because the cooker cannot start the VM that reads behaviours' fields")
+				settle(pass, s.asset, .Failed)
+				ok = false
+				continue
 			}
 			schema_ok: bool
 			class_name, fields, schema_ok = read_schema(&vm, index)
 			if !schema_ok {
-				s.failed = true
+				settle(pass, s.asset, .Failed)
 				ok = false
 				continue
 			}
 		}
 		if !compile_script(options.config, s, key, output, class_name, fields, problems) {
-			s.failed = true
+			settle(pass, s.asset, .Failed)
 			ok = false
 			continue
 		}
 		s.behaviour = class_name
-		pass.cooked[.Script] += 1
+		settle(pass, s.asset, .Cooked)
 	}
 	return ok
 }
 
-// collect_scripts gives the scripts among the assets, and checks their settings. A script with a bad setting is
-// marked failed.
-collect_scripts :: proc(assets: []Asset_Source, problems: ^Problems) -> []Script_Source {
-	found := make([dynamic]Script_Source, 0, len(assets), context.temp_allocator)
-	for i in assets_of(assets, .Script) {
-		a := assets[i]
+// Tool_State is how far the script pass got with a tool that it opens on the first script that needs it.
+@(private = "file")
+Tool_State :: enum u8 {
+	Closed,
+	Open,
+	// It did not open, so no script that needs it cooks.
+	Broken,
+}
+
+// script_result is what the pass did with a script.
+@(private = "file")
+script_result :: proc(pass: ^Pass, s: Script_Source) -> Asset_Result {
+	return pass.assets[s.asset].result
+}
+
+// collect_scripts gives the scripts among the pass's assets, and checks their settings. A script with a bad setting
+// fails.
+collect_scripts :: proc(pass: ^Pass) -> []Script_Source {
+	found := make([dynamic]Script_Source, 0, len(pass.assets), context.temp_allocator)
+	for i in assets_of(pass.assets, .Script) {
+		a := pass.assets[i]
 		append(
 			&found,
 			Script_Source {
@@ -183,25 +201,27 @@ collect_scripts :: proc(assets: []Asset_Source, problems: ^Problems) -> []Script
 				source = a.source,
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
-				failed = !check_settings(a, problems),
 			},
 		)
+		if !check_settings(a, &pass.problems) {
+			settle(pass, i, .Failed)
+		}
 	}
 	return found[:]
 }
 
-// fail_dependents marks every script that requires a failed script, directly or not, as failed, and says why.
-fail_dependents :: proc(scripts: []Script_Source, problems: ^Problems) {
+// fail_dependents blocks every script that requires a failed script, directly or not, and says why.
+fail_dependents :: proc(pass: ^Pass, scripts: []Script_Source) {
 	for changed := true; changed; {
 		changed = false
-		for &s in scripts {
-			if s.failed {
+		for s in scripts {
+			if script_result(pass, s) != .Pending {
 				continue
 			}
 			for r in s.resolved {
-				if scripts[r.target].failed {
-					report_error(problems, s.path, 0, 0, "not cooked, because it requires %s, which did not cook", scripts[r.target].name)
-					s.failed = true
+				if asset_failed(script_result(pass, scripts[r.target])) {
+					report_error(&pass.problems, s.path, 0, 0, "not cooked, because it requires %s, which did not cook", scripts[r.target].name)
+					settle(pass, s.asset, .Blocked)
 					changed = true
 					break
 				}
@@ -341,8 +361,8 @@ find_alias :: proc(dir, alias: string) -> (target: string, found: bool, message:
 	}
 }
 
-// check_cycles reports each require cycle in each of its scripts, and marks them failed.
-check_cycles :: proc(scripts: []Script_Source, problems: ^Problems) {
+// check_cycles reports each require cycle in each of its scripts, which fail.
+check_cycles :: proc(pass: ^Pass, scripts: []Script_Source) {
 	State :: enum u8 {
 		New,
 		Visiting,
@@ -350,14 +370,14 @@ check_cycles :: proc(scripts: []Script_Source, problems: ^Problems) {
 	}
 	states := make([]State, len(scripts), context.temp_allocator)
 	stack := make([dynamic]int, context.temp_allocator)
-	visit :: proc(scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int, problems: ^Problems) {
+	visit :: proc(pass: ^Pass, scripts: []Script_Source, states: []State, stack: ^[dynamic]int, i: int) {
 		states[i] = .Visiting
 		append(stack, i)
 		for r in scripts[i].resolved {
 			t := r.target
 			switch states[t] {
 			case .New:
-				visit(scripts, states, stack, t, problems)
+				visit(pass, scripts, states, stack, t)
 			case .Visiting:
 				builder := strings.builder_make(context.temp_allocator)
 				start, _ := slice.linear_search(stack[:], t)
@@ -366,8 +386,11 @@ check_cycles :: proc(scripts: []Script_Source, problems: ^Problems) {
 				}
 				strings.write_string(&builder, scripts[t].name)
 				for s in stack[start:] {
-					report_error(problems, scripts[s].path, 0, 0, "require cycle: %s", strings.to_string(builder))
-					scripts[s].failed = true
+					report_error(&pass.problems, scripts[s].path, 0, 0, "require cycle: %s", strings.to_string(builder))
+					// A script in two cycles, or one whose requires did not all resolve, has already failed.
+					if script_result(pass, scripts[s]) == .Pending {
+						settle(pass, scripts[s].asset, .Failed)
+					}
 				}
 			case .Done:
 			}
@@ -377,7 +400,7 @@ check_cycles :: proc(scripts: []Script_Source, problems: ^Problems) {
 	}
 	for i in 0 ..< len(scripts) {
 		if states[i] == .New {
-			visit(scripts, states, &stack, i, problems)
+			visit(pass, scripts, states, &stack, i)
 		}
 	}
 }

@@ -39,7 +39,6 @@ Shading_Decl :: struct {
 	no_lighting:    bool,
 	// The .hlsli beside it, absolute.
 	implementation: string,
-	ok:             bool,
 }
 
 Param_Decl :: struct {
@@ -137,20 +136,33 @@ Material_Set :: struct {
 	kinds:     map[format.Guid]format.Asset_Kind,
 }
 
-// material_set parses the shading models and the material functions, and marks those with errors as failed.
-material_set :: proc(assets: []Asset_Source, problems: ^Problems) -> (set: Material_Set, ok: bool) {
+// material_set parses the shading models and the material functions, and settles them: those with errors fail, and
+// so does every shading model whose name another has.
+material_set :: proc(pass: ^Pass) -> (set: Material_Set, ok: bool) {
+	assets := pass.assets
+	problems := &pass.problems
 	ok = true
 	set.shadings = make(map[string]^Shading_Decl, context.temp_allocator)
+	// A shading model settles once every one has parsed, since a name that two files have makes both unusable.
+	decls := make([dynamic]^Shading_Decl, context.temp_allocator)
+	parsed := make(map[^Shading_Decl]bool, context.temp_allocator)
+	files := make(map[string]int, context.temp_allocator)
 	for i in assets_of(assets, .Shading_Model) {
 		decl := new(Shading_Decl, context.temp_allocator)
-		decl^ = parse_shading(assets[i], i, problems)
-		if previous, taken := set.shadings[decl.name]; taken {
-			report_error(problems, assets[i].path, 0, 0, "a shading model named %s is also at %s", decl.name, assets[previous.asset].path)
-			decl.ok, previous.ok = false, false
-		}
+		decl^, parsed[decl] = parse_shading(assets[i], i, problems)
+		append(&decls, decl)
+		files[decl.name] += 1
 		set.shadings[decl.name] = decl
-		assets[i].failed = !decl.ok
-		ok &&= decl.ok
+	}
+	for decl in decls {
+		for other in decls {
+			if other != decl && other.name == decl.name {
+				report_error(problems, assets[decl.asset].path, 0, 0, "a shading model named %s is also at %s. Rename one of them.", decl.name, assets[other.asset].path)
+			}
+		}
+		usable := parsed[decl] && files[decl.name] == 1
+		settle(pass, decl.asset, .Current if usable else .Failed)
+		ok &&= usable
 	}
 	set.kinds = make(map[format.Guid]format.Asset_Kind, len(assets), context.temp_allocator)
 	for a in assets {
@@ -168,10 +180,15 @@ material_set :: proc(assets: []Asset_Source, problems: ^Problems) -> (set: Mater
 		for &n in decl.graph.nodes {
 			add_function_dependency(&assets[i], &n)
 		}
-		assets[i].failed = !decl.ok
+		settle(pass, i, .Current if decl.ok else .Failed)
 		ok &&= decl.ok
 	}
 	return
+}
+
+// shading_usable is whether materials can use a shading model: it parsed, and no other shading model has its name.
+shading_usable :: proc(assets: []Asset_Source, decl: ^Shading_Decl) -> bool {
+	return link_status(assets[decl.asset].result) == .Current
 }
 
 // add_function_dependency makes a function node's material function a dependency of the asset whose graph has it.
@@ -192,7 +209,7 @@ add_function_dependency :: proc(a: ^Asset_Source, n: ^Graph_Node) {
 // every failure, and returns false if any.
 cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
-	set, ok := material_set(assets, problems)
+	set, ok := material_set(pass)
 	if pass.shadings == nil {
 		pass.shadings = make([dynamic]^Shading_Decl, context.temp_allocator)
 	}
@@ -228,11 +245,8 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 	}
 
 	out_dir := config_dir(options)
-	if len(materials) + len(instances) > 0 {
-		if err := os.make_directory_all(fmt.tprintf("%s/generated", out_dir)); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(materials) + len(instances) > 0 && !make_output_dir(pass, fmt.tprintf("%s/generated", out_dir), {.Material, .Material_Instance}) {
+		return false
 	}
 	step_begin(pass, .Material, "", len(materials) + len(instances))
 	for guid, decl in materials {
@@ -250,19 +264,21 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 		list := variants[decl]
 		slice.sort(list[:])
 		a.permutations = len(list)
+		result: Asset_Result
 		switch {
 		case !decl.ok || !check_settings(a^, problems):
-			a.failed = true
+			result = .Failed
 		case !found:
 			report_error(problems, a.path, 0, 0, "no shading model is named %s", decl.shading)
-			a.failed = true
-		case !shading.ok:
+			result = .Failed
+		case !shading_usable(assets, shading):
 			report_error(problems, a.path, 0, 0, "not cooked, because its shading model %s has errors", decl.shading)
-			a.failed = true
+			result = .Blocked
 		case:
-			a.failed = !cook_material(options, a^, guid, decl, shading, set, list[:], fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid)), pass)
+			result = cook_material(options, a^, guid, decl, shading, set, list[:], fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid)), pass)
 		}
-		ok &&= !a.failed
+		settle(pass, decl.asset, result)
+		ok &&= !asset_failed(result)
 	}
 	for guid, decl in instances {
 		defer step_advance(pass)
@@ -277,12 +293,13 @@ cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pas
 			a.hotspots = r.material.hotspots[:]
 		}
 		if !decl.ok || !r.ok || !check_settings(a^, problems) {
-			a.failed = true
+			settle(pass, decl.asset, .Failed)
 			ok = false
 			continue
 		}
-		a.failed = !cook_instance(options, a^, guid, r, assets, out_dir, pass)
-		ok &&= !a.failed
+		result := cook_instance(options, a^, guid, r, assets, out_dir, pass)
+		settle(pass, decl.asset, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
@@ -298,7 +315,11 @@ cook_preview :: proc(options: Cook_Options, guid: format.Guid, text: string) -> 
 		report_error(&problems, "", 0, 0, "cannot scan the content roots")
 		return
 	}
-	set, _ := material_set(assets, &content)
+	scanned_pass := Pass {
+		assets   = assets,
+		problems = content,
+	}
+	set, _ := material_set(&scanned_pass)
 	index := -1
 	for a, i in assets {
 		if a.meta.guid == guid {
@@ -320,7 +341,7 @@ cook_preview :: proc(options: Cook_Options, guid: format.Guid, text: string) -> 
 	case !found:
 		report_error(&problems, a.path, 0, 0, "no shading model is named %s", decl.shading)
 		return
-	case !shading.ok:
+	case !shading_usable(assets, shading):
 		report_error(&problems, a.path, 0, 0, "its shading model %s has errors", decl.shading)
 		return
 	}
@@ -342,7 +363,7 @@ cook_preview :: proc(options: Cook_Options, guid: format.Guid, text: string) -> 
 		force    = make(map[format.Guid]bool, context.temp_allocator),
 	}
 	pass.force[guid] = true
-	ok = cook_material(options, a, guid, decl, shading, set, {switches}, fmt.tprintf("%s/%s.blob", dir, guid_text(guid)), &pass)
+	ok = !asset_failed(cook_material(options, a, guid, decl, shading, set, {switches}, fmt.tprintf("%s/%s.blob", dir, guid_text(guid)), &pass))
 	return pass.problems, ok
 }
 
@@ -411,12 +432,13 @@ input_count :: proc(type: string) -> int {
 	return 0
 }
 
-parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Shading_Decl) {
-	decl = {asset = index, name = filepath.stem(a.path), inputs = make([dynamic]Shading_Input, context.temp_allocator), ok = true}
+parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Shading_Decl, ok: bool) {
+	decl = {asset = index, name = filepath.stem(a.path), inputs = make([dynamic]Shading_Input, context.temp_allocator)}
+	ok = true
 	lines, _, _, _ := decl_lines(string(a.source))
 	if len(lines) == 0 || lines[0].text != "shading 1" {
 		report_error(problems, a.path, 1, 0, "a shading model starts with `shading 1`")
-		decl.ok = false
+		ok = false
 		return
 	}
 	for l in lines[1:] {
@@ -425,7 +447,7 @@ parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl
 		case "flag":
 			if strings.trim_space(rest) != "no_lighting" {
 				report_error(problems, a.path, l.number, 0, "the only flag is no_lighting")
-				decl.ok = false
+				ok = false
 			}
 			decl.no_lighting = true
 		case "input":
@@ -434,25 +456,25 @@ parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl
 			fields := strings.fields(head, context.temp_allocator)
 			if len(fields) != 2 || !is_identifier(fields[0]) || input_count(fields[1]) == 0 {
 				report_error(problems, a.path, l.number, 0, "an input is `input <name> <float, float2, float3 or float4> = <default>`")
-				decl.ok = false
+				ok = false
 				continue
 			}
 			values, count, numbers_ok := parse_numbers(strings.trim_space(value))
 			if !numbers_ok || count != input_count(fields[1]) {
 				report_error(problems, a.path, l.number, 0, "the input %s needs %d numbers as its default", fields[0], input_count(fields[1]))
-				decl.ok = false
+				ok = false
 				continue
 			}
 			append(&decl.inputs, Shading_Input{fields[0], fields[1], count, values})
 		case:
 			report_error(problems, a.path, l.number, 0, "a shading model's lines are `input` and `flag`, not %q", word)
-			decl.ok = false
+			ok = false
 		}
 	}
 	decl.implementation = fmt.tprintf("%s/%s.hlsli", filepath.dir(a.path), decl.name)
 	if !os.is_file(decl.implementation) {
 		report_error(problems, a.path, 0, 0, "has no implementation: %s.hlsli is not beside it", decl.name)
-		decl.ok = false
+		ok = false
 	}
 	return
 }
@@ -1243,11 +1265,11 @@ cook_material :: proc(
 	switch_masks: []u32,
 	output: string,
 	pass: ^Pass,
-) -> bool {
+) -> Asset_Result {
 	problems := &pass.problems
 	if options.dxc == "" {
 		report_error(problems, a.path, 0, 0, "not cooked: the cooker has no --dxc to compile materials with")
-		return false
+		return .Failed
 	}
 	out_dir := config_dir(options)
 	sources := make([]string, len(switch_masks), context.temp_allocator)
@@ -1255,7 +1277,7 @@ cook_material :: proc(
 	for mask, i in switch_masks {
 		source, time, moves, generated := generate_source(a, decl, shading, set, mask, problems)
 		if !generated {
-			return false
+			return .Failed
 		}
 		sources[i] = source
 		reads_time ||= time
@@ -1264,7 +1286,7 @@ cook_material :: proc(
 	// Every variant includes the same files.
 	inputs, inputs_ok := gather_includes(fmt.tprintf("%s/generated/material.hlsl", out_dir), transmute([]byte)sources[0], options.includes[:], problems)
 	if !inputs_ok {
-		return false
+		return .Failed
 	}
 	inputs_hash := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%v\x00", MATERIAL_COOK_VERSION, options.dxc_version, options.config))
 	for input in inputs[1:] {
@@ -1280,14 +1302,16 @@ cook_material :: proc(
 		key = hash.fnv64a(transmute([]byte)source, key)
 	}
 	if cooked_key(output, .Material, format.material_layout()) == key && !pass.force[guid] {
-		pass.current[.Material] += 1
-		return true
+		return .Current
 	}
 
 	entries := material_entries(decl)
 	variants := make([dynamic]format.Material_Variant_Entry, context.temp_allocator)
 	for mask, i in switch_masks {
-		codes := compile_source(options, a, sources[i], hash.fnv64a(transmute([]byte)sources[i], inputs_hash), entries, out_dir, pass) or_return
+		codes, compiled := compile_source(options, a, sources[i], hash.fnv64a(transmute([]byte)sources[i], inputs_hash), entries, out_dir, pass)
+		if !compiled {
+			return .Failed
+		}
 		for entry, e in entries {
 			append(&variants, format.Material_Variant_Entry{mask, entry.pass, entry.target.stage, codes[e]})
 		}
@@ -1354,15 +1378,14 @@ cook_material :: proc(
 		source_path      = a.name,
 	}
 	if !write_blob(output, format.material_write(contents, context.temp_allocator)) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Material] += 1
-	return true
+	return .Cooked
 }
 
 // cook_instance writes the instance's blob, with its values resolved, if its key changed.
 @(private = "file")
-cook_instance :: proc(options: Cook_Options, a: Asset_Source, guid: format.Guid, r: Resolved, assets: []Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_instance :: proc(options: Cook_Options, a: Asset_Source, guid: format.Guid, r: Resolved, assets: []Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%v\x00%s\x00%x\x00", MATERIAL_COOK_VERSION, options.config, a.name, format.material_instance_layout()))
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
 	for source in r.chain {
@@ -1371,8 +1394,7 @@ cook_instance :: proc(options: Cook_Options, a: Asset_Source, guid: format.Guid,
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 	if cooked_key(output, .Material_Instance, format.material_instance_layout()) == key && !pass.force[guid] {
-		pass.current[.Material_Instance] += 1
-		return true
+		return .Current
 	}
 	block, textures := encode_block(r.params, block_layout(r.params))
 	contents := format.Material_Instance_Contents {
@@ -1385,8 +1407,7 @@ cook_instance :: proc(options: Cook_Options, a: Asset_Source, guid: format.Guid,
 		source_path = a.name,
 	}
 	if !write_blob(output, format.material_instance_write(contents, context.temp_allocator)) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Material_Instance] += 1
-	return true
+	return .Cooked
 }

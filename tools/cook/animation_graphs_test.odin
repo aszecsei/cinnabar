@@ -242,7 +242,7 @@ animation_graphs_cook_to_blobs_that_depend_on_their_clips :: proc(t: ^testing.T)
 		testing.expect_value(t, format.blob_string(data, blob.source_path), "game/animations/fox.animation_graph")
 	}
 	for a in pass.assets {
-		if a.kind == .Animation_Graph && !a.failed {
+		if a.kind == .Animation_Graph && a.result == .Cooked {
 			testing.expect_value(t, len(a.dependencies), 3)
 		}
 	}

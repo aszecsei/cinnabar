@@ -676,14 +676,15 @@ an_image_that_is_not_standalone_cooks_only_in_its_set :: proc(t: ^testing.T) {
 	pass := cook(options, {.Texture})
 	testing.expect(t, pass.ok)
 	testing.expect_value(t, pass.cooked[.Texture], 0)
-	testing.expect_value(t, pass.current[.Texture], 1)
+	// The set, and the six images, which have nothing to cook.
+	testing.expect_value(t, pass.current[.Texture], 7)
 	for guid in SET_GUIDS {
 		testing.expectf(t, !os.exists(blob_of(tree, guid)), "%s kept its blob", guid)
 	}
 	for a in pass.assets {
 		if strings.has_suffix(a.path, ".png") {
 			testing.expect_value(t, a.size, [2]u32{})
-			testing.expect(t, !a.failed)
+			testing.expect_value(t, a.result, Asset_Result.Current)
 		}
 	}
 	if data, blob, ok := texture_blob(t, tree, "sky.texture_set"); ok {

@@ -3,7 +3,6 @@ package cook
 import "core:fmt"
 import "core:hash"
 import "core:math"
-import "core:os"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
@@ -81,23 +80,18 @@ font_setting :: proc(a: Asset_Source, key: string) -> string {
 }
 
 cook_fonts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	fonts := assets_of(assets, .Font)
-	if len(fonts) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(fonts) > 0 && !make_output_dir(pass, out_dir, {.Font}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Font, "", len(fonts))
 	for i in fonts {
 		defer step_advance(pass)
-		if !cook_font(options, &assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_font(options, &assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
@@ -113,11 +107,15 @@ Font_Cell :: struct {
 }
 
 @(private = "file")
-cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
-	check_settings(a^, problems) or_return
+	if !check_settings(a^, problems) {
+		return .Failed
+	}
 	guid := a.meta.guid
-	assign_subassets(a, {{kind = .Texture, name = format.FONT_ATLAS_NAME}}, pass.force[guid], problems) or_return
+	if !assign_subassets(a, {{kind = .Texture, name = format.FONT_ATLAS_NAME}}, pass.force[guid], problems) {
+		return .Failed
+	}
 	atlas_guid: format.Guid
 	for s in a.subassets {
 		if s.kind == .Texture && s.name == format.FONT_ATLAS_NAME {
@@ -154,39 +152,38 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
 	atlas_output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(atlas_guid))
 	if cooked_key(output, .Font, format.font_layout()) == key && cooked_key(atlas_output, .Texture, format.texture_layout()) == key && !pass.force[guid] {
-		pass.current[.Font] += 1
-		return true
+		return .Current
 	}
 
 	data := a.source
 	offset := int(stbtt.GetFontOffsetForIndex(raw_data(data), i32(index))) if len(data) >= 12 else -1
 	if offset < 0 {
 		report_error(problems, a.path, 0, 0, "has no font %d", index)
-		return false
+		return .Failed
 	}
 	tables, tables_ok := font_tables(data, offset)
 	if !tables_ok {
 		report_error(problems, a.path, 0, 0, "is not a TrueType or OpenType font, or is truncated")
-		return false
+		return .Failed
 	}
 	if "fvar" in tables.tables || "CFF2" in tables.tables {
 		report_error(problems, a.path, 0, 0, "is a variable font, which the cooker does not read. Export a static instance of it.")
-		return false
+		return .Failed
 	}
 	if !("glyf" in tables.tables) && !("CFF " in tables.tables) {
 		report_error(problems, a.path, 0, 0, "has no outlines: neither a glyf nor a CFF table")
-		return false
+		return .Failed
 	}
 	info: stbtt.fontinfo
 	if !stbtt.InitFont(&info, raw_data(data), i32(offset)) || info.numGlyphs <= 0 {
 		report_error(problems, a.path, 0, 0, "is not a font that stb_truetype reads")
-		return false
+		return .Failed
 	}
 	head := tables.tables["head"]
 	units_per_em := len(head) >= 20 ? int(head[18]) << 8 | int(head[19]) : 0
 	if units_per_em == 0 {
 		report_error(problems, a.path, 0, 0, "has no units per em in its head table")
-		return false
+		return .Failed
 	}
 
 	wanted := make([dynamic]bool, info.numGlyphs, context.temp_allocator)
@@ -214,21 +211,24 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 	cells := font_cells(&info, wanted[:], f64(em_size) / f64(units_per_em), f64(em_size), range, a.path, problems)
 	if len(cells) > format.MAX_FONT_GLYPHS {
 		report_error(problems, a.path, 0, 0, "has %d glyphs, more than the atlas holds (%d)", len(cells), format.MAX_FONT_GLYPHS)
-		return false
+		return .Failed
 	}
 	atlas_size, packed := pack_font_cells(cells)
 	if !packed {
 		report_error(problems, a.path, 0, 0, "has %d glyphs, which do not fit in a %d texel atlas at em_size %d. Choose a smaller em_size or charset.", len(cells), MAX_FONT_ATLAS, em_size)
-		return false
+		return .Failed
 	}
 	atlas := Image{int(atlas_size.x), int(atlas_size.y), make([][4]f32, int(atlas_size.x * atlas_size.y), context.temp_allocator)}
 	if !draw_font_cells(cells, f64(em_size) / f64(units_per_em), f64(range), atlas) {
 		report_error(problems, a.path, 0, 0, "has a glyph whose outline msdfgen cannot use")
-		return false
+		return .Failed
 	}
 
 	texture := Texture_Cook{usage = .Data, mips = false, max_size = 16384}
-	atlas_blob := cook_texture_image(options, atlas, texture, atlas_guid, key, fmt.tprintf("%s#%s", a.name, format.FONT_ATLAS_NAME), a.path, problems) or_return
+	atlas_blob, atlas_ok := cook_texture_image(options, atlas, texture, atlas_guid, key, fmt.tprintf("%s#%s", a.name, format.FONT_ATLAS_NAME), a.path, problems)
+	if !atlas_ok {
+		return .Failed
+	}
 	glyphs := make([]format.Font_Glyph, len(cells), context.temp_allocator)
 	for c, i in cells {
 		glyphs[i] = c.glyph
@@ -258,12 +258,11 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 	)
 	// The atlas goes first, so a font blob never names an atlas that its cook did not write.
 	if !write_blob(atlas_output, atlas_blob) || !write_blob(output, blob) {
-		return false
+		return .Failed
 	}
 	a.size = atlas_size
-	pass.cooked[.Texture] += 1
-	pass.cooked[.Font] += 1
-	return true
+	count_subassets(pass, .Texture, .Cooked)
+	return .Cooked
 }
 
 // font_cells is the atlas's cells for the wanted glyphs, in order of their ids, with their outlines in font units.

@@ -34,6 +34,8 @@ Cook_Options :: struct {
 // Pass is what one cook did, and what it found, in the temporary allocator.
 Pass :: struct {
 	ok:         bool,
+	// The assets and sub-assets of each kind that the pass cooked, or found up to date. Only settle and count_subassets
+	// change them.
 	cooked:     [format.Asset_Kind]int,
 	current:    [format.Asset_Kind]int,
 	// The cache's generation after the pass. It changes only when the pass writes a blob.
