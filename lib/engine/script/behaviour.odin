@@ -45,10 +45,12 @@ Instance_Flag :: enum u8 {
 	Fixed_Updates,
 	// Created by native code: awake waits for the next script phase.
 	Needs_Awake,
+	// The script's last enable callback was on_enable, not on_disable. Only sync_enabled and destroy_instance write it.
+	Told_Enabled,
 }
 
 @(private)
-Instance_Flags :: bit_set[Instance_Flag;u8]
+Instance_Flags :: bit_set[Instance_Flag;u16]
 
 // Instance is the native state of a behaviour instance. The instance's table holds its handle under a light
 // userdata key, which scripts cannot make.
@@ -369,6 +371,29 @@ field_problem :: proc(r: ^Runtime, L: ^luau.State, class, fields: c.int, key: st
 	return ""
 }
 
+// sync_enabled sends on_enable or on_disable when effective() differs from what the script was last told, so the two
+// always alternate. While quiet it sends nothing and the record keeps what the script last saw: set_quiet calls it for
+// every instance when quiet ends. The record changes before the callback, so a callback that changes enabled or
+// activity syncs again from the new record.
+@(private)
+sync_enabled :: proc(r: ^Runtime, h: Instance_Handle) {
+	i := instance_at(r, h)
+	if i == nil || r.quiet {
+		return
+	}
+	now := effective(i)
+	if now == (.Told_Enabled in i.flags) {
+		return
+	}
+	if now {
+		i.flags += {.Told_Enabled}
+		call_method(r, h, "on_enable")
+	} else {
+		i.flags -= {.Told_Enabled}
+		call_method(r, h, "on_disable")
+	}
+}
+
 // wake runs awake once, and then on_enable if the instance is enabled. Both run only while the entity is active.
 @(private)
 wake :: proc(r: ^Runtime, h: Instance_Handle) {
@@ -388,9 +413,7 @@ wake :: proc(r: ^Runtime, h: Instance_Handle) {
 		i.flags += {.Awake}
 		call_method(r, h, "awake")
 	}
-	if i = instance_at(r, h); i != nil && effective(i) {
-		call_method(r, h, "on_enable")
-	}
+	sync_enabled(r, h)
 }
 
 @(private)
@@ -398,18 +421,12 @@ set_enabled :: proc(r: ^Runtime, i: ^Instance, enabled: bool) {
 	if (.Enabled in i.flags) == enabled {
 		return
 	}
-	was := effective(i)
 	if enabled {
 		i.flags += {.Enabled}
 	} else {
 		i.flags -= {.Enabled}
 	}
-	h := handle_of(r, i)
-	if !was && effective(i) {
-		call_method(r, h, "on_enable")
-	} else if was && !effective(i) {
-		call_method(r, h, "on_disable")
-	}
+	sync_enabled(r, handle_of(r, i))
 }
 
 // set_entity_active updates the instances of an entity whose activity changed, like Unity: awake on the first
@@ -425,12 +442,9 @@ set_entity_active :: proc(r: ^Runtime, e: ecs.Entity, active: bool) {
 			i.flags += {.Active}
 			wake(r, h)
 		} else {
-			was := effective(i)
 			i.flags -= {.Active}
 			stop_owned(r, h)
-			if was {
-				call_method(r, h, "on_disable")
-			}
+			sync_enabled(r, h)
 		}
 	}
 }
@@ -462,14 +476,16 @@ record_instances :: proc(r: ^Runtime, record: c.int) -> []Instance_Handle {
 	return handles
 }
 
-// destroy_instance ends an instance: on_disable if it was effective, on_destroy if it woke, and its coroutines stop.
+// destroy_instance ends an instance: on_disable if the script's last enable callback was on_enable, on_destroy if it
+// woke, and its coroutines stop.
 @(private)
 destroy_instance :: proc(r: ^Runtime, h: Instance_Handle) {
 	i := instance_at(r, h)
 	if i == nil {
 		return
 	}
-	if effective(i) {
+	if .Told_Enabled in i.flags && !r.quiet {
+		i.flags -= {.Told_Enabled}
 		call_method(r, h, "on_disable")
 	}
 	if i = instance_at(r, h); i != nil && .Awake in i.flags {

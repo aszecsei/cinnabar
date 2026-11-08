@@ -356,8 +356,77 @@ b:set_active(false)
 	expect_reports(t, f, {})
 	testing.expect_value(t, behaviour_count(&f.runtime), 1)
 
-	// The next script phase starts the one that is left. It was awake, so it gets no on_enable.
+	// The one that is left was awake, so it gets on_enable when quiet ends, and the next script phase starts it.
 	set_quiet(&f.runtime, false)
+	expect_reports(t, f, {2})
 	phase(f)
 	expect_reports(t, f, {3, 4})
+}
+
+// door_entity is the entity of the only behaviour in the world, which is active.
+@(private)
+door_entity :: proc(t: ^testing.T, f: ^World_Fixture) -> ecs.Entity {
+	found := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(f.runtime.world, {BEHAVIOURS_ID}, &found)
+	testing.expect_value(t, len(found), 1)
+	return found[0] if len(found) > 0 else 0
+}
+
+@(test)
+a_deactivation_while_quiet_sends_on_disable_when_quiet_ends :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	thread, ok := spawn_source(&f.runtime, "=door", DOOR + `
+local e = World.spawn()
+e:add(Door)
+coroutine.yield()
+e:set_active(true)
+`)
+	testing.expect(t, ok)
+	expect_reports(t, f, {1, 2})
+	e := door_entity(t, f)
+
+	// As in the editor's pause: an edit deactivates the entity, and the script hears nothing.
+	set_quiet(&f.runtime, true)
+	ecs.set_active(f.runtime.world, e, false)
+	settle(&f.runtime)
+	expect_reports(t, f, {})
+
+	// When quiet ends, the script gets the on_disable that it missed, once.
+	set_quiet(&f.runtime, false)
+	expect_reports(t, f, {5})
+	set_quiet(&f.runtime, false)
+	expect_reports(t, f, {})
+
+	// A script activates it again: on_enable follows on_disable, never another on_enable.
+	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Finished)
+	expect_reports(t, f, {2})
+	release(&f.runtime, thread)
+}
+
+@(test)
+a_change_undone_while_quiet_sends_nothing :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(&f.runtime, "=door", DOOR + "World.spawn():add(Door)")
+	testing.expect(t, ok)
+	expect_reports(t, f, {1, 2})
+	phase(f)
+	expect_reports(t, f, {3, 4})
+	e := door_entity(t, f)
+
+	set_quiet(&f.runtime, true)
+	ecs.set_active(f.runtime.world, e, false)
+	settle(&f.runtime)
+	ecs.set_active(f.runtime.world, e, true)
+	settle(&f.runtime)
+	expect_reports(t, f, {})
+
+	// The script was last told enabled, and the door is enabled again, so it gets no second on_enable.
+	set_quiet(&f.runtime, false)
+	expect_reports(t, f, {})
+	phase(f)
+	expect_reports(t, f, {4})
 }
