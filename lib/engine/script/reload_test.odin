@@ -3,6 +3,7 @@ package script
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:testing"
 import "core:time"
 
@@ -217,6 +218,92 @@ a_main_script_restarts :: proc(t: ^testing.T) {
 	stop(&f.runtime, script)
 	phase(f.base)
 	expect_reports(t, f, {})
+}
+
+@(test)
+an_ended_main_script_leaves_other_coroutines_alone :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	// The coroutine starts in the second update, after the main script's thread was freed in the first phase.
+	door := write_script(t, &f, 3, 0, `
+local Door = Behaviour.define("Door", {})
+function Door:update()
+	self.calls = (self.calls or 0) + 1
+	if self.calls == 2 then
+		self:start_coroutine(function() while true do Test.report(5) coroutine.yield() end end)
+	end
+end
+return Door`)
+	e := ecs.spawn(&f.world)
+	testing.expect(t, attach_script(&f.runtime, e, door))
+	main := write_script(t, &f, MAIN, 0, "coroutine.yield()")
+	script, ok := spawn_script(&f.runtime, main)
+	testing.expect(t, ok)
+	m := &f.runtime.modules[int(script) - 1]
+	main_ref := f.runtime.waiters[m.main.index].thread
+	phase(f.base)
+	testing.expect_value(t, m.state, Module_State.Ended)
+	phase(f.base)
+	expect_reports(t, f, {5})
+	// The VM gives the freed reference out again first, so the coroutine has the main script's old one.
+	reused := false
+	for w in f.runtime.waiters[:f.runtime.waiter_used] {
+		if _, owned := w.owner.(Instance_Handle); owned && w.live {
+			reused = w.thread == main_ref
+		}
+	}
+	testing.expect(t, reused)
+
+	write_script(t, &f, MAIN, 1, "while true do Test.report(2) coroutine.yield() end")
+	hot_reload(&f)
+	stop(&f.runtime, script)
+	// The ended script does not restart, and neither the reload nor the stop reaches the coroutine.
+	expect_reports(t, f, {})
+	phase(f.base)
+	expect_reports(t, f, {5})
+}
+
+@(test)
+a_stopped_main_script_can_be_spawned_again :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	main := write_script(t, &f, MAIN, 0, "while true do Test.report(1) coroutine.yield() end")
+	script, ok := spawn_script(&f.runtime, main)
+	testing.expect(t, ok)
+	expect_reports(t, f, {1})
+	stop(&f.runtime, script)
+	phase(f.base)
+	expect_reports(t, f, {})
+	again, spawned := spawn_script(&f.runtime, main)
+	testing.expect(t, spawned)
+	testing.expect_value(t, again, script)
+	expect_reports(t, f, {1})
+	phase(f.base)
+	expect_reports(t, f, {1})
+}
+
+@(test)
+a_main_script_that_fails_at_once_can_be_spawned_again :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	context.logger = capture_world_errors(f.base)
+	main := write_script(t, &f, MAIN, 0, "error('broken at the top')")
+	_, ok := spawn_script(&f.runtime, main)
+	testing.expect(t, !ok)
+	expect_world_error(t, f.base, "broken at the top")
+	// The fix reloads, but the failed script does not restart until it is spawned again.
+	write_script(t, &f, MAIN, 1, "while true do Test.report(3) coroutine.yield() end")
+	hot_reload(&f)
+	expect_reports(t, f, {})
+	_, spawned := spawn_script(&f.runtime, main)
+	testing.expect(t, spawned)
+	expect_reports(t, f, {3})
+	for e in f.errors {
+		testing.expectf(t, !strings.contains(e, "already runs"), "unexpected error: %s", e)
+	}
 }
 
 @(test)

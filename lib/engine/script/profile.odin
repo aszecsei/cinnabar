@@ -63,8 +63,10 @@ callback_kind :: proc(method: cstring) -> profile.Callback {
 // waiter_class is the class whose coroutine a waiter runs, or the name of coroutines that no behaviour started.
 @(private)
 waiter_class :: proc(r: ^Runtime, w: ^Waiter) -> profile.Name {
-	if i := instance_at(r, w.owner); i != nil {
-		return i.profile_class
+	if owner, ok := w.owner.(Instance_Handle); ok {
+		if i := instance_at(r, owner); i != nil {
+			return i.profile_class
+		}
 	}
 	return r.coroutine_name
 }

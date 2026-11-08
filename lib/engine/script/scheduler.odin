@@ -40,14 +40,28 @@ Wait :: struct {
 	entity:    ecs.Entity,
 }
 
+// Waiter_Id names a waiter by its index and the sequence number that add_waiter gave it. A freed index is given out
+// again with a new number, so an old id finds nothing. The zero id finds nothing either.
+@(private)
+Waiter_Id :: struct {
+	index: int,
+	seq:   u64,
+}
+
+// Waiter_Owner is what started a waiter: a behaviour's start_coroutine, or spawn_script.
+@(private)
+Waiter_Owner :: union {
+	Instance_Handle,
+	Main_Script,
+}
+
 // Waiter is a thread that the scheduler runs: a script from spawn_script, or a behaviour's coroutine.
 @(private)
 Waiter :: struct {
 	// A registry reference to the thread, and the thread itself, which the reference keeps alive.
 	thread:  c.int,
 	state:   ^luau.State,
-	// The behaviour that started it, or the zero handle.
-	owner:   Instance_Handle,
+	owner:   Waiter_Owner,
 	wait:    Wait,
 	// The order in which coroutines started, which breaks ties between coroutines that are due together.
 	seq:     u64,
@@ -102,7 +116,7 @@ resume_state :: proc(r: ^Runtime, co: ^luau.State, nargs: c.int) -> luau.Status 
 
 // add_waiter makes a thread the scheduler's. The thread is on top of L's stack, and stays there.
 @(private)
-add_waiter :: proc(r: ^Runtime, L: ^luau.State, owner: Instance_Handle) -> int {
+add_waiter :: proc(r: ^Runtime, L: ^luau.State, owner: Waiter_Owner) -> int {
 	index := -1
 	for w, i in r.waiters[:r.waiter_used] {
 		if !w.live {
@@ -180,6 +194,10 @@ free_waiter :: proc(r: ^Runtime, index: int) {
 	if !w.live {
 		return
 	}
+	// A main script ends with its thread, however the thread ends.
+	if script, is_main := w.owner.(Main_Script); is_main {
+		end_main(r, script, {index, w.seq})
+	}
 	release_wait(r, w.wait)
 	luau.unref(r.L, w.thread)
 	w^ = {}
@@ -199,19 +217,21 @@ stop_waiter :: proc(r: ^Runtime, index: int) {
 @(private)
 stop_owned :: proc(r: ^Runtime, owner: Instance_Handle) {
 	for &w, i in r.waiters[:r.waiter_used] {
-		if w.live && w.owner == owner {
+		if handle, ok := w.owner.(Instance_Handle); ok && w.live && handle == owner {
 			stop_waiter(r, i)
 		}
 	}
 }
 
-// stop_thread stops the waiter with this thread reference.
+// stop_waiter_id stops the waiter that id names, if it still lives.
 @(private)
-stop_thread :: proc(r: ^Runtime, thread: c.int) {
-	for &w, i in r.waiters[:r.waiter_used] {
-		if w.live && w.thread == thread {
-			stop_waiter(r, i)
-		}
+stop_waiter_id :: proc(r: ^Runtime, id: Waiter_Id) {
+	if id.index < 0 || id.index >= r.waiter_used {
+		return
+	}
+	w := &r.waiters[id.index]
+	if w.live && w.seq == id.seq {
+		stop_waiter(r, id.index)
 	}
 }
 
@@ -244,7 +264,7 @@ stop_coroutine_binding :: proc(L: ^luau.State) -> c.int {
 		luau.L_typeerrorL(L, 2, "thread")
 	}
 	for &w, i in r.waiters[:r.waiter_used] {
-		if w.live && w.state == co && w.owner == owner {
+		if handle, ok := w.owner.(Instance_Handle); ok && w.live && w.state == co && handle == owner {
 			stop_waiter(r, i)
 		}
 	}
