@@ -310,7 +310,9 @@ create_body :: proc(
 	parts: []Part,
 ) {
 	velocity, spin := pb.linear_velocity, pb.angular_velocity
-	pb^ = {source = source_hash(s, w, e, parts), position = pose.position, rotation = pose.rotation}
+	pb^ = {position = pose.position, rotation = pose.rotation}
+	// After the shapes load their meshes, so the hash has the versions of the meshes that the body is made from.
+	defer pb.source = source_hash(s, w, e, parts)
 	own := ecs.get(w, e, Collider)
 	if own == nil && len(parts) == 0 {
 		return
