@@ -2,6 +2,7 @@ package editor
 
 import "base:runtime"
 import "core:hash"
+import "core:log"
 import "core:strings"
 
 import "cinnabar:core/gpu"
@@ -142,7 +143,7 @@ sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> ^Ui_Document {
 }
 
 // build_ui_document builds a UI preview's document from a blob of a key that it has not built or tried. A document
-// that is open builds again in its slot; one that does not build frees its slot.
+// that is open builds again in its slot; one that does not build frees its slot, and says why, once for its key.
 @(private = "file")
 build_ui_document :: proc(e: ^Editor, p: ^Preview, data: []byte, key: u64) {
 	u := &p.ui_preview
@@ -156,7 +157,7 @@ build_ui_document :: proc(e: ^Editor, p: ^Preview, data: []byte, key: u64) {
 			return
 		}
 		drop_ui_document(e, u)
-		u.document = Ui_Build_Failed{key}
+		fail_ui_build(p, data, key)
 		return
 	case Ui_Build_Failed:
 		if d.key == key {
@@ -165,11 +166,25 @@ build_ui_document :: proc(e: ^Editor, p: ^Preview, data: []byte, key: u64) {
 	}
 	slot, ok := ui.open_document(&e.ui, p.material, data)
 	if !ok {
-		u.document = Ui_Build_Failed{key}
+		fail_ui_build(p, data, key)
 		return
 	}
 	u.document = Ui_Document{slot = slot, key = key}
 	u.apply = true
+}
+
+// fail_ui_build keeps a UI preview's blob, which has a valid header, as one that did not build, and says why. The
+// editor shows the warning in its log, as its canvas shows nothing.
+@(private = "file")
+fail_ui_build :: proc(p: ^Preview, data: []byte, key: u64) {
+	p.ui_preview.document = Ui_Build_Failed{key}
+	buffer: [32]u8
+	guid := format.guid_format(p.material, &buffer)
+	if header, _ := format.blob_header(data); header.layout != format.ui_layout() {
+		log.warnf("editor: the UI preview of %s cannot read its blob, which was cooked with another build. Cook the content with this build.", guid)
+	} else {
+		log.warnf("editor: the UI preview of %s cannot build its blob of key %x.", guid, key)
+	}
 }
 
 // Ui_Draw is what a UI preview's hook draws, in frame memory.
