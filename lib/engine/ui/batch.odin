@@ -237,20 +237,13 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 	}
 	clip := node.clip
 	scroll: f32
-	editing := false
+	edit: ^Field_Edit
 	if node.element == .Field {
 		clip = intersect(node.child_clip, content)
-		if focus_d, focus_n, focused := resolve(s, s.input.focus); focused && focus_d == d && focus_n == n && s.input.editing {
-			editing = true
-			// The field scrolls to keep its caret in view.
-			x := caret_x(d, text, s.input.caret)
-			width := content[2] - content[0]
-			if x - s.input.scroll > width - CARET_WIDTH * s.scale {
-				s.input.scroll = x - width + CARET_WIDTH * s.scale
-			} else if x < s.input.scroll {
-				s.input.scroll = x
-			}
-			scroll = s.input.scroll
+		// The layout scrolled the field that is being edited to keep its caret in view.
+		if e, is_edited := editing(s, d, n); is_edited {
+			edit = e
+			scroll = e.scroll
 		}
 	}
 	// A line's glyphs are placed at its alignment, its baseline on a whole pixel.
@@ -269,8 +262,8 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 		}
 		top := content[1] + f32(l) * text.line
 		baseline := math.round(top + text.baseline)
-		if editing && l == 0 {
-			batch_selection(s, b, d, text, x0, top, clip, st.color, alpha)
+		if edit != nil && l == 0 {
+			batch_selection(s, b, d, edit^, text, x0, top, clip, st.color, alpha)
 		}
 		for g in d.glyphs[line.glyphs.first:][:line.glyphs.count] {
 			if .Hard_Break in g.flags {
@@ -294,27 +287,27 @@ batch_text :: proc(s: ^State, b: ^Batch, d: ^Document, index: int, n: u32, now: 
 				},
 			)
 		}
-		if editing && l == 0 {
-			batch_caret(s, b, d, text, x0, top, clip, st.color, alpha, now)
+		if edit != nil && l == 0 {
+			batch_caret(s, b, d, edit^, text, x0, top, clip, st.color, alpha, now)
 		}
 	}
 }
 
 // batch_selection draws the selection behind a field's text.
 @(private)
-batch_selection :: proc(s: ^State, b: ^Batch, d: ^Document, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32) {
-	if s.input.caret == s.input.anchor || text.placeholder {
+batch_selection :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32) {
+	if edit.caret == edit.anchor || text.placeholder {
 		return
 	}
-	from := caret_x(d, text, min(s.input.caret, s.input.anchor))
-	to := caret_x(d, text, max(s.input.caret, s.input.anchor))
+	from := caret_x(d, text, min(edit.caret, edit.anchor))
+	to := caret_x(d, text, max(edit.caret, edit.anchor))
 	push(b, {rect = {x0 + from, top, x0 + to, top + text.line}, clip = clip, fill = pack(color, alpha * SELECTION_ALPHA), fill_end = pack(color, alpha * SELECTION_ALPHA), kind = INSTANCE_RECT})
 }
 
 // batch_caret draws a field's caret, blinking, and the IME's composition at it, underlined, as it is not text yet.
 @(private)
-batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32, now: f64) {
-	x := text.placeholder ? 0 : caret_x(d, text, s.input.caret)
+batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, edit: Field_Edit, text: Node_Text, x0, top: f32, clip: [4]f32, color: format.Ui_Color, alpha: f32, now: f64) {
+	x := text.placeholder ? 0 : caret_x(d, text, edit.caret)
 	if s.input.composition != "" {
 		// The composition is shaped with the field's font after the caret; its width marks the underline.
 		width := f32(len(s.input.composition)) * text.px * 0.5
@@ -351,7 +344,7 @@ batch_caret :: proc(s: ^State, b: ^Batch, d: ^Document, text: Node_Text, x0, top
 		push(b, {rect = {x0 + x, underline, x0 + x + width, underline + max(math.round(s.scale), 1)}, clip = clip, fill = pack(color, alpha), fill_end = pack(color, alpha), kind = INSTANCE_RECT})
 		return
 	}
-	if math.mod(now - s.input.caret_time, CARET_BLINK) > CARET_BLINK * 0.5 {
+	if math.mod(now - edit.caret_time, CARET_BLINK) > CARET_BLINK * 0.5 {
 		return
 	}
 	caret := math.round(x0 + x)
