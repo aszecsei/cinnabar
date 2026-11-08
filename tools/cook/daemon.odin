@@ -13,19 +13,19 @@ import "core:time"
 
 import cook_link "cinnabar:engine/asset/cook_link"
 import format "cinnabar:engine/asset/format"
+import "cinnabar:engine/wire/serve"
 
 // After a change, the daemon waits until this many milliseconds pass without another, so a save of several files, or
 // a program that writes a file in steps, makes one pass.
 SETTLE_MS :: 100
 
-@(private = "file")
+@(private)
 Daemon :: struct {
-	options:           Cook_Options,
-	watcher:           Watcher,
-	server:            Server,
-	index:             Index,
-	// The editor's connection once it said Hello, or 0.
-	linked_connection: u64,
+	options: Cook_Options,
+	watcher: Watcher,
+	// It owns which editor is linked; the main thread asks it.
+	server:  serve.Server,
+	index:   Index,
 }
 
 run_daemon :: proc(parsed: Cook_Options) -> bool {
@@ -65,10 +65,10 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 		wake :: proc(data: rawptr) {
 			watcher_wake((^Watcher)(data))
 		}
-		server_start(&d.server, d.options.link, wake, &d.watcher) or_return
-		context.logger = server_logger(&d.server)
+		serve.start(&d.server, "cook: cook link", d.options.link, write_log, wake, &d.watcher) or_return
+		context.logger = serve.logger(&d.server)
 	}
-	defer server_stop(&d.server)
+	defer serve.stop(&d.server)
 	defer index_destroy(&d.index)
 	log.infof("cook: watching %s", strings.join(dirs[:], ", ", context.temp_allocator))
 	// Previews are of a running editor's unsaved materials, so an earlier editor's are stale.
@@ -111,11 +111,11 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 		delay    = PROGRESS_DELAY,
 		interval = PROGRESS_INTERVAL,
 	}
-	if d.linked_connection != 0 {
-		// The main thread cooks, so the link does not change until the pass is done; server_send takes any thread.
+	if serve.linked(&d.server) != 0 {
+		// Only the main thread links, so no editor links during the pass. One that leaves gets nothing more.
 		progress.report = proc(data: rawptr, p: cook_link.Cook_Progress) {
 			d := (^Daemon)(data)
-			server_send(&d.server, d.linked_connection, p)
+			server_send_linked(&d.server, p)
 		}
 	}
 	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress)
@@ -151,21 +151,20 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 	if len(parts) > 0 {
 		log.infof("cook: cooked %s in %v, generation %d", strings.join(parts[:], ", ", context.temp_allocator), elapsed, pass.generation)
 	}
-	if d.linked_connection == 0 {
+	if serve.linked(&d.server) == 0 {
 		return
 	}
 	if index_changed(changes) {
-		server_send(&d.server, d.linked_connection, changes.delta)
+		server_send_linked(&d.server, changes.delta)
 		for p in changes.problems {
-			server_send(&d.server, d.linked_connection, p)
+			server_send_linked(&d.server, p)
 		}
 	}
 	if changes.shading {
-		server_send(&d.server, d.linked_connection, next.shading)
+		server_send_linked(&d.server, next.shading)
 	}
-	server_send(
+	server_send_linked(
 		&d.server,
-		d.linked_connection,
 		cook_link.Cook_Finished {
 			generation = pass.generation,
 			cooked = cooked[:],
@@ -199,22 +198,26 @@ Answer :: struct {
 	result:  cook_link.Operation_Result,
 }
 
-// handle_messages handles what the editor sent, and notices when it leaves. After asset operations, it makes a pass,
-// so the editor has the changes to the index before the answers.
-@(private = "file")
+// handle_messages handles what the editor sent, and notices when it leaves.
+@(private)
 handle_messages :: proc(d: ^Daemon) {
+	taken := serve.take(&d.server)
+	defer serve.release(taken)
+	handle_taken(d, taken)
+}
+
+// handle_taken handles what one take gave. After asset operations, it makes a pass, so the editor has the changes to
+// the index before the answers. The connection can close while it runs: the server then drops what goes to it, and
+// does not link it.
+@(private)
+handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 	answers := make([dynamic]Answer, context.temp_allocator)
 	force := make(map[format.Guid]bool, context.temp_allocator)
-	incoming, connection, dropped := server_take(&d.server)
-	defer server_release(incoming)
-	if d.linked_connection != 0 && connection != d.linked_connection {
-		d.linked_connection = 0
+	connection := taken.connection
+	if taken.unlinked {
 		log.info("cook: the editor disconnected")
 	}
-	for m in incoming {
-		if m.connection != connection {
-			continue
-		}
+	for m in taken.incoming {
 		message, ok := cook_link.decode_message(m.header.kind, m.payload, context.temp_allocator)
 		if !ok {
 			log.warnf("cook: cook link: cannot decode a message of kind %d", m.header.kind)
@@ -241,16 +244,18 @@ handle_messages :: proc(d: ^Daemon) {
 				server_send(&d.server, connection, p)
 			}
 			server_send(&d.server, connection, d.index.shading)
-			d.linked_connection = connection
-			server_log_to_editor(&d.server, true)
+			if !serve.link(&d.server, connection) {
+				log.infof("cook: cook link: %s disconnected before it was linked", msg.editor)
+				continue
+			}
 			log.infof("cook: linked to %s", msg.editor)
 		case cook_link.Cook_Preview:
-			if connection != d.linked_connection {
+			if serve.linked(&d.server) != connection {
 				continue
 			}
 			server_send(&d.server, connection, preview(d, msg), m.header.request)
 		case:
-			if connection != d.linked_connection {
+			if serve.linked(&d.server) != connection {
 				log.warnf("cook: cook link: the editor sent a message of kind %d before its Hello", m.header.kind)
 				continue
 			}
@@ -265,15 +270,15 @@ handle_messages :: proc(d: ^Daemon) {
 			append(&answers, Answer{m.header.request, result})
 		}
 	}
-	if dropped > 0 {
-		log.warnf("cook: cook link: dropped %d log lines while the editor was slow to read", dropped)
+	if taken.dropped_logs > 0 {
+		log.warnf("cook: cook link: dropped %d log lines while the editor was slow to read", taken.dropped_logs)
 	}
 	if len(answers) == 0 {
 		return
 	}
 	daemon_pass(d, force)
 	for a in answers {
-		server_send(&d.server, d.linked_connection, a.result, a.request)
+		server_send_linked(&d.server, a.result, a.request)
 	}
 }
 
