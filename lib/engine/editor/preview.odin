@@ -34,14 +34,9 @@ Preview :: struct {
 	version:         u32,
 	// The cooked blob's version when the preview last looked, which a new cook changes.
 	asset_version:   u32,
-	// Whether the blob is an effect, once a look found it, and whether the look could not load it. Both last until
-	// the blob changes, so a material that is not cooked is read and reported once, not in every frame.
-	kind_known:      bool,
-	effect:          bool,
-	load_failed:     bool,
-	animation_graph: bool,
+	// What the blob shows, which preview_kind finds and forget_kind forgets when the blob changes.
+	kind:            Preview_Kind,
 	// A UI document's preview (see ui_preview.odin).
-	ui:              bool,
 	ui_preview:      Ui_Preview,
 	// An animation graph's instance, which plays apart from any entity; when it last moved; and the hash of the view
 	// that the editor last got, or 0.
@@ -61,6 +56,18 @@ Preview :: struct {
 	prefix:          [128]u8,
 }
 
+// Preview_Kind is what a preview's blob shows. Load_Failed is a look that could not load the cooked blob. It lasts
+// until the blob changes, so a material that is not cooked is read and reported once, not in every frame.
+@(private)
+Preview_Kind :: enum u8 {
+	Unknown,
+	Load_Failed,
+	Material,
+	Effect,
+	Animation_Graph,
+	Ui,
+}
+
 // handle_preview_message handles a preview's messages, and reports whether the message was one.
 @(private)
 handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
@@ -71,6 +78,9 @@ handle_preview_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 		p := &e.session.previews[m.id]
 		material := format.Guid(m.material)
+		if p.material != material {
+			drop_ui_document(e, &p.ui_preview)
+		}
 		if !p.open || p.material != material || p.unsaved != m.unsaved {
 			free_preview_data(e, p)
 		}
@@ -129,7 +139,13 @@ free_preview_data :: proc(e: ^Editor, p: ^Preview) {
 		delete(p.data, e.platform.asset_allocator)
 	}
 	p.data, p.modified = nil, 0
-	p.kind_known, p.load_failed = false, false
+	forget_kind(p)
+}
+
+// forget_kind forgets what a preview's blob shows, when the blob changes, so the next look finds it again.
+@(private = "file")
+forget_kind :: proc(p: ^Preview) {
+	p.kind = .Unknown
 }
 
 // close_previews closes every preview, as when the editor leaves.
@@ -179,12 +195,10 @@ previews :: proc(e: ^Editor) -> []render.Preview_Desc {
 		e.session.next_preview = (id + 1) % MAX_PREVIEWS
 		p.dirty, p.complete = false, false
 		descs := make([]render.Preview_Desc, 1, e.platform.frame_allocator)
-		descs[0] = preview_desc(p, id, target)
-		descs[0].effect = is_effect(e, p)
-		if p.ui {
-			descs[0] = ui_preview_desc(e, p, id, target)
-		}
-		if p.animation_graph {
+		kind := preview_kind(e, p)
+		descs[0] = kind == .Ui ? ui_preview_desc(e, p, id, target) : preview_desc(p, id, target)
+		descs[0].effect = kind == .Effect
+		if kind == .Animation_Graph {
 			descs[0].animated = true
 			descs[0].palette = play_animation_graph(e, p)
 		}
@@ -211,7 +225,7 @@ refresh_preview :: proc(e: ^Editor, p: ^Preview) {
 	if h, loaded := asset.find(e.assets, p.material); loaded {
 		if version := asset.version(e.assets, h); version != p.asset_version {
 			p.asset_version, p.dirty = version, true
-			p.kind_known, p.load_failed = false, false
+			forget_kind(p)
 		}
 	}
 }
@@ -222,8 +236,7 @@ preview_graph_data :: proc(e: ^Editor, p: ^Preview) -> []byte {
 	if !p.open || e.assets == nil {
 		return nil
 	}
-	is_effect(e, p)
-	if !p.animation_graph {
+	if preview_kind(e, p) != .Animation_Graph {
 		return nil
 	}
 	if p.data != nil {
@@ -284,37 +297,50 @@ send_preview_views :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.A
 	}
 }
 
-// is_effect is whether a preview shows an effect, by its blob's kind. The first look loads the cooked blob, which the
-// renderer would load anyway. A blob that does not load is not tried again until refresh_preview sees it change,
-// which it does once the renderer, which retries, loads it.
+// preview_kind is what a preview's blob shows, by its kind. The first look loads the cooked blob, which the renderer
+// would load anyway. A blob that does not load is not loaded again until refresh_preview sees it change, which it does
+// once the renderer, which retries, loads it.
 @(private)
-is_effect :: proc(e: ^Editor, p: ^Preview) -> bool {
-	if p.kind_known {
-		return p.effect
+preview_kind :: proc(e: ^Editor, p: ^Preview) -> Preview_Kind {
+	if p.kind != .Unknown && p.kind != .Load_Failed {
+		return p.kind
 	}
 	data := p.data
 	if data == nil {
 		h, loaded := asset.find(e.assets, p.material)
-		if !loaded && !p.load_failed {
+		if !loaded && p.kind != .Load_Failed {
 			h, loaded = asset.load(e.assets, p.material)
-			p.load_failed = !loaded
+			if !loaded {
+				p.kind = .Load_Failed
+			}
 		}
 		if !loaded {
-			return false
+			return p.kind
 		}
 		data, _ = asset.data(e.assets, h)
 	}
 	header, ok := format.blob_header(data)
-	p.kind_known, p.effect, p.animation_graph = ok, ok && header.kind == .Effect, ok && header.kind == .Animation_Graph
-	p.ui = ok && header.kind == .Ui
-	return p.effect
+	if !ok {
+		return p.kind
+	}
+	#partial switch header.kind {
+	case .Effect:
+		p.kind = .Effect
+	case .Animation_Graph:
+		p.kind = .Animation_Graph
+	case .Ui:
+		p.kind = .Ui
+	case:
+		p.kind = .Material
+	}
+	return p.kind
 }
 
 // reads_time is whether the preview changes every frame: an effect, an animation graph, or a material that reads the
 // frame's time.
 @(private = "file")
 reads_time :: proc(e: ^Editor, p: ^Preview) -> bool {
-	if is_effect(e, p) || p.animation_graph {
+	if kind := preview_kind(e, p); kind == .Effect || kind == .Animation_Graph {
 		return true
 	}
 	data := p.data

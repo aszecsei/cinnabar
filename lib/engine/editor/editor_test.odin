@@ -894,13 +894,13 @@ previews_draw_when_what_they_show_changes :: proc(t: ^testing.T) {
 
 // Missing_Blobs counts the asset runtime's reports of a blob that is not cooked, and passes every other message to the
 // test's logger, through which the test's expectations fail.
-@(private = "file")
+@(private)
 Missing_Blobs :: struct {
 	count: int,
 	next:  log.Logger,
 }
 
-@(private = "file")
+@(private)
 count_missing_blobs :: proc(data: rawptr, level: log.Level, text: string, options: log.Options, location: runtime.Source_Code_Location) {
 	m := (^Missing_Blobs)(data)
 	if strings.contains(text, "no blob for") {
