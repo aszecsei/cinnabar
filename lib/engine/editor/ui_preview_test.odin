@@ -119,7 +119,8 @@ exchange :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Ui_Preview_Lay
 	return found[:]
 }
 
-// draw draws the frame's previews as the renderer would, through their UI hooks, and gives how many it drew.
+// draw draws the frame's previews as the renderer would, through their UI hooks, which say whether the drawing is
+// complete, and gives how many it drew.
 @(private = "file")
 draw :: proc(f: ^Fixture) -> int {
 	descs := previews(&f.editor)
@@ -129,7 +130,10 @@ draw :: proc(f: ^Fixture) -> int {
 				data        = d.ui_data,
 				output_size = d.size,
 			}
-			d.ui(&frame)
+			ready := d.ui(&frame)
+			if d.complete != nil {
+				d.complete^ = ready
+			}
 		}
 	}
 	return len(descs)
@@ -224,9 +228,10 @@ a_preview_that_moves_from_a_ui_document_to_a_material_does_not_draw_the_document
 	testing.expect_value(t, missing.count, 1)
 }
 
-// A UI preview whose new blob does not build frees its document's slot.
+// A UI preview whose new blob does not build frees its document's slot, draws nothing, once, and does not build that
+// blob again. A blob of another key builds.
 @(test)
-a_ui_preview_whose_document_does_not_build_frees_its_slot :: proc(t: ^testing.T) {
+a_ui_preview_whose_document_does_not_build_frees_its_slot_and_waits_for_another_blob :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	guid, _ := format.guid_parse(DOCUMENT)
@@ -252,7 +257,22 @@ a_ui_preview_whose_document_does_not_build_frees_its_slot :: proc(t: ^testing.T)
 	write_preview_blob(t, path, broken, time.time_add(start, time.Second))
 	testing.expect_value(t, draw(f), 1)
 	testing.expect(t, !f.editor.ui.documents[slot].used)
-	testing.expect(t, p.ui_preview.document == nil)
+	failed, is_failed := p.ui_preview.document.(Ui_Build_Failed)
+	testing.expect(t, is_failed)
+	testing.expect_value(t, failed.key, 78)
+	// That drawing was complete, so the preview does not draw, or build the blob, again.
+	testing.expect(t, p.complete)
+	testing.expect_value(t, draw(f), 0)
+	testing.expect_value(t, len(exchange(f)), 0)
+
+	// A blob of another key builds.
+	header.key, header.layout = 79, header.layout - 1
+	write_preview_blob(t, path, broken, time.time_add(start, 2 * time.Second))
+	testing.expect_value(t, draw(f), 1)
+	slot, ok = document_slot(p)
+	testing.expect(t, ok)
+	testing.expect(t, f.editor.ui.documents[slot].used)
+	testing.expect_value(t, f.editor.ui.documents[slot].nodes[1].source, 1)
 }
 
 @(private = "file")
@@ -263,6 +283,6 @@ write_preview_blob :: proc(t: ^testing.T, path: string, data: []byte, modified: 
 
 @(private = "file")
 document_slot :: proc(p: ^Preview) -> (int, bool) {
-	doc, ok := p.ui_preview.document.?
+	doc, ok := p.ui_preview.document.(Ui_Document)
 	return doc.slot, ok
 }
