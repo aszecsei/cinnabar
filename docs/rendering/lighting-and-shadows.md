@@ -269,7 +269,7 @@ What they show:
   - before the two pipelines, the binning's, the fallback's and the hit light's and screen light's have compiled;
   - in a frame without draw items or a hit table. Once the pipelines are ready, `begin_traced_reflections` requests the ray scene, whose first request makes the hit table from the next frame on.
 
-  When the passes are added, a frame whose hit shading cannot take another batch (`hit_shading_ready`), or whose light list does not fit the upload ring, takes the screen-space trace at the same level too. So `Frame.reflections` is always written once `Frame.ssr` is set.
+  When the passes are added, a frame whose hit shading cannot take another batch (`hit_shading_ready`), or whose light list does not fit the upload ring, takes the screen-space trace at the same level too: its params, stride, trace size and constants, which one proc (`configure_ssr`) sets for both fallbacks. Only the lit scene stays as the frame chose it for the traced reflections, since a history is used once a frame. So `Frame.reflections` is always written once `Frame.ssr` is set.
 - **The passes** run on the compute queue after the prepass, after the GI's:
   1. **The depth pyramid** (`reflections depth`), the screen-space reflections', when the level marches the screen first.
   2. **The trace** (`reflections ray trace`, `rtr_trace.hlsl`): a thread for each trace texel, whose ray starts from one pixel of its block, in turn from frame to frame (`ssr_offset`).

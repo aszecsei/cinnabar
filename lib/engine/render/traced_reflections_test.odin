@@ -90,6 +90,8 @@ the_traced_reflections_shade_one_batch_and_fall_back_to_the_screen :: proc(t: ^t
 		reflections: bool,
 		traced:      bool,
 		batches:     int,
+		// The frame's trace as it ran, copied out of frame memory.
+		ssr:         Ssr_Frame,
 	}
 	run_frame :: proc(t: ^testing.T, r: ^Renderer, cache: ^Texture_Cache, instances, exposure: gpu.Buffer, settings: Reflection_Settings, options: Options = {}) -> (result: Result) {
 		platform := r.platform
@@ -151,6 +153,9 @@ the_traced_reflections_shade_one_batch_and_fall_back_to_the_screen :: proc(t: ^t
 		}
 		result.reflections = f.reflections != 0
 		result.traced = f.ssr != nil && f.ssr.traced != nil
+		if f.ssr != nil {
+			result.ssr = f.ssr^
+		}
 		if f.ray_scene != nil {
 			result.batches = f.ray_scene.batches
 		}
@@ -197,6 +202,20 @@ the_traced_reflections_shade_one_batch_and_fall_back_to_the_screen :: proc(t: ^t
 	free_all(platform.frame_allocator)
 	expect_screen(t, run_frame(t, r, &cache, instances, exposure, settings, {batches_full = true}), "no batch left")
 	free_all(platform.frame_allocator)
+	// A frame that falls back once its passes are added runs the screen-space trace at the same level, as one with the
+	// Screen technique does: at High, where the traced reflections trace a pixel of each 2x1 block, it traces each pixel.
+	for level in Quality_Level {
+		late := run_frame(t, r, &cache, instances, exposure, {technique = .Ray_Traced, level = level}, {batches_full = true})
+		expect_screen(t, late, "no batch left")
+		free_all(platform.frame_allocator)
+		screen := run_frame(t, r, &cache, instances, exposure, {technique = .Screen, level = level})
+		free_all(platform.frame_allocator)
+		testing.expectf(t, late.ssr.technique == .Screen, "%v: the fallback is %v", level, late.ssr.technique)
+		testing.expectf(t, late.ssr.stride == screen.ssr.stride && late.ssr.trace_size == screen.ssr.trace_size, "%v: the fallback traces at a stride of %v, the screen-space trace at %v", level, late.ssr.stride, screen.ssr.stride)
+		testing.expectf(t, late.ssr.params == screen.ssr.params, "%v: the fallback keeps the traced params", level)
+		lc, sc := late.ssr.constants, screen.ssr.constants
+		testing.expectf(t, lc.trace_size == sc.trace_size && lc.stride == sc.stride && lc.ray_count == sc.ray_count && lc.steps == sc.steps && lc.cutoff == sc.cutoff && lc.reach == sc.reach, "%v: the fallback's constants are not the screen-space trace's", level)
+	}
 	r.caps.ray_query = false
 	expect_screen(t, run_frame(t, r, &cache, instances, exposure, settings), "no Ray_Query")
 	free_all(platform.frame_allocator)
