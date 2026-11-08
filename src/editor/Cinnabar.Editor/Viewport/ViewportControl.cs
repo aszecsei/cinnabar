@@ -5,6 +5,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 
 using Cinnabar.Editor.Maths;
+using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Viewport;
 
@@ -23,12 +24,12 @@ public sealed class ViewportControl : Control
     readonly Action _update;
     readonly List<ViewportImage> _images = [];
     readonly DispatcherTimer _resize;
-    Compositor? _compositor;
-    CompositionDrawingSurface? _surface;
-    CompositionSurfaceVisual? _visual;
-    ICompositionGpuInterop? _interop;
-    bool _attached;
+    readonly AttachTickets _attach = new();
+    // The compositor's objects of the current attach, once its setup is done, which a detach lets go of.
+    Attachment? _attachment;
     bool _updateQueued;
+
+    sealed record Attachment(Compositor Compositor, CompositionDrawingSurface Surface, CompositionSurfaceVisual Visual, ICompositionGpuInterop Interop);
 
     public ViewportSession? Session { get; init; }
 
@@ -47,19 +48,19 @@ public sealed class ViewportControl : Control
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
-        _attached = true;
-        _ = InitializeAsync();
+        _ = InitializeAsync(_attach.Attach());
     }
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
-        _attached = false;
+        // The detach ends the attach's ticket, so its setup, if it still awaits the compositor, builds nothing.
+        _attach.Detach();
         _resize.Stop();
         ReleaseImages();
-        _surface?.Dispose();
-        _surface = null;
-        _visual = null;
-        _interop = null;
+        _attachment?.Surface.Dispose();
+        _attachment = null;
+        // A composition update queued for the old attach may never run, so the next attach queues its own.
+        _updateQueued = false;
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -74,7 +75,7 @@ public sealed class ViewportControl : Control
         }
     }
 
-    async Task InitializeAsync()
+    async Task InitializeAsync(int ticket)
     {
         if (Session == null)
         {
@@ -84,7 +85,7 @@ public sealed class ViewportControl : Control
         {
             var compositor = ElementComposition.GetElementVisual(this)!.Compositor;
             var interop = await compositor.TryGetCompositionGpuInterop();
-            if (!_attached)
+            if (!_attach.IsCurrent(ticket))
             {
                 return;
             }
@@ -104,12 +105,11 @@ public sealed class ViewportControl : Control
                 Session.Fail("viewport: the compositor does not report its adapter's LUID");
                 return;
             }
-            _compositor = compositor;
-            _interop = interop;
-            _surface = compositor.CreateDrawingSurface();
-            _visual = compositor.CreateSurfaceVisual();
-            _visual.Surface = _surface;
-            ElementComposition.SetElementChildVisual(this, _visual);
+            var surface = compositor.CreateDrawingSurface();
+            var visual = compositor.CreateSurfaceVisual();
+            visual.Surface = surface;
+            _attachment = new Attachment(compositor, surface, visual, interop);
+            ElementComposition.SetElementChildVisual(this, visual);
             LayoutVisual();
             Session.Attach(BitConverter.ToUInt64(luid), description);
             RequestSize();
@@ -123,10 +123,10 @@ public sealed class ViewportControl : Control
 
     void QueueUpdate()
     {
-        if (!_updateQueued && _attached && _compositor != null)
+        if (!_updateQueued && _attach.Attached && _attachment is { } attachment)
         {
             _updateQueued = true;
-            _compositor.RequestCompositionUpdate(_update);
+            attachment.Compositor.RequestCompositionUpdate(_update);
         }
     }
 
@@ -134,13 +134,13 @@ public sealed class ViewportControl : Control
     void Update()
     {
         _updateQueued = false;
-        if (!_attached || Session?.Device is not { } device || _surface == null)
+        if (!_attach.Attached || Session?.Device is not { } device || _attachment is not { } attachment)
         {
             return;
         }
         var frames = Session.Poll();
         // Without a host, the last frame would stay on screen as if the game were frozen.
-        _visual!.Visible = Session.HasPicture;
+        attachment.Visual.Visible = Session.HasPicture;
         if (!Session.HasPicture)
         {
             ReleaseImages();
@@ -154,13 +154,13 @@ public sealed class ViewportControl : Control
         }
         if (frames != null)
         {
-            PresentLatest(frames, device);
+            PresentLatest(frames, device, attachment);
         }
         LayoutVisual();
         QueueUpdate();
     }
 
-    void PresentLatest(SharedFrames frames, ViewportDevice device)
+    void PresentLatest(SharedFrames frames, ViewportDevice device, Attachment attachment)
     {
         var latest = frames.Completed;
         if (latest == 0 || latest == Session!.FrameShown)
@@ -181,12 +181,12 @@ public sealed class ViewportControl : Control
                 // The compositor holds every image. The next update shows a newer frame.
                 return;
             }
-            image = new ViewportImage(device.Device, _interop!, frames.Size);
+            image = new ViewportImage(device.Device, attachment.Interop, frames.Size);
             _images.Add(image);
         }
         // The fence says the frame is finished, so the copy reads a complete frame. The host draws into this texture
         // again only after the editor acknowledges the copy (see docs/editor/viewport.md#viewport).
-        image.Present(device.Context, frames.Texture(latest), latest, _surface!);
+        image.Present(device.Context, frames.Texture(latest), latest, attachment.Surface);
         Session.Presented(latest);
     }
 
@@ -200,33 +200,33 @@ public sealed class ViewportControl : Control
     /// <summary>A point of the control in pixels of the host's frame, from its top left, or null before the first frame.</summary>
     public Vec2? FramePoint(Point point)
     {
-        if (_visual == null || Session is not { FrameSize: { Width: > 0, Height: > 0 } frame } || _visual.Size.X <= 0 || _visual.Size.Y <= 0)
+        if (_attachment?.Visual is not { } visual || Session is not { FrameSize: { Width: > 0, Height: > 0 } frame } || visual.Size.X <= 0 || visual.Size.Y <= 0)
         {
             return null;
         }
         return new Vec2(
-            (point.X - _visual.Offset.X) * frame.Width / _visual.Size.X,
-            (point.Y - _visual.Offset.Y) * frame.Height / _visual.Size.Y);
+            (point.X - visual.Offset.X) * frame.Width / visual.Size.X,
+            (point.Y - visual.Offset.Y) * frame.Height / visual.Size.Y);
     }
 
     /// <summary>The point of the control that shows a point of the host's frame, in its pixels, or null before the first frame.</summary>
     public Point? ControlPoint(Vec2 frame)
     {
-        if (_visual == null || Session is not { FrameSize: { Width: > 0, Height: > 0 } size })
+        if (_attachment?.Visual is not { } visual || Session is not { FrameSize: { Width: > 0, Height: > 0 } size })
         {
             return null;
         }
         return new Point(
-            _visual.Offset.X + frame.X * _visual.Size.X / size.Width,
-            _visual.Offset.Y + frame.Y * _visual.Size.Y / size.Height);
+            visual.Offset.X + frame.X * visual.Size.X / size.Width,
+            visual.Offset.Y + frame.Y * visual.Size.Y / size.Height);
     }
 
     /// <summary>How many frame pixels a unit of the control's length covers.</summary>
-    public double FrameScale => _visual is { Size.Y: > 0 } && Session is { FrameSize.Height: > 0 } ? Session.FrameSize.Height / _visual.Size.Y : 1;
+    public double FrameScale => _attachment?.Visual is { Size.Y: > 0 } visual && Session is { FrameSize.Height: > 0 } ? Session.FrameSize.Height / visual.Size.Y : 1;
 
     void LayoutVisual()
     {
-        if (_visual == null || Session == null)
+        if (_attachment?.Visual is not { } visual || Session == null)
         {
             return;
         }
@@ -234,16 +234,16 @@ public sealed class ViewportControl : Control
         var frame = Session.FrameSize;
         if (frame.Width <= 0 || frame.Height <= 0)
         {
-            _visual.Size = new Vector(bounds.Width, bounds.Height);
-            _visual.Offset = default;
+            visual.Size = new Vector(bounds.Width, bounds.Height);
+            visual.Offset = default;
             return;
         }
         var scale = Session.Scale == ViewportScale.Fit
             ? Math.Min(bounds.Width / frame.Width, bounds.Height / frame.Height)
             : 1 / (TopLevel.GetTopLevel(this)?.RenderScaling ?? 1);
         var size = new Vector(frame.Width * scale, frame.Height * scale);
-        _visual.Size = size;
-        _visual.Offset = new Vector3D(Math.Round((bounds.Width - size.X) / 2), Math.Round((bounds.Height - size.Y) / 2), 0);
+        visual.Size = size;
+        visual.Offset = new Vector3D(Math.Round((bounds.Width - size.X) / 2), Math.Round((bounds.Height - size.Y) / 2), 0);
     }
 
     void ReleaseImages()
