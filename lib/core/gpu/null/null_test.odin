@@ -531,3 +531,16 @@ a_failed_frame_copy_keeps_the_texture_copy :: proc(t: ^testing.T) {
 	testing.expect_value(t, next.status, gpu.Capture_Status.Ready)
 	release_frame_capture(next)
 }
+
+@(test)
+a_pipeline_is_ready_once_it_exists_and_failed_without_one :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 64}))
+	defer shutdown()
+	pipeline := create_compute_pipeline({compute = []byte{1}, label = "test"})
+	testing.expect_value(t, pipeline_status(pipeline), gpu.Pipeline_Status.Ready)
+	testing.expect(t, pipeline_ready(pipeline))
+	destroy_pipeline(pipeline)
+	testing.expect_value(t, pipeline_status(pipeline), gpu.Pipeline_Status.Failed)
+	testing.expect_value(t, pipeline_status({}), gpu.Pipeline_Status.Failed)
+}

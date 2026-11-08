@@ -129,8 +129,9 @@ Platform_API :: struct {
 	// formats or the topology: create a new pipeline for those.
 	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
 	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
-	// Whether a pipeline's latest version is compiled, so draws with it draw.
-	gpu_pipeline_ready:           proc(pipeline: gpu.Pipeline) -> bool,
+	// Where a pipeline's latest version is: Compiling, Ready, so draws with it draw, or Failed, which a caller need not
+	// wait for (see gpu.Pipeline_Status).
+	gpu_pipeline_status:          proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status,
 	// Ray tracing pipelines need Ray_Tracing_Pipeline.
 	gpu_create_ray_tracing_pipeline: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline,
 	gpu_update_ray_tracing_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool,

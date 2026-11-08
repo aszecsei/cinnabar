@@ -354,7 +354,7 @@ add_hit_entries :: proc(
 // hit_pipeline_ready is whether a material's hit pipeline has compiled.
 @(private)
 hit_pipeline_ready :: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> bool {
-	return platform.gpu_pipeline_ready == nil || platform.gpu_pipeline_ready(pipeline)
+	return handle_status(platform, pipeline) == .Ready
 }
 
 // hit_shading_ready is whether add_hit_shading can shade another batch this frame: the frame has a ray scene and a hit

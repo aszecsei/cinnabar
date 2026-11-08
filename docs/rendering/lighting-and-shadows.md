@@ -113,7 +113,7 @@ What they show:
   A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
 - **Provisional captures:** a capture records whether its inputs were complete (`reflection_probe_inputs_complete`). A frame's inputs are complete when all of these are true:
   - No asset streams to the GPU.
-  - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in.
+  - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in. A material whose pipelines failed draws its stand-in until its shader changes, so a capture does not wait for it.
   - The scene has at least one item to draw.
 
   A capture is provisional if the inputs of any frame that drew its faces were not complete. For example, an `On_Load` probe captures in the first frames of a level, while the meshes still stream. The probe uses its provisional cube and does not capture again while the inputs stay incomplete. In the first frame whose inputs are complete, it captures again. A texture that never becomes resident keeps the inputs incomplete, so the probe keeps its provisional cube.

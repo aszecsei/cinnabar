@@ -81,7 +81,7 @@ a_bin_draws_with_its_blend_modes_substitute_until_its_pipelines_compile :: proc(
 		gpu_create_graphics_pipeline = null.create_graphics_pipeline,
 		gpu_update_graphics_pipeline = null.update_graphics_pipeline,
 		gpu_destroy_pipeline         = null.destroy_pipeline,
-		gpu_pipeline_ready           = proc(pipeline: gpu.Pipeline) -> bool {return !slice.contains(compiling[:], pipeline)},
+		gpu_pipeline_status          = proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {return slice.contains(compiling[:], pipeline) ? .Compiling : .Ready},
 	}
 	dir, err := os.make_directory_temp("", "substitutes_test_*", context.temp_allocator)
 	testing.expect(t, err == nil)

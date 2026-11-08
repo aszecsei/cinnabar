@@ -179,7 +179,7 @@ init :: proc(
 		gpu_preview_target           = backend.preview_target,
 		gpu_release_preview_target   = backend.release_preview_target,
 		gpu_capture_texture          = backend.request_texture_capture,
-		gpu_pipeline_ready           = backend.pipeline_ready,
+		gpu_pipeline_status          = backend.pipeline_status,
 		gpu_submit                   = backend.submit,
 		gpu_upload                   = backend.upload,
 		gpu_stream_buffer            = backend.stream_buffer,

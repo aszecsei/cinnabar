@@ -425,7 +425,8 @@ reflection_probe_pipelines_ready :: proc(r: ^Renderer) -> bool {
 
 // reflection_probe_inputs_complete is whether a capture this frame draws the level as it stays: no asset streams to
 // the GPU, every material that the scene draws has its textures resident and its own pipelines compiled, so no bin
-// draws a stand-in, and the scene has an item to draw. Without an item, a capture draws only the sky.
+// draws a stand-in, and the scene has an item to draw. Without an item, a capture draws only the sky. A material whose
+// pipelines failed draws its stand-in until its shader changes, so a capture does not wait for it.
 @(private)
 reflection_probe_inputs_complete :: proc(f: ^Frame) -> bool {
 	r := f.renderer
@@ -434,7 +435,7 @@ reflection_probe_inputs_complete :: proc(f: ^Frame) -> bool {
 		return false
 	}
 	for index in sf.bin_pipelines {
-		if !material_ready(r.platform, &r.materials.pipelines[index]) {
+		if material_status(r.platform, &r.materials.pipelines[index]) == .Compiling {
 			return false
 		}
 	}

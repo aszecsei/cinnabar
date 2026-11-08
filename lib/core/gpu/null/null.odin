@@ -221,10 +221,14 @@ release_preview_target :: proc(id: int) {}
 
 acknowledge_preview_frame :: proc(id: int, generation: u32, frame: u64) {}
 
-// Nothing compiles, so a pipeline is ready once it exists.
-pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+// Nothing compiles, so a pipeline is Ready once it exists, and a handle that is not a pipeline's is Failed.
+pipeline_status :: proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
 	_, ok := gpu.pool_lookup(&state.pipelines, pipeline)
-	return ok
+	return ok ? .Ready : .Failed
+}
+
+pipeline_ready :: proc(pipeline: gpu.Pipeline) -> bool {
+	return pipeline_status(pipeline) == .Ready
 }
 
 begin_frame :: proc(size: [2]i32) {

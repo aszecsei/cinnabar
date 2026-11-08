@@ -353,7 +353,23 @@ sync_post_pipelines :: proc(r: ^Renderer, force: bool) {
 // pipeline_ready is whether a pipeline is compiled, so a pass that it records does its work. A post pass whose
 // pipeline is not ready is left out, and the frame goes on without it, as a game's post effect should be.
 pipeline_ready :: proc(platform: ^core.Platform_API, p: ^Shader_Pipeline) -> bool {
-	return p.pipeline != {} && (platform.gpu_pipeline_ready == nil || platform.gpu_pipeline_ready(p.pipeline))
+	return pipeline_status(platform, p) == .Ready
+}
+
+// pipeline_status is where a shader's pipeline is (see gpu.Pipeline_Status): Compiling until it is made and compiled,
+// Ready, or Failed when its shader is not cooked or has no blob, or its compile failed. A caller that waits for a
+// pipeline, such as a preview, stops waiting for one that failed.
+pipeline_status :: proc(platform: ^core.Platform_API, p: ^Shader_Pipeline) -> gpu.Pipeline_Status {
+	if p.pipeline == {} {
+		return p.failed ? .Failed : .Compiling
+	}
+	return handle_status(platform, p.pipeline)
+}
+
+// handle_status is where a pipeline is, by its handle, or Ready on a platform that compiles nothing.
+@(private)
+handle_status :: proc(platform: ^core.Platform_API, pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
+	return platform.gpu_pipeline_status == nil ? .Ready : platform.gpu_pipeline_status(pipeline)
 }
 
 // halton is the index-th point of the Halton sequence of a base, in [0, 1).

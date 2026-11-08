@@ -272,6 +272,16 @@ Frame_Capture :: struct {
 	pixels:    []byte,
 }
 
+// Pipeline_Status is where a pipeline's latest version is: Compiling while a job that creates or updates it runs, Ready
+// once it is compiled and in use, and Failed when it has no version to use, as when its first compile failed or the
+// handle is not a pipeline's. Failed lasts until an update of the pipeline compiles, so a caller need not wait for it.
+// The zero value is Compiling, which is not done.
+Pipeline_Status :: enum u8 {
+	Compiling,
+	Ready,
+	Failed,
+}
+
 // Capture_Status says whether a capture's copy was made. A frame that records nothing, or a copy that cannot get its
 // readback memory, cancels the capture, and the backend gives it back cancelled so that the caller's request ends.
 Capture_Status :: enum u8 {
