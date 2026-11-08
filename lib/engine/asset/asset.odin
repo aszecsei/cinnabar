@@ -12,7 +12,8 @@ import format "cinnabar:engine/asset/format"
 MAX_ASSETS :: 4096
 MAX_PATH :: 260
 
-// Handle is a loaded asset. The zero handle is no asset, and a handle to an unloaded asset is detected.
+// Handle is a loaded asset, which every user of the asset shares. The zero handle is no asset, and a handle to an
+// unloaded asset is detected.
 Handle :: struct {
 	index:      u32,
 	generation: u32,
@@ -44,8 +45,10 @@ Record :: struct {
 	guid:       format.Guid,
 	// Even while the record is free, odd while it holds an asset, so the zero handle never matches.
 	generation: u32,
-	// Increments every time the blob is swapped.
+	// 1 when loaded, and increments every time the blob is swapped, so 0 is no asset.
 	version:    u32,
+	// The loads that are not unloaded. At max(u32) it stays, and the asset stays loaded.
+	users:      u32,
 	kind:       format.Asset_Kind,
 	// The blob, in the platform's asset allocator, at format.BLOB_ALIGN.
 	data:       []byte,
@@ -84,10 +87,15 @@ destroy :: proc(a: ^Assets) {
 	a.used = 0
 }
 
-// load returns the handle of a loaded asset, and otherwise reads its blob. It fails if the blob is missing or is not
+// load returns the handle of a loaded asset, and otherwise reads its blob. Each load adds a user, which unload
+// removes. Code that keeps the asset for the session need not unload it. It fails if the blob is missing or is not
 // a blob for this GUID.
 load :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, ok: bool) {
 	if found, loaded := find(a, guid); loaded {
+		r := &a.records[found.index]
+		if r.users < max(u32) {
+			r.users += 1
+		}
 		return found, true
 	}
 	index := u32(0)
@@ -104,6 +112,8 @@ load :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, ok: bool) {
 	r^ = {
 		guid       = guid,
 		generation = r.generation + 1,
+		version    = 1,
+		users      = 1,
 		kind       = header.kind,
 		data       = data,
 		modified   = modified,
@@ -112,7 +122,7 @@ load :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, ok: bool) {
 	return {index, r.generation}, true
 }
 
-// find is the handle of an asset, if it is loaded.
+// find is the handle of an asset, if it is loaded. It adds no user, so do not unload what it gives.
 find :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, loaded: bool) {
 	for &r, i in a.records[:a.used] {
 		if r.generation % 2 == 1 && r.guid == guid {
@@ -122,8 +132,14 @@ find :: proc(a: ^Assets, guid: format.Guid) -> (h: Handle, loaded: bool) {
 	return
 }
 
+// unload removes a user that load added, and frees the asset when it removes the last.
 unload :: proc(a: ^Assets, h: Handle) {
-	if r := record(a, h); r != nil {
+	r := record(a, h)
+	if r == nil || r.users == max(u32) {
+		return
+	}
+	r.users -= 1
+	if r.users == 0 {
 		free_data(a, r)
 		r.generation += 1
 	}
@@ -136,7 +152,7 @@ data :: proc(a: ^Assets, h: Handle) -> (blob: []byte, ok: bool) {
 	return r.data if r != nil else nil, r != nil
 }
 
-// version increments each time poll swaps the asset's blob.
+// version is 1 when the asset loads, and increments each time poll swaps its blob. It is 0 for a handle to no asset.
 version :: proc(a: ^Assets, h: Handle) -> u32 {
 	r := record(a, h)
 	return r.version if r != nil else 0

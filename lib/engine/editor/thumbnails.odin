@@ -135,14 +135,9 @@ thumbnail_items :: proc(e: ^Editor, t: ^Thumbnail) -> (items: []render.Preview_I
 		}
 		return items, true
 	case .Prefab:
-		h, loaded := asset.find(e.assets, t.asset)
-		if !loaded {
-			h = asset.load(e.assets, t.asset) or_return
-		}
-		// Nothing else holds it, and what the prefab draws is all that a picture needs of it.
-		defer if !loaded {
-			asset.unload(e.assets, h)
-		}
+		// What the prefab draws is all that a picture needs of it.
+		h := asset.load(e.assets, t.asset) or_return
+		defer asset.unload(e.assets, h)
 		data, _ := asset.data(e.assets, h)
 		scene := format.scene_read(data, context.temp_allocator) or_return
 		return render.prefab_preview_items(scene, t.node, heap), true

@@ -174,6 +174,68 @@ poll_swaps_a_rewritten_blob :: proc(t: ^testing.T) {
 		testing.expect_value(t, changed[0], h)
 	}
 	testing.expect_value(t, blob_key(f, h), 9)
-	testing.expect_value(t, version(&f.assets, h), 1)
-	testing.expect_value(t, version(&f.assets, other), 0)
+	testing.expect_value(t, version(&f.assets, h), 2)
+	testing.expect_value(t, version(&f.assets, other), 1)
+}
+
+// Two users of one asset share its handle. One unloads, and the other's handle stays valid and takes the next hot
+// reload. The last unload frees the asset.
+@(test)
+a_shared_asset_stays_loaded_until_its_last_user_unloads :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	start := time.now()
+	write_blob(t, f, test_guid(1), 7, start)
+	write_generation(t, f, start)
+	a, _ := load(&f.assets, test_guid(1))
+	b, _ := load(&f.assets, test_guid(1))
+	unload(&f.assets, a)
+	_, ok := data(&f.assets, b)
+	testing.expect(t, ok, "the other user's handle stays valid")
+
+	write_blob(t, f, test_guid(1), 9, time.time_add(start, time.Second))
+	write_generation(t, f, time.time_add(start, time.Second))
+	changed := poll(&f.assets)
+	testing.expect_value(t, len(changed), 1)
+	if len(changed) == 1 {
+		testing.expect_value(t, changed[0], b)
+	}
+	testing.expect_value(t, version(&f.assets, b), 2)
+	testing.expect_value(t, blob_key(f, b), 9)
+
+	unload(&f.assets, b)
+	_, ok = data(&f.assets, b)
+	testing.expect(t, !ok, "the last unload frees the asset")
+}
+
+// A stale handle's version is 0, and a live asset's version is never 0, so a stale handle never looks current.
+@(test)
+a_stale_handle_has_no_version :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_blob(t, f, test_guid(1), 7, time.now())
+	old, _ := load(&f.assets, test_guid(1))
+	testing.expect_value(t, version(&f.assets, old), 1)
+	unload(&f.assets, old)
+	testing.expect_value(t, version(&f.assets, old), 0)
+	again, _ := load(&f.assets, test_guid(1))
+	testing.expect_value(t, again.index, old.index)
+	testing.expect_value(t, version(&f.assets, again), 1)
+	testing.expect_value(t, version(&f.assets, old), 0)
+	testing.expect_value(t, version(&f.assets, Handle{}), 0)
+}
+
+// An asset whose users reach the most that the count holds stays loaded for the session.
+@(test)
+an_asset_at_the_most_users_stays_loaded :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	write_blob(t, f, test_guid(1), 7, time.now())
+	h, _ := load(&f.assets, test_guid(1))
+	f.assets.records[h.index].users = max(u32)
+	load(&f.assets, test_guid(1))
+	testing.expect_value(t, f.assets.records[h.index].users, max(u32))
+	unload(&f.assets, h)
+	_, ok := data(&f.assets, h)
+	testing.expect(t, ok)
 }

@@ -810,7 +810,7 @@ mesh_collider :: proc(f: ^Fixture, e: ecs.Entity, shape: Shape, mesh: format.Gui
 
 // A ground of a mesh's triangles, scaled 20 by 1 by 20, holds a box whose collider is the same mesh's hull, and a
 // dynamic box whose collider asks for the triangles, which takes their hull. A collider whose mesh is missing makes no
-// body.
+// body. The ground's body is made once, though its mesh loads as the body is made.
 @(test)
 mesh_colliders :: proc(t: ^testing.T) {
 	f := setup(t, quiet = true)
@@ -831,7 +831,11 @@ mesh_colliders :: proc(t: ^testing.T) {
 	mesh_collider(f, moving, .Mesh, BOX_MESH)
 	lost := spawn_at(f, {6, 3, 0})
 	mesh_collider(f, lost, .Mesh, MISSING)
-	ticks(f, 180)
+	ticks(f, 1)
+	ground := ecs.get(&f.world, g, Physics_Body).body
+	testing.expect(t, ground.generation != 0)
+	ticks(f, 179)
+	testing.expect_value(t, ecs.get(&f.world, g, Physics_Body).body, ground)
 	testing.expect(t, ecs.get(&f.world, g, Physics_Body).body.generation != 0)
 	testing.expectf(t, abs(height(f, hull) - 0.5) < 0.03, "the hull rests on the mesh: %v", height(f, hull))
 	testing.expectf(t, abs(height(f, moving) - 0.5) < 0.03, "so does the dynamic mesh, as its hull: %v", height(f, moving))
