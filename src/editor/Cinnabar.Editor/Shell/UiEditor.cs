@@ -49,20 +49,16 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
     const double MaxScaleFactor = 4;
     public const string ScaleKey = "ui.scale";
 
-    // The daemon checks the text this long after the last change, so typing or a drag checks once.
-    static readonly TimeSpan CheckDelay = TimeSpan.FromMilliseconds(250);
-
     readonly List<UiProblem> _problems = [];
     readonly Dictionary<string, string> _bindings = [];
     readonly HashSet<string> _states = [];
-    int _checkVersion;
-    bool _checking;
-    bool _checkAgain;
+    readonly PreviewCook _cook;
     bool _showsUnsaved;
 
     internal UiEditor(EditorShell shell, UiDocument document, int? previewId = null) : base(shell, previewId, 0, 0, 1, 1)
     {
         Document = document;
+        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
         Document.Changed += OnDocumentChanged;
         ScaleFactor = ProjectScale(shell.ProjectPath);
     }
@@ -186,7 +182,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
         Changed?.Invoke();
         _shell.Commands.InvalidateAll();
         // A color picker's steps check too, a moment after the last, so the canvas follows the picker.
-        ScheduleCheck();
+        _cook.Schedule();
     }
 
     // Selection.
@@ -644,54 +640,18 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
 
     static UiRect Rect(float[] r) => new(r[0], r[1], r[2], r[3]);
 
-    // The check: a moment after the last change, the daemon reads the unsaved text. Only one check runs at a time, and a
-    // change during it checks again after it.
+    /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
+    public Task CookNow() => _cook.CookNow();
 
-    void ScheduleCheck()
+    void OnCooked(string text, PreviewResult result)
     {
-        var version = ++_checkVersion;
-        _ = Task.Delay(CheckDelay).ContinueWith(_ =>
+        // From the first text that cooks, the preview draws what the daemon cooks and not the saved one.
+        if (result.Error == "" && !_showsUnsaved)
         {
-            if (version == _checkVersion)
-            {
-                _ = CookNow();
-            }
-        }, SynchronizationContext.Current == null ? TaskScheduler.Default : TaskScheduler.FromCurrentSynchronizationContext());
-    }
-
-    public async Task CookNow()
-    {
-        if (!_shell.Cook.Linked)
-        {
-            return;
+            _showsUnsaved = true;
+            SendPreview();
         }
-        if (_checking)
-        {
-            _checkAgain = true;
-            return;
-        }
-        _checking = true;
-        try
-        {
-            do
-            {
-                _checkAgain = false;
-                var text = Document.Text;
-                var result = await _shell.Cook.CookPreview(Guid, text);
-                // From the first text that cooks, the preview draws what the daemon cooks and not the saved document.
-                if (result.Error == "" && !_showsUnsaved)
-                {
-                    _showsUnsaved = true;
-                    SendPreview();
-                }
-                ShowProblems(text, result);
-            }
-            while (_checkAgain);
-        }
-        finally
-        {
-            _checking = false;
-        }
+        ShowProblems(text, result);
     }
 
     /// <summary>
@@ -720,6 +680,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
 
     public override void Dispose()
     {
+        _cook.Dispose();
         base.Dispose();
         Document.Changed -= OnDocumentChanged;
     }

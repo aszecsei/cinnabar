@@ -62,7 +62,13 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
                 Size = (Math.Clamp(size.Width, 16, 1024), Math.Clamp(size.Height, 16, 1024));
                 SendSettings();
             };
-            Preview.FrameCopied += (generation, frame) => _shell.Host.Send(new PreviewAcknowledged((uint)previewId, generation, frame));
+            Preview.FrameCopied += (generation, frame) =>
+            {
+                if (PreviewId is { } id)
+                {
+                    _shell.Host.Send(new PreviewAcknowledged((uint)id, generation, frame));
+                }
+            };
             Preview.Failed += message => _shell.Console.Add(Model.LogLevel.Warning, message);
         }
     }
@@ -70,8 +76,11 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
     /// <summary>The GUID of the asset that the preview shows.</summary>
     public abstract string Guid { get; }
 
-    /// <summary>The preview's ID, or null when every preview is in use, or for a document with none.</summary>
-    public int? PreviewId { get; }
+    /// <summary>
+    /// The preview's ID, or null when every preview is in use, for a document with none, or once the preview closed. Every
+    /// message to the game about the preview checks it, so a closed preview sends nothing.
+    /// </summary>
+    public int? PreviewId { get; private set; }
 
     /// <summary>The preview's frames, or null without a preview.</summary>
     public ViewportSession? Preview { get; }
@@ -134,6 +143,7 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
         {
             _shell.Host.Send(new ClosePreviewMessage((uint)id));
             Preview?.Disconnect();
+            PreviewId = null;
         }
     }
 

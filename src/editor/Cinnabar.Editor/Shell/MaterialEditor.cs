@@ -18,8 +18,6 @@ public sealed record GraphProblem(int? Node, string Text, bool Error, int Line =
 /// </summary>
 public sealed class MaterialEditor : PreviewOwner, IGraphEditor
 {
-    // The preview cooks this long after the last change, so typing or a drag cooks once.
-    static readonly TimeSpan CookDelay = TimeSpan.FromMilliseconds(250);
     // The preview's camera starts here.
     const float StartYaw = 0.6f;
     const float StartPitch = 0.35f;
@@ -28,9 +26,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
 
     readonly HashSet<int> _selection = [];
     readonly List<GraphProblem> _problems = [];
-    int _cookVersion;
-    bool _cooking;
-    bool _cookAgain;
+    readonly PreviewCook _cook;
 
     PreviewMesh _mesh = PreviewMesh.Sphere;
 
@@ -38,6 +34,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
         Document = document;
+        _cook = new PreviewCook(() => PreviewId != null && _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
         Document.Changed += OnDocumentChanged;
     }
 
@@ -90,7 +87,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            ScheduleCook();
+            _cook.Schedule();
         }
     }
 
@@ -370,61 +367,18 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
         Changed?.Invoke();
     }
 
-    // The preview's cook: a moment after the last change, the daemon cooks the unsaved text. Only one cook runs at a
-    // time, and a change during it cooks again after it.
-
-    void ScheduleCook()
-    {
-        if (PreviewId == null)
-        {
-            return;
-        }
-        var version = ++_cookVersion;
-        _ = Task.Delay(CookDelay).ContinueWith(_ =>
-        {
-            if (version == _cookVersion)
-            {
-                _ = CookNow();
-            }
-        }, Scheduler());
-    }
-
-    // The UI thread's scheduler in the editor, or the default one in tests, which have no synchronization context.
-    static TaskScheduler Scheduler() => SynchronizationContext.Current == null ? TaskScheduler.Default : TaskScheduler.FromCurrentSynchronizationContext();
-
     /// <summary>Cooks the graph for the preview now, and shows the result's problems on their nodes.</summary>
-    public async Task CookNow()
+    public Task CookNow() => _cook.CookNow();
+
+    void OnCooked(string text, PreviewResult result)
     {
-        // Without the cook link, the editor cooks when the link comes up.
-        if (PreviewId == null || !_shell.Cook.Linked)
+        // From the first graph that cooks, the preview shows what the daemon cooks and not the saved graph.
+        if (result.Error == "" && !ShowsUnsaved)
         {
-            return;
+            ShowsUnsaved = true;
+            SendPreview();
         }
-        if (_cooking)
-        {
-            _cookAgain = true;
-            return;
-        }
-        _cooking = true;
-        try
-        {
-            do
-            {
-                _cookAgain = false;
-                var result = await _shell.Cook.CookPreview(Guid, Document.Text);
-                if (result.Error == "" && !ShowsUnsaved)
-                {
-                    ShowsUnsaved = true;
-                    SendPreview();
-                }
-                ShowProblems(result);
-            }
-            while (_cookAgain);
-        }
-        finally
-        {
-            _cooking = false;
-        }
+        ShowProblems(result);
     }
 
     void ShowProblems(PreviewResult result)
@@ -443,6 +397,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
 
     public override void Dispose()
     {
+        _cook.Dispose();
         Document.Changed -= OnDocumentChanged;
         base.Dispose();
     }

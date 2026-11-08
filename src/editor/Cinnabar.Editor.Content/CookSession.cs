@@ -6,6 +6,16 @@ using Cinnabar.Editor.Model;
 
 namespace Cinnabar.Editor.Content;
 
+/// <summary>What cooks a document's unsaved text for its preview: the cook session, or a fake one in tests.</summary>
+public interface IPreviewCooker
+{
+    /// <summary>Whether a cook can be sent now.</summary>
+    bool Linked { get; }
+
+    /// <summary>Cooks an asset's unsaved text into the cache's preview area, and completes with the answer.</summary>
+    Task<PreviewResult> CookPreview(string guid, string text);
+}
+
 /// <summary>
 /// Where the cook session is (see docs/editor/processes-and-projects.md#crash-recovery). Each state carries what belongs
 /// to it: the running ones their process, the linked ones their link, and the failed ones their reason or code. Only
@@ -128,7 +138,7 @@ public sealed record CookOptions(
 /// connection, which fills an <see cref="AssetIndex"/>. Events are raised, and the index changes, on the
 /// synchronization context that the session was made on, which is the UI thread in the editor.
 /// </summary>
-public sealed class CookSession : IDisposable
+public sealed class CookSession : IPreviewCooker, IDisposable
 {
     // The daemon listens soon after it starts.
     static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(30);

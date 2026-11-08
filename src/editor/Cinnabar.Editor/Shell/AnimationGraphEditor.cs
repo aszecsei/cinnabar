@@ -22,15 +22,10 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
     const float StartDistance = 3f;
     const float MaxDistance = 40f;
 
-    // The daemon checks the text this long after the last change, so typing or a drag checks once.
-    static readonly TimeSpan CheckDelay = TimeSpan.FromMilliseconds(250);
-
     readonly HashSet<int> _selection = [];
     readonly List<GraphProblem> _checked = [];
     readonly List<GraphProblem> _problems = [];
-    int _checkVersion;
-    bool _checking;
-    bool _checkAgain;
+    readonly PreviewCook _cook;
 
     // The mesh that the user picked, and whether the game has been told that the daemon cooked the unsaved text.
     string? _pickedMesh;
@@ -41,6 +36,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
         : base(shell, previewId, StartYaw, StartPitch, StartDistance, MaxDistance)
     {
         Document = document;
+        _cook = new PreviewCook(() => _shell.PreviewCooker.Linked, () => Document.Text, text => _shell.PreviewCooker.CookPreview(Guid, text), OnCooked);
         Document.Changed += OnDocumentChanged;
         _shell.Assets.Changed += GatherProblems;
         _shell.World.AnimatorChanged += OnAnimatorChanged;
@@ -104,7 +100,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
         _shell.Commands.InvalidateAll();
         if (!Document.InTransaction)
         {
-            ScheduleCheck();
+            _cook.Schedule();
         }
     }
 
@@ -596,55 +592,18 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
             }
         });
 
-    // The check: a moment after the last change, the daemon reads the unsaved text. Only one check runs at a time, and a
-    // change during it checks again after it.
+    /// <summary>Sends the unsaved text to the cook daemon now, and shows the answer's problems.</summary>
+    public Task CookNow() => _cook.CookNow();
 
-    void ScheduleCheck()
+    void OnCooked(string text, PreviewResult result)
     {
-        var version = ++_checkVersion;
-        _ = Task.Delay(CheckDelay).ContinueWith(_ =>
+        // From the first text that cooks, the preview plays what the daemon cooks and not the saved one.
+        if (result.Error == "" && !_showsUnsaved)
         {
-            if (version == _checkVersion)
-            {
-                _ = CookNow();
-            }
-        }, SynchronizationContext.Current == null ? TaskScheduler.Default : TaskScheduler.FromCurrentSynchronizationContext());
-    }
-
-    public async Task CookNow()
-    {
-        // Without the cook link, the editor checks when the link comes up.
-        if (!_shell.Cook.Linked)
-        {
-            return;
+            _showsUnsaved = true;
+            SendPreview();
         }
-        if (_checking)
-        {
-            _checkAgain = true;
-            return;
-        }
-        _checking = true;
-        try
-        {
-            do
-            {
-                _checkAgain = false;
-                var text = Document.Text;
-                var result = await _shell.Cook.CookPreview(Guid, text);
-                // From the first text that cooks, the preview plays what the daemon cooks and not the saved graph.
-                if (result.Error == "" && !_showsUnsaved)
-                {
-                    _showsUnsaved = true;
-                    SendPreview();
-                }
-                ShowProblems(text, result);
-            }
-            while (_checkAgain);
-        }
-        finally
-        {
-            _checking = false;
-        }
+        ShowProblems(text, result);
     }
 
     /// <summary>
@@ -695,6 +654,7 @@ public sealed class AnimationGraphEditor : PreviewOwner, IGraphEditor
 
     public override void Dispose()
     {
+        _cook.Dispose();
         base.Dispose();
         Document.Changed -= OnDocumentChanged;
         _shell.Assets.Changed -= GatherProblems;
