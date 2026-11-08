@@ -90,15 +90,12 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             // The gizmo keeps its size on screen, so a new frame size changes it.
             SendGizmo();
         };
-        // A soft restart starts the game with its own scene, so the editor sends the document again.
+        // A soft restart makes a fresh Game_State. A code reload keeps it.
         Host.GameReloaded += kind =>
         {
             if (kind == ReloadKind.SoftRestart)
             {
-                // The new game state starts in Edit, with the game's own scene, and knows no live meshes.
-                ResetMode();
-                SendScene();
-                Mesh.SendLiveMeshes();
+                OnNewGameState();
             }
         };
         Host.GameMessage += OnGameMessage;
@@ -119,11 +116,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
             CancelGizmo();
             SendGizmo();
         };
-        // A snapshot means a new stream from the game, which knows no watches and no selection yet. A new
-        // connection's game knows no live meshes either, and an old one keeps them, so sending them again is safe.
+        // A snapshot means that every entity is new, so the game knows no watches, no selection and nothing hidden,
+        // and the mesh overlay names entities by their old handles. What else a new game state lacks is OnNewGameState's.
         World.Reset += () =>
         {
-            Mesh.SendLiveMeshes();
             Mesh.ResendMeshOverlay();
             foreach (var entity in Selection.Entities.Union(Watches.Handles))
             {
@@ -202,10 +198,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         // A new link is a host that has its own world, from a start, a restart or a crash.
         if (Host.Linked && !_linked)
         {
-            ResetMode();
-            SendScene();
-            SendViewportTools();
-            _previewSlots.SendAll();
+            OnNewGameState();
         }
         _linked = Host.Linked;
         if (!Host.Linked)
@@ -232,6 +225,24 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         }
         Context.Set("host.running", Host.State == HostState.Running);
         Commands.InvalidateAll();
+    }
+
+    /// <summary>
+    /// The game has a new state, from a new link or a soft restart, which knows nothing that the editor sent: it is in
+    /// Edit with its own scene, has no camera, gizmo, selection, hidden entities, viewport settings, mesh overlay, live
+    /// meshes or previews, and answers no request that the old state had. Every cache of what the game was sent, and
+    /// every request that waits for the game, starts over here and nowhere else (see docs/editor/link.md#a-new-game-state).
+    /// </summary>
+    void OnNewGameState()
+    {
+        ResetMode();
+        SendScene();
+        SendViewportTools();
+        Mesh.SendLiveMeshes();
+        // The old state's preview targets are gone. The new state's arrive as Preview_Targets.
+        _previewSlots.DisconnectAll();
+        _previewSlots.SendAll();
+        Thumbnails.Restart(DateTime.UtcNow);
     }
 
     void RestoreLayout()

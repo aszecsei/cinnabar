@@ -46,7 +46,7 @@ helper_setup :: proc(t: ^testing.T) -> ^Helper_Fixture {
 	init(&f.editor, &f.platform, nil)
 	debug.init(&f.lines, runtime.heap_allocator())
 	// Linked, as an editor's first poll makes it.
-	f.editor.connection = 1
+	f.editor.session.connection = 1
 	return f
 }
 
@@ -89,25 +89,25 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 
 	// Without a selection, the default draws nothing; with None, nothing draws even for the selection.
 	testing.expect_value(t, line_count(f), 0)
-	f.editor.viewport.settings.helpers = .Selected
-	append(&f.editor.viewport.selection, quad)
+	f.editor.session.view.settings.helpers = .Selected
+	append(&f.editor.session.view.selection, quad)
 	// A quad's four edges and its normal's arrow.
 	quad_lines := line_count(f)
 	testing.expect(t, quad_lines > 4)
 
-	clear(&f.editor.viewport.selection)
-	append(&f.editor.viewport.selection, box)
+	clear(&f.editor.session.view.selection)
+	append(&f.editor.session.view.selection, box)
 	// A box of 12 edges, and its blend's.
 	testing.expect_value(t, line_count(f), 24)
 
 	// All: the spot light's cones, the quad and the box too. The global volume has no shape.
-	f.editor.viewport.settings.helpers = .All
+	f.editor.session.view.settings.helpers = .All
 	all := line_count(f)
 	testing.expect(t, all > 24 + quad_lines)
 	// A hidden entity has none.
-	append(&f.editor.viewport.hidden, spot)
+	append(&f.editor.session.view.hidden, spot)
 	testing.expect(t, line_count(f) < all)
-	f.editor.viewport.settings.helpers = link.Helper_Mode.None
+	f.editor.session.view.settings.helpers = link.Helper_Mode.None
 	testing.expect_value(t, line_count(f), 0)
 }
 
@@ -131,7 +131,7 @@ icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 	// A color of 0 is white.
 	testing.expect_value(t, icons[1].color, [3]f32{1, 1, 1})
 
-	append(&f.editor.viewport.hidden, sun)
+	append(&f.editor.session.view.hidden, sun)
 	icons = icon_instances(&f.world, visibility(&f.editor, &f.world), context.temp_allocator)
 	testing.expect_value(t, len(icons), 3)
 	for icon in icons {

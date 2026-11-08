@@ -52,11 +52,31 @@ The host's profiler ([Core](../core/profiling.md#profiler)) talks to the editor'
 
 The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Editor` in its `Game_State`, and its `Game_API.editor_poll` calls `editor.poll` with the world and the script runtime. On the editor's side, `WorldModel` in `Cinnabar.Editor.Model` mirrors what it hears. The mirror is read-only: it changes only through the game's messages.
 
-- **A new connection gets everything.** When `poll` sees a connection that its state is not for, it sends `Component_Types` and an `Entity_Snapshot`. After a `Load_Scene`, it sends an `Entity_Snapshot` again, and forgets the watches, whose entities are gone. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches again after one, and its live meshes, which a fresh `Game_State` has lost.
+- **A new connection gets everything.** When `poll` sees a connection that its session is not for, it ends the session and starts another, and it sends `Component_Types` and an `Entity_Snapshot` (see [A new game state](#a-new-game-state)). After a `Load_Scene`, it sends an `Entity_Snapshot` again, and forgets the watches, the selection and the hidden entities, whose entities are gone. A soft restart makes a fresh `Game_State`, which knows no connection, so the editor gets everything again then too. A snapshot replaces the editor's mirror, and the editor sends its watches, its selection, its hidden entities and its mesh overlay again after one, because they name entities by handle.
 - **Deltas:** at most ten times a second, the game scans the world with `ecs.world_iter_changed` and compares each entity slot with what it last told the editor: the handle, the archetype (which stands for the set of components), the parent, the active state and the name. It sends an `Entity_Delta` with the changed entities and the destroyed ones. The scan visits only the chunks where a row arrived, or where `Parent` or `Name` was written, since the last scan (see [ECS: Change versions](../world/ecs.md#change-versions)): a change of archetype or of active state moves the row. If any entity was despawned since the last scan, a sweep over what the game told the editor finds the ones that are not alive. A slot that a new generation took therefore counts as a destroyed entity and a new one.
 - **Watching:** the outliner needs every entity, but only a few entities need their field values. The editor sends `Watch_Entity` and `Unwatch_Entity` for the selection, and the game sends `Entity_Values` for each watched entity at most twenty times a second, and only when the encoded values changed. A watched entity that dies stops being watched. At most 64 entities are watched.
 - **Values are bytes.** A component's value is its memory, and the editor reads each field at its offset with `FieldValues`, so the game does no per-field work. A behaviour's fields come from `script.inspect`, which reads the instance's table for each field that `Behaviour.define` declared, without calling any script code. A behaviour's value also names the script asset whose module returned its class, which is how the document finds it.
 - After a code reload, the game sends the types again, and the panels rebuild.
+
+### A new game state
+
+A new link, from a start, a restart or a crash, and a soft restart both give the editor a game state that knows nothing that the editor sent. A code reload keeps the game state, so it is not one.
+
+- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the camera, the selection, the hidden entities, the gizmo, the viewport settings and the picks (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
+- **The editor's side.** `EditorShell.OnNewGameState` is the one handler. A new link and a `Game_Reloaded` of kind `Soft_Restart` both call it. It clears every cache of what the game was sent, drops every request that waits for the game, and sends again:
+
+  | What | Message |
+  |---|---|
+  | The mode, which the editor resets to Edit, as the game does | none |
+  | The open scene | `Load_Scene` |
+  | The camera and the gizmo | `Editor_Camera`, `Gizmo_State` |
+  | The selection and the hidden entities | `Set_Selection`, `Set_Hidden` |
+  | The viewport settings | `Viewport_Settings` |
+  | The mesh overlay | `Mesh_Overlay` |
+  | The live meshes | `Live_Mesh` |
+  | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |
+
+  It drops the picks and the `Sky_Sun_Request` in flight, disconnects the previews from the old targets until the new `Preview_Target`s come, and restarts the thumbnail queue, whose bake the old state lost. A preview's `unsaved` flag follows the cook daemon's cache, not the game, so `Open_Preview` sends it again as it is. A new feature that keeps a copy of game state, or waits for an answer from the game, resets it in `OnNewGameState`, and nowhere else.
 
 ### Types
 

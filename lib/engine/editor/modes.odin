@@ -12,18 +12,18 @@ import "cinnabar:engine/editor/link"
 
 // mode is the editor's mode, or Play without an editor.
 mode :: proc(e: ^Editor) -> link.Editor_Mode {
-	return e.mode if active(e) else .Play
+	return e.session.mode if active(e) else .Play
 }
 
 // editing is true while a linked editor is in Edit: the editor's outline, gizmo, icons and helpers draw only then.
 editing :: proc(e: ^Editor) -> bool {
-	return active(e) && e.mode == .Edit
+	return active(e) && e.session.mode == .Edit
 }
 
 // debug_shown is whether the frame draws its debug layer: always without an editor, and only while editing with one,
 // so the viewport in Play and Paused shows what the game shows.
 debug_shown :: proc(e: ^Editor) -> bool {
-	return !active(e) || e.mode == .Edit
+	return !active(e) || e.session.mode == .Edit
 }
 
 // playing is the Particle_Systems that play while the world stands still, for render.Frame_Desc.playing: the editor's
@@ -33,7 +33,7 @@ playing :: proc(e: ^Editor) -> []ecs.Entity {
 	if !active(e) {
 		return nil
 	}
-	return e.viewport.selection[:]
+	return e.session.view.selection[:]
 }
 
 // simulation reports whether this frame runs the world, its systems and scripts, and with what time step: the frame's
@@ -44,8 +44,8 @@ simulation :: proc(e: ^Editor, w: ^ecs.World, dt: time.Duration) -> (run: bool, 
 	case .Play:
 		return true, dt
 	case .Paused:
-		if e.steps > 0 {
-			e.steps -= 1
+		if e.session.steps > 0 {
+			e.session.steps -= 1
 			return true, ecs.tick_length(w)
 		}
 	case .Edit:

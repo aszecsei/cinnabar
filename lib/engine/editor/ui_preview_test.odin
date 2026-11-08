@@ -103,7 +103,7 @@ exchange :: proc(f: ^Fixture, incoming: ..link.Message) -> []link.Ui_Preview_Lay
 		append(&encoded, core.Editor_Message{kind = header.kind, payload = bytes[link.HEADER_SIZE:]})
 	}
 	clear(&f.out)
-	f.editor.last_values = -1
+	f.editor.session.last_values = -1
 	poll(&f.editor, &f.world, nil, 1, encoded[:], &f.out)
 	found := make([dynamic]link.Ui_Preview_Layout, context.temp_allocator)
 	rest := f.out[:]
@@ -151,7 +151,7 @@ a_ui_preview_lays_its_document_out_on_its_screen_and_says_where_its_elements_wen
 	}
 	testing.expect_value(t, len(exchange(f, link.Open_Preview{id = 2, material = ([16]u8)(guid)}, settings)), 0)
 	testing.expect_value(t, draw(f), 1)
-	p := &f.editor.previews[2]
+	p := &f.editor.session.previews[2]
 	testing.expect(t, p.ui)
 
 	layouts := exchange(f)

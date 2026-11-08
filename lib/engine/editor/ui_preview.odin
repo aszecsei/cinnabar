@@ -177,7 +177,7 @@ draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 // send_ui_layouts tells the editor where each UI preview's elements went when it last drew, when that changed.
 @(private)
 send_ui_layouts :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allocator) {
-	for &p, id in e.previews {
+	for &p, id in e.session.previews {
 		u := &p.ui_preview
 		if !p.open || !p.ui || !u.open || !u.laid_out {
 			continue

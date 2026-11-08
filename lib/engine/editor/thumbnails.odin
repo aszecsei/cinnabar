@@ -64,7 +64,7 @@ handle_thumbnail_message :: proc(e: ^Editor, message: link.Message) -> bool {
 	if !is_bake {
 		return false
 	}
-	t := &e.thumbnail
+	t := &e.session.thumbnail
 	free_thumbnail_items(e, t)
 	t.phase = .Waiting
 	t.id, t.kind, t.asset, t.node = m.id, m.kind, format.Guid(m.asset), m.node
@@ -153,7 +153,7 @@ thumbnail_items :: proc(e: ^Editor, t: ^Thumbnail) -> (items: []render.Preview_I
 // thumbnail_preview moves the thumbnail on, and gives what the frame draws of it, if it is the thumbnail's turn.
 @(private)
 thumbnail_preview :: proc(e: ^Editor, others_waiting: bool) -> (desc: render.Preview_Desc, draw: bool) {
-	t := &e.thumbnail
+	t := &e.session.thumbnail
 	now := e.platform.time_seconds()
 	if t.phase == .Idle {
 		if t.baked && now - t.last >= THUMBNAIL_RELEASE_SECONDS && e.renderer != nil {
@@ -274,7 +274,7 @@ thumbnail_preview :: proc(e: ^Editor, others_waiting: bool) -> (desc: render.Pre
 // send_thumbnail_failed tells the editor of a thumbnail that cannot be made.
 @(private)
 send_thumbnail_failed :: proc(e: ^Editor, out: ^[dynamic]byte) {
-	t := &e.thumbnail
+	t := &e.session.thumbnail
 	if t.failed != "" {
 		link.write_message(out, link.Thumbnail_Failed{id = t.failed_id, reason = t.failed})
 		t.failed = ""
@@ -284,7 +284,7 @@ send_thumbnail_failed :: proc(e: ^Editor, out: ^[dynamic]byte) {
 // close_thumbnail lets go of the thumbnail and its texture, as when the editor leaves.
 @(private)
 close_thumbnail :: proc(e: ^Editor) {
-	t := &e.thumbnail
+	t := &e.session.thumbnail
 	free_thumbnail_items(e, t)
 	t.phase = .Idle
 	t.failed = ""

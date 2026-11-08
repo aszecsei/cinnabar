@@ -34,17 +34,24 @@ PICK_SHADER :: #load("../content/shaders/pick.hlsl.meta", string)
 @(private)
 OVERLAY_SHADER :: #load("../content/shaders/overlay.hlsl.meta", string)
 
-// Viewport is the editor's camera, selection and gizmo, and the picks that wait for the GPU. It lives in Editor.
-Viewport :: struct {
-	camera:           link.Editor_Camera,
-	has_camera:       bool,
-	selection:        [dynamic]ecs.Entity,
+// View is the editor's camera, selection and gizmo, and the picks that wait for the GPU. It is part of the session.
+View :: struct {
+	camera:     link.Editor_Camera,
+	has_camera: bool,
+	selection:  [dynamic]ecs.Entity,
 	// The entities that the editor hides, with their descendants. The game does not draw them.
-	hidden:           [dynamic]ecs.Entity,
-	gizmo:            link.Gizmo_State,
-	picks:            [dynamic]link.Pick_Request,
-	// picks[0] was rendered with this ticket, and its results come back through the readback buffer.
-	picking:          bool,
+	hidden:     [dynamic]ecs.Entity,
+	gizmo:      link.Gizmo_State,
+	picks:      [dynamic]link.Pick_Request,
+	// picks[0] was rendered with Viewport.ticket, and its results come back through the readback buffer.
+	picking:    bool,
+	// How the editor wants the viewport drawn, from Viewport_Settings.
+	settings:   link.Viewport_Settings,
+}
+
+// Viewport is what the tools draw and pick with. It lives in Editor and outlives a session.
+Viewport :: struct {
+	// The ticket of the last pick that the GPU ran. A new session keeps it, so a pick of the old one comes back stale.
 	ticket:           u32,
 	// What the pick needs to read its results: the words of entity bits, and the near planes that the world and the
 	// view model were drawn with.
@@ -59,8 +66,6 @@ Viewport :: struct {
 	icons_pipeline:   render.Shader_Pipeline,
 	results:          gpu.Buffer,
 	readback:         gpu.Buffer,
-	// How the editor wants the viewport drawn, from Viewport_Settings.
-	settings:         link.Viewport_Settings,
 }
 
 // Viewport_Frame is what the game drew that the tools draw on and pick from.
@@ -81,14 +86,14 @@ Viewport_Frame :: struct {
 // active is true while an editor is linked: the game then draws from view, writes the ID buffer, keeps its depth and
 // calls add_viewport_passes.
 active :: proc(e: ^Editor) -> bool {
-	return e.connection != 0
+	return e.session.connection != 0
 }
 
 // view is the editor's camera, once a linked editor has sent one, in edit mode or with the free camera.
 view :: proc(e: ^Editor) -> (render.View, bool) {
-	c := e.viewport.camera
+	c := e.session.view.camera
 	// In play mode the game's own camera draws, unless the editor flies its free camera.
-	if !active(e) || !e.viewport.has_camera || (e.mode != .Edit && !e.free_camera) {
+	if !active(e) || !e.session.view.has_camera || (e.session.mode != .Edit && !e.session.free_camera) {
 		return {}, false
 	}
 	return {
@@ -115,7 +120,7 @@ render_overrides :: proc(e: ^Editor) -> (o: Render_Overrides) {
 	if !active(e) {
 		return
 	}
-	s := e.viewport.settings
+	s := e.session.view.settings
 	o.debug_view = render.Debug_View(s.debug_view)
 	o.exposure_offset = s.exposure_offset
 	o.shading_stats = s.shading_stats
@@ -148,7 +153,7 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality,
 	if !active(e) {
 		return
 	}
-	s := e.viewport.settings
+	s := e.session.view.settings
 	q = r.quality
 	if s.quality_preset != .Game {
 		q = render.preset_quality(render.Quality_Preset(int(s.quality_preset) - 1), r.caps)
@@ -186,6 +191,7 @@ entity_id :: proc "contextless" (entity: ecs.Entity) -> u32 {
 // icons and the overlay draw only while editing, so the viewport in Play shows what the game shows.
 add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewport_Frame) {
 	v := &e.viewport
+	tools := &e.session.view
 	if !active(e) || !create_viewport_gpu(e) {
 		return
 	}
@@ -199,13 +205,13 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 	slots := ecs.slot_count(w)
 	words := (slots + 31) / 32
 
-	if len(v.picks) > 0 && !v.picking {
-		request := scale_pick(v.picks[0], frame)
+	if len(tools.picks) > 0 && !tools.picking {
+		request := scale_pick(tools.picks[0], frame)
 		size := u32(PICK_HEADER) + words * 4
 		zeros, ok := platform.gpu_upload(int(size), 4)
 		if ok {
 			v.ticket += 1
-			v.picking = true
+			tools.picking = true
 			v.pick_words = words
 			v.pick_near = frame.view.near
 			v.pick_view_model_near = render.view_model_view(frame.view).near
@@ -250,23 +256,23 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 		slots = slots,
 		view_projection = render.view_projection(frame.view, f32(frame.size.x) / f32(max(frame.size.y, 1))),
 	}
-	if len(v.selection) > 0 {
+	if len(tools.selection) > 0 {
 		if upload, ok := platform.gpu_upload(int(max(words, 1)) * 4, 4); ok {
-			with_descendants(w, v.selection[:], ([^]u32)(raw_data(upload.data))[:max(words, 1)])
+			with_descendants(w, tools.selection[:], ([^]u32)(raw_data(upload.data))[:max(words, 1)])
 			overlay.selection = upload
 			overlay.outline = true
 		}
 	}
-	if v.gizmo.kind != .None {
+	if tools.gizmo.kind != .None {
 		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
-		gizmo_vertices(v.gizmo, frame.view, &vertices)
+		gizmo_vertices(tools.gizmo, frame.view, &vertices)
 		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
 			copy(upload.data, ([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)])
 			overlay.vertices = upload
 			overlay.vertex_count = u32(len(vertices))
 		}
 	}
-	if e.mesh_overlay.active {
+	if e.session.mesh_overlay.active {
 		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
 		mesh_overlay_vertices(e, w, frame.view, frame.size.y, &vertices)
 		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
@@ -427,11 +433,11 @@ Visibility :: struct {
 // visibility is what the editor hides this frame. A game that draws entities skips those that is_visible rejects, so
 // they are neither drawn nor picked. Without an editor, or with nothing hidden, it hides nothing.
 visibility :: proc(e: ^Editor, w: ^ecs.World) -> Visibility {
-	if !active(e) || len(e.viewport.hidden) == 0 {
+	if !active(e) || len(e.session.view.hidden) == 0 {
 		return {}
 	}
 	bits := make([]u32, (ecs.slot_count(w) + 31) / 32, e.platform.frame_allocator)
-	with_descendants(w, e.viewport.hidden[:], bits)
+	with_descendants(w, e.session.view.hidden[:], bits)
 	return {bits}
 }
 
@@ -547,7 +553,7 @@ OVERLAY_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 // handle_viewport_message handles the tools' messages. It reports false for any other message.
 @(private)
 handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
-	v := &e.viewport
+	v := &e.session.view
 	#partial switch m in message {
 	case link.Editor_Camera:
 		v.camera = m
@@ -578,36 +584,26 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 	return true
 }
 
-// reset_viewport forgets what an editor sent, for a new editor. A pick that the GPU still runs finishes with an old
-// ticket, so nothing reads it.
-@(private)
-reset_viewport :: proc(e: ^Editor) {
-	v := &e.viewport
-	v.camera, v.has_camera, v.gizmo, v.picking, v.settings = {}, false, {}, false, {}
-	clear(&v.selection)
-	clear(&v.hidden)
-	clear(&v.picks)
-}
-
 // finish_pick sends the answer to the pick that the GPU ran, once its results are on the CPU.
 @(private)
 finish_pick :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: runtime.Allocator) {
 	v := &e.viewport
-	if !v.picking || !v.gpu_ready {
+	tools := &e.session.view
+	if !tools.picking || !v.gpu_ready {
 		return
 	}
 	data, ok := e.platform.gpu_read_buffer(v.readback)
 	if !ok {
 		return
 	}
-	v.picking = false
+	tools.picking = false
 	words := ([^]u32)(raw_data(data))
 	// A frame that did not run the pick, such as one that the GPU dropped, leaves an old ticket, and the pick runs again.
-	if words[0] != v.ticket || len(v.picks) == 0 {
+	if words[0] != v.ticket || len(tools.picks) == 0 {
 		return
 	}
-	request := v.picks[0]
-	ordered_remove(&v.picks, 0)
+	request := tools.picks[0]
+	ordered_remove(&tools.picks, 0)
 	link.write_message(out, pick_result(w, request, words[:PICK_HEADER / 4 + v.pick_words], v.pick_near, v.pick_view_model_near, allocator))
 }
 

@@ -57,7 +57,7 @@ A code reload is what `just game-dll` gives in the common case. A soft restart h
 5. The host compares the new `layout_hash` with the old one. The DLL computes this hash at runtime by walking the type info of `Game_State` (field names, offsets and types).
    - **Same hash:** the host calls `on_reload`. State is kept.
    - **Different hash:** the host calls `shutdown` and then `init` with fresh state. This is a soft restart. The window, the GPU device and the loaded assets stay up. Between the two calls, `core` destroys the GPU resources that the old game left in the `Game` scope (see [GPU](../gpu/resources-and-pipelines.md#resources)).
-6. While an editor is linked, the host tells it which happened (`Game_Reloaded` with the kind). After a code reload the game sends its types again; after a soft restart the editor sends its scene again.
+6. While an editor is linked, the host tells it which happened (`Game_Reloaded` with the kind). After a code reload the game sends its types again; after a soft restart the editor sends again what it sends to a new link: its scene, its viewport tools, its live meshes and its previews (see [Editor link](../editor/link.md#a-new-game-state)).
 
 The reload point is between frames, after the job system is drained and before the editor's messages are handled, so no job, no script and no editor operation is ever in flight across it.
 
