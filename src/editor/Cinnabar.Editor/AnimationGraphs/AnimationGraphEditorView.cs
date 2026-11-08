@@ -76,7 +76,7 @@ public sealed class AnimationGraphEditorView : DockPanel
     {
         var parts = new List<string>();
         var errors = _editor.Problems.Count(p => p.Error);
-        if (_shell.Cook.State != Content.CookState.Linked)
+        if (!_shell.Cook.Linked)
         {
             parts.Add("waiting for the cook daemon");
         }

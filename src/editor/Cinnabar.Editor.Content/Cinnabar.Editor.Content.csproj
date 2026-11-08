@@ -8,4 +8,7 @@
     <ProjectReference Include="..\Cinnabar.Editor.Link\Cinnabar.Editor.Link.csproj" />
     <ProjectReference Include="..\Cinnabar.Editor.Model\Cinnabar.Editor.Model.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cinnabar.Editor.Tests" />
+  </ItemGroup>
 </Project>

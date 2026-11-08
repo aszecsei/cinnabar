@@ -108,7 +108,7 @@ public sealed class ContentBrowser
     public bool SelectionHasSubassets => SelectedAssets.Any(g => assets.Find(g) is { } a && AssetIndex.IsSubasset(a));
 
     /// <summary>The cook daemon is linked, so the content can change.</summary>
-    public bool CanChangeContent => cook.State == CookState.Linked;
+    public bool CanChangeContent => cook.Linked;
 
     /// <summary>The user asked for a new asset from a template, or a folder for null. The window asks for its name.</summary>
     public event Action<AssetTemplate?>? NewAssetRequested;

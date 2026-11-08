@@ -104,7 +104,7 @@ public sealed class MaterialEditorView : DockPanel
         }
         else if (_editor.PreviewId != null)
         {
-            parts.Add(_shell.Cook.State != Content.CookState.Linked ? "waiting for the cook daemon" : _editor.ShowsUnsaved ? "preview cooked" : "cooking the preview");
+            parts.Add(!_shell.Cook.Linked ? "waiting for the cook daemon" : _editor.ShowsUnsaved ? "preview cooked" : "cooking the preview");
         }
         if (_editor.Document.IsDirty)
         {

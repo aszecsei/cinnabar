@@ -26,7 +26,6 @@ public class AssetIndexTests
             [Script("01", "scripts/door.luau", "Door"), Script("02", "scripts/ui/menu.luau"), Scene("03", "main.scene")],
             "scripts", "scripts/ui", "levels");
 
-        Assert.True(index.Linked);
         Assert.Equal(["levels", "scripts"], index.ChildFolders("game", ""));
         Assert.Equal(["ui"], index.ChildFolders("game", "scripts"));
         Assert.Equal(["03"], index.AssetsIn("game", "").Select(a => a.Guid));
@@ -111,8 +110,15 @@ public class AssetIndexTests
     public void TheIndexKeepsItsAssetsWhenTheLinkCloses()
     {
         var index = Index([Script("01", "a.luau")]);
-        index.Unlink();
+        index.SetLinked(true);
+        var changes = 0;
+        index.Changed += () => changes++;
+
+        index.SetLinked(false);
+        index.SetLinked(false);
+
         Assert.False(index.Linked);
+        Assert.Equal(1, changes);
         Assert.NotNull(index.Find("01"));
     }
 

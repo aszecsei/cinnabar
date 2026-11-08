@@ -151,7 +151,7 @@ public sealed class UiEditorView : DockPanel
     {
         var parts = new List<string> { $"UI scale {_editor.Scale.ToString("0.##", CultureInfo.InvariantCulture)}" };
         var errors = _editor.Problems.Count(p => p.Error);
-        if (_shell.Cook.State != Content.CookState.Linked)
+        if (!_shell.Cook.Linked)
         {
             parts.Add("waiting for the cook daemon");
         }

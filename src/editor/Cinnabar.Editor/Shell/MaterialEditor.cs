@@ -396,7 +396,7 @@ public sealed class MaterialEditor : PreviewOwner, IGraphEditor
     public async Task CookNow()
     {
         // Without the cook link, the editor cooks when the link comes up.
-        if (PreviewId == null || _shell.Cook.State != Content.CookState.Linked)
+        if (PreviewId == null || !_shell.Cook.Linked)
         {
             return;
         }

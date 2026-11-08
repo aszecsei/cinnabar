@@ -661,7 +661,7 @@ public sealed class UiEditor : PreviewOwner, IGraphEditor
 
     public async Task CookNow()
     {
-        if (_shell.Cook.State != Content.CookState.Linked)
+        if (!_shell.Cook.Linked)
         {
             return;
         }
