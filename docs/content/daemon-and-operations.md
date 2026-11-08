@@ -45,7 +45,7 @@ The daemon is the only program that writes `.meta` files, and it moves every ass
 
 The editor talks to the daemon through the cook link. It has the editor link's transport (see [Editor](../editor/link.md#editor-link)) and its own messages.
 
-- **One transport:** `lib/engine/wire` has the framing, the wire format and the schema writer, for any union of messages. `lib/engine/editor/link` and `lib/engine/asset/cook_link` each give a union of messages. Neither imports anything from core or engine.
+- **One transport:** `lib/engine/wire` has the framing, the wire format and the schema writer, for any union of messages. `lib/engine/editor/link` and `lib/engine/asset/cook_link` each give a union of messages. Neither imports anything from core or engine. The daemon and the host serve with the same `lib/engine/wire/serve`: its accept, reader and writer threads, its outbox and its logger, and which connection is linked (see [Editor](../editor/link.md#editor-link)).
 - **The daemon is the server.** It listens on `127.0.0.1` at the port that `--link` gives, and serves one editor at a time.
 - **Handshake:** `Hello`, then `Welcome` with the roots, the configuration, the importers, each with its extension and import settings, and the kinds of node of material graphs, then the whole index as an `Asset_Snapshot`, an `Asset_Problems` for each asset that has problems, and the `Shading_Models` with their surface inputs. A `Hello` of another protocol version gets `Refused`. Then the daemon's log goes over the link, as the host's does.
 - **After each pass** that changed the index, the daemon sends an `Asset_Delta` and an `Asset_Problems` for each asset whose problems changed, and `Shading_Models` when a shading model changed. It sends `Cook_Finished` after every pass.

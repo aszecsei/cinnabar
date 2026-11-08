@@ -128,6 +128,7 @@ Packages are small and single-purpose. A package's tests are beside it as `*_tes
 | `lib/engine/render` | Game | The render graph, render extraction, and the built-in renderer: views, layers, materials and the frame's passes. |
 | `lib/engine/editor` | Game | The game side of the editor link: component types, the entity list and its deltas, watched values, scene snapshots and edit operations, and the viewport tools' passes: picking from the entity ID buffer, the selection outline and the gizmo. |
 | `lib/engine/wire` | Shared | The transport of the editor link and the cook link: framing, the wire format and the schema writer, for any union of messages. |
+| `lib/engine/wire/serve` | Host | The server side of both links, for the host and the cook daemon: one editor at a time, the reader and writer threads, the outbox, the logger, and which connection is linked. `lib/engine/wire/servetest` is its tests' editor end. |
 | `lib/engine/volume` | Game | Volumes: settings components that change with where a point is, such as the post-processing at the camera (see [World](../world/volumes.md#volumes)). |
 | `lib/engine/project` | Game | The project's settings file and the user's file beside it, which the game reads again when they change (see [Project settings](architecture.md#project-settings)). |
 | `lib/core/audio` | Host | The boundary to an audio backend, and the mixer behind it, whose threads run through a code reload (see [Audio](../audio/README.md#overview)). |

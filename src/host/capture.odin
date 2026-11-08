@@ -219,7 +219,7 @@ capture_tick :: proc(c: ^Capture) {
 	c.done = make([dynamic]link.Capture_Result, runtime.heap_allocator())
 	sync.unlock(&c.mutex)
 	for r in results {
-		if c.editor != nil && c.editor.linked {
+		if c.editor != nil && link_linked(c.editor) {
 			link_send(c.editor, r)
 		}
 		free_result(r)
@@ -292,7 +292,7 @@ take_thumbnail :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 		post_job(c, Job{kind = .Thumbnail, capture = done, frame = c.frame, id = done.ticket, path = c.thumbnail_path})
 	case .Cancelled:
 		core.release_frame_capture(done)
-		if c.editor != nil && c.editor.linked {
+		if c.editor != nil && link_linked(c.editor) {
 			link_send(c.editor, link.Capture_Result{id = done.ticket, kind = .Thumbnail, reason = "the backend could not copy the texture"})
 		}
 		delete(c.thumbnail_path, runtime.heap_allocator())
@@ -329,7 +329,7 @@ take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 		if f.ring {
 			c.ring_due = true
 		}
-		if f.id != 0 && c.editor != nil && c.editor.linked {
+		if f.id != 0 && c.editor != nil && link_linked(c.editor) {
 			// It waits as a request that found no free slot does, so a window that stays minimized fails it.
 			inject_at(&c.requests, 0, Request{id = f.id, kind = .Screenshot, path = f.path, waited = 1})
 		} else {
