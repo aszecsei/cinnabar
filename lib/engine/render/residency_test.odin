@@ -472,6 +472,75 @@ a_live_mesh_with_no_asset_draws_nothing_once_let_go :: proc(t: ^testing.T) {
 	testing.expect_value(t, fake.live_buffers, 6)
 }
 
+// A mesh whose cooked blob is broken has nothing to draw once its live mesh is let go, though it has an asset.
+@(test)
+a_live_mesh_over_a_broken_blob_draws_nothing_once_let_go :: proc(t: ^testing.T) {
+	context.logger = testlog.expected_errors()
+	fake: Fake_GPU
+	context.user_ptr = &fake
+	frame: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&frame) == nil)
+	defer virtual.arena_destroy(&frame)
+	platform := fake_platform(&frame)
+	dir, err := os.make_directory_temp("", "residency_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	defer os.remove_all(dir)
+	guid := format.guid_parse("9db8150cc7215ffc2708d20d77cf60bf") or_else {}
+	// A blob with only its header loads as the mesh's, but cannot be made resident.
+	start := time.now()
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", dir, format.guid_format(guid, &buffer)), mesh_bytes(guid, 3)[:size_of(format.Blob_Header)]) == nil)
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s", dir, format.GENERATION_FILE), transmute([]byte)string("1")) == nil)
+
+	assets: asset.Assets
+	asset.init(&assets, &platform, asset.loose_cache(dir))
+	defer asset.destroy(&assets)
+	r := new(Residency)
+	defer free(r)
+	residency_init(r, &platform, &assets)
+	defer residency_destroy(r)
+
+	_, ready := resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	testing.expect(t, resident_failed(r, guid))
+	testing.expect(t, set_live(r, guid, mesh_bytes(guid, 4)))
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	mesh: ^Resident_Mesh
+	mesh, ready = resident_mesh(r, guid)
+	testing.expect(t, ready)
+	testing.expect_value(t, mesh.vertex_count, 4)
+	testing.expect_value(t, fake.live_buffers, 6)
+
+	// Its buffers go with it.
+	clear_live(r, guid)
+	residency_update(r)
+	_, ready = resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.live_buffers, 0)
+
+	// One still streaming when it is let go lands, and then goes the same way.
+	testing.expect(t, set_live(r, guid, mesh_bytes(guid, 5)))
+	clear_live(r, guid)
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	residency_update(r)
+	_, ready = resident_mesh(r, guid)
+	testing.expect(t, !ready)
+	testing.expect_value(t, fake.live_buffers, 0)
+
+	// A good cook draws.
+	write_mesh(t, dir, guid, 3, time.time_add(start, time.Second))
+	testing.expect_value(t, len(asset.poll(&assets)), 1)
+	residency_update(r)
+	fake.done_through = fake.next_transfer
+	residency_update(r)
+	mesh, ready = resident_mesh(r, guid)
+	testing.expect(t, ready)
+	testing.expect_value(t, mesh.vertex_count, 3)
+	testing.expect_value(t, fake.live_buffers, 6)
+}
+
 @(test)
 a_skinned_mesh_streams_its_skin :: proc(t: ^testing.T) {
 	fake: Fake_GPU
@@ -500,7 +569,7 @@ a_skinned_mesh_streams_its_skin :: proc(t: ^testing.T) {
 	_, ready := resident_mesh(r, guid)
 	testing.expect(t, !ready)
 	testing.expect_value(t, fake.live_buffers, 7)
-	testing.expect_value(t, r.entries[0].transfer_count, 7)
+	testing.expect_value(t, (r.entries[0].stream.? or_else {}).transfer_count, 7)
 	fake.done_through = fake.next_transfer
 	residency_update(r)
 	mesh, now_ready := resident_mesh(r, guid)
