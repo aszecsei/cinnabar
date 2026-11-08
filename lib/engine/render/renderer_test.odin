@@ -363,9 +363,19 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		q.shadows.level = .Ultra
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
 		testing.expect_value(t, r.shadows.virtual.pool_pages, SHADOW_PARAMS[.Ultra].pool_pages)
+		// A frame that records the stats' copy and then fails writes no copy and does not move on, so its stats show none.
+		next := r.shadows.virtual.stats_ring.next
+		platform.gpu_submit = fail_submit
+		testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
+		platform.gpu_submit = null.submit
+		testing.expect_value(t, r.shadows.virtual.stats_ring.next, next)
+		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
 		q.shadows = {level = .Low, virtual = true}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.Low].cascades + 6)
+		// The cascades' frame copies no virtual stats, so none are written, and none show.
+		testing.expect_value(t, r.shadows.virtual.stats_ring.written, [READBACK_COPIES]bool{})
+		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
 		q.shadows = {level = .High, virtual = false}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_CASCADES + 6)
@@ -548,10 +558,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	for _ in 0 ..< 2 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame with the shading stats did not execute")
 	}
-	testing.expect_value(t, r.shading.stats_next, 2)
+	testing.expect_value(t, r.shading.stats_ring.next, 2)
 	desc.shading_stats = false
 	testing.expect(t, draw_frame(r, w, desc), "the frame without the shading stats did not execute")
-	testing.expect_value(t, r.shading.stats_next, 2)
+	testing.expect_value(t, r.shading.stats_ring.next, 2)
 	testing.expect_value(t, shading_stats(r), Shading_Stats{})
 	desc.disable = ~Features{}
 	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")

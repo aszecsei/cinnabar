@@ -79,7 +79,8 @@ sealed class ContentFilterBar : DockPanel
             chip.Click += (_, _) => _model.ToggleKind(kind);
             _kinds.Children.Add(chip);
         }
-        _inFolder.IsVisible = _model.Filtering && _model.OpenFile == null;
+        // In a file or a prefab, the filter looks through what it holds, so the folder's switch does nothing there.
+        _inFolder.IsVisible = _model.Filtering && _model.Location is ContentLocation.InFolder;
         _inFolder.IsChecked = _model.InThisFolder;
         _grid.IsChecked = _model.ViewMode == ContentViewMode.Grid;
         _list.IsChecked = _model.ViewMode == ContentViewMode.List;

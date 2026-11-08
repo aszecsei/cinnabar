@@ -215,6 +215,9 @@ deliver_one :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
 	handler := fmt.caprintf("on_%s", luau.toodinstring(L, -1), allocator = frame(r))
 	name := luau.gettop(L)
 	argc := luau.objlen(L, event) - 2
+	// The event resumes the coroutines that waited for it before it came. One that a handler or a resumed coroutine
+	// starts, waiting for the same event, waits for the next one.
+	last_seq := r.waiter_seq
 	if r.world != nil && ecs.is_alive(r.world, e) {
 		for h in entity_instances(r, e) {
 			if i := instance_at(r, h); i != nil && effective(i) {
@@ -226,10 +229,11 @@ deliver_one :: proc(r: ^Runtime, L: ^luau.State, event: c.int) {
 		}
 	}
 	for &w, index in r.waiters[:r.waiter_used] {
-		if !w.live || w.stopped || w.running || w.wait.kind != .Event || w.wait.entity != e {
+		wait, waits_event := w.wait.(Wait_Event)
+		if !waits_event || w.status != .Waiting || w.seq > last_seq || wait.entity != e {
 			continue
 		}
-		luau.getref(L, w.wait.event)
+		luau.getref(L, wait.event)
 		same := luau.rawequal(L, -1, name)
 		luau.pop(L, 1)
 		if !same {

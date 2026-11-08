@@ -22,29 +22,23 @@ public sealed partial class MeshToolRunner
 
     internal MeshToolRunner(MeshSession session, IMeshHost shell) => (_session, _shell) = (session, shell);
 
-    // A tool whose distance the next gizmo drag sets, with its undo entry open: the entry, each mesh's snapshot and
-    // selection from before it ran, and how to run it at a distance.
-    sealed record PendingDistance(SceneEdit Edit, Vec3 Axis, bool Magnitude, Dictionary<string, (MeshData Start, IReadOnlyList<int> Selected)> Meshes,
-        Func<MeshData, IEnumerable<int>, double, ToolResult> Run);
-
     // What the last primitive was made from, so a parameter change makes it again in place of the same undo entry.
     sealed record LastPrimitive(int Position, long[] Corner, Vec3 Size, int Axis, string? Mesh);
 
-    PendingDistance? _pending;
-    // The loop that the Cut tool would make from the edge under the mouse: its mesh and its points.
+    // The loop that the Cut tool would make from the edge under the mouse: its mesh and its points. It is what the mouse
+    // is over, not an interaction.
     (string Guid, List<CutPoint.OnEdge> Points)? _loopPreview;
-    readonly List<CutPoint> _toolPoints = [];
-    string? _toolMesh;
-    readonly List<long[]> _planePoints = [];
     LastPrimitive? _lastPrimitive;
 
-    /// <summary>A tool ran and waits for a drag of the gizmo to set its distance.</summary>
-    public bool HasPendingDistance => _pending != null;
+    MeshInteraction.PendingDistance? Pending => _session.Interaction as MeshInteraction.PendingDistance;
 
-    internal string? PendingLabel => _pending?.Edit.Label;
+    /// <summary>A tool ran and waits for a drag of the gizmo to set its distance.</summary>
+    public bool HasPendingDistance => Pending != null;
+
+    internal string? PendingLabel => Pending?.Edit.Label;
 
     /// <summary>The pending distance's open entry, which the gizmo drag that sets the distance previews in.</summary>
-    internal SceneEdit? PendingEdit => _pending?.Edit;
+    internal SceneEdit? PendingEdit => Pending?.Edit;
 
     // Any edit but a primitive's own parameter change ends its parameters' editability.
     internal void ForgetStalePrimitive()
@@ -85,7 +79,7 @@ public sealed partial class MeshToolRunner
     /// </summary>
     public bool RunMeshTool(string label, Func<MeshData, IEnumerable<int>, ToolResult> run, MeshElement? requires = null)
     {
-        CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!CanRunMeshTool(requires) || _shell.Scene == null)
         {
             return false;
@@ -128,7 +122,7 @@ public sealed partial class MeshToolRunner
     /// <summary>Acts on the whole of each edited mesh, as Clean and Recalculate Normals do without a selection.</summary>
     public bool RunWholeMeshTool(string label, Func<MeshData, (MeshData Mesh, IReadOnlyList<string> Problems)> run)
     {
-        CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!_session.InMeshMode || !_shell.IsEditing || _shell.Scene == null)
         {
             return false;
@@ -241,7 +235,7 @@ public sealed partial class MeshToolRunner
     /// </summary>
     public bool Detach(bool keepSource)
     {
-        CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!CanRunMeshTool(MeshElement.Faces) || _shell.Scene == null)
         {
             return false;

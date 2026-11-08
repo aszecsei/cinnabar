@@ -65,7 +65,7 @@ public static partial class PrefabExpansion
     /// <summary>The prefab's root, the one block that is neither an override nor a child, and how many such blocks it has.</summary>
     public static (SceneEntity? Root, int Roots) RootOf(Scene prefab)
     {
-        var roots = prefab.Entities.Where(e => e.Path == null && e.Parent == 0).ToList();
+        var roots = prefab.Entities.Where(e => e.Kind != BlockKind.Override && e.Parent == 0).ToList();
         return (roots.FirstOrDefault(), roots.Count);
     }
 
@@ -83,10 +83,10 @@ public static partial class PrefabExpansion
             var isOutermost = chain.Count == outermost;
             var output = new List<Flat>();
             var ranges = new Dictionary<ulong, (int Start, int End)>();
-            foreach (var e in scene.Entities.Where(e => e.Path == null))
+            foreach (var e in scene.Entities.Where(e => e.Kind != BlockKind.Override))
             {
                 var start = output.Count;
-                if (e.Prefab == "")
+                if (e.Kind == BlockKind.Plain)
                 {
                     output.Add(new Flat(Plain(e.Copy(e.Id)), null, ""));
                 }

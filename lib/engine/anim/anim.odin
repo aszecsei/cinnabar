@@ -107,7 +107,9 @@ State :: struct {
 	world:        ^ecs.World,
 	animators:    ecs.Query,
 	job_events:   ecs.Job_Buffer,
-	// prepare's graphs, in frame memory, which the ticks read until asset.poll.
+	// prepare's graphs, in frame memory, from prepare to end_frame, and nil between frames. A graph points into its asset's
+	// blob, which asset.poll can free, so nothing reads the table after the frame ends: an Animator's slot then finds no
+	// graph until the next prepare.
 	graphs:       []Resolved,
 	// The events of the tick numbered tick, and of every tick since begin_frame. Their strings are on the heap.
 	tick_events:  [dynamic]Event,
@@ -164,6 +166,13 @@ prepare :: proc(s: ^State, w: ^ecs.World) {
 		}
 	}
 	s.graphs = table[:]
+}
+
+// end_frame lets the frame's graphs go, which prepare made, before asset.poll can free their blobs. Until the next
+// prepare, an Animator has no graph: Animation calls from scripts that run between frames, such as a main script that a
+// reload starts or an editor's scene load, find none. Call it at the end of the frame code, before asset.poll.
+end_frame :: proc(s: ^State) {
+	s.graphs = nil
 }
 
 // begin_frame clears the frame's events. Call it in the frame code before the ticks, with physics.begin_frame.

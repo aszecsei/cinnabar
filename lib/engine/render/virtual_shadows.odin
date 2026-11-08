@@ -43,8 +43,6 @@ VIRTUAL_VOLUME_LEVELS :: 3
 VIRTUAL_VOLUME_REACH :: SHADOW_DISTANCE
 // The lookups' offsets move a point by at most this many texels. Matches MARK_MARGIN in virtual_shadow_mark.hlsl.
 VIRTUAL_MARK_MARGIN :: 1
-// Copies of the stats that the CPU reads, so a read never waits for a frame in flight.
-VIRTUAL_STATS_COPIES :: 3
 VIRTUAL_MARK_GROUP_SIZE :: 8
 // A sphere over more than this many pages on a side counts as reaching one, which is cheaper to draw than to test.
 // Matches VIRTUAL_CULL_PAGES in virtual_pages.hlsli.
@@ -74,12 +72,8 @@ Virtual_Shadows :: struct {
 	table:             gpu.Buffer,
 	arguments:         gpu.Buffer,
 	stats:             gpu.Buffer,
-	stats_copies:      [VIRTUAL_STATS_COPIES]gpu.Buffer,
-	stats_written:     [VIRTUAL_STATS_COPIES]bool,
-	stats_next:        int,
+	stats_ring:        Readback_Ring,
 	last_stats:        Virtual_Shadow_Stats,
-	// The last frame counted, so the next copy is the one that it wrote.
-	counted:           bool,
 	pool:              gpu.Texture,
 	pool_pages:        [2]u32,
 }
@@ -530,43 +524,24 @@ virtual_shadows_destroy :: proc(v: ^Virtual_Shadows, platform: ^core.Platform_AP
 	platform.gpu_destroy_buffer(v.table)
 	platform.gpu_destroy_buffer(v.arguments)
 	platform.gpu_destroy_buffer(v.stats)
-	for b in v.stats_copies {
-		platform.gpu_destroy_buffer(b)
-	}
+	destroy_readback_ring(&v.stats_ring, platform)
 	platform.gpu_destroy_texture(v.pool)
 	v^ = {}
 }
 
-// read_virtual_stats takes each stats' copy that has come back, the newest last, and keeps it.
+// read_virtual_stats keeps the newest stats' copy that has come back. After a frame without the virtual shadow map, or
+// one that did not execute, the stats are empty.
 @(private)
 read_virtual_stats :: proc(r: ^Renderer) {
 	v := &r.shadows.virtual
-	for k in 0 ..< VIRTUAL_STATS_COPIES {
-		i := (v.stats_next + k) % VIRTUAL_STATS_COPIES
-		if !v.stats_written[i] {
-			continue
-		}
-		if data, ok := r.platform.gpu_read_buffer(v.stats_copies[i]);
-		   ok && len(data) >= size_of(Virtual_Shadow_Stats) {
-			v.last_stats = (^Virtual_Shadow_Stats)(raw_data(data))^
-			v.stats_written[i] = false
-		}
-	}
-}
-
-// finish_virtual_stats moves on to the next copy, once the frame has copied into this one. A frame without the virtual
-// shadow map shows none.
-@(private)
-finish_virtual_stats :: proc(r: ^Renderer) {
-	v := &r.shadows.virtual
-	if !v.counted {
-		v.stats_written = {}
+	data, take := take_readback(&v.stats_ring, r.platform, size_of(Virtual_Shadow_Stats))
+	switch take {
+	case .Fresh:
+		v.last_stats = (^Virtual_Shadow_Stats)(raw_data(data))^
+	case .Idle:
 		v.last_stats = {}
-		return
+	case .Waiting:
 	}
-	v.stats_written[v.stats_next] = true
-	v.stats_next = (v.stats_next + 1) % VIRTUAL_STATS_COPIES
-	v.counted = false
 }
 
 // ensure_virtual_shadows syncs the virtual shadow map's pipelines and creates what the level's parameters need, and says
@@ -625,16 +600,9 @@ ensure_virtual_shadows :: proc(r: ^Renderer, p: Shadow_Params) -> bool {
 			},
 			nil,
 		)
-		for &b in v.stats_copies {
-			b = platform.gpu_create_buffer(
-				{
-					size = size_of(Virtual_Shadow_Stats),
-					usage = {.Readback},
-					label = "virtual shadow stats readback",
-				},
-				nil,
-			)
-		}
+	}
+	if !ensure_readback_ring(&v.stats_ring, platform, size_of(Virtual_Shadow_Stats), "virtual shadow stats readback") {
+		return false
 	}
 	if v.pool_pages != p.pool_pages {
 		platform.gpu_destroy_texture(v.pool)
@@ -759,22 +727,7 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	declare_scene_draws(f, p)
 
 	// The stats' copy, for read_virtual_stats to take once it is back.
-	copy := import_buffer(g, v.stats_copies[v.stats_next])
-	p = add_compute_pass(g, "virtual shadow stats", proc(ctx: ^Pass_Context) {
-			f := (^Frame)(ctx.data)
-			v := &f.renderer.shadows.virtual
-			gpu.cmd_copy_buffer(
-				ctx.cb,
-				gpu_buffer(ctx.graph, f.shadows.virtual.stats),
-				0,
-				v.stats_copies[v.stats_next],
-				0,
-				size_of(Virtual_Shadow_Stats),
-			)
-		}, f)
-	copy_source(g, p, vf.stats)
-	copy_dest(g, p, copy)
-	v.counted = true
+	add_readback_copy(g, f.renderer.platform, &v.stats_ring, vf.stats, size_of(Virtual_Shadow_Stats), "virtual shadow stats")
 }
 
 // add_virtual_culling adds the culling of the levels' views, which the page table has to be written for: their instance

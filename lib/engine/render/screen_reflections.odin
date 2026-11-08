@@ -113,6 +113,9 @@ Ssr_Constants :: struct {
 @(private)
 Ssr_Frame :: struct {
 	constants:  Ssr_Constants,
+	// The technique whose trace the frame runs, Screen or Ray_Traced, at level: configure_ssr sets it, and the params,
+	// the stride, the trace's size and the constants that follow from them.
+	technique:  Reflection_Technique,
 	params:     Reflection_Params,
 	level:      Quality_Level,
 	// The block that a trace texel covers, and the trace's size, a texel for each block.
@@ -131,7 +134,7 @@ Ssr_Frame :: struct {
 	// The scene that the lit pass keeps: later passes replace Frame.scene before the passes record.
 	scene:      Texture,
 	depth:      [2]Ssr_Depth_Pass,
-	// The traced reflections' frame, nil for the screen-space reflections.
+	// The traced reflections' frame, nil unless technique is Ray_Traced.
 	traced:     ^Rtr_Frame,
 }
 
@@ -212,13 +215,12 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	}
 	sf := new(Ssr_Frame, platform.frame_allocator)
 	sf.traced = traced
-	sf.params = REFLECTION_PARAMS[technique][settings.level]
 	sf.level = settings.level
-	sf.stride = technique == .Ray_Traced ? reflection_stride(f.size, sf.params.stride) : sf.params.stride
-	sf.trace_size = (f.size + sf.stride - 1) / sf.stride
-	// A trace of one pixel of each 2x2 block, or fewer, takes a lit scene at half resolution.
+	// A trace of one pixel of each 2x2 block, or fewer, takes a lit scene at half resolution. The lit scene stays as
+	// chosen here when the frame falls back to the screen-space trace after all, since a history is used once a frame.
+	stride := ssr_stride(f.size, technique, sf.level)
 	half_size := (f.size + 1) / 2
-	half := sf.stride.x >= 2 && sf.stride.y >= 2
+	half := stride.x >= 2 && stride.y >= 2
 	if half && f.gi != nil {
 		sf.lit, sf.lit_size, sf.shares_lit = f.gi.lit, f.gi.lit_size, true
 	} else {
@@ -241,24 +243,48 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 		noise         = gpu.read_index(noise),
 		frame         = s.frame,
 		size          = f.size,
-		trace_size    = sf.trace_size,
 		lit_size      = sf.lit_size,
-		offset        = ssr_offset(sf.stride, s.frame),
-		ray_count     = max(min(sf.params.rays, 2), 1),
-		steps         = sf.params.steps,
-		cutoff        = sf.params.cutoff,
 		level_count   = SSR_DEPTH_LEVELS,
 		jitter        = f.jitter,
 		history_valid = u32(sf.history.valid),
 		min_frames    = SSR_MIN_FRAMES,
 		max_frames    = SSR_MAX_FRAMES,
-		reach         = sf.params.distance,
-		stride        = sf.stride,
 	}
-	if traced != nil {
-		sf.constants.ray_count = 1
-	}
+	configure_ssr(f, sf, technique)
 	f.ssr = sf
+}
+
+// ssr_stride is the block that a trace texel covers for a technique at a level. The traced reflections' grows with the
+// frame's size, so that their rays fit a batch of hit shading.
+@(private = "file")
+ssr_stride :: proc(size: [2]u32, technique: Reflection_Technique, level: Quality_Level) -> [2]u32 {
+	stride := REFLECTION_PARAMS[technique][level].stride
+	return technique == .Ray_Traced ? reflection_stride(size, stride) : stride
+}
+
+// configure_ssr sets the trace that the frame runs: the technique, Screen or Ray_Traced, its params at the frame's
+// level, its stride and trace size, and the constants that follow from them. begin_screen_reflections calls it, and so
+// does a frame that falls back to the screen-space trace once its passes are added, so the fallback is the screen-space
+// trace at the same level, whichever way the frame comes to it.
+@(private = "file")
+configure_ssr :: proc(f: ^Frame, sf: ^Ssr_Frame, technique: Reflection_Technique) {
+	assert(technique == .Screen || technique == .Ray_Traced)
+	sf.technique = technique
+	if technique != .Ray_Traced {
+		sf.traced = nil
+	}
+	sf.params = REFLECTION_PARAMS[technique][sf.level]
+	sf.stride = ssr_stride(f.size, technique, sf.level)
+	sf.trace_size = (f.size + sf.stride - 1) / sf.stride
+	c := &sf.constants
+	c.trace_size = sf.trace_size
+	c.offset = ssr_offset(sf.stride, c.frame)
+	// The traced reflections trace one ray for each texel; the screen-space trace up to two.
+	c.ray_count = technique == .Ray_Traced ? 1 : max(min(sf.params.rays, 2), 1)
+	c.steps = sf.params.steps
+	c.cutoff = sf.params.cutoff
+	c.reach = sf.params.distance
+	c.stride = sf.stride
 }
 
 // add_screen_reflection_passes adds the depth pyramid and the trace, or the traced reflections' passes, then the resolve
@@ -274,13 +300,10 @@ add_screen_reflection_passes :: proc(f: ^Frame) {
 	g := f.graph
 	// Last frame's projection is known once the scene's constants are written.
 	sf.constants.previous = f.previous_view_projection * linalg.matrix4_translate_f32(f.camera_motion)
-	if sf.traced != nil && !add_traced_reflection_passes(f) {
-		sf.traced = nil
-		screen := REFLECTION_PARAMS[.Screen][sf.level]
-		sf.constants.ray_count = max(min(screen.rays, 2), 1)
-		sf.constants.steps = screen.steps
+	if sf.technique == .Ray_Traced && !add_traced_reflection_passes(f) {
+		configure_ssr(f, sf, .Screen)
 	}
-	if sf.traced == nil {
+	if sf.technique == .Screen {
 		add_ssr_depth(f)
 		add_ssr_trace(f)
 	}

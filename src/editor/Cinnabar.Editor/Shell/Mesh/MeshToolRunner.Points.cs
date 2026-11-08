@@ -15,7 +15,19 @@ namespace Cinnabar.Editor.Shell;
 public sealed partial class MeshToolRunner
 {
     /// <summary>The points a Draw has so far.</summary>
-    public int ToolPointCount => _toolPoints.Count + _planePoints.Count;
+    public int ToolPointCount => Points?.Count ?? 0;
+
+    // The Cut's or the Draw's points, while they are what mesh mode is in the middle of.
+    MeshInteraction.ToolPoints? Points => _session.Interaction as MeshInteraction.ToolPoints;
+
+    // The points on a mesh that a click adds to: those under way, or new ones, which first end what was under way, such
+    // as a distance tool that waits. Null while a drag that the mouse holds is under way.
+    MeshInteraction.ToolPoints.OnMesh? MeshPoints(string mesh) =>
+        Points as MeshInteraction.ToolPoints.OnMesh ?? _session.Begin(() => new MeshInteraction.ToolPoints.OnMesh(mesh));
+
+    // The same for the points of a Draw on the grid.
+    MeshInteraction.ToolPoints.OnGrid? GridPoints() =>
+        Points as MeshInteraction.ToolPoints.OnGrid ?? _session.Begin(() => new MeshInteraction.ToolPoints.OnGrid());
 
     /// <summary>The edge of an edited mesh under a pixel, by its mesh and its index, with how far along it the mouse is, or null.</summary>
     (string Guid, int Edge, double T)? EdgeAt(Vec2 pixel)
@@ -87,7 +99,7 @@ public sealed partial class MeshToolRunner
         {
             return false;
         }
-        CommitPendingDistance();
+        _session.EndOpenEntry();
         if (EdgeAt(pixel) is not var (guid, edge, t) || _session.FindMeshData(guid) is not { } mesh)
         {
             return true;
@@ -128,7 +140,7 @@ public sealed partial class MeshToolRunner
         }
         var (width, height) = _shell.FrameSize;
         var ray = _shell.Camera.Ray(pixel, width, height);
-        if (_session.MeshTool == MeshTool.Draw && _planePoints.Count > 0)
+        if (_session.MeshTool == MeshTool.Draw && Points is MeshInteraction.ToolPoints.OnGrid)
         {
             return AddPlanePoint(pixel);
         }
@@ -164,9 +176,10 @@ public sealed partial class MeshToolRunner
         }
         if (best == null)
         {
-            return _session.MeshTool == MeshTool.Draw && _toolPoints.Count == 0 && AddPlanePoint(pixel);
+            return _session.MeshTool == MeshTool.Draw && Points is not MeshInteraction.ToolPoints.OnMesh && AddPlanePoint(pixel);
         }
-        if (_toolMesh != null && _toolMesh != best)
+        var onMesh = Points as MeshInteraction.ToolPoints.OnMesh;
+        if (onMesh != null && onMesh.Mesh != best)
         {
             _shell.Console.Add(LogLevel.Warning, "mesh: a cut's points are on one mesh");
             return true;
@@ -176,34 +189,45 @@ public sealed partial class MeshToolRunner
         if (_session.MeshTool == MeshTool.Draw)
         {
             // Every corner is on the first click's face, where the ray meets its plane.
-            var face = _toolPoints is [CutPoint.OnFace first, ..] ? first.Face
+            var face = onMesh?.Points is [CutPoint.OnFace first, ..] ? first.Face
                 : bestHit?.Face ?? (bestVertex is { } bv ? data.FacesOfVertex(bv)[0] : data.FacesOfEdge(data.Edges[bestEdge!.Value])[0]);
             var normal = at.NormalToView(data.FaceNormal(face));
             if (MeshGrid.HitPlane(at.ToView(data.Vertices[data.Faces[face].Corners[0]]), normal, ray) is not { } onPlane)
             {
                 return true;
             }
-            if (_toolPoints.Count >= 3 && _shell.Camera.Project(at.ToView(((CutPoint.OnFace)_toolPoints[0]).Position), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
+            if (onMesh?.Points is { Count: >= 3 } drawn && _shell.Camera.Project(at.ToView(((CutPoint.OnFace)drawn[0]).Position), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
             {
                 ApplyToolPoints();
                 return true;
             }
-            _toolPoints.Add(new CutPoint.OnFace(face, at.ToLocal(onPlane)));
+            CutPoint point = new CutPoint.OnFace(face, at.ToLocal(onPlane));
+            return AddMeshPoint(best, point);
         }
-        else if (bestVertex is { } vertex)
+        if (bestVertex is { } hitVertex)
         {
-            _toolPoints.Add(new CutPoint.OnVertex(vertex));
+            return AddMeshPoint(best, new CutPoint.OnVertex(hitVertex));
         }
-        else if (bestEdge is { } edge)
+        if (bestEdge is { } hitEdge)
         {
-            var e = data.Edges[edge];
-            _toolPoints.Add(new CutPoint.OnEdge(e.A, e.B, AlongRay(at.ToView(data.Vertices[e.A]), at.ToView(data.Vertices[e.B]), ray)));
+            var e = data.Edges[hitEdge];
+            return AddMeshPoint(best, new CutPoint.OnEdge(e.A, e.B, AlongRay(at.ToView(data.Vertices[e.A]), at.ToView(data.Vertices[e.B]), ray)));
         }
-        else if (bestHit is { } faceHit)
+        if (bestHit is { } faceHit)
         {
-            _toolPoints.Add(new CutPoint.OnFace(faceHit.Face, at.ToLocal(faceHit.Point)));
+            return AddMeshPoint(best, new CutPoint.OnFace(faceHit.Face, at.ToLocal(faceHit.Point)));
         }
-        _toolMesh = best;
+        return true;
+    }
+
+    // Adds a point on a mesh to the Cut's or the Draw's points, and is false when none can start.
+    bool AddMeshPoint(string mesh, CutPoint point)
+    {
+        if (MeshPoints(mesh) is not { } points)
+        {
+            return false;
+        }
+        points.Points.Add(point);
         _session.OnMeshModeChanged();
         return true;
     }
@@ -223,42 +247,59 @@ public sealed partial class MeshToolRunner
     bool AddPlanePoint(Vec2 pixel)
     {
         var (origin, axis) = _session.GridPlane();
-        if (_planePoints.Count > 0)
+        var onGrid = Points as MeshInteraction.ToolPoints.OnGrid;
+        if (onGrid?.Points is [var first, ..])
         {
-            (origin, axis) = (_planePoints[0], MeshGrid.NearestAxis(_shell.Camera.Forward));
+            (origin, axis) = (first, MeshGrid.NearestAxis(_shell.Camera.Forward));
         }
         if (_session.PointOnGrid(pixel, origin, axis) is not { } point)
         {
             return false;
         }
         var (width, height) = _shell.FrameSize;
-        if (_planePoints.Count >= 3 && _shell.Camera.Project(_shell.Camera.RelativeTo(_planePoints[0]), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
+        if (onGrid?.Points is { Count: >= 3 } corners && _shell.Camera.Project(_shell.Camera.RelativeTo(corners[0]), width, height) is { } start && (start - pixel).Length <= MeshPick.HitPixels)
         {
             ApplyToolPoints();
             return true;
         }
-        _planePoints.Add(point);
+        if (GridPoints() is not { } grid)
+        {
+            return false;
+        }
+        grid.Points.Add(point);
         _session.OnMeshModeChanged();
         return true;
     }
 
-    /// <summary>Enter: applies the Cut or the Draw with its points.</summary>
+    /// <summary>
+    /// Enter: applies the Cut or the Draw with its points, which ends them. What else is under way, such as a distance tool
+    /// that waits, ends first, so its entry does not refuse the Cut or Draw.
+    /// </summary>
     public void ApplyToolPoints()
     {
         if (_shell.Scene == null)
         {
             return;
         }
-        // As every mesh tool does, a distance tool that waits ends first, so its entry does not refuse the Cut or Draw.
-        CommitPendingDistance();
-        if (_planePoints.Count > 0)
+        _session.Settle();
+    }
+
+    // Applies a Cut's or a Draw's points, which are no longer under way: the end of the ToolPoints interaction that keeps
+    // what it did.
+    internal void Apply(MeshInteraction.ToolPoints toolPoints)
+    {
+        _loopPreview = null;
+        if (_shell.Scene == null)
         {
-            var points = _planePoints.ToList();
+            return;
+        }
+        if (toolPoints is MeshInteraction.ToolPoints.OnGrid onGrid)
+        {
+            var points = onGrid.Points.ToList();
             var axis = MeshGrid.NearestAxis(_shell.Camera.Forward);
             // The plane fronts toward the camera.
             var front = MeshGrid.AxisVector(axis) * (Vec3.Dot(MeshGrid.AxisVector(axis), _shell.Camera.Forward) > 0 ? -1 : 1);
             var data = MeshCut.Plane([.. points.Select(p => Vec3.Between(points[0], p))], front, _session.DefaultMeshMaterial, _session.Texture.NewFaceScale(_session.DefaultMeshMaterial));
-            CancelToolPoints();
             if (data == null)
             {
                 _shell.Console.Add(LogLevel.Warning, "mesh: a polygon has three or more corners and does not cross itself");
@@ -271,27 +312,25 @@ public sealed partial class MeshToolRunner
             }
             return;
         }
-        if (_toolMesh is not { } guid || _session.FindMeshData(guid) is not { } mesh)
+        if (toolPoints is not MeshInteraction.ToolPoints.OnMesh { Mesh: var guid } onMesh || _session.FindMeshData(guid) is not { } mesh)
         {
-            CancelToolPoints();
             return;
         }
-        var toolPoints = _toolPoints.ToList();
+        var cutPoints = onMesh.Points.ToList();
         var tool = _session.MeshTool;
-        CancelToolPoints();
         ToolResult result;
         string? reason;
         if (tool == MeshTool.Draw)
         {
-            if (toolPoints is not [CutPoint.OnFace first, ..])
+            if (cutPoints is not [CutPoint.OnFace first, ..])
             {
                 return;
             }
-            (result, reason) = MeshCut.Draw(mesh, first.Face, [.. toolPoints.OfType<CutPoint.OnFace>().Select(p => p.Position)]);
+            (result, reason) = MeshCut.Draw(mesh, first.Face, [.. cutPoints.OfType<CutPoint.OnFace>().Select(p => p.Position)]);
         }
         else
         {
-            (result, reason) = MeshCut.Cut(mesh, toolPoints);
+            (result, reason) = MeshCut.Cut(mesh, cutPoints);
         }
         if (reason != null)
         {
@@ -313,7 +352,7 @@ public sealed partial class MeshToolRunner
     // the mesh's space.
     internal float[] ToolMarks(string guid, MeshData mesh)
     {
-        IEnumerable<CutPoint> points = _loopPreview is { } preview && preview.Guid == guid ? preview.Points : _toolMesh == guid ? _toolPoints : [];
+        IEnumerable<CutPoint> points = _loopPreview is { } preview && preview.Guid == guid ? preview.Points : Points is MeshInteraction.ToolPoints.OnMesh drawn && drawn.Mesh == guid ? drawn.Points : [];
         var marks = new List<float>();
         foreach (var point in points)
         {
@@ -335,26 +374,31 @@ public sealed partial class MeshToolRunner
     /// <summary>Backspace: drops the last point.</summary>
     public void RemoveLastToolPoint()
     {
-        if (_planePoints.Count > 0)
+        if (Points is not { } points)
         {
-            _planePoints.RemoveAt(_planePoints.Count - 1);
+            return;
         }
-        else if (_toolPoints.Count > 0)
+        switch (points)
         {
-            _toolPoints.RemoveAt(_toolPoints.Count - 1);
-            if (_toolPoints.Count == 0)
-            {
-                _toolMesh = null;
-            }
+        case MeshInteraction.ToolPoints.OnGrid { Points.Count: > 0 } grid:
+            grid.Points.RemoveAt(grid.Points.Count - 1);
+            break;
+        case MeshInteraction.ToolPoints.OnMesh { Points.Count: > 0 } onMesh:
+            onMesh.Points.RemoveAt(onMesh.Points.Count - 1);
+            break;
+        }
+        // The last point gone, the Cut or the Draw is no longer under way.
+        if (points.Count == 0)
+        {
+            _session.Cancel();
         }
         _session.OnMeshModeChanged();
     }
 
+    /// <summary>Drops a Cut's or a Draw's points, and the loop that the mouse shows.</summary>
     public void CancelToolPoints()
     {
-        _toolPoints.Clear();
-        _planePoints.Clear();
-        _toolMesh = null;
+        _session.Cancel<MeshInteraction.ToolPoints>();
         _loopPreview = null;
         _session.OnMeshModeChanged();
     }

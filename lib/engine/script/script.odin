@@ -79,7 +79,7 @@ Runtime :: struct {
 	waiters:          [MAX_WAITERS]Waiter,
 	waiter_used:      int,
 	waiter_seq:       u64,
-	// The waiter that is running, or -1, and the wait that its wait call asked for.
+	// The waiter that is running, or -1, and the wait that its wait call asked for, nil without one.
 	current_waiter:   int,
 	pending_wait:     Wait,
 	// Registry references: the event queue, and protected_call's message handler.

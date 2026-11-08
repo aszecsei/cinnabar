@@ -113,7 +113,7 @@ What they show:
   A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
 - **Provisional captures:** a capture records whether its inputs were complete (`reflection_probe_inputs_complete`). A frame's inputs are complete when all of these are true:
   - No asset streams to the GPU.
-  - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in.
+  - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in. A material whose pipelines failed draws its stand-in until its shader changes, so a capture does not wait for it.
   - The scene has at least one item to draw.
 
   A capture is provisional if the inputs of any frame that drew its faces were not complete. For example, an `On_Load` probe captures in the first frames of a level, while the meshes still stream. The probe uses its provisional cube and does not capture again while the inputs stay incomplete. In the first frame whose inputs are complete, it captures again. A texture that never becomes resident keeps the inputs incomplete, so the probe keeps its provisional cube.
@@ -269,7 +269,7 @@ What they show:
   - before the two pipelines, the binning's, the fallback's and the hit light's and screen light's have compiled;
   - in a frame without draw items or a hit table. Once the pipelines are ready, `begin_traced_reflections` requests the ray scene, whose first request makes the hit table from the next frame on.
 
-  When the passes are added, a frame whose hit shading cannot take another batch (`hit_shading_ready`), or whose light list does not fit the upload ring, takes the screen-space trace at the same level too. So `Frame.reflections` is always written once `Frame.ssr` is set.
+  When the passes are added, a frame whose hit shading cannot take another batch (`hit_shading_ready`), or whose light list does not fit the upload ring, takes the screen-space trace at the same level too: its params, stride, trace size and constants, which one proc (`configure_ssr`) sets for both fallbacks. Only the lit scene stays as the frame chose it for the traced reflections, since a history is used once a frame. So `Frame.reflections` is always written once `Frame.ssr` is set.
 - **The passes** run on the compute queue after the prepass, after the GI's:
   1. **The depth pyramid** (`reflections depth`), the screen-space reflections', when the level marches the screen first.
   2. **The trace** (`reflections ray trace`, `rtr_trace.hlsl`): a thread for each trace texel, whose ray starts from one pixel of its block, in turn from frame to frame (`ssr_offset`).
@@ -277,7 +277,7 @@ What they show:
      - With the level's steps, the ray first marches the screen (`screen_ray` in `ssr_march.hlsli`). A hit there whose whole weight holds, which is not near the screen's edge, not a back face and on the screen last frame, takes last frame's lit scene, and the ray traces nothing.
      - Otherwise the ray starts at the pixel's surface, moved off it along the normal by 1.5 pixels at its depth, and traces `RAY_MASK_SURFACES` with `trace_hit` as far as `RTR_FAR` (10 km). Its cone widens by the larger of a pixel's angle and the GGX alpha, so a rough reflection samples coarser texture levels.
      - A hit past the level's distance is stored as a miss, so hit shading skips it, and has no weight. So does a ray below the surface.
-  3. **Hit shading** of the rays as a batch of their own (`add_hit_shading`, named `reflections`): with the world probes and the split cascades, the frame's third of `MAX_HIT_BATCHES`.
+  3. **Hit shading** of the rays as a batch of their own (`add_hit_shading`, named `reflections`): with the world probes and the split cascades, the frame's third of `MAX_HIT_BATCHES`. The turn is taken before the trace. When it fails, as when an upload fails, the trace still runs, and its hits have no weight.
   4. **The hits' light** (`reflections hit light`, `reflections hit screen`): the GI's passes (see [World probes](global-illumination.md#world-probes)). A hit's light is its emission, the directional lights and up to 16 punctual lights whose spheres reach the level's distance, each with a shadow ray, and the world probes' light at the hit where they run. Without them the grid has no levels, and the hit takes the ambient light. A hit that the screen shows takes last frame's lit scene instead.
   5. **The light** (`reflections ray light`, `rtr_light.hlsl`): each waiting ray's light, pre-exposed, into the trace's radiance texture. A ray that found nothing takes the sky's [cubemap](sky.md#specular-light) along it, at roughness 0, and `RTR_FAR` as its distance, so the temporal pass reprojects a point far away and not the surface. A back face has no weight.
   6. **The resolve and the temporal pass**, the screen-space reflections': the ratio estimator over four trace texels, by the pixel's own lobe, so a mirror takes almost no blur, and the temporal pass reprojects the reflected point by the hit's distance.

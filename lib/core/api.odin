@@ -71,7 +71,8 @@ Platform_API :: struct {
 	profile: profile.Procs,
 
 	// The audio device (see docs/core/audio.md#audio). audio_write queues 48 kHz stereo frames and returns how many fit,
-	// from one thread at a time. It opens the device on its first frames. audio_status is safe from any thread.
+	// from one thread at a time. It opens the device on its first frames. The device takes one writer: once the audio
+	// backend's mixer writes, the game's writes are refused and return 0, and the other way round. audio_status is safe from any thread.
 	// audio_test_tone is whether CINNABAR_TEST_TONE asks the game to play the test tone.
 	audio_write:     proc(frames: []Audio_Frame) -> int,
 	audio_status:    proc() -> Audio_Status,
@@ -129,8 +130,9 @@ Platform_API :: struct {
 	// formats or the topology: create a new pipeline for those.
 	gpu_update_graphics_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Graphics_Pipeline_Desc) -> bool,
 	gpu_update_compute_pipeline:  proc(pipeline: gpu.Pipeline, desc: gpu.Compute_Pipeline_Desc) -> bool,
-	// Whether a pipeline's latest version is compiled, so draws with it draw.
-	gpu_pipeline_ready:           proc(pipeline: gpu.Pipeline) -> bool,
+	// Where a pipeline's latest version is: Compiling, Ready, so draws with it draw, or Failed, which a caller need not
+	// wait for (see gpu.Pipeline_Status).
+	gpu_pipeline_status:          proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status,
 	// Ray tracing pipelines need Ray_Tracing_Pipeline.
 	gpu_create_ray_tracing_pipeline: proc(desc: gpu.Ray_Tracing_Pipeline_Desc) -> gpu.Pipeline,
 	gpu_update_ray_tracing_pipeline: proc(pipeline: gpu.Pipeline, desc: gpu.Ray_Tracing_Pipeline_Desc) -> bool,

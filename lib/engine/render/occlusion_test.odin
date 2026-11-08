@@ -31,20 +31,24 @@ the_cull_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	read_cull_stats(r)
 	testing.expect_value(t, cull_stats(r), Cull_Stats{})
 
-	// Two frames' copies, the older first: the newer is the one kept, and each is read once.
-	tally :: proc(o: ^Occlusion, i: int, items: u32) {
-		data, _ := null.read_buffer(o.stats_copies[i])
+	// A frame's copy, as its commit leaves the ring (see a_readback_ring_shows_what_the_frames_that_executed_copied).
+	tally :: proc(o: ^Occlusion, items: u32) {
+		ring := &o.stats_ring
+		data, _ := null.read_buffer(ring.copies[ring.next])
 		mem.slice_data_cast([]u32, data)[0] = items
-		o.stats_written[i] = true
+		mark_readback_copied(ring, ring.next)
 	}
-	o.stats_next = 1
-	tally(o, 1, 5)
-	tally(o, 2, 7)
-	o.stats_next = 0
+	tally(o, 7)
 	read_cull_stats(r)
 	testing.expect_value(t, cull_stats(r).early_items, 7)
-	testing.expect(t, !o.stats_written[1] && !o.stats_written[2])
-	tally(o, 0, 9)
+	// A frame copied, but its copy is not back: the stats stay.
+	o.stats_ring.copied = true
+	read_cull_stats(r)
+	testing.expect_value(t, cull_stats(r).early_items, 7)
+	tally(o, 9)
 	read_cull_stats(r)
 	testing.expect_value(t, cull_stats(r).early_items, 9)
+	// A frame that tallied nothing, or did not execute, shows none.
+	read_cull_stats(r)
+	testing.expect_value(t, cull_stats(r), Cull_Stats{})
 }

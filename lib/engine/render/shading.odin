@@ -23,19 +23,12 @@ Shading_Stats :: struct {
 // material_common.hlsli.
 SHADING_STATS_WORDS :: 2
 #assert(size_of(Shading_Stats) == SHADING_STATS_WORDS * 4)
-// The tally's copies that the CPU reads, a frame or more apart, so a read never waits for a frame in flight.
-SHADING_STATS_COPIES :: 3
 
-// Shading is the measurements' state between frames, in Renderer: the tally, its copies, the next copy to write, and
-// the last that came back.
+// Shading is the measurements' state between frames, in Renderer: the tally, its copies, and the last that came back.
 Shading :: struct {
-	stats:         gpu.Buffer,
-	stats_copies:  [SHADING_STATS_COPIES]gpu.Buffer,
-	stats_written: [SHADING_STATS_COPIES]bool,
-	stats_next:    int,
-	last_stats:    Shading_Stats,
-	// The last frame counted, so the next copy is the one that it wrote.
-	counted:       bool,
+	stats:      gpu.Buffer,
+	stats_ring: Readback_Ring,
+	last_stats: Shading_Stats,
 }
 
 // Shading_Frame is one frame's measurements, in Frame: nil when the frame measures nothing.
@@ -57,25 +50,22 @@ shading_stats :: proc(r: ^Renderer) -> Shading_Stats {
 @(private)
 shading_destroy :: proc(s: ^Shading, platform: ^core.Platform_API) {
 	platform.gpu_destroy_buffer(s.stats)
-	for b in s.stats_copies {
-		platform.gpu_destroy_buffer(b)
-	}
+	destroy_readback_ring(&s.stats_ring, platform)
 	s^ = {}
 }
 
-// read_shading_stats takes each tally's copy that has come back, the newest last, and keeps it.
+// read_shading_stats keeps the newest tally's copy that has come back. After a frame without Frame_Desc.shading_stats,
+// or one that did not execute, the stats are empty.
 @(private)
 read_shading_stats :: proc(r: ^Renderer) {
 	s := &r.shading
-	for k in 0 ..< SHADING_STATS_COPIES {
-		i := (s.stats_next + k) % SHADING_STATS_COPIES
-		if !s.stats_written[i] {
-			continue
-		}
-		if data, ok := r.platform.gpu_read_buffer(s.stats_copies[i]); ok && len(data) >= size_of(Shading_Stats) {
-			s.last_stats = (^Shading_Stats)(raw_data(data))^
-			s.stats_written[i] = false
-		}
+	data, take := take_readback(&s.stats_ring, r.platform, size_of(Shading_Stats))
+	switch take {
+	case .Fresh:
+		s.last_stats = (^Shading_Stats)(raw_data(data))^
+	case .Idle:
+		s.last_stats = {}
+	case .Waiting:
 	}
 }
 
@@ -85,11 +75,8 @@ ensure_shading_stats :: proc(r: ^Renderer) -> bool {
 	s := &r.shading
 	if s.stats == {} {
 		s.stats = r.platform.gpu_create_buffer({size = SHADING_STATS_WORDS * 4, usage = {.Storage}, label = "shading stats"}, nil)
-		for &b in s.stats_copies {
-			b = r.platform.gpu_create_buffer({size = SHADING_STATS_WORDS * 4, usage = {.Readback}, label = "shading stats readback"}, nil)
-		}
 	}
-	return s.stats != {}
+	return s.stats != {} && ensure_readback_ring(&s.stats_ring, r.platform, SHADING_STATS_WORDS * 4, "shading stats readback")
 }
 
 // begin_shading gives the frame its measurements: the tally with stats, and the quads' counts with the Quad_Overdraw
@@ -97,12 +84,6 @@ ensure_shading_stats :: proc(r: ^Renderer) -> bool {
 @(private)
 begin_shading :: proc(f: ^Frame, stats: bool) {
 	r := f.renderer
-	r.shading.counted = false
-	// Without the stats, the copies in flight are dropped, so the editor sees none.
-	if !stats {
-		r.shading.stats_written = {}
-		r.shading.last_stats = {}
-	}
 	if !stats && f.debug_view != .Quad_Overdraw {
 		return
 	}
@@ -154,35 +135,14 @@ shading_push :: proc(f: ^Frame, quad_counts, stats: ^u32) {
 	}
 }
 
-// add_shading_stats_copy copies the tally to its next copy after the world pass, for read_shading_stats to take once
-// it is back.
+// add_shading_stats_copy copies the tally to its ring after the world pass, for read_shading_stats to take once it is
+// back.
 @(private)
 add_shading_stats_copy :: proc(f: ^Frame) {
 	if f.shading == nil || f.shading.stats == 0 {
 		return
 	}
-	s := &f.renderer.shading
-	g := f.graph
-	copy := import_buffer(g, s.stats_copies[s.stats_next])
-	p := add_compute_pass(g, "shading stats", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		s := &f.renderer.shading
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, f.shading.stats), 0, s.stats_copies[s.stats_next], 0, SHADING_STATS_WORDS * 4)
-	}, f)
-	copy_source(g, p, f.shading.stats)
-	copy_dest(g, p, copy)
-	s.counted = true
-}
-
-// finish_shading_stats moves on to the next copy, once the frame has copied into this one.
-@(private)
-finish_shading_stats :: proc(r: ^Renderer) {
-	s := &r.shading
-	if !s.counted {
-		return
-	}
-	s.stats_written[s.stats_next] = true
-	s.stats_next = (s.stats_next + 1) % SHADING_STATS_COPIES
-	s.counted = false
+	r := f.renderer
+	add_readback_copy(f.graph, r.platform, &r.shading.stats_ring, f.shading.stats, SHADING_STATS_WORDS * 4, "shading stats")
 }
 

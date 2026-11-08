@@ -163,7 +163,7 @@ public sealed class TextureMapper
     /// <summary>Runs a texture tool on the selected faces of every edited mesh, as one undo entry.</summary>
     public bool EditMappings(string label, Func<MeshData, int, Mapping, Mapping> change)
     {
-        _session.Tools.CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!CanRunTextureTool || _shell.Scene == null || _shell.OpenEdit != null)
         {
             return false;
@@ -196,13 +196,21 @@ public sealed class TextureMapper
     /// </summary>
     public (SceneEdit Edit, IReadOnlyDictionary<string, MeshData> Starts)? BeginMappingScrub(string label)
     {
-        _session.Tools.CommitPendingDistance();
-        if (!CanRunTextureTool || _shell.TryBeginEdit(label, "a texture drag", commitIfInterrupted: true) is not { } edit)
+        var scrub = _session.Begin(() =>
         {
-            return null;
-        }
-        edit.Ended += _ => _session.OnMeshModeChanged();
-        return (edit, SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => _session.FindMeshData(g)!));
+            if (!CanRunTextureTool || _shell.TryBeginEdit(label, "a texture drag", commitIfInterrupted: true) is not { } edit)
+            {
+                return null;
+            }
+            var started = new MeshInteraction.MappingScrub(edit);
+            edit.Ended += _ =>
+            {
+                _session.Ended(started);
+                _session.OnMeshModeChanged();
+            };
+            return started;
+        });
+        return scrub is { } s ? (s.Edit, SelectedFaces.Select(f => f.Guid).Distinct().ToDictionary(g => g, g => _session.FindMeshData(g)!)) : null;
     }
 
     /// <summary>A step of the drag: the change from where each mapping was at the start.</summary>
@@ -277,7 +285,7 @@ public sealed class TextureMapper
     // Align to Edge runs in the Edges kind: each selected edge's faces take u along it.
     bool AlignTextureToEdges()
     {
-        _session.Tools.CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!_session.Tools.CanRunMeshTool(MeshElement.Edges) || _shell.Scene == null || _shell.OpenEdit != null)
         {
             _shell.Console.Add(LogLevel.Info, "mesh: select edges to align their faces' textures along them");
@@ -361,7 +369,7 @@ public sealed class TextureMapper
     /// <summary>Sets the selected faces' material: the mesh's slot, and the entity's Mesh_Renderer slot that draws it, as one undo entry.</summary>
     public bool SetFaceMaterial(string guid)
     {
-        _session.Tools.CommitPendingDistance();
+        _session.EndOpenEntry();
         if (!CanRunTextureTool || _shell.Scene == null || _shell.OpenEdit != null || !IsMaterialOrNone(guid))
         {
             return false;

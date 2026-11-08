@@ -195,24 +195,71 @@ public sealed class MeshToolModeTests : IDisposable
         Assert.Equal("Invert", Assert.Single(shell.Scene.History).Label);
     }
 
+    static readonly Vec3[] DrawCorners = [new(-0.25, -0.25, -0.5), new(0.25, -0.25, -0.5), new(0.25, 0.25, -0.5), new(-0.25, 0.25, -0.5)];
+
     [Fact]
-    public void EnterAppliesADrawAfterADistanceToolThatWaits()
+    public void ADistanceToolThatStartsDuringADrawAppliesTheDrawFirst()
     {
         using var shell = NewShell();
         shell.Commands.Get(EditorCommands.MeshDraw).Execute();
-        foreach (var corner in new[] { new Vec3(-0.25, -0.25, -0.5), new Vec3(0.25, -0.25, -0.5), new Vec3(0.25, 0.25, -0.5), new Vec3(-0.25, 0.25, -0.5) })
+        foreach (var corner in DrawCorners)
         {
             Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, corner)));
         }
+        // Selecting holds no entry, so the Draw's points stay.
         SelectFaces(shell, 5);
+        Assert.Equal(4, shell.Mesh.Tools.ToolPointCount);
+
+        // Mesh mode is in one thing at a time: the Extrude ends the Draw as it is, which applies it, and then waits.
         Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
         Assert.True(shell.Mesh.Tools.HasPendingDistance);
-
-        shell.Mesh.Tools.ApplyToolPoints();
-
-        Assert.False(shell.Mesh.Tools.HasPendingDistance);
+        Assert.Equal(0, shell.Mesh.Tools.ToolPointCount);
         Assert.Equal("Draw", Assert.Single(shell.Scene!.History).Label);
         Assert.Equal(8, MeshFixtures.Mesh(shell).Faces.Length);
+
+        // Enter, with no points, ends the Extrude, which was never dragged and leaves no entry.
+        shell.Mesh.Tools.ApplyToolPoints();
+        Assert.False(shell.Mesh.Tools.HasPendingDistance);
+        Assert.Null(shell.OpenEdit);
+        Assert.Equal("Draw", Assert.Single(shell.Scene.History).Label);
+    }
+
+    [Fact]
+    public void ADrawsFirstClickEndsADistanceToolThatWaits()
+    {
+        using var shell = NewShell();
+        SelectFaces(shell, 5);
+        Assert.True(shell.Commands.Get(EditorCommands.MeshExtrude).Execute());
+        // The tool changes, and the Extrude still waits for its drag.
+        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
+        Assert.True(shell.Mesh.Tools.HasPendingDistance);
+
+        Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, DrawCorners[0])));
+
+        // The click ended the Extrude, as a Cut's click does, so the Draw's points are all that is under way.
+        Assert.False(shell.Mesh.Tools.HasPendingDistance);
+        Assert.Null(shell.OpenEdit);
+        Assert.Equal(1, shell.Mesh.Tools.ToolPointCount);
+    }
+
+    [Fact]
+    public void EscapeEndsWhatIsUnderWayThenTheToolThenTheSelection()
+    {
+        using var shell = NewShell();
+        SelectFaces(shell, 5);
+        shell.Commands.Get(EditorCommands.MeshDraw).Execute();
+        Assert.True(shell.Mesh.Tools.AddToolPoint(PixelOf(shell, DrawCorners[0])));
+
+        shell.Mesh.EscapeMeshMode();
+        Assert.Equal(0, shell.Mesh.Tools.ToolPointCount);
+        Assert.Equal(MeshTool.Draw, shell.Mesh.MeshTool);
+        shell.Mesh.EscapeMeshMode();
+        Assert.Equal(MeshTool.Select, shell.Mesh.MeshTool);
+        Assert.False(shell.Mesh.MeshSelection.IsEmpty);
+        shell.Mesh.EscapeMeshMode();
+        Assert.True(shell.Mesh.MeshSelection.IsEmpty);
+        Assert.True(shell.Mesh.InMeshMode);
+        Assert.Empty(shell.Scene!.History);
     }
 
     [Fact]

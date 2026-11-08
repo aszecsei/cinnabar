@@ -249,7 +249,7 @@ return Door`)
 	// The VM gives the freed reference out again first, so the coroutine has the main script's old one.
 	reused := false
 	for w in f.runtime.waiters[:f.runtime.waiter_used] {
-		if _, owned := w.owner.(Instance_Handle); owned && w.live {
+		if _, owned := w.owner.(Instance_Handle); owned && w.status != .Free {
 			reused = w.thread == main_ref
 		}
 	}

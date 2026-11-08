@@ -246,7 +246,7 @@ public sealed partial class EditorShell
     // An instance whose prefab the index did not have when the scene expanded shows once the index has it.
     void ExpandArrivedPrefabs()
     {
-        if (Scene == null || !Scene.Scene.Entities.Any(e => e.Prefab != "" && IsPrefab(e.Prefab) && Scene.Prefabs.Documents.All(d => d.Guid != e.Prefab)))
+        if (Scene == null || !Scene.Scene.Entities.Any(e => e.Kind == BlockKind.Instance && IsPrefab(e.Prefab) && Scene.Prefabs.Documents.All(d => d.Guid != e.Prefab)))
         {
             return;
         }

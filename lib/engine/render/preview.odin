@@ -277,14 +277,15 @@ add_preview_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	if (mesh_ready || patches) && material_ok {
 		pf.pipeline = pipeline
 		pf.draw_count = patches ? 1 : mesh.submesh_count
-		ready := platform.gpu_pipeline_ready != nil
+		// A pipeline that failed is as settled as one that compiled: the preview will not change until its shader does.
+		settled := platform.gpu_pipeline_status != nil
 		pipelines, count := preview_pipelines(pipeline)
 		for p in pipelines[:count] {
-			ready &&= p != {} && platform.gpu_pipeline_ready(p)
+			settled &&= p != {} && handle_status(platform, p) != .Compiling
 		}
 		if desc.complete != nil {
 			// The output pass tone maps with the lookup table only once it is baked.
-			desc.complete^ = ready && !table.waiting && lut_ready(f) && !desc.animated
+			desc.complete^ = settled && !table.waiting && lut_ready(f) && !desc.animated
 		}
 		if desc.animated && !patches {
 			pose_preview(f, pf, mesh)

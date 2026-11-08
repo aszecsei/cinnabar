@@ -67,8 +67,8 @@ Rtr_Frame :: struct {
 	rays:      Buffer,
 	ray_count: u32,
 	inputs:    Hit_Light_Inputs,
-	// Whether hit shading shades the hits: without it, a ray that hit has no weight.
-	shaded:    bool,
+	// The hits as hit shading shaded them, or nil when the frame had no turn at it: then a ray that hit has no weight.
+	shaded:    Maybe(Hit_Shaded),
 }
 
 traced_reflections_init :: proc(t: ^Traced_Reflections) {
@@ -154,6 +154,9 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	g := f.graph
 	tf.inputs = inputs
 	tf.ray_count = sf.trace_size.x * sf.trace_size.y
+	// Hit shading's turn comes before the trace. Without it, as when an upload fails, the trace still runs, and its hits
+	// have no weight.
+	reservation := reserve_hit_shading(f, tf.ray_count)
 	ensure_rtr_storage(r, int(tf.ray_count))
 	tf.hits = import_buffer(g, r.rtr.hits)
 	tf.surfaces = import_buffer(g, r.rtr.surfaces)
@@ -177,15 +180,15 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	write(g, p, sf.rays[0])
 	write(g, p, sf.radiance[0])
 
-	// hit_shading_ready said that it can, but for an upload.
-	tf.shaded = add_hit_shading(f, {hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count}, .Compute, "reflections")
-	if tf.shaded {
-		add_hit_light_passes(f, &tf.inputs, "reflections hit", tf.hits, tf.surfaces, tf.rays, tf.ray_count)
+	if reservation, reserved := reservation.?; reserved {
+		shaded := add_hit_shading(f, reservation, {hits = tf.hits, surfaces = tf.surfaces, count = tf.ray_count}, .Compute, "reflections")
+		add_hit_light_passes(f, &tf.inputs, "reflections hit", shaded, tf.rays)
+		tf.shaded = shaded
 	}
 
 	p = add_compute_pass(g, "reflections ray light", run_rtr_light, f, queue = .Compute)
 	read(g, p, tf.hits)
-	if tf.shaded {
+	if tf.shaded != nil {
 		read(g, p, tf.rays)
 	}
 	read(g, p, f.exposure)
@@ -243,9 +246,9 @@ run_rtr_light :: proc(ctx: ^Pass_Context) {
 		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
 		width    = sf.trace_size.x,
 		height   = sf.trace_size.y,
-		shaded   = u32(tf.shaded),
+		shaded   = u32(tf.shaded != nil),
 	}
-	if tf.shaded {
+	if tf.shaded != nil {
 		push.light = gpu.read_index(gpu_buffer(g, tf.rays))
 	}
 	gpu.cmd_set_pipeline(ctx.cb, r.rtr.light.pipeline)

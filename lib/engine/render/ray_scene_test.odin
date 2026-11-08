@@ -267,6 +267,11 @@ a_failed_frame_builds_the_accels_again :: proc(t: ^testing.T) {
 	testing.expect(t, run.refit, "a built structure did not refit")
 }
 
+@(private = "file")
+fail_upload :: proc(size, align: int) -> (gpu.Upload, bool) {
+	return {}, false
+}
+
 @(test)
 hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing.T) {
 	sync.guard(&backend_lock)
@@ -334,15 +339,26 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 		// Without a request, the frame has no ray scene to shade hits of.
 		hits, surfaces := import_buffer(&g, buffers[0]), import_buffer(&g, buffers[1])
 		batch := Hit_Batch{hits = hits, surfaces = surfaces, count = rays}
-		testing.expect(t, !add_hit_shading(f, batch, queue))
+		testing.expect(t, reserve_hit_shading(f, rays) == nil)
 		testing.expect(t, request_ray_scene(f))
 		// The structure as add_ray_scene_passes imports it, without the residency's meshes to build.
 		f.ray_scene.accel = import_accel(&g, r.ray_scene.accel)
+
+		// A turn whose uploads fail takes no batch, so a client that has none adds no pass that reads the surfaces.
+		platform.gpu_upload = fail_upload
+		testing.expect(t, reserve_hit_shading(f, rays) == nil, "a turn was reserved without its uploads")
+		testing.expect_value(t, f.ray_scene.batches, 0)
+		platform.gpu_upload = null.upload
+
+		reservation, reserved := reserve_hit_shading(f, rays).?
+		testing.expect(t, reserved, "no turn was reserved")
+		testing.expect_value(t, f.ray_scene.batches, 1)
 		// The client's trace writes the hits, and a pass after reads the surfaces.
 		p := add_compute_pass(&g, "trace", proc(_: ^Pass_Context) {}, nil, queue = queue)
 		read_accel(&g, p, ray_scene_accel(f))
 		write(&g, p, hits)
-		testing.expect(t, add_hit_shading(f, batch, queue))
+		shaded := add_hit_shading(f, reservation, batch, queue)
+		testing.expect(t, shaded.surfaces == surfaces && shaded.count == rays)
 		p = add_compute_pass(&g, "light", proc(_: ^Pass_Context) {}, nil, queue = queue)
 		read(&g, p, surfaces)
 		write(&g, p, hits)

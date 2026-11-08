@@ -73,14 +73,13 @@ fixed_events :: proc(r: ^Runtime) {
 	}
 	due := make([dynamic]Due, frame(r))
 	for &w, index in r.waiters[:r.waiter_used] {
-		if w.live && !w.stopped && !w.running && w.wait.kind == .Fixed {
+		if _, fixed := w.wait.(Wait_Fixed); fixed && w.status == .Waiting {
 			append(&due, Due{index, w.seq})
 		}
 	}
 	slice.sort_by(due[:], proc(a, b: Due) -> bool {return a.seq < b.seq})
 	for d in due {
-		w := &r.waiters[d.index]
-		if w.live && w.seq == d.seq && !w.stopped {
+		if waiter_due(r, d.index, d.seq) {
 			run_waiter(r, d.index)
 		}
 	}

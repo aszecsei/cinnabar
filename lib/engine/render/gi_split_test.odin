@@ -393,7 +393,7 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		testing.expect_value(t, passes["gi trace"], 0)
 		free_all(platform.frame_allocator)
 	}
-	testing.expect_value(t, split.stats_next, 3 % SPLIT_STATS_COPIES)
+	testing.expect_value(t, split.stats_ring.next, 3 % READBACK_COPIES)
 	// New storage starts each cascade at the longest lifetime.
 	testing.expect_value(t, split.lifetimes[0], SPLIT_LIFETIME)
 
@@ -449,34 +449,30 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	s := &r.gi.split
 	defer gi_split_destroy(s, &platform)
 	s.layout = split_layout(GI_SPLIT_PARAMS[.High])
-	for &b in s.stats_copies {
-		b = platform.gpu_create_buffer({size = MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, usage = {.Readback}, label = "test"}, nil)
-	}
+	testing.expect(t, ensure_readback_ring(&s.stats_ring, &platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "test"))
 
-	// Each cascade's counters: free slots, slots taken, active slots and dropped keys.
-	tally :: proc(s: ^Gi_Split, i: int, active, dropped: u32) {
-		data, _ := null.read_buffer(s.stats_copies[i])
+	// Each cascade's counters: free slots, slots taken, active slots and dropped keys, in a frame's copy, as its commit
+	// leaves the ring (see a_readback_ring_shows_what_the_frames_that_executed_copied).
+	tally :: proc(s: ^Gi_Split, active, dropped: u32) {
+		ring := &s.stats_ring
+		data, _ := null.read_buffer(ring.copies[ring.next])
 		counters := mem.slice_data_cast([]u32, data)
 		for c in 0 ..< MAX_SPLIT_CASCADES {
 			counters[c * 4 + 2], counters[c * 4 + 3] = active + u32(c), dropped
 		}
-		s.stats_written[i] = true
+		mark_readback_copied(ring, ring.next)
 	}
-	// Two frames' copies, the older first: the newer is the one kept, with each cascade's slots.
-	s.ran = true
-	s.stats_next = 1
-	tally(s, 1, 50, 0)
-	tally(s, 2, 70, 3)
-	s.stats_next = 0
+	// The newest copy is kept, with each cascade's slots.
+	tally(s, 70, 3)
 	read_gi_split_stats(r)
 	stats := gi_split_stats(r)
 	testing.expect_value(t, stats.count, 4)
 	testing.expect_value(t, stats.cascades[0], Split_Cascade_Stats{active = 70, slots = 16384, dropped = 3})
 	testing.expect_value(t, stats.cascades[3], Split_Cascade_Stats{active = 73, slots = 256, dropped = 3})
-	testing.expect(t, !s.stats_written[1] && !s.stats_written[2])
 
 	// A frame without the split cascades empties them, even when an older copy comes back then.
-	tally(s, 0, 90, 0)
+	tally(s, 90, 0)
+	s.stats_ring.copied = false
 	read_gi_split_stats(r)
 	testing.expect_value(t, gi_split_stats(r), Gi_Split_Stats{})
 }

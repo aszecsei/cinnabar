@@ -17,11 +17,11 @@ How sound gets from a component or a script to the speakers. Read [Hot reload](.
 
 `update` takes `run`, whether the world runs this frame. While it does not, as in the editor's edit mode or while paused, the backend is paused: voices hold their place, and no new one starts.
 
-A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not both, because the device takes one writer. `mygame` chooses with `audio_test_tone`.
+A game plays the [test tone](../core/audio.md#test-tone) or calls `update`, not both, because the device takes one writer. The device enforces it: the writer that writes first keeps it, and the other's frames are dropped with one error. `mygame` chooses with `audio_test_tone`.
 
 ## Sources and the listener
 
-**`Audio_Source`** (96) plays a sound at its entity's presented pose while the entity is active. A despawned or disabled entity, or a removed component, stops its voice with a short fade (`STOP_FADE`, 30 ms).
+**`Audio_Source`** (96) plays a sound at its entity's presented pose while the entity is active. A despawned or disabled entity, or a removed component, stops its voice with a short fade (`STOP_FADE`, 30 ms). A source that plays holds one of `MAX_SOURCES` (256) slots. It gives the slot back when it has no voice and does not play: its sound ended, `playing` was cleared, or its entity went. So any number of sources can play in turn, and at most 256 at once. Each limit, `MAX_SOURCES`, `MAX_SOUNDS` and `MAX_ONE_SHOTS`, logs its own warning once.
 
 | Field | Meaning |
 |---|---|

@@ -14,6 +14,8 @@ public static partial class SceneFile
         int _line;
         SceneEntity? _entity;
         List<SceneField>? _block;
+        // The entity's node, which it takes once it is done, when it is an instance block.
+        ulong _node;
 
         public void Run(string text)
         {
@@ -97,14 +99,23 @@ public static partial class SceneFile
         // Only the block of a prefab's entity can take away what the prefab gives it.
         void FinishEntity()
         {
-            if (_entity is { Path: null, Prefab: "" } && (_entity.RemovedComponents.Count > 0 || _entity.RemovedBehaviours.Count > 0))
+            if (_entity == null)
+            {
+                return;
+            }
+            if (_entity is { Kind: BlockKind.Plain } && (_entity.RemovedComponents.Count > 0 || _entity.RemovedBehaviours.Count > 0))
             {
                 Error($"entity {_entity.Id:x16}: only an instance or an override block removes a component or a behaviour");
             }
-            if (_entity is { Node: not 0 } && (_entity.Prefab == "" || _entity.Path != null))
+            if (_node != 0 && _entity.Kind != BlockKind.Instance)
             {
                 Error($"entity {_entity.Id:x16}: only an instance block takes node");
             }
+            else
+            {
+                _entity.Node = _node;
+            }
+            _node = 0;
         }
 
         // A scene ID, or a path of up to ScenePath.MaxLength of them joined by #, each 16 hex digits and nonzero.
@@ -269,27 +280,33 @@ public static partial class SceneFile
                     Error("prefab takes the prefab's GUID, such as $9db8150cc7215ffc2708d20d77cf60bf");
                     break;
                 case "prefab":
-                    if (_entity.Path != null)
+                    if (_entity.Kind == BlockKind.Override)
                     {
                         Error("an override block cannot change which prefab an entity instantiates");
                     }
-                    _entity.Prefab = value.Asset;
+                    else
+                    {
+                        _entity.Prefab = value.Asset;
+                    }
                     break;
                 case "node" when value.Kind != SceneValueKind.Entity || value.Entity == 0:
                     Error("node takes an entity of the prefab, such as @2000000000000002");
                     break;
                 case "node":
-                    _entity.Node = value.Entity;
+                    _node = value.Entity;
                     break;
                 case "removed" when value.Kind != SceneValueKind.Bool:
                     Error("removed takes true or false");
                     break;
                 case "removed":
-                    if (_entity.Path == null)
+                    if (_entity.Kind != BlockKind.Override)
                     {
                         Error("only an override block, whose ID is a path, takes removed");
                     }
-                    _entity.Removed = value.Bool;
+                    else
+                    {
+                        _entity.Removed = value.Bool;
+                    }
                     break;
                 default:
                     Warning($"the entity key {key} is unknown, so the editor keeps it as it is");

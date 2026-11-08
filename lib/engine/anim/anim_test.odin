@@ -400,3 +400,24 @@ Test.entity():add(Listener)
 		testing.expect_value(t, f.reports[3], fmt.tprintf("%d footstep left 2 walk", start + u64(ticks)))
 	}
 }
+
+// Once the frame ends, the graphs that prepare made are gone, since asset.poll can free their blobs: an Animator finds
+// no graph until the next prepare, which finds it again.
+@(test)
+an_animator_has_no_graph_between_frames :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	a := DEFAULT_ANIMATOR
+	a.graph = guid(GRAPH)
+	e := spawn(f, a)
+	frame(f, 1)
+	animator := ecs.get(&f.world, e, Animator)
+	testing.expect_value(t, state_name(&f.animation, animator), "idle")
+	end_frame(&f.animation)
+	_, _, found := parameter(&f.animation, animator, "speed")
+	testing.expect(t, !found, "an Animator found its graph after the frame ended")
+	testing.expect_value(t, state_name(&f.animation, animator), "")
+	frame(f, 1)
+	_, _, found = parameter(&f.animation, animator, "speed")
+	testing.expect(t, found)
+}

@@ -257,25 +257,37 @@ substitute_kind :: proc(p: ^Material_Pipeline) -> (kind: Substitute, ok: bool) {
 // material_ready is whether each of a material's pipelines is compiled.
 @(private)
 material_ready :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> bool {
-	if platform.gpu_pipeline_ready == nil {
-		return true
-	}
-	for pipeline in p.pipelines {
-		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
-			return false
+	return material_status(platform, p) == .Ready
+}
+
+// material_status is where a material's pipelines are together: Failed when any failed, since the material then never
+// draws as it is until its shader changes, else Compiling while any compiles, else Ready.
+@(private)
+material_status :: proc(platform: ^core.Platform_API, p: ^Material_Pipeline) -> gpu.Pipeline_Status {
+	// fold takes a pipeline into the status so far: a failed one wins, then a compiling one.
+	fold :: proc(platform: ^core.Platform_API, status: ^gpu.Pipeline_Status, pipeline: gpu.Pipeline) {
+		if pipeline == {} || status^ == .Failed {
+			return
 		}
+		switch handle_status(platform, pipeline) {
+		case .Failed:
+			status^ = .Failed
+		case .Compiling:
+			status^ = .Compiling
+		case .Ready:
+		}
+	}
+	status := gpu.Pipeline_Status.Ready
+	for pipeline in p.pipelines {
+		fold(platform, &status, pipeline)
 	}
 	for pipeline in p.meshes {
-		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
-			return false
-		}
+		fold(platform, &status, pipeline)
 	}
 	for pipeline in p.over {
-		if pipeline != {} && !platform.gpu_pipeline_ready(pipeline) {
-			return false
-		}
+		fold(platform, &status, pipeline)
 	}
-	return true
+	return status
 }
 
 // substitute_pipeline gives a substitute's pipelines, which it loads and makes the first time a bin waits for its own.

@@ -117,7 +117,7 @@ public sealed class PivotEditor
     // Moves the pivot mesh's entity by a translation in view space, as one undo entry.
     bool MovePivot(string label, Func<MeshData, MeshPlacement, Vec3, Vec3> translation)
     {
-        _session.Tools.CommitPendingDistance();
+        _session.EndOpenEntry();
         if (PivotMesh() is not var (guid, entity) || _session.FindMeshData(guid) is not { } mesh || _session.PlacementOf(guid) is not { } placement || _shell.Scene == null || _shell.OpenEdit != null
             || _shell.Scene.Expanded.Flat.Find(entity) is not { } document || SceneEdits.WorldPose(_shell.Scene.Expanded.Flat, document) is not { } pose)
         {

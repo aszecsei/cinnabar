@@ -124,6 +124,7 @@ The frame code calls the package around the ticks:
 | `prepare` | Before the ticks | Loads each Animator's graph, its clips and their skin into a table in frame memory, so the system's jobs read no assets. An Animator whose graph's key differs from its instance's starts again in the entry state, with `keep_parameters`, and the warnings the cooker could not give: a root motion joint the skin does not have, and markers past their clips' ends. It starts each `Root_Motion`'s frame from nothing. |
 | `begin_frame` | Before the ticks | Clears the frame's events. |
 | `animate` | The `Fixed` system | Moves each playing Animator whose graph is ready by `dt` times `speed`, writes its `Root_Motion`, and records its events in its job's buffer. A stopped Animator holds its pose and keeps its triggers. An Animator spawned during the ticks waits for the next `prepare`. |
+| `end_frame` | At the end of the frame code, before `asset.poll` | Lets the frame's table go, since `poll` can free the blobs that it points into. Until the next `prepare`, an Animator has no graph, so a script that runs between frames, such as a main script that a reload starts or an editor's scene load, finds none. |
 | `send_events` | After each tick's physics events | Sends the tick's events to behaviours (see [Events in the world](#events-in-the-world)). |
 | `present` | At render, after `asset.poll` | Loads the blobs again, since `poll` may have changed them. It poses each Animator whose instance fits its graph's key into a `render.Skin_Pose` for `Frame_Desc.skins`. |
 
@@ -157,7 +158,7 @@ The frame code calls the package around the ticks:
 
 - **Errors.** An entity without an `Animator`, a name that the graph does not have, and a parameter of another kind raise errors.
 - **Loading.** While a graph loads, a call does nothing, and the graph starts with its defaults.
-- **Names.** The calls find a parameter by its name's hash in the frame's table, so they run between `prepare` and the frame's end, as all script phases do.
+- **Names.** The calls find a parameter by its name's hash in the frame's table, so they run between `prepare` and `end_frame`, as all script phases do. Between frames, the calls find no graph.
 - **Events.** A behaviour gets the graph's events as `on_animation_event(name, ...)`, with the event's arguments.
 
 ## The sample

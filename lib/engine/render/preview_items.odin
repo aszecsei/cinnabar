@@ -363,14 +363,15 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 		records[i] = d.record
 		arguments[i] = {draw_id = u32(i), vertex_count = d.record.count, instance_count = 1}
 	}
-	ready := platform.gpu_pipeline_ready != nil
+	// A pipeline that failed is as settled as one that compiled: the preview will not change until its shader does.
+	ready := platform.gpu_pipeline_status != nil
 	any_transparent := false
 	for &bin in bins {
 		bin.pipeline = &r.materials.pipelines[bin.index]
 		any_transparent ||= bin.transparent
 		pipelines, count := preview_pipelines(bin.pipeline)
 		for p in pipelines[:count] {
-			ready &&= p != {} && platform.gpu_pipeline_ready(p)
+			ready &&= p != {} && handle_status(platform, p) != .Compiling
 		}
 	}
 	pf.bins = bins

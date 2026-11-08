@@ -1,8 +1,10 @@
 package script
 
+import "core:slice"
 import "core:testing"
 import "core:time"
 
+import "cinnabar:core/testlog"
 import "cinnabar:engine/ecs"
 
 // The callbacks report these codes, so a test can check their order.
@@ -429,4 +431,109 @@ a_change_undone_while_quiet_sends_nothing :: proc(t: ^testing.T) {
 	expect_reports(t, f, {})
 	phase(f)
 	expect_reports(t, f, {4})
+}
+
+// A wait_until predicate that stops its own coroutine and starts another leaves the new one alone: it is not resumed
+// for the predicate's answer, and a predicate that fails after the restart ends only the coroutine that waited.
+@(test)
+a_predicate_that_restarts_its_coroutines_leaves_the_new_one_alone :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(&f.runtime, "=restarts", `
+local function restart(self, first, last)
+	self:stop_all_coroutines()
+	self:start_coroutine(function()
+		Test.report(first)
+		wait_frames(10)
+		Test.report(last)
+	end)
+end
+local Restarter = Behaviour.define("Restarter")
+function Restarter:start()
+	self:start_coroutine(function()
+		wait_until(function()
+			restart(self, 1, 2)
+			return true
+		end)
+		Test.report(99)
+	end)
+end
+local Failer = Behaviour.define("Failer")
+function Failer:start()
+	self:start_coroutine(function()
+		wait_until(function()
+			restart(self, 3, 4)
+			error("the predicate fails")
+		end)
+		Test.report(99)
+	end)
+end
+World.spawn():add(Restarter)
+World.spawn():add(Failer)
+`)
+	testing.expect(t, ok)
+	context.logger = testlog.expected_errors()
+	// The phase that each report came in.
+	came: map[f64]int
+	defer delete(came)
+	for frame in 0 ..< 20 {
+		phase(f)
+		for report in f.reports {
+			came[report] = frame
+		}
+		clear(&f.reports)
+	}
+	testing.expect(t, 99 not_in came, "a stopped coroutine went on")
+	for pair in ([2][2]f64{{1, 2}, {3, 4}}) {
+		first, started := came[pair[0]]
+		last, ended := came[pair[1]]
+		testing.expectf(t, started && ended, "the new coroutine reported %v and %v: %v", started, ended, came)
+		testing.expectf(t, last - first >= 10, "the new coroutine waited %d frames, not 10", last - first)
+	}
+}
+
+// A coroutine that a handler of an event, or a coroutine that the event resumes, starts, waiting for the same event,
+// waits for the next one: the event that started it does not resume it too.
+@(test)
+a_coroutine_started_by_an_event_waits_for_the_next :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	_, ok := spawn_source(&f.runtime, "=chain", `
+local Chain = Behaviour.define("Chain")
+function Chain:start()
+	self:start_coroutine(function()
+		Test.report(wait_event(self.entity, "hit"))
+		self:start_coroutine(function()
+			Test.report(wait_event(self.entity, "hit") + 10)
+		end)
+	end)
+	-- A coroutine that ends after a frame, so the one that the first starts takes its slot, after the first's.
+	self:start_coroutine(function() wait_frames(1) end)
+end
+-- The handler starts a coroutine that waits for the same event too.
+function Chain:on_hit()
+	self:start_coroutine(function()
+		Test.report(wait_event(self.entity, "hit") + 100)
+	end)
+end
+World.spawn():add(Chain)
+`)
+	testing.expect(t, ok)
+	phase(f)
+	phase(f)
+	phase(f)
+	found := make([dynamic]ecs.Entity, context.temp_allocator)
+	ecs.collect(&f.world, {BEHAVIOURS_ID}, &found)
+	testing.expect_value(t, len(found), 1)
+	send(&f.runtime, found[0], "hit", f64(1))
+	phase(f)
+	expect_reports(t, f, {1})
+	// The next hit resumes both: the one that the first coroutine started, and the one that the handler started.
+	send(&f.runtime, found[0], "hit", f64(2))
+	phase(f)
+	testing.expect_value(t, len(f.reports), 2)
+	testing.expect(t, slice.contains(f.reports[:], 12) && slice.contains(f.reports[:], 102), "the coroutines that waited did not get the next hit")
+	clear(&f.reports)
 }

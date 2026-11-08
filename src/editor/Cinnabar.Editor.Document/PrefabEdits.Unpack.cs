@@ -33,7 +33,7 @@ public static partial class PrefabEdits
     {
         var block = document.Scene.Find(instance);
         // One level of a part is no simpler than all of them, as its entities may be inside a nested instance.
-        if (block is not { Prefab: not "", Node: 0 } || document.Prefabs.SceneOf(block.Prefab) is not { } prefab || PrefabExpansion.RootOf(prefab) is not ({ } root, 1))
+        if (block is not { Kind: BlockKind.Instance, Node: 0 } || document.Prefabs.SceneOf(block.Prefab) is not { } prefab || PrefabExpansion.RootOf(prefab) is not ({ } root, 1))
         {
             return UnpackCompletely(document, instance);
         }
@@ -104,7 +104,7 @@ public static partial class PrefabEdits
             }
             if (byOuterId.TryGetValue(o.Id, out var target))
             {
-                if (target.Path != null || target.Prefab != "")
+                if (target.Kind != BlockKind.Plain)
                 {
                     MergeBlock(target, o);
                 }
@@ -151,7 +151,7 @@ public static partial class PrefabEdits
     // of instances that are gone.
     static List<SceneEntity> DropRemovedBlocks(List<SceneEntity> blocks)
     {
-        var byId = blocks.Where(b => b.Path == null).ToDictionary(b => b.Id);
+        var byId = blocks.Where(b => b.Kind != BlockKind.Override).ToDictionary(b => b.Id);
         bool Gone(SceneEntity b, int depth)
         {
             if (depth > 64)
@@ -170,7 +170,7 @@ public static partial class PrefabEdits
             return anchor != 0 && byId.TryGetValue(anchor, out var parent) && Gone(parent, depth + 1);
         }
         var kept = blocks.Where(b => !Gone(b, 0)).ToList();
-        foreach (var b in kept.Where(b => b.Path == null))
+        foreach (var b in kept.Where(b => b.Kind != BlockKind.Override))
         {
             b.Removed = false;
         }

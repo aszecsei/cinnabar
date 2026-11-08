@@ -154,5 +154,29 @@ public sealed class CaptureModelTests : IDisposable
         Assert.False(CaptureModel.TryParseView("wireframe", out _));
     }
 
+    [Fact]
+    public async Task ACaptureThatThrowsEndsAndTheNextOneRuns()
+    {
+        var model = NewModel();
+        var changes = 0;
+        model.Changed += () => changes++;
+
+        // A path that Path.GetFullPath rejects, as automation's screenshot can give, throws before any request.
+        await Assert.ThrowsAnyAsync<ArgumentException>(() => model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, "bad\0name.png",
+            EditorShell.DefaultViewportSettings, Context, CancellationToken.None));
+        Assert.False(model.Busy);
+        Assert.Equal(2, changes);
+
+        // So does a sidecar whose context throws, after the screenshot is written.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null,
+            EditorShell.DefaultViewportSettings, () => throw new InvalidOperationException("no context"), CancellationToken.None), Written));
+        Assert.False(model.Busy);
+
+        _sent.Clear();
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context,
+            CancellationToken.None), Written);
+        Assert.True(outcome.Ok, outcome.Error);
+    }
+
     public void Dispose() => _temp.Dispose();
 }

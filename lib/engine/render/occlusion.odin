@@ -68,8 +68,6 @@ Cull_Stats :: struct {
 // Cull_Stats' order.
 CULL_STATS_WORDS :: 8
 #assert(size_of(Cull_Stats) == CULL_STATS_WORDS * 4)
-// The tally's copies that the CPU reads, a frame or more apart, so a read never waits for a frame in flight.
-CULL_STATS_COPIES :: 3
 
 // Occlusion is occlusion culling's state between frames, in Gpu_Scene: the pyramid's levels, made again when the
 // frame's size changes, each slot's bit of last frame and of this one, which alternate, and each cell's bits.
@@ -81,11 +79,9 @@ Occlusion :: struct {
 	slot_seen:  [2]gpu.Buffer,
 	cell_seen:  gpu.Buffer,
 	cell_seen_capacity: u32,
-	// The camera's tally of this frame, its copies, the next copy to write, and the last that came back.
+	// The camera's tally of this frame, its copies, and the last that came back.
 	stats:          gpu.Buffer,
-	stats_copies:   [CULL_STATS_COPIES]gpu.Buffer,
-	stats_written:  [CULL_STATS_COPIES]bool,
-	stats_next:     int,
+	stats_ring:     Readback_Ring,
 	last_stats:     Cull_Stats,
 }
 
@@ -94,52 +90,31 @@ cull_stats :: proc(r: ^Renderer) -> Cull_Stats {
 	return r.scene.occlusion.last_stats
 }
 
-// read_cull_stats takes each tally's copy that has come back, the newest last, and keeps it.
+// read_cull_stats keeps the newest tally's copy that has come back. After a frame that tallied nothing, or that did not
+// execute, the stats are empty.
 @(private)
 read_cull_stats :: proc(r: ^Renderer) {
 	o := &r.scene.occlusion
-	for k in 0 ..< CULL_STATS_COPIES {
-		i := (o.stats_next + k) % CULL_STATS_COPIES
-		if !o.stats_written[i] {
-			continue
-		}
-		if data, ok := r.platform.gpu_read_buffer(o.stats_copies[i]); ok && len(data) >= size_of(Cull_Stats) {
-			o.last_stats = (^Cull_Stats)(raw_data(data))^
-			o.stats_written[i] = false
-		}
+	data, take := take_readback(&o.stats_ring, r.platform, size_of(Cull_Stats))
+	switch take {
+	case .Fresh:
+		o.last_stats = (^Cull_Stats)(raw_data(data))^
+	case .Idle:
+		o.last_stats = {}
+	case .Waiting:
 	}
 }
 
-// add_cull_stats_copy copies the camera's tally to its next copy, after the late view's culling, for read_cull_stats
-// to take once it is back.
+// add_cull_stats_copy copies the camera's tally to its ring, after the late view's culling, for read_cull_stats to take
+// once it is back.
 @(private)
 add_cull_stats_copy :: proc(f: ^Frame) {
 	sf := f.scene_frame
 	if sf == nil || sf.stats == 0 {
 		return
 	}
-	o := &f.renderer.scene.occlusion
-	g := f.graph
-	copy := import_buffer(g, o.stats_copies[o.stats_next])
-	p := add_compute_pass(g, "cull stats", proc(ctx: ^Pass_Context) {
-		f := (^Frame)(ctx.data)
-		o := &f.renderer.scene.occlusion
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, f.scene_frame.stats), 0, o.stats_copies[o.stats_next], 0, CULL_STATS_WORDS * 4)
-	}, f)
-	copy_source(g, p, sf.stats)
-	copy_dest(g, p, copy)
-}
-
-// finish_cull_stats moves on to the next copy, once the frame has copied into this one.
-@(private)
-finish_cull_stats :: proc(f: ^Frame) {
-	sf := f.scene_frame
-	if sf == nil || sf.stats == 0 {
-		return
-	}
-	o := &f.renderer.scene.occlusion
-	o.stats_written[o.stats_next] = true
-	o.stats_next = (o.stats_next + 1) % CULL_STATS_COPIES
+	r := f.renderer
+	add_readback_copy(f.graph, r.platform, &r.scene.occlusion.stats_ring, sf.stats, CULL_STATS_WORDS * 4, "cull stats")
 }
 
 // ensure_cull_stats creates the tally and its copies the first time.
@@ -148,11 +123,8 @@ ensure_cull_stats :: proc(r: ^Renderer) -> bool {
 	o := &r.scene.occlusion
 	if o.stats == {} {
 		o.stats = r.platform.gpu_create_buffer({size = CULL_STATS_WORDS * 4, usage = {.Storage}, label = "cull stats"}, nil)
-		for &b in o.stats_copies {
-			b = r.platform.gpu_create_buffer({size = CULL_STATS_WORDS * 4, usage = {.Readback}, label = "cull stats readback"}, nil)
-		}
 	}
-	return o.stats != {}
+	return o.stats != {} && ensure_readback_ring(&o.stats_ring, r.platform, CULL_STATS_WORDS * 4, "cull stats readback")
 }
 
 // Occlusion_Frame is one frame's occlusion culling, in Scene_Frame.
@@ -180,9 +152,7 @@ occlusion_destroy :: proc(o: ^Occlusion, platform: ^core.Platform_API) {
 	for b in ([]gpu.Buffer{o.slot_seen[0], o.slot_seen[1], o.cell_seen, o.stats}) {
 		platform.gpu_destroy_buffer(b)
 	}
-	for b in o.stats_copies {
-		platform.gpu_destroy_buffer(b)
-	}
+	destroy_readback_ring(&o.stats_ring, platform)
 	o^ = {pipeline = o.pipeline}
 }
 
