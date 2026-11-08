@@ -24,24 +24,23 @@ the_shading_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	r.platform = &platform
 	s := &r.shading
 	defer shading_destroy(s, &platform)
-	for &b in s.stats_copies {
-		b = platform.gpu_create_buffer({size = SHADING_STATS_WORDS * 4, usage = {.Readback}, label = "test"}, nil)
-	}
-	tally :: proc(s: ^Shading, i: int, quads, pixels: u32) {
-		data, _ := null.read_buffer(s.stats_copies[i])
+	testing.expect(t, ensure_readback_ring(&s.stats_ring, &platform, SHADING_STATS_WORDS * 4, "test"))
+	// A frame's copy, as its commit leaves the ring (see a_readback_ring_shows_what_the_frames_that_executed_copied).
+	tally :: proc(s: ^Shading, quads, pixels: u32) {
+		ring := &s.stats_ring
+		data, _ := null.read_buffer(ring.copies[ring.next])
 		words := mem.slice_data_cast([]u32, data)
 		words[0], words[1] = quads, pixels
-		s.stats_written[i] = true
+		mark_readback_copied(ring, ring.next)
 	}
-	// Two frames' copies, the older first: the newer is the one kept, and both are taken.
-	s.stats_next = 1
-	tally(s, 1, 10, 30)
-	tally(s, 2, 20, 50)
-	s.stats_next = 0
+	tally(s, 20, 50)
 	read_shading_stats(r)
 	testing.expect_value(t, shading_stats(r), Shading_Stats{forward_quads = 20, forward_pixels = 50})
-	testing.expect(t, !s.stats_written[1] && !s.stats_written[2])
-	// A copy that has not come back is kept for later.
+	// A copy that has not come back keeps the stats.
+	s.stats_ring.copied = true
 	read_shading_stats(r)
 	testing.expect_value(t, shading_stats(r).forward_quads, 20)
+	// A frame without the stats, or that did not execute, shows none.
+	read_shading_stats(r)
+	testing.expect_value(t, shading_stats(r), Shading_Stats{})
 }

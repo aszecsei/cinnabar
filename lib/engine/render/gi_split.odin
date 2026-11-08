@@ -181,8 +181,6 @@ Split_Cascade_Stats :: struct {
 	dropped: u32,
 }
 
-// The tables' counters' copies that the CPU reads, a frame or more apart, so a read never waits for a frame in flight.
-SPLIT_STATS_COPIES :: 3
 
 // Split_Window is a level of detail's window between frames: its first cell, of World_Position.
 Split_Window :: struct {
@@ -221,12 +219,8 @@ Gi_Split :: struct {
 	// Whether the storage is new since the last frame that executed, so its slots and accumulators must be cleared.
 	fresh:        bool,
 	frame:        u32,
-	// The counters' copies, whether each holds a frame's that has not been read, the next copy to write, whether the
-	// split ran last frame, and the last stats that came back.
-	stats_copies:  [SPLIT_STATS_COPIES]gpu.Buffer,
-	stats_written: [SPLIT_STATS_COPIES]bool,
-	stats_next:    int,
-	ran:           bool,
+	// The counters' copies, and the last stats that came back.
+	stats_ring:    Readback_Ring,
 	last_stats:    Gi_Split_Stats,
 	// Whether the last frame that wanted the split cascades had them, for note_split_fallback.
 	running:       bool,
@@ -273,10 +267,7 @@ gi_split_destroy :: proc(s: ^Gi_Split, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	s.hits, s.surfaces, s.rays, s.ray_capacity = {}, {}, {}, 0
-	for &b in s.stats_copies {
-		platform.gpu_destroy_buffer(b)
-		b = {}
-	}
+	destroy_readback_ring(&s.stats_ring, platform)
 }
 
 // gi_split_stats is the split cascades' tables, a frame or two ago (see Gi_Split_Stats).
@@ -284,27 +275,14 @@ gi_split_stats :: proc(r: ^Renderer) -> Gi_Split_Stats {
 	return r.gi.split.last_stats
 }
 
-// read_gi_split_stats takes each counters' copy that has come back, the newest last, and keeps it with the cascades'
-// slots. Without the split cascades last frame, the stats are empty, whatever older copies came back.
+// read_gi_split_stats keeps the newest counters' copy that has come back, with the cascades' slots. Without the split
+// cascades last frame, or after a frame that did not execute, the stats are empty, whatever older copies came back.
 @(private)
 read_gi_split_stats :: proc(r: ^Renderer) {
 	s := &r.gi.split
-	defer {
-		if !s.ran {
-			s.last_stats = {}
-		}
-		s.ran = false
-	}
-	for k in 0 ..< SPLIT_STATS_COPIES {
-		i := (s.stats_next + k) % SPLIT_STATS_COPIES
-		if !s.stats_written[i] {
-			continue
-		}
-		data, ok := r.platform.gpu_read_buffer(s.stats_copies[i])
-		if !ok || len(data) < MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE {
-			continue
-		}
-		s.stats_written[i] = false
+	data, take := take_readback(&s.stats_ring, r.platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE)
+	switch take {
+	case .Fresh:
 		counters := ([^]u32)(raw_data(data))
 		stats := Gi_Split_Stats{count = s.layout.count}
 		for c in 0 ..< int(s.layout.count) {
@@ -312,18 +290,19 @@ read_gi_split_stats :: proc(r: ^Renderer) {
 			stats.cascades[c] = {active = counters[c * 4 + 2], slots = s.layout.cascades[c].slots, dropped = counters[c * 4 + 3]}
 		}
 		s.last_stats = stats
+	case .Idle:
+		s.last_stats = {}
+	case .Waiting:
 	}
 }
 
-// commit_gi_split keeps what the frame's split passes did: the storage is cleared, the tables are keyed to the frame's
-// windows, and the counters' copy is written, so the next frame copies into the one after it.
+// commit_gi_split keeps what the frame's split passes did: the storage is cleared, and the tables are keyed to the
+// frame's windows.
 @(private = "file")
 commit_gi_split :: proc(data: rawptr) {
 	sf := (^Gi_Split_Frame)(data)
 	s := &sf.frame.renderer.gi.split
-	s.fresh, s.windows, s.ran = false, sf.windows, true
-	s.stats_written[s.stats_next] = true
-	s.stats_next = (s.stats_next + 1) % SPLIT_STATS_COPIES
+	s.fresh, s.windows = false, sf.windows
 }
 
 @(private = "file")
@@ -782,26 +761,16 @@ note_split_fallback :: proc(f: ^Frame, ran: bool) {
 	log.warnf("gi: the split cascades gave way to the screen cascades: %s", reason)
 }
 
-// add_split_stats_copy copies the tables' counters to their next copy, after the merge, for read_gi_split_stats to
-// take once it is back. commit_gi_split moves on to the copy after it.
+// add_split_stats_copy copies the tables' counters to their ring, after the merge, for read_gi_split_stats to take once
+// it is back.
 @(private = "file")
 add_split_stats_copy :: proc(f: ^Frame, sf: ^Gi_Split_Frame) {
 	s := &f.renderer.gi.split
 	platform := f.renderer.platform
-	if s.stats_copies[0] == {} {
-		for &b in s.stats_copies {
-			b = platform.gpu_create_buffer({size = MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, usage = {.Readback}, label = "gi split stats readback"}, nil)
-		}
+	if !ensure_readback_ring(&s.stats_ring, platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "gi split stats readback") {
+		return
 	}
-	g := f.graph
-	copy := import_buffer(g, s.stats_copies[s.stats_next])
-	p := add_compute_pass(g, "gi split stats", proc(ctx: ^Pass_Context) {
-		sf := (^Gi_Split_Frame)(ctx.data)
-		s := &sf.frame.renderer.gi.split
-		gpu.cmd_copy_buffer(ctx.cb, gpu_buffer(ctx.graph, sf.counters), 0, s.stats_copies[s.stats_next], 0, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE)
-	}, sf, queue = .Compute)
-	copy_source(g, p, sf.counters)
-	copy_dest(g, p, copy)
+	add_readback_copy(f.graph, platform, &s.stats_ring, sf.counters, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "gi split stats", .Compute)
 }
 
 @(private = "file")
