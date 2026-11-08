@@ -237,11 +237,20 @@ entity_set_active :: proc(L: ^luau.State) -> c.int {
 	return 0
 }
 
-// entity_destroy despawns the entity and its descendants at the end of the script phase, like Unity's Destroy.
+// entity_destroy despawns the entity and its descendants at the end of the script step, like Unity's Destroy. Outside
+// a step, such as in a main script's top level or on_reload, it despawns at once, and the callbacks run before it
+// returns, as entity_set_active's do.
 @(private = "file")
 entity_destroy :: proc(L: ^luau.State) -> c.int {
-	r, _ := world_of(L)
-	ecs.command_despawn(script_commands(r), alive_entity(L, 1))
+	r, w := world_of(L)
+	e := alive_entity(L, 1)
+	switch r.phase {
+	case .None:
+		ecs.despawn(w, e)
+		drain_log(r)
+	case .Variable, .Fixed:
+		ecs.command_despawn(&r.commands, e)
+	}
 	return 0
 }
 
@@ -393,13 +402,4 @@ push_entities :: proc(L: ^luau.State, found: []ecs.Entity) {
 		push_entity(L, e)
 		luau.rawseti(L, -2, c.int(i + 1))
 	}
-}
-
-// script_commands is the command buffer of the script phase, which the game applies with end_phase's result.
-@(private)
-script_commands :: proc(r: ^Runtime) -> ^ecs.Commands {
-	if r.commands.data.allocator.procedure == nil {
-		r.commands = ecs.commands(frame(r))
-	}
-	return &r.commands
 }

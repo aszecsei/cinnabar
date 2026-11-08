@@ -45,7 +45,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 
 - `World.spawn(position?, rotation?)` creates an entity with a `Transform` at once and returns its handle. `World.spawn(prefab, position?, rotation?)`, with an `Asset` of a cooked prefab first, creates an instance of it with its root at the pose and returns the root, and every behaviour in it gets `awake` and `on_enable` before `spawn` returns, in the prefab's entity order, as in Unity's `Instantiate` ([Editor: Prefabs](../editor/prefabs.md#spawning-at-run-time)). The game registers it with `scene.register_scripts` in its `Register_Proc`; without that, it raises an error.
 - `entity:add(T, values?)` and `entity:remove(T)` take effect at once. `values` is a table of field values, and `add` returns the component.
-- `entity:destroy()` is deferred to the end of the script phase, as in Unity's `Destroy`. It goes into the script command buffer, which phase 6 of the frame applies.
+- `entity:destroy()` is deferred to the end of the script phase or fixed step, as in Unity's `Destroy`. It goes into the step's command buffer, which the end of the step applies: phase 6 of the frame for the script phase. Outside a step, as in a main script's top level or `on_reload`, it despawns at once (see [Behaviours: Outside a phase](behaviours.md#outside-a-phase)).
 - `World.query(T, ...)` returns an array of the matching entities, collected before the loop starts. Structural changes inside the loop are therefore safe. A query from a script scans every archetype, so performance-critical work belongs in a native system.
 - `World.version()` gives a version, and every later write is newer than it. `World.changed(since, T, ...)` returns an array of the entities in the chunks where a component `T` was written since the version, or that gained a row. It works by chunk (see [ECS: Change versions](../world/ecs.md#change-versions)), so it can give entities that did not change, and it does not report the entities that left. A script's own writes count.
 
@@ -124,7 +124,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `[SerializeField]`, public fields | `Field.*` in `Behaviour.define` |
 | `GetComponent<T>()`, `TryGetComponent` | `entity:get(T)` |
 | `AddComponent<T>()` | `entity:add(T, value?)` |
-| `Destroy(obj)` | `entity:destroy()`, deferred to the end of the script phase |
+| `Destroy(obj)` | `entity:destroy()`, deferred to the end of the script phase or fixed step; at once outside one |
 | `Instantiate(prefab, pos, rot)` | `World.spawn(prefab, position, rotation)` |
 | `transform.position` | `entity.transform.position`, a `WorldPosition` |
 | `Vector3` | `vector` |

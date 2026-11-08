@@ -159,6 +159,46 @@ return Door`)
 }
 
 @(test)
+a_main_script_destroys_at_spawn :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	e := ecs.spawn(&f.world)
+	ecs.add(&f.world, e, Health{})
+	main := write_script(t, &f, MAIN, 0, "World.query(Health)[1]:destroy()")
+	_, ok := spawn_script(&f.runtime, main)
+	testing.expect(t, ok)
+	phase(f.base)
+	testing.expect(t, !ecs.is_alive(&f.world, e))
+}
+
+@(test)
+on_reload_destroys :: proc(t: ^testing.T) {
+	f := setup_reload(t)
+	defer teardown_reload(f)
+	context.user_ptr = f.base
+	door := write_script(t, &f, 3, 0, `
+local Door = Behaviour.define("Door", {})
+return Door`)
+	e := ecs.spawn(&f.world)
+	testing.expect(t, attach_script(&f.runtime, e, door))
+	phase(f.base)
+
+	write_script(t, &f, 3, 1, `
+local Door = Behaviour.define("Door", {})
+function Door:on_reload() self.entity:destroy() end
+function Door:on_destroy() Test.report(6) end
+return Door`)
+	hot_reload(&f)
+	// reload_changed runs outside a phase, so the destroy and its callbacks run at once.
+	expect_reports(t, f, {6})
+	testing.expect(t, !ecs.is_alive(&f.world, e))
+	phase(f.base)
+	expect_reports(t, f, {})
+	testing.expect(t, !ecs.is_alive(&f.world, e))
+}
+
+@(test)
 a_main_script_restarts :: proc(t: ^testing.T) {
 	f := setup_reload(t)
 	defer teardown_reload(f)

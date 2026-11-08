@@ -63,7 +63,7 @@ return Door
 
 - **`update` is opt-in.** The script phase calls `update` only on instances whose class defines it, in instance slot order. Calling into Luau for every entity every frame is expensive at scale. The profiler shows the cost of each class's `update`, and of its other callbacks and coroutines ([Profiling](../core/profiling.md#frames-and-costs)), and the API favors events and coroutines.
 - **`fixed_update` is opt-in too,** and a frame can run up to four ticks, so the profiler shows its cost per class as `fixed_update`. Use it for what must happen once per tick: moving something that is interpolated, or a force that must not depend on the frame rate. Logic that is heavy and runs every tick is a native `Fixed` system.
-- **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`.
+- **Despawn notification:** the world logs each removed `Behaviours` component with its record reference (see `ecs.watch` and `ecs.take_log`), from `ecs.apply` and from the immediate `despawn`. The script phase drains the log at its start, and again after it applies its own commands, so `on_destroy` runs in the same frame as a script's `destroy`. A `destroy` outside a phase drains it at once (see [Outside a phase](#outside-a-phase)).
 - **Callbacks** run on the main thread in a protected call, under the watchdog. An error logs the message with a traceback, and the other callbacks still run. A callback cannot wait: it is not a coroutine.
 
 ### Enabled state
@@ -141,3 +141,16 @@ for ecs.next_tick(&ticks) {
 `script.fixed_events`, at the end of the tick: deliver the tick's events, resume the coroutines that wait in `wait_fixed`, in the order they started, deliver what they sent, and apply their structural changes. The tick's physics contacts are delivered here, after `physics.send_events` queues them ([Physics: Events](../physics/design.md#events)).
 
 What stays per frame: `update`, the other waits, events that `Update` systems queue, and the collector's step. The editor's edit mode runs no ticks, so no `fixed_update`, and a paused step runs one.
+
+### Outside a phase
+
+The runtime records which step runs: none, the script phase (`begin_phase` to `end_phase`), or a fixed step (`fixed_update` or `fixed_events`). A step begins only when no other step runs, and its command buffer is empty when it begins. The step ends when it applies its structural changes, before the callbacks for them run.
+
+Script code also runs outside these steps:
+
+- A main script's top level, when `script.spawn_script` runs it at init.
+- `on_reload`, and a main script that restarts, in `script.reload_changed` at the end of the frame.
+- A module's top level that `attach_script` runs, as when the editor attaches a script.
+- The `on_disable` and `on_destroy` callbacks that the end of a step runs for the changes that it applied.
+
+There, `entity:destroy()` despawns the entity and its descendants at once, and their `on_disable` and `on_destroy` run before `destroy` returns, as the callbacks of `entity:set_active` do. While the runtime is quiet, none of them run. The entity is not alive after the call: `is_alive` is false, and its components are gone.

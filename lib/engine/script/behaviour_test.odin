@@ -57,6 +57,38 @@ e:destroy()
 }
 
 @(test)
+a_destroy_in_on_destroy_at_the_end_of_a_phase_applies :: proc(t: ^testing.T) {
+	f := setup_world(t)
+	defer teardown_world(f)
+	context.user_ptr = f
+	thread, ok := spawn_source(&f.runtime, "=linked", `
+Linked = Behaviour.define("Linked", {})
+function Linked:on_destroy()
+	Test.report(6)
+	if self.other then self.other:destroy() end
+end
+local a, b = World.spawn(), World.spawn()
+a:add(Linked).other = b
+b:add(Linked)
+coroutine.yield()
+a:destroy()
+coroutine.yield()
+Test.report(a:is_alive() and 1 or 0)
+Test.report(b:is_alive() and 1 or 0)
+`)
+	testing.expect(t, ok)
+	// a's on_destroy runs after end_phase applies the phase's changes, so b's destroy applies at once.
+	begin_phase(&f.runtime, FRAME, {})
+	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Yielded)
+	end_phase(&f.runtime)
+	expect_reports(t, f, {6, 6})
+	phase(f)
+	testing.expect_value(t, resume(&f.runtime, thread), Resume_Result.Finished)
+	expect_reports(t, f, {0, 0})
+	release(&f.runtime, thread)
+}
+
+@(test)
 disabling_a_behaviour_stops_its_update :: proc(t: ^testing.T) {
 	f := setup_world(t)
 	defer teardown_world(f)
