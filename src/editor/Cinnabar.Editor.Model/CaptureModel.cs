@@ -120,101 +120,109 @@ public sealed class CaptureModel
         {
             return new CaptureOutcome(false, "a capture is already under way", [], null);
         }
+        // Busy ends however the capture ends: a path that cannot be used, a request that throws, or a sidecar that cannot
+        // be written, so a failed capture does not leave the commands disabled.
         Busy = true;
         Changed?.Invoke();
-        var started = DateTime.UtcNow;
-        var extension = kind == CaptureKind.Gif ? ".gif" : ".png";
-        string primary;
-        if (!string.IsNullOrEmpty(path))
-        {
-            primary = Path.GetFullPath(path);
-            if (!primary.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-            {
-                primary += extension;
-            }
-        }
-        else
-        {
-            primary = Path.Combine(Path.GetFullPath(directory), BaseName(started, ++_sequence) + extension);
-        }
-        var stem = primary[..^extension.Length];
-        List<CaptureImage> images = [];
-        List<string> failures = [];
-        var sentView = false;
         try
         {
-            var result = await RequestAsync(kind, primary, cancel);
-            if (result.Ok)
+            var started = DateTime.UtcNow;
+            var extension = kind == CaptureKind.Gif ? ".gif" : ".png";
+            string primary;
+            if (!string.IsNullOrEmpty(path))
             {
-                images.Add(Image(result, null));
+                primary = Path.GetFullPath(path);
+                if (!primary.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+                {
+                    primary += extension;
+                }
             }
             else
             {
-                failures.Add($"{kind}: {result.Reason}");
+                primary = Path.Combine(Path.GetFullPath(directory), BaseName(started, ++_sequence) + extension);
             }
-            foreach (var view in views.Distinct())
+            var stem = primary[..^extension.Length];
+            List<CaptureImage> images = [];
+            List<string> failures = [];
+            var sentView = false;
+            try
             {
-                if (view == DebugView.Lit)
+                var result = await RequestAsync(kind, primary, cancel);
+                if (result.Ok)
                 {
-                    continue;
-                }
-                _send(current with { DebugView = view });
-                sentView = true;
-                await _awaitFrames(SettleFrames, cancel);
-                var viewResult = await RequestAsync(CaptureKind.Screenshot, $"{stem}.{ViewName(view)}.png", cancel);
-                if (viewResult.Ok)
-                {
-                    images.Add(Image(viewResult, ViewName(view)));
+                    images.Add(Image(result, null));
                 }
                 else
                 {
-                    failures.Add($"{ViewName(view)}: {viewResult.Reason}");
+                    failures.Add($"{kind}: {result.Reason}");
+                }
+                foreach (var view in views.Distinct())
+                {
+                    if (view == DebugView.Lit)
+                    {
+                        continue;
+                    }
+                    _send(current with { DebugView = view });
+                    sentView = true;
+                    await _awaitFrames(SettleFrames, cancel);
+                    var viewResult = await RequestAsync(CaptureKind.Screenshot, $"{stem}.{ViewName(view)}.png", cancel);
+                    if (viewResult.Ok)
+                    {
+                        images.Add(Image(viewResult, ViewName(view)));
+                    }
+                    else
+                    {
+                        failures.Add($"{ViewName(view)}: {viewResult.Reason}");
+                    }
                 }
             }
-        }
-        catch (OperationCanceledException)
-        {
-            failures.Add("the capture was cancelled");
+            catch (OperationCanceledException)
+            {
+                failures.Add("the capture was cancelled");
+            }
+            finally
+            {
+                if (sentView)
+                {
+                    _send(current);
+                }
+            }
+
+            string? sidecar = null;
+            try
+            {
+                sidecar = stem + ".json";
+                Directory.CreateDirectory(Path.GetDirectoryName(sidecar)!);
+                var document = new
+                {
+                    Schema = 1,
+                    Time = started,
+                    Kind = kind,
+                    Views = views.Select(ViewName).ToArray(),
+                    Images = images,
+                    Failures = failures,
+                    Context = context(),
+                };
+                await File.WriteAllTextAsync(sidecar, JsonSerializer.Serialize(document, SidecarJson), CancellationToken.None);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                failures.Add($"sidecar: {e.Message}");
+                sidecar = null;
+            }
+            var files = images.Select(i => i.File).ToList();
+            if (sidecar != null)
+            {
+                files.Add(sidecar);
+            }
+            var ok = images.Count > 0 && images[0].View == null && failures.Count == 0;
+            return new CaptureOutcome(ok, failures.Count > 0 ? string.Join("; ", failures) : null, files, sidecar);
         }
         finally
         {
-            if (sentView)
-            {
-                _send(current);
-            }
+            Busy = false;
+            Changed?.Invoke();
         }
-
-        string? sidecar = null;
-        try
-        {
-            sidecar = stem + ".json";
-            Directory.CreateDirectory(Path.GetDirectoryName(sidecar)!);
-            var document = new
-            {
-                Schema = 1,
-                Time = started,
-                Kind = kind,
-                Views = views.Select(ViewName).ToArray(),
-                Images = images,
-                Failures = failures,
-                Context = context(),
-            };
-            await File.WriteAllTextAsync(sidecar, JsonSerializer.Serialize(document, SidecarJson), CancellationToken.None);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            failures.Add($"sidecar: {e.Message}");
-            sidecar = null;
-        }
-        Busy = false;
-        Changed?.Invoke();
-        var files = images.Select(i => i.File).ToList();
-        if (sidecar != null)
-        {
-            files.Add(sidecar);
-        }
-        var ok = images.Count > 0 && images[0].View == null && failures.Count == 0;
-        return new CaptureOutcome(ok, failures.Count > 0 ? string.Join("; ", failures) : null, files, sidecar);
     }
 
     /// <summary>Completes the request that the result answers. False for a result nothing waits for.</summary>

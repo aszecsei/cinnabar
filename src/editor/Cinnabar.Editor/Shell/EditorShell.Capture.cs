@@ -33,8 +33,16 @@ public sealed partial class EditorShell
             Console.Add(LogLevel.Warning, $"capture: {refused.Error}");
             return refused;
         }
-        var outcome = await Captures.CaptureAsync(kind, views, _options.CaptureDirectory, path, ViewportSettings, BuildCaptureContext, CancellationToken.None);
-        Commands.InvalidateAll();
+        CaptureOutcome outcome;
+        try
+        {
+            outcome = await Captures.CaptureAsync(kind, views, _options.CaptureDirectory, path, ViewportSettings, BuildCaptureContext, CancellationToken.None);
+        }
+        finally
+        {
+            // The capture commands follow Busy, which the capture ends however it ends.
+            Commands.InvalidateAll();
+        }
         if (outcome.Files.Count > 0)
         {
             Console.Add(LogLevel.Info, $"capture: wrote {string.Join(", ", outcome.Files)}");
