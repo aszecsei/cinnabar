@@ -463,7 +463,7 @@ no_physics_and_no_listener :: proc(t: ^testing.T) {
 	testing.expect(t, !bool(record.last.spatial))
 	testing.expect_value(t, record.last.position, [3]f32{})
 	testing.expect_value(t, record.last.occlusion, 0)
-	testing.expect(t, f.audio.warned_listener)
+	testing.expect(t, .No_Listener in f.audio.warned)
 }
 
 // A short sound's samples go to the backend, and a long one's blob is only named, with where its samples start. Neither
@@ -686,4 +686,59 @@ buses_come_from_names :: proc(t: ^testing.T) {
 	frame(f)
 	testing.expect_value(t, record.plays[0].bus, music)
 	testing.expect_value(t, record.plays[1].bus, boundary.MASTER_BUS)
+}
+
+// A source whose sound ends gives its slot back, so more sources than MAX_SOURCES can each play once in turn. One that
+// plays again later takes a slot again.
+@(test)
+a_source_gives_its_slot_back_when_its_sound_ends :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	first := source(f, {1, 0, 0}, loop = false)
+	for _ in 1 ..< MAX_SOURCES {
+		source(f, {1, 0, 0}, loop = false)
+	}
+	frame(f)
+	testing.expect_value(t, len(record.plays), MAX_SOURCES)
+	// The sounds end. The null backend's voices never do, so the test ends them there too, as a backend's own end does.
+	voices := make([dynamic]boundary.Voice, context.temp_allocator)
+	for slot in f.audio.sources {
+		append(&voices, slot.voice)
+	}
+	record.ended = true
+	frame(f)
+	record.ended = false
+	for voice in voices {
+		record.null.voice_stop(voice, 0)
+	}
+	for slot in f.audio.sources {
+		testing.expect(t, !slot.used, "a source whose sound ended keeps its slot")
+	}
+	source(f, {1, 0, 0}, loop = false)
+	frame(f)
+	testing.expect_value(t, len(record.plays), MAX_SOURCES + 1)
+	testing.expect(t, .Sources not_in f.audio.warned, "a source found no slot")
+	ecs.get_write(&f.world, first, Audio_Source).playing = true
+	frame(f)
+	testing.expect_value(t, len(record.plays), MAX_SOURCES + 2)
+}
+
+// Each limit warns once, on its own: one does not hide another.
+@(test)
+each_limit_warns_once :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(t, f)
+	write_sound(t, f, SOUND, SAMPLES[:])
+	listener(f)
+	for _ in 0 ..= MAX_SOURCES {
+		source(f, {1, 0, 0})
+	}
+	frame(f)
+	testing.expect_value(t, f.audio.warned, bit_set[Warning]{.Sources})
+	for _ in 0 ..= MAX_ONE_SHOTS {
+		play(&f.audio, SOUND)
+	}
+	testing.expect_value(t, f.audio.warned, bit_set[Warning]{.Sources, .One_Shots})
 }

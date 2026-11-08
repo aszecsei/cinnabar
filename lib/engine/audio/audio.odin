@@ -48,6 +48,8 @@ Sound_Slot :: struct {
 	version:    u32,
 }
 
+// Source_Slot is a playing Audio_Source's voice. update_sources claims a slot for a source that starts to play, and frees
+// it when the source has no voice and is not playing: its sound ended, it was stopped, or its entity went.
 @(private)
 Source_Slot :: struct {
 	used:      bool,
@@ -91,8 +93,17 @@ State :: struct {
 	buses:           [MAX_BUSES]boundary.Bus,
 	bus_names:       Bus_Names,
 	paused:          bool,
-	warned_listener: bool,
-	warned_full:     bool,
+	// The warnings given, each once.
+	warned:          bit_set[Warning],
+}
+
+// Warning is a warning that the audio gives once: a spatial source with no listener, and each of the limits.
+@(private)
+Warning :: enum {
+	No_Listener,
+	Sounds,
+	Sources,
+	One_Shots,
 }
 
 // The most buses that a project names, besides Master.
@@ -231,8 +242,8 @@ set_bus_effect :: proc(s: ^State, name: string, slot: int, effect: boundary.Effe
 // too many. The sound plays once, to its end. Call it from the frame's code or its scripts.
 play :: proc(s: ^State, sound: format.Guid, position: Maybe(ecs.World_Position) = nil, gain: f32 = 1, bus := 0) -> bool {
 	if s.one_shot_count >= MAX_ONE_SHOTS {
-		if !s.warned_full {
-			s.warned_full = true
+		if .One_Shots not_in s.warned {
+			s.warned += {.One_Shots}
 			log.warnf("audio: more than %d sounds from play at once, so a sound does not play", MAX_ONE_SHOTS)
 		}
 		return false
@@ -339,8 +350,14 @@ update_sources :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: L
 				entity = e,
 			}
 		}
-		follow_source(s, w, ph, listener, &s.sources[index], e, source^, run)
-		s.sources[index].seen = true
+		slot := &s.sources[index]
+		ended := follow_source(s, w, ph, listener, slot, e, source^, run)
+		// A slot with no voice whose source does not play, or whose sound just ended, is free for another source.
+		if ended || (slot.voice == {} && !source.playing) {
+			slot^ = {}
+		} else {
+			slot.seen = true
+		}
 	}
 	// What is left had its entity despawned or disabled, or its component removed.
 	for &slot in s.sources {
@@ -361,16 +378,20 @@ free_source :: proc(s: ^State) -> int {
 			return i
 		}
 	}
-	if !s.warned_full {
-		s.warned_full = true
+	if .Sources not_in s.warned {
+		s.warned += {.Sources}
 		log.warnf("audio: more than %d Audio_Sources at once, so a source does not play", MAX_SOURCES)
 	}
 	return -1
 }
 
 // follow_source brings a source's voice in line with its component: stopped, started again for a new sound, or moved.
+// ended is true when a sound that does not loop ended, which clears the component's playing. update_sources then frees
+// the slot, as it does for any slot with no voice whose source does not play; a source that plays again later takes a
+// slot as a new one does. A source that plays but has no voice yet, as while its sound is cooked or the world does not
+// run, keeps its slot.
 @(private)
-follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, slot: ^Source_Slot, e: ecs.Entity, source: Audio_Source, run: bool) {
+follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Listener, slot: ^Source_Slot, e: ecs.Entity, source: Audio_Source, run: bool) -> (ended: bool) {
 	api := &s.platform.audio
 	sound := find_sound(s, source.sound)
 	if slot.voice != {} {
@@ -385,7 +406,7 @@ follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Li
 				if written := ecs.get_write(w, e, Audio_Source); written != nil {
 					written.playing = false
 				}
-				return
+				return true
 			}
 		}
 	}
@@ -394,8 +415,8 @@ follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Li
 		return
 	}
 	spatial := source.spatial && listener.found
-	if source.spatial && !listener.found && !s.warned_listener {
-		s.warned_listener = true
+	if source.spatial && !listener.found && .No_Listener not_in s.warned {
+		s.warned += {.No_Listener}
 		log.warn("audio: a spatial Audio_Source plays with no Audio_Listener in the world, so it plays centred at full gain")
 	}
 	params := boundary.Voice_Params {
@@ -423,6 +444,7 @@ follow_source :: proc(s: ^State, w: ^ecs.World, ph: ^physics.State, listener: Li
 	slot.guid = source.sound
 	slot.version = sound.version
 	slot.voice = api.voice_play(&boundary.Voice_Desc{sound = sound.handle, bus = bus_handle(s, int(source.bus)), params = params, loop = b32(source.loop)})
+	return
 }
 
 // update_occlusion casts a few rays, in turn over the sources, and moves each source's occlusion toward what its last
@@ -519,8 +541,8 @@ find_sound :: proc(s: ^State, guid: format.Guid) -> ^Sound_Slot {
 		}
 	}
 	if s.sound_count >= MAX_SOUNDS {
-		if !s.warned_full {
-			s.warned_full = true
+		if .Sounds not_in s.warned {
+			s.warned += {.Sounds}
 			log.warnf("audio: more than %d sounds, so a sound does not play", MAX_SOUNDS)
 		}
 		return nil
