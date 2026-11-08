@@ -3,7 +3,6 @@ package cook
 import "core:fmt"
 import "core:hash"
 import "core:math"
-import "core:os"
 import "core:slice"
 
 import ma "vendor:miniaudio"
@@ -47,23 +46,18 @@ AUDIO_SETTINGS := []Setting_Info {
 }
 
 cook_audio :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	sounds := assets_of(assets, .Audio)
-	if len(sounds) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(sounds) > 0 && !make_output_dir(pass, out_dir, {.Audio}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Audio, "", len(sounds))
 	for i in sounds {
 		defer step_advance(pass)
-		if !cook_sound(&assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_sound(&assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
@@ -78,10 +72,10 @@ audio_setting :: proc(a: Asset_Source, key: string) -> string {
 }
 
 @(private = "file")
-cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
-		return false
+		return .Failed
 	}
 	// A setting is part of the key through the .meta file's text, and so are the codecs through their versions.
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%x\x00", AUDIO_COOK_VERSION, ma.BINDINGS_VERSION_STRING, OPUS_VERSION, VORBIS_VERSION, a.name, format.audio_layout()))
@@ -92,15 +86,14 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 	if cooked_key(output, .Audio, format.audio_layout()) == key && !pass.force[guid] {
-		pass.current[.Audio] += 1
-		return true
+		return .Current
 	}
 	samples, channels, decoded := decode_sound(a.source, audio_setting(a^, "channels"))
 	defer delete(samples)
 	// A sound that fails keeps its old blob, so the running game keeps the last good version.
 	if !decoded {
 		report_error(problems, a.path, 0, 0, "cannot decode this sound. It takes .wav, .ogg, .flac or .mp3 with at least one sample.")
-		return false
+		return .Failed
 	}
 	frames := len(samples) / int(channels)
 	stream: bool
@@ -120,19 +113,18 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 		data, skip, encoded = audio_encode(sound_format, samples[:], int(channels))
 		if !encoded {
 			report_error(problems, a.path, 0, 0, "cannot encode this sound as %v", sound_format)
-			return false
+			return .Failed
 		}
 	}
 	if len(data) > AUDIO_MAX_BYTES {
 		report_error(problems, a.path, 0, 0, "is too long: its data takes more than 4 GiB")
-		return false
+		return .Failed
 	}
 	blob := format.audio_write({guid = guid, key = key, frames = u64(frames), channels = channels, stream = stream, format = sound_format, skip = skip, data = data, source_path = a.name}, context.temp_allocator)
 	if !write_blob(output, blob) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Audio] += 1
-	return true
+	return .Cooked
 }
 
 @(private = "file")

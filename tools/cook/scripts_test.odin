@@ -482,3 +482,22 @@ a_broken_definition_file_fails_the_cook :: proc(t: ^testing.T) {
 	testing.expect(t, !cook(typed_options(t, tree, "declare World: {"), {.Script}).ok)
 	expect_error(t, &errors, "is not a valid definition file")
 }
+
+// The definition file's hash is in every script's key, so a broken one makes every script dirty, and none of them
+// cooks: not only the first, which opens the type checker (#325).
+@(test)
+a_broken_definition_file_fails_every_dirty_script :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"content/a.luau", "return 1"}, {"content/b.luau", "return 2"}, {"content/c.luau", "return 3"}})
+	defer remove_tree(tree)
+	testing.expect(t, cook(typed_options(t, tree), ALL_KINDS, log_problems = false).ok)
+	options := typed_options(t, tree, "declare World: {")
+	pass := cook(options, ALL_KINDS, log_problems = false)
+	testing.expect(t, !pass.ok)
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	testing.expect_value(t, len(index.assets), 3)
+	for _, a in index.assets {
+		testing.expectf(t, a.status == .Failed && a.errors == 1, "%s is %v with %d errors", a.path, a.status, a.errors)
+	}
+}

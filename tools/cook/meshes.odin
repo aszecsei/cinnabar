@@ -107,38 +107,33 @@ Model_Part :: struct {
 // cook_models cooks the models among the assets whose keys changed, and gives each mesh a GUID in its model's .meta
 // file. A model whose meshes do not all cook keeps every old blob. It reports every failure, and returns false if any.
 cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	models := assets_of(assets, .Model)
-	if len(models) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(models) > 0 && !make_output_dir(pass, out_dir, {.Model}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Model, "", len(models))
 	for i in models {
 		defer step_advance(pass)
-		if !cook_model(options, &assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_model(options, &assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
 
 @(private = "file")
-cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
-		return false
+		return .Failed
 	}
 	gltf_options: cgltf.options
 	data, result := cgltf.parse(gltf_options, raw_data(a.source), uint(len(a.source)))
 	if result != .success {
 		report_error(problems, a.path, 0, 0, "cannot read the glTF file: %v", result)
-		return false
+		return .Failed
 	}
 	defer cgltf.free(data)
 
@@ -172,14 +167,16 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	for anim in animations {
 		append(&wanted, Subasset{kind = .Animation, name = anim.name})
 	}
-	assign_subassets(a, wanted[:], force, problems) or_return
+	if !assign_subassets(a, wanted[:], force, problems) {
+		return .Failed
+	}
 	// The sub-assets are the meshes', then the skins', then the animations', in the order of wanted.
 	skin_guids := a.subassets[len(meshes):][:len(skins)]
 	animation_guids := a.subassets[len(meshes) + len(skins):][:len(animations)]
 
 	key, key_ok := model_key(options, a^, data, problems)
 	if !key_ok {
-		return false
+		return .Failed
 	}
 	current := !force
 	for s in a.subassets {
@@ -197,14 +194,13 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		current &&= cooked_key(output, s.kind, layout) == key
 	}
 	if current {
-		pass.current[.Model] += 1
-		return true
+		return .Current
 	}
 
 	path := strings.clone_to_cstring(a.path, context.temp_allocator)
 	if result = cgltf.load_buffers(gltf_options, data, path); result != .success {
 		report_error(problems, a.path, 0, 0, "cannot load the glTF file's buffers: %v", result)
-		return false
+		return .Failed
 	}
 	skin_read_binds(skins, scale)
 	// Every sub-asset cooks before any blob is written, so a model never has some new and some old. The meshes go
@@ -214,7 +210,7 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		skin := &skins[mesh_skins[i]] if mesh_skins[i] >= 0 else nil
 		blob, built := build_mesh(a^, m, skin, a.subassets[i].guid, key, problems)
 		if !built {
-			return false
+			return .Failed
 		}
 		blobs[i] = blob
 	}
@@ -245,14 +241,13 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	for blob, i in blobs {
 		buffer: [32]u8
 		if !write_blob(fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.subassets[i].guid, &buffer)), blob) {
-			return false
+			return .Failed
 		}
 	}
-	pass.cooked[.Model] += 1
-	pass.cooked[.Mesh] += len(meshes)
-	pass.cooked[.Skin] += len(skins)
-	pass.cooked[.Animation] += len(animations)
-	return true
+	count_subassets(pass, .Mesh, .Cooked, len(meshes))
+	count_subassets(pass, .Skin, .Cooked, len(skins))
+	count_subassets(pass, .Animation, .Cooked, len(animations))
+	return .Cooked
 }
 
 // model_setting is an import setting's value, or its default.

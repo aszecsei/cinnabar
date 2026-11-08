@@ -44,13 +44,12 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	if options.dxc == "" {
 		for i in shaders {
 			report_error(problems, assets[i].path, 0, 0, "not cooked: the cooker has no --dxc to compile shaders with")
-			assets[i].failed = true
+			settle(pass, i, .Failed)
 		}
 		return false
 	}
 	out_dir := config_dir(options)
-	if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-		report_error(problems, out_dir, 0, 0, "%v", err)
+	if !make_output_dir(pass, out_dir, {.Shader}) {
 		return false
 	}
 	ok := true
@@ -60,7 +59,7 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		s := &assets[i]
 		inputs, inputs_ok := gather_includes(s.path, s.source, options.includes[:], problems)
 		if !check_settings(s^, problems) || !inputs_ok {
-			s.failed = true
+			settle(pass, i, .Failed)
 			ok = false
 			continue
 		}
@@ -68,7 +67,7 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		buffer: [32]u8
 		output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 		if cooked_key(output, .Shader, format.shader_layout()) == key && !pass.force[s.meta.guid] {
-			pass.current[.Shader] += 1
+			settle(pass, i, .Current)
 			continue
 		}
 		entries := make([dynamic]format.Shader_Code, context.temp_allocator)
@@ -82,17 +81,17 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 			append(&entries, format.Shader_Code{target.stage, .DXIL, code})
 		}
 		if !compiled {
-			s.failed = true
+			settle(pass, i, .Failed)
 			ok = false
 			continue
 		}
 		blob := format.shader_write({guid = s.meta.guid, key = key, entries = entries[:], source_path = s.name}, context.temp_allocator)
 		if !write_blob(output, blob) {
-			s.failed = true
+			settle(pass, i, .Failed)
 			ok = false
 			continue
 		}
-		pass.cooked[.Shader] += 1
+		settle(pass, i, .Cooked)
 	}
 	return ok
 }

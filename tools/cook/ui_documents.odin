@@ -31,14 +31,10 @@ UI_TEMPLATE :: `ui 1
 `
 
 cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	documents := assets_of(assets, .Ui)
-	if len(documents) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(documents) > 0 && !make_output_dir(pass, out_dir, {.Ui}) {
+		return false
 	}
 	kinds := make(map[format.Guid]format.Asset_Kind, len(assets), context.temp_allocator)
 	for a in assets {
@@ -51,16 +47,15 @@ cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^
 	step_begin(pass, .Ui, "", len(documents))
 	for i in documents {
 		defer step_advance(pass)
-		if !cook_ui_document(&assets[i], out_dir, kinds, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_ui_document(&assets[i], out_dir, kinds, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
 
 @(private = "file")
-cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Guid]format.Asset_Kind, pass: ^Pass) -> bool {
+cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Guid]format.Asset_Kind, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
 	document, parse_problems, parsed := format.ui_parse(string(a.source))
@@ -80,7 +75,7 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	}
 	// A document with errors keeps its old blob, so the running game keeps the last good version.
 	if !parsed || !settings_ok {
-		return false
+		return .Failed
 	}
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", UI_COOK_VERSION, a.name, format.ui_layout()))
 	key = hash.fnv64a(a.source, key)
@@ -88,15 +83,13 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 	key = hash.fnv64a(guid[:], key)
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
 	if cooked_key(output, .Ui, format.ui_layout()) == key && !pass.force[guid] {
-		pass.current[.Ui] += 1
-		return true
+		return .Current
 	}
 	blob := format.ui_write({guid = guid, key = key, document = document, source_path = a.name}, context.temp_allocator)
 	if !write_blob(output, blob) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Ui] += 1
-	return true
+	return .Cooked
 }
 
 // ui_check gives the problems of a UI document's text that the editor has not saved, as a cook of the file at this path

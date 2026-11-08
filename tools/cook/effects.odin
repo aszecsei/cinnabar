@@ -3,7 +3,6 @@ package cook
 import "core:fmt"
 import "core:hash"
 import "core:math"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 
@@ -68,29 +67,24 @@ CURVE_COMPONENTS := [format.Effect_Curve]int {
 }
 
 cook_effects :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	effects := assets_of(assets, .Effect)
-	if len(effects) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(effects) > 0 && !make_output_dir(pass, out_dir, {.Effect}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Effect, "", len(effects))
 	for i in effects {
 		defer step_advance(pass)
-		if !cook_effect(&assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_effect(&assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
 
 @(private = "file")
-cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
 	emitters, parse_problems := effect_parse(string(a.source), context.temp_allocator)
@@ -99,7 +93,7 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 	}
 	// An effect with errors keeps its old blob, so the running game keeps the last good version.
 	if len(parse_problems) > 0 || !settings_ok {
-		return false
+		return .Failed
 	}
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", EFFECT_COOK_VERSION, a.name, format.effect_layout()))
 	key = hash.fnv64a(a.source, key)
@@ -108,8 +102,7 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 	if cooked_key(output, .Effect, format.effect_layout()) == key && !pass.force[guid] {
-		pass.current[.Effect] += 1
-		return true
+		return .Current
 	}
 	for e in emitters {
 		for dependency in ([]format.Guid{e.emitter.texture, e.emitter.material, e.emitter.mesh}) {
@@ -120,10 +113,9 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
 	}
 	blob := format.effect_write({guid = guid, key = key, emitters = emitters, source_path = a.name}, context.temp_allocator)
 	if !write_blob(output, blob) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Effect] += 1
-	return true
+	return .Cooked
 }
 
 // effect_parse parses an effect's text into its emitters, with their curves baked. It gives every problem that it

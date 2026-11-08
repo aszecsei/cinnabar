@@ -132,8 +132,8 @@ Asset_Source :: struct {
 	meta_text:    string,
 	meta:         format.Meta,
 	source:       []byte,
-	// The cook could not cook it, so it keeps its old blob.
-	failed:       bool,
+	// What the pass did with it. Only settle changes it.
+	result:       Asset_Result,
 	// The assets that it depends on: a script's requires, and the scripts that a scene's or a prefab's behaviours name
 	// and the prefabs that it instantiates.
 	dependencies: [dynamic]format.Guid,
@@ -153,6 +153,60 @@ Asset_Source :: struct {
 	// For a source that a stage generates, such as its prefab, the stage's GUID: it is not a file of its own, and its
 	// meta is only its GUID (see stages.odin).
 	owner:        format.Guid,
+}
+
+// Asset_Result is what a pass did with an asset. It is Pending until the pass of its kind settles it, and a pass that
+// does not reach it leaves it Pending, which the index reports as failed.
+Asset_Result :: enum u8 {
+	Pending,
+	// Its blob was up to date, or it has nothing to cook.
+	Current,
+	Cooked,
+	// It did not cook, so it keeps its old blob, if it has one.
+	Failed,
+	// It did not cook, because an asset that it depends on failed.
+	Blocked,
+}
+
+// asset_failed is whether an asset's result is a failure.
+asset_failed :: proc(result: Asset_Result) -> bool {
+	return result == .Failed || result == .Blocked
+}
+
+// settle records what the pass did with an asset, and counts it among the kind's cooked or up-to-date assets. It is
+// the only writer of an asset's result, and each asset settles once in a pass.
+settle :: proc(pass: ^Pass, index: int, result: Asset_Result, loc := #caller_location) {
+	a := &pass.assets[index]
+	assert(result != .Pending, "an asset settles with a result", loc)
+	assert(a.result == .Pending, "an asset settles once in a pass", loc)
+	a.result = result
+	#partial switch result {
+	case .Current:
+		pass.current[a.kind] += 1
+	case .Cooked:
+		pass.cooked[a.kind] += 1
+	}
+}
+
+// fail_pending settles each asset of the kinds that is still Pending as Failed: a pass that stops early has not cooked
+// them.
+fail_pending :: proc(pass: ^Pass, kinds: Asset_Kinds) {
+	for a, i in pass.assets {
+		if a.kind in kinds && a.result == .Pending {
+			settle(pass, i, .Failed)
+		}
+	}
+}
+
+// make_output_dir makes a directory that a pass writes into. When it cannot, it reports why, and every asset of the
+// kinds that is still Pending fails.
+make_output_dir :: proc(pass: ^Pass, dir: string, kinds: Asset_Kinds) -> bool {
+	if err := os.make_directory_all(dir); err != nil && err != .Exist {
+		report_error(&pass.problems, dir, 0, 0, "%v", err)
+		fail_pending(pass, kinds)
+		return false
+	}
+	return true
 }
 
 // Subasset is an asset that a source file makes, with its own GUID from the file's .meta file and its own blob.

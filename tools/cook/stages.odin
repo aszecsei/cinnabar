@@ -192,21 +192,18 @@ cook_stages :: proc(options: Cook_Options, pass: ^Pass) -> bool {
 	if len(stages) == 0 {
 		return true
 	}
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	for dir in ([]string{out_dir, fmt.tprintf("%s/stages", out_dir), fmt.tprintf("%s/generated/stages", out_dir)}) {
-		if err := os.make_directory_all(dir); err != nil && err != .Exist {
-			report_error(problems, dir, 0, 0, "%v", err)
+		if !make_output_dir(pass, dir, {.Stage}) {
 			return false
 		}
 	}
 	generated := make([dynamic]Asset_Source, context.temp_allocator)
 	ok := true
 	for i in stages {
-		if !cook_stage(options, &pass.assets[i], out_dir, pass, &generated) {
-			pass.assets[i].failed = true
-			ok = false
-		}
+		result := cook_stage(options, &pass.assets[i], out_dir, pass, &generated)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	if len(generated) > 0 {
 		all := make([]Asset_Source, len(pass.assets) + len(generated), context.temp_allocator)
@@ -252,17 +249,16 @@ stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 }
 
 @(private = "file")
-cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass, generated: ^[dynamic]Asset_Source) -> bool {
+cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass: ^Pass, generated: ^[dynamic]Asset_Source) -> Asset_Result {
 	problems := &pass.problems
 	if !check_settings(a^, problems) {
-		return false
+		return .Failed
 	}
 	key := stage_key(options, a^)
 	manifest_path := fmt.tprintf("%s/stages/%s.deps", out_dir, guid_text(a.meta.guid))
 	old, has_old := read_manifest(manifest_path)
 	if has_old && old.key == key && !pass.force[a.meta.guid] && manifest_current(old, a^, out_dir) {
-		pass.current[.Stage] += 1
-		return use_manifest(a, old, generated, problems)
+		return .Current if use_manifest(a, old, generated, problems) else .Failed
 	}
 
 	instancers := stage_setting(a^, "point_instancers")
@@ -275,13 +271,13 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		if strings.has_prefix(err, "missing layer") {
 			// A stage whose files are not there, as a sample's downloads, is not an error: the build goes on without it.
 			report_warning(problems, a.path, 0, 0, "not cooked: %s. See the README beside the stage for where its files come from.", err)
-			if has_old {
-				return use_manifest(a, old, generated, problems)
+			if has_old && !use_manifest(a, old, generated, problems) {
+				return .Failed
 			}
-			return true
+			return .Current
 		}
 		report_error(problems, a.path, 0, 0, "cannot read the stage: %s", strings.trim_space(err))
-		return false
+		return .Failed
 	}
 	report_stage_warnings(a^, usd_string(cn_usd_warnings(usd)), problems)
 	info: Cn_Usd_Info
@@ -307,7 +303,9 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&wanted, Subasset{kind = .Instance_Set, name = set.name})
 	}
 	append(&wanted, Subasset{kind = .Prefab, name = STAGE_PREFAB_NAME})
-	assign_subassets(a, wanted[:], pass.force[a.meta.guid], problems) or_return
+	if !assign_subassets(a, wanted[:], pass.force[a.meta.guid], problems) {
+		return .Failed
+	}
 	guid_of := make(map[string]format.Guid, len(a.subassets), context.temp_allocator)
 	for s in a.subassets {
 		guid_of[fmt.tprintf("%s.%s", subasset_kind_name(s.kind), s.name)] = s.guid
@@ -386,15 +384,14 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		append(&manifest.subassets, Stage_Manifest_Subasset{.Prefab, prefab_guid, 0, STAGE_PREFAB_NAME, path})
 	}
 	if !ok {
-		return false
+		return .Failed
 	}
 	if !write_manifest(manifest_path, manifest) {
 		report_error(problems, manifest_path, 0, 0, "cannot write the stage's manifest")
-		return false
+		return .Failed
 	}
 	add_generated(a^, manifest, generated, problems)
-	pass.cooked[.Stage] += 1
-	return true
+	return .Cooked
 }
 
 // report_stage_warnings reports LightUSD's warnings about the stage, one problem a line, at most a screenful.
@@ -739,7 +736,7 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 	}
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(set.guid))
 	if cooked_key(output, .Instance_Set, format.instance_set_layout()) == blob_key && !pass.force[a.meta.guid] {
-		pass.current[.Instance_Set] += 1
+		count_subassets(pass, .Instance_Set, .Current)
 		return blob_key, true
 	}
 
@@ -783,7 +780,7 @@ cook_stage_set :: proc(a: Asset_Source, usd: ^Cn_Usd, info: Cn_Usd_Info, set: St
 		report_error(&scratch.problems, output, 0, 0, "cannot write the instance set")
 		return
 	}
-	pass.cooked[.Instance_Set] += 1
+	count_subassets(pass, .Instance_Set, .Cooked)
 	return blob_key, true
 }
 
@@ -946,7 +943,7 @@ Stage_Work :: struct {
 @(private = "file")
 Stage_Job :: struct {
 	blob_key: u64,
-	result:   Cook_Result,
+	result:   Asset_Result,
 	file:     Stage_File,
 	scratch:  Scratch,
 }
@@ -960,16 +957,16 @@ cook_stage_job :: proc(data: rawptr, index: int) {
 	job := &w.jobs[index]
 	job.scratch.problems = Problems{log = w.log}
 	if index < len(w.parts) {
-		cook_stage_part(w, w.parts[index], job)
+		job.result = cook_stage_part(w, w.parts[index], job)
 	} else {
-		cook_stage_texture(w, w.textures[index - len(w.parts)], job)
+		job.result = cook_stage_texture(w, w.textures[index - len(w.parts)], job)
 	}
 	scratch_keep(&job.scratch, &job.file.path)
 	step_advance(w.pass)
 }
 
 @(private = "file")
-cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) {
+cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) -> Asset_Result {
 	a := w.a
 	// A dome's image wraps around the sky.
 	tex := Cn_Usd_Texture{wrap_s = .Repeat, wrap_t = .Repeat}
@@ -981,7 +978,7 @@ cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) {
 	size, modified, stamped := file_stamp(path)
 	if !stamped {
 		report_error(&job.scratch.problems, a.path, 0, 0, "cannot read %s", path)
-		return
+		return .Failed
 	}
 	job.file = {size, modified, path}
 	cook := Texture_Cook {
@@ -996,12 +993,12 @@ cook_stage_texture :: proc(w: ^Stage_Work, t: Stage_Texture, job: ^Stage_Job) {
 	job.blob_key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%v\x00%x\x00%s\x00%v\x00%d\x00%d\x00", STAGE_COOK_VERSION, TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), w.options.config, format.texture_layout(), path, cook, size, modified))
 	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(t.guid))
 	if cooked_key(output, .Texture, format.texture_layout()) == job.blob_key && !w.force {
-		job.result = .Current
-		return
+		return .Current
 	}
-	if cook_stage_texture_blob(w.options, a, path, t, cook, job.blob_key, output, &job.scratch.problems) {
-		job.result = .Cooked
+	if !cook_stage_texture_blob(w.options, a, path, t, cook, job.blob_key, output, &job.scratch.problems) {
+		return .Failed
 	}
+	return .Cooked
 }
 
 @(private = "file")
@@ -1017,19 +1014,19 @@ cook_stage_texture_blob :: proc(options: Cook_Options, a: Asset_Source, path: st
 }
 
 @(private = "file")
-cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) {
+cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) -> Asset_Result {
 	a := w.a
 	problems := &job.scratch.problems
 	m: Cn_Usd_Mesh
 	if cn_usd_mesh(w.usd, p.mesh, &m) == 0 {
 		report_error(problems, a.path, 0, 0, "mesh %s has faces that are not triangles after triangulation", p.name)
-		return
+		return .Failed
 	}
 	basis, scale := stage_basis(a, w.info)
 	cook := stage_cook_mesh(a, m, p, basis, scale)
 	if len(cook.corners) == 0 {
 		report_error(problems, a.path, 0, 0, "mesh %s has no triangles", p.name)
-		return
+		return .Failed
 	}
 	blob_key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.collision, cook.impostor_size))
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.corners), blob_key)
@@ -1040,14 +1037,13 @@ cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) {
 	job.blob_key = blob_key
 	output := fmt.tprintf("%s/%s.blob", w.out_dir, guid_text(p.guid))
 	if cooked_key(output, .Mesh, format.mesh_layout()) == blob_key && !w.force {
-		job.result = .Current
-		return
+		return .Current
 	}
 	if !write_blob(output, finish_mesh(cook, p.guid, blob_key)) {
 		report_error(problems, output, 0, 0, "cannot write the mesh")
-		return
+		return .Failed
 	}
-	job.result = .Cooked
+	return .Cooked
 }
 
 // stage_cook_mesh converts a part of a mesh to corners on the engine's axes in meters, with v down as the engine's

@@ -39,29 +39,24 @@ Animation_Graph_Problem :: struct {
 }
 
 cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	graphs := assets_of(assets, .Animation_Graph)
-	if len(graphs) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(graphs) > 0 && !make_output_dir(pass, out_dir, {.Animation_Graph}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Animation_Graph, "", len(graphs))
 	for i in graphs {
 		defer step_advance(pass)
-		if !cook_animation_graph(&assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_animation_graph(&assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
 
 @(private = "file")
-cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> bool {
+cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
 	contents, parse_problems := animation_graph_parse(string(a.source), context.temp_allocator)
@@ -70,7 +65,7 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 	}
 	// A graph with errors keeps its old blob, so the running game keeps the last good version.
 	if len(parse_problems) > 0 || !settings_ok {
-		return false
+		return .Failed
 	}
 	layout := format.animation_graph_layout()
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", ANIMATION_GRAPH_COOK_VERSION, a.name, layout))
@@ -80,8 +75,7 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 	if cooked_key(output, .Animation_Graph, layout) == key && !pass.force[guid] {
-		pass.current[.Animation_Graph] += 1
-		return true
+		return .Current
 	}
 	for c in contents.clips {
 		if c.clip != {} {
@@ -90,10 +84,9 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 	}
 	contents.guid, contents.key, contents.source_path = guid, key, a.name
 	if !write_blob(output, format.animation_graph_write(contents, context.temp_allocator)) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Animation_Graph] += 1
-	return true
+	return .Cooked
 }
 
 @(private = "file")

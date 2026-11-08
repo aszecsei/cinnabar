@@ -122,11 +122,8 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	out_dir := config_dir(options)
 	ok := true
 	textures := assets_of(assets, .Texture)
-	if len(textures) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(textures) > 0 && !make_output_dir(pass, out_dir, {.Texture}) {
+		return false
 	}
 	work := Texture_Work {
 		pass    = pass,
@@ -145,7 +142,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	for i in textures {
 		a := &assets[i]
 		if !check_settings(a^, problems) {
-			a.failed = true
+			settle(pass, i, .Failed)
 			ok = false
 			continue
 		}
@@ -154,7 +151,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		}
 		set, set_ok := parse_texture_set(a^, assets, by_guid, &named, problems)
 		if !set_ok {
-			a.failed = true
+			settle(pass, i, .Failed)
 			ok = false
 			continue
 		}
@@ -165,7 +162,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	}
 	for i in textures {
 		a := &assets[i]
-		if a.failed {
+		if a.result != .Pending {
 			continue
 		}
 		if !is_texture_set(a^) && texture_setting(a^, "standalone") == "false" {
@@ -173,6 +170,8 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 				report_warning(problems, fmt.tprintf("%s%s", a.path, format.META_EXTENSION), 0, 0, "has standalone = false, but no .texture_set names it, so nothing cooks it")
 			}
 			remove_texture_blob(out_dir, a^, problems)
+			// It has nothing to cook.
+			settle(pass, i, .Current)
 			continue
 		}
 		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], set = sets[i], scratch = {problems = {log = problems.log}}})
@@ -194,12 +193,10 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	step_begin(pass, .Texture, "", len(work.jobs))
 	parallel_for(len(work.jobs), &work, cook_texture_job)
 	for &job in work.jobs {
-		a := &assets[job.asset]
-		a.size = job.size
-		if !finish_job(job.result, &job.scratch, .Texture, pass) {
-			a.failed = true
-			ok = false
-		}
+		assets[job.asset].size = job.size
+		settle(pass, job.asset, job.result)
+		scratch_merge(&job.scratch, pass)
+		ok &&= !asset_failed(job.result)
 	}
 	return ok
 }
@@ -218,13 +215,13 @@ Texture_Work :: struct {
 
 // Texture_Job is one texture's cook: its asset's index, whether it cooks also when its blob is up to date, the layers
 // that it takes from other assets if it is a set, what came of it, the size of the blob that the cache ends up with,
-// cooked now or kept, which the index carries, and the scratch that holds its problems until finish_job.
+// cooked now or kept, which the index carries, and the scratch that holds its problems until the pass merges them.
 @(private = "file")
 Texture_Job :: struct {
 	asset:   int,
 	force:   bool,
 	set:     Texture_Set,
-	result:  Cook_Result,
+	result:  Asset_Result,
 	size:    [2]u32,
 	scratch: Scratch,
 }
@@ -245,9 +242,7 @@ cook_texture_job :: proc(data: rawptr, index: int) {
 		return
 	}
 	blob, cooked := cook_texture(w.options, a, w.assets, job.set, key, &job.scratch.problems)
-	if cooked && write_blob(output, blob) {
-		job.result = .Cooked
-	}
+	job.result = .Cooked if cooked && write_blob(output, blob) else .Failed
 }
 
 // remove_texture_blob deletes the blob of a texture that no longer cooks one, so that it cannot keep drawing.

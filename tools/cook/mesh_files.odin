@@ -6,7 +6,6 @@ package cook
 
 import "core:fmt"
 import "core:hash"
-import "core:os"
 import "core:path/filepath"
 import "core:strconv"
 
@@ -50,23 +49,18 @@ MESH_SETTINGS := []Setting_Info {
 // cook_mesh_files cooks the mesh files among the assets whose keys changed. It parses every one, also one that is up
 // to date, so its problems are known at every cook. It reports every failure, and returns false if any.
 cook_mesh_files :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
-	problems := &pass.problems
 	out_dir := config_dir(options)
 	meshes := assets_of(assets, .Mesh)
-	if len(meshes) > 0 {
-		if err := os.make_directory_all(out_dir); err != nil && err != .Exist {
-			report_error(problems, out_dir, 0, 0, "%v", err)
-			return false
-		}
+	if len(meshes) > 0 && !make_output_dir(pass, out_dir, {.Mesh}) {
+		return false
 	}
 	ok := true
 	step_begin(pass, .Mesh, "", len(meshes))
 	for i in meshes {
 		defer step_advance(pass)
-		if !cook_mesh_file(options, &assets[i], out_dir, pass) {
-			assets[i].failed = true
-			ok = false
-		}
+		result := cook_mesh_file(options, &assets[i], out_dir, pass)
+		settle(pass, i, result)
+		ok &&= !asset_failed(result)
 	}
 	return ok
 }
@@ -77,7 +71,7 @@ cook_mesh_file :: proc(
 	a: ^Asset_Source,
 	out_dir: string,
 	pass: ^Pass,
-) -> bool {
+) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
 	mesh, parsed, parsed_ok := format.mesh_text_parse(string(a.source), context.temp_allocator)
@@ -90,14 +84,13 @@ cook_mesh_file :: proc(
 	}
 	// A mesh with errors keeps its old blob, so the running game keeps the last good version.
 	if !parsed_ok || !settings_ok {
-		return false
+		return .Failed
 	}
 	key := mesh_file_key(a^)
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(a.meta.guid, &buffer))
 	if cooked_key(output, .Mesh, format.mesh_layout()) == key && !pass.force[a.meta.guid] {
-		pass.current[.Mesh] += 1
-		return true
+		return .Current
 	}
 	bake := format.mesh_bake(mesh, context.temp_allocator)
 	for p in bake.problems {
@@ -105,14 +98,13 @@ cook_mesh_file :: proc(
 	}
 	if len(bake.indices) == 0 {
 		report_error(problems, a.path, 0, 0, "has no faces that bake")
-		return false
+		return .Failed
 	}
 	blob := finish_mesh(baked_mesh(a^, bake), a.meta.guid, key)
 	if !write_blob(output, blob) {
-		return false
+		return .Failed
 	}
-	pass.cooked[.Mesh] += 1
-	return true
+	return .Cooked
 }
 
 // baked_mesh is a bake as finish_mesh takes it: its triangles as corners, in the bake's submesh order, which is slot

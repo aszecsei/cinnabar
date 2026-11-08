@@ -436,6 +436,40 @@ tool_textures_and_hotspots_reach_the_index :: proc(t: ^testing.T) {
 	testing.expect(t, !index_changed(index_diff(&index, &again)))
 }
 
+// Materials name a shading model by its file's stem, so two files with one stem, as a game's lit.shading beside the
+// engine's, make neither usable: each fails with an error, and so does a material that names them (#325).
+@(test)
+two_shading_models_with_one_name_both_fail :: proc(t: ^testing.T) {
+	tree := make_tree(
+		t,
+		{
+			{"content/lit.shading", engine_file("shading/lit.shading")},
+			{"content/lit.hlsli", engine_file("shading/lit.hlsli")},
+			{"content/rock.material", ROCK},
+			{"engine/shading/lit.shading", engine_file("shading/lit.shading")},
+			{"engine/shading/lit.hlsli", engine_file("shading/lit.hlsli")},
+		},
+	)
+	defer remove_tree(tree)
+	options := tree_options(tree)
+	append(&options.roots, Root{"engine", fmt.tprintf("%s/engine", tree.dir)})
+	pass := cook(options, ALL_KINDS, log_problems = false)
+	testing.expect(t, !pass.ok)
+	index: Index
+	index_build(&index, pass, options.roots[:])
+	defer index_destroy(&index)
+	testing.expect_value(t, len(index.assets), 3)
+	for _, a in index.assets {
+		testing.expectf(t, a.status == .Failed && a.errors == 1, "%s/%s is %v with %d errors", a.root, a.path, a.status, a.errors)
+	}
+	testing.expect_value(t, len(index.shading.models), 0)
+	for a in pass.assets {
+		if a.kind == .Material {
+			testing.expect_value(t, a.result, Asset_Result.Blocked)
+		}
+	}
+}
+
 // A ribbon material draws particle ribbons with its transparent passes only, and an opaque one is an error.
 @(test)
 ribbon_materials_draw_ribbons :: proc(t: ^testing.T) {

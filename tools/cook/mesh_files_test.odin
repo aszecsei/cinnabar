@@ -126,7 +126,7 @@ mesh_file_problems_name_their_lines_and_errors_keep_the_old_blob :: proc(t: ^tes
 	testing.expectf(t, found, "problems: %v", pass.problems.list)
 	for a in pass.assets {
 		if a.kind == .Mesh {
-			testing.expect(t, a.failed)
+			testing.expect_value(t, a.result, Asset_Result.Failed)
 		}
 	}
 	data = tree_blob(t, tree, guid)
