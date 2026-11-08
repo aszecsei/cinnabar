@@ -263,3 +263,28 @@ the_watcher_sees_changes_under_its_directories :: proc(t: ^testing.T) {
 	watcher_wake(&watcher)
 	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Woken)
 }
+
+// A watched directory that is deleted, as `just clean` deletes the definitions' directory, is watched again once it is
+// made again, and a change in it then cooks.
+@(test)
+the_watcher_watches_a_directory_again_once_it_is_back :: proc(t: ^testing.T) {
+	tree := make_tree(t, {{"defs/cinnabar.d.luau", "-- 1"}})
+	defer remove_tree(tree)
+	dir := fmt.tprintf("%s/defs", tree.dir)
+	watcher: Watcher
+	testing.expect(t, watcher_open(&watcher, {dir}))
+	defer watcher_close(&watcher)
+
+	testing.expect(t, os.remove_all(dir) == nil)
+	// The deletion is a change. The watcher then lets the directory go, so it can be made again.
+	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
+	for watcher_wait(&watcher, 200) == .Changed {
+	}
+	testing.expect(t, os.make_directory(dir) == nil, "the deleted directory cannot be made again")
+	// The wait opens it again, which is a change, since what it held meanwhile was not seen.
+	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
+	for watcher_wait(&watcher, 200) == .Changed {
+	}
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/cinnabar.d.luau", dir), transmute([]byte)string("-- 2")) == nil)
+	testing.expect_value(t, watcher_wait(&watcher, 5000), Wait_Result.Changed)
+}
