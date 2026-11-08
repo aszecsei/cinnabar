@@ -64,11 +64,21 @@ wake_and_start :: proc(r: ^Runtime) {
 
 // set_quiet stops or starts the callbacks that the world's changes run, as the editor's edit mode does (see
 // docs/editor/document-and-scenes.md#modes). While quiet, a despawned behaviour, or one that an edit removes, ends without on_disable or
-// on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one gets awake and on_enable
-// in the next script phase that runs, and one that was awake gets no on_enable. The script phase itself still runs
-// everything: the game does not run it while quiet.
+// on_destroy, and a deactivated one stops its coroutines without on_disable. An activated one that never woke gets
+// awake and on_enable in the next script phase that runs. When quiet ends, each instance, in slot order, gets the
+// on_enable or on_disable that it missed (see docs/scripting/behaviours.md#enabled-state). The script phase itself
+// still runs everything: the game does not run it while quiet.
 set_quiet :: proc(r: ^Runtime, quiet: bool) {
+	was := r.quiet
 	r.quiet = quiet
+	if !was || quiet {
+		return
+	}
+	for &i, index in r.instances[:r.instance_used] {
+		if .Live in i.flags {
+			sync_enabled(r, {u32(index), i.generation})
+		}
+	}
 }
 
 // settle applies the world's changes to the scripts without running script code, as a frame that runs no script phase
