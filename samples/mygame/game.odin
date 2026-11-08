@@ -653,8 +653,10 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
 }
 
-// end_frame swaps the blobs that the cooker rewrote, and reloads the scripts among them.
+// end_frame lets the frame's animation graphs go, then swaps the blobs that the cooker rewrote, and reloads the scripts
+// among them.
 end_frame :: proc(s: ^Game_State) {
+	anim.end_frame(&s.animation)
 	script.reload_changed(&s.scripts, asset.poll(&s.assets))
 }
 
