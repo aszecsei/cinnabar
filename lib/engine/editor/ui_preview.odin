@@ -17,19 +17,23 @@ import "cinnabar:engine/ui"
 // ui.State, which no world syncs and no input reaches, so the game's UI is not touched. Where each element went goes
 // back to the editor, which outlines and picks elements by it.
 
-// Ui_Preview is a UI preview's state: its document's slot, the blob's key that it was built from, the editor's
-// settings, and the bindings, whose strings are on the heap.
+// Ui_Preview is a UI preview's state: its document, while it has one, the editor's settings, and the bindings, whose
+// strings are on the heap.
 @(private)
 Ui_Preview :: struct {
-	slot:        int,
-	open:        bool,
-	key:         u64,
-	settings:    link.Ui_Preview_Settings,
-	bindings:    [dynamic]link.Ui_Preview_Binding,
+	document: Maybe(Ui_Document),
+	settings: link.Ui_Preview_Settings,
+	bindings: [dynamic]link.Ui_Preview_Binding,
 	// The settings and bindings changed since the document last took them.
-	apply:       bool,
-	// The last layout: whether the document was laid out since it was built, its scale, and the hash of the last
-	// report.
+	apply:    bool,
+}
+
+// Ui_Document is a UI preview's document: its slot, the blob's key that it was built from, and the last layout:
+// whether the document was laid out since it was built, its scale, and the hash of the last report.
+@(private)
+Ui_Document :: struct {
+	slot:        int,
+	key:         u64,
 	laid_out:    bool,
 	scale:       f32,
 	layout_sent: u64,
@@ -66,12 +70,19 @@ clear_ui_bindings :: proc(e: ^Editor, u: ^Ui_Preview) {
 @(private)
 close_ui_preview :: proc(e: ^Editor, p: ^Preview) {
 	u := &p.ui_preview
-	if u.open {
-		ui.close_document(&e.ui, u.slot)
-	}
+	drop_ui_document(e, u)
 	clear_ui_bindings(e, u)
 	delete(u.bindings)
 	u^ = {}
+}
+
+// drop_ui_document frees a UI preview's document, when it has one, and keeps its settings and bindings.
+@(private)
+drop_ui_document :: proc(e: ^Editor, u: ^Ui_Preview) {
+	if doc, ok := u.document.?; ok {
+		ui.close_document(&e.ui, doc.slot)
+	}
+	u.document = nil
 }
 
 // ui_preview_data is the blob that a UI preview shows: its unsaved one, or its cooked one.
@@ -102,23 +113,30 @@ sync_ui_preview :: proc(e: ^Editor, p: ^Preview) -> bool {
 	}
 	data := ui_preview_data(e, p)
 	header, valid := format.blob_header(data)
-	if valid && header.kind == .Ui && (!u.open || header.key != u.key) {
-		if u.open {
-			u.open = ui.set_document_data(&e.ui, u.slot, data)
-		} else {
-			u.slot, u.open = ui.open_document(&e.ui, p.material, data)
+	if valid && header.kind == .Ui {
+		if doc, ok := &u.document.?; !ok {
+			slot, opened := ui.open_document(&e.ui, p.material, data)
+			if !opened {
+				return false
+			}
+			u.document = Ui_Document{slot = slot, key = header.key}
+			u.apply = true
+		} else if header.key != doc.key {
+			if !ui.set_document_data(&e.ui, doc.slot, data) {
+				drop_ui_document(e, u)
+				return false
+			}
+			doc.key, doc.laid_out = header.key, false
+			u.apply = true
 		}
-		if !u.open {
-			return false
-		}
-		u.key, u.apply, u.laid_out = header.key, true, false
 	}
-	if !u.open {
+	doc, ok := u.document.?
+	if !ok {
 		return false
 	}
 	if u.apply {
 		u.apply = false
-		d := &e.ui.documents[u.slot]
+		d := &e.ui.documents[doc.slot]
 		ui.set_forced_states(d, u.settings.forced_node, transmute(bit_set[format.Ui_State])u.settings.forced_states)
 		ui.clear_bindings(&e.ui, d)
 		for b in u.bindings {
@@ -165,13 +183,14 @@ draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 		return false
 	}
 	u := &p.ui_preview
+	doc := &u.document.?
 	s := u.settings
 	screen := [2]f32{f32(max(s.screen_width, 1)), f32(max(s.screen_height, 1))}
 	scale := s.scale > 0 ? s.scale : max(screen.y / ui.REFERENCE_HEIGHT, ui.MIN_SCALE)
-	ui.layout_one(&e.ui, u.slot, screen, scale)
-	u.laid_out, u.scale = true, scale
+	ui.layout_one(&e.ui, doc.slot, screen, scale)
+	doc.laid_out, doc.scale = true, scale
 	view := ui.View{scale = s.view_scale > 0 ? s.view_scale : 1, offset = {s.view_x, s.view_y}}
-	return ui.add_document_passes(&e.ui, f, u.slot, view)
+	return ui.add_document_passes(&e.ui, f, doc.slot, view)
 }
 
 // send_ui_layouts tells the editor where each UI preview's elements went when it last drew, when that changed.
@@ -179,20 +198,21 @@ draw_ui_preview :: proc(f: ^render.Frame) -> bool {
 send_ui_layouts :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allocator) {
 	for &p, id in e.session.previews {
 		u := &p.ui_preview
-		if !p.open || !p.ui || !u.open || !u.laid_out {
+		doc, ok := &u.document.?
+		if !p.open || p.kind != .Ui || !ok || !doc.laid_out {
 			continue
 		}
-		d := &e.ui.documents[u.slot]
+		d := &e.ui.documents[doc.slot]
 		message := link.Ui_Preview_Layout {
 			id     = u32(id),
-			key    = u.key,
-			scale  = u.scale,
+			key    = doc.key,
+			scale  = doc.scale,
 			width  = u.settings.screen_width,
 			height = u.settings.screen_height,
 			nodes  = make([]link.Ui_Layout_Node, len(d.nodes), allocator),
 		}
 		for n, i in d.nodes {
-			pad := n.style.padding * u.scale
+			pad := n.style.padding * doc.scale
 			message.nodes[i] = {
 				source  = n.source,
 				shown   = n.shown,
@@ -204,8 +224,8 @@ send_ui_layouts :: proc(e: ^Editor, out: ^[dynamic]byte, allocator: runtime.Allo
 		encoded := make([dynamic]byte, allocator)
 		link.write_message(&encoded, message)
 		h := max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
-		if h != u.layout_sent {
-			u.layout_sent = h
+		if h != doc.layout_sent {
+			doc.layout_sent = h
 			append(out, ..encoded[:])
 		}
 	}
