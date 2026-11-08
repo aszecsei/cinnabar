@@ -74,6 +74,32 @@ public class SceneFileTests
         Assert.Equal(ScenePath.Id(0x2000000000000005, 0x1000000000000002), nested!.Find(0x9000000000000001)!.Node);
     }
 
+    [Fact]
+    public void EachBlockHasTheKindThatTheFileGivesIt()
+    {
+        // A file can give node before prefab: the block takes it once it is done.
+        const string text = "scene 2\n\nentity 9000000000000001\nnode = @2000000000000002\nprefab = $22222222222222222222222222222222\n\n"
+            + "entity 9000000000000001#2000000000000003\nremoved = true\n\nentity 9000000000000004\nname = \"Plain\"\n";
+        var (scene, problems) = SceneFile.Parse(text);
+        Assert.Empty(problems);
+        Assert.Equal([BlockKind.Instance, BlockKind.Override, BlockKind.Plain], scene!.Entities.Select(e => e.Kind));
+        Assert.Equal(0x2000000000000002ul, scene.Entities[0].Node);
+        Assert.True(scene.Entities[1].Removed);
+        // A copy keeps the kind.
+        Assert.Equal([BlockKind.Instance, BlockKind.Override, BlockKind.Plain], scene.Clone().Entities.Select(e => e.Kind));
+    }
+
+    [Theory]
+    [InlineData("scene 2\n\nentity 9000000000000001#2000000000000002\nprefab = $22222222222222222222222222222222\n", "cannot change which prefab")]
+    [InlineData("scene 2\n\nentity 9000000000000001\nremoved = true\n", "only an override block")]
+    public void AKeyThatTheBlocksKindDoesNotTakeIsAnErrorAndIsNotSet(string text, string fragment)
+    {
+        var (scene, problems) = SceneFile.Parse(text);
+        Assert.Contains(problems, p => p.IsError && p.Message.Contains(fragment));
+        Assert.All(scene?.Entities ?? [], e => Assert.True(e.Prefab == "" || e.Kind == BlockKind.Instance));
+        Assert.All(scene?.Entities ?? [], e => Assert.False(e.Removed && e.Kind != BlockKind.Override));
+    }
+
     [Theory]
     [InlineData("scene 2\n\nentity 9000000000000001\nnode = @2000000000000002\n", "only an instance block takes node")]
     [InlineData("scene 2\n\nentity 9000000000000001#2000000000000002\nnode = @2000000000000002\n", "only an instance block takes node")]

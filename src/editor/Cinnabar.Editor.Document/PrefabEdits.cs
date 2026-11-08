@@ -268,7 +268,7 @@ public static partial class PrefabEdits
         [.. fields.Where(f => prefab?.Find(p => p.Name == f.Name)?.Value != f.Value).Select(f => f with { Value = Pathed(document, f.Value)! })];
 
     static bool IsEmptyOverride(SceneEntity block) =>
-        block.Path != null && block.Keys == SceneKeys.None && !block.Removed && block.Components.Count == 0 && block.Behaviours.Count == 0
+        block.Kind == BlockKind.Override && block.Keys == SceneKeys.None && !block.Removed && block.Components.Count == 0 && block.Behaviours.Count == 0
         && block.RemovedComponents.Count == 0 && block.RemovedBehaviours.Count == 0 && block.UnknownKeys.Count == 0;
 
     /// <summary>

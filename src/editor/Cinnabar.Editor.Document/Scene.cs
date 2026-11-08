@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 
 namespace Cinnabar.Editor.Document;
 
@@ -25,10 +26,31 @@ public sealed class Scene
     }
 }
 
+/// <summary>
+/// What a scene's entity block is (see docs/editor/prefabs.md#instances-in-a-scene): a plain entity, an instance of a
+/// prefab, or an override of an entity inside an instance. <see cref="SceneEntity.Kind"/> gives it.
+/// </summary>
+public enum BlockKind
+{
+    Plain,
+    Instance,
+    Override,
+}
+
 public sealed class SceneEntity(ulong id)
 {
     /// <summary>An override block of the entity on a path inside an instance (see docs/editor/prefabs.md#instances-in-a-scene).</summary>
-    public SceneEntity(IReadOnlyList<ulong> path) : this(ScenePath.Id(path)) => Path = path;
+    public SceneEntity(IReadOnlyList<ulong> path) : this(ScenePath.Id(path))
+    {
+        Debug.Assert(path.Count >= 2, "an override block's path has the instance and the entity");
+        Path = path;
+    }
+
+    /// <summary>
+    /// The block's kind: an override when it has a path, which it has from its construction on, an instance when it names
+    /// a prefab, and plain otherwise. The setters of <see cref="Prefab"/> and <see cref="Node"/> keep the kinds apart.
+    /// </summary>
+    public BlockKind Kind => Path != null ? BlockKind.Override : Prefab != "" ? BlockKind.Instance : BlockKind.Plain;
 
     /// <summary>
     /// The scene ID: random, nonzero and unique in the scene. An override block's is its path's, so that
@@ -38,13 +60,29 @@ public sealed class SceneEntity(ulong id)
     /// <summary>An override block's path: the instance's ID, any inner instances' and the entity's. Null for any other block.</summary>
     public IReadOnlyList<ulong>? Path { get; }
     /// <summary>An instance block: the GUID of the prefab whose root it stands for, as 32 lowercase hex digits, or "".</summary>
-    public string Prefab { get; set; } = "";
+    public string Prefab
+    {
+        get;
+        set
+        {
+            Debug.Assert(value == "" || Path == null, "an override block cannot change which prefab its entity instantiates");
+            field = value;
+        }
+    } = "";
 
     /// <summary>
     /// For an instance block: the entity of the prefab's expansion that it instantiates with its descendants, in place of
     /// the whole prefab, or 0.
     /// </summary>
-    public ulong Node { get; set; }
+    public ulong Node
+    {
+        get;
+        set
+        {
+            Debug.Assert(value == 0 || Kind == BlockKind.Instance, "only an instance block takes node: set its prefab first");
+            field = value;
+        }
+    }
     /// <summary>
     /// Which of name, parent and active an instance or override block writes, since it changes only those of the
     /// prefab's entity. A plain entity writes a name that is not empty, a parent that is not 0 and active when false.
@@ -71,7 +109,7 @@ public sealed class SceneEntity(ulong id)
     public List<(string Key, string Text)> UnknownKeys { get; } = [];
 
     /// <summary>A copy that shares nothing that can change with this one.</summary>
-    public SceneEntity Clone() => Path != null ? CopyInto(new SceneEntity(Path)) : Copy(Id);
+    public SceneEntity Clone() => Path is { } path ? CopyInto(new SceneEntity(path)) : Copy(Id);
 
     /// <summary>A copy with another scene ID, which is not an override block.</summary>
     public SceneEntity Copy(ulong id) => CopyInto(new SceneEntity(id));

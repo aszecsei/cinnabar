@@ -18,17 +18,17 @@ public static partial class SceneFile
         {
             sb.Append("\nentity ").Append(e.Path != null ? ScenePath.Format(e.Path) : e.Id.ToString("x16", CultureInfo.InvariantCulture)).Append('\n');
             // A plain entity writes what differs from an entity's defaults, and a prefab's entity what it overrides.
-            var plain = e.Path == null && e.Prefab == "";
+            var plain = e.Kind == BlockKind.Plain;
             if (plain ? e.Name.Length > 0 : e.Keys.HasFlag(SceneKeys.Name))
             {
                 sb.Append("name = ").Append(TextQuote.Quote(e.Name)).Append('\n');
             }
-            if (e.Path == null ? e.Parent != 0 : e.Keys.HasFlag(SceneKeys.Parent))
+            if (e.Kind != BlockKind.Override ? e.Parent != 0 : e.Keys.HasFlag(SceneKeys.Parent))
             {
                 var parent = e.ParentPath is { } path && ScenePath.Id(path) == e.Parent ? SceneValue.EntityRef(path) : SceneValue.EntityRef(e.Parent);
                 sb.Append("parent = ").Append(FormatValue(parent)).Append('\n');
             }
-            if (e.Prefab != "")
+            if (e.Kind == BlockKind.Instance)
             {
                 sb.Append("prefab = $").Append(e.Prefab).Append('\n');
             }

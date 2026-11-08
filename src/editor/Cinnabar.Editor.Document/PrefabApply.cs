@@ -21,7 +21,7 @@ public static partial class PrefabEdits
         {
             return false;
         }
-        return scene.Entities.Any(e => e.Prefab != "" && Contains(document, e.Prefab, other, depth + 1));
+        return scene.Entities.Any(e => e.Kind == BlockKind.Instance && Contains(document, e.Prefab, other, depth + 1));
     }
 
     // A working copy of a prefab as a document, whose routed operations make the prefab's next snapshot, with the
@@ -33,7 +33,7 @@ public static partial class PrefabEdits
     static (PrefabDocument Prefab, ulong Root) PrefabOf(SceneDocument document, ulong instance)
     {
         var block = document.Scene.Find(instance);
-        if (block is not { Prefab: not "" } || document.Prefabs.Find(block.Prefab) is not { } prefab
+        if (block is not { Kind: BlockKind.Instance } || document.Prefabs.Find(block.Prefab) is not { } prefab
             || PrefabExpansion.RootOf(prefab.Scene) is not ({ } root, 1))
         {
             throw new InvalidOperationException("the instance's prefab is not open, or does not have one root");
@@ -200,7 +200,7 @@ public static partial class PrefabEdits
     {
         var (prefab, root) = PrefabOf(document, instance);
         var (overrides, tops, added, moved) = Parts(document, instance);
-        foreach (var b in added.Where(b => b.Prefab != ""))
+        foreach (var b in added.Where(b => b.Kind == BlockKind.Instance))
         {
             if (Contains(document, b.Prefab, prefab.Guid))
             {
@@ -238,13 +238,13 @@ public static partial class PrefabEdits
             {
                 Run(new SetActive(local, block.Active));
             }
-            if (block.Path != null && block.Keys.HasFlag(SceneKeys.Parent) && map(SceneValue.EntityRef(block.ParentPath ?? [block.Parent])) is { } parent)
+            if (block.Kind == BlockKind.Override && block.Keys.HasFlag(SceneKeys.Parent) && map(SceneValue.EntityRef(block.ParentPath ?? [block.Parent])) is { } parent)
             {
                 Run(SceneEdits.Reparent(working.Expanded.Flat, local, parent.Entity).Take(1).ToArray());
             }
             Run([.. block.RemovedComponents.Where(c => target.Components.Any(x => x.Id == c)).Select(c => new RemoveComponent(local, c))]);
             Run([.. block.RemovedBehaviours.Where(s => target.Behaviours.Any(x => x.Script == s)).Select(s => new RemoveBehaviour(local, s))]);
-            foreach (var c in block.Components.Where(c => block.Path != null || c.Id is not (SceneEdits.TransformId or SceneEdits.LocalTransformId)))
+            foreach (var c in block.Components.Where(c => block.Kind == BlockKind.Override || c.Id is not (SceneEdits.TransformId or SceneEdits.LocalTransformId)))
             {
                 var fields = Split(c.Fields, map, out var outside);
                 if (outside.Count > 0)
@@ -276,7 +276,7 @@ public static partial class PrefabEdits
                     Run([.. fields.Select(f => new SetBehaviourField(local, b.Script, f.Name, f.Value))]);
                 }
             }
-            if (block.Path == null || keep.Components.Count + keep.Behaviours.Count > 0)
+            if (block.Kind != BlockKind.Override || keep.Components.Count + keep.Behaviours.Count > 0)
             {
                 kept.Add(keep);
             }
@@ -285,7 +285,7 @@ public static partial class PrefabEdits
         var into = added.Select(b =>
         {
             var copy = b.Clone();
-            if (copy.Path == null && map(SceneValue.EntityRef(copy.ParentPath ?? [copy.Parent])) is { } parent)
+            if (copy.Kind != BlockKind.Override && map(SceneValue.EntityRef(copy.ParentPath ?? [copy.Parent])) is { } parent)
             {
                 copy.Parent = parent.Entity;
                 copy.ParentPath = parent.Path;
@@ -369,7 +369,7 @@ public static partial class PrefabEdits
     public static (Operation[] Operations, PrefabDocument Variant) MakeVariant(SceneDocument document, ulong instance, string path)
     {
         var block = document.Scene.Find(instance);
-        if (block is not { Prefab: not "" })
+        if (block is not { Kind: BlockKind.Instance })
         {
             throw new InvalidOperationException($"{instance:x16} is not an instance");
         }
@@ -450,7 +450,7 @@ public static partial class PrefabEdits
         foreach (var b in added)
         {
             var copy = b.Clone();
-            if (copy.Path == null && Map(SceneValue.EntityRef(copy.ParentPath ?? [copy.Parent])) is { } parent)
+            if (copy.Kind != BlockKind.Override && Map(SceneValue.EntityRef(copy.ParentPath ?? [copy.Parent])) is { } parent)
             {
                 copy.Parent = parent.Entity;
                 copy.ParentPath = parent.Path;
