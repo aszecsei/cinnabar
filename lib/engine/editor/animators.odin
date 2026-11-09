@@ -68,24 +68,18 @@ instance_view :: proc(data: []byte, blob: ^format.Animation_Graph_Blob, inst: ^a
 	}
 }
 
-// send_animators sends the view of each watched entity's Animator that changed since the editor last got it, and one
-// empty view for an Animator that has gone, so the editor keeps no old state.
+// send_animators sends the view of each watched entity's Animator that changed since the editor last got it: the first
+// after a watch, whatever it is, so the editor drops a view that it kept from an earlier watch, then one empty view for
+// an Animator that has gone, so the editor keeps no old state.
 @(private)
 send_animators :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte, allocator: runtime.Allocator) {
 	for &watched in e.session.watched {
 		view := animator_view(e, w, watched.entity, allocator)
-		if view.graph == {} {
-			if watched.animator_sent != 0 {
-				watched.animator_sent = 0
-				link.write_message(out, view)
-			}
-			continue
-		}
 		encoded := make([dynamic]byte, allocator)
 		link.write_message(&encoded, view)
-		// A hash of 0 means that the editor knows of none, so a real 0 counts as 1.
-		h := max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
-		if h != watched.animator_sent {
+		// 0 is the empty view's, so a real 0 counts as 1.
+		h := view.graph == {} ? 0 : max(hash.fnv64a(encoded[link.HEADER_SIZE:]), 1)
+		if sent, ok := watched.animator_sent.?; !ok || sent != h {
 			watched.animator_sent = h
 			append(out, ..encoded[:])
 		}

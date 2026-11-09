@@ -207,9 +207,38 @@ an_animator_that_goes_away_says_so_once :: proc(t: ^testing.T) {
 	testing.expect_value(t, views(f)[0].graph, [16]u8{})
 	testing.expect_value(t, len(views(f)), 0)
 
-	// An entity without one never sends any.
+	// An entity without one sends one empty view after its watch, then none.
 	plain := ecs.spawn(&f.world)
-	testing.expect_value(t, len(views(f, link.Watch_Entity{u64(plain)})), 0)
+	list = views(f, link.Watch_Entity{u64(plain)})
+	if testing.expect_value(t, len(list), 1) {
+		testing.expect_value(t, list[0].graph, [16]u8{})
+	}
+	testing.expect_value(t, len(views(f)), 0)
+}
+
+// The editor keeps a view after an unwatch, so a watch again sends the view as it is now, even an empty one: an
+// Animator that went while the entity was not watched does not show as playing.
+@(test)
+a_watch_again_sends_the_view_even_when_it_is_empty :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	e := playing(f)
+	testing.expect_value(t, len(views(f, link.Watch_Entity{u64(e)})), 1)
+	views(f, link.Unwatch_Entity{u64(e)})
+	ecs.remove(&f.world, e, anim.Animator)
+
+	list := views(f, link.Watch_Entity{u64(e)})
+	if testing.expect_value(t, len(list), 1) {
+		testing.expect_value(t, ecs.Entity(list[0].entity), e)
+		testing.expect_value(t, list[0].graph, [16]u8{})
+	}
+	testing.expect_value(t, len(views(f)), 0)
+
+	// And one that plays sends its view again after a watch, though it did not change.
+	again := playing(f)
+	testing.expect_value(t, len(views(f, link.Watch_Entity{u64(again)})), 1)
+	views(f, link.Unwatch_Entity{u64(again)})
+	testing.expect_value(t, len(views(f, link.Watch_Entity{u64(again)})), 1)
 }
 
 @(test)
