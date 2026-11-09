@@ -101,7 +101,7 @@ public sealed class ResourceMonitorView : Grid
                 .. VirtualShadowRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
-                // The reflection probes, while the quality has them: the probes, the slots whose probe has a cube, and the faces captured.
+                // The reflections: while the quality has the probes, the probes, the slots whose probe has a cube and the faces captured, and their memory.
                 .. ReflectionProbeRows(g),
                 ("Behaviours", $"{g.Behaviours:N0}"),
                 ("Script memory", ResourceStats.Bytes(g.ScriptBytes)),
@@ -132,8 +132,9 @@ public sealed class ResourceMonitorView : Grid
         }
     }
 
-    // The reflection probes' rows, none without them (see docs/rendering/lighting-and-shadows.md#reflection-probes): the
-    // probes in the frame, the slots whose probe has a cube of the level's, and the faces that the frame captured.
+    // The reflections' rows, none without them (see docs/rendering/lighting-and-shadows.md#reflection-probes): the probes in
+    // the frame, the slots whose probe has a cube of the level's, and the faces that the frame captured, while the
+    // quality has the probes, and the memory that the reflections keep between frames.
     internal static IEnumerable<(string Name, string Value)> ReflectionProbeRows(Link.Protocol.GameStats g)
     {
         if (g.ReflectionProbeCapacity > 0)
@@ -141,6 +142,10 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Reflection probes", $"{g.ReflectionProbes:N0}");
             yield return ("Reflection probe slots", $"{g.ReflectionProbeSlots:N0} / {g.ReflectionProbeCapacity:N0}");
             yield return ("Reflection probe faces", $"{g.ReflectionProbeFaces:N0}");
+        }
+        if (g.ReflectionMemory > 0)
+        {
+            yield return ("Reflection memory", ResourceStats.Bytes(g.ReflectionMemory));
         }
     }
 

@@ -60,6 +60,9 @@ Screen_Reflections :: struct {
 	lit:        Shader_Pipeline,
 	// Counts the frames, for the noise and the half resolution's pixel.
 	frame:      u32,
+	// The bytes of the histories that the last frame kept, its own lit scene's and the reflections', each with its
+	// previous frame's: 0 in a frame without the screen-space or traced reflections.
+	memory:     u64,
 }
 
 // Ssr_Constants matches Ssr_Constants in ssr_common.hlsli.
@@ -192,6 +195,7 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	r := f.renderer
 	s := &r.ssr
 	platform := r.platform
+	s.memory = 0
 	if settings.off || (settings.technique != .Screen && settings.technique != .Ray_Traced) {
 		return
 	}
@@ -230,6 +234,11 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	sf.history = history_texture(g, {size = f.size, format = SSR_FORMAT, label = "reflections"})
 	if sf.lit.current == 0 || sf.history.current == 0 {
 		return
+	}
+	texel := u64(gpu.format_size(SSR_FORMAT))
+	s.memory = 2 * texel * u64(f.size.x) * u64(f.size.y)
+	if !sf.shares_lit {
+		s.memory += 2 * texel * u64(sf.lit_size.x) * u64(sf.lit_size.y)
 	}
 	s.frame += 1
 	right, up, forward := view_axes(f.view)

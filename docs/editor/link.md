@@ -28,7 +28,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Pick_Request`, `Pick_Result`, `Viewport_Settings` |
+| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Viewport_Settings` |
 | Mode | `Set_Mode`, `Step_Frame`, and `Editor_Input`, which the host handles |
 | Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
 | Profile | `Profile_Summary`, `Profile_Capture_Request`, `Profile_Capture` and `Profile_Recording`, which the host handles (see [Profile](#profile)) |
@@ -39,6 +39,7 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Sky | `Sky_Sun_Request` and `Sky_Sun`: where the texture sky's sun is, which the game answers from its renderer, or why it has none (see [Sky](../rendering/sky.md#texture)) |
 | Animators | `Animator_View`, what a watched entity's Animator plays, or with an entity of 0 an animation graph's preview, and `Set_Preview_Parameter` and `Restart_Preview` (see [Animation graph editor](animation-graph-editor.md#preview)) |
 | UI previews | `Ui_Preview_Settings`, how a preview shows a UI document, and `Ui_Preview_Layout`, where its elements went (see [UI editor](ui-editor.md#the-games-side)) |
+| Reflection probes | `Capture_Reflection_Probes`, the probes to capture now, none for all, and `Reflection_Probe_View`, a watched probe's slot and last capture, when it changes (see [Viewport](viewport.md#reflection-probes)) |
 
 ### Profile
 

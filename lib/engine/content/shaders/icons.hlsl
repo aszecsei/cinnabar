@@ -1,8 +1,9 @@
 #include "cinnabar.hlsli"
 
-// The editor's icons for lights, volumes and cameras (see docs/editor/viewport.md#viewport): a disc that faces the camera, a
-// fixed size on screen, with a glyph for its kind in its light's color. It draws into the debug layer, and its entity's
-// ID and depth into the ID buffer and the scene's depth, so the pick and the outline find it as they find a mesh.
+// The editor's icons for lights, volumes, cameras and reflection probes (see docs/editor/viewport.md#viewport): a disc that
+// faces the camera, a fixed size on screen, with a glyph for its kind in its light's color, or for a reflection probe a
+// sphere that reflects its cube. It draws into the debug layer, and its entity's ID and depth into the ID buffer and
+// the scene's depth, so the pick and the outline find it as they find a mesh.
 
 // Matches Icons_Constants in icons.odin.
 struct Push {
@@ -12,16 +13,22 @@ struct Push {
 	float2 viewport;
 	// The icon's diameter in pixels.
 	float size;
-	uint3 padding;
+	// The reflection probes' cube array, 0 without it, and the sampler that it is read with.
+	uint cubes;
+	uint cube_sampler;
+	uint padding;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
-// Matches Icon_Instance in icons.odin: a position relative to the view, the kind, the color and the ID.
+// Matches Icon_Instance in icons.odin: a position relative to the view, the kind, the color, the ID, and a reflection
+// probe's cube of the array, -1 for none.
 struct Instance {
 	float3 position;
 	uint kind;
 	float3 color;
 	uint id;
+	int cube;
+	uint3 padding;
 };
 
 // Match editor.Icon_Kind.
@@ -31,6 +38,7 @@ static const uint ICON_DIRECTIONAL = 2;
 static const uint ICON_AREA = 3;
 static const uint ICON_VOLUME = 4;
 static const uint ICON_CAMERA = 5;
+static const uint ICON_REFLECTION_PROBE = 6;
 
 struct Varyings {
 	float4 position : SV_Position;
@@ -38,6 +46,9 @@ struct Varyings {
 	nointerpolation float3 color : COLOR0;
 	nointerpolation uint kind : KIND;
 	nointerpolation uint id : ID;
+	nointerpolation int cube : CUBE;
+	// The direction from the eye to the icon, which a probe's sphere reflects.
+	nointerpolation float3 toward : TOWARD;
 };
 
 struct Targets {
@@ -60,7 +71,28 @@ Varyings vs_main(uint vertex_id : SV_VertexID) {
 	o.color = instance.color;
 	o.kind = instance.kind;
 	o.id = instance.id;
+	o.cube = instance.cube;
+	o.toward = normalize(instance.position);
 	return o;
+}
+
+// probe_sphere is a reflection probe's icon: a mirror ball, its normal from the disc's uv about the direction to the
+// icon and the world's up, reflecting the probe's cube at its sharpest mip. Before its first capture, it is grey and
+// lit from above.
+float3 probe_sphere(Varyings i) {
+	float2 p = i.uv / 0.95;
+	float z = sqrt(saturate(1 - dot(p, p)));
+	float3 forward = i.toward;
+	float3 side = abs(forward.y) < 0.99 ? float3(0, 1, 0) : float3(1, 0, 0);
+	float3 right = normalize(cross(side, forward));
+	float3 up = cross(forward, right);
+	float3 n = right * p.x + up * p.y - forward * z;
+	if (i.cube < 0 || push.cubes == 0) {
+		return float3(0.35, 0.35, 0.38) * (0.6 + 0.4 * n.y);
+	}
+	float3 r = reflect(forward, n);
+	TextureCubeArray<float4> cubes = cn_texture_cube_array(push.cubes);
+	return cubes.SampleLevel(cn_sampler(push.cube_sampler), float4(r, i.cube), 0).rgb;
 }
 
 float box(float2 p, float2 half_size) {
@@ -111,9 +143,14 @@ Targets ps_main(Varyings i) {
 	float disc = length(i.uv) - 0.95;
 	clip(-disc + pixel * 0.5);
 	float edge = saturate(0.5 - disc / pixel);
-	float inside = saturate(0.5 - glyph(i.kind, i.uv) / pixel);
-	float3 background = float3(0.08, 0.08, 0.1);
-	float3 color = lerp(background, i.color, inside);
+	float3 color;
+	if (i.kind == ICON_REFLECTION_PROBE) {
+		color = probe_sphere(i);
+	} else {
+		float inside = saturate(0.5 - glyph(i.kind, i.uv) / pixel);
+		float3 background = float3(0.08, 0.08, 0.1);
+		color = lerp(background, i.color, inside);
+	}
 	// A thin light rim, so the icon shows on a dark scene.
 	color = lerp(color, float3(0.7, 0.7, 0.75), saturate(1 - abs(disc + pixel) / pixel) * 0.6);
 	Targets o;

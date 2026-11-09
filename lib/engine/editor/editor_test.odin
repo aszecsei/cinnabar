@@ -2,6 +2,8 @@ package editor
 
 import "base:runtime"
 import "core:log"
+import "core:math"
+import "core:math/linalg"
 import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
@@ -686,6 +688,119 @@ gizmos_are_triangles_with_the_hot_part_highlighted :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(none), 0)
 }
 
+// The box handles are a cube each, about their positions, in their box's color, and the hot one in the gizmo's highlight.
+// The game keeps the last Box_Handles, and an empty one clears them.
+@(test)
+box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
+	v := render.View {
+		rotation     = 1,
+		vertical_fov = 1,
+		near         = 0.05,
+	}
+	hot := pack_color({GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1})
+	handles := []link.Box_Handle{{position = {0, 0, 5 << 24}, kind = .Influence}, {position = {1 << 24, 0, 5 << 24}, kind = .Projection, hot = true}}
+	vertices := make([dynamic]Gizmo_Vertex, context.temp_allocator)
+	box_handle_vertices(handles, 0.2, v, &vertices)
+	// 6 faces of 2 triangles each.
+	testing.expect_value(t, len(vertices), 2 * 36)
+	for vertex, i in vertices {
+		testing.expect_value(t, vertex.color == hot, i >= 36)
+		center := i < 36 ? [3]f32{0, 0, 5} : [3]f32{1, 0, 5}
+		testing.expect(t, linalg.length(vertex.position - center) <= 0.1 * math.sqrt(f32(3)) + 1e-4)
+	}
+
+	f := setup(t)
+	defer teardown(f)
+	step(f, 1, link.Box_Handles{size = 0.2, handles = handles})
+	testing.expect_value(t, len(f.editor.session.view.handles), 2)
+	testing.expect_value(t, f.editor.session.view.handle_size, 0.2)
+	step(f, 1, link.Box_Handles{})
+	testing.expect_value(t, len(f.editor.session.view.handles), 0)
+}
+
+// probe_views are the Reflection_Probe_Views among a poll's messages.
+@(private = "file")
+probe_views :: proc(messages: []link.Message) -> []link.Reflection_Probe_View {
+	views := make([dynamic]link.Reflection_Probe_View, context.temp_allocator)
+	for m in messages {
+		if view, ok := m.(link.Reflection_Probe_View); ok {
+			append(&views, view)
+		}
+	}
+	return views[:]
+}
+
+// A capture that the editor asks for forces the probe's slot, or every slot with none. A watched probe's state goes out
+// when it changes, but for its age, and once as None when the probe goes. The stats have the reflections' memory.
+@(test)
+reflection_probes_capture_when_asked_and_report_their_state :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	render.register_components(&f.world.registry)
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	f.editor.renderer = renderer
+	rp := &renderer.reflection_probes
+	probe := ecs.spawn(&f.world)
+	ecs.add(&f.world, probe, ecs.TRANSFORM_IDENTITY)
+	ecs.add(&f.world, probe, render.Reflection_Probe{})
+	other := ecs.spawn(&f.world)
+	ecs.add(&f.world, other, ecs.TRANSFORM_IDENTITY)
+	ecs.add(&f.world, other, render.Reflection_Probe{})
+	step(f)
+
+	// The reflections are off: the cubes are not made, so the view is None, which the editor knows already.
+	testing.expect_value(t, len(probe_views(step(f, 1, link.Watch_Entity{u64(probe)}))), 0)
+	rp.params = render.REFLECTION_PARAMS[.Probes][.Low]
+	rp.params.probes = 2
+	rp.cubes.texture = gpu.Texture{index = 1}
+	views := probe_views(step(f))
+	testing.expect_value(t, len(views), 1)
+	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe), status = .No_Slot})
+	testing.expect_value(t, len(probe_views(step(f))), 0)
+
+	rp.slots[0] = {used = true, entity = probe}
+	rp.slots[1] = {used = true, entity = other}
+	views = probe_views(step(f))
+	testing.expect_value(t, views[0].status, link.Reflection_Probe_Status.Waiting)
+	views = probe_views(step(f, 1, link.Capture_Reflection_Probes{entities = {u64(probe)}}))
+	testing.expect(t, rp.slots[0].forced && !rp.slots[1].forced)
+	testing.expect(t, len(views) == 1 && views[0].capturing)
+
+	// The capture finishes, provisional: Captured, with its age, which alone does not send it again.
+	rp.slots[0].forced = false
+	rp.slots[0].cube = render.Reflection_Probe_Cube{index = 1, time = clock}
+	views = probe_views(step(f))
+	testing.expect_value(t, len(views), 1)
+	testing.expect(t, views[0].status == .Captured && !views[0].complete && !views[0].capturing)
+	testing.expect(t, views[0].age >= 1)
+	testing.expect_value(t, len(probe_views(step(f))), 0)
+	// Another capture's time sends it again.
+	rp.slots[0].cube = render.Reflection_Probe_Cube{index = 2, time = clock, complete = true}
+	views = probe_views(step(f))
+	testing.expect(t, len(views) == 1 && views[0].complete)
+
+	// None asks for every probe that holds a slot.
+	step(f, 1, link.Capture_Reflection_Probes{})
+	testing.expect(t, rp.slots[0].forced && rp.slots[1].forced)
+
+	// The stats have the probes' cubes.
+	stats: link.Game_Stats
+	for m in step_all(f) {
+		if s, ok := m.(link.Game_Stats); ok {
+			stats = s
+		}
+	}
+	testing.expect_value(t, stats.reflection_memory, render.reflection_probe_memory(rp.params))
+
+	// The probe goes: one None view, then none.
+	ecs.remove(&f.world, probe, render.Reflection_Probe)
+	views = probe_views(step(f))
+	testing.expect_value(t, len(views), 1)
+	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe)})
+	testing.expect_value(t, len(probe_views(step(f))), 0)
+}
+
 @(test)
 hidden_entities_hide_their_descendants :: proc(t: ^testing.T) {
 	f := setup(t)
@@ -979,6 +1094,26 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	step(f, 1, link.Viewport_Settings{global_illumination = .Off})
 	q, _ = viewport_quality(&f.editor, renderer)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Off)
+	// The reflections' technique and level each replace the game's, or the preset's, on their own; without Ray_Query,
+	// the traced reflections are the screen-space ones.
+	game := renderer.quality.reflections
+	step(f, 1, link.Viewport_Settings{reflections = .Probes})
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok)
+	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Probes, level = game.level})
+	step(f, 1, link.Viewport_Settings{reflections_level = .Ultra})
+	q, ok = viewport_quality(&f.editor, renderer)
+	testing.expect(t, ok)
+	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = game.technique, level = .Ultra})
+	step(f, 1, link.Viewport_Settings{quality_preset = .Ultra, reflections = .Ray_Traced, reflections_level = .Low})
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Screen, level = .Low})
+	renderer.caps = {ray_query = true}
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Ray_Traced)
+	step(f, 1, link.Viewport_Settings{reflections = .Off})
+	q, _ = viewport_quality(&f.editor, renderer)
+	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Off)
 	step(f, 0)
 	_, ok = viewport_quality(&f.editor, renderer)
 	testing.expect(t, !ok, "without an editor, the game's quality")

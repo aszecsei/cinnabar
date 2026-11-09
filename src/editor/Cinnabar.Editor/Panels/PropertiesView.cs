@@ -6,6 +6,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using CommunityToolkit.Mvvm.Input;
 using Cinnabar.Editor.Document;
+using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Shell;
 
@@ -40,6 +41,11 @@ public sealed class PropertiesView : ScrollViewer
     // Groups that the user collapsed, by title, which stay collapsed across selections.
     readonly SectionExpander _sections = new();
     string _structure = "";
+    // The selected reflection probe's state and Capture, which its view and the host's state update in place, and the
+    // probe's entity.
+    TextBlock? _probeStatus;
+    Button? _probeCapture;
+    ulong _probeEntity;
 
     public PropertiesView(EditorShell shell)
     {
@@ -69,6 +75,8 @@ public sealed class PropertiesView : ScrollViewer
             .Add(() => _shell.SceneChanged += OnSceneChanged, () => _shell.SceneChanged -= OnSceneChanged)
             .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
             .Add(() => _shell.ModeChanged += Rebuild, () => _shell.ModeChanged -= Rebuild)
+            .Add(() => _shell.ReflectionProbesChanged += ShowProbeStatus, () => _shell.ReflectionProbesChanged -= ShowProbeStatus)
+            .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState)
             .Add(() => _shell.Assets.Changed += OnSceneChanged, () => _shell.Assets.Changed -= OnSceneChanged);
     }
 
@@ -127,6 +135,7 @@ public sealed class PropertiesView : ScrollViewer
     {
         _content.Children.Clear();
         _grid.Clear();
+        (_probeStatus, _probeCapture) = (null, null);
         var node = _world.Find(_selection.Entity);
         _structure = Structure();
         if (node != null && _selection.Count > 1)
@@ -173,8 +182,9 @@ public sealed class PropertiesView : ScrollViewer
             });
             var note = id == SceneEdits.TransformId && node.Parent != 0 ? "Propagation writes a child's Transform from its Local Transform." : null;
             var added = prefabBase != null && prefabBase.Components.All(c => c.Id != id);
+            var footer = id == SceneEdits.ReflectionProbeId ? ProbeFooter(node.Handle) : null;
             _content.Children.Add(Group(title, fields, badge: added ? "Added" : null,
-                remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note));
+                remove: removable ? () => _shell.Edit($"Remove {title}", new RemoveComponent(document!.Id, id)) : null, note: note, footer: footer));
         }
         var attached = new HashSet<string>();
         foreach (var behaviour in _world.Values(node.Handle)?.Behaviours ?? [])
@@ -566,15 +576,57 @@ public sealed class PropertiesView : ScrollViewer
     static bool InDocument(SceneComponent component, Link.Protocol.FieldInfo f) =>
         component.Fields.Any(x => x.Name == f.Name || (f.HasOverride && x.Name == f.Name + FieldEditor.OverrideSuffix));
 
-    Control Group(string title, IEnumerable<FieldRow> fields, string? badge = null, bool disabled = false, Action? remove = null, string? note = null)
+    Control Group(string title, IEnumerable<FieldRow> fields, string? badge = null, bool disabled = false, Action? remove = null, string? note = null, Control? footer = null)
     {
         var rows = _grid.Rows(fields);
         Control content = rows;
-        if (note != null)
+        if (note != null || footer != null)
         {
-            content = new StackPanel { Spacing = 4, Children = { new TextBlock { Text = note, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap }, rows } };
+            var stack = new StackPanel { Spacing = 4 };
+            if (note != null)
+            {
+                stack.Children.Add(new TextBlock { Text = note, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap });
+            }
+            stack.Children.Add(rows);
+            if (footer != null)
+            {
+                stack.Children.Add(footer);
+            }
+            content = stack;
         }
         return Expander(title, content, badge, disabled, remove);
+    }
+
+    // A reflection probe's state, from the game, and Capture, which captures it now (see
+    // docs/editor/shell-and-panels.md#properties).
+    Control ProbeFooter(ulong entity)
+    {
+        _probeEntity = entity;
+        _probeStatus = new TextBlock { Classes = { "dim" }, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center };
+        var command = _shell.Commands.Get(EditorCommands.CaptureProbe);
+        _probeCapture = new Button { Content = "Capture", Classes = { "field-button" }, VerticalAlignment = VerticalAlignment.Top };
+        ToolTip.SetTip(_probeCapture, command.Description);
+        _probeCapture.Click += (_, _) => command.Execute();
+        ShowProbeStatus();
+        var footer = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), ColumnSpacing = 8 };
+        Grid.SetColumn(_probeCapture, 1);
+        footer.Children.Add(_probeStatus);
+        footer.Children.Add(_probeCapture);
+        return footer;
+    }
+
+    void OnHostState(HostState _) => ShowProbeStatus();
+
+    void ShowProbeStatus()
+    {
+        if (_probeStatus != null)
+        {
+            _probeStatus.Text = ReflectionProbeStatusText.Describe(_shell.ProbeView(_probeEntity), _shell.Host.Linked);
+        }
+        if (_probeCapture != null)
+        {
+            _probeCapture.IsEnabled = _shell.Commands.Get(EditorCommands.CaptureProbe).CanExecute;
+        }
     }
 
     // A component that the document has and the game does not: the scene keeps it, and the panel shows its values.

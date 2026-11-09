@@ -42,6 +42,9 @@ View :: struct {
 	// The entities that the editor hides, with their descendants. The game does not draw them.
 	hidden:     [dynamic]ecs.Entity,
 	gizmo:      link.Gizmo_State,
+	// A reflection probe's box handles, from Box_Handles, as cubes of handle_size meters.
+	handles:    [dynamic]link.Box_Handle,
+	handle_size: f32,
 	picks:      [dynamic]link.Pick_Request,
 	// picks[0] was rendered with Viewport.ticket, and its results come back through the readback buffer.
 	picking:    bool,
@@ -170,6 +173,14 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality,
 		q.gi.technique = render.Gi_Technique(int(s.global_illumination) - 1)
 		ok = true
 	}
+	if s.reflections != .Game {
+		q.reflections.technique = render.Reflection_Technique(int(s.reflections) - 1)
+		ok = true
+	}
+	if s.reflections_level != .Game {
+		q.reflections.level = render.Quality_Level(int(s.reflections_level) - 1)
+		ok = true
+	}
 	if s.render_scale > 0 {
 		q.render_scale = s.render_scale
 		ok = true
@@ -180,6 +191,8 @@ viewport_quality :: proc(e: ^Editor, r: ^render.Renderer) -> (q: render.Quality,
 #assert(int(max(link.Viewport_Preset)) == int(render.Quality_Preset.Ultra) + 1)
 #assert(int(max(link.Viewport_Aa)) == int(max(render.Aa_Technique)) + 1)
 #assert(int(max(link.Viewport_Gi)) == int(max(render.Gi_Technique)) + 1)
+#assert(int(max(link.Viewport_Reflections)) == int(max(render.Reflection_Technique)) + 1)
+#assert(int(max(link.Viewport_Level)) == int(max(render.Quality_Level)) + 1)
 
 // entity_id is an entity's value in the ID buffer: its index + 1, so 0 is no entity. A pick finds the entity that
 // is in that slot when the answer arrives.
@@ -264,8 +277,9 @@ add_viewport_passes :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: 
 			overlay.outline = true
 		}
 	}
-	if tools.gizmo.kind != .None {
+	if tools.gizmo.kind != .None || len(tools.handles) > 0 {
 		vertices := make([dynamic]Gizmo_Vertex, platform.frame_allocator)
+		box_handle_vertices(tools.handles[:], tools.handle_size, frame.view, &vertices)
 		gizmo_vertices(tools.gizmo, frame.view, &vertices)
 		if upload, ok := platform.gpu_upload(max(len(vertices), 1) * size_of(Gizmo_Vertex), 16); ok && len(vertices) > 0 {
 			copy(upload.data, ([^]byte)(raw_data(vertices))[:len(vertices) * size_of(Gizmo_Vertex)])
@@ -571,6 +585,10 @@ handle_viewport_message :: proc(e: ^Editor, message: link.Message) -> bool {
 		}
 	case link.Gizmo_State:
 		v.gizmo = m
+	case link.Box_Handles:
+		clear(&v.handles)
+		append(&v.handles, ..m.handles)
+		v.handle_size = m.size
 	case link.Viewport_Settings:
 		v.settings = m
 	case link.Pick_Request:
@@ -742,6 +760,22 @@ gizmo_vertices :: proc(gizmo: link.Gizmo_State, view: render.View, out: ^[dynami
 			cube(&b, end, axes, GIZMO_CUBE * s, c)
 		}
 		cube(&b, center, axes, GIZMO_CENTER * s, color(gizmo, .View))
+	}
+}
+
+// box_handle_vertices builds the box handles' triangles, relative to the view: a cube of size meters on each handle, in
+// its box's color, and the hot one in the highlight color. They go before the gizmo, which draws over them.
+@(private)
+box_handle_vertices :: proc(handles: []link.Box_Handle, size: f32, view: render.View, out: ^[dynamic]Gizmo_Vertex) {
+	right, up, forward := render.view_axes(view)
+	b := Gizmo_Builder{out, right, up}
+	for h in handles {
+		c := PROBE_COLORS[h.kind]
+		if h.hot {
+			c = {GIZMO_HOT.r, GIZMO_HOT.g, GIZMO_HOT.b, 1}
+		}
+		center := ecs.position_sub({h.position}, view.position)
+		cube(&b, center, {right, up, forward}, size * 0.5, pack_color(c))
 	}
 }
 

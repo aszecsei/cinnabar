@@ -21,6 +21,8 @@ public static class SceneEdits
     public const ulong FogId = 38;
     /// <summary>The renderer's Environment setting (see docs/rendering/sky.md#sky).</summary>
     public const ulong EnvironmentId = 49;
+    /// <summary>The renderer's Reflection_Probe (see docs/rendering/lighting-and-shadows.md#reflection-probes).</summary>
+    public const ulong ReflectionProbeId = 54;
     /// <summary>The renderer's Clouds setting (see docs/rendering/clouds.md#clouds).</summary>
     public const ulong CloudsId = 55;
     /// <summary>A volume's setting's override flag is a field of its own in a scene, which only false needs (see docs/world/volumes.md#volumes).</summary>

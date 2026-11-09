@@ -111,6 +111,10 @@ What they show:
   5. The `Realtime` probes, the one whose capture is oldest first.
 
   A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
+- **A capture on request:** the editor's Capture and Capture All Probes (see [Editor](../editor/viewport.md#reflection-probes)) mark probes forced (`capture_reflection_probe`, `capture_reflection_probes`).
+  - A forced probe comes before every other in the turns, the nearest first, and ends a capture in flight of a probe that is not forced, which starts over later. A capture is forced while its probe is, so forcing the probe whose capture is in flight keeps the faces that it drew.
+  - A forced capture draws all of its faces in one frame, whatever the level's budget, and the probe is no longer forced once it finishes. So one probe captures a frame, and N probes take N frames.
+  - Only a probe that holds a slot can be forced. A probe added in this frame has its slot from the next.
 - **Provisional captures:** a capture records whether its inputs were complete (`reflection_probe_inputs_complete`). A frame's inputs are complete when all of these are true:
   - No asset streams to the GPU.
   - Each material that the scene draws has its textures resident and its own pipelines compiled, so no bin draws a stand-in. A material whose pipelines failed draws its stand-in until its shader changes, so a capture does not wait for it.
@@ -127,7 +131,8 @@ What they show:
 - **After the last face:**
   - The source's mip chain is made one pass per mip, each mip the mean of the one before it (`reflection probe downsample`).
   - The sky's [prefilter](sky.md#specular-light) convolves the source into the spare cube, from a mirror at mip 0 to roughness 1 at the last.
-  - The probe uses that cube from the next frame on. Its old cube, or a cube that no slot holds, becomes the spare. So a probe's cube never changes while a frame reads it.
+  - The probe uses that cube from that frame's view on: the frame's records give the probe the spare cube, which the view's lookups read after the prefilter, and a face looks no probe up. Its old cube, or a cube that no slot holds, becomes the spare once the frame executes. So a probe's cube never changes while a frame reads it.
+  - The cube records the frame and the host's time (`platform.time_seconds`) when it finished, which the editor shows as when the probe was captured (`reflection_probe_state`).
 - **Binning:** the records of the probes with a cube are in the upload ring, in this order: highest priority first, then the smallest box, so a room's probe wins over the hall around it, then by slot.
   - The cluster pass tests each probe's turned influence box against the cluster's box, using the box around it in view space. `probe_reaches_box` is the matching Odin test.
   - Each cluster keeps the first `MAX_CLUSTER_PROBES` (7) probes in a fixed list: its count, then its indices.
@@ -163,7 +168,7 @@ What they show:
 | Ultra | 24 µs | 82 µs |
 
 - **The debug view** `Reflection_Probes` colors each pixel by its strongest probe's cube, and red where no probe counts.
-- **The Resource Monitor** shows the probes, the slots whose probe has a cube, and the faces that the frame captured (`reflection_probe_stats`).
+- **The Resource Monitor** shows the probes, the slots whose probe has a cube, and the faces that the frame captured (`reflection_probe_stats`), and the reflections' memory: the probes' cubes while they are made, and the screen-space or traced reflections' histories (`reflection_memory`).
 - **The sample:**
   - The room scene's probe fills the room, and its projection box is the walls. Its polished floor reflects the pillar at the pillar's foot.
   - The glass scene has two probes that overlap over the glass. The sorted side's probe is `Realtime`, so it follows the lamp that the spinner carries.

@@ -15,7 +15,7 @@ public sealed partial class EditorShell
 {
     /// <summary>The settings of a viewport that shows the lit scene, with every feature, the icons and the selection's shapes.</summary>
     public static readonly ViewportSettings DefaultViewportSettings =
-        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, ViewportGi.Game, 0);
+        new(DebugView.Lit, false, false, false, false, false, false, false, false, false, false, false, false, 0, true, HelperMode.Selected, ViewportPreset.Game, ViewportAa.Game, ViewportGi.Game, 0, ViewportReflections.Game, ViewportLevel.Game);
 
     /// <summary>The viewport's choice that keeps the game's quality.</summary>
     public const string GameQualityLabel = "Game's";
@@ -28,6 +28,12 @@ public sealed partial class EditorShell
 
     /// <summary>The viewport's global illumination, as the ribbon shows it, in <see cref="ViewportGi"/>'s order.</summary>
     public static IReadOnlyList<string> ViewportGiNames { get; } = [GameQualityLabel, "Off", "Screen Cascades", "Split Cascades", "Voxel Cones"];
+
+    /// <summary>The viewport's reflections, as the ribbon shows them, in <see cref="ViewportReflections"/>'s order.</summary>
+    public static IReadOnlyList<string> ViewportReflectionsNames { get; } = [GameQualityLabel, "Off", "Probes", "Screen Space", "Ray Traced"];
+
+    /// <summary>A level of the viewport's quality, as the ribbon shows it, in <see cref="ViewportLevel"/>'s order.</summary>
+    public static IReadOnlyList<string> ViewportLevelNames { get; } = [GameQualityLabel, "Low", "Medium", "High", "Ultra"];
 
     /// <summary>The viewport's render scales, as the ribbon shows them, and their values; 0 keeps the game's.</summary>
     public static IReadOnlyList<(string Label, float Scale)> ViewportRenderScales { get; } =
