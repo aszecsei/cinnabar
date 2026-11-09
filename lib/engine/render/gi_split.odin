@@ -282,7 +282,7 @@ gi_split_state_destroy :: proc(s: ^Gi_Split_State, platform: ^core.Platform_API)
 
 // gi_split_stats is the split cascades' tables of the frame's own view, a frame or two ago (see Gi_Split_Stats).
 gi_split_stats :: proc(r: ^Renderer) -> Gi_Split_Stats {
-	return r.view.gi.split.last_stats
+	return stats_state(r).gi.split.last_stats
 }
 
 // read_gi_split_stats keeps the newest counters' copy that has come back, with the cascades' slots. Without the split

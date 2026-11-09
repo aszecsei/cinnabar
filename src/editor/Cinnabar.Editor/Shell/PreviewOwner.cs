@@ -57,10 +57,13 @@ public abstract class PreviewOwner : IPreviewOwner, IDisposable
         if (previewId != null)
         {
             Preview = new ViewportSession();
-            Preview.SizeRequested += size =>
+            Preview.PresenceChanged += () =>
             {
-                Size = (Math.Clamp(size.Width, 16, 1024), Math.Clamp(size.Height, 16, 1024));
-                SendSettings();
+                if (Preview.Presence is ViewportPresence.Shown { Size: var size })
+                {
+                    Size = (Math.Clamp(size.Width, 16, 1024), Math.Clamp(size.Height, 16, 1024));
+                    SendSettings();
+                }
             };
             Preview.FrameCopied += (generation, frame) =>
             {

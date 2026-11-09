@@ -544,3 +544,179 @@ a_pipeline_is_ready_once_it_exists_and_failed_without_one :: proc(t: ^testing.T)
 	testing.expect_value(t, pipeline_status(pipeline), gpu.Pipeline_Status.Failed)
 	testing.expect_value(t, pipeline_status({}), gpu.Pipeline_Status.Failed)
 }
+
+// poll_one polls the one capture that a frame finished, and releases it: only its description is left.
+@(private = "file")
+poll_one :: proc(t: ^testing.T) -> (capture: gpu.Frame_Capture, ok: bool) {
+	capture, ok = poll_frame_capture()
+	testing.expect(t, ok)
+	release_frame_capture(capture)
+	capture.pixels = nil
+	return
+}
+
+@(test)
+a_viewports_target_has_its_size_and_a_generation_for_each_size :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+
+	begin_frame({64, 32})
+	a, ok := viewport_target(2, {40, 20})
+	testing.expect(t, ok)
+	testing.expect_value(t, a.size, [2]u32{40, 20})
+	testing.expect_value(t, a.generation, 0)
+	end_frame()
+
+	// A side beyond the largest is clamped, and a new size is a new generation.
+	begin_frame({64, 32})
+	b, _ := viewport_target(2, {gpu.MAX_VIEWPORT_SIZE + 1, 20})
+	testing.expect_value(t, b.size, [2]u32{gpu.MAX_VIEWPORT_SIZE, 20})
+	testing.expect_value(t, b.generation, 1)
+	testing.expect_value(t, b.texture, a.texture)
+	end_frame()
+
+	// Not for a viewport that does not exist, with no size, or in a frame that records nothing.
+	begin_frame({64, 32})
+	_, bad := viewport_target(gpu.MAX_VIEWPORT_TARGETS, {8, 8})
+	testing.expect(t, !bad)
+	_, empty := viewport_target(0, {0, 8})
+	testing.expect(t, !empty)
+	end_frame()
+	begin_frame({0, 0})
+	_, minimized := viewport_target(0, {8, 8})
+	testing.expect(t, !minimized)
+	end_frame()
+
+	// Released, it starts again as a new generation.
+	release_viewport_target(2)
+	begin_frame({64, 32})
+	c, again := viewport_target(2, {40, 20})
+	testing.expect(t, again)
+	testing.expect_value(t, c.generation, 2)
+	end_frame()
+}
+
+@(test)
+a_capture_of_a_viewport_reads_its_target_when_the_frame_drew_it :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+	testing.expect_value(t, capture_source(), nil)
+
+	// The start: the frame target.
+	begin_frame({64, 32})
+	end_frame()
+	testing.expect(t, request_frame_capture(1))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ := poll_one(t)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.viewport, nil)
+	testing.expect_value(t, capture.size, [2]u32{64, 32})
+
+	// The viewport's target has its own size, and the frame target's mode does not apply to it.
+	set_capture_source(1)
+	testing.expect_value(t, capture_source(), 1)
+	testing.expect(t, request_frame_capture(2))
+	begin_frame({64, 32})
+	_, drawn := viewport_target(1, {40, 20})
+	testing.expect(t, drawn)
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.ticket, 2)
+	testing.expect_value(t, capture.source, gpu.Capture_Source.Frame)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.viewport, 1)
+	testing.expect_value(t, capture.size, [2]u32{40, 20})
+	testing.expect_value(t, capture.format, gpu.FRAME_TARGET_FORMAT)
+	testing.expect_value(t, capture.mode, gpu.Output_Mode.Sdr)
+}
+
+@(test)
+a_capture_of_a_viewport_that_the_frame_did_not_draw_is_cancelled :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+	begin_frame({64, 32})
+	end_frame()
+
+	// A viewport that never opened, one that exists but the frame skipped, and one that is out of range.
+	set_capture_source(0)
+	testing.expect(t, request_frame_capture(1))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ := poll_one(t)
+	testing.expect_value(t, capture.ticket, 1)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Cancelled)
+	testing.expect_value(t, capture.viewport, 0)
+
+	begin_frame({64, 32})
+	_, made := viewport_target(0, {16, 8})
+	testing.expect(t, made)
+	end_frame()
+	testing.expect(t, request_frame_capture(2))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Cancelled)
+
+	set_capture_source(gpu.MAX_VIEWPORT_TARGETS + 3)
+	testing.expect(t, request_frame_capture(3))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Cancelled)
+
+	// A closed viewport has no target to copy, though it drew before.
+	set_capture_source(0)
+	release_viewport_target(0)
+	testing.expect(t, request_frame_capture(4))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Cancelled)
+
+	// And back to the frame target, which the frame always draws.
+	set_capture_source(nil)
+	testing.expect(t, request_frame_capture(5))
+	begin_frame({64, 32})
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.viewport, nil)
+}
+
+@(test)
+a_request_keeps_the_source_that_it_was_made_with :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	testing.expect(t, init(nil, {64, 32}))
+	defer shutdown()
+	begin_frame({64, 32})
+	end_frame()
+
+	// The editor changes the source between the request and its frame: the copy is of the source at the request.
+	set_capture_source(3)
+	testing.expect(t, request_frame_capture(1))
+	set_capture_source(nil)
+	begin_frame({64, 32})
+	_, drawn := viewport_target(3, {32, 16})
+	testing.expect(t, drawn)
+	end_frame()
+	capture, _ := poll_one(t)
+	testing.expect_value(t, capture.viewport, 3)
+	testing.expect_value(t, capture.status, gpu.Capture_Status.Ready)
+	testing.expect_value(t, capture.size, [2]u32{32, 16})
+
+	// A texture's copy is of its texture, whatever the source.
+	set_capture_source(3)
+	texture := create_texture({size = {16, 8}, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "thumbnail"}, nil)
+	defer destroy_texture(texture)
+	begin_frame({64, 32})
+	testing.expect(t, request_texture_capture(texture, 9))
+	end_frame()
+	capture, _ = poll_one(t)
+	testing.expect_value(t, capture.source, gpu.Capture_Source.Texture)
+	testing.expect_value(t, capture.viewport, nil)
+	testing.expect_value(t, capture.size, [2]u32{16, 8})
+}

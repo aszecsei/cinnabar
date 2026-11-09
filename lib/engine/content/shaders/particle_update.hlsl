@@ -5,9 +5,7 @@
 // color, size and emission from the emitter's curves at its age. A ribbon's emitter instead spawns over its oldest
 // particles in its range's order, and appends no sprites: ribbon_build.hlsl draws them. A mesh emitter's living
 // particles append their instances instead, which its draws draw its mesh at (see
-// docs/rendering/particles.md#mesh-particles). A view other than the frame's own dispatches the emitters with
-// EMITTER_DRAW: they step and spawn nothing, and append the sprites of the particles that the frame's own view stepped,
-// relative to that view's camera.
+// docs/rendering/particles.md#mesh-particles).
 #include "particles.hlsli"
 #include "sprites.hlsli"
 
@@ -181,29 +179,6 @@ void step(inout Particle p, Emitter_Record e, float dt) {
 	}
 }
 
-// append_particle_sprite appends a living particle's sprite, with its color, size and emission from the emitter's curves
-// at its age.
-void append_particle_sprite(Emitter_Record e, Particle p) {
-	float t = p.age / p.lifetime;
-	Sprite_Record s;
-	s.position = p.position + e.anchor;
-	s.size = curve_at(e.curves + CURVE_SIZE, t).x;
-	s.color = curve_at(e.curves + CURVE_COLOR, t);
-	s.emission = curve_at(e.curves + CURVE_EMISSION, t).rgb;
-	s.rotation = p.rotation;
-	s.uv_rect = float4(0, 0, 1, 1);
-	uint frames = e.flipbook.x * e.flipbook.y;
-	if (frames > 1) {
-		uint frame = uint(p.age * e.flipbook_rate) % frames;
-		float2 cell = 1.0 / float2(e.flipbook);
-		s.uv_rect = float4(float2(frame % e.flipbook.x, frame / e.flipbook.x) * cell, cell);
-	}
-	s.texture = e.texture;
-	s.softness = e.softness;
-	s.padding = 0;
-	append_sprite(constants.sprites, constants.sprite_count, s);
-}
-
 [numthreads(64, 1, 1)]
 void cs_main(uint3 id : SV_DispatchThreadID) {
 	Emitter_Record e = load_emitter(push.emitter);
@@ -213,13 +188,6 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	RWByteAddressBuffer pool = cn_rw_buffer(constants.pool);
 	uint address = (e.first + id.x) * sizeof(Particle);
 	Particle p = pool.Load<Particle>(address);
-	if ((e.flags & EMITTER_DRAW) != 0) {
-		// The particles are as the frame's own view's update left them, the living ones with a lifetime.
-		if (e.reset == 0 && p.lifetime > 0 && p.age < p.lifetime && (e.flags & (EMITTER_RIBBON | EMITTER_MESH)) == 0) {
-			append_particle_sprite(e, p);
-		}
-		return;
-	}
 	float dt = e.delta;
 	bool alive = e.reset == 0 && p.lifetime > 0;
 	bool ribbon = (e.flags & EMITTER_RIBBON) != 0;
@@ -271,5 +239,22 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 		return;
 	}
 
-	append_particle_sprite(e, p);
+	float t = p.age / p.lifetime;
+	Sprite_Record s;
+	s.position = p.position + e.anchor;
+	s.size = curve_at(e.curves + CURVE_SIZE, t).x;
+	s.color = curve_at(e.curves + CURVE_COLOR, t);
+	s.emission = curve_at(e.curves + CURVE_EMISSION, t).rgb;
+	s.rotation = p.rotation;
+	s.uv_rect = float4(0, 0, 1, 1);
+	uint frames = e.flipbook.x * e.flipbook.y;
+	if (frames > 1) {
+		uint frame = uint(p.age * e.flipbook_rate) % frames;
+		float2 cell = 1.0 / float2(e.flipbook);
+		s.uv_rect = float4(float2(frame % e.flipbook.x, frame / e.flipbook.x) * cell, cell);
+	}
+	s.texture = e.texture;
+	s.softness = e.softness;
+	s.padding = 0;
+	append_sprite(constants.sprites, constants.sprite_count, s);
 }

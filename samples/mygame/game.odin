@@ -267,6 +267,8 @@ Pipelines :: struct {
 // Frame is what the pass procedures need. It lives in frame memory.
 Frame :: struct {
 	state:          ^Game_State,
+	// The editor's viewport that the frame is, or 0 for the game's own camera without one.
+	viewport:       int,
 	// The scene's size, at the quality's render scale, which before_world takes from the renderer's frame.
 	size:           [2]u32,
 	view:           render.View,
@@ -593,11 +595,14 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if size.x <= 0 || size.y <= 0 {
 		return true
 	}
-	pass, ok := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN)
-	if !ok {
-		return true
-	}
-	view := camera_view(s)
+	render_frame(s, {u32(size.x), u32(size.y)})
+	return true
+}
+
+// view_frame is the sample's data for a view of the frame: the constants of its own passes, and its triangles relative
+// to the view. It is false when the upload ring has no room for the constants.
+view_frame :: proc(s: ^Game_State, viewport: int, size: [2]u32, view: render.View) -> (frame: ^Frame, ok: bool) {
+	pass := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN) or_return
 	aspect := f32(size.x) / f32(size.y)
 	right, up, forward := render.view_axes(view)
 	(^Pass_Constants)(raw_data(pass.data))^ = {
@@ -610,8 +615,16 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		tan_half_fov    = math.tan(view.vertical_fov * 0.5),
 		near            = view.near,
 	}
-	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
-	return true
+	frame = new(Frame, s.platform.frame_allocator)
+	frame^ = {
+		state          = s,
+		viewport       = viewport,
+		size           = size,
+		view           = view,
+		pass_constants = pass,
+	}
+	extract_triangles(frame)
+	return frame, true
 }
 
 // tone_pan is the test tone's pan: how far the first spinning entity's presented X axis points along the view's right.
@@ -642,11 +655,9 @@ draw_spin_axes :: proc(s: ^Game_State) {
 	}
 }
 
-// camera_view is the editor's camera while an editor is linked, and the scene's camera otherwise.
+// camera_view is the scene's camera, which the game draws from: the editor's Game view draws from it, and so does the
+// game without an editor. The editor's scene views draw from the editor's cameras.
 camera_view :: proc(s: ^Game_State) -> render.View {
-	if view, ok := editor.view(&s.editor); ok {
-		return view
-	}
 	if view, ok := render.camera_view(&s.world, s.camera); ok {
 		return view
 	}
@@ -685,58 +696,72 @@ stream_rings :: proc(s: ^Game_State) {
 }
 
 // render_frame draws the frame with the built-in renderer, which draws the Mesh_Renderers, and adds the sample's own
-// work through its hooks: the triangles in the world pass,
-// the ray-traced shadows and the post pass after it, the UI's documents in the UI layer, and the editor's tools in the
-// debug layer. The render graph places the barriers between the passes and the waits between the queues.
-render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
-	frame := new(Frame, s.platform.frame_allocator)
-	frame^ = {
-		state          = s,
-		size           = size,
-		view           = view,
-		pass_constants = pass_constants,
-	}
-	extract_triangles(frame)
-	// A linked editor, in any mode: the frame writes the IDs for its picks and takes its viewport settings.
-	editing := editor.active(&s.editor)
-	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
-	// none without an editor. The shapes draw only in Edit.
-	overrides := editor.render_overrides(&s.editor)
-	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
+// work through its hooks: the triangles in the world pass, the ray-traced shadows and the post pass after it, the UI's
+// documents in the UI layer, and the editor's tools in the debug layer. The render graph places the barriers between the
+// passes and the waits between the queues. A linked editor shows viewports (see docs/editor/viewport.md#views), each a view
+// of the frame with the sample's own passes: the Game view, from the scene's camera, draws the UI and nothing of the
+// editor's, and a scene view, from the editor's camera, draws the editor's tools and no UI. The first view that
+// editor.frame_viewports gives is the frame's own, and the others are extra views. With none, as without an editor, the
+// frame draws the scene's camera into the frame target.
+render_frame :: proc(s: ^Game_State, window: [2]u32) {
+	camera := camera_view(s)
+	// The shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or none without an editor. They
+	// draw only in Edit.
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
-	hidden := editor.visibility(&s.editor, &s.world).hidden
 	desc := render.Frame_Desc {
-		view            = view,
-		size            = size,
-		keep_ids        = editing,
-		// The debug layer, with the editor's overlays and the debug lines, only while editing or without an editor.
-		no_debug        = !editor.debug_shown(&s.editor),
-		hidden          = hidden,
-		debug_view      = overrides.debug_view,
-		disable         = overrides.disable,
-		exposure_offset = overrides.exposure_offset,
-		shading_stats   = overrides.shading_stats,
-		quality         = viewport_quality ? &quality : nil,
+		hidden   = editor.visibility(&s.editor, &s.world).hidden,
 		// The material editor's previews (see docs/rendering/materials.md#material-previews).
-		previews        = editor.previews(&s.editor),
+		previews = editor.previews(&s.editor),
 		// The particles step by the time that the world stepped, so they stand still in the editor's Edit and Paused.
-		delta           = s.frame_step,
+		delta    = s.frame_step,
 		// The editor's selected systems play while the world stands still.
-		playing         = editor.playing(&s.editor),
+		playing  = editor.playing(&s.editor),
 		// The skinned entities' poses, between the last two ticks.
-		skins           = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
-		hooks           = {
-			data         = frame,
-			before_world = before_world,
-			world_uses   = world_uses,
-			world_draw   = draw_scene,
-			after_world  = after_world,
-			ui           = draw_ui_layer,
-			debug        = editing ? draw_editor_tools : nil,
-		},
+		skins    = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
 	}
-	if render.draw_frame(&s.renderer, &s.world, desc) && frame.building_blas {
-		s.blas_built = true
+	frames := make([dynamic]^Frame, s.platform.frame_allocator)
+	extra_views := make([dynamic]render.Extra_View, s.platform.frame_allocator)
+	for viewport in editor.frame_viewports(&s.editor) {
+		scene := viewport.kind == .Scene
+		frame := view_frame(s, viewport.viewport, viewport.size, viewport.view.? or_else camera) or_continue
+		append(&frames, frame)
+		view := editor.render_view(&s.editor, viewport, camera, frame_hooks(frame, tools = scene, ui = !scene))
+		if len(frames) == 1 {
+			render.use_view(&desc, view)
+			desc.shading_stats = editor.render_overrides(&s.editor, viewport.viewport).shading_stats
+		} else {
+			append(&extra_views, view)
+		}
+	}
+	if len(frames) == 0 {
+		frame, ok := view_frame(s, 0, window, camera)
+		if !ok {
+			return
+		}
+		append(&frames, frame)
+		desc.view, desc.size, desc.hooks = camera, window, frame_hooks(frame, tools = false, ui = true)
+		// The debug layer shows the game's own lines, unless a linked editor is in Play or Paused.
+		desc.no_debug = !editor.debug_shown(&s.editor)
+	}
+	desc.extra_views = extra_views[:]
+	if render.draw_frame(&s.renderer, &s.world, desc) {
+		for frame in frames {
+			s.blas_built ||= frame.building_blas
+		}
+	}
+}
+
+// frame_hooks adds the sample's passes and draws to a view of the frame: the editor's tools for a scene view, and the UI
+// for the Game view and the game without an editor.
+frame_hooks :: proc(frame: ^Frame, tools, ui: bool) -> render.Frame_Hooks {
+	return {
+		data         = frame,
+		before_world = before_world,
+		world_uses   = world_uses,
+		world_draw   = draw_scene,
+		after_world  = after_world,
+		ui           = ui ? draw_ui_layer : nil,
+		debug        = tools ? draw_editor_tools : nil,
 	}
 }
 
@@ -792,12 +817,13 @@ draw_ui_layer :: proc(f: ^render.Frame) {
 // draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo, which draw into the debug layer.
 // In Play and Paused the frame has no debug layer, so only the pick runs.
 draw_editor_tools :: proc(f: ^render.Frame) {
-	s := (^Frame)(f.data).state
+	frame := (^Frame)(f.data)
+	s := frame.state
 	editor.add_viewport_passes(
 		&s.editor,
 		f.graph,
 		&s.world,
-		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
+		{viewport = frame.viewport, view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
 	)
 }
 

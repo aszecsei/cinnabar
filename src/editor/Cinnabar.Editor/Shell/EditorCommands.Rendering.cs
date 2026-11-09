@@ -4,7 +4,7 @@ namespace Cinnabar.Editor.Shell;
 
 static partial class EditorCommands
 {
-    // The panels, the layout, the ribbon and the viewport's scale.
+    // The panels, the layout, the ribbon, the viewports' documents and their scale.
     static void RegisterWindow(EditorShell shell)
     {
         var commands = shell.Commands;
@@ -22,11 +22,18 @@ static partial class EditorCommands
             Description = "Put every panel back where it starts.",
             Icon = "reset",
         });
-        commands.Register(new Command(Stats, "Viewport Stats", () => shell.Viewport.ShowStats = !shell.Viewport.ShowStats)
+        commands.Register(new Command(Stats, "Viewport Stats", () =>
         {
-            Description = "Show the frame rates and the adapter over the viewport.",
+            var show = !shell.Viewports.Any(v => v.Session.ShowStats);
+            foreach (var viewport in shell.Viewports)
+            {
+                viewport.Session.ShowStats = show;
+            }
+        })
+        {
+            Description = "Show the frame rates and the adapter over the viewports.",
             Icon = "stats",
-            IsCheckedWhen = () => shell.Viewport.ShowStats,
+            IsCheckedWhen = () => shell.Viewports.Any(v => v.Session.ShowStats),
         });
         commands.Register(new Command(CollapseRibbon, "Collapse Ribbon", () => shell.RibbonCollapsed = !shell.RibbonCollapsed)
         {
@@ -35,14 +42,43 @@ static partial class EditorCommands
             Shortcut = "Ctrl+F1",
             IsCheckedWhen = () => shell.RibbonCollapsed,
         });
-        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.Viewport.Scale, scale => shell.Viewport.Scale = scale,
+        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.ActiveViewport.Session.Scale,
+            scale =>
+            {
+                foreach (var viewport in shell.Viewports)
+                {
+                    viewport.Session.Scale = scale;
+                }
+            },
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
+        commands.Register(new Command(NewSceneView, "New Scene View", () => shell.OpenSceneView())
+        {
+            Description = "Open another scene view, with a camera of its own, up to three. Drag its tab to dock it beside the others.",
+            Icon = "viewport",
+            CanExecuteWhen = () => shell.CanOpenSceneView,
+        });
+        commands.Register(new Command(GameView, "Game View", () =>
+        {
+            if (shell.Layout.IsViewportOpen(EditorViewport.GameIndex))
+            {
+                shell.Layout.CloseViewport(EditorViewport.GameIndex);
+            }
+            else
+            {
+                shell.Layout.ShowViewport(EditorViewport.GameIndex);
+            }
+        })
+        {
+            Description = "Show or hide the Game view, which shows the game as a player sees it and gives it the input while it plays.",
+            Icon = "camera",
+            IsCheckedWhen = () => shell.Layout.IsViewportOpen(EditorViewport.GameIndex),
+        });
     }
 
-    // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features
-    // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
+    // The active viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the
+    // features that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
     static void RegisterRendering(EditorShell shell)
     {
         var commands = shell.Commands;

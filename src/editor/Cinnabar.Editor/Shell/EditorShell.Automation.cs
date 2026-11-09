@@ -70,7 +70,7 @@ public sealed partial class EditorShell
         {
             case "status":
                 return new AutomationResponse(request.Id, true,
-                    Status: new AutomationStatus(Host.Linked, Host.State.Name, Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId));
+                    Status: new AutomationStatus(Host.Linked, Host.State.Name, Mode.ToString(), Scene?.Path, Host.Game, Host.ProcessId, [.. ShownViewports.Select(v => v.Index)]));
             case "screenshot":
                 List<DebugView> views = [];
                 foreach (var name in request.Views ?? [])
@@ -81,26 +81,61 @@ public sealed partial class EditorShell
                     }
                     views.Add(view);
                 }
-                return Response(request.Id, await Screenshot(views, request.Path));
+                return Response(request.Id, await Screenshot(views, request.Path, request.Viewport));
             case "gif":
-                return Response(request.Id, await Gif(request.Path));
+                return Response(request.Id, await Gif(request.Path, request.Viewport));
             case "viewport":
-                if (request.Settings is not { Count: > 0 } changes)
+                if (request.Settings is not { Count: > 0 } all)
                 {
                     return new AutomationResponse(request.Id, false, Error: "viewport takes settings to change");
                 }
-                if (!ViewportSettingsPatch.TryApply(ViewportSettings, changes, out var settings, out var error))
+                // Shown is the viewport's document, not one of its settings to patch.
+                var changes = new Dictionary<string, System.Text.Json.JsonElement>(all, StringComparer.OrdinalIgnoreCase);
+                if (changes.Remove("shown", out var shown))
+                {
+                    if (request.Viewport is not { } number || number < 0 || number >= Viewports.Count)
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"shown takes a viewport, 0 to {Viewports.Count - 1}");
+                    }
+                    if (shown.ValueKind is not (System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"shown takes true or false, not {shown}");
+                    }
+                    if (shown.ValueKind == System.Text.Json.JsonValueKind.True)
+                    {
+                        Layout.ShowViewport(number);
+                    }
+                    else
+                    {
+                        Layout.CloseViewport(number);
+                    }
+                }
+                if (AutomationViewport(request, scene: false) is not { } target)
+                {
+                    return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} is not one of the viewports, 0 to {Viewports.Count - 1}");
+                }
+                if (changes.Count == 0)
+                {
+                    return new AutomationResponse(request.Id, true);
+                }
+                if (!ViewportSettingsPatch.TryApply(target.Settings, changes, out var settings, out var error))
                 {
                     return new AutomationResponse(request.Id, false, Error: error);
                 }
-                ViewportSettings = settings;
+                ApplyViewportSettings(target, settings);
                 return new AutomationResponse(request.Id, true);
             case "camera":
                 if (request.Position is not { Length: 3 } meters)
                 {
                     return new AutomationResponse(request.Id, false, Error: "camera takes a position of three numbers, in meters");
                 }
-                Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? Camera.Yaw, request.Pitch ?? Camera.Pitch);
+                if (AutomationViewport(request, scene: true) is not { HasCamera: true } placed)
+                {
+                    return new AutomationResponse(request.Id, false, Error: request.Viewport is { } game && game == EditorViewport.GameIndex
+                        ? $"viewport {game} is the Game view, which draws from the game's camera and has no editor camera"
+                        : $"viewport {request.Viewport} is not one of the viewports, 0 to {Viewports.Count - 1}");
+                }
+                placed.Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? placed.Camera.Yaw, request.Pitch ?? placed.Camera.Pitch);
                 return new AutomationResponse(request.Id, true);
             case "ui":
                 return CaptureUiResponse(request);
@@ -110,6 +145,13 @@ public sealed partial class EditorShell
                 return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
         }
     }
+
+    // The viewport that a request names, or null when it is not one. Without a name, the capture viewport, which is the
+    // first scene view that is shown; with none shown, the first scene view, so settings and a camera can be set ahead of it.
+    EditorViewport? AutomationViewport(AutomationRequest request, bool scene) =>
+        request.Viewport is { } index
+            ? Viewports.FirstOrDefault(v => v.Index == index)
+            : (scene ? ShownSceneViews.FirstOrDefault() : CaptureViewport) ?? Viewports[0];
 
     // Changes what the content browser shows, each setting in turn, and answers with what it shows then.
     AutomationResponse ContentResponse(AutomationRequest request)

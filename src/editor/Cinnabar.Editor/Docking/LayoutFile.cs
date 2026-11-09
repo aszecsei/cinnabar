@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Cinnabar.Editor.Docking;
 
 /// <summary>
-/// The saved dock layout: the tree of splits, tool docks and the document dock, with each panel by ID. Panel state
+/// The saved dock layout: the tree of splits, tool docks and document docks, with each panel and viewport document by ID. Panel state
 /// is not in it. A panel that floated is listed in <see cref="Floating"/> and docks again in its default dock, and with
 /// <see cref="Windows"/>, which a file from an older editor lacks, a window that kept its place pops out again there.
 /// </summary>
@@ -72,4 +72,10 @@ public sealed record SplitNode(string Id, double? Proportion, bool Vertical, IRe
 public sealed record ToolsNode(string Id, double? Proportion, string Alignment, IReadOnlyList<string> Panels, string? Active)
     : LayoutNode(Id, Proportion);
 
-public sealed record DocumentsNode(string Id, double? Proportion) : LayoutNode(Id, Proportion);
+/// <summary>
+/// A document dock, with the viewport documents it holds, by ID, and the active one. A file from an editor with one
+/// viewport lists none (null), which restores the scene view and the Game view; a dock with all its viewports closed lists
+/// an empty array.
+/// </summary>
+public sealed record DocumentsNode(string Id, double? Proportion, IReadOnlyList<string>? Documents = null, string? Active = null)
+    : LayoutNode(Id, Proportion);

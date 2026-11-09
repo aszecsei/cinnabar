@@ -142,7 +142,7 @@ public sealed class ReflectionProbeTests : IDisposable
             new EntityInfo(TinyHandle, "Tiny", 2, 0, true, [1, SceneEdits.ReflectionProbeId]),
             new EntityInfo(PlainHandle, "Plain", 3, 0, true, [1]),
         ]));
-        shell.Viewport.RequestSize(new PixelSize(1600, 900));
+        shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         shell.Camera.Place([0, 0, 0], 0, 0);
         shell.SetTool(Tool.Select);
         return shell;

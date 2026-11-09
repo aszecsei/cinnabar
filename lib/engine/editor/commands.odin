@@ -40,7 +40,8 @@ Command_Context :: struct {
 	user:       rawptr,
 	// The entities that the editor has selected, the primary one last.
 	selection:  []ecs.Entity,
-	// The editor's camera, so a command can put something in view.
+	// The editor's camera, so a command can put something in view: the open scene view's with the lowest number, or
+	// else the lowest viewport's that has one.
 	camera:     link.Editor_Camera,
 	// Edits of the scene, by scene ID, which the editor applies.
 	operations: [dynamic]link.Operation,
@@ -122,7 +123,7 @@ run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: r
 			scripts    = scripts,
 			user       = user,
 			selection  = e.session.view.selection[:],
-			camera     = e.session.view.camera,
+			camera     = command_camera(e),
 			operations = make([dynamic]link.Operation, allocator),
 			allocator  = allocator,
 		}
@@ -133,4 +134,21 @@ run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: r
 	}
 	log.warnf("editor: the game has no command %s", id)
 	link.write_message(out, link.Game_Command_Result{id = id, message = "the game has no such command"})
+}
+
+// command_camera is the camera that a command sees: the open scene view's with the lowest number, once it has one, and
+// otherwise the camera of the lowest viewport that has one, or zero.
+@(private)
+command_camera :: proc(e: ^Editor) -> link.Editor_Camera {
+	if index, ok := scene_viewport(e); ok {
+		if camera, has_camera := e.session.view.viewports[index].camera.?; has_camera {
+			return camera
+		}
+	}
+	for v in e.session.view.viewports {
+		if camera, has_camera := v.camera.?; has_camera {
+			return camera
+		}
+	}
+	return {}
 }

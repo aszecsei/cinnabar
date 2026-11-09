@@ -39,7 +39,7 @@ Editor :: struct {
 	// session.
 	by_scene_id: map[u64]ecs.Entity,
 	// The viewport tools' GPU objects (see viewport.odin).
-	viewport:    Viewport,
+	tools:       Viewport_Tools,
 	// The game's commands (see commands.odin). Registrations: reload clears them.
 	commands:    [dynamic]Command,
 	// The UI documents that previews show, each in a slot of its own, apart from the game's UI (see ui_preview.odin).
@@ -64,11 +64,10 @@ Session :: struct {
 	scan_version: u64,
 	despawned:    u64,
 	watched:      [dynamic]Watched,
-	// The editor's camera, selection and gizmo, and its picks (see viewport.odin).
+	// The editor's viewports, each with its camera and gizmo, its selection and its picks (see viewport.odin).
 	view:         View,
 	// The mode that the editor set (see modes.odin).
 	mode:         link.Editor_Mode,
-	free_camera:  bool,
 	// Step_Frame messages that wait for a paused frame.
 	steps:        int,
 	last_scan:    f64,
@@ -141,11 +140,14 @@ begin_session :: proc(e: ^Editor, connection: u64) {
 			picks     = make([dynamic]link.Pick_Request, heap),
 		},
 	}
+	for &v in e.session.view.viewports {
+		v.handles = make([dynamic]link.Box_Handle, heap)
+	}
 }
 
-// end_session ends the session: it closes the previews and the thumbnail, releases the live meshes and the mesh
-// overlay, frees the session's arrays, and zeroes it. A pick that the GPU still runs comes back with an old ticket, so
-// nothing reads it.
+// end_session ends the session: it closes the previews, the thumbnail and the viewports, with their targets and view
+// states, releases the live meshes and the mesh overlay, frees the session's arrays, and zeroes it. A pick that the GPU
+// still runs comes back with an old ticket, so nothing reads it.
 @(private)
 end_session :: proc(e: ^Editor) {
 	s := &e.session
@@ -154,9 +156,12 @@ end_session :: proc(e: ^Editor) {
 	delete(s.live_meshes)
 	delete(s.known)
 	delete(s.watched)
+	for &v, i in s.view.viewports {
+		close_viewport(e, i)
+		delete(v.handles)
+	}
 	delete(s.view.selection)
 	delete(s.view.hidden)
-	delete(s.view.handles)
 	delete(s.view.picks)
 	s^ = {}
 }
@@ -183,7 +188,7 @@ destroy :: proc(e: ^Editor) {
 	if e.ui.platform != nil {
 		ui.destroy(&e.ui)
 	}
-	if e.viewport.gpu_ready {
+	if e.tools.gpu_ready {
 		destroy_viewport_gpu(e)
 	}
 	e^ = {}
@@ -235,7 +240,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				link.write_message(out, edit_problems(problems[:], false, frame))
 			}
 		case link.Set_Mode:
-			e.session.mode, e.session.free_camera = v.mode, v.free_camera
+			e.session.mode = v.mode
 			if v.mode != .Paused {
 				e.session.steps = 0
 			}
@@ -266,6 +271,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 	}
 	finish_pick(e, w, out, frame)
 	send_preview_targets(e, out)
+	send_viewport_targets(e, out)
 	send_thumbnail_failed(e, out)
 	s := &e.session
 	if !s.types_sent {

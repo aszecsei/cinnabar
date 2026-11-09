@@ -45,8 +45,12 @@ helper_setup :: proc(t: ^testing.T) -> ^Helper_Fixture {
 	render.register_components(&f.world.registry)
 	init(&f.editor, &f.platform, nil)
 	debug.init(&f.lines, runtime.heap_allocator())
-	// Linked, as an editor's first poll makes it.
+	// Linked, as an editor's first poll makes it, with a scene view open, whose settings choose the helpers.
 	f.editor.session.connection = 1
+	f.editor.session.view.viewports[0].open = Viewport_Open {
+		kind = .Scene,
+		size = {64, 64},
+	}
 	return f
 }
 
@@ -89,7 +93,7 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 
 	// Without a selection, the default draws nothing; with None, nothing draws even for the selection.
 	testing.expect_value(t, line_count(f), 0)
-	f.editor.session.view.settings.helpers = .Selected
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
 	append(&f.editor.session.view.selection, quad)
 	// A quad's four edges and its normal's arrow.
 	quad_lines := line_count(f)
@@ -101,14 +105,57 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 	testing.expect_value(t, line_count(f), 24)
 
 	// All: the spot light's cones, the quad and the box too. The global volume has no shape.
-	f.editor.session.view.settings.helpers = .All
+	f.editor.session.view.viewports[0].settings.helpers = .All
 	all := line_count(f)
 	testing.expect(t, all > 24 + quad_lines)
 	// A hidden entity has none.
 	append(&f.editor.session.view.hidden, spot)
 	testing.expect(t, line_count(f) < all)
-	f.editor.session.view.settings.helpers = link.Helper_Mode.None
+	f.editor.session.view.viewports[0].settings.helpers = link.Helper_Mode.None
 	testing.expect_value(t, line_count(f), 0)
+}
+
+// The shapes are the frame's debug lines, so the open scene view with the lowest number chooses them for all: a closed
+// view, the Game view and a higher number choose nothing.
+@(test)
+the_helpers_take_the_mode_of_the_lowest_open_scene_view :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	spawn_with(f, render.Quad_Light{intensity = 1})
+	viewports := &f.editor.session.view.viewports
+	// Viewport 0 is open as a scene view with no helpers, viewport 1 is the Game view, and 2 and 3 are scene views.
+	viewports[0].settings.helpers = .None
+	viewports[1].open = Viewport_Open {
+		kind = .Game,
+	}
+	viewports[1].settings.helpers = .All
+	viewports[2].open = Viewport_Open {
+		kind = .Scene,
+	}
+	viewports[2].settings.helpers = .All
+	viewports[3].open = Viewport_Open {
+		kind = .Scene,
+	}
+	viewports[3].settings.helpers = .Selected
+	testing.expect_value(t, line_count(f), 0)
+
+	// Without viewport 0, the next scene view chooses; the Game view never does.
+	viewports[0].open = nil
+	all := line_count(f)
+	testing.expect(t, all > 0)
+	viewports[2].open = nil
+	testing.expect_value(t, line_count(f), 0)
+	// The viewport is open only as a Game view, or none: no shapes.
+	viewports[3].open = nil
+	testing.expect_value(t, line_count(f), 0)
+	// A viewport that is closed keeps its settings, which an open one takes again.
+	viewports[2].open = Viewport_Open {
+		kind = .Scene,
+	}
+	testing.expect_value(t, line_count(f), all)
 }
 
 // A reflection probe draws its influence box, the fade inside it with a blend, and its projection box with box
@@ -121,14 +168,14 @@ a_reflection_probe_draws_its_boxes :: proc(t: ^testing.T) {
 	f := helper_setup(t)
 	defer helper_teardown(f)
 	probe := spawn_with(f, render.Reflection_Probe{extent = {2, 1, 3}})
-	f.editor.session.view.settings.helpers = .All
+	f.editor.session.view.viewports[0].settings.helpers = .All
 	testing.expect_value(t, line_count(f), 12)
 	ecs.get(&f.world, probe, render.Reflection_Probe).blend_distance = 0.5
 	testing.expect_value(t, line_count(f), 24)
 	ecs.get(&f.world, probe, render.Reflection_Probe).box_projection = true
 	// Not selected, the three boxes are grey; with Selected, only the selection has them.
 	testing.expect_value(t, line_count(f), 36)
-	f.editor.session.view.settings.helpers = .Selected
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
 	testing.expect_value(t, line_count(f), 0)
 	append(&f.editor.session.view.selection, probe)
 	testing.expect_value(t, line_count(f), 36)

@@ -13,9 +13,11 @@ public class LinkWireTests
         new Refused("versions differ", 2),
         new Log(LogLevel.Warning, -5, "host.odin:12:main()", "ünïcode"),
         new GameReloaded(ReloadKind.SoftRestart),
-        new ViewportSize(1920, -1),
-        new FrameTarget("cinnabar.g3", 3, 640, 360),
-        new FrameAcknowledged(3, 1UL << 40),
+        new GameSize(1920, -1),
+        new OpenViewport(2, ViewportKind.Game, 640, 360),
+        new ViewportTarget(2, "cinnabar.viewport2.g3", 3, 640, 360),
+        new ViewportAcknowledged(2, 3, 1UL << 40),
+        new CaptureSource(-1),
     ];
 
     [Theory]
@@ -34,11 +36,11 @@ public class LinkWireTests
     [Fact]
     public void TheBytesMatchTheOdinEncoding()
     {
-        // FrameAcknowledged{generation = 3, frame = 0x0102030405060708} as lib/engine/editor/link writes it.
-        var frame = LinkFrame.Encode(new FrameAcknowledged(3, 0x0102030405060708));
+        // Game_Size{width = 3, height = 0x01020304} as lib/engine/editor/link writes it.
+        var frame = LinkFrame.Encode(new GameSize(3, 0x01020304));
 
         Assert.Equal(
-            [12, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 8, 7, 6, 5, 4, 3, 2, 1],
+            [8, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 4, 3, 2, 1],
             frame);
     }
 
@@ -117,7 +119,7 @@ public class LinkWireTests
             """));
 
     [Theory]
-    [InlineData("Frame_Target", "FrameTarget")]
+    [InlineData("Viewport_Target", "ViewportTarget")]
     [InlineData("layout_hash", "LayoutHash")]
     [InlineData("Soft_Restart", "SoftRestart")]
     [InlineData("game", "Game")]

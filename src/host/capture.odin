@@ -15,7 +15,7 @@ import "cinnabar:core/gpu"
 import "cinnabar:engine/editor/link"
 
 // Screenshots and the history ring (see docs/editor/capture.md#capture). The main thread asks the backend for copies
-// of the frame target between frames, and a worker thread turns the finished copies into images, keeps the ring,
+// of the capture source between frames, the frame target unless the editor chose a viewport's (see capture_source), and a worker thread turns the finished copies into images, keeps the ring,
 // encodes the files and writes them, so the frame never waits for an encode. The editor's requests arrive over the
 // link and are answered with Capture_Result when the file is written.
 
@@ -97,12 +97,23 @@ Ring_Frame :: struct {
 	frame: u64,
 	tick:  time.Tick,
 	image: capture.Image,
+	// The viewport whose target the frame is of, or nil for the frame target.
+	viewport: Maybe(int),
 }
 
 Ring :: struct {
 	frames: [RING_FRAMES]Ring_Frame,
 	next:   int,
 	count:  int,
+}
+
+// capture_source is the capture source that Capture_Source's number names: a viewport's target, or for a negative number
+// the frame target. A viewport that does not exist, or that the frame does not draw, makes the backend cancel the copies.
+capture_source :: proc(viewport: i32) -> Maybe(int) {
+	if viewport < 0 {
+		return nil
+	}
+	return int(viewport)
 }
 
 // capture_start starts the worker. Call it after core.init.
@@ -248,7 +259,7 @@ capture_tick :: proc(c: ^Capture) {
 			r.waited += 1
 			if r.waited >= CAPTURE_WAIT_FRAMES {
 				reason := fmt.tprintf(
-					"no capture slot was free for %d frames; the window may be minimized",
+					"no frame was captured for %d frames; the window may be minimized, or the capture's viewport is not open",
 					CAPTURE_WAIT_FRAMES,
 				)
 				link_send(
@@ -301,7 +312,8 @@ take_thumbnail :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 }
 
 // take_frame gives the worker the frame's copy for the request with its ticket. A cancelled copy, of a frame that drew
-// nothing, puts its screenshot back to wait for the next frame, and its ring sample is taken again.
+// nothing or not the viewport that the capture reads, puts its screenshot back to wait for the next frame, and its ring
+// sample is taken again.
 @(private = "file")
 take_frame :: proc(c: ^Capture, done: gpu.Frame_Capture) {
 	index := -1
@@ -431,6 +443,7 @@ run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bo
 		img, ok := capture.to_rgb8(job.capture, heap)
 		mode := link.Output_Mode(job.capture.mode)
 		size := job.capture.size
+		viewport := job.capture.viewport
 		core.release_frame_capture(job.capture)
 		if !ok {
 			delete(job.path, heap)
@@ -447,7 +460,7 @@ run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bo
 			return {}, false
 		}
 		if job.kind == .Ring_Sample || job.ring {
-			ring_push(&c.ring, img, job.frame, job.tick)
+			ring_push(&c.ring, img, job.frame, job.tick, viewport)
 		}
 		if job.kind == .Ring_Sample {
 			delete(img.pixels, heap)
@@ -525,22 +538,24 @@ run_job :: proc(c: ^Capture, job: Job) -> (result: link.Capture_Result, send: bo
 }
 
 // ring_push adds a half-size copy of the image to the ring, over its oldest frame.
-@(private = "file")
-ring_push :: proc(r: ^Ring, img: capture.Image, frame: u64, tick: time.Tick) {
+@(private)
+ring_push :: proc(r: ^Ring, img: capture.Image, frame: u64, tick: time.Tick, viewport: Maybe(int)) {
 	heap := runtime.heap_allocator()
 	slot := &r.frames[r.next]
 	delete(slot.image.pixels, heap)
 	slot^ = {
-		frame = frame,
-		tick  = tick,
-		image = capture.downscale_half(img, heap),
+		frame    = frame,
+		tick     = tick,
+		image    = capture.downscale_half(img, heap),
+		viewport = viewport,
 	}
 	r.next = (r.next + 1) % RING_FRAMES
 	r.count = min(r.count + 1, RING_FRAMES)
 }
 
-// ring_frames is the ring's frames, oldest first, that have the newest frame's size, with the first and the last.
-@(private = "file")
+// ring_frames is the ring's frames, oldest first, that have the newest frame's size and source, with the first and the
+// last. A change of the capture source, or of its size, starts the ring again.
+@(private)
 ring_frames :: proc(
 	r: ^Ring,
 	allocator: runtime.Allocator,
@@ -555,7 +570,7 @@ ring_frames :: proc(
 	out := make([dynamic]capture.Image, 0, r.count, allocator)
 	for i in 0 ..< r.count {
 		f := r.frames[(r.next + RING_FRAMES - r.count + i) % RING_FRAMES]
-		if f.image.size != newest.image.size {
+		if f.image.size != newest.image.size || f.viewport != newest.viewport {
 			clear(&out)
 			continue
 		}

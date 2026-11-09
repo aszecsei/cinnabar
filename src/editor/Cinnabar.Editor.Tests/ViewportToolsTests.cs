@@ -25,7 +25,7 @@ public sealed class ViewportToolsTests : IDisposable
     {
         var shell = TestShell.Open(_temp, "two.scene", Text);
         Report(shell, 1);
-        shell.Viewport.RequestSize(new PixelSize(1600, 900));
+        shell.Viewports[0].Session.Show(new PixelSize(1600, 900));
         shell.Camera.Place([0, 0, 0], 0, 0);
         return shell;
     }

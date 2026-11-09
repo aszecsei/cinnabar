@@ -47,16 +47,17 @@ public sealed class ModeTests : IDisposable
     }
 
     [Fact]
-    public void TheFreeCameraKeepsTheViewportsInputForTheEditor()
+    public void OnlyPlayGivesTheGameViewsInputToTheGame()
     {
         using var shell = NewShell();
         Assert.False(shell.InputGoesToGame);
         shell.Play();
         Assert.True(shell.InputGoesToGame);
-        shell.ToggleFreeCamera();
+        shell.TogglePause();
         Assert.False(shell.InputGoesToGame);
+        shell.TogglePause();
         shell.Stop();
-        Assert.False(shell.FreeCamera);
+        Assert.False(shell.InputGoesToGame);
     }
 
     [Fact]
@@ -93,13 +94,13 @@ public sealed class ModeTests : IDisposable
         var function = new ShortcutCommand(new CommandAdapter(command), new KeyGesture(Key.F5, KeyModifiers.Shift), () => shell.GameHasKeys, () => false);
 
         Assert.True(letter.CanExecute(null));
-        shell.ViewportHasFocus = true;
+        shell.GameViewHasFocus = true;
         Assert.True(letter.CanExecute(null));
         shell.Play();
         Assert.False(letter.CanExecute(null));
         Assert.True(function.CanExecute(null));
         // Another panel's keys are the editor's, whatever the game does.
-        shell.ViewportHasFocus = false;
+        shell.GameViewHasFocus = false;
         Assert.True(letter.CanExecute(null));
     }
 

@@ -91,7 +91,7 @@ Occlusion_State :: struct {
 
 // cull_stats is what the frame's own view's camera drew, a frame or two ago (see Cull_Stats).
 cull_stats :: proc(r: ^Renderer) -> Cull_Stats {
-	return r.view.occlusion.last_stats
+	return stats_state(r).occlusion.last_stats
 }
 
 // read_cull_stats keeps the newest tally's copy of a view that has come back. After a frame that tallied nothing, or that

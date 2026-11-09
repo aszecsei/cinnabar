@@ -57,8 +57,8 @@ ICONS_PIPELINE :: gpu.Graphics_Pipeline_Desc {
 // shows them.
 @(private)
 add_icons_pass :: proc(e: ^Editor, g: ^render.Graph, w: ^ecs.World, frame: Viewport_Frame) {
-	v := &e.viewport
-	if !icons_shown(e) || v.icons_pipeline.pipeline == {} {
+	v := &e.tools
+	if !icons_shown(e, frame.viewport) || v.icons_pipeline.pipeline == {} {
 		return
 	}
 	icons := icon_instances(w, visibility(e, w), e.platform.frame_allocator, e.renderer)

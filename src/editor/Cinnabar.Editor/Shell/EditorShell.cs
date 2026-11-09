@@ -7,10 +7,8 @@ using Cinnabar.Editor.Host;
 using Cinnabar.Editor.Model;
 using Cinnabar.Editor.Panels;
 using Cinnabar.Editor.Viewport;
-using FrameAcknowledged = Cinnabar.Editor.Link.Protocol.FrameAcknowledged;
 using ReloadKind = Cinnabar.Editor.Link.Protocol.ReloadKind;
 using UnwatchEntity = Cinnabar.Editor.Link.Protocol.UnwatchEntity;
-using ViewportSize = Cinnabar.Editor.Link.Protocol.ViewportSize;
 using WatchEntity = Cinnabar.Editor.Link.Protocol.WatchEntity;
 
 namespace Cinnabar.Editor.Shell;
@@ -27,7 +25,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
     public MeshSession Mesh { get; }
     public ConsoleLog Console { get; } = new();
     public HostSession Host { get; }
-    public ViewportSession Viewport { get; } = new();
     public WorldModel World { get; } = new();
     public ResourceStats Stats { get; } = new();
     public Selection Selection { get; } = new();
@@ -75,21 +72,12 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         WireCook();
         Mesh.Subscribe();
         Autosave = new Autosave(options.AutosaveDirectory);
-        Layout = new EditorLayout(CreatePanels(), new ViewportDocument(Viewport, () => new ViewportView(this)));
+        CreateViewports();
+        Layout = new EditorLayout(CreatePanels(), [.. Viewports.Select(v => new ViewportDocument(v, () => new ViewportView(this, v)))]);
         RestoreLayout();
 
-        Viewport.AdapterFound += Host.Start;
-        Viewport.Failed += message => Console.Add(LogLevel.Error, message);
-        Viewport.SizeRequested += size => Host.Send(new ViewportSize(size.Width, size.Height));
-        Viewport.FrameCopied += (generation, frame) => Host.Send(new FrameAcknowledged(generation, frame));
         Host.Output += Console.Add;
         Host.LogReceived += log => Console.Add(ConsoleLog.Level(log.Level), ConsoleLog.Format(log));
-        Host.FrameTargetChanged += target =>
-        {
-            Viewport.Connect(target.Prefix, target.Generation);
-            // The gizmo keeps its size on screen, so a new frame size changes it.
-            SendGizmo();
-        };
         // A soft restart makes a fresh Game_State. A code reload keeps it.
         Host.GameReloaded += kind =>
         {
@@ -137,7 +125,6 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         Layout.DocumentClosed += OnDocumentClosed;
         // Commands such as Delete act on the selected entities.
         Selection.Changed += (_, _) => Commands.InvalidateAll();
-        Camera.Changed += SendCamera;
 
         EditorCommands.Register(this);
         Ribbon = DefaultRibbon.Create(Layout.Panels);
@@ -203,7 +190,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         }
         if (!Host.Linked)
         {
-            Viewport.Disconnect();
+            CloseViewportsInGame();
             _previewSlots.DisconnectAll();
             if (Stats.Host != null || Stats.Game != null)
             {
@@ -218,19 +205,14 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
                 World.Clear();
             }
         }
-        else if (Viewport.RequestedSize is { Width: > 0, Height: > 0 } size)
-        {
-            // The viewport asked before the host could hear it.
-            Host.Send(new ViewportSize(size.Width, size.Height));
-        }
         Context.Set("host.running", Host.State is HostState.Running);
         Commands.InvalidateAll();
     }
 
     /// <summary>
     /// The game has a new state, from a new link or a soft restart, which knows nothing that the editor sent: it is in
-    /// Edit with its own scene, has no camera, gizmo, selection, hidden entities, viewport settings, mesh overlay, live
-    /// meshes or previews, and answers no request that the old state had. Every cache of what the game was sent, and
+    /// Edit with its own scene, has no open viewports, cameras, gizmos, selection, hidden entities, viewport settings,
+    /// game size, capture source, mesh overlay, live meshes or previews, and answers no request that the old state had. Every cache of what the game was sent, and
     /// every request that waits for the game, starts over here and nowhere else (see docs/editor/link.md#a-new-game-state).
     /// </summary>
     void OnNewGameState()
@@ -278,7 +260,10 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         StopGame();
         Host.Dispose();
         Cook.Dispose();
-        Viewport.Dispose();
+        foreach (var viewport in Viewports)
+        {
+            viewport.Session.Dispose();
+        }
         foreach (var owner in PreviewOwners())
         {
             owner.Dispose();

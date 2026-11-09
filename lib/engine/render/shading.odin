@@ -44,7 +44,7 @@ Shading_Frame :: struct {
 // shading_stats is what the opaque surfaces' shading cost, a frame or two ago (see Shading_Stats). It is all 0 after a
 // frame without Frame_Desc.shading_stats.
 shading_stats :: proc(r: ^Renderer) -> Shading_Stats {
-	return r.view.shading.last_stats
+	return stats_state(r).shading.last_stats
 }
 
 @(private)

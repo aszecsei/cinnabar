@@ -300,7 +300,7 @@ reflection_probe_stats :: proc(r: ^Renderer) -> Reflection_Probe_Stats {
 // are not counted.
 reflection_memory :: proc(r: ^Renderer) -> u64 {
 	rp := &r.reflection_probes
-	bytes := r.view.ssr.memory
+	bytes := stats_state(r).ssr.memory
 	if rp.cubes.texture != {} {
 		bytes += reflection_probe_memory(rp.params)
 	}

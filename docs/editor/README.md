@@ -11,7 +11,7 @@ Read them in this order the first time.
 | [Processes and projects](processes-and-projects.md) | Processes, the UI framework, the C# projects and crash recovery. |
 | [Document and scenes](document-and-scenes.md) | The document model, modes, and the scene format. |
 | [Editor link](link.md) | The editor link and the game side that mirrors the world. |
-| [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos and viewport settings. |
+| [Viewport](viewport.md) | Frames, the camera, picking, selection, gizmos, viewport settings, and the scene views and the Game view. |
 | [Shell and panels](shell-and-panels.md) | Docking, the ribbon, commands and every panel. |
 | [Material editor](material-editor.md) | The node editor and its previews. |
 | [Animation graph editor](animation-graph-editor.md) | The canvas for `.animation_graph` files, its reader and writer that keep every line, and the live view of an Animator in play mode. |
@@ -41,7 +41,7 @@ flowchart LR
 
 1. **Edits go down.** Every change is an operation on the document, which the editor applies at once and sends to the game. The game applies it to its world and reports what it could not apply. The document is never changed to match the host ([Document model](document-and-scenes.md#document-model)).
 2. **The world comes up.** The game scans its world and sends deltas of the entity list, and the values of the entities the editor watches. The editor's mirror changes only from these messages ([World](link.md#world)).
-3. **Frames come across.** The host renders into shared textures, and the viewport copies each finished frame into Avalonia's compositor ([Viewport](viewport.md#viewport)).
+3. **Frames come across.** The host renders into shared textures, and the viewport copies each finished frame into Avalonia's compositor ([Viewport](viewport.md#viewport)). Each viewport, the scene views and the Game view, has shared textures of its own, while it is shown ([Views](viewport.md#views)).
 
 The game side is small and lives in `lib/engine/editor`:
 
@@ -51,7 +51,7 @@ The game side is small and lives in `lib/engine/editor`:
 | `types.odin` | `component_types`: every registered component with the fields that scenes can set |
 | `edit.odin` | `apply_operations`: the editor's edits applied to the world, with problems for what cannot be |
 | `modes.odin` | Edit, Play and Paused: `simulation` tells the game's frame what to run |
-| `viewport.odin` | The camera, the selection, hidden entities, the ID buffer's pick pass, the outline and the gizmo |
+| `viewport.odin` | The viewports with their cameras, the selection, hidden entities, the ID buffer's pick pass, the outline and the gizmo |
 | `helpers.odin`, `icons.odin` | The shapes of lights, volumes and cameras as debug lines, and their clickable icons |
 | `commands.odin` | Game commands: registered by the game, shown in the ribbon, run through `poll` |
 | `preview.odin` | Material previews for the material editor, and effect previews (see [Rendering](../rendering/materials.md#material-previews) and [Particles](../rendering/particles.md#previews)) |

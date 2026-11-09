@@ -178,6 +178,8 @@ init :: proc(
 		gpu_request_output           = gpu_request_output,
 		gpu_preview_target           = backend.preview_target,
 		gpu_release_preview_target   = backend.release_preview_target,
+		gpu_viewport_target          = backend.viewport_target,
+		gpu_release_viewport_target  = backend.release_viewport_target,
 		gpu_capture_texture          = backend.request_texture_capture,
 		gpu_pipeline_status          = backend.pipeline_status,
 		gpu_submit                   = backend.submit,
@@ -430,23 +432,27 @@ memory_stats :: proc() -> (permanent, frame_max: u64) {
 	return
 }
 
-// Frame captures copy a frame's final frame target to CPU memory (see docs/gpu/presentation.md#frame-capture). The
-// host drives them for its screenshots and history ring; the game has no part in them. request_frame_capture asks
-// for this frame's with a ticket, poll_frame_capture returns a finished or cancelled one with its ticket, and
-// release_frame_capture frees its slot, from any thread.
+// Frame captures copy a frame's final frame target, or an editor viewport's target, to CPU memory (see
+// docs/gpu/presentation.md#frame-capture). The host drives them for its screenshots and history ring; the game has no
+// part in them. request_frame_capture asks for this frame's with a ticket, poll_frame_capture returns a finished or
+// cancelled one with its ticket, and release_frame_capture frees its slot, from any thread. set_capture_source chooses
+// the viewport whose target the next requests copy, or with nil the frame target, and capture_source says which.
 request_frame_capture :: backend.request_frame_capture
 poll_frame_capture :: backend.poll_frame_capture
 release_frame_capture :: backend.release_frame_capture
+set_capture_source :: backend.set_capture_source
+capture_source :: backend.capture_source
 
 // pace_shared_frames turns the reader's back-pressure on or off (see docs/editor/viewport.md#viewport).
 pace_shared_frames :: backend.pace_shared_frames
 
-// acknowledge_shared_frame records that the reader has finished with a frame of a generation.
-acknowledge_shared_frame :: backend.acknowledge_shared_frame
-
 // acknowledge_preview_frame records that the reader has finished with a frame of a generation of a preview target
 // (see docs/rendering/materials.md#material-previews).
 acknowledge_preview_frame :: backend.acknowledge_preview_frame
+
+// acknowledge_viewport_frame records that the reader has finished with a frame of a generation of a viewport's target
+// (see docs/editor/viewport.md#views).
+acknowledge_viewport_frame :: backend.acknowledge_viewport_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

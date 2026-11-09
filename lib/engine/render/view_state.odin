@@ -56,6 +56,9 @@ view_state_init :: proc(v: ^View_State, r: ^Renderer) {
 // view_state_destroy frees a view's GPU objects, its histories too, at once. It is safe on a zero value, and leaves one.
 view_state_destroy :: proc(v: ^View_State, r: ^Renderer) {
 	platform := r.platform
+	if r.stats_view == v {
+		r.stats_view = nil
+	}
 	history_set_destroy(&v.histories, platform)
 	occlusion_state_destroy(&v.occlusion, platform)
 	post_state_destroy(&v.post, platform)
@@ -64,6 +67,12 @@ view_state_destroy :: proc(v: ^View_State, r: ^Renderer) {
 	virtual_state_destroy(&v.virtual_shadows, platform)
 	shading_state_destroy(&v.shading, platform)
 	v^ = {}
+}
+
+// stats_state is the state that the stats getters read: the last frame's own view's.
+@(private)
+stats_state :: proc(r: ^Renderer) -> ^View_State {
+	return r.stats_view != nil ? r.stats_view : &r.view
 }
 
 // read_view_stats takes the stats of a view that have come back.

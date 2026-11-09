@@ -6,10 +6,10 @@ import d3d "vendor:directx/d3d12"
 
 import "cinnabar:core/gpu"
 
-// Frame captures copy the frame target to CPU memory for the host's screenshots and history ring (see
-// docs/gpu/presentation.md#frame-capture). A capture takes a slot: a readback buffer, grown to the frame target's
-// copyable footprint, that stays mapped. The copy goes on the frame's final graphics list, so it sees the whole
-// frame, and the slot is ready once the frame's fence passes. A capture that cannot be copied is cancelled, and
+// Frame captures copy the frame target, or an editor viewport's target (see set_capture_source), to CPU memory for the
+// host's screenshots and history ring (see docs/gpu/presentation.md#frame-capture). A capture takes a slot: a readback
+// buffer, grown to the target's copyable footprint, that stays mapped. The copy goes on the frame's final graphics list,
+// so it sees the whole frame, and the slot is ready once the frame's fence passes. A capture that cannot be copied is cancelled, and
 // poll_frame_capture gives it back with its ticket, so the caller's request ends. The host's worker thread frees a slot,
 // so its state is atomic.
 @(private)
@@ -41,14 +41,17 @@ Capture_Slot :: struct {
 	mode:        gpu.Output_Mode,
 	sdr_white:   f32,
 	row_pitch:   u32,
-	// The request's, which poll_frame_capture gives back.
+	// The request's, which poll_frame_capture gives back. viewport is the capture source when the request was made.
 	source:      gpu.Capture_Source,
 	ticket:      u32,
+	viewport:    Maybe(int),
 }
 
 @(private)
 Captures :: struct {
 	slots:   [CAPTURE_SLOTS]Capture_Slot,
+	// The viewport whose target the frame's copies read, or nil for the frame target.
+	viewport: Maybe(int),
 	// The slot that this frame's end_frame copies into, or -1.
 	pending: i32,
 	// The slot that this frame's end_frame copies a texture into, or -1, and the texture.
@@ -56,10 +59,22 @@ Captures :: struct {
 	texture:         gpu.Texture,
 }
 
-// request_frame_capture asks for a copy of this frame's frame target, which poll_frame_capture gives with the ticket.
-// False when the last frame was minimized, every slot is in use or a copy is already asked for this frame. It sees the
-// last frame, so a frame that then records nothing cancels the copy, and poll_frame_capture gives it back cancelled.
-// Call it on the main thread between frames.
+// set_capture_source chooses what request_frame_capture copies from the next request on: a viewport's target, or with nil
+// the frame target, which is the start. A frame that does not draw the viewport, as one for a viewport that is not open,
+// cancels the copy, as a frame that records nothing does. Call it on the main thread between frames.
+set_capture_source :: proc(viewport: Maybe(int)) {
+	dev.captures.viewport = viewport
+}
+
+// capture_source is what set_capture_source set.
+capture_source :: proc() -> Maybe(int) {
+	return dev.captures.viewport
+}
+
+// request_frame_capture asks for a copy of this frame's capture source (see set_capture_source): the frame target, or an
+// editor viewport's target. poll_frame_capture gives it with the ticket. False when the last frame was minimized, every
+// slot is in use or a copy is already asked for this frame. It sees the last frame, so a frame that then records nothing
+// cancels the copy, and poll_frame_capture gives it back cancelled. Call it on the main thread between frames.
 request_frame_capture :: proc(ticket: u32) -> bool {
 	c := &dev.captures
 	if !dev.recording || c.pending >= 0 {
@@ -67,6 +82,7 @@ request_frame_capture :: proc(ticket: u32) -> bool {
 	}
 	i, ok := take_slot(.Frame, ticket)
 	if ok {
+		c.slots[i].viewport = c.viewport
 		c.pending = i
 	}
 	return ok
@@ -77,7 +93,7 @@ request_frame_capture :: proc(ticket: u32) -> bool {
 take_slot :: proc(source: gpu.Capture_Source, ticket: u32) -> (index: i32, ok: bool) {
 	for &slot, i in dev.captures.slots {
 		if sync.atomic_load(&slot.state) == .Free {
-			slot.source, slot.ticket = source, ticket
+			slot.source, slot.ticket, slot.viewport = source, ticket, nil
 			sync.atomic_store(&slot.state, .Requested)
 			return i32(i), true
 		}
@@ -92,7 +108,7 @@ poll_frame_capture :: proc() -> (capture: gpu.Frame_Capture, ok: bool) {
 	for &slot, i in c.slots {
 		if sync.atomic_load(&slot.state) == .Cancelled {
 			sync.atomic_store(&slot.state, .Taken)
-			return {slot = u32(i), status = .Cancelled, source = slot.source, ticket = slot.ticket}, true
+			return {slot = u32(i), status = .Cancelled, source = slot.source, ticket = slot.ticket, viewport = slot.viewport}, true
 		}
 	}
 	completed := dev.fence->GetCompletedValue()
@@ -206,8 +222,26 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 	if c.texture_pending < 0 {
 		return
 	}
-	slot := &c.slots[c.texture_pending]
-	target := gpu.pool_get(&dev.textures, c.texture)
+	if !record_target_copy(&c.slots[c.texture_pending], list, gpu.pool_get(&dev.textures, c.texture)) {
+		cancel_texture_capture()
+	}
+}
+
+// record_viewport_capture copies this frame's frame capture from its viewport's target, on the frame's final list, if the
+// frame drew the target. Otherwise the capture is cancelled. The target stays in the render target layout, where the
+// frame's end moves it to the common layout (see end_shared_sides).
+@(private)
+record_viewport_capture :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7, viewport: int) {
+	target := drawn_viewport_target(viewport)
+	if target == nil || !record_target_copy(slot, list, target) {
+		cancel_frame_capture()
+	}
+}
+
+// record_target_copy copies a texture that is in the render target layout into a slot, which gets a new buffer if its is
+// too small, and leaves the texture in that layout. It is false when the slot cannot get its buffer.
+@(private = "file")
+record_target_copy :: proc(slot: ^Capture_Slot, list: ^d3d.IGraphicsCommandList7, target: ^Texture_Entry) -> bool {
 	desc: d3d.RESOURCE_DESC
 	target.resource->GetDesc(&desc)
 	footprint: d3d.PLACED_SUBRESOURCE_FOOTPRINT
@@ -226,8 +260,7 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 			if ok {
 				resource->Release()
 			}
-			cancel_texture_capture()
-			return
+			return false
 		}
 		slot.resource = resource
 		slot.capacity = u32(total)
@@ -251,6 +284,7 @@ record_texture_capture :: proc(list: ^d3d.IGraphicsCommandList7) {
 	slot.row_pitch = footprint.Footprint.RowPitch
 	slot.fence_value = 0
 	sync.atomic_store(&slot.state, .Copying)
+	return true
 }
 
 // record_capture copies the frame target into the slot on the frame's final list, and leaves the target in the

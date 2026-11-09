@@ -230,7 +230,8 @@ public sealed class ShellTests : IDisposable
         using var shell = NewShell();
 
         Assert.All(shell.Layout.Panels, p => Assert.True(shell.Layout.IsOpen(p.Id), p.Id));
-        Assert.True(shell.Layout.IsOpen(ViewportDocument.PanelId));
+        Assert.True(shell.Layout.IsViewportOpen(0));
+        Assert.True(shell.Layout.IsViewportOpen(EditorViewport.GameIndex));
     }
 
     [Fact]

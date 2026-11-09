@@ -46,9 +46,7 @@ Message :: union {
 	Refused,
 	Log,
 	Game_Reloaded,
-	Viewport_Size,
-	Frame_Target,
-	Frame_Acknowledged,
+	Game_Size,
 	Component_Types,
 	Entity_Snapshot,
 	Entity_Delta,
@@ -77,7 +75,7 @@ Message :: union {
 	Close_Preview,
 	Preview_Target,
 	Preview_Acknowledged,
-	Viewport_Settings,
+	Set_Viewport_Settings,
 	Profile_Summary,
 	Profile_Capture_Request,
 	Profile_Capture,
@@ -100,6 +98,11 @@ Message :: union {
 	Capture_Reflection_Probes,
 	Reflection_Probe_View,
 	Box_Handles,
+	Open_Viewport,
+	Close_Viewport,
+	Viewport_Target,
+	Viewport_Acknowledged,
+	Capture_Source,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -155,26 +158,13 @@ Game_Reloaded :: struct {
 	kind: Reload_Kind,
 }
 
-// Editor to host: the viewport's size in physical pixels. The host renders at that size from a following frame.
-Viewport_Size :: struct {
+// Editor to host: the size of the game's picture in physical pixels, which is the Game view's (see
+// docs/editor/viewport.md#views). The game sees it as its window's size from a following frame, so its UI and its
+// camera's aspect follow the Game view. The frames themselves reach the editor through each view's own target (see
+// Open_Viewport), not through the host's frame target.
+Game_Size :: struct {
 	width:  i32,
 	height: i32,
-}
-
-// Host to editor: the shared target that frames render into (see docs/gpu/presentation.md#presentation). The objects are named
-// <prefix>.texture0..2 and <prefix>.fence. Each resize makes a new generation, whose frames count from 1 again.
-Frame_Target :: struct {
-	prefix:     string,
-	generation: u32,
-	width:      i32,
-	height:     i32,
-}
-
-// Editor to host: the editor has finished copying this frame of this generation. While an editor is linked, the host
-// renders frame k into a shared texture only if k <= frame + 2.
-Frame_Acknowledged :: struct {
-	generation: u32,
-	frame:      u64,
 }
 
 // The world (see docs/editor/link.md#world). The game side sends these, and handles Watch_Entity and Unwatch_Entity.
@@ -456,13 +446,27 @@ Edit_Problems :: struct {
 	problems: []Edit_Problem,
 }
 
-// Viewport tools (see docs/editor/viewport.md#viewport). The editor owns its camera, its selection and its gizmo, and the game
-// draws them: the frame from the camera, an outline around the selected entities, and the gizmo. The game also
-// renders an entity ID buffer, which answers picks.
+// Viewport tools (see docs/editor/viewport.md#viewport). The editor owns its cameras, its selection and its gizmo, and the game
+// draws them: each viewport's frame from its camera, an outline around the selected entities, and the gizmo. The game
+// also renders an entity ID buffer for each viewport, which answers its picks.
+//
+// A viewport is a number below MAX_VIEWPORTS (see docs/editor/viewport.md#views). Each is open from its Open_Viewport
+// to its Close_Viewport, which the editor sends as the viewport shows and hides, and while it is open the game draws it
+// into a shared target of its own. Its kind says what it shows.
+MAX_VIEWPORTS :: 4
 
-// Editor to game: the camera that the game draws from while an editor is linked. The editor sends it when it changes,
-// and when the link connects.
+Viewport_Kind :: enum u8 {
+	// A scene view: the world from the viewport's Editor_Camera, with the editor's tools, in every mode.
+	Scene,
+	// The Game view: the world from the game's own camera, with the game's UI and without the editor's tools, as a
+	// player sees it. In Play it has the game's input.
+	Game,
+}
+
+// Editor to game: the camera that the game draws a viewport from while an editor is linked. The editor sends it when
+// it changes, and when the link connects.
 Editor_Camera :: struct {
+	viewport:     u32,
 	// A World_Position: units of 2^-24 m.
 	position:     [3]i64,
 	// Camera to world: x, y, z, w. The camera looks down its +z, with +y up and +x right.
@@ -499,8 +503,10 @@ Gizmo_Part :: enum u8 {
 	View,
 }
 
-// Editor to game: the gizmo to draw. The editor does the hit test and the drag math, so the game only draws it.
+// Editor to game: the gizmo to draw in a viewport. The editor does the hit test and the drag math, so the game only
+// draws it. Each viewport has its own, because the gizmo's size follows the viewport's camera.
 Gizmo_State :: struct {
+	viewport: u32,
 	kind:     Gizmo_Kind,
 	// A World_Position.
 	position: [3]i64,
@@ -513,14 +519,16 @@ Gizmo_State :: struct {
 	dragging: bool,
 }
 
-// Editor to game: which entities are drawn in a rectangle of the frame, in pixels of the current frame target from its
-// top left. A click is a rectangle of one pixel. The game answers each with a Pick_Result, in order.
+// Editor to game: which entities are drawn in a rectangle of a viewport's frame, in pixels of its current target from
+// its top left. A click is a rectangle of one pixel. The game answers each with a Pick_Result, in order. A pick of a
+// viewport that is not open answers with no hits.
 Pick_Request :: struct {
-	id:     u32,
-	x:      i32,
-	y:      i32,
-	width:  i32,
-	height: i32,
+	id:       u32,
+	viewport: u32,
+	x:        i32,
+	y:        i32,
+	width:    i32,
+	height:   i32,
 }
 
 Pick_Hit :: struct {
@@ -636,8 +644,8 @@ Viewport_Level :: enum u8 {
 	Ultra,
 }
 
-// Editor to game: how the viewport draws while an editor is linked (see docs/editor/viewport.md#viewport). The editor sends it
-// when it changes, and when the link connects. The features are the ones that the viewport turns off.
+// How a viewport draws while an editor is linked (see docs/editor/viewport.md#viewport), which a Set_Viewport_Settings
+// carries. The features are the ones that the viewport turns off.
 Viewport_Settings :: struct {
 	debug_view:           Debug_View,
 	no_temporal_aa:       bool,
@@ -668,6 +676,49 @@ Viewport_Settings :: struct {
 	reflections_level:    Viewport_Level,
 }
 
+// Editor to game: how a viewport draws. The editor sends it when it changes, and when the link connects. Each viewport
+// has its own view, features, exposure, icons and quality. The shapes are debug lines, which every viewport with a debug
+// layer draws, so they are those of the scene view with the lowest number (see docs/editor/viewport.md#views).
+Set_Viewport_Settings :: struct {
+	viewport: u32,
+	settings: Viewport_Settings,
+}
+
+// Editor to game: a viewport is open, at a size in physical pixels, or has a new size or kind. The game draws it into a
+// shared target of its own, and tells the editor of it with a Viewport_Target. A side is at most
+// gpu.MAX_VIEWPORT_SIZE. A scene view draws once it has an Editor_Camera.
+Open_Viewport :: struct {
+	viewport: u32,
+	kind:     Viewport_Kind,
+	width:    i32,
+	height:   i32,
+}
+
+// Editor to game: a viewport is closed, as when its panel hides, and its shared target can go. The game keeps what it
+// has of the viewport's camera between frames only while the viewport is open.
+Close_Viewport :: struct {
+	viewport: u32,
+}
+
+// Game to editor: the shared target that a viewport renders into (see docs/gpu/presentation.md#presentation). The
+// objects are named <prefix>.texture0..2 and <prefix>.fence. Each size makes a new generation, whose frames count from
+// 1 again.
+Viewport_Target :: struct {
+	viewport:   u32,
+	prefix:     string,
+	generation: u32,
+	width:      i32,
+	height:     i32,
+}
+
+// Editor to host: the editor has finished copying this frame of this generation of a viewport's target. The host
+// renders frame k of the viewport only if k <= frame + 2, so it never draws into a texture that the editor still reads.
+Viewport_Acknowledged :: struct {
+	viewport:   u32,
+	generation: u32,
+	frame:      u64,
+}
+
 // Modes (see docs/editor/document-and-scenes.md#modes).
 
 Editor_Mode :: enum u8 {
@@ -682,9 +733,7 @@ Editor_Mode :: enum u8 {
 // Editor to game: the mode. A game that an editor has just linked to is in Edit. The editor stops play by setting
 // Edit and sending its scene again, so nothing of play mode stays.
 Set_Mode :: struct {
-	mode:        Editor_Mode,
-	// In Play and Paused, the game draws from the editor's camera instead of its own.
-	free_camera: bool,
+	mode: Editor_Mode,
 }
 
 // Editor to game: while paused, run one frame of one fixed tick.
@@ -746,11 +795,12 @@ Box_Handle :: struct {
 	hot:      bool,
 }
 
-// Editor to game: the box handles to draw, as cubes of size meters, none to draw none (see
+// Editor to game: the box handles to draw in a viewport, as cubes of size meters, none to draw none (see
 // docs/editor/viewport.md#reflection-probes). The editor does the hit test and the drag math, as with the gizmo.
 Box_Handles :: struct {
-	size:    f32,
-	handles: []Box_Handle,
+	viewport: u32,
+	size:     f32,
+	handles:  []Box_Handle,
 }
 
 // Game to editor: the direction toward the texture sky's sun in the world, where its brightest texels are, when the
@@ -1288,9 +1338,17 @@ Output_Mode :: enum u8 {
 	Scrgb,
 }
 
-// Editor to host: write the next frame as a PNG, or the history ring as a GIF, to path, an absolute path whose
-// directory the host makes, or to captures/<utc time>-f<frame>.<png|gif> beside the host when path is "". The host
-// answers with a Capture_Result with the same id, once the file is written.
+// Editor to host: the viewport whose frames the host's screenshots and history ring read (see
+// docs/editor/capture.md#capture), or a negative number for the host's frame target, which is the start. The editor
+// sends it when its capture view changes, and when the link connects. A frame that does not draw the viewport has no
+// capture, as a minimized frame has none.
+Capture_Source :: struct {
+	viewport: i32,
+}
+
+// Editor to host: write the next frame of the capture's source as a PNG, or the history ring as a GIF, to path, an
+// absolute path whose directory the host makes, or to captures/<utc time>-f<frame>.<png|gif> beside the host when path
+// is "". The host answers with a Capture_Result with the same id, once the file is written.
 Capture_Request :: struct {
 	id:   u32,
 	kind: Capture_Kind,

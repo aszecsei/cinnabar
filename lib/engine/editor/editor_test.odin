@@ -83,6 +83,8 @@ Fixture :: struct {
 	world:    ecs.World,
 	editor:   Editor,
 	out:      [dynamic]byte,
+	// The renderer that the viewports' view states are made with, or nil (see with_renderer).
+	renderer: ^render.Renderer,
 }
 
 // Each poll sees a clock one second later, so every interval has passed.
@@ -122,6 +124,7 @@ setup :: proc(t: ^testing.T) -> ^Fixture {
 @(private = "file")
 teardown :: proc(f: ^Fixture) {
 	destroy(&f.editor)
+	free(f.renderer)
 	ecs.destroy(&f.world)
 	delete(f.out)
 	virtual.arena_destroy(&f.frame)
@@ -375,7 +378,8 @@ another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
 		link.Set_Selection{entities = {u64(e)}},
 		link.Set_Hidden{entities = {u64(e)}},
 		link.Gizmo_State{kind = .Translate, rotation = {0, 0, 0, 1}, size = 1},
-		link.Viewport_Settings{no_bloom = true},
+		link.Set_Viewport_Settings{settings = {no_bloom = true}},
+		link.Open_Viewport{viewport = 0, kind = .Scene, width = 8, height = 8},
 		link.Pick_Request{id = 1, width = 1, height = 1},
 		link.Open_Preview{id = 1},
 		link.Set_Mode{mode = .Paused},
@@ -383,7 +387,7 @@ another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
 	)
 	s := &f.editor.session
 	testing.expect(t, s.previews[1].open)
-	testing.expect(t, s.view.has_camera)
+	testing.expect(t, s.view.viewports[0].camera != nil)
 	testing.expect_value(t, len(s.view.picks), 1)
 	testing.expect_value(t, s.steps, 1)
 
@@ -391,11 +395,12 @@ another_connection_has_a_session_of_its_own :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, s.connection, 2)
 	testing.expect_value(t, len(s.watched), 0)
-	testing.expect(t, !s.view.has_camera)
+	testing.expect(t, s.view.viewports[0].camera == nil)
+	testing.expect(t, s.view.viewports[0].open == nil)
 	testing.expect_value(t, len(s.view.selection), 0)
 	testing.expect_value(t, len(s.view.hidden), 0)
-	testing.expect_value(t, s.view.gizmo.kind, link.Gizmo_Kind.None)
-	testing.expect(t, !s.view.settings.no_bloom)
+	testing.expect_value(t, s.view.viewports[0].gizmo.kind, link.Gizmo_Kind.None)
+	testing.expect(t, !s.view.viewports[0].settings.no_bloom)
 	testing.expect_value(t, len(s.view.picks), 0)
 	testing.expect(t, !s.previews[1].open)
 	testing.expect_value(t, s.next_preview, 0)
@@ -573,8 +578,7 @@ the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
 	defer teardown(f)
 	a := spawn(f, {})
 	step(f)
-	_, has_view := view(&f.editor)
-	testing.expect(t, !has_view)
+	testing.expect(t, f.editor.session.view.viewports[0].camera == nil)
 
 	camera := link.Editor_Camera {
 		position     = {1 << 24, 0, -(2 << 24)},
@@ -583,16 +587,16 @@ the_editor_sets_the_view_and_the_selection :: proc(t: ^testing.T) {
 		near         = 0.05,
 	}
 	step(f, 1, camera, link.Set_Selection{entities = {u64(a)}})
-	v, ok := view(&f.editor)
+	stored, ok := f.editor.session.view.viewports[0].camera.?
 	testing.expect(t, ok)
+	v := camera_view(stored)
 	testing.expect_value(t, v.position.raw, [3]i64{1 << 24, 0, -(2 << 24)})
 	testing.expect_value(t, v.near, 0.05)
 	testing.expect_value(t, len(f.editor.session.view.selection), 1)
 
 	// Another editor has its own camera and selection.
 	step(f, 2)
-	_, has_view = view(&f.editor)
-	testing.expect(t, !has_view)
+	testing.expect(t, f.editor.session.view.viewports[0].camera == nil)
 	testing.expect_value(t, len(f.editor.session.view.selection), 0)
 }
 
@@ -712,10 +716,10 @@ box_handles_are_cubes_with_the_hot_one_highlighted :: proc(t: ^testing.T) {
 	f := setup(t)
 	defer teardown(f)
 	step(f, 1, link.Box_Handles{size = 0.2, handles = handles})
-	testing.expect_value(t, len(f.editor.session.view.handles), 2)
-	testing.expect_value(t, f.editor.session.view.handle_size, 0.2)
+	testing.expect_value(t, len(f.editor.session.view.viewports[0].handles), 2)
+	testing.expect_value(t, f.editor.session.view.viewports[0].handle_size, 0.2)
 	step(f, 1, link.Box_Handles{})
-	testing.expect_value(t, len(f.editor.session.view.handles), 0)
+	testing.expect_value(t, len(f.editor.session.view.viewports[0].handles), 0)
 }
 
 // probe_views are the Reflection_Probe_Views among a poll's messages.
@@ -862,18 +866,6 @@ the_editors_mode_decides_whether_the_world_runs :: proc(t: ^testing.T) {
 	}
 	run, _ = simulation(&f.editor, w, frame)
 	testing.expect(t, !run)
-
-	// The editor's camera draws in Edit, and in Play only as the free camera.
-	camera := link.Editor_Camera{rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05}
-	step(f, 1, camera)
-	_, ok := view(&f.editor)
-	testing.expect(t, !ok)
-	step(f, 1, link.Set_Mode{mode = .Play, free_camera = true})
-	_, ok = view(&f.editor)
-	testing.expect(t, ok)
-	step(f, 1, link.Set_Mode{mode = .Edit})
-	_, ok = view(&f.editor)
-	testing.expect(t, ok)
 }
 
 @(test)
@@ -892,14 +884,14 @@ the_editors_overlays_and_the_debug_layer_draw_only_while_editing :: proc(t: ^tes
 	// Without an editor, the game is not editing, and its debug layer shows.
 	testing.expect(t, !editing(&f.editor) && debug_shown(&f.editor))
 	// A new editor starts in Edit, where both show.
-	step(f, 1, link.Viewport_Settings{helpers = .All})
+	step(f, 1, link.Set_Viewport_Settings{settings = {helpers = .All}}, open_viewport(0, .Scene))
 	testing.expect(t, editing(&f.editor) && debug_shown(&f.editor))
 	draw_helpers(&f.editor, w, &lines)
 	testing.expect(t, len(debug.frame_lines(&lines)) > 0, "the helpers drew nothing in Edit")
 	debug.end_frame(&lines)
 
-	// Play and Paused show the game's frame alone, with or without the free camera.
-	for mode in ([]link.Set_Mode{{mode = .Play}, {mode = .Play, free_camera = true}, {mode = .Paused}}) {
+	// Play and Paused show the game's frame alone.
+	for mode in ([]link.Set_Mode{{mode = .Play}, {mode = .Paused}}) {
 		step(f, 1, mode)
 		testing.expectf(t, !editing(&f.editor) && !debug_shown(&f.editor), "overlays in %v", mode)
 		draw_helpers(&f.editor, w, &lines)
@@ -1041,16 +1033,16 @@ the_viewports_settings_reach_the_frame_while_an_editor_is_linked :: proc(t: ^tes
 	defer teardown(f)
 
 	step(f)
-	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
-	step(f, 1, link.Viewport_Settings{debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5, shading_stats = true})
-	o := render_overrides(&f.editor)
+	testing.expect_value(t, render_overrides(&f.editor, 0), Render_Overrides{})
+	step(f, 1, link.Set_Viewport_Settings{settings = {debug_view = .Normals, no_bloom = true, no_shadows = true, exposure_offset = -1.5, shading_stats = true}})
+	o := render_overrides(&f.editor, 0)
 	testing.expect_value(t, o.debug_view, render.Debug_View.Normals)
 	testing.expect_value(t, o.disable, render.Features{.Bloom, .Shadows})
 	testing.expect_value(t, o.exposure_offset, -1.5)
 	testing.expect(t, o.shading_stats)
 	// Without an editor, the frame is the game's own.
 	step(f, 0)
-	testing.expect_value(t, render_overrides(&f.editor), Render_Overrides{})
+	testing.expect_value(t, render_overrides(&f.editor, 0), Render_Overrides{})
 }
 
 @(test)
@@ -1065,66 +1057,66 @@ the_viewports_quality_replaces_the_games_where_it_chooses :: proc(t: ^testing.T)
 	renderer.quality.aa, renderer.quality.render_scale = .Smaa, 0.75
 
 	step(f)
-	_, ok := viewport_quality(&f.editor, renderer)
+	_, ok := viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, !ok, "the viewport keeps the game's quality")
 	// A preset sets the features, and the anti-aliasing and the render scale stay the game's.
-	step(f, 1, link.Viewport_Settings{quality_preset = .Low})
+	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Low}})
 	q: render.Quality
-	q, ok = viewport_quality(&f.editor, renderer)
+	q, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.Low)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
 	testing.expect_value(t, q.render_scale, 0.75)
-	step(f, 1, link.Viewport_Settings{anti_aliasing = .Fsr, render_scale = 0.5})
-	q, ok = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {anti_aliasing = .Fsr, render_scale = 0.5}})
+	q, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.shadows.level, render.Quality_Level.High)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Fsr)
 	testing.expect_value(t, q.render_scale, 0.5)
 	// The device limits it: without FSR, temporal AA.
 	renderer.caps = {}
-	q, _ = viewport_quality(&f.editor, renderer)
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Taa)
 	// The global illumination's technique replaces the game's, at its level, and the device limits it too: without
 	// Ray_Query, the split cascades are the screen cascades.
 	renderer.caps = {ray_query = true}
-	step(f, 1, link.Viewport_Settings{global_illumination = .Voxel_Cones})
-	q, ok = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {global_illumination = .Voxel_Cones}})
+	q, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Voxel_Cones)
 	testing.expect_value(t, q.gi.level, render.Quality_Level.High)
 	testing.expect_value(t, q.aa, render.Aa_Technique.Smaa)
-	step(f, 1, link.Viewport_Settings{quality_preset = .Low, global_illumination = .Split_Cascades})
-	q, _ = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Low, global_illumination = .Split_Cascades}})
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.gi, render.Gi_Quality{technique = .Split_Cascades, level = .Low})
 	renderer.caps = {}
-	q, _ = viewport_quality(&f.editor, renderer)
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Screen_Cascades)
-	step(f, 1, link.Viewport_Settings{global_illumination = .Off})
-	q, _ = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {global_illumination = .Off}})
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.gi.technique, render.Gi_Technique.Off)
 	// The reflections' technique and level each replace the game's, or the preset's, on their own; without Ray_Query,
 	// the traced reflections are the screen-space ones.
 	game := renderer.quality.reflections
-	step(f, 1, link.Viewport_Settings{reflections = .Probes})
-	q, ok = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Probes}})
+	q, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Probes, level = game.level})
-	step(f, 1, link.Viewport_Settings{reflections_level = .Ultra})
-	q, ok = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {reflections_level = .Ultra}})
+	q, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, ok)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = game.technique, level = .Ultra})
-	step(f, 1, link.Viewport_Settings{quality_preset = .Ultra, reflections = .Ray_Traced, reflections_level = .Low})
-	q, _ = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {quality_preset = .Ultra, reflections = .Ray_Traced, reflections_level = .Low}})
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.reflections, render.Reflection_Quality{technique = .Screen, level = .Low})
 	renderer.caps = {ray_query = true}
-	q, _ = viewport_quality(&f.editor, renderer)
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Ray_Traced)
-	step(f, 1, link.Viewport_Settings{reflections = .Off})
-	q, _ = viewport_quality(&f.editor, renderer)
+	step(f, 1, link.Set_Viewport_Settings{settings = {reflections = .Off}})
+	q, _ = viewport_quality(&f.editor, renderer, 0)
 	testing.expect_value(t, q.reflections.technique, render.Reflection_Technique.Off)
 	step(f, 0)
-	_, ok = viewport_quality(&f.editor, renderer)
+	_, ok = viewport_quality(&f.editor, renderer, 0)
 	testing.expect(t, !ok, "without an editor, the game's quality")
 }
 // A fake GPU for the live meshes' residency, whose transfers are done at once.
@@ -1300,4 +1292,423 @@ the_mesh_overlay_draws_edges_vertices_fills_and_the_grid :: proc(t: ^testing.T) 
 	testing.expect(t, f.editor.session.mesh_overlay.active)
 	step(f, 2)
 	testing.expect(t, !f.editor.session.mesh_overlay.active)
+}
+
+// Viewports (see docs/editor/viewport.md#views): a scene view draws from its own camera and the Game view from the game's,
+// each into a target of its own while it is open, and each viewport has its own gizmo, settings and picks.
+
+// The backend's targets for the viewports, by the test: each id's generation, whether its reader is still reading it, and
+// what was released.
+@(private = "file")
+Viewport_Targets :: struct {
+	generation: [gpu.MAX_VIEWPORT_TARGETS]u32,
+	busy:       [gpu.MAX_VIEWPORT_TARGETS]bool,
+	released:   [gpu.MAX_VIEWPORT_TARGETS]int,
+}
+
+// A copy for each test, as the tests run on threads of their own.
+@(private = "file", thread_local)
+targets: Viewport_Targets
+
+@(private = "file")
+with_targets :: proc(f: ^Fixture) {
+	targets = {}
+	f.platform.gpu_viewport_target = proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool) {
+		return {texture = {index = u32(20 + id), generation = 1}, prefix = "test.viewport", generation = targets.generation[id], size = size}, !targets.busy[id]
+	}
+	f.platform.gpu_release_viewport_target = proc(id: int) {
+		targets.released[id] += 1
+	}
+}
+
+// The GPU objects that the renderer's view states made and freed.
+@(private = "file")
+View_Objects :: struct {
+	made:  int,
+	freed: int,
+}
+
+@(private = "file", thread_local)
+objects: View_Objects
+
+// with_renderer gives the editor a renderer that makes the view states of the viewports, over a platform that counts their
+// GPU objects. A Renderer is too large for the stack.
+@(private = "file")
+with_renderer :: proc(f: ^Fixture) {
+	objects = {}
+	f.renderer = new(render.Renderer)
+	f.renderer.platform = &f.platform
+	f.renderer.caps = {
+		upscalers = {.Fsr},
+	}
+	f.renderer.quality = render.preset_quality(.High, f.renderer.caps)
+	f.renderer.quality.aa, f.renderer.quality.render_scale = .Smaa, 0.75
+	f.platform.gpu_create_buffer = proc(desc: gpu.Buffer_Desc, data: []byte) -> gpu.Buffer {
+		objects.made += 1
+		return {index = u32(objects.made), generation = 1}
+	}
+	f.platform.gpu_destroy_buffer = proc(buffer: gpu.Buffer) {
+		if buffer != {} {
+			objects.freed += 1
+		}
+	}
+	f.platform.gpu_destroy_texture = proc(_: gpu.Texture) {}
+	f.platform.gpu_destroy_sampler = proc(_: gpu.Sampler) {}
+	f.platform.gpu_destroy_accel = proc(_: gpu.Accel_Struct) {}
+	f.platform.gpu_destroy_upscaler = proc(_: gpu.Upscaler) {}
+	f.platform.gpu_destroy_pipeline = proc(_: gpu.Pipeline) {}
+	f.editor.renderer = f.renderer
+}
+
+@(private = "file")
+viewport_camera :: proc(viewport: u32, x: i64) -> link.Editor_Camera {
+	return {viewport = viewport, position = {x, 0, 0}, rotation = {0, 0, 0, 1}, vertical_fov = 1, near = 0.05}
+}
+
+@(private = "file")
+open_viewport :: proc(viewport: u32, kind: link.Viewport_Kind, width := i32(64), height := i32(64)) -> link.Open_Viewport {
+	return {viewport = viewport, kind = kind, width = width, height = height}
+}
+
+// expect_viewports expects the viewports that a frame draws, by number, in this order.
+@(private = "file")
+expect_viewports :: proc(t: ^testing.T, views: []Frame_Viewport, want: ..int, loc := #caller_location) {
+	got := make([dynamic]int, context.temp_allocator)
+	for v in views {
+		append(&got, v.viewport)
+	}
+	testing.expectf(t, slice.equal(got[:], want), "the frame draws viewports %v, want %v", got[:], want, loc = loc)
+}
+
+@(test)
+viewports_of_both_kinds_open_resize_and_close :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	step(f, 1, viewport_camera(1, 5 << 24))
+	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+
+	// A scene view and the Game view, each with the target of its own number.
+	step(f, 1, open_viewport(1, .Scene, 640, 360), open_viewport(2, .Game, 320, 180))
+	views := frame_viewports(&f.editor)
+	testing.expect_value(t, len(views), 2)
+	if len(views) == 2 {
+		// The Game view is the frame's own view, so it is first.
+		testing.expect_value(t, views[0].viewport, 2)
+		testing.expect_value(t, views[0].kind, link.Viewport_Kind.Game)
+		testing.expect_value(t, views[0].size, [2]u32{320, 180})
+		testing.expect_value(t, views[0].target, gpu.Texture{index = 22, generation = 1})
+		testing.expect(t, views[0].view == nil, "the Game view has the game's camera")
+		testing.expect_value(t, views[1].viewport, 1)
+		testing.expect_value(t, views[1].kind, link.Viewport_Kind.Scene)
+		testing.expect_value(t, views[1].size, [2]u32{640, 360})
+		testing.expect_value(t, views[1].target, gpu.Texture{index = 21, generation = 1})
+		camera, has_camera := views[1].view.?
+		testing.expect(t, has_camera)
+		testing.expect_value(t, camera.position.raw.x, 5 << 24)
+		testing.expect(t, views[0].state != nil && views[1].state != nil && views[0].state != views[1].state, "each viewport has a state of its own")
+	}
+
+	// The editor hears of each target once, and of a new generation when the backend makes one, as a new size does.
+	told := [MAX_VIEWPORTS]int{}
+	for m in step(f, 1) {
+		if target, is_target := m.(link.Viewport_Target); is_target {
+			told[target.viewport] += 1
+			testing.expect_value(t, target.prefix, "test.viewport")
+		}
+	}
+	testing.expect_value(t, told, [MAX_VIEWPORTS]int{0, 1, 1, 0})
+	frame_viewports(&f.editor)
+	for m in step(f, 1) {
+		_, is_target := m.(link.Viewport_Target)
+		testing.expect(t, !is_target)
+	}
+	targets.generation[1] = 1
+	step(f, 1, open_viewport(1, .Scene, 800, 600))
+	views = frame_viewports(&f.editor)
+	testing.expect_value(t, len(views), 2)
+	if len(views) == 2 {
+		testing.expect_value(t, views[1].size, [2]u32{800, 600})
+	}
+	generation: Maybe(u32)
+	for m in step(f, 1) {
+		if target, is_target := m.(link.Viewport_Target); is_target {
+			testing.expect_value(t, target.viewport, 1)
+			generation = target.generation
+		}
+	}
+	testing.expect_value(t, generation, 1)
+
+	// A side beyond the largest is clamped, and a size of nothing is a pixel.
+	step(f, 1, open_viewport(3, .Game, gpu.MAX_VIEWPORT_SIZE + 5, 0))
+	views = frame_viewports(&f.editor)
+	testing.expect_value(t, len(views), 3)
+	for v in views {
+		if v.viewport == 3 {
+			testing.expect_value(t, v.size, [2]u32{gpu.MAX_VIEWPORT_SIZE, 1})
+		}
+	}
+
+	// Closing a viewport ends its drawing, releases its target and frees its state, and nothing else's.
+	freed := objects.freed
+	step(f, 1, link.Close_Viewport{viewport = 1})
+	expect_viewports(t, frame_viewports(&f.editor)[:], 2, 3)
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0})
+	testing.expect_value(t, objects.freed, freed + 1)
+	// A viewport that is not open, and one that is not there, close nothing.
+	step(f, 1, link.Close_Viewport{viewport = 1}, link.Close_Viewport{viewport = 0}, link.Close_Viewport{viewport = 9})
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 0, 0})
+	testing.expect_value(t, objects.freed, freed + 1)
+
+	// A new editor's session has none of the old one's viewports: their targets go, and so do their states.
+	step(f, 2)
+	testing.expect_value(t, targets.released, [gpu.MAX_VIEWPORT_TARGETS]int{0, 1, 1, 1})
+	testing.expect_value(t, objects.freed, objects.made)
+	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+}
+
+@(test)
+a_scene_view_needs_a_camera_and_the_game_view_does_not :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+
+	// Open without a camera, and a camera without being open, draw nothing; the Game view draws from the game's camera.
+	step(f, 1, open_viewport(0, .Scene), viewport_camera(2, 7), open_viewport(3, .Game))
+	views := frame_viewports(&f.editor)
+	expect_viewports(t, views, 3)
+	step(f, 1, viewport_camera(0, 0))
+	expect_viewports(t, frame_viewports(&f.editor), 3, 0)
+
+	// The camera is a scene view's: the Game view stores the editor's messages for it, and draws without them.
+	step(f, 1, viewport_camera(3, 9), link.Gizmo_State{viewport = 3, kind = .Scale, size = 2})
+	views = frame_viewports(&f.editor)
+	testing.expect(t, len(views) == 2 && views[0].view == nil)
+	testing.expect_value(t, f.editor.session.view.viewports[3].gizmo.kind, link.Gizmo_Kind.Scale)
+
+	// The editor's cameras draw in every mode, so in Play the scene views show the game from outside.
+	for mode in ([]link.Editor_Mode{.Play, .Paused, .Edit}) {
+		step(f, 1, link.Set_Mode{mode = mode})
+		expect_viewports(t, frame_viewports(&f.editor), 3, 0)
+	}
+
+	// A viewport of another kind is another camera, with a state of its own.
+	freed := objects.freed
+	step(f, 1, open_viewport(0, .Game))
+	testing.expect_value(t, objects.freed, freed + 1)
+	views = frame_viewports(&f.editor)
+	expect_viewports(t, views, 0, 3)
+	testing.expect(t, views[0].view == nil)
+}
+
+@(test)
+the_first_viewport_that_draws_is_the_frames_own_and_the_others_follow :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	step(f, 1, viewport_camera(0, 0), viewport_camera(1, 0), viewport_camera(3, 0))
+
+	// Scene views alone are in viewport order, the first one being the frame's own.
+	step(f, 1, open_viewport(3, .Scene), open_viewport(1, .Scene))
+	expect_viewports(t, frame_viewports(&f.editor), 1, 3)
+	// The Game view takes the role, as the view model and the particles' collisions are the game camera's; the others keep
+	// their order.
+	step(f, 1, open_viewport(2, .Game), open_viewport(0, .Scene))
+	expect_viewports(t, frame_viewports(&f.editor), 2, 0, 1, 3)
+	// The Game view with the lowest number, when there are two.
+	step(f, 1, open_viewport(3, .Game))
+	expect_viewports(t, frame_viewports(&f.editor), 2, 0, 1, 3)
+	step(f, 1, link.Close_Viewport{viewport = 2})
+	expect_viewports(t, frame_viewports(&f.editor), 3, 0, 1)
+	step(f, 1, link.Close_Viewport{viewport = 3})
+	expect_viewports(t, frame_viewports(&f.editor), 0, 1)
+
+	// A viewport whose target the editor still reads skips the frame, and the next one is the frame's own.
+	targets.busy[0] = true
+	expect_viewports(t, frame_viewports(&f.editor), 1)
+	targets.busy[0] = false
+	expect_viewports(t, frame_viewports(&f.editor), 0, 1)
+
+	// No linked editor, and no renderer, draw no viewport: the game draws its own camera into the frame target.
+	f.editor.renderer = nil
+	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+	f.editor.renderer = f.renderer
+	step(f, 0)
+	testing.expect_value(t, len(frame_viewports(&f.editor)), 0)
+}
+
+@(test)
+a_viewport_keeps_its_view_state_while_the_others_open_and_close :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	step(f, 1, viewport_camera(0, 0), viewport_camera(1, 0), open_viewport(0, .Scene), open_viewport(1, .Scene))
+
+	views := frame_viewports(&f.editor)
+	testing.expect_value(t, len(views), 2)
+	first, second := views[0].state, views[1].state
+	testing.expect_value(t, objects.made, 2)
+
+	// The states are made once, when a viewport first draws, and last while it is open, whichever viewport is the frame's own.
+	step(f, 1, open_viewport(2, .Game))
+	views = frame_viewports(&f.editor)
+	expect_viewports(t, views, 2, 0, 1)
+	testing.expect(t, views[1].state == first && views[2].state == second, "a state moved when another viewport opened")
+	step(f, 1, link.Close_Viewport{viewport = 2})
+	views = frame_viewports(&f.editor)
+	testing.expect(t, views[0].state == first && views[1].state == second, "a state moved when another viewport closed")
+	testing.expect_value(t, objects.made, 3)
+	testing.expect_value(t, objects.freed, 1)
+
+	// A viewport that the editor still reads skips a frame and keeps its state.
+	targets.busy[1] = true
+	testing.expect_value(t, len(frame_viewports(&f.editor)), 1)
+	targets.busy[1] = false
+	views = frame_viewports(&f.editor)
+	testing.expect(t, views[1].state == second)
+	testing.expect_value(t, objects.made, 3)
+
+	// Closed and open again, it starts anew; the end of the session frees the rest.
+	step(f, 1, link.Close_Viewport{viewport = 0}, open_viewport(0, .Scene))
+	views = frame_viewports(&f.editor)
+	testing.expect_value(t, objects.made, 4)
+	testing.expect_value(t, objects.freed, 2)
+	destroy(&f.editor)
+	testing.expect_value(t, objects.freed, objects.made)
+	// The fixture's teardown destroys an editor that is destroyed already.
+	init(&f.editor, &f.platform, nil)
+}
+
+@(test)
+each_viewport_has_its_own_gizmo_handles_and_settings :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	step(
+		f,
+		1,
+		link.Gizmo_State{viewport = 0, kind = .Translate, size = 1},
+		link.Gizmo_State{viewport = 2, kind = .Rotate, size = 4},
+		link.Box_Handles{viewport = 2, size = 0.5, handles = {{kind = .Influence}}},
+		link.Set_Viewport_Settings{viewport = 0, settings = {debug_view = .Albedo, show_icons = true}},
+		link.Set_Viewport_Settings{viewport = 2, settings = {debug_view = .Normals, no_fog = true}},
+		// A viewport that the game does not have is dropped.
+		link.Gizmo_State{viewport = MAX_VIEWPORTS, kind = .Scale},
+	)
+	viewports := &f.editor.session.view.viewports
+
+	testing.expect_value(t, viewports[0].gizmo.kind, link.Gizmo_Kind.Translate)
+	testing.expect_value(t, viewports[2].gizmo.size, 4)
+	testing.expect_value(t, viewports[1].gizmo.kind, link.Gizmo_Kind.None)
+	testing.expect_value(t, len(viewports[0].handles), 0)
+	testing.expect_value(t, len(viewports[2].handles), 1)
+	testing.expect_value(t, render_overrides(&f.editor, 0).debug_view, render.Debug_View.Albedo)
+	testing.expect_value(t, render_overrides(&f.editor, 2).debug_view, render.Debug_View.Normals)
+	testing.expect(t, .Fog in render_overrides(&f.editor, 2).disable)
+	testing.expect(t, .Fog not_in render_overrides(&f.editor, 0).disable)
+	testing.expect(t, icons_shown(&f.editor, 0))
+	testing.expect(t, !icons_shown(&f.editor, 2))
+	// No such viewport, no overrides.
+	testing.expect_value(t, render_overrides(&f.editor, MAX_VIEWPORTS), Render_Overrides{})
+	testing.expect_value(t, render_overrides(&f.editor, -1), Render_Overrides{})
+}
+
+@(test)
+a_frame_viewport_takes_its_own_settings_quality_and_exposure :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	with_renderer(f)
+	step(
+		f,
+		1,
+		viewport_camera(1, 3 << 24),
+		open_viewport(1, .Scene, 16, 8),
+		open_viewport(2, .Game, 32, 16),
+		link.Set_Viewport_Settings{viewport = 1, settings = {debug_view = .Normals, no_fog = true, exposure_offset = -1, quality_preset = .Low}},
+		link.Set_Viewport_Settings{viewport = 2, settings = {no_bloom = true, exposure_offset = 2, anti_aliasing = .Fxaa}},
+	)
+	hook :: proc(_: ^render.Frame) {}
+	camera := render.View {
+		rotation     = 1,
+		vertical_fov = 2,
+		near         = 0.5,
+	}
+	views := frame_viewports(&f.editor)
+	if !testing.expect_value(t, len(views), 2) {
+		return
+	}
+	game, scene := render_view(&f.editor, views[0], camera, {debug = hook}), render_view(&f.editor, views[1], camera, {debug = hook})
+
+	// The scene view: the editor's camera, its IDs for the picks, its debug layer in Edit, and its own settings.
+	testing.expect_value(t, scene.view.position.raw.x, 3 << 24)
+	testing.expect_value(t, scene.size, [2]u32{16, 8})
+	testing.expect_value(t, scene.target, gpu.Texture{index = 21, generation = 1})
+	testing.expect(t, scene.state == views[1].state)
+	testing.expect(t, scene.keep_ids && !scene.no_debug)
+	testing.expect_value(t, scene.debug_view, render.Debug_View.Normals)
+	testing.expect_value(t, scene.disable, render.Features{.Fog})
+	testing.expect_value(t, scene.exposure_offset, -1)
+	testing.expect(t, scene.hooks.debug == hook)
+	if testing.expect(t, scene.quality != nil, "the scene view's preset replaces the quality") {
+		testing.expect_value(t, scene.quality.aa, f.renderer.quality.aa)
+	}
+
+	// The Game view: the game's camera, no IDs and no debug layer, as a player sees it, and its own settings.
+	testing.expect_value(t, game.view, camera)
+	testing.expect_value(t, game.size, [2]u32{32, 16})
+	testing.expect(t, game.state == views[0].state && game.state != scene.state)
+	testing.expect(t, !game.keep_ids && game.no_debug)
+	testing.expect_value(t, game.debug_view, render.Debug_View.Lit)
+	testing.expect_value(t, game.disable, render.Features{.Bloom})
+	testing.expect_value(t, game.exposure_offset, 2)
+	if testing.expect(t, game.quality != nil, "the Game view's anti-aliasing replaces the quality") {
+		testing.expect_value(t, game.quality.aa, render.Aa_Technique.Fxaa)
+	}
+
+	// The scene view has no debug layer outside Edit; the Game view never does. A viewport that keeps the game's quality
+	// leaves it to the frame's.
+	step(f, 1, link.Set_Mode{mode = .Play}, link.Set_Viewport_Settings{viewport = 1})
+	views = frame_viewports(&f.editor)
+	scene = render_view(&f.editor, views[1], camera, {})
+	testing.expect(t, scene.keep_ids && scene.no_debug)
+	testing.expect(t, scene.quality == nil)
+}
+
+@(test)
+a_pick_of_the_game_view_or_a_viewport_that_cannot_draw_answers_with_no_hits :: proc(t: ^testing.T) {
+	f := setup(t)
+	defer teardown(f)
+	with_targets(f)
+	// Viewport 1 is closed, 2 is the Game view, and 3 is a scene view without a camera: their picks would never run, and
+	// would hold up the pick behind them.
+	messages := step(
+		f,
+		1,
+		open_viewport(2, .Game),
+		open_viewport(3, .Scene),
+		viewport_camera(0, 0),
+		open_viewport(0, .Scene),
+		link.Pick_Request{id = 4, viewport = 1, width = 1, height = 1},
+		link.Pick_Request{id = 5, viewport = 2, width = 1, height = 1},
+		link.Pick_Request{id = 6, viewport = 3, width = 1, height = 1},
+		link.Pick_Request{id = 7, viewport = 0, width = 1, height = 1},
+	)
+
+	answered := make([dynamic]u32, context.temp_allocator)
+	for m in messages {
+		if result, is_result := m.(link.Pick_Result); is_result {
+			append(&answered, result.id)
+			testing.expect_value(t, len(result.hits), 0)
+			testing.expect_value(t, result.submesh, -1)
+		}
+	}
+	testing.expect(t, slice.equal(answered[:], []u32{4, 5, 6}), "the picks that were answered")
+	// A scene view with a camera runs its pick in a frame of its own.
+	testing.expect_value(t, len(f.editor.session.view.picks), 1)
+	testing.expect_value(t, f.editor.session.view.picks[0].id, 7)
+	testing.expect(t, pickable(&f.editor, 0) && !pickable(&f.editor, 2) && !pickable(&f.editor, 3) && !pickable(&f.editor, 1))
 }

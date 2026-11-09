@@ -40,7 +40,7 @@ public sealed class MeshModeTests : IDisposable
             new EntityInfo(Handle(0), "Room", 1, 0, true, [1, 33]),
             new EntityInfo(Handle(1), "Lamp", 2, 0, true, [1]),
         ]));
-        shell.Viewport.RequestSize(new PixelSize((int)Width, (int)Height));
+        shell.Viewports[0].Session.Show(new PixelSize((int)Width, (int)Height));
         shell.Camera.Place([0, 0, 0], 0, 0);
         return shell;
     }

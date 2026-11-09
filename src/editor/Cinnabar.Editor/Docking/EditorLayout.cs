@@ -16,12 +16,14 @@ public sealed class EditorLayout
     public const string RightDock = "dock.right";
     public const string BottomDock = "dock.bottom";
     const string DocumentDockId = "dock.documents";
+    const double DocumentDockProportion = 0.72;
 
     // Panels that a later editor renamed, by their old IDs, so a saved layout keeps them.
     static readonly Dictionary<string, string> Renamed = new() { ["assetBrowser"] = "contentBrowser" };
 
     readonly IReadOnlyDictionary<string, PanelTool> _panels;
-    readonly ViewportDocument _viewport;
+    readonly IReadOnlyList<ViewportDocument> _viewports;
+    readonly IReadOnlyDictionary<string, ViewportDocument> _viewportsById;
 
     public Factory Factory { get; } = new();
 
@@ -33,7 +35,7 @@ public sealed class EditorLayout
     /// <summary>A panel opened, closed or moved.</summary>
     public event Action? Changed;
 
-    /// <summary>The document dock's active document changed: the viewport or a material editor.</summary>
+    /// <summary>A document dock's active document changed: a viewport or a material editor.</summary>
     public event Action<IDockable?>? ActiveDocumentChanged;
 
     /// <summary>Asks whether a document may close. A document that it refuses stays open.</summary>
@@ -44,10 +46,13 @@ public sealed class EditorLayout
 
     public IEnumerable<PanelTool> Panels => _panels.Values;
 
-    public EditorLayout(IEnumerable<PanelTool> panels, ViewportDocument viewport)
+    /// <param name="panels">Every panel, each of which exists once.</param>
+    /// <param name="viewports">Every viewport's document, in the order of their numbers: the scene views, then the Game view.</param>
+    public EditorLayout(IEnumerable<PanelTool> panels, IReadOnlyList<ViewportDocument> viewports)
     {
         _panels = panels.ToDictionary(p => p.Id);
-        _viewport = viewport;
+        _viewports = viewports;
+        _viewportsById = viewports.ToDictionary(v => v.Id);
         Root = CreateDefault();
         Factory.DockableAdded += (_, _) => Changed?.Invoke();
         Factory.DockableRemoved += (_, _) => Changed?.Invoke();
@@ -83,21 +88,27 @@ public sealed class EditorLayout
             if (e.Dockable is EditorDocument document)
             {
                 DocumentClosed?.Invoke(document);
-                // The viewport is the document again once the last editor's document closes.
-                if (Documents()?.ActiveDockable is not EditorDocument)
+                // A viewport is the document again once the last editor's document closes.
+                if (DocumentHost()?.ActiveDockable is not EditorDocument)
                 {
-                    ActiveDocumentChanged?.Invoke(Documents()?.ActiveDockable);
+                    ActiveDocumentChanged?.Invoke(DocumentHost()?.ActiveDockable);
                 }
             }
         };
     }
 
-    IDocumentDock? Documents() => Walk(Root).OfType<IDocumentDock>().FirstOrDefault();
+    // The document dock that new documents go into, beside the viewports: the one that holds the first open viewport, or
+    // else the first document dock.
+    IDocumentDock? DocumentHost()
+    {
+        var docks = Walk(Root).OfType<IDocumentDock>().ToList();
+        return _viewports.Where(v => IsOpen(v.Id)).Select(v => v.Owner).OfType<IDocumentDock>().FirstOrDefault(docks.Contains) ?? docks.FirstOrDefault();
+    }
 
-    /// <summary>Adds a material editor's or an effect preview's document beside the viewport, and shows it.</summary>
+    /// <summary>Adds a material editor's or an effect preview's document beside the viewports, and shows it.</summary>
     public void OpenDocument(EditorDocument document)
     {
-        if (Documents() is not { } dock)
+        if (DocumentHost() is not { } dock)
         {
             return;
         }
@@ -129,7 +140,44 @@ public sealed class EditorLayout
     EditorDocument? FindDocument(object editor) =>
         Walk(Root).OfType<EditorDocument>().FirstOrDefault(d => d.Shows == editor);
 
-    /// <summary>The outliner on the left, the viewport in the middle, the properties on the right, and the console below.</summary>
+    /// <summary>Whether a viewport's document is in the layout, as a tab that may be behind another.</summary>
+    public bool IsViewportOpen(int index) => IsOpen(_viewports[index].Id);
+
+    /// <summary>
+    /// Shows a viewport's document: it opens in the document dock that holds the first open viewport, unless it is open
+    /// already, and becomes its dock's active tab.
+    /// </summary>
+    public void ShowViewport(int index)
+    {
+        var document = _viewports[index];
+        if (!IsOpen(document.Id))
+        {
+            if (DocumentHost() is not { } dock)
+            {
+                return;
+            }
+            Factory.AddDockable(dock, document);
+        }
+        Factory.SetActiveDockable(document);
+        if (document.Owner is IDock owner)
+        {
+            Factory.SetFocusedDockable(owner, document);
+        }
+        ActiveDocumentChanged?.Invoke(document);
+        Changed?.Invoke();
+    }
+
+    /// <summary>Closes a viewport's document. Its viewport keeps its camera and settings for the next time.</summary>
+    public void CloseViewport(int index)
+    {
+        if (IsViewportOpen(index))
+        {
+            Factory.CloseDockable(_viewports[index]);
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>The outliner on the left, the scene view and the Game view in the middle, the properties on the right, and the console below.</summary>
     IRootDock CreateDefault()
     {
         IDockable Tools(string id, Alignment alignment, double proportion, params string[] panels) =>
@@ -141,7 +189,7 @@ public sealed class EditorLayout
             Orientation = Orientation.Vertical,
             Proportion = 0.64,
             VisibleDockables = Factory.CreateList<IDockable>(
-                NewDocumentDock(0.72),
+                NewDocumentDock(DocumentDockId, DocumentDockProportion, [_viewports[0], _viewports[^1]], _viewports[0].Id),
                 new ProportionalDockSplitter(),
                 Tools(BottomDock, Alignment.Bottom, 0.28, "console", "contentBrowser", "resourceMonitor", "profiler")),
         };
@@ -205,8 +253,9 @@ public sealed class EditorLayout
     public LayoutFile Save()
     {
         var docked = new HashSet<string>();
+        var dockIds = new HashSet<string>();
         var root = Root.VisibleDockables?.FirstOrDefault(d => d is not IProportionalDockSplitter);
-        var node = root == null ? null : SaveNode(root, docked);
+        var node = root == null ? null : SaveNode(root, docked, dockIds);
         var floating = _panels.Keys.Where(id => IsOpen(id) && !docked.Contains(id)).Order().ToList();
         var windows = new List<FloatingWindow>();
         foreach (var id in floating)
@@ -218,16 +267,17 @@ public sealed class EditorLayout
                 windows.Add(new FloatingWindow(id, x, y, width, height));
             }
         }
-        return new LayoutFile(LayoutFile.CurrentVersion, node ?? new DocumentsNode(DocumentDockId, null), floating, windows.Count > 0 ? windows : null);
+        return new LayoutFile(LayoutFile.CurrentVersion, node ?? new DocumentsNode(DocumentDockId, null, [], null), floating, windows.Count > 0 ? windows : null);
     }
 
-    /// <summary>Restores a saved layout, and returns false and keeps the current one if it has no viewport.</summary>
+    /// <summary>Restores a saved layout, and returns false and keeps the current one if it has no document dock.</summary>
     public bool Restore(LayoutFile file)
     {
         var used = new HashSet<string>();
-        var viewportPlaced = false;
-        var main = RestoreNode(file.Root, used, ref viewportPlaced);
-        if (main == null || !viewportPlaced)
+        var dockIds = new HashSet<string>();
+        var documentDocks = 0;
+        var main = RestoreNode(file.Root, used, dockIds, ref documentDocks);
+        if (main == null || documentDocks == 0)
         {
             return false;
         }
@@ -242,7 +292,19 @@ public sealed class EditorLayout
 
     static string CurrentId(string id) => Renamed.GetValueOrDefault(id, id);
 
-    LayoutNode? SaveNode(IDockable dockable, HashSet<string> docked)
+    // A dock that the user split off has no ID of its own yet, and two docks never share one.
+    static string UniqueId(string? id, string fallback, HashSet<string> taken)
+    {
+        var chosen = string.IsNullOrEmpty(id) || taken.Contains(id) ? fallback : id;
+        for (var n = 2; taken.Contains(chosen); n++)
+        {
+            chosen = $"{fallback}.{n}";
+        }
+        taken.Add(chosen);
+        return chosen;
+    }
+
+    LayoutNode? SaveNode(IDockable dockable, HashSet<string> docked, HashSet<string> dockIds)
     {
         var proportion = double.IsNaN(dockable.Proportion) ? (double?)null : dockable.Proportion;
         switch (dockable)
@@ -250,7 +312,7 @@ public sealed class EditorLayout
             case IProportionalDock split:
                 var children = (split.VisibleDockables ?? [])
                     .Where(d => d is not IProportionalDockSplitter)
-                    .Select(d => SaveNode(d, docked))
+                    .Select(d => SaveNode(d, docked, dockIds))
                     .OfType<LayoutNode>()
                     .ToList();
                 return children.Count == 0 ? null
@@ -260,14 +322,15 @@ public sealed class EditorLayout
                 docked.UnionWith(panels);
                 return panels.Count == 0 ? null
                     : new ToolsNode(tools.Id, proportion, tools.Alignment.ToString(), panels, tools.ActiveDockable?.Id);
-            case IDocumentDock:
-                return new DocumentsNode(dockable.Id, proportion);
+            case IDocumentDock documents:
+                var viewports = (documents.VisibleDockables ?? []).OfType<ViewportDocument>().Select(v => v.Id).ToList();
+                return new DocumentsNode(UniqueId(dockable.Id, DocumentDockId, dockIds), proportion, viewports, (documents.ActiveDockable as ViewportDocument)?.Id);
             default:
                 return null;
         }
     }
 
-    IDockable? RestoreNode(LayoutNode node, HashSet<string> used, ref bool viewportPlaced)
+    IDockable? RestoreNode(LayoutNode node, HashSet<string> used, HashSet<string> dockIds, ref int documentDocks)
     {
         IDockable? dockable;
         switch (node)
@@ -276,7 +339,7 @@ public sealed class EditorLayout
                 var children = new List<IDockable>();
                 foreach (var child in split.Children)
                 {
-                    if (RestoreNode(child, used, ref viewportPlaced) is { } restored)
+                    if (RestoreNode(child, used, dockIds, ref documentDocks) is { } restored)
                     {
                         if (children.Count > 0)
                         {
@@ -299,9 +362,12 @@ public sealed class EditorLayout
                     Enum.TryParse<Alignment>(tools.Alignment, out var alignment) ? alignment : Alignment.Unset,
                     double.NaN, panels, tools.Active == null ? null : CurrentId(tools.Active));
                 break;
-            case DocumentsNode when !viewportPlaced:
-                viewportPlaced = true;
-                dockable = NewDocumentDock(double.NaN);
+            case DocumentsNode documents:
+                documentDocks++;
+                // A file from an editor with one viewport lists no documents, and had the scene view and the Game view's place.
+                var wanted = documents.Documents ?? [_viewports[0].Id, _viewports[^1].Id];
+                var placed = wanted.Where(id => _viewportsById.ContainsKey(id) && used.Add(id)).Select(id => _viewportsById[id]).ToList();
+                dockable = NewDocumentDock(UniqueId(documents.Id, DocumentDockId, dockIds), double.NaN, placed, documents.Active);
                 break;
             default:
                 dockable = null;
@@ -324,15 +390,15 @@ public sealed class EditorLayout
             ActiveDockable = panels.FirstOrDefault(p => p.Id == active) ?? panels.FirstOrDefault(),
         };
 
-    DocumentDock NewDocumentDock(double proportion) =>
+    DocumentDock NewDocumentDock(string id, double proportion, IReadOnlyList<ViewportDocument> documents, string? active) =>
         new()
         {
-            Id = DocumentDockId,
+            Id = id,
             Proportion = proportion,
             IsCollapsable = false,
             CanCreateDocument = false,
-            VisibleDockables = Factory.CreateList<IDockable>(_viewport),
-            ActiveDockable = _viewport,
+            VisibleDockables = Factory.CreateList<IDockable>(documents.ToArray()),
+            ActiveDockable = documents.FirstOrDefault(d => d.Id == active) ?? documents.FirstOrDefault(),
         };
 
     IRootDock NewRoot(IDockable main)

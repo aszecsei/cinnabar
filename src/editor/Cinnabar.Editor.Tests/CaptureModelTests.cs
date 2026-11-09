@@ -12,14 +12,16 @@ public sealed class CaptureModelTests : IDisposable
     readonly TempDirectory _temp = new("capture");
     readonly List<ILinkMessage> _sent = [];
     int _framesAwaited;
+    readonly List<int> _awaitedViewports = [];
 
-    CaptureModel NewModel() => new(_sent.Add, (frames, _) =>
+    CaptureModel NewModel() => new(_sent.Add, (viewport, frames, _) =>
     {
+        _awaitedViewports.Add(viewport);
         _framesAwaited += frames;
         return Task.CompletedTask;
     });
 
-    static CaptureContext Context() => new("Edit", false, "E:/scenes/door.scene", new CameraInfo([0, 1 << 24, 0], [0, 1, 0], 0.5, -0.1, 1.05, 0.05),
+    static CaptureContext Context() => new("Edit", 0, ViewportKind.Scene, "E:/scenes/door.scene", new CameraInfo([0, 1 << 24, 0], [0, 1, 0], 0.5, -0.1, 1.05, 0.05),
         EditorShell.DefaultViewportSettings, null, null,
         new ProfileSummary(10, 25, 16, 15, 9, 12, 20, 1, 2, 7.5f, 9, 22, 0, true, [new ProfileCost(ProfileCostKind.Pass, "world", ProfileCallback.None, 0, 1, 3.25f, 4)]),
         "mygame", 1234, ["mygame.dll"], Environment.ProcessId);
@@ -47,25 +49,38 @@ public sealed class CaptureModelTests : IDisposable
     static CaptureResult Written(CaptureRequest r) => new(r.Id, r.Kind, true, "", r.Path, 900, 640, 360, r.Kind == CaptureKind.Gif ? 50u : 0u, r.Kind == CaptureKind.Gif ? 4900 : 0, OutputMode.Sdr);
 
     [Fact]
+    public async Task AViewportOtherThanTheFirstHasItsOwnSettingsSwitchedAndItsOwnFramesAwaited()
+    {
+        var model = NewModel();
+        var settings = EditorShell.DefaultViewportSettings with { NoFog = true };
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Albedo], _temp.Path, null, 3, settings, Context, CancellationToken.None), Written);
+
+        Assert.True(outcome.Ok, outcome.Error);
+        Assert.Equal([3u, 3u], _sent.OfType<SetViewportSettings>().Select(s => s.Viewport));
+        Assert.All(_awaitedViewports, v => Assert.Equal(3, v));
+        Assert.NotEmpty(_awaitedViewports);
+    }
+
+    [Fact]
     public async Task AScreenshotWithViewsSwitchesTheViewportAndPutsItBack()
     {
         var model = NewModel();
         var settings = EditorShell.DefaultViewportSettings with { NoBloom = true };
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Depth, DebugView.Normals], _temp.Path, null, settings, Context, CancellationToken.None), Written);
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Depth, DebugView.Normals], _temp.Path, null, 0, settings, Context, CancellationToken.None), Written);
 
         Assert.True(outcome.Ok, outcome.Error);
         Assert.False(model.Busy);
         // The lit frame, then each view: the settings with the view, a wait for frames, the request; then the user's settings again.
         Assert.Collection(_sent,
             m => Assert.Equal(CaptureKind.Screenshot, Assert.IsType<CaptureRequest>(m).Kind),
-            m => Assert.Equal(DebugView.Depth, Assert.IsType<ViewportSettings>(m).DebugView),
+            m => Assert.Equal(DebugView.Depth, Assert.IsType<SetViewportSettings>(m).Settings.DebugView),
             m => Assert.EndsWith(".depth.png", Assert.IsType<CaptureRequest>(m).Path),
-            m => Assert.Equal(DebugView.Normals, Assert.IsType<ViewportSettings>(m).DebugView),
+            m => Assert.Equal(DebugView.Normals, Assert.IsType<SetViewportSettings>(m).Settings.DebugView),
             m => Assert.EndsWith(".normals.png", Assert.IsType<CaptureRequest>(m).Path),
-            m => Assert.Equal(settings, Assert.IsType<ViewportSettings>(m)));
+            m => Assert.Equal(new SetViewportSettings(0, settings), Assert.IsType<SetViewportSettings>(m)));
         Assert.Equal(2 * CaptureModel.SettleFrames, _framesAwaited);
         // The view's settings keep the user's other choices.
-        Assert.True(((ViewportSettings)_sent[1]).NoBloom);
+        Assert.True(((SetViewportSettings)_sent[1]).Settings.NoBloom);
 
         Assert.Equal(4, outcome.Files.Count);
         Assert.All(outcome.Files, f => Assert.StartsWith(_temp.Path, f));
@@ -95,7 +110,7 @@ public sealed class CaptureModelTests : IDisposable
     {
         var model = NewModel();
         var path = _temp.Combine("clips", "jump");
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, path, EditorShell.DefaultViewportSettings, Context, CancellationToken.None), Written);
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, path, 0, EditorShell.DefaultViewportSettings, Context, CancellationToken.None), Written);
 
         Assert.True(outcome.Ok, outcome.Error);
         var request = Assert.IsType<CaptureRequest>(Assert.Single(_sent));
@@ -110,12 +125,12 @@ public sealed class CaptureModelTests : IDisposable
     public async Task AFailedCaptureStillWritesTheSidecarAndPutsTheSettingsBack()
     {
         var model = NewModel();
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Albedo], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None),
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [DebugView.Albedo], _temp.Path, null, 0, EditorShell.DefaultViewportSettings, Context, CancellationToken.None),
             r => new CaptureResult(r.Id, r.Kind, false, "the window is minimized", r.Path, 0, 0, 0, 0, 0, OutputMode.Sdr));
 
         Assert.False(outcome.Ok);
         Assert.Contains("minimized", outcome.Error);
-        Assert.Equal(EditorShell.DefaultViewportSettings, Assert.IsType<ViewportSettings>(_sent[^1]));
+        Assert.Equal(new SetViewportSettings(0, EditorShell.DefaultViewportSettings), Assert.IsType<SetViewportSettings>(_sent[^1]));
         var sidecar = Assert.Single(outcome.Files);
         Assert.EndsWith(".json", sidecar);
         Assert.Contains("minimized", File.ReadAllText(sidecar));
@@ -125,9 +140,9 @@ public sealed class CaptureModelTests : IDisposable
     public async Task OnlyOneCaptureRunsAndStrayResultsAreIgnored()
     {
         var model = NewModel();
-        var first = model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
+        var first = model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, 0, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
         Assert.True(model.Busy);
-        var second = await model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
+        var second = await model.CaptureAsync(CaptureKind.Gif, [], _temp.Path, null, 0, EditorShell.DefaultViewportSettings, Context, CancellationToken.None);
         Assert.False(second.Ok);
         Assert.Contains("under way", second.Error);
         Assert.False(model.Apply(new CaptureResult(99, CaptureKind.Screenshot, true, "", "x.png", 0, 0, 0, 0, 0, OutputMode.Sdr)));
@@ -163,17 +178,17 @@ public sealed class CaptureModelTests : IDisposable
 
         // A path that Path.GetFullPath rejects, as automation's screenshot can give, throws before any request.
         await Assert.ThrowsAnyAsync<ArgumentException>(() => model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, "bad\0name.png",
-            EditorShell.DefaultViewportSettings, Context, CancellationToken.None));
+            0, EditorShell.DefaultViewportSettings, Context, CancellationToken.None));
         Assert.False(model.Busy);
         Assert.Equal(2, changes);
 
         // So does a sidecar whose context throws, after the screenshot is written.
         await Assert.ThrowsAsync<InvalidOperationException>(() => Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null,
-            EditorShell.DefaultViewportSettings, () => throw new InvalidOperationException("no context"), CancellationToken.None), Written));
+            0, EditorShell.DefaultViewportSettings, () => throw new InvalidOperationException("no context"), CancellationToken.None), Written));
         Assert.False(model.Busy);
 
         _sent.Clear();
-        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, EditorShell.DefaultViewportSettings, Context,
+        var outcome = await Drive(model, model.CaptureAsync(CaptureKind.Screenshot, [], _temp.Path, null, 0, EditorShell.DefaultViewportSettings, Context,
             CancellationToken.None), Written);
         Assert.True(outcome.Ok, outcome.Error);
     }

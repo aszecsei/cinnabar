@@ -11,7 +11,8 @@ namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
 /// Shows the frames of its <see cref="Session"/> (see docs/editor/viewport.md#viewport). On each composition update, it copies
-/// the newest finished frame into a <see cref="ViewportImage"/> and gives that to its surface.
+/// the newest finished frame into a <see cref="ViewportImage"/> and gives that to its surface. While it is attached, visible
+/// and sized, it shows the session at its size (<see cref="ViewportSession.Presence"/>), and when it is not, it hides it.
 /// </summary>
 public sealed class ViewportControl : Control
 {
@@ -28,6 +29,8 @@ public sealed class ViewportControl : Control
     // The compositor's objects of the current attach, once its setup is done, which a detach lets go of.
     Attachment? _attachment;
     bool _updateQueued;
+    // Whether the control was visible at the last composition update, for a parent that hides it while it stays attached.
+    bool _visible = true;
 
     sealed record Attachment(Compositor Compositor, CompositionDrawingSurface Surface, CompositionSurfaceVisual Visual, ICompositionGpuInterop Interop);
 
@@ -41,7 +44,7 @@ public sealed class ViewportControl : Control
         _resize.Tick += (_, _) =>
         {
             _resize.Stop();
-            RequestSize();
+            UpdatePresence();
         };
     }
 
@@ -56,6 +59,7 @@ public sealed class ViewportControl : Control
         // The detach ends the attach's ticket, so its setup, if it still awaits the compositor, builds nothing.
         _attach.Detach();
         _resize.Stop();
+        Session?.Hide(this);
         ReleaseImages();
         _attachment?.Surface.Dispose();
         _attachment = null;
@@ -70,8 +74,17 @@ public sealed class ViewportControl : Control
         if (change.Property == BoundsProperty)
         {
             LayoutVisual();
-            _resize.Stop();
-            _resize.Start();
+            // A size that is gone hides the session at once. A new size waits until it settles.
+            if (Bounds.Width <= 0 || Bounds.Height <= 0)
+            {
+                _resize.Stop();
+                Session?.Hide(this);
+            }
+            else
+            {
+                _resize.Stop();
+                _resize.Start();
+            }
         }
     }
 
@@ -112,7 +125,7 @@ public sealed class ViewportControl : Control
             ElementComposition.SetElementChildVisual(this, visual);
             LayoutVisual();
             Session.Attach(BitConverter.ToUInt64(luid), description);
-            RequestSize();
+            UpdatePresence();
             QueueUpdate();
         }
         catch (Exception e)
@@ -137,6 +150,11 @@ public sealed class ViewportControl : Control
         if (!_attach.Attached || Session?.Device is not { } device || _attachment is not { } attachment)
         {
             return;
+        }
+        if (IsEffectivelyVisible != _visible)
+        {
+            _visible = IsEffectivelyVisible;
+            UpdatePresence();
         }
         var frames = Session.Poll();
         // Without a host, the last frame would stay on screen as if the game were frozen.
@@ -190,11 +208,20 @@ public sealed class ViewportControl : Control
         Session.Presented(latest);
     }
 
-    // The host renders at the viewport's size in physical pixels.
-    void RequestSize()
+    // The host renders at the viewport's size in physical pixels, while the control is on screen with a setup done.
+    void UpdatePresence()
     {
+        if (Session == null)
+        {
+            return;
+        }
+        if (_attachment == null || !IsEffectivelyVisible)
+        {
+            Session.Hide(this);
+            return;
+        }
         var scaling = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
-        Session?.RequestSize(new PixelSize((int)Math.Round(Bounds.Width * scaling), (int)Math.Round(Bounds.Height * scaling)));
+        Session.Show(new PixelSize((int)Math.Round(Bounds.Width * scaling), (int)Math.Round(Bounds.Height * scaling)), this);
     }
 
     /// <summary>A point of the control in pixels of the host's frame, from its top left, or null before the first frame.</summary>

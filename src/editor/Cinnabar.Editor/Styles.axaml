@@ -391,6 +391,18 @@
     <Style Selector="Border.viewport-frame.paused">
         <Setter Property="BorderBrush" Value="#E8B04A" />
     </Style>
+    <!-- The viewport that the View tab acts on, while more than one viewport is shown. -->
+    <Style Selector="Border.viewport-active">
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.viewport-active.active">
+        <Setter Property="BorderBrush" Value="#99E34234" />
+    </Style>
+    <Style Selector="ComboBox.viewport-view">
+        <Setter Property="FontSize" Value="11" />
+        <Setter Property="MinHeight" Value="0" />
+        <Setter Property="Padding" Value="6,2" />
+    </Style>
     <Style Selector="Border.status TextBlock">
         <Setter Property="FontSize" Value="12" />
     </Style>

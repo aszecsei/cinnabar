@@ -902,6 +902,8 @@ View_Record :: struct {
 	// The particles that the debug hook saw: the frame had them, and drew them without stepping.
 	particles:     bool,
 	draw_only:     bool,
+	// The frame had particles to step and a valid history of last frame's depth for their collisions.
+	collides:      bool,
 }
 
 // RECORD_HOOKS record into the View_Record that is their data.
@@ -911,6 +913,7 @@ RECORD_HOOKS :: Frame_Hooks {
 		rec := (^View_Record)(f.data)
 		rec.before_world += 1
 		rec.position, rec.size, rec.output_size, rec.extra = f.view.position, f.size, f.output_size, f.extra
+		rec.collides = f.particles != nil && !f.particles.draw_only && f.particles.history.valid
 	},
 	after_prepass = proc(f: ^Frame) {
 		(^View_Record)(f.data).after_prepass += 1
@@ -1783,5 +1786,266 @@ the_debug_lines_of_a_frame_reach_its_extra_views :: proc(t: ^testing.T) {
 		testing.expect_value(t, rec.lines, i != 2 ? 1 : 0)
 	}
 	testing.expect_value(t, records[1].first_line.a, ecs.position_sub(from, extra_at))
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The frame's own view can draw into a target of its own, with a state of its own: it draws there and not into the frame
+// target, in the frame's place in the order, with that state's histories. The stats getters follow the state, and do not
+// dangle when it is freed.
+@(test)
+the_frames_own_view_draws_into_a_target_with_a_state_of_its_own :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state: View_State
+	view_state_init(&state, r)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+	main_target := platform.gpu_frame_target()
+	platform.gpu_submit = logging_submit
+	defer platform.gpu_submit = null.submit
+	defer {
+		delete(draw_log.drawn)
+		draw_log = {}
+	}
+
+	record: View_Record
+	desc := Frame_Desc {
+		view   = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size   = {48, 24},
+		target = target,
+		state  = &state,
+		hooks  = RECORD_HOOKS,
+	}
+	desc.hooks.data = &record
+	for k in 0 ..< 3 {
+		testing.expectf(t, draw_frame(r, rig.w, desc), "frame %d did not execute", k)
+		testing.expectf(t, record.history_valid == (k > 0), "frame %d: the history is valid %v", k, record.history_valid)
+	}
+	into_target, _ := draws_into(target)
+	into_frame, _ := draws_into(main_target)
+	testing.expect(t, into_target > 0, "the frame's own view did not draw into its target")
+	testing.expect_value(t, into_frame, 0)
+	testing.expect_value(t, state.frames, 3)
+	testing.expect_value(t, r.view.frames, 0)
+	testing.expect(t, !record.extra, "the frame's own view is not an extra view")
+	testing.expect_value(t, record.output_size, [2]u32{48, 24})
+
+	// The stats are those of the state that drew the frame's own view.
+	state.occlusion.last_stats.early_items = 7
+	r.view.occlusion.last_stats.early_items = 3
+	testing.expect_value(t, cull_stats(r).early_items, 7)
+	// And a state that is freed leaves the renderer's own.
+	view_state_destroy(&state, r)
+	testing.expect_value(t, cull_stats(r).early_items, 3)
+
+	// Without a target and a state, the frame draws as it did: into the frame target, with the renderer's state.
+	desc.target, desc.state = {}, nil
+	desc.size = {64, 32}
+	clear(&draw_log.drawn)
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	into_frame, _ = draws_into(main_target)
+	testing.expect(t, into_frame > 0)
+	testing.expect_value(t, r.view.frames, 1)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The frame's own view can move from one state to another between frames, as the editor's does when its viewports open and
+// close: a view keeps its histories while it draws every frame, whether as the frame's own view or as an extra one, and one
+// that is not drawn has none in its next frame.
+@(test)
+the_own_views_role_moves_between_states_without_losing_histories :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	states: [2]View_State
+	targets: [2]gpu.Texture
+	for &s, i in states {
+		view_state_init(&s, r)
+		targets[i] = extra_target(platform, {48, 24})
+	}
+	defer {
+		for &s, i in states {
+			view_state_destroy(&s, r)
+			platform.gpu_destroy_texture(targets[i])
+		}
+	}
+	records: [2]View_Record
+	views: [2]Extra_View
+	for &v, i in views {
+		v = {
+			view   = {position = ecs.position_offset({}, {f32(i) * 30, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05},
+			size   = {48, 24},
+			target = targets[i],
+			state  = &states[i],
+			hooks  = RECORD_HOOKS,
+		}
+		v.hooks.data = &records[i]
+	}
+
+	// Which view is the frame's own in each frame, which views draw, and whether each view's history is valid in it.
+	Step :: struct {
+		own:   int,
+		draws: [2]bool,
+		valid: [2]bool,
+	}
+	steps := [?]Step {
+		{0, {true, true}, {false, false}},
+		{0, {true, true}, {true, true}},
+		// The role moves: both views draw every frame, so neither loses its histories.
+		{1, {true, true}, {true, true}},
+		{0, {true, true}, {true, true}},
+		// Only the second view draws, as the frame's own, and the first has no history in its next frame.
+		{1, {false, true}, {false, true}},
+		{1, {true, true}, {false, true}},
+		{0, {true, true}, {true, true}},
+	}
+	for step, k in steps {
+		desc: Frame_Desc
+		extras: [1]Extra_View
+		count := 0
+		use_view(&desc, views[step.own])
+		if !step.draws[step.own] {
+			// The own view's target and state are the renderer's.
+			desc.target, desc.state = {}, nil
+			desc.size = {64, 32}
+		}
+		if other := 1 - step.own; step.draws[other] {
+			extras[0] = views[other]
+			count = 1
+		}
+		desc.extra_views = extras[:count]
+		testing.expectf(t, draw_frame(r, rig.w, desc), "frame %d did not execute", k)
+		for i in 0 ..< 2 {
+			if step.draws[i] {
+				testing.expectf(t, records[i].history_valid == step.valid[i], "frame %d: view %d's history is valid %v, want %v", k, i, records[i].history_valid, step.valid[i])
+				testing.expectf(t, records[i].extra == (i != step.own), "frame %d: view %d is extra %v", k, i, records[i].extra)
+			}
+		}
+	}
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// use_view makes every field of an extra view the frame's own.
+@(test)
+use_view_takes_every_field_of_an_extra_view :: proc(t: ^testing.T) {
+	state: View_State
+	quality := Quality {
+		render_scale = 0.5,
+	}
+	settings: Frame_Settings
+	hook :: proc(_: ^Frame) {}
+	v := Extra_View {
+		view            = {rotation = 1, vertical_fov = 2, near = 0.5},
+		size            = {8, 4},
+		target          = {index = 3, generation = 1},
+		state           = &state,
+		quality         = &quality,
+		settings        = &settings,
+		keep_ids        = true,
+		no_debug        = true,
+		debug_view      = .Normals,
+		disable         = {.Fog},
+		exposure_offset = -1,
+		hooks           = {debug = hook},
+	}
+	desc := Frame_Desc {
+		delta = 0.5,
+	}
+	use_view(&desc, v)
+	testing.expect_value(t, desc.view, v.view)
+	testing.expect_value(t, desc.size, [2]u32{8, 4})
+	testing.expect_value(t, desc.target, gpu.Texture{index = 3, generation = 1})
+	testing.expect(t, desc.state == &state && desc.quality == &quality && desc.settings == &settings)
+	testing.expect(t, desc.keep_ids && desc.no_debug)
+	testing.expect_value(t, desc.debug_view, Debug_View.Normals)
+	testing.expect_value(t, desc.disable, Features{.Fog})
+	testing.expect_value(t, desc.exposure_offset, -1)
+	testing.expect(t, desc.hooks.debug == hook)
+	testing.expect_value(t, desc.delta, 0.5)
+}
+
+// The particles' collisions use the depth of the frame's own view, kept in its state: when the role moves to a state that
+// did not keep it, the particles do not collide in that frame, and collide again from the next, as for a view that missed a
+// frame. The renderer's own particle clock goes on.
+@(test)
+the_particles_collide_again_a_frame_after_the_own_views_role_moves :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	guid := format.Guid{0 = 0x43, 15 = 0xab}
+	smoke: [format.Effect_Curve]format.Effect_Curve_Row
+	smoke[.Size][63] = {0.5, 0, 0, 0}
+	emitters := []format.Effect_Emitter_Contents{{emitter = {capacity = 100, rate = 60, lifetime = {1, 2}, shape = .Sphere, shape_size = {0.1, 0, 0}}, name = "smoke", curves = smoke}}
+	blob := format.effect_write({guid = guid, key = 1, emitters = emitters, source_path = "game/effects/smoke.effect"}, context.temp_allocator)
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	system := ecs.spawn(rig.w)
+	ecs.add(rig.w, system, ecs.Transform{position = ecs.position_offset({}, {0, 0, 5}), rotation = 1, scale = 1})
+	ecs.add(rig.w, system, Particle_System{effect = guid})
+	for p in ([]^Shader_Pipeline{&r.particles.update, &r.particles.history, &r.particles.ribbon, &r.particles.meshes}) {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test particles"})
+	}
+	fake_sprite_pipelines(r)
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test composite"})
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	states: [2]View_State
+	targets: [2]gpu.Texture
+	for &s, i in states {
+		view_state_init(&s, r)
+		targets[i] = extra_target(platform, {48, 24})
+	}
+	defer {
+		for &s, i in states {
+			view_state_destroy(&s, r)
+			platform.gpu_destroy_texture(targets[i])
+		}
+	}
+	records: [2]View_Record
+	views: [2]Extra_View
+	for &v, i in views {
+		v = {
+			view   = {position = ecs.position_offset({}, {f32(i) * 4, 1, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+			size   = {48, 24},
+			target = targets[i],
+			state  = &states[i],
+			hooks  = RECORD_HOOKS,
+		}
+		v.hooks.data = &records[i]
+	}
+	// The view that is the frame's own in each frame, and whether its particles collide in it.
+	own := [?]int{0, 0, 1, 1, 0, 0}
+	collides := [?]bool{false, true, false, true, false, true}
+	for k in 0 ..< len(own) {
+		desc := Frame_Desc {
+			delta = 1.0 / 60,
+		}
+		use_view(&desc, views[own[k]])
+		extras := [1]Extra_View{views[1 - own[k]]}
+		desc.extra_views = extras[:]
+		testing.expectf(t, draw_frame(r, rig.w, desc), "frame %d did not execute", k)
+		testing.expectf(t, records[own[k]].collides == collides[k], "frame %d: the particles collide %v, want %v", k, records[own[k]].collides, collides[k])
+	}
+	testing.expect_value(t, r.particles.frame, len(own))
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

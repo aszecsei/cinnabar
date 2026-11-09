@@ -243,6 +243,11 @@ output_mode :: proc(request: Output_Request, display: Display) -> Output_Mode {
 MAX_PREVIEW_TARGETS :: 4
 MAX_PREVIEW_SIZE :: 1024
 
+// The editor's viewports render into shared targets of their own too, at most this many, each at most this large on a
+// side, as the frame target is (see docs/editor/viewport.md#views).
+MAX_VIEWPORT_TARGETS :: 4
+MAX_VIEWPORT_SIZE :: 8192
+
 // Preview_Target is a frame of a preview target: its texture, in the render target layout until the frame ends, in
 // FRAME_TARGET_FORMAT, its shared objects' name prefix, in temporary memory, its generation and its size.
 Preview_Target :: struct {
@@ -252,11 +257,12 @@ Preview_Target :: struct {
 	size:       [2]u32,
 }
 
-// Frame_Capture is a copy of a frame's final frame target in CPU memory, as the backend's readback gives it (see
-// docs/gpu/presentation.md#frame-capture). The pixels are the backend's, row_pitch bytes per row, and stay valid until
-// release_frame_capture. The format is the frame target's: RGBA8 sRGB bytes in Sdr, RGB10A2 PQ in Hdr10 and RGBA16F in
-// Scrgb, with the display's SDR white in nits for the HDR modes, or 0 when unknown. A cancelled capture has only its
-// slot, source and ticket, and is released as a ready one is.
+// Frame_Capture is a copy of a frame's final frame target, or of an editor viewport's target, in CPU memory, as the
+// backend's readback gives it (see docs/gpu/presentation.md#frame-capture). The pixels are the backend's, row_pitch bytes
+// per row, and stay valid until release_frame_capture. The format is the target's: for the frame target RGBA8 sRGB bytes in
+// Sdr, RGB10A2 PQ in Hdr10 and RGBA16F in Scrgb, with the display's SDR white in nits for the HDR modes, or 0 when unknown,
+// and for a viewport's target always RGBA8 sRGB. A cancelled capture has only its slot, source, viewport and ticket, and is
+// released as a ready one is.
 Frame_Capture :: struct {
 	// The backend's slot, which release_frame_capture frees.
 	slot:      u32,
@@ -264,6 +270,9 @@ Frame_Capture :: struct {
 	source:    Capture_Source,
 	// What the request asked it to be called. The host gives a frame's copy its ticket, and the game a texture's.
 	ticket:    u32,
+	// The viewport whose target a frame's copy read (see set_capture_source), or nil for the frame target, and for a
+	// texture's copy.
+	viewport:  Maybe(int),
 	size:      [2]u32,
 	format:    Format,
 	mode:      Output_Mode,
@@ -289,8 +298,8 @@ Capture_Status :: enum u8 {
 	Ready,
 }
 
-// Capture_Source says which request made a capture: request_frame_capture's copy of the frame target, or
-// request_texture_capture's copy of a texture.
+// Capture_Source says which request made a capture: request_frame_capture's copy of the frame target or of a viewport's
+// target, or request_texture_capture's copy of a texture.
 Capture_Source :: enum u8 {
 	Frame,
 	Texture,

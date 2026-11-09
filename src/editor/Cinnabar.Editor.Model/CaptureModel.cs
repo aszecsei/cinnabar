@@ -11,18 +11,20 @@ public sealed record CaptureImage(string File, string? View, ulong Frame, uint W
 /// <summary>What a capture made: its files, the sidecar among them, or why it failed.</summary>
 public sealed record CaptureOutcome(bool Ok, string? Error, IReadOnlyList<string> Files, string? Sidecar);
 
-/// <summary>The editor's camera at a capture: a raw World_Position and the same in meters, the angles in radians.</summary>
+/// <summary>A scene view's camera at a capture: a raw World_Position and the same in meters, the angles in radians.</summary>
 public sealed record CameraInfo(long[] Position, double[] PositionMeters, double Yaw, double Pitch, double VerticalFov, double Near);
 
 /// <summary>
-/// Everything the sidecar records of the editor's state at a capture (see docs/editor/capture.md#sidecar). Profile is
-/// the host's last profile summary, whose costs have each render pass's GPU time.
+/// Everything the sidecar records of the editor's state at a capture (see docs/editor/capture.md#sidecar). Viewport is
+/// the viewport that the capture shows, with its kind; Camera and Settings are its own, and the Game view has no camera.
+/// Profile is the host's last profile summary, whose costs have each render pass's GPU time.
 /// </summary>
 public sealed record CaptureContext(
     string Mode,
-    bool FreeCamera,
+    int Viewport,
+    ViewportKind ViewportKind,
     string? Scene,
-    CameraInfo Camera,
+    CameraInfo? Camera,
     ViewportSettings Settings,
     HostStats? HostStats,
     GameStats? GameStats,
@@ -34,7 +36,7 @@ public sealed record CaptureContext(
 
 /// <summary>
 /// A capture in the editor (see docs/editor/capture.md#capture): it asks the host for a screenshot or a GIF, then for
-/// a screenshot of each debug view asked for, with the viewport's settings switched to the view and put back after,
+/// a screenshot of each debug view asked for, with the captured viewport's settings switched to the view and put back after,
 /// and writes a JSON sidecar beside the images. It lives in the shell, and sends through it, so it has no UI and no
 /// host of its own.
 /// </summary>
@@ -54,13 +56,13 @@ public sealed class CaptureModel
     };
 
     readonly Action<ILinkMessage> _send;
-    readonly Func<int, CancellationToken, Task> _awaitFrames;
+    readonly Func<int, int, CancellationToken, Task> _awaitFrames;
     readonly PendingReplies<TaskCompletionSource<CaptureResult>> _waiting = new();
     int _sequence;
 
     /// <param name="send">Sends a message to the host.</param>
-    /// <param name="awaitFrames">Completes once the viewport has shown that many new frames, or soon after if it shows none.</param>
-    public CaptureModel(Action<ILinkMessage> send, Func<int, CancellationToken, Task> awaitFrames)
+    /// <param name="awaitFrames">Completes once a viewport, by its number, has shown that many new frames, or soon after if it shows none.</param>
+    public CaptureModel(Action<ILinkMessage> send, Func<int, int, CancellationToken, Task> awaitFrames)
     {
         _send = send;
         _awaitFrames = awaitFrames;
@@ -110,11 +112,12 @@ public sealed class CaptureModel
 
     /// <summary>
     /// Captures a screenshot or a GIF into <paramref name="directory"/>, or at <paramref name="path"/> when given, with
-    /// a screenshot of each view beside it and the sidecar. The views need <paramref name="current"/>, the viewport's
-    /// settings, which they change and put back. <paramref name="context"/> is read when the sidecar is written.
+    /// a screenshot of each view beside it and the sidecar. The host reads <paramref name="viewport"/> (see
+    /// <c>Capture_Source</c>). The views need <paramref name="current"/>, that viewport's settings, which they change and put
+    /// back. <paramref name="context"/> is read when the sidecar is written.
     /// </summary>
     public async Task<CaptureOutcome> CaptureAsync(CaptureKind kind, IReadOnlyList<DebugView> views, string directory, string? path,
-        ViewportSettings current, Func<CaptureContext> context, CancellationToken cancel)
+        int viewport, ViewportSettings current, Func<CaptureContext> context, CancellationToken cancel)
     {
         if (Busy)
         {
@@ -162,9 +165,9 @@ public sealed class CaptureModel
                     {
                         continue;
                     }
-                    _send(current with { DebugView = view });
+                    _send(new SetViewportSettings((uint)viewport, current with { DebugView = view }));
                     sentView = true;
-                    await _awaitFrames(SettleFrames, cancel);
+                    await _awaitFrames(viewport, SettleFrames, cancel);
                     var viewResult = await RequestAsync(CaptureKind.Screenshot, $"{stem}.{ViewName(view)}.png", cancel);
                     if (viewResult.Ok)
                     {
@@ -184,7 +187,7 @@ public sealed class CaptureModel
             {
                 if (sentView)
                 {
-                    _send(current);
+                    _send(new SetViewportSettings((uint)viewport, current));
                 }
             }
 

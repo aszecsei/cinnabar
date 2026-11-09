@@ -1,5 +1,5 @@
 using Avalonia.Controls;
-using Cinnabar.Editor.Viewport;
+using Cinnabar.Editor.Shell;
 using Dock.Model.Mvvm.Controls;
 
 namespace Cinnabar.Editor.Docking;
@@ -96,27 +96,30 @@ public sealed class EffectPreviewDocument : EditorDocument
     public Shell.EffectPreview Preview { get; }
 }
 
-/// <summary>The viewport, as the first document. It cannot close, float or move into a tool dock.</summary>
+/// <summary>
+/// One of the editor's viewports, as a document (see docs/editor/viewport.md#views): "Scene", "Scene 2", "Scene 3" or
+/// "Game". Each exists once. Closing it removes it from the layout, and showing it again puts the same document back, so
+/// its camera and settings survive. It tabs, splits and closes like other documents, and does not float.
+/// </summary>
 public sealed class ViewportDocument : Dock.Model.Mvvm.Controls.Document
 {
-    public const string PanelId = "viewport";
-
     readonly Func<Control> _createView;
 
-    public ViewportDocument(ViewportSession session, Func<Control> createView)
+    public ViewportDocument(EditorViewport viewport, Func<Control> createView)
     {
         _createView = createView;
-        Id = PanelId;
-        Title = "Viewport";
-        Session = session;
-        CanClose = false;
+        Id = IdOf(viewport.Index);
+        Title = viewport.Title;
+        Viewport = viewport;
         CanFloat = false;
-        CanDrag = false;
         CanPin = false;
     }
 
-    public ViewportSession Session { get; }
+    /// <summary>The document's ID in the layout: <c>viewport.0</c> to <c>viewport.3</c>.</summary>
+    public static string IdOf(int index) => $"viewport.{index}";
 
-    /// <summary>Docking can template the viewport more than once, so each call makes a new view over the same session.</summary>
+    public EditorViewport Viewport { get; }
+
+    /// <summary>Docking can template the viewport more than once, so each call makes a new view over the same viewport.</summary>
     public Control CreateView() => _createView();
 }

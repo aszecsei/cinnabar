@@ -3,10 +3,10 @@
 // tool or a script asks for a screenshot or a GIF this way, then reads the files it names.
 //
 //   editorctl [--automation <file>] [--json] status
-//   editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--out <path>]
-//   editorctl [--automation <file>] [--json] gif [--out <path>]
-//   editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
-//   editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+//   editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--viewport <number>] [--out <path>]
+//   editorctl [--automation <file>] [--json] gif [--viewport <number>] [--out <path>]
+//   editorctl [--automation <file>] [--json] viewport [--viewport <number>] --set <name>=<value>...
+//   editorctl [--automation <file>] [--json] camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 //   editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
 //   editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 package editorctl
@@ -47,6 +47,9 @@ Options :: struct {
 	pitch:      Maybe(f64),
 	// The panel whose window ui draws, or "" for the main window.
 	window:     string,
+	// The viewport that viewport and camera change, and that screenshot and gif capture, or nil for the first scene view (see
+	// docs/editor/viewport.md#views).
+	viewport:   Maybe(int),
 }
 
 // Request matches AutomationRequest in Cinnabar.Editor.Model.
@@ -60,6 +63,7 @@ Request :: struct {
 	yaw:      Maybe(f64) `json:"yaw"`,
 	pitch:    Maybe(f64) `json:"pitch"`,
 	window:   string `json:"window"`,
+	viewport: Maybe(int) `json:"viewport"`,
 }
 
 // Status matches AutomationStatus.
@@ -104,7 +108,7 @@ main :: proc() {
 	if problem != "" {
 		fmt.eprintfln("editorctl: %s", problem)
 		fmt.eprintln(
-			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--out <path>] | gif [--out <path>] | viewport --set <name>=<value>... | camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
+			"usage: editorctl [--automation <file>] [--json] status | screenshot [--view <name>]... [--viewport <number>] [--out <path>] | gif [--viewport <number>] [--out <path>] | viewport [--viewport <number>] --set <name>=<value>... | camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>] | ui [--window <panel>] [--out <path>] | content [--set <name>=<value>]...",
 		)
 		os.exit(2)
 	}
@@ -180,6 +184,13 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 		case arg == "--window" && i + 1 < len(args):
 			o.window = args[i + 1]
 			i += 1
+		case arg == "--viewport" && i + 1 < len(args):
+			v, ok := strconv.parse_int(args[i + 1])
+			if !ok || v < 0 {
+				return o, fmt.tprintf("--viewport takes a viewport's number, from 0, not %s", args[i + 1])
+			}
+			o.viewport = v
+			i += 1
 		case arg == "--set" && i + 1 < len(args):
 			name, _, value := strings.partition(args[i + 1], "=")
 			if name == "" || value == "" {
@@ -239,6 +250,9 @@ parse_args :: proc(args: []string) -> (o: Options, problem: string) {
 	}
 	if o.window != "" && o.command != "ui" {
 		return o, "--window goes with ui"
+	}
+	if o.viewport != nil && o.command != "viewport" && o.command != "camera" && o.command != "screenshot" && o.command != "gif" {
+		return o, "--viewport goes with viewport, camera, screenshot or gif"
 	}
 	if o.out != "" && o.command != "screenshot" && o.command != "gif" && o.command != "ui" {
 		return o, "--out goes with screenshot, gif or ui"
@@ -328,6 +342,7 @@ request_line :: proc(o: Options, id: i64, allocator: runtime.Allocator) -> []byt
 		yaw      = o.yaw,
 		pitch    = o.pitch,
 		window   = o.window,
+		viewport = o.viewport,
 	}
 	data, _ := json.marshal(request, allocator = context.temp_allocator)
 	line := make([]byte, len(data) + 1, allocator)

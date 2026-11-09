@@ -123,13 +123,14 @@ static partial class EditorCommands
     public const string CaptureGif = "capture.gif";
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
+    public const string NewSceneView = "viewport.newScene";
+    public const string GameView = "viewport.game";
     public const string SelectAll = "edit.selectAll";
     public const string PopOutContentBrowser = "window.popOutContentBrowser";
     public const string PlayMode = "mode.play";
     public const string PauseMode = "mode.pause";
     public const string StepFrame = "mode.step";
     public const string StopMode = "mode.stop";
-    public const string FreeCamera = "viewport.freeCamera";
     public const string HideSelected = "entity.hide";
     public const string ShowAll = "entity.showAll";
     public const string LockSelected = "entity.lock";

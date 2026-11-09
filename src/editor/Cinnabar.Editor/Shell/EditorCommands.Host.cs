@@ -39,12 +39,6 @@ static partial class EditorCommands
             Shortcut = "Shift+F5",
             CanExecuteWhen = () => !shell.IsEditing,
         });
-        commands.Register(new Command(FreeCamera, "Free Camera", shell.ToggleFreeCamera)
-        {
-            Description = "While the game plays, fly the editor's camera in the viewport and draw from it, instead of giving the game its input.",
-            Icon = "free-camera",
-            IsCheckedWhen = () => shell.FreeCamera,
-        });
     }
 
     // The host and the cook daemon.

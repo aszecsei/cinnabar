@@ -32,6 +32,7 @@ public sealed class GameStateTests : IDisposable
             shell.Host.LinkForTests(_sent.Add);
         }
         shell.OnGameMessage(new EntitySnapshot([new EntityInfo(Box, "Box", 1, 0, true, [1])]));
+        shell.Viewports[0].Session.Show(new Avalonia.PixelSize(1600, 900));
         shell.Selection.Select(Box);
         Assert.Equal(0, shell.OpenMaterial(shell.Assets.Find(MaterialGuid)!)!.PreviewId);
         return shell;
@@ -50,7 +51,7 @@ public sealed class GameStateTests : IDisposable
         Assert.Single(_sent.OfType<LoadScene>());
         Assert.Single(_sent.OfType<EditorCamera>());
         Assert.Equal([Box], Assert.Single(_sent.OfType<SetSelection>()).Entities);
-        Assert.Single(_sent.OfType<ViewportSettings>());
+        Assert.Equal(0u, Assert.Single(_sent.OfType<SetViewportSettings>()).Viewport);
         Assert.Single(_sent.OfType<MeshOverlay>());
         Assert.Equal(0u, Assert.Single(_sent.OfType<OpenPreview>()).Id);
         Assert.Equal(0u, Assert.Single(_sent.OfType<PreviewSettings>()).Id);

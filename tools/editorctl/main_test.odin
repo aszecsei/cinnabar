@@ -53,6 +53,20 @@ arguments_are_read_and_checked :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(camera.position), 3)
 	testing.expect_value(t, camera.position[2], -3)
 	testing.expect_value(t, camera.yaw.? or_else 0, 0.5)
+	// Each takes the viewport that it changes or captures, the first scene view without one.
+	testing.expect(t, camera.viewport == nil)
+	second, second_problem := parse_args({"camera", "--viewport", "1", "--position", "0,0,0"})
+	testing.expect_value(t, second_problem, "")
+	testing.expect_value(t, second.viewport.? or_else -1, 1)
+	_, not_a_viewport := parse_args({"camera", "--viewport", "top", "--position", "0,0,0"})
+	testing.expect(t, strings.contains(not_a_viewport, "--viewport"))
+	_, stray_viewport := parse_args({"status", "--viewport", "1"})
+	testing.expect(t, strings.contains(stray_viewport, "--viewport"))
+	for command in ([]string{"screenshot", "gif"}) {
+		captured, captured_problem := parse_args({command, "--viewport", "2", "--out", "a.png"})
+		testing.expect_value(t, captured_problem, "")
+		testing.expect_value(t, captured.viewport.? or_else -1, 2)
+	}
 	_, no_position := parse_args({"camera", "--yaw", "1"})
 	testing.expect(t, strings.contains(no_position, "--position"))
 	_, two := parse_args({"camera", "--position", "1,2"})
