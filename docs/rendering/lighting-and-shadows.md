@@ -157,7 +157,7 @@ What they show:
   - The faces' own ambient occlusion on top of the voxel cones took the arcade's ratio only from 1.92 to 1.81, for 14 to 34 µs a face, so the faces take it only where their light is the ambient light.
 - **The fade's range** is 0.2 to 0.45 at every level. It comes from the same courtyard, from the frame's mean linear luminance with the probes over the frame without them, at three views: the courtyard from its end, the arcade, and the nave.
   - Before captures had GI, with the fade at 0.5 to 0.8, Sponza's stone, at roughness 0.5 to 0.75, took the captures' unoccluded light: at Ultra with the voxel cones, the frame's mean brightness rose from 52 to 70, and the columns and arches turned milky.
-  - With GI in the captures, the fade at 0.5 to 0.8 still made the frame 3 to 10% brighter with the voxel cones, at every level. With the screen cascades it changed it by -2 to +1%, and with the split cascades by +1 to +2%.
+  - With GI in the captures, the fade at 0.5 to 0.8 still made the frame brighter with the voxel cones, at every level: by 5 to 10% in the view of the courtyard, 2 to 7% in the nave, and 0.4 to 1% at the arcade. With the screen cascades it changed the frame by -2 to +1%, and with the split cascades by +1 to +2%.
   - From 0.2 to 0.45, the stone and the curtains keep the GI's specular light, and the probes change the frame by at most 0.1%, or 2% with the split cascades. Only glossy surfaces take the probe.
 - **Parameters:** `REFLECTION_PARAMS[.Probes]` at the reflections' level (see [Quality](quality.md#quality)), with the sky cubemap's samples per texel.
 
