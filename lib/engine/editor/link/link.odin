@@ -776,9 +776,9 @@ Animator_Parameter :: struct {
 }
 
 // Game to editor: what a watched entity's Animator plays, which its component's bytes do not say (see
-// docs/editor/animation-graph-editor.md#live-view), or with entity 0, what an animation graph's preview plays. It goes out when
-// it changes. States and transitions are by their node IDs in
-// the graph's text, or 0: source is 0 in an interrupted fade too, which has no one state that it fades from. Without
+// docs/editor/animation-graph-editor.md#live-view), or with entity 0, what an animation graph's preview plays. A watched
+// entity's goes out once after the watch, empty without an Animator, then when it changes. States and transitions are by
+// their node IDs in the graph's text, or 0: source is 0 in an interrupted fade too, which has no one state that it fades from. Without
 // a graph that is ready, graph is zero and the rest is too, which tells the editor that it has gone.
 Animator_View :: struct {
 	entity:        u64,

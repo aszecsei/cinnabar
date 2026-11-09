@@ -100,10 +100,10 @@ Watched :: struct {
 	entity:        ecs.Entity,
 	// The hash of the values that the editor last got, or 0 to send them at the next chance.
 	sent:          u64,
-	// The same for its Animator's view, where 0 is also that the editor knows of none (see animators.odin).
-	animator_sent: u64,
-	// The hash of its reflection probe's view that the editor last got, 0 for None, or nil before the first, which then
-	// goes out whatever it is, so a watch tells the editor even of no probe (see reflection_probes.odin).
+	// The hash of its Animator's view that the editor last got, 0 for an empty one, or nil before the first, which then
+	// goes out whatever it is, so a watch tells the editor even of no Animator (see animators.odin).
+	animator_sent: Maybe(u64),
+	// The same for its reflection probe's view, 0 for None (see reflection_probes.odin).
 	probe_sent:    Maybe(u64),
 }
 
