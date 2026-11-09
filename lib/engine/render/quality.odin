@@ -115,6 +115,8 @@ Quality :: struct {
 	gi:           Gi_Quality,
 	reflections:  Reflection_Quality,
 	fog:          Quality_Level,
+	// The clouds' march, shadow map and history (CLOUD_PARAMS, see clouds.odin).
+	clouds:       Quality_Level,
 	aa:           Aa_Technique,
 	// The share of the frame's width and height that the scene renders at, from MIN_RENDER_SCALE to 1, 0 giving 1.
 	// Temporal AA upscales the scene to the frame's size (see docs/rendering/anti-aliasing.md#upscaling); with the
@@ -192,6 +194,7 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		gi = {technique = traced ? .Split_Cascades : .Screen_Cascades, level = level},
 		reflections = {technique = reflections, level = level},
 		fog = level,
+		clouds = level,
 		aa = .Taa,
 		render_scale = 1,
 		lod_error = LOD_ERRORS[level],
@@ -247,6 +250,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	}
 	q.reflections.level = clamp_enum(q.reflections.level, .High)
 	q.fog = clamp_enum(q.fog, .High)
+	q.clouds = clamp_enum(q.clouds, .High)
 	q.aa = clamp_enum(q.aa, .Off)
 	if kind, upscales := upscaler_kind(q.aa); upscales && kind not_in caps.upscalers {
 		q.aa = .Taa
@@ -286,6 +290,7 @@ apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {
 	settings.reflections.level = q.reflections.level
 	settings.reflections.off ||= q.reflections.technique == .Off
 	settings.fog.level = q.fog
+	settings.clouds.level = q.clouds
 	settings.post.aa = q.aa
 	settings.post.no_aa ||= q.aa == .Off
 }

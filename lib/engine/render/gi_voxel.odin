@@ -550,6 +550,7 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 	}
 	for l in 0 ..< int(params.levels) {
 		p := add_compute_pass(g, "gi voxel inject", run_voxel_pass, step(vf, .Inject, u32(l)), queue = .Compute)
+		declare_cloud_shadow(f, p)
 		for k in 0 ..< int(params.levels) {
 			read(g, p, vf.textures[k][.Mask])
 			if k == l {

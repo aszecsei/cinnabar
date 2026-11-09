@@ -46,6 +46,7 @@ SCRIPT_QUALITY_FIELDS := [Quality_Key]cstring {
 	.Virtual_Shadows    = "virtual_shadows",
 	.Reflections        = "reflections",
 	.Reflections_Level  = "reflections_level",
+	.Clouds             = "clouds",
 }
 
 // script_quality is the Script_Quality of a renderer and a project settings file.

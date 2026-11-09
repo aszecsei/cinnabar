@@ -187,6 +187,7 @@ public sealed partial class EditorShell : IDisposable, IMeshHost
         yield return new PanelTool("faceEditor", "Face", "mesh", EditorLayout.RightDock, () => new FaceEditorView(this));
         yield return new PanelTool("undoHistory", "Undo History", "history", EditorLayout.RightDock, () => new UndoHistoryView(this));
         yield return new PanelTool("atmosphere", "Atmosphere", "sky", EditorLayout.RightDock, () => new AtmosphereView(this));
+        yield return new PanelTool("weather", "Weather Map", "cloud", EditorLayout.RightDock, () => new WeatherMapView(this));
         yield return new PanelTool("console", "Console", "console", EditorLayout.BottomDock, () => new ConsoleView(Console));
         yield return new PanelTool("contentBrowser", "Content Browser", "assets", EditorLayout.BottomDock, () => new ContentBrowserView(this));
         yield return new PanelTool("resourceMonitor", "Resource Monitor", "monitor", EditorLayout.BottomDock, () => new ResourceMonitorView(Stats, CaptureFrame));

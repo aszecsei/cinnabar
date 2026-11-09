@@ -92,6 +92,8 @@ Renderer :: struct {
 	rtr:             Traced_Reflections,
 	fog:             Volumetric_Fog,
 	sky:             Sky,
+	// The volumetric clouds (see clouds.odin).
+	clouds:          Volumetric_Clouds,
 	// The last frame's sky, which sky_texture_sun answers for.
 	last_sky_mode:   Sky_Mode,
 	post:            Post,
@@ -276,6 +278,8 @@ Frame :: struct {
 	sky_texture:              ^Sky_Texture_Frame,
 	// nil when the sky's cubemap has no textures (see sky_cube.odin).
 	sky_cube:                 ^Sky_Cube_Frame,
+	// nil without clouds (see clouds.odin); its shadow map, which the light loop reads, is zero without a sun that casts it.
+	clouds:                   ^Cloud_Frame,
 	// nil without the reflection probes (see reflection_probes.odin).
 	reflection_probes:        ^Reflection_Probe_Frame,
 	// Frame_Desc.disable has occlusion culling, or the hierarchy over meshlets.
@@ -376,6 +380,7 @@ renderer_init :: proc(r: ^Renderer, platform: ^core.Platform_API, assets: ^asset
 	traced_reflections_init(&r.rtr)
 	fog_init(&r.fog)
 	sky_init(&r.sky)
+	clouds_init(&r.clouds)
 	sprites_init(&r.sprites)
 	particles_init(&r.particles, w)
 	reflection_probes_init(&r.reflection_probes, r, w)
@@ -427,6 +432,7 @@ renderer_destroy :: proc(r: ^Renderer) {
 	traced_reflections_destroy(&r.rtr, r.platform)
 	fog_destroy(&r.fog, r.platform)
 	sky_destroy(&r.sky, r)
+	clouds_destroy(&r.clouds, r.platform)
 	sprites_destroy(&r.sprites, r.platform)
 	shading_destroy(&r.shading, r.platform)
 	particles_destroy(&r.particles, r.platform)
@@ -504,8 +510,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			casts = false
 		}
 	}
-	// The sky tints its sun's light before the shadows and the upload take the lights.
+	// The sky tints its sun's light before the shadows and the upload take the lights, and the clouds flag the light that
+	// casts their shadow.
 	ambient := begin_sky(f, settings.sky)
+	begin_clouds(f, settings.clouds, settings.sky, ambient)
 	begin_sky_cube(f, settings.sky, settings.reflections.level, ambient)
 	begin_reflection_probes(f, w, desc.hidden, settings.reflections, ambient)
 	assign_shadows(f)
@@ -547,12 +555,15 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	if desc.hooks.after_prepass != nil {
 		desc.hooks.after_prepass(f)
 	}
+	// The cloud shadow map first: the passes that light the world from here on read it.
+	add_cloud_shadow_passes(f)
 	add_ao_passes(f, settings.ambient_occlusion)
 	add_gi_world_probes(f)
 	add_gi_passes(f)
 	add_screen_reflection_passes(f)
 	add_cluster_passes(f)
 	add_shadow_passes(f)
+	add_cloud_passes(f)
 	add_fog_passes(f)
 	add_sky_passes(f)
 	add_sky_texture_passes(f)
@@ -576,10 +587,11 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		desc.hooks.world_uses(f, p)
 	}
 	add_shading_stats_copy(f)
-	// The sky, then the background's fog, so it does not dim the transparent surfaces in front of it, and the global
-	// illumination's and the reflections' lit scenes, which keep only the opaque surfaces.
+	// The sky, the clouds over it, then the background's fog, so it does not dim the transparent surfaces in front of
+	// it, and the global illumination's and the reflections' lit scenes, which keep only the opaque surfaces.
 	add_sky_background(f)
 	add_sky_texture_background(f)
+	add_cloud_composite(f)
 	add_fog_background(f)
 	add_gi_lit(f)
 	add_screen_reflection_lit(f)
@@ -675,6 +687,7 @@ sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool
 	sync_ray_scene_pipelines(r, force)
 	sync_fog_pipelines(r, force)
 	sync_sky_pipelines(r, force)
+	sync_cloud_pipelines(r, force)
 	sync_sprite_pipelines(r, force)
 	sync_particle_pipelines(r, force)
 	sync_reflection_probe_pipelines(r, force)

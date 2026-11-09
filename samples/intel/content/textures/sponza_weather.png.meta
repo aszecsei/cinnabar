@@ -1,0 +1,4 @@
+# cinnabar asset metadata. Keep this file next to its asset (see docs/content/identity-and-cooking.md#identity).
+guid = 57bed8c5e4eac9bb2c03476331afd35b
+usage = data
+mips = false

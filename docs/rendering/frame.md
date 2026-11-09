@@ -17,7 +17,10 @@ flowchart TB
     SKYLUT["Sky tables<br/>transmittance, multiple scattering, view"]
     SKYCUBE["Sky cubemap<br/>capture, prefilter"]
     PROBES["Reflection probe faces<br/>clusters, prepass, forward, prefilter"]
+    CLOUDSHADOW["Cloud shadow map<br/>noise once"]
+    CLOUDS["Clouds<br/>march, temporal"]
     SKY["Sky<br/>where nothing drew"]
+    CLOUDCOMP["Clouds composite<br/>over the sky"]
     FWD["Forward<br/>opaque"]
     VMFWD["View model forward"]
     TRANS["Transparent"]
@@ -28,14 +31,16 @@ flowchart TB
     OUT["Output<br/>frame target"]
 
     EXTRACT --> CULL --> VMPRE --> PRE
-    PRE --> SHADOW & CLUSTER & AO & GI & SSR
+    PRE --> CLOUDSHADOW --> SHADOW & CLUSTER & AO & GI & SSR
     CLUSTER --> FOG
+    SHADOW --> CLOUDS --> CLOUDCOMP
+    CLOUDSHADOW --> FOG
     SHADOW & CLUSTER & AO & GI & SSR & FOG --> FWD
     FWD -.->|"lit scene, next frame"| GI & SSR
     SKYLUT --> SKY
     SKYLUT --> SKYCUBE -.->|"next frames"| GI & FWD & TRANS
     SHADOW & SKYCUBE --> PROBES -.->|"next frames"| FWD & TRANS
-    FWD --> VMFWD --> SKY --> TRANS --> POST --> TONE --> OUT
+    FWD --> VMFWD --> SKY --> CLOUDCOMP --> TRANS --> POST --> TONE --> OUT
     UI --> OUT
     DEBUG --> OUT
 ```
@@ -44,10 +49,11 @@ flowchart TB
 - With a feature that traces, such as traced shadows, the frame builds the ray scene's acceleration structures after the culling and before the prepass, so every pass after can trace them (see [Ray scene](ray-scene.md#ray-scene)). The global illumination's [world probes](global-illumination.md#world-probes) update after the prepass, on the compute queue, before the cascades, which read them.
 - The ambient occlusion, the global illumination and the [screen-space](lighting-and-shadows.md#screen-space-reflections) or [traced](lighting-and-shadows.md#ray-traced-reflections) reflections run on the compute queue (see [GPU](../gpu/queues-streaming-readback.md#queues)). They depend only on the prepass and on textures from last frame, so they overlap with the light clusters and the shadow maps. The clusters, the fog volume and the exposure run on the graphics queue: the fog reads the shadow maps, which are drawn just before it, after the [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps)'s marking and allocation, which read the prepass's depth, and the exposure is explained in [Post-processing](post-processing.md#post-processing).
 - The sky's [cubemap](sky.md#specular-light) is captured and prefiltered after the sky's tables, on the graphics queue. The global illumination, the forward pass and the transparent surfaces sample only cubes that earlier frames finished, so they do not wait for it.
+- The [clouds](clouds.md#passes) run on the compute queue: their shadow map right after the prepass, before every pass that lights the world, since the light loop reads it, with their noise in the first frame; their march and temporal pass after the shadow maps and before the fog. Their composite runs on the graphics queue after the sky's background and before the fog's, so the fog dims the clouds with the sky.
 - A [reflection probe](lighting-and-shadows.md#reflection-probes)'s capture draws its share of faces after the shadow maps and the sky's cubemap, which its faces read, and before the world pass, on the graphics queue. The forward pass and the transparent surfaces sample only probes' cubes that earlier frames finished.
-- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the ray scene's acceleration structure (`render.Ray_Scene`, see [Ray scene](ray-scene.md#ray-scene)), the volumes' query, the ambient occlusion's, the global illumination's, the screen-space reflections', the traced reflections' and the fog's pipelines (`render.Ao_Passes`, `render.Gi_Passes`, `render.Screen_Reflections`, `render.Traced_Reflections`, `render.Volumetric_Fog`), and post-processing's pipelines, exposure and lookup table (`render.Post`). It holds handles only, so a code reload keeps it (see [Hot reload](../overview/hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
+- The renderer is a `render.Renderer` in `Game_State`: the residency table, the transient texture cache, the debug lines, the mesh extractor, the materials, the GPU scene, the lights' extractors and clusters, the ray scene's acceleration structure (`render.Ray_Scene`, see [Ray scene](ray-scene.md#ray-scene)), the volumes' query, the ambient occlusion's, the global illumination's, the screen-space reflections', the traced reflections', the fog's and the clouds' pipelines (`render.Ao_Passes`, `render.Gi_Passes`, `render.Screen_Reflections`, `render.Traced_Reflections`, `render.Volumetric_Fog`, `render.Volumetric_Clouds`, with the clouds' noise textures and shadow map), and post-processing's pipelines, exposure and lookup table (`render.Post`). It holds handles only, so a code reload keeps it (see [Hot reload](../overview/hot-reload.md#rules)). A game calls `renderer_init` after its world and asset runtime, `renderer_reload` in `on_reload`, which makes its registrations again and updates every pipeline at the next frame, and `renderer_destroy` at shutdown.
 - A game calls `render.draw_frame(&renderer, &world, frame_desc)` once a frame. `Frame_Desc` is in frame memory: the view, the size, whether to keep the IDs and the depth for the editor, whether the frame has no debug layer (`no_debug`, the editor's outside Edit, see [Layers and output](layers-and-output.md#debug)), the entity slots not to draw (the editor's hidden ones), the frame's settings or nil for the volumes' (see [Settings](#settings)), the hooks, the editor's material previews to draw (see [Material previews](materials.md#material-previews)), the sprites to draw (see [Sprites](transparency.md#sprites)), the time that the particles step and the systems that play while it is 0 (see [Particles](particles.md#time)). The lights are components (see [Lights and clusters](lighting-and-shadows.md#lights-and-clusters)).
-- `draw_frame` returns false when the graph could not execute. The renderer's state from the frame's GPU work changes only when the frame executes (see [Render graph](../gpu/render-graph.md#commits)). This state includes the built acceleration structures, the baked lookup table, the adapted exposure, the sky's cubemap and the reflection probes' captures, the split cascades' storage and windows, the voxel cones' levels, new particle systems and the histories. After a frame that failed, the next frame does that work again, so a game can draw the next frame as usual. A game's own state follows the same rule: the sample in `samples/mygame` marks its triangle's structure as built only when `draw_frame` returns true.
+- `draw_frame` returns false when the graph could not execute. The renderer's state from the frame's GPU work changes only when the frame executes (see [Render graph](../gpu/render-graph.md#commits)). This state includes the built acceleration structures, the baked lookup table, the adapted exposure, the sky's cubemap and the reflection probes' captures, the split cascades' storage and windows, the voxel cones' levels, the clouds' noise (`Cloud_Noise_State`, Ready once the frame that bakes it executes), new particle systems and the histories. After a frame that failed, the next frame does that work again, so a game can draw the next frame as usual. A game's own state follows the same rule: the sample in `samples/mygame` marks its triangle's structure as built only when `draw_frame` returns true.
 - **Hooks** add a game's own work, in the order of the frame. Each is optional, and each gets the `render.Frame`, which holds the graph, the view and its projection, the targets, and the hooks' `data`:
 
 | Hook | When | What it does |
@@ -80,8 +86,9 @@ The settings that make the scene's look are settings components on [volumes](../
 | `Environment` | 49 | The `mode`: Flat's `background`, which the world pass clears the scene to and which is not pre-exposed, and its ambient light's `sky` and `ground`; the atmosphere's sky, with its sun, moon and stars; or a texture's. The `ambient_intensity` in each. See [Sky](sky.md#sky) |
 | `Fog` | 38 | See [Volumetric fog](fog.md#volumetric-fog) |
 | `Shadows` | 50 | The directional cascades' `distance` (`SHADOW_DISTANCE`, 100 m) and `split_lambda` between even and exponential (`SHADOW_SPLIT_LAMBDA`, 0.75) |
+| `Clouds` | 55 | The cloud layer's `density`, its weather from scalars or a map, its wind, its heights, its far clouds, its ambient light and its shadow's strength. See [Clouds](clouds.md#clouds) |
 
-- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Reflection_Settings`, which no volume sets, `Fog_Settings` and `Sky_Settings`, from which `begin_sky` gives the frame's `Ambient`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
+- **Resolving:** `resolve_settings(&renderer, &world, position, hidden)` gives a `Frame_Settings` with the volumes' settings blended and the rest at their defaults: `Post_Settings`, `Ao_Settings`, `Gi_Settings`, `Reflection_Settings`, which no volume sets, `Fog_Settings`, `Sky_Settings`, from which `begin_sky` gives the frame's `Ambient`, and `Cloud_Settings`. `draw_frame` calls it at the view's position when `Frame_Desc.settings` is nil. A game can call it, change a value, and pass the result.
 - **Quality:** the settings are the look, the same at every quality. `draw_frame` then gives them the frame's [quality](quality.md#order-in-the-frame), which sets each feature's level and can turn a feature off but never on, and then the editor's debug flags.
 - **Defaults:** each component registers its `DEFAULT_*` value (see [Volumes](../world/volumes.md#volumes)). Volumes blend from it, so a volume that reaches halfway sets a value halfway from the default, and a component added in the editor starts from it. Paper white and the peak have no fixed default, the display's, so their default is 0, which gives the display's. The exposure, the exposure range, the adaptation speed, the shadow distance and the ambient occlusion's radius and power also take their defaults at 0 in `Frame_Settings`, where 0 would mean nothing.
 - **The sample's scene** has a Global Volume with its background. The glass scene's has an atmosphere whose sun is the scene's directional light, with stars and a moon.

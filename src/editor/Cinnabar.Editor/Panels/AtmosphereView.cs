@@ -13,10 +13,11 @@ using FieldInfo = Cinnabar.Editor.Link.Protocol.FieldInfo;
 namespace Cinnabar.Editor.Panels;
 
 /// <summary>
-/// The Atmosphere panel (see docs/editor/shell-and-panels.md#atmosphere): the scene's sky, sun, ambient light, night
-/// and fog in one place, whatever is selected. Its rows are the atmosphere volume's Environment and Fog, as the
-/// properties panel has them, and a linked sun's light's color and intensity; the sun's azimuth and elevation turn the
-/// linked light, or set the sky's own sun. It watches the volume and the light for their values while it shows them.
+/// The Atmosphere panel (see docs/editor/shell-and-panels.md#atmosphere): the scene's sky, sun, ambient light, night,
+/// fog and clouds in one place, whatever is selected. Its rows are the atmosphere volume's Environment, Fog and Clouds,
+/// as the properties panel has them, and a linked sun's light's color and intensity; the sun's azimuth and elevation
+/// turn the linked light, or set the sky's own sun. It watches the volume and the light for their values while it
+/// shows them.
 /// </summary>
 public sealed class AtmosphereView : ScrollViewer
 {
@@ -50,7 +51,9 @@ public sealed class AtmosphereView : ScrollViewer
             .Add(() => _world.TypesChanged += Refresh, () => _world.TypesChanged -= Refresh)
             .Add(() => _world.ValuesChanged += OnValuesChanged, () => _world.ValuesChanged -= OnValuesChanged)
             .Add(() => _shell.SceneChanged += Refresh, () => _shell.SceneChanged -= Refresh)
-            .Add(() => _shell.ModeChanged += Refresh, () => _shell.ModeChanged -= Refresh);
+            .Add(() => _shell.ModeChanged += Refresh, () => _shell.ModeChanged -= Refresh)
+            // The weather map's warning reads the index.
+            .Add(() => _shell.Assets.Changed += Refresh, () => _shell.Assets.Changed -= Refresh);
     }
 
     void OnValuesChanged(ulong entity)
@@ -61,8 +64,8 @@ public sealed class AtmosphereView : ScrollViewer
         }
     }
 
-    // The panel rebuilds when what it shows changes: the volume, its components, its mode, its sun, and their
-    // handles. An edit of a value only shows the new value.
+    // The panel rebuilds when what it shows changes: the volume, its components, its mode, its sun, its weather's
+    // source and map, and their handles. An edit of a value only shows the new value.
     void Refresh()
     {
         var structure = Structure();
@@ -86,7 +89,22 @@ public sealed class AtmosphereView : ScrollViewer
         }
         var sun = _shell.AtmosphereSun;
         return $"{volume.Id}|{string.Join(",", volume.Components.Select(c => c.Id))}|{Atmosphere.ModeOf(volume)}|{sun?.Id}|" +
-            $"{_world.FindScene(volume.Id)?.Handle}|{(sun == null ? 0 : _world.FindScene(sun.Id)?.Handle)}|{_world.Types.Count}";
+            $"{_world.FindScene(volume.Id)?.Handle}|{(sun == null ? 0 : _world.FindScene(sun.Id)?.Handle)}|{_world.Types.Count}|" +
+            $"{Atmosphere.WeatherSourceOf(volume)}|{WeatherMapWarning(volume)}";
+    }
+
+    // The warning under the weather map, or null: the clouds read its channels as they are, so a texture that is not a
+    // data texture, whose colors are gamma-encoded and block-compressed, gives weather that is not what it shows. A
+    // texture the index lacks has no warning, as it has no usage. The cooker takes the _weather suffix as data.
+    string? WeatherMapWarning(SceneEntity volume)
+    {
+        if (Atmosphere.WeatherMapOf(volume) is not { Length: > 0 } guid || _shell.Assets.Find(guid) is not { } asset)
+        {
+            return null;
+        }
+        var usage = asset.Settings.FirstOrDefault(s => s.Key == "usage")?.Value;
+        var data = usage != null ? usage == WeatherMapFile.Usage : WeatherMapFile.HasWeatherSuffix(asset.Path);
+        return data ? null : "This texture is not a data texture; the clouds read its channels raw.";
     }
 
     void Watch(ulong[] handles)
@@ -203,6 +221,46 @@ public sealed class AtmosphereView : ScrollViewer
         else
         {
             _content.Children.Add(Group("Fog", CommandButton("Add Fog", EditorCommands.AtmosphereFog)));
+        }
+
+        // The clouds, once the volume has a Clouds: the weather from the scalars or the map, by the source, then the rest.
+        if (volume.Components.Any(c => c.Id == SceneEdits.CloudsId) && _world.Type(SceneEdits.CloudsId) is { } clouds)
+        {
+            var cloudFields = clouds.Fields.ToDictionary(f => f.Name);
+            FieldRow? Cloud(string name, string? label = null) =>
+                cloudFields.TryGetValue(name, out var f) ? Row(volume, SceneEdits.CloudsId, f, label) : null;
+            var panel = new StackPanel { Spacing = 4 };
+            panel.Children.Add(_grid.Rows(new[] { Cloud(Atmosphere.CloudDensity), Cloud(Atmosphere.CloudWeather) }.OfType<FieldRow>()));
+            if (Atmosphere.WeatherSourceOf(volume) == "Map")
+            {
+                panel.Children.Add(_grid.Rows(new[] { Cloud(Atmosphere.WeatherMap) }.OfType<FieldRow>()));
+                if (WeatherMapWarning(volume) is { } warning)
+                {
+                    panel.Children.Add(new TextBlock { Text = warning, Classes = { "dim" }, TextWrapping = TextWrapping.Wrap });
+                }
+                panel.Children.Add(_grid.Rows(new[] { Cloud(Atmosphere.WeatherOrigin), Cloud(Atmosphere.WeatherSize, "Weather Size (m)"), Cloud(Atmosphere.Cirrus) }.OfType<FieldRow>()));
+                panel.Children.Add(CommandButton("Center Weather Here", EditorCommands.AtmosphereCenterWeather));
+            }
+            else
+            {
+                panel.Children.Add(_grid.Rows(new[] { Cloud(Atmosphere.CloudCoverage), Cloud(Atmosphere.CloudPrecipitation), Cloud(Atmosphere.CloudType), Cloud(Atmosphere.Cirrus) }.OfType<FieldRow>()));
+            }
+            panel.Children.Add(_grid.Rows(new[]
+            {
+                Cloud(Atmosphere.WindSpeed, "Wind Speed (m/s)"), Cloud(Atmosphere.WindDirection, "Wind Direction (°)"),
+                Cloud(Atmosphere.CloudBottom, "Bottom (m)"), Cloud(Atmosphere.CloudThickness, "Thickness (m)"), Cloud(Atmosphere.BaseVariation), Cloud(Atmosphere.CirrusHeight, "Cirrus Height (m)"),
+                Cloud(Atmosphere.FarDistance, "Far Distance (m)"), Cloud(Atmosphere.FarCoverage),
+                Cloud(Atmosphere.CloudAmbientIntensity), Cloud(Atmosphere.ShadowStrength),
+            }.OfType<FieldRow>()));
+            var weatherMap = new Button { Content = "Weather Map…", HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Center };
+            ToolTip.SetTip(weatherMap, "Show the Weather Map panel, which paints the map and generates one from noise.");
+            weatherMap.Click += (_, _) => _shell.Layout.Show("weather");
+            panel.Children.Add(weatherMap);
+            _content.Children.Add(Group("Clouds", panel));
+        }
+        else
+        {
+            _content.Children.Add(Group("Clouds", CommandButton("Add Clouds", EditorCommands.AtmosphereClouds)));
         }
     }
 

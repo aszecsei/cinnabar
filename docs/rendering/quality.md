@@ -25,6 +25,7 @@ A volume says how far the ambient occlusion reaches; the quality says how many s
 | `reflections.technique` | `Off`, `Probes`, `Screen`, `Ray_Traced` | The reflections. `Probes` looks up the [reflection probes](lighting-and-shadows.md#reflection-probes) in the forward pass, with the pixel's own normal and roughness. `Screen` adds the [screen-space reflections](lighting-and-shadows.md#screen-space-reflections) in front of the probes, which fill in where their rays find nothing. Both run on every device. `Ray_Traced` adds the [traced reflections](lighting-and-shadows.md#ray-traced-reflections) in front of the probes instead, and needs `Ray_Query`. Low gives `Probes`, Medium `Screen`, and High and Ultra `Ray_Traced` where the device has `Ray_Query` and `Screen` where it does not |
 | `reflections.level` | `Low` … `Ultra` | The technique's parameters (`REFLECTION_PARAMS`, a table for each technique, in `reflections.odin`). `Off`'s are empty. `Probes`' are the faces' size, the slots, the faces a frame and the roughness fade over the GI, which `Screen` keeps for its probes. `Screen`'s are the block of pixels that one pixel's rays start from, the rays a pixel, the march's steps and the roughness cutoff. `Ray_Traced`'s are the block, the steps of the march on the screen before a ray traces, the roughness cutoff and the distance past which a hit has no weight, and it keeps the probes' too. At every technique, `Off` too, the sky's [cubemap](sky.md#specular-light)'s faces, format and samples (`SKY_CUBE_PARAMS`) |
 | `fog` | `Low` … `Ultra` | The fog volume's depth slices (`FOG_LEVEL_SLICES`) |
+| `clouds` | `Low` … `Ultra` | The [clouds](clouds.md#levels)' buffer's share of the frame, the march's steps and light steps, the shadow map's size and steps, and the history's frames (`CLOUD_PARAMS`) |
 | `aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` | The [anti-aliasing](anti-aliasing.md#anti-aliasing). `Fsr` needs the device to run it |
 | `render_scale` | `MIN_RENDER_SCALE` (0.5) to 1; 0 gives 1 | The scene's share of the frame's width and height, which temporal AA and FSR [upscale](anti-aliasing.md#upscaling) and the output pass otherwise stretches |
 | `lod_error` | `MIN_LOD_ERROR` (0.25) to `MAX_LOD_ERROR` (8) pixels; 0 gives 1 | The largest error that the mesh shader path's [levels of detail](gpu-scene.md#mesh-shader-path) may show: 2, 1.5, 1 and 0.5 pixels from Low to Ultra (`LOD_ERRORS`) |
@@ -48,12 +49,12 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 
 ## Levels
 
-| Level | Shadow atlas | Cascades | Shadow filter | GTAO slices × steps | GI cascades, spacing, directions, steps | Fog slices |
-|---|---|---|---|---|---|---|
-| Low | 2048, cells of 1024 | 2 | 1 tap (2x2) | 1 × 2 | 4, 16 px, 4, 4 | 32 |
-| Medium | 4096, cells of 1024 | 3 | 4 taps (3x3) | 2 × 2 | 5, 8 px, 4, 6 | 48 |
-| High | 4096, cells of 1024 | 4 | 4 taps (3x3) | 3 × 3 | 5, 8 px, 4, 8 | 64 |
-| Ultra | 8192, cells of 2048 | 4 | 9 taps (4x4) | 9 × 3 | 5, 8 px, 8, 12 | 96 |
+| Level | Shadow atlas | Cascades | Shadow filter | GTAO slices × steps | GI cascades, spacing, directions, steps | Fog slices | Clouds buffer, steps, light steps, shadow map |
+|---|---|---|---|---|---|---|---|
+| Low | 2048, cells of 1024 | 2 | 1 tap (2x2) | 1 × 2 | 4, 16 px, 4, 4 | 32 | 1/4, 48, 4, 256² |
+| Medium | 4096, cells of 1024 | 3 | 4 taps (3x3) | 2 × 2 | 5, 8 px, 4, 6 | 48 | 1/2, 64, 5, 512² |
+| High | 4096, cells of 1024 | 4 | 4 taps (3x3) | 3 × 3 | 5, 8 px, 4, 8 | 64 | 1/2, 96, 6, 512² |
+| Ultra | 8192, cells of 2048 | 4 | 9 taps (4x4) | 9 × 3 | 5, 8 px, 8, 12 | 96 | 1/2, 128, 6, 1024² |
 
 | Level | Virtual shadow map's levels, reach | Pool in pages, memory | Bias |
 |---|---|---|---|
@@ -70,6 +71,7 @@ So a room whose volume turns the ambient occlusion off has none at Ultra, and a 
 - **The world probes' levels** (`GI_PROBE_PARAMS`): Low has 2 levels from 2 m with 32 rays and 1024 probes a frame; Medium 3 levels from 1 m with 64 rays and 2048; High 4096; Ultra 4 levels and 8192. At High, the probes trace 262 144 rays a frame and every probe updates within 12 frames.
 - **GI's levels** trade probes for cascades: each cascade's interval is four times as long as the one before, from a length that scales with the spacing, so sparser probes need fewer cascades to reach as far. Sparser probes are noisier, so their histories average over more frames. The spacing and the steps are in `Gi_Constants`.
 - **Fog's slices** reach the injection in `Fog_Push.grid.z` and the forward pass in `Frame_Constants.fog_slices`.
+- **The clouds' levels** (`CLOUD_PARAMS`, see [Clouds](clouds.md#levels)) are the cloud buffer's share of the frame on each side, the march's steps and its light steps, the shadow map's size and its steps, and the history's frames, 8 at Low to 16 at High and Ultra.
 
 ## Hardware caps
 
@@ -106,6 +108,7 @@ The player's choice is in the [project settings](../overview/architecture.md#pro
 | `quality.reflections` | `Off`, `Probes`, `Screen`, `Ray_Traced`; a file without it keeps the preset's |
 | `quality.reflections.level` | `Low` … `Ultra`; a file without it keeps the preset's |
 | `quality.fog` | `Low` … `Ultra` |
+| `quality.clouds` | `Low` … `Ultra`; a file without it keeps the preset's |
 | `quality.aa` | `Off`, `Taa`, `Fxaa`, `Smaa`, `Fsr` |
 | `quality.render_scale` | A number from 0.5 to 1 |
 | `quality.lod_error` | A number of pixels from 0.25 to 8 |

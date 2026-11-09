@@ -47,6 +47,8 @@ Light_Flag :: enum u32 {
 	Two_Sided,
 	// The light's shadow is the virtual shadow map (see virtual_shadows.odin).
 	Virtual_Shadow,
+	// The clouds shadow the light through the cloud shadow map (see clouds.odin).
+	Cloud_Shadow,
 }
 
 // Light_Record matches Light_Record in material_common.hlsli: a light relative to the camera. direction is where the

@@ -17,6 +17,7 @@ AMBIENT_OCCLUSION_ID :: ecs.Component_Id(47)
 GLOBAL_ILLUMINATION_ID :: ecs.Component_Id(48)
 ENVIRONMENT_ID :: ecs.Component_Id(49)
 SHADOWS_ID :: ecs.Component_Id(50)
+CLOUDS_ID :: ecs.Component_Id(55)
 
 // Anti_Aliasing is the anti-aliasing, of the technique that the quality chooses (see
 // docs/rendering/anti-aliasing.md#anti-aliasing): off turns it off.
@@ -171,6 +172,51 @@ Fog :: struct {
 	anisotropy:     volume.Value(f32) `editor:"range=-0.9,0.9"`,
 }
 
+// Clouds are a ray-marched layer of clouds above the world (see docs/rendering/clouds.md#clouds). density is the master:
+// 0 is no clouds. Heights are meters above the atmosphere's ground, where Atmosphere.altitude (in kilometers) puts the
+// world's y of 0.
+Clouds :: struct {
+	// Multiplies the clouds' extinction. 0 is no clouds.
+	density:           volume.Value(f32) `editor:"range=0,4"`,
+	// Where the weather comes from: the four scalars below everywhere, or the weather map.
+	weather:           volume.Value(Weather_Source),
+	// How much of the sky the low layer covers, how much it rains (which darkens and thickens the clouds and pushes them
+	// toward cumulonimbus), and the cloud type from stratus (0) through cumulus (0.5) to cumulonimbus (1).
+	coverage:          volume.Value(f32) `editor:"range=0,1"`,
+	precipitation:     volume.Value(f32) `editor:"range=0,1"`,
+	cloud_type:        volume.Value(f32) `editor:"range=0,1"`,
+	// How much of the sky the cirrus layer covers.
+	cirrus:            volume.Value(f32) `editor:"range=0,1"`,
+	// The weather map (see docs/rendering/clouds.md#weather): a data texture whose R, G and B are the coverage, the
+	// precipitation and the cloud type over weather_size meters centered on weather_origin, repeating beyond it.
+	weather_map:       volume.Value(format.Guid) `asset:"texture"`,
+	weather_origin:    volume.Value(ecs.World_Position),
+	weather_size:      volume.Value(f32) `editor:"range=1000,200000"`,
+	// The wind, in meters per second, toward the azimuth in degrees from +z toward +x: it moves the weather and the shapes.
+	wind_speed:        volume.Value(f32) `editor:"range=0,60"`,
+	wind_direction:    volume.Value(f32) `editor:"range=0,360"`,
+	// The low layer's bottom and how thick it is, and the cirrus layer's height, in meters.
+	bottom:            volume.Value(f32) `editor:"range=0,12000"`,
+	thickness:         volume.Value(f32) `editor:"range=100,8000"`,
+	cirrus_height:     volume.Value(f32) `editor:"range=0,20000"`,
+	// How much each cloud's base rises above the layer's bottom, by a slow noise over the sky: 0 puts every cloud on
+	// one plane, 1 lifts some by CLOUD_LIFT_MAX (0.7) of the layer's thickness.
+	base_variation:    volume.Value(f32) `editor:"range=0,1"`,
+	// From this distance, the authored weather blends over as far again to a cumulus at far_coverage.
+	far_distance:      volume.Value(f32) `editor:"range=1000,50000"`,
+	far_coverage:      volume.Value(f32) `editor:"range=0,1"`,
+	// Multiplies the sky's ambient light on the clouds.
+	ambient_intensity: volume.Value(f32) `editor:"range=0,4"`,
+	// How dark the clouds' shadow is on the world: 1 is their whole transmittance.
+	shadow_strength:   volume.Value(f32) `editor:"range=0,1"`,
+}
+
+// Weather_Source is where the Clouds take their weather from.
+Weather_Source :: enum u8 {
+	Scalars,
+	Map,
+}
+
 // The settings' defaults, which volumes blend from.
 DEFAULT_EXPOSURE :: Exposure {
 	exposure = {value = 1},
@@ -224,6 +270,21 @@ DEFAULT_SHADOWS :: Shadows {
 	distance = {value = SHADOW_DISTANCE},
 	split_lambda = {value = SHADOW_SPLIT_LAMBDA},
 }
+DEFAULT_CLOUDS :: Clouds {
+	coverage = {value = 0.5},
+	cloud_type = {value = 0.5},
+	cirrus = {value = 0.2},
+	weather_size = {value = 50000},
+	wind_speed = {value = 3},
+	bottom = {value = 1500},
+	thickness = {value = 2500},
+	cirrus_height = {value = 8000},
+	base_variation = {value = 0.3},
+	far_distance = {value = 15000},
+	far_coverage = {value = 0.5},
+	ambient_intensity = {value = 1},
+	shadow_strength = {value = 1},
+}
 
 // Shadow_Settings are a frame's cascades, from the Shadows settings, and its shadows' quality. A distance of 0 gives
 // SHADOW_DISTANCE.
@@ -260,6 +321,8 @@ Frame_Settings :: struct {
 	shadows:           Shadow_Settings,
 	// What is around the world: the background and the ambient light.
 	sky:               Sky_Settings,
+	// The clouds above it (see clouds.odin).
+	clouds:            Cloud_Settings,
 	// The game's post effects' settings, by their index in Renderer.effects (see register_post_effect).
 	effects:           []Effect_Settings,
 }
@@ -274,6 +337,7 @@ register_settings_components :: proc(r: ^ecs.Registry) {
 	ecs.register_component(r, Environment, ENVIRONMENT_ID, DEFAULT_ENVIRONMENT)
 	ecs.register_component(r, Fog, FOG_ID, DEFAULT_FOG)
 	ecs.register_component(r, Shadows, SHADOWS_ID, DEFAULT_SHADOWS)
+	ecs.register_component(r, Clouds, CLOUDS_ID, DEFAULT_CLOUDS)
 }
 
 // resolve_settings takes the frame's settings from the volumes at a position, usually the camera's, leaving out the
@@ -289,6 +353,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 	env, _ := volume.blend(w, &inf, Environment)
 	fog, _ := volume.blend(w, &inf, Fog)
 	shadows, _ := volume.blend(w, &inf, Shadows)
+	clouds, _ := volume.blend(w, &inf, Clouds)
 	return {
 		post = {
 			no_aa = aa.off.value,
@@ -317,6 +382,7 @@ resolve_settings :: proc(r: ^Renderer, w: ^ecs.World, position: ecs.World_Positi
 		},
 		shadows = {distance = shadows.distance.value, split_lambda = shadows.split_lambda.value},
 		sky = sky_settings(env),
+		clouds = cloud_settings(clouds),
 		effects = resolve_effects(r, w, &inf),
 	}
 }

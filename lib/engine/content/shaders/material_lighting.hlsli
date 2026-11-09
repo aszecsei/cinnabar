@@ -5,6 +5,7 @@
 #define MATERIAL_LIGHTING_HLSLI
 
 #include "material_common.hlsli"
+#include "cloud_shadow.hlsli"
 #include "sky_cube.hlsli"
 #include "virtual_shadow.hlsli"
 
@@ -178,12 +179,17 @@ float range_window(float distance2, float range) {
 
 // light_falloff is one light as it reaches a point, before its shadow: the direction toward it, and its light there.
 // A punctual light falls off with the square of the distance, windowed to 0 at its range. The fog sees an area light as
-// a point light at its middle, whose light a quad or a disk sends out with the cosine of its face.
+// a point light at its middle, whose light a quad or a disk sends out with the cosine of its face. The clouds shadow
+// the directional light that casts their shadow (see cloud_shadow.hlsli), so every pass that includes this file takes
+// it.
 Light light_falloff(Light_Record l, float3 p) {
 	Light light;
 	if (l.type == LIGHT_DIRECTIONAL) {
 		light.direction = -l.direction;
 		light.color = l.color;
+		if ((l.flags & LIGHT_CLOUD_SHADOW) != 0) {
+			light.color *= cloud_shadow(p, light.direction);
+		}
 	} else {
 		float3 d = l.position - p;
 		float distance2 = max(dot(d, d), 1e-4);

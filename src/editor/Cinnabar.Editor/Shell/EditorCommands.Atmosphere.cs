@@ -6,8 +6,8 @@ namespace Cinnabar.Editor.Shell;
 static partial class EditorCommands
 {
     // The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere): its volume, its sky's mode and sun, presets
-    // of the time of day, the sky and the fog, and the night's stars and moon. Each edit is one undo entry, and gives
-    // the scene an atmosphere first when it has none.
+    // of the time of day, the sky, the fog and the weather, the night's stars and moon, and the clouds. Each edit is one
+    // undo entry, and gives the scene an atmosphere first when it has none.
     static void RegisterAtmosphere(EditorShell shell)
     {
         var commands = shell.Commands;
@@ -74,6 +74,40 @@ static partial class EditorCommands
             {
                 Description = name == "None" ? "Give the atmosphere's fog a density of 0." : $"Give the atmosphere {name.ToLowerInvariant()} fog.",
                 Icon = "fog",
+                CanExecuteWhen = () => shell.CanEditScene,
+            });
+        }
+        commands.Register(new Command(AtmosphereClouds, "Clouds", () =>
+        {
+            var cloudy = shell.AtmosphereVolume is { } v && Atmosphere.HasClouds(v);
+            shell.EditAtmosphere(cloudy ? "Clear Clouds" : "Add Clouds", (_, volume) => Atmosphere.Clouds(volume));
+        })
+        {
+            Description = "Cover the sky with the atmosphere's volumetric clouds, or clear them and keep their settings.",
+            Icon = "cloud",
+            IsCheckedWhen = () => shell.AtmosphereVolume is { } v && Atmosphere.HasClouds(v),
+            CanExecuteWhen = () => shell.CanEditScene,
+        });
+        commands.Register(new ChoiceCommand(AtmosphereWeatherSource, "Weather", Atmosphere.WeatherSources,
+            () => shell.AtmosphereVolume is { } volume ? Atmosphere.WeatherSourceOf(volume) : "Scalars",
+            source => shell.EditAtmosphere("Set Weather Source", (_, volume) => Atmosphere.WeatherSource(volume, source)))
+        {
+            Description = "Scalars: the clouds' coverage, precipitation and type are the same everywhere. Map: they come from the weather map, which the Weather Map panel paints.",
+            CanExecuteWhen = () => shell.CanEditScene,
+        });
+        commands.Register(new Command(AtmosphereCenterWeather, "Center Weather Here", () =>
+            shell.EditAtmosphere("Center Weather Here", (_, volume) => Atmosphere.CenterWeather(volume, shell.Camera.Position)))
+        {
+            Description = "Put the middle of the weather map under the editor's camera.",
+            Icon = "cloud",
+            CanExecuteWhen = () => shell.CanEditScene,
+        });
+        foreach (var (name, _) in Atmosphere.Weathers)
+        {
+            commands.Register(new Command(WeatherPreset(name), name, () => shell.EditAtmosphere($"Set Weather to {name}", (_, volume) => Atmosphere.Weather(volume, name)))
+            {
+                Description = $"Give the clouds {name.ToLowerInvariant()} weather, from the scalars. The weather map stays for when the source goes back to it.",
+                Icon = "cloud",
                 CanExecuteWhen = () => shell.CanEditScene,
             });
         }

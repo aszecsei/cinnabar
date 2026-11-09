@@ -62,6 +62,9 @@ Debug_View :: enum u8 {
 	// The screen-space or traced reflections' light, as bright as their weight, which is black where the probes take
 	// over (see docs/rendering/lighting-and-shadows.md#screen-space-reflections).
 	Reflections,
+	// The clouds' history over black: their light at the cloud buffer's texels, exposed as the scene is (see
+	// docs/rendering/clouds.md#passes).
+	Clouds,
 }
 
 // Feature is a part of the frame that the editor's viewport can turn off.
@@ -81,6 +84,8 @@ Feature :: enum u8 {
 	// The walk of the hierarchy over meshlets, without which each amplification shader tests every meshlet of every
 	// level of its submesh. Both draw the same meshlets.
 	Meshlet_Hierarchy,
+	// The volumetric clouds and their shadow (see docs/rendering/clouds.md#clouds).
+	Clouds,
 }
 
 Features :: bit_set[Feature;u16]
@@ -89,7 +94,7 @@ Features :: bit_set[Feature;u16]
 // are, which the output pass only encodes.
 debug_view_shaded :: proc(view: Debug_View) -> bool {
 	#partial switch view {
-	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission, .Reflections:
+	case .Lit, .Lighting_Only, .Direct_Light, .Indirect_Light, .Fog, .Gi_Diffuse, .Gi_Specular, .Emission, .Reflections, .Clouds:
 		return true
 	}
 	return false
@@ -106,7 +111,7 @@ debug_view_from_textures :: proc(view: Debug_View) -> bool {
 
 // apply_debug turns off what a debug view and the disabled features leave out of the frame's settings, and adds the
 // exposure offset in stops. A view other than Lit has no bloom and no post effects, and a view that is not shaded no
-// temporal AA and no fog, so its colors stay as they are.
+// temporal AA, no fog and no clouds, so its colors stay as they are.
 @(private)
 apply_debug :: proc(s: ^Frame_Settings, view: Debug_View, disable: Features, exposure_offset: f32) {
 	shaded := debug_view_shaded(view)
@@ -115,6 +120,9 @@ apply_debug :: proc(s: ^Frame_Settings, view: Debug_View, disable: Features, exp
 	s.post.exposure_compensation += exposure_offset
 	if .Fog in disable || (!shaded && view != .Fog) {
 		s.fog.density = 0
+	}
+	if .Clouds in disable || !shaded {
+		s.clouds.off = true
 	}
 	s.ambient_occlusion.off ||= .Ambient_Occlusion in disable
 	s.gi.off ||= .Gi in disable
@@ -130,6 +138,8 @@ Debug_View_Push :: struct {
 	size:          [2]u32,
 	near:          f32,
 	mask_channels: u32,
+	// The source's texels are this many pixels on a side, as the clouds' are: 1 for the others.
+	divisor:       u32,
 }
 
 // Debug_View_Frame is the pass of a view from the frame's textures, in frame memory.
@@ -178,6 +188,8 @@ add_debug_view_pass :: proc(f: ^Frame) {
 		source = f.moments_zeroth
 	case .Quad_Overdraw:
 		source = f.shading != nil ? f.shading.quad_counts : 0
+	case .Clouds:
+		source = f.clouds != nil ? f.clouds.history.current : 0
 	}
 	g := f.graph
 	dv := new(Debug_View_Frame, r.platform.frame_allocator)
@@ -203,9 +215,13 @@ run_debug_view :: proc(ctx: ^Pass_Context) {
 		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
 		size     = f.size,
 		near     = f.view.near,
+		divisor  = 1,
 	}
 	if f.shadows != nil {
 		push.mask_channels = u32(f.shadows.mask_count)
+	}
+	if f.debug_view == .Clouds && f.clouds != nil {
+		push.divisor = f.clouds.params.divisor
 	}
 	if dv.source != 0 {
 		push.source = gpu.read_index(gpu_texture(g, dv.source))

@@ -159,9 +159,9 @@ add_transparent_id_pass :: proc(f: ^Frame, keep_ids: bool) {
 	declare_scene_draws(f, p)
 }
 
-// declare_lighting declares what the forward template reads: the exposure, the clusters, the shadow maps, the fog
-// volume, the global illumination, the sky's cubemap and the reflection probes, and for opaque surfaces the shadow mask,
-// the ambient occlusion and the screen-space or traced reflections.
+// declare_lighting declares what the forward template reads: the exposure, the clusters, the shadow maps, the cloud
+// shadow map, the fog volume, the global illumination, the sky's cubemap and the reflection probes, and for opaque
+// surfaces the shadow mask, the ambient occlusion and the screen-space or traced reflections.
 @(private)
 declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
 	g := f.graph
@@ -174,6 +174,7 @@ declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
 		read(g, p, f.shadows.atlas)
 	}
 	declare_virtual_shadows(f, p)
+	declare_cloud_shadow(f, p)
 	if f.fog_volume != 0 {
 		read(g, p, f.fog_volume)
 	}

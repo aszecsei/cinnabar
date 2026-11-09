@@ -146,6 +146,7 @@ static partial class EditorCommands
     public const string Bloom = "view.bloom";
     public const string ToneMapping = "view.toneMapping";
     public const string Fog = "view.fog";
+    public const string Clouds = "view.clouds";
     public const string AmbientOcclusion = "view.ambientOcclusion";
     public const string GlobalIllumination = "view.globalIllumination";
     public const string Shadows = "view.shadows";
@@ -175,13 +176,18 @@ static partial class EditorCommands
     public const string Stars = "atmosphere.stars";
     public const string Moon = "atmosphere.moon";
     public const string AtmosphereFog = "atmosphere.fog";
+    public const string AtmosphereClouds = "atmosphere.clouds";
+    public const string AtmosphereWeatherSource = "atmosphere.weatherSource";
+    public const string AtmosphereCenterWeather = "atmosphere.centerWeather";
 
-    /// <summary>The commands that set the time of day, the sky and the fog to a preset.</summary>
+    /// <summary>The commands that set the time of day, the sky, the fog and the weather to a preset.</summary>
     public static string TimeOfDay(string name) => $"atmosphere.time.{name.ToLowerInvariant()}";
 
     public static string SkyPreset(string name) => $"atmosphere.sky.{name.ToLowerInvariant()}";
 
     public static string FogPreset(string name) => $"atmosphere.fog.{name.ToLowerInvariant()}";
+
+    public static string WeatherPreset(string name) => $"atmosphere.weather.{name.ToLowerInvariant()}";
 
     /// <summary>The command that shows or hides a panel.</summary>
     public static string Panel(string panelId) => $"view.panel.{panelId}";

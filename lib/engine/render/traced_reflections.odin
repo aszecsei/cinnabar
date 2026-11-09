@@ -187,6 +187,7 @@ add_traced_reflection_passes :: proc(f: ^Frame) -> bool {
 	}
 
 	p = add_compute_pass(g, "reflections ray light", run_rtr_light, f, queue = .Compute)
+	declare_cloud_shadow(f, p)
 	read(g, p, tf.hits)
 	if tf.shaded != nil {
 		read(g, p, tf.rays)

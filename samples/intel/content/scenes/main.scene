@@ -3,6 +3,20 @@
 # writes this file; see docs/editor/document-and-scenes.md#scenes.
 scene 2
 
+entity 0c949594bfc7cc17
+name = "Courtyard Probe"
+component 1 Transform
+	position = [-38587597, 67108864, 0]
+	rotation = [0.0, 0.0, 0.0, 1.0]
+	scale = [1.0, 1.0, 1.0]
+component 54 Reflection_Probe
+	extent = [18.5, 5.0, 4.0]
+	blend_distance = 1.0
+	box_projection = true
+	projection_extent = [17.4, 4.0, 3.0]
+	intensity = 1.0
+	update = On_Change
+
 entity 3e6501e8881e7358
 name = "Camera"
 component 1 Transform
@@ -25,12 +39,12 @@ entity 99fc7a52b56f77cb
 name = "Sun"
 component 1 Transform
 	position = [0, 335544320, 0]
-	rotation = [0.4829629, 0.2241439, -0.1294095, 0.8365163]
+	rotation = [-0.18707418, 0.7567356, -0.5761842, -0.24569522]
 	scale = [1.0, 1.0, 1.0]
 component 34 Directional_Light
 	color = [1.0, 0.95, 0.85]
 	cast_shadows = true
-	intensity = 2.0
+	intensity = 1.0
 
 entity ad2ea49a8b462f92
 name = "Sponza"
@@ -39,6 +53,18 @@ component 1 Transform
 	position = [0, 0, 0]
 	rotation = [0.0, 0.0, 0.0, 1.0]
 	scale = [1.0, 1.0, 1.0]
+
+entity ad2ea49a8b462f92#c07b9b86d61c2231
+component 49 Environment
+	sun_azimuth = 35.97492
+	sun_elevation = 74.57184
+	sun = @99fc7a52b56f77cb
+	texture_intensity = 0.1
+component 55 Clouds
+	density = 1.0
+	weather = Map
+	weather_map = $57bed8c5e4eac9bb2c03476331afd35b
+	cirrus = 0.2
 
 entity d9beab7dd5794b42
 name = "Sponza Curtains"

@@ -40,6 +40,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 | `Ambient_Occlusion`, `Shadow_Mask` | `debug_view.hlsl` | The occlusion, and each traced light's mask channel in its own color | No |
 | `Gi_Diffuse`, `Gi_Specular` | `debug_view.hlsl` | The global illumination's light | Yes |
 | `Reflections` | `debug_view.hlsl` | The [screen-space reflections](lighting-and-shadows.md#screen-space-reflections)' light times their weight: black where the probes take over, and black without them | Yes |
+| `Clouds` | `debug_view.hlsl` | The [clouds](clouds.md#passes)' history over black: their light, a texel for each block of pixels of the cloud buffer, and black without them | Yes |
 | `Entity_Ids` | `debug_view.hlsl` | Each entity in a color of its own | No |
 | `Luminance` | `debug_view.hlsl` | The scene's EV100 as heat colors, from -4 to 16 | No |
 | `Transparent_Overdraw` | `debug_view.hlsl` | The transparent layers at each pixel, sprites included, which the moments passes count, as heat colors from 1 to 8 | No |
@@ -51,7 +52,7 @@ The editor shows what makes the frame in its viewport (see [Editor](../editor/vi
 - **In the forward pass:** `Frame_Constants.debug_view` drives a dynamic branch in the forward template, so the views need no permutations. The cooker defines `SHADING_HAS_BASE_COLOR` for a shading model with a `float3 base_color` input.
 - **From the frame's textures:** a compute pass after the `before_post` hook writes the view into a new scene color. A texture that the frame does not have, such as the global illumination's when it is off, gives black.
 - **Shaded views** are exposed and tone mapped as the scene is. The others are colors as they are: the output pass only encodes them (`Output_Push.raw`), they have no anti-aliasing, jitter or fog, and the exposure stays where it was, so the lit scene comes back as it was. Only `Lit` has bloom and the game's [post effects](#post-effects).
-- **Features** (`Features`) the viewport can turn off: the anti-aliasing (`Temporal_Aa`, which turns off every technique), bloom, the tone mapping (a plain roll-off to white in its place), the fog, the ambient occlusion, the global illumination, the shadows and the game's post effects. They change the settings after `resolve_settings`, so a volume cannot turn them back on.
+- **Features** (`Features`) the viewport can turn off: the anti-aliasing (`Temporal_Aa`, which turns off every technique), bloom, the tone mapping (a plain roll-off to white in its place), the fog, the ambient occlusion, the global illumination, the shadows, the game's post effects, occlusion culling, the meshlet hierarchy, and the [clouds](clouds.md#clouds) with their shadow. They change the settings after `resolve_settings`, so a volume cannot turn them back on.
 
 ## Post effects
 

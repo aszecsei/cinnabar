@@ -75,7 +75,7 @@ static class DefaultRibbon
                         new ComboBox(EditorCommands.DebugView),
                         new SmallStack([EditorCommands.TemporalAa, EditorCommands.Bloom, EditorCommands.ToneMapping]),
                         new SmallStack([EditorCommands.Fog, EditorCommands.AmbientOcclusion, EditorCommands.GlobalIllumination]),
-                        new SmallStack([EditorCommands.Shadows, EditorCommands.PostEffects]),
+                        new SmallStack([EditorCommands.Shadows, EditorCommands.Clouds, EditorCommands.PostEffects]),
                         new SmallStack([EditorCommands.OcclusionCulling, EditorCommands.MeshletHierarchy, EditorCommands.ShadingStats]),
                         new SmallStack([EditorCommands.ExposureUp, EditorCommands.ExposureDown, EditorCommands.ExposureReset]),
                     ]),
@@ -114,6 +114,13 @@ static class DefaultRibbon
                     [
                         new LargeButton(EditorCommands.AtmosphereFog),
                         new Dropdown("Density", "fog", [.. Atmosphere.Fogs.Select(f => EditorCommands.FogPreset(f.Name))]),
+                    ]),
+                    new RibbonGroup("Clouds",
+                    [
+                        new LargeButton(EditorCommands.AtmosphereClouds),
+                        new Dropdown("Weather", "cloud", [.. Atmosphere.Weathers.Select(w => EditorCommands.WeatherPreset(w.Name))]),
+                        new ComboBox(EditorCommands.AtmosphereWeatherSource),
+                        new SmallStack([EditorCommands.AtmosphereCenterWeather, EditorCommands.Panel("weather")]),
                     ]),
                     new RibbonGroup("Details", [new LargeButton(EditorCommands.Panel("atmosphere"))]),
                 ]),
