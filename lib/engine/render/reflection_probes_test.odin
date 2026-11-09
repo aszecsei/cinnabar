@@ -305,12 +305,12 @@ a_forced_capture_goes_first_and_takes_one_frame :: proc(t: ^testing.T) {
 	testing.expect(t, first == 0 && count == 1)
 	cubes_are_apart(t, rp)
 
-	// Capture all: one probe a frame. The far one's capture in flight is forced now, so it keeps its face and draws
-	// the other five at once; then the near one.
+	// Capture all: one probe a frame. The far one's capture in flight starts over, forced, so it draws all six faces
+	// after the force; then the near one.
 	testing.expect_value(t, capture_reflection_probes(r), 2)
 	e, first, count, _ = frame(rp, all, faces)
 	testing.expect_value(t, e, far.entity)
-	testing.expect(t, first == 1 && count == 5)
+	testing.expect(t, first == 0 && count == 6)
 	testing.expect(t, cube_of(rp, far.entity) != nil)
 	e, first, count, _ = frame(rp, all, faces)
 	testing.expect_value(t, e, near.entity)
@@ -327,15 +327,16 @@ a_forced_capture_goes_first_and_takes_one_frame :: proc(t: ^testing.T) {
 	_, first, count, _ = plan_reflection_probe_capture(rp, faces, true)
 	testing.expect(t, first == 0 && count == 6)
 
-	// Forcing the probe whose capture is in flight keeps the faces drawn so far, and draws the rest at once.
+	// Forcing the probe whose capture is in flight starts it over, so no face that it drew before the force counts.
 	rp.capture = nil
 	rp.slots[slot].forced = false
 	all[1].key.probe.update = .Realtime
 	e, first, count, _ = frame(rp, all, faces)
 	testing.expect(t, e == far.entity && first == 0 && count == 1)
 	testing.expect(t, capture_reflection_probe(r, far.entity))
+	testing.expect_value(t, (rp.capture.?).faces, 0)
 	e, first, count, _ = frame(rp, all, faces)
-	testing.expect(t, e == far.entity && first == 1 && count == 5)
+	testing.expect(t, e == far.entity && first == 0 && count == 6)
 }
 
 // The editor's helpers take the boxes from the probe and the entity's scale, as the records do: 0 is the default, the

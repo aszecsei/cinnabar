@@ -51,7 +51,7 @@ A [reflection probe](../rendering/lighting-and-shadows.md#reflection-probes) is 
 - **Handles that would meet:** a fade of 0 would put the fade's handles on the influence box's, and so would a projection box that is the influence box. Such a handle stays two handles' widths from the influence box's handle, so each can be grabbed, and its drag starts from its value all the same.
 - **The gizmo wins:** the tool's gizmo is drawn over the handles and takes the mouse first. With the Select tool, which has no gizmo, the handles take every click on them.
 - **Capture:** the Properties panel's Capture button under the probe, and Capture All Probes in the Home tab's Scene group, ask the game to capture now (`Capture_Reflection_Probes`). A probe captures its six faces in one frame, whatever the quality's budget, and the frame that finishes it shows it, so the viewport and the probe's icon show the new capture at once. With several probes, one captures each frame. A probe that holds no slot is not captured (see [Rendering](../rendering/lighting-and-shadows.md#reflection-probes)). The commands need a linked game.
-- **The probe's state:** the game sends a watched probe's state as `Reflection_Probe_View`, and the Properties panel shows it (see [Shell](shell-and-panels.md#properties)).
+- **The probe's state:** the game sends a watched probe's state as `Reflection_Probe_View`, once after the watch, `None` included, then when it changes, and the world keeps it (`WorldModel.Probe`) until a `None`, the entity's destruction, a snapshot or the link's close. The Properties panel shows it (see [Shell](shell-and-panels.md#properties)).
 
 ## Quality
 

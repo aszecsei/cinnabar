@@ -720,9 +720,9 @@ Reflection_Probe_Status :: enum u8 {
 }
 
 // Game to editor: a watched entity's reflection probe's state, which the Properties panel shows (see
-// docs/editor/shell-and-panels.md#properties). It goes out when it changes, but for age: capturing is whether a
-// capture of it is in flight or asked for, complete is false for a provisional capture, and age is the seconds since
-// its last capture finished, when it was sent.
+// docs/editor/shell-and-panels.md#properties). It goes out once after a watch, None included, then when it changes, but
+// for age: capturing is whether a capture of it is in flight or asked for, complete is false for a provisional capture,
+// and age is the seconds since its last capture finished, when it was sent.
 Reflection_Probe_View :: struct {
 	entity:    u64,
 	status:    Reflection_Probe_Status,

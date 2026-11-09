@@ -53,28 +53,24 @@ reflection_probe_view :: proc(e: ^Editor, w: ^ecs.World, entity: ecs.Entity) -> 
 }
 
 // send_reflection_probes sends the view of each watched entity's probe that changed since the editor last got it, but
-// for its age, which a new capture's time changes, and one None view for a probe that has gone, so the editor keeps no
-// old state.
+// for its age, which a new capture's time changes: the first after a watch, whatever it is, so the editor drops a view
+// that it kept from an earlier watch, then one None view for a probe that has gone, so the editor keeps no old state.
 @(private)
 send_reflection_probes :: proc(e: ^Editor, w: ^ecs.World, out: ^[dynamic]byte) {
 	for &watched in e.session.watched {
 		view, time := reflection_probe_view(e, w, watched.entity)
-		if view.status == .None {
-			if watched.probe_sent != 0 {
-				watched.probe_sent = 0
-				link.write_message(out, view)
-			}
-			continue
+		h: u64
+		if view.status != .None {
+			key := struct #packed {
+				status:    link.Reflection_Probe_Status,
+				capturing: bool,
+				complete:  bool,
+				time:      f64,
+			}{view.status, view.capturing, view.complete, time}
+			// 0 is None's, so a real 0 counts as 1.
+			h = max(hash.fnv64a(([^]byte)(&key)[:size_of(key)]), 1)
 		}
-		key := struct #packed {
-			status:    link.Reflection_Probe_Status,
-			capturing: bool,
-			complete:  bool,
-			time:      f64,
-		}{view.status, view.capturing, view.complete, time}
-		// A hash of 0 means that the editor knows of none, so a real 0 counts as 1.
-		h := max(hash.fnv64a(([^]byte)(&key)[:size_of(key)]), 1)
-		if h != watched.probe_sent {
+		if sent, ok := watched.probe_sent.?; !ok || sent != h {
 			watched.probe_sent = h
 			link.write_message(out, view)
 		}

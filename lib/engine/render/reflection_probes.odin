@@ -108,7 +108,8 @@ Reflection_Probe_Cube :: struct {
 }
 
 // Reflection_Probe_Capture is the capture in flight: its slot and entity, the key that it captures, its faces drawn so
-// far, and of those, the faces that frames with complete inputs drew. It is forced while its slot is.
+// far, and of those, the faces that frames with complete inputs drew. It is forced while its slot is, and a force starts
+// it over, so no face of a forced capture was drawn before the force.
 Reflection_Probe_Capture :: struct {
 	slot:           int,
 	entity:         ecs.Entity,
@@ -624,7 +625,7 @@ free_reflection_probe_slot :: proc(rp: ^Reflection_Probes, slot: int) {
 // first; any other probe with no cube yet; when the frame's inputs are complete, a probe whose capture is provisional,
 // the nearest first; a probe On_Change whose key changed since its capture; then the Realtime probes, the longest since
 // its capture first. A forced probe ends a capture in flight whose probe is not forced, which starts over later, and a
-// forced probe's capture draws all of its faces left this frame, whatever faces is.
+// forced probe's capture draws all six faces this frame, whatever faces is.
 plan_reflection_probe_capture :: proc(
 	rp: ^Reflection_Probes,
 	faces: u32,
@@ -713,9 +714,9 @@ plan_reflection_probe_capture :: proc(
 // next.
 capture_reflection_probe :: proc(r: ^Renderer, entity: ecs.Entity) -> bool {
 	rp := &r.reflection_probes
-	for &s in rp.slots[:min(int(rp.params.probes), MAX_REFLECTION_PROBES)] {
+	for &s, i in rp.slots[:min(int(rp.params.probes), MAX_REFLECTION_PROBES)] {
 		if s.used && s.entity == entity {
-			s.forced = true
+			force_reflection_probe(rp, i)
 			return true
 		}
 	}
@@ -726,13 +727,28 @@ capture_reflection_probe :: proc(r: ^Renderer, entity: ecs.Entity) -> bool {
 capture_reflection_probes :: proc(r: ^Renderer) -> int {
 	rp := &r.reflection_probes
 	count := 0
-	for &s in rp.slots[:min(int(rp.params.probes), MAX_REFLECTION_PROBES)] {
+	for &s, i in rp.slots[:min(int(rp.params.probes), MAX_REFLECTION_PROBES)] {
 		if s.used {
-			s.forced = true
+			force_reflection_probe(rp, i)
 			count += 1
 		}
 	}
 	return count
+}
+
+// force_reflection_probe forces a slot's probe. Its capture in flight starts over, as a change of its key does, so the
+// capture that answers the force draws every face after it, and sees what changed before it.
+@(private = "file")
+force_reflection_probe :: proc(rp: ^Reflection_Probes, slot: int) {
+	s := &rp.slots[slot]
+	s.forced = true
+	if c, active := rp.capture.?; active && c.slot == slot {
+		rp.capture = Reflection_Probe_Capture {
+			slot   = slot,
+			entity = s.entity,
+			key    = s.key,
+		}
+	}
 }
 
 // advance_reflection_probe_capture records that this frame drew face_count more of the capture's faces, with complete

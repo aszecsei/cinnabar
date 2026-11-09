@@ -9,20 +9,15 @@ namespace Cinnabar.Editor.Shell;
 
 /// <summary>
 /// The reflection probes in the editor (see docs/editor/viewport.md#reflection-probes): the selected probe's box handles, which
-/// resize its boxes, the captures that the editor asks the game for, and the state of each watched probe, which the
-/// Properties panel shows.
+/// resize its boxes, and the captures that the editor asks the game for. The state of each watched probe, which the
+/// Properties panel shows, is the world's (<see cref="WorldModel.Probe"/>).
 /// </summary>
 public sealed partial class EditorShell
 {
-    // The last view of each watched probe, by its entity, with when it came, which its age is from.
-    readonly Dictionary<ulong, (ReflectionProbeView View, DateTime Received)> _probeViews = [];
     string _sentHandles = "";
 
     /// <summary>The box handle under the mouse, or the one that a drag holds, or null.</summary>
     public ProbeHandle? HotHandle { get; private set; }
-
-    /// <summary>A watched probe's state changed.</summary>
-    public event Action? ReflectionProbesChanged;
 
     /// <summary>The selected probe, when one entity is selected, outside mesh mode, and it has a Reflection_Probe and a pose.</summary>
     public (SceneEntity Entity, ProbeBoxes Boxes)? SelectedProbe()
@@ -116,23 +111,5 @@ public sealed partial class EditorShell
         {
             Host.Send(new CaptureReflectionProbes([]));
         }
-    }
-
-    /// <summary>The last state that the game sent for a watched entity's probe, with when it came, or null.</summary>
-    public (ReflectionProbeView View, DateTime Received)? ProbeView(ulong entity) =>
-        _probeViews.TryGetValue(entity, out var view) ? view : null;
-
-    void OnReflectionProbeView(ReflectionProbeView view)
-    {
-        if (view.Status == ReflectionProbeStatus.None)
-        {
-            _probeViews.Remove(view.Entity);
-        }
-        else
-        {
-            _probeViews[view.Entity] = (view, DateTime.UtcNow);
-        }
-        Commands.InvalidateAll();
-        ReflectionProbesChanged?.Invoke();
     }
 }

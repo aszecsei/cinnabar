@@ -75,7 +75,7 @@ public sealed class PropertiesView : ScrollViewer
             .Add(() => _shell.SceneChanged += OnSceneChanged, () => _shell.SceneChanged -= OnSceneChanged)
             .Add(() => _shell.ProblemsChanged += Rebuild, () => _shell.ProblemsChanged -= Rebuild)
             .Add(() => _shell.ModeChanged += Rebuild, () => _shell.ModeChanged -= Rebuild)
-            .Add(() => _shell.ReflectionProbesChanged += ShowProbeStatus, () => _shell.ReflectionProbesChanged -= ShowProbeStatus)
+            .Add(() => _world.ProbeChanged += OnProbeChanged, () => _world.ProbeChanged -= OnProbeChanged)
             .Add(() => _shell.Host.StateChanged += OnHostState, () => _shell.Host.StateChanged -= OnHostState)
             .Add(() => _shell.Assets.Changed += OnSceneChanged, () => _shell.Assets.Changed -= OnSceneChanged);
     }
@@ -617,11 +617,19 @@ public sealed class PropertiesView : ScrollViewer
 
     void OnHostState(HostState _) => ShowProbeStatus();
 
+    void OnProbeChanged(ulong entity)
+    {
+        if (entity == _probeEntity)
+        {
+            ShowProbeStatus();
+        }
+    }
+
     void ShowProbeStatus()
     {
         if (_probeStatus != null)
         {
-            _probeStatus.Text = ReflectionProbeStatusText.Describe(_shell.ProbeView(_probeEntity), _shell.Host.Linked);
+            _probeStatus.Text = ReflectionProbeStatusText.Describe(_world.Probe(_probeEntity), _shell.Host.Linked);
         }
         if (_probeCapture != null)
         {

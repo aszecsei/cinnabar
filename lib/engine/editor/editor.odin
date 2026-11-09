@@ -102,8 +102,9 @@ Watched :: struct {
 	sent:          u64,
 	// The same for its Animator's view, where 0 is also that the editor knows of none (see animators.odin).
 	animator_sent: u64,
-	// The same for its reflection probe's view (see reflection_probes.odin).
-	probe_sent:    u64,
+	// The hash of its reflection probe's view that the editor last got, 0 for None, or nil before the first, which then
+	// goes out whatever it is, so a watch tells the editor even of no probe (see reflection_probes.odin).
+	probe_sent:    Maybe(u64),
 }
 
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the

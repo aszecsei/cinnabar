@@ -352,7 +352,6 @@ public sealed partial class EditorShell
     {
         _sentGizmo = "";
         _sentHandles = "";
-        _probeViews.Clear();
         _picks.Clear();
         _aimingSun = false;
         SendCamera();

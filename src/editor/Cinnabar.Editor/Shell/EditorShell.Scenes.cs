@@ -523,9 +523,6 @@ public sealed partial class EditorShell
             case Link.Protocol.AnimatorView { Entity: 0 } preview:
                 OnPreviewView(preview);
                 return;
-            case Link.Protocol.ReflectionProbeView probe:
-                OnReflectionProbeView(probe);
-                return;
             case Link.Protocol.UiPreviewLayout layout:
                 OnUiLayout(layout);
                 return;

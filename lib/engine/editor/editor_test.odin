@@ -749,12 +749,16 @@ reflection_probes_capture_when_asked_and_report_their_state :: proc(t: ^testing.
 	ecs.add(&f.world, other, render.Reflection_Probe{})
 	step(f)
 
-	// The reflections are off: the cubes are not made, so the view is None, which the editor knows already.
-	testing.expect_value(t, len(probe_views(step(f, 1, link.Watch_Entity{u64(probe)}))), 0)
+	// The reflections are off: the cubes are not made, so the view is None, which goes out once after the watch, so
+	// the editor drops any view that it kept from an earlier watch.
+	views := probe_views(step(f, 1, link.Watch_Entity{u64(probe)}))
+	testing.expect_value(t, len(views), 1)
+	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe)})
+	testing.expect_value(t, len(probe_views(step(f))), 0)
 	rp.params = render.REFLECTION_PARAMS[.Probes][.Low]
 	rp.params.probes = 2
 	rp.cubes.texture = gpu.Texture{index = 1}
-	views := probe_views(step(f))
+	views = probe_views(step(f))
 	testing.expect_value(t, len(views), 1)
 	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe), status = .No_Slot})
 	testing.expect_value(t, len(probe_views(step(f))), 0)
@@ -799,6 +803,11 @@ reflection_probes_capture_when_asked_and_report_their_state :: proc(t: ^testing.
 	testing.expect_value(t, len(views), 1)
 	testing.expect_value(t, views[0], link.Reflection_Probe_View{entity = u64(probe)})
 	testing.expect_value(t, len(probe_views(step(f))), 0)
+	// Watched again, it sends None again, whatever the last watch sent.
+	step(f, 1, link.Unwatch_Entity{u64(probe)})
+	views = probe_views(step(f, 1, link.Watch_Entity{u64(probe)}))
+	testing.expect_value(t, len(views), 1)
+	testing.expect_value(t, views[0].status, link.Reflection_Probe_Status.None)
 }
 
 @(test)

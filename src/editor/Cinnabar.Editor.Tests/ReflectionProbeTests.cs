@@ -283,17 +283,34 @@ public sealed class ReflectionProbeTests : IDisposable
     }
 
     [Fact]
-    public void TheGamesViewOfAProbeIsKeptUntilItGoes()
+    public void TheGamesViewOfAProbeLastsAsLongAsItsEntityInTheWorld()
     {
         using var shell = NewShell(link: true);
-        var changes = 0;
-        shell.ReflectionProbesChanged += () => changes++;
+        var changes = new List<ulong>();
+        shell.World.ProbeChanged += changes.Add;
+        ReflectionProbeView Captured(ulong entity) => new(entity, ReflectionProbeStatus.Captured, false, true, 2);
 
-        shell.OnGameMessage(new ReflectionProbeView(ProbeHandleId, ReflectionProbeStatus.Captured, false, true, 2));
-        Assert.Equal(ReflectionProbeStatus.Captured, shell.ProbeView(ProbeHandleId)!.Value.View.Status);
+        shell.OnGameMessage(Captured(ProbeHandleId));
+        Assert.Equal(ReflectionProbeStatus.Captured, shell.World.Probe(ProbeHandleId)!.Value.View.Status);
+        // None says that it has gone.
         shell.OnGameMessage(new ReflectionProbeView(ProbeHandleId, ReflectionProbeStatus.None, false, false, 0));
-        Assert.Null(shell.ProbeView(ProbeHandleId));
-        Assert.Equal(2, changes);
+        Assert.Null(shell.World.Probe(ProbeHandleId));
+        Assert.Equal([ProbeHandleId, ProbeHandleId], changes);
+
+        // A destroyed entity's view goes, and a new snapshot or a closed link drops every view.
+        shell.OnGameMessage(Captured(ProbeHandleId));
+        shell.OnGameMessage(Captured(TinyHandle));
+        shell.OnGameMessage(new EntityDelta([], [TinyHandle]));
+        Assert.Null(shell.World.Probe(TinyHandle));
+        Assert.Equal(TinyHandle, changes[^1]);
+        shell.OnGameMessage(new EntitySnapshot([new EntityInfo(ProbeHandleId, "Probe", 1, 0, true, [1, SceneEdits.ReflectionProbeId])]));
+        Assert.Null(shell.World.Probe(ProbeHandleId));
+        shell.OnGameMessage(Captured(ProbeHandleId));
+        shell.World.Clear();
+        Assert.Null(shell.World.Probe(ProbeHandleId));
+        // An entity that the world does not know has none.
+        shell.OnGameMessage(Captured(PlainHandle + 100));
+        Assert.Null(shell.World.Probe(PlainHandle + 100));
     }
 
     [Fact]

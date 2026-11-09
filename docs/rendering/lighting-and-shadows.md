@@ -112,8 +112,8 @@ What they show:
 
   A probe that changes during its capture starts it over, and a probe that loses its slot ends it.
 - **A capture on request:** the editor's Capture and Capture All Probes (see [Editor](../editor/viewport.md#reflection-probes)) mark probes forced (`capture_reflection_probe`, `capture_reflection_probes`).
-  - A forced probe comes before every other in the turns, the nearest first, and ends a capture in flight of a probe that is not forced, which starts over later. A capture is forced while its probe is, so forcing the probe whose capture is in flight keeps the faces that it drew.
-  - A forced capture draws all of its faces in one frame, whatever the level's budget, and the probe is no longer forced once it finishes. So one probe captures a frame, and N probes take N frames.
+  - A forced probe comes before every other in the turns, the nearest first, and ends a capture in flight of a probe that is not forced, which starts over later. Forcing the probe whose capture is in flight starts that capture over, so every face of the capture that answers the force is drawn after it.
+  - A forced capture draws all six faces in one frame, whatever the level's budget, and the probe is no longer forced once it finishes. So one probe captures a frame, and N probes take N frames.
   - Only a probe that holds a slot can be forced. A probe added in this frame has its slot from the next.
 - **Provisional captures:** a capture records whether its inputs were complete (`reflection_probe_inputs_complete`). A frame's inputs are complete when all of these are true:
   - No asset streams to the GPU.
