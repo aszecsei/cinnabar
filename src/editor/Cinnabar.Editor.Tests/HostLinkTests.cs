@@ -795,7 +795,8 @@ public sealed class HostLinkTests : IAsyncDisposable
         }
         // The viewport's quality in place of the game's: each preset, each anti-aliasing at half the size, FSR
         // included, which is temporal AA where the device cannot run it, and each global illumination, the split
-        // cascades included, which are the screen cascades where the device has no ray queries.
+        // cascades included, which are the screen cascades where the device has no ray queries, and each reflections'
+        // technique at each level, the traced ones included, which are the screen-space ones without ray queries.
         foreach (var preset in Enum.GetValues<ViewportPreset>())
         {
             editor.Link.Send(EditorShell.DefaultViewportSettings with { QualityPreset = preset });
@@ -810,6 +811,14 @@ public sealed class HostLinkTests : IAsyncDisposable
         {
             editor.Link.Send(EditorShell.DefaultViewportSettings with { GlobalIllumination = gi, RenderScale = 0.5f });
             await Latest(editor, frames, target);
+        }
+        foreach (var reflections in Enum.GetValues<ViewportReflections>())
+        {
+            foreach (var level in Enum.GetValues<ViewportLevel>())
+            {
+                editor.Link.Send(EditorShell.DefaultViewportSettings with { Reflections = reflections, ReflectionsLevel = level, RenderScale = 0.5f });
+                await Latest(editor, frames, target);
+            }
         }
         var scaled = Pixel(device, frames.Texture(await Latest(editor, frames, target)), 2, 2);
         Assert.True(scaled.R > scaled.G + 60 && scaled.R > scaled.B + 60, $"at half the size, the background is {scaled}");

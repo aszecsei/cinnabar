@@ -49,6 +49,7 @@ public sealed class WorldModel
     readonly List<EntityNode> _roots = [];
     readonly Dictionary<ulong, EntityValues> _values = [];
     readonly Dictionary<ulong, AnimatorView> _animators = [];
+    readonly Dictionary<ulong, (ReflectionProbeView View, DateTime Received)> _probes = [];
 
     public IReadOnlyDictionary<ulong, ComponentType> Types => _types;
 
@@ -73,6 +74,9 @@ public sealed class WorldModel
     /// <summary>What a watched entity's Animator plays changed, or it has gone.</summary>
     public event Action<ulong>? AnimatorChanged;
 
+    /// <summary>A watched entity's reflection probe's state changed, or it has gone.</summary>
+    public event Action<ulong>? ProbeChanged;
+
     public EntityNode? Find(ulong handle) => _entities.GetValueOrDefault(handle);
 
     /// <summary>The entity that a scene made with this scene ID, or null.</summary>
@@ -85,6 +89,12 @@ public sealed class WorldModel
 
     /// <summary>What a watched entity's Animator plays, or null without one whose graph is ready.</summary>
     public AnimatorView? Animator(ulong handle) => _animators.GetValueOrDefault(handle);
+
+    /// <summary>
+    /// A watched entity's reflection probe's last state from the game, with when it came, which its age is from, or null
+    /// without one: no probe, the reflections off, or none sent yet (see docs/editor/viewport.md#reflection-probes).
+    /// </summary>
+    public (ReflectionProbeView View, DateTime Received)? Probe(ulong handle) => _probes.TryGetValue(handle, out var probe) ? probe : null;
 
     /// <summary>The component's name, or its ID in hex for a type that the game has not described.</summary>
     public string TypeName(ulong id) => _types.TryGetValue(id, out var t) ? t.Name : $"0x{id:x16}";
@@ -106,6 +116,7 @@ public sealed class WorldModel
                 _entities.Clear();
                 _values.Clear();
                 _animators.Clear();
+                _probes.Clear();
                 foreach (var info in snapshot.Entities)
                 {
                     Update(info);
@@ -123,6 +134,10 @@ public sealed class WorldModel
                     if (_animators.Remove(handle))
                     {
                         AnimatorChanged?.Invoke(handle);
+                    }
+                    if (_probes.Remove(handle))
+                    {
+                        ProbeChanged?.Invoke(handle);
                     }
                 }
                 foreach (var info in delta.Changed)
@@ -154,6 +169,21 @@ public sealed class WorldModel
                     AnimatorChanged?.Invoke(view.Entity);
                 }
                 return true;
+            case ReflectionProbeView probe:
+                if (_entities.ContainsKey(probe.Entity))
+                {
+                    // None says that the entity no longer has a probe to show.
+                    if (probe.Status == ReflectionProbeStatus.None)
+                    {
+                        _probes.Remove(probe.Entity);
+                    }
+                    else
+                    {
+                        _probes[probe.Entity] = (probe, DateTime.UtcNow);
+                    }
+                    ProbeChanged?.Invoke(probe.Entity);
+                }
+                return true;
             default:
                 return false;
         }
@@ -168,6 +198,7 @@ public sealed class WorldModel
         _bySceneId.Clear();
         _values.Clear();
         _animators.Clear();
+        _probes.Clear();
         HasWorld = false;
         TypesChanged?.Invoke();
         Reset?.Invoke();

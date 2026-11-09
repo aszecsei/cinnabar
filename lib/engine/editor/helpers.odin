@@ -7,12 +7,13 @@ import "cinnabar:engine/asset"
 import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
+import "cinnabar:engine/editor/link"
 import "cinnabar:engine/physics"
 import "cinnabar:engine/render"
 import "cinnabar:engine/volume"
 
-// The viewport's helpers (see docs/editor/viewport.md#viewport): the shapes of lights, volumes and cameras, as debug lines, for
-// the selection or for every entity, as Viewport_Settings.helpers says.
+// The viewport's helpers (see docs/editor/viewport.md#viewport): the shapes of lights, volumes, reflection probes and cameras,
+// as debug lines, for the selection or for every entity, as Viewport_Settings.helpers says.
 
 // A helper of an entity that is not selected is grey and faint. A selected light's is its color, made bright.
 @(private = "file")
@@ -21,6 +22,14 @@ UNSELECTED :: [4]f32{0.6, 0.6, 0.6, 0.5}
 VOLUME_COLOR :: [4]f32{0.3, 0.8, 1, 1}
 @(private = "file")
 CAMERA_COLOR :: [4]f32{1, 1, 1, 1}
+// A reflection probe's boxes, and their handles (see box_handle_vertices): the influence box, its fade inside it, and
+// the projection box.
+@(private)
+PROBE_COLORS := [link.Box_Handle_Kind][4]f32 {
+	.Influence  = {1, 0.85, 0.3, 1},
+	.Blend      = {1, 0.85, 0.3, 0.45},
+	.Projection = {0.85, 0.45, 1, 1},
+}
 // A collider's shape, and a sensor's.
 @(private = "file")
 COLLIDER_COLOR :: [4]f32{0.4, 1, 0.4, 1}
@@ -169,6 +178,21 @@ draw_entity_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw, entity: e
 			}
 		}
 	}
+	if p := ecs.get(w, entity, render.Reflection_Probe); p != nil {
+		// As the renderer takes them (see render.reflection_probe_records): the fade is inside the influence box.
+		extent, projection := render.reflection_probe_extents(p^, pose.scale)
+		blend := render.reflection_probe_blend(p^, extent)
+		influence := selected ? PROBE_COLORS[.Influence] : UNSELECTED
+		debug.box(d, at, extent, pose.rotation, influence)
+		if blend > 0 {
+			fade := influence
+			fade.a *= 0.4
+			debug.box(d, at, extent - blend, pose.rotation, fade)
+		}
+		if p.box_projection {
+			debug.box(d, at, projection, pose.rotation, selected ? PROBE_COLORS[.Projection] : UNSELECTED)
+		}
+	}
 	if c := ecs.get(w, entity, render.Camera); c != nil {
 		color := selected ? CAMERA_COLOR : UNSELECTED
 		fov := c.vertical_fov > 0 ? c.vertical_fov : render.DEFAULT_VERTICAL_FOV
@@ -196,19 +220,28 @@ Icon_Kind :: enum u32 {
 	Area_Light,
 	Volume,
 	Camera,
+	Reflection_Probe,
 }
 
-// Icon is an entity's icon in the viewport, which picks it: at its presented position, in its light's color.
+// Icon is an entity's icon in the viewport, which picks it: at its presented position, in its light's color. A
+// reflection probe's is a sphere that reflects its cube of the renderer's array, -1 before its first capture.
 Icon :: struct {
 	entity:   ecs.Entity,
 	position: ecs.World_Position,
 	kind:     Icon_Kind,
 	color:    [3]f32,
+	cube:     i32,
 }
 
-// icon_instances lists the icons of the entities that have one: lights, volumes and cameras, leaving out the hidden
-// ones. An entity with more than one of them has the first in Icon_Kind's order.
-icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.allocator) -> []Icon {
+// icon_instances lists the icons of the entities that have one: lights, volumes, cameras and reflection probes, leaving
+// out the hidden ones. An entity with more than one of them has the first in Icon_Kind's order. A probe's cube is the
+// renderer's, without which (nil) it has none.
+icon_instances :: proc(
+	w: ^ecs.World,
+	shown: Visibility,
+	allocator := context.allocator,
+	renderer: ^render.Renderer = nil,
+) -> []Icon {
 	icons := make([dynamic]Icon, allocator)
 	it := ecs.world_iter(w)
 	for entity in ecs.world_next(&it) {
@@ -218,6 +251,7 @@ icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.al
 		icon := Icon {
 			entity = entity,
 			color  = {1, 1, 1},
+			cube   = -1,
 		}
 		switch {
 		case ecs.has(w, entity, render.Point_Light):
@@ -236,6 +270,13 @@ icon_instances :: proc(w: ^ecs.World, shown: Visibility, allocator := context.al
 			icon.kind = .Volume
 		case ecs.has(w, entity, render.Camera):
 			icon.kind = .Camera
+		case ecs.has(w, entity, render.Reflection_Probe):
+			icon.kind = .Reflection_Probe
+			if renderer != nil {
+				if cube, ok := render.reflection_probe_state(renderer, entity).cube.?; ok {
+					icon.cube = cube.index
+				}
+			}
 		case:
 			continue
 		}

@@ -111,6 +111,29 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 	testing.expect_value(t, line_count(f), 0)
 }
 
+// A reflection probe draws its influence box, the fade inside it with a blend, and its projection box with box
+// projection.
+@(test)
+a_reflection_probe_draws_its_boxes :: proc(t: ^testing.T) {
+	when !debug.DEBUG_DRAW {
+		return
+	}
+	f := helper_setup(t)
+	defer helper_teardown(f)
+	probe := spawn_with(f, render.Reflection_Probe{extent = {2, 1, 3}})
+	f.editor.session.view.settings.helpers = .All
+	testing.expect_value(t, line_count(f), 12)
+	ecs.get(&f.world, probe, render.Reflection_Probe).blend_distance = 0.5
+	testing.expect_value(t, line_count(f), 24)
+	ecs.get(&f.world, probe, render.Reflection_Probe).box_projection = true
+	// Not selected, the three boxes are grey; with Selected, only the selection has them.
+	testing.expect_value(t, line_count(f), 36)
+	f.editor.session.view.settings.helpers = .Selected
+	testing.expect_value(t, line_count(f), 0)
+	append(&f.editor.session.view.selection, probe)
+	testing.expect_value(t, line_count(f), 36)
+}
+
 @(test)
 icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 	f := helper_setup(t)
@@ -137,6 +160,22 @@ icons_mark_lights_volumes_and_cameras :: proc(t: ^testing.T) {
 	for icon in icons {
 		testing.expect(t, icon.entity != sun)
 	}
+
+	// A reflection probe's icon has its cube, once captured, and none before or without a renderer.
+	probe := spawn_with(f, render.Reflection_Probe{})
+	icons = icon_instances(&f.world, {}, context.temp_allocator)
+	testing.expect_value(t, icons[len(icons) - 1].kind, Icon_Kind.Reflection_Probe)
+	testing.expect_value(t, icons[len(icons) - 1].cube, -1)
+	renderer := new(render.Renderer)
+	defer free(renderer)
+	renderer.reflection_probes.params.probes = 1
+	renderer.reflection_probes.slots[0] = {used = true, entity = probe}
+	icons = icon_instances(&f.world, {}, context.temp_allocator, renderer)
+	testing.expect_value(t, icons[len(icons) - 1].cube, -1)
+	renderer.reflection_probes.slots[0].cube = render.Reflection_Probe_Cube{index = 1}
+	icons = icon_instances(&f.world, {}, context.temp_allocator, renderer)
+	testing.expect_value(t, icons[len(icons) - 1].entity, probe)
+	testing.expect_value(t, icons[len(icons) - 1].cube, 1)
 }
 
 @(test)

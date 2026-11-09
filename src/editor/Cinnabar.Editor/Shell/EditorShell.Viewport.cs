@@ -195,9 +195,12 @@ public sealed partial class EditorShell
             var (width, height) = FrameSize;
             part = Gizmo.HitTest(Mesh.ActiveGizmoKind, Camera, Camera.RelativeTo(pivot), axes, pixel, width, height);
         }
-        if (part != HotPart)
+        // The gizmo is drawn over the selected probe's box handles, so it wins.
+        var handle = part == GizmoPart.None ? HitProbeHandle(pixel) : null;
+        if (part != HotPart || handle != HotHandle)
         {
             HotPart = part;
+            HotHandle = handle;
             OnToolsChanged();
         }
     }
@@ -209,6 +212,10 @@ public sealed partial class EditorShell
     public bool PressGizmo(Vec2 pixel, bool extrude = false)
     {
         HoverGizmo(pixel);
+        if (HotPart == GizmoPart.None && HotHandle is { } handle)
+        {
+            return PressProbeHandle(pixel, handle);
+        }
         if (HotPart == GizmoPart.None || GizmoPose() is not var (pivot, axes) || Scene == null)
         {
             return false;
@@ -337,12 +344,14 @@ public sealed partial class EditorShell
             _sentGizmo = key;
             Host.Send(state);
         }
+        SendBoxHandles();
     }
 
     // A new game state knows none of the tools' state and answers none of the old state's picks (see OnNewGameState).
     void SendViewportTools()
     {
         _sentGizmo = "";
+        _sentHandles = "";
         _picks.Clear();
         _aimingSun = false;
         SendCamera();

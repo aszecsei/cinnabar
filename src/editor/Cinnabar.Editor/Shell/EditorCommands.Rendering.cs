@@ -72,7 +72,7 @@ static partial class EditorCommands
             icon: "frame"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportPreset>(ViewportQuality, "Quality", () => shell.ViewportSettings.QualityPreset,
             preset => shell.ViewportSettings = shell.ViewportSettings with { QualityPreset = preset }, preset => EditorShell.ViewportPresetNames[(int)preset],
-            description: "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too, and the global illumination is the preset's unless it is.",
+            description: "Draw the viewport at a quality preset in place of the game's, to see what each level costs and looks like. The anti-aliasing and the render scale stay the game's unless they are chosen too, and the global illumination and the reflections are the preset's unless they are.",
             icon: "viewport"));
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportAa>(ViewportAntiAliasing, "Anti-Aliasing", () => shell.ViewportSettings.AntiAliasing,
             aa => shell.ViewportSettings = shell.ViewportSettings with { AntiAliasing = aa }, aa => EditorShell.ViewportAaNames[(int)aa],
@@ -81,6 +81,14 @@ static partial class EditorCommands
         commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportGi>(ViewportGiTechnique, "Global Illumination", () => shell.ViewportSettings.GlobalIllumination,
             gi => shell.ViewportSettings = shell.ViewportSettings with { GlobalIllumination = gi }, gi => EditorShell.ViewportGiNames[(int)gi],
             description: "Light the viewport's indirect light with a technique in place of the game's, at the quality's level. Split Cascades need ray queries; elsewhere the viewport uses Screen Cascades.",
+            icon: "viewport"));
+        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportReflections>(ViewportReflections, "Reflections", () => shell.ViewportSettings.Reflections,
+            reflections => shell.ViewportSettings = shell.ViewportSettings with { Reflections = reflections }, reflections => EditorShell.ViewportReflectionsNames[(int)reflections],
+            description: "Draw the viewport's reflections with a technique in place of the game's: the reflection probes alone, the screen-space reflections or the traced ones, both in front of the probes. Ray Traced needs ray queries; elsewhere the viewport uses Screen Space.",
+            icon: "viewport"));
+        commands.Register(ChoiceCommand.ForEnum<Link.Protocol.ViewportLevel>(ViewportReflectionsLevel, "Reflections Level", () => shell.ViewportSettings.ReflectionsLevel,
+            level => shell.ViewportSettings = shell.ViewportSettings with { ReflectionsLevel = level }, level => EditorShell.ViewportLevelNames[(int)level],
+            description: "Draw the viewport's reflections at a level in place of the game's or the preset's: the probes' slots, faces captured a frame and cube size, and the rays' share of the pixels.",
             icon: "viewport"));
         commands.Register(new ChoiceCommand(ViewportRenderScale, "Render Scale", [.. EditorShell.ViewportRenderScales.Select(s => s.Label)],
             () => shell.ViewportRenderScale, shell.SetViewportRenderScale)

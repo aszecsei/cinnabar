@@ -269,6 +269,89 @@ the_captures_take_turns_within_the_budget :: proc(t: ^testing.T) {
 	cubes_are_apart(t, rp)
 }
 
+// A forced probe takes the next capture, before an On_Load probe without a cube, and ends a capture in flight that is
+// not forced, which starts over once the forced ones are done. A forced capture draws its six faces in a frame at a
+// budget of one, and capturing every probe takes them one a frame, the nearest first.
+@(test)
+a_forced_capture_goes_first_and_takes_one_frame :: proc(t: ^testing.T) {
+	r := new(Renderer)
+	defer free(r)
+	rp := &r.reflection_probes
+	rp.params = REFLECTION_PARAMS[.Probes][.Low]
+	rp.params.probes = 3
+	rp.spare = 3
+	faces := u32(1)
+	near := probe_candidate(0, 0, 1, .On_Load)
+	far := probe_candidate(1, 0, 9, .On_Load)
+	all := []Reflection_Probe_Candidate{near, far}
+	// The near probe captures by the budget, a face a frame.
+	for k in u32(0) ..< 6 {
+		e, first, count, _ := frame(rp, all, faces)
+		testing.expect_value(t, e, near.entity)
+		testing.expect(t, first == k && count == 1)
+	}
+	// The far one starts; forcing the near one ends it, and the near one draws its six faces in a frame.
+	e, _, _, _ := frame(rp, all, faces)
+	testing.expect_value(t, e, far.entity)
+	testing.expect(t, capture_reflection_probe(r, near.entity))
+	first, count: u32
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect_value(t, e, near.entity)
+	testing.expect(t, first == 0 && count == 6)
+	testing.expect(t, !rp.slots[probe_slot_of(rp, near.entity)].forced)
+	// The far one starts over.
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect_value(t, e, far.entity)
+	testing.expect(t, first == 0 && count == 1)
+	cubes_are_apart(t, rp)
+
+	// Capture all: one probe a frame. The far one's capture in flight starts over, forced, so it draws all six faces
+	// after the force; then the near one.
+	testing.expect_value(t, capture_reflection_probes(r), 2)
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect_value(t, e, far.entity)
+	testing.expect(t, first == 0 && count == 6)
+	testing.expect(t, cube_of(rp, far.entity) != nil)
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect_value(t, e, near.entity)
+	testing.expect(t, first == 0 && count == 6)
+	cubes_are_apart(t, rp)
+	// Both On_Load probes have their cubes, so nothing captures.
+	_, _, _, ok := frame(rp, all, faces)
+	testing.expect(t, !ok)
+	// A forced capture that its probe's change starts over stays forced.
+	testing.expect(t, capture_reflection_probe(r, far.entity))
+	slot, _, _, _ := plan_reflection_probe_capture(rp, faces, true)
+	testing.expect_value(t, rp.slots[slot].entity, far.entity)
+	rp.slots[slot].key.probe.intensity = 3
+	_, first, count, _ = plan_reflection_probe_capture(rp, faces, true)
+	testing.expect(t, first == 0 && count == 6)
+
+	// Forcing the probe whose capture is in flight starts it over, so no face that it drew before the force counts.
+	rp.capture = nil
+	rp.slots[slot].forced = false
+	all[1].key.probe.update = .Realtime
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect(t, e == far.entity && first == 0 && count == 1)
+	testing.expect(t, capture_reflection_probe(r, far.entity))
+	testing.expect_value(t, (rp.capture.?).faces, 0)
+	e, first, count, _ = frame(rp, all, faces)
+	testing.expect(t, e == far.entity && first == 0 && count == 6)
+}
+
+// The editor's helpers take the boxes from the probe and the entity's scale, as the records do: 0 is the default, the
+// projection box defaults to the influence box, and the fade is no more than the smallest half size.
+@(test)
+the_boxes_come_from_the_probe_and_the_scale :: proc(t: ^testing.T) {
+	extent, projection := reflection_probe_extents({extent = {2, 0, 1}}, {2, -1, 3})
+	testing.expect_value(t, extent, [3]f32{4, DEFAULT_PROBE_EXTENT, 3})
+	testing.expect_value(t, projection, extent)
+	_, projection = reflection_probe_extents({projection_extent = {1, 0, 2}}, {2, 1, 1})
+	testing.expect_value(t, projection, [3]f32{2, DEFAULT_PROBE_EXTENT, 2})
+	testing.expect_value(t, reflection_probe_blend({blend_distance = 10}, {4, 2, 3}), 2)
+	testing.expect_value(t, reflection_probe_blend({blend_distance = -1}, {4, 2, 3}), 0)
+}
+
 // A capture whose inputs were not complete is provisional. Its probe does not capture again while the frames' inputs
 // stay incomplete; once a frame's are complete, it captures again after the probes with no cube and before an On_Change
 // probe whose key changed. A capture that one incomplete frame drew a share of is provisional too.
@@ -687,7 +770,11 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 			Reflection_Probe_Stats{probes = 1, slots = 0, capacity = 32, faces = 2},
 		)
 		testing.expect_value(t, run.frame.shadow_view, 0)
-		testing.expect_value(t, len(run.frame.records), 0)
+		// The frame that finishes the capture shows it, with the cube that it prefilters.
+		testing.expect_value(t, len(run.frame.records), k == 2 ? 1 : 0)
+		if k == 2 {
+			testing.expect_value(t, run.frame.records[0].cube, run.frame.target)
+		}
 	}
 	testing.expect(t, rp.slots[0].cube != nil)
 
@@ -703,6 +790,35 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	testing.expect_value(t, run.passes["reflection probe prepass"], 0)
 	testing.expect_value(t, run.frame.records[0].center, [3]f32{0, 1.5, 0})
 	testing.expect_value(t, run.frame.records[0].projection, [3]f32{3, 1.5, 4})
+
+	// A capture that the editor asks for draws all six faces in one frame, whatever Medium's budget, and that frame
+	// shows it: the record takes the new cube, which the probe keeps, at the host's time.
+	platform.time_seconds = proc() -> f64 {return 42}
+	defer platform.time_seconds = nil
+	old := (rp.slots[0].cube.?).index
+	testing.expect(t, capture_reflection_probe(r, probe))
+	testing.expect(t, reflection_probe_state(r, probe).forced)
+	run = run_probe_frame(t, r, &cache, w, medium)
+	testing.expect(t, run.frame.capturing && run.frame.finish)
+	testing.expect(t, run.frame.first_face == 0 && run.frame.face_count == 6)
+	testing.expect_value(t, run.passes["reflection probe copy"], 6)
+	testing.expect_value(t, run.passes["reflection probe prefilter"], 1)
+	testing.expect_value(t, len(run.frame.records), 1)
+	testing.expect_value(t, run.frame.records[0].cube, run.frame.target)
+	testing.expect(t, run.frame.target != u32(old))
+	state := reflection_probe_state(r, probe)
+	cube := state.cube.?
+	testing.expect(t, state.slot && !state.forced && !state.capturing)
+	testing.expect_value(t, u32(cube.index), run.frame.target)
+	testing.expect_value(t, cube.time, 42)
+	testing.expect_value(t, rp.spare, old)
+	run = run_probe_frame(t, r, &cache, w, medium)
+	testing.expect(t, !run.frame.capturing)
+	// The probes' cubes are the reflections' memory, with Probes.
+	testing.expect_value(t, reflection_memory(r), reflection_probe_memory(rp.params))
+	// An entity without a probe has no slot, so it cannot be captured.
+	testing.expect(t, !capture_reflection_probe(r, ecs.spawn(w)))
+	testing.expect_value(t, reflection_probe_state(r, ecs.spawn(w)), Reflection_Probe_State{})
 
 	// The screen-space reflections keep the probes at the same level, with the probes' parameters, which fill in where
 	// the rays find nothing: the cube stays.

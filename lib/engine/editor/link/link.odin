@@ -97,6 +97,9 @@ Message :: union {
 	Restart_Preview,
 	Ui_Preview_Settings,
 	Ui_Preview_Layout,
+	Capture_Reflection_Probes,
+	Reflection_Probe_View,
+	Box_Handles,
 }
 
 // Editor to host, first: the editor's protocol version and its name.
@@ -613,6 +616,26 @@ Viewport_Gi :: enum u8 {
 	Voxel_Cones,
 }
 
+// The viewport's reflections, in place of the quality's. Game keeps the quality's; the others match
+// render.Reflection_Technique. Ray_Traced needs Ray_Query; without it, the viewport draws the screen-space reflections.
+Viewport_Reflections :: enum u8 {
+	Game,
+	Off,
+	Probes,
+	Screen,
+	Ray_Traced,
+}
+
+// A level of the viewport's quality, in place of the quality's. Game keeps the quality's, or the viewport's preset's;
+// the others match render.Quality_Level.
+Viewport_Level :: enum u8 {
+	Game,
+	Low,
+	Medium,
+	High,
+	Ultra,
+}
+
 // Editor to game: how the viewport draws while an editor is linked (see docs/editor/viewport.md#viewport). The editor sends it
 // when it changes, and when the link connects. The features are the ones that the viewport turns off.
 Viewport_Settings :: struct {
@@ -636,11 +659,13 @@ Viewport_Settings :: struct {
 	show_icons:           bool,
 	helpers:              Helper_Mode,
 	// The quality that the viewport draws at, from the game's: a preset, the anti-aliasing, the global illumination's
-	// technique, and the render scale, 0 keeping the game's.
+	// technique, the render scale, 0 keeping the game's, and the reflections' technique and level.
 	quality_preset:       Viewport_Preset,
 	anti_aliasing:        Viewport_Aa,
 	global_illumination:  Viewport_Gi,
 	render_scale:         f32,
+	reflections:          Viewport_Reflections,
+	reflections_level:    Viewport_Level,
 }
 
 // Modes (see docs/editor/document-and-scenes.md#modes).
@@ -675,6 +700,57 @@ Sky_Sun_State :: enum u8 {
 	No_Texture_Sky,
 	Not_Ready,
 	No_Sun,
+}
+
+// Editor to game: capture these reflection probes now, or every probe with none, each in one frame whatever the
+// level's budget, one a frame (see docs/rendering/lighting-and-shadows.md#reflection-probes). A probe that holds no
+// slot is not captured.
+Capture_Reflection_Probes :: struct {
+	entities: []u64,
+}
+
+// What the renderer did with a probe: None when the entity has no Reflection_Probe or the reflections are off,
+// No_Slot when nearer or higher-priority probes hold every slot, Waiting when it holds a slot with no capture yet, and
+// Captured.
+Reflection_Probe_Status :: enum u8 {
+	None,
+	No_Slot,
+	Waiting,
+	Captured,
+}
+
+// Game to editor: a watched entity's reflection probe's state, which the Properties panel shows (see
+// docs/editor/shell-and-panels.md#properties). It goes out once after a watch, None included, then when it changes, but
+// for age: capturing is whether a capture of it is in flight or asked for, complete is false for a provisional capture,
+// and age is the seconds since its last capture finished, when it was sent.
+Reflection_Probe_View :: struct {
+	entity:    u64,
+	status:    Reflection_Probe_Status,
+	capturing: bool,
+	complete:  bool,
+	age:       f32,
+}
+
+// A box handle's box: a reflection probe's influence box, its fade inside it, or its projection box.
+Box_Handle_Kind :: enum u8 {
+	Influence,
+	Blend,
+	Projection,
+}
+
+// A handle on a face of a box, which a drag resizes: its World_Position, its box, and whether the mouse is over it or
+// a drag holds it.
+Box_Handle :: struct {
+	position: [3]i64,
+	kind:     Box_Handle_Kind,
+	hot:      bool,
+}
+
+// Editor to game: the box handles to draw, as cubes of size meters, none to draw none (see
+// docs/editor/viewport.md#reflection-probes). The editor does the hit test and the drag math, as with the gizmo.
+Box_Handles :: struct {
+	size:    f32,
+	handles: []Box_Handle,
 }
 
 // Game to editor: the direction toward the texture sky's sun in the world, where its brightest texels are, when the
@@ -1063,6 +1139,9 @@ Game_Stats :: struct {
 	reflection_probe_slots:    u32,
 	reflection_probe_capacity: u32,
 	reflection_probe_faces:    u32,
+	// The bytes that the reflections keep between frames: the probes' cubes and the screen-space or traced
+	// reflections' histories (see render.reflection_memory).
+	reflection_memory:         u64,
 }
 
 // Gi_Cascade_Stats is a split cascade's table: the probes that rays reached, its slots, and the keys that found no

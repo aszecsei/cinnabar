@@ -122,6 +122,10 @@ public sealed class ShellTests : IDisposable
             var view = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.DebugView);
             Assert.Equal("Lit", view.Selected);
             Assert.Contains("Lighting Only", view.Options);
+            // The reflections' debug views (see docs/rendering/post-processing.md#debug-views).
+            Assert.Contains("Roughness", view.Options);
+            Assert.Contains("Reflections", view.Options);
+            Assert.Contains("Reflection Probes", view.Options);
             view.Select("Light Complexity");
             Assert.Equal(Link.Protocol.DebugView.LightComplexity, shell.ViewportSettings.DebugView);
 
@@ -136,6 +140,13 @@ public sealed class ShellTests : IDisposable
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportQuality)).Select("Low");
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportAntiAliasing)).Select("FSR");
             ((Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportGiTechnique)).Select("Voxel Cones");
+            var reflections = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportReflections);
+            Assert.Equal(EditorShell.GameQualityLabel, reflections.Selected);
+            Assert.Equal(Enum.GetValues<Link.Protocol.ViewportReflections>().Length, reflections.Options.Count);
+            reflections.Select("Probes");
+            var level = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportReflectionsLevel);
+            Assert.Equal(Enum.GetValues<Link.Protocol.ViewportLevel>().Length, level.Options.Count);
+            level.Select("Ultra");
             var scale = (Commands.ChoiceCommand)shell.Commands.Get(EditorCommands.ViewportRenderScale);
             Assert.Equal(EditorShell.GameQualityLabel, scale.Selected);
             scale.Select("67%");
@@ -150,6 +161,8 @@ public sealed class ShellTests : IDisposable
         Assert.Equal(Link.Protocol.ViewportPreset.Low, again.ViewportSettings.QualityPreset);
         Assert.Equal(Link.Protocol.ViewportAa.Fsr, again.ViewportSettings.AntiAliasing);
         Assert.Equal(Link.Protocol.ViewportGi.VoxelCones, again.ViewportSettings.GlobalIllumination);
+        Assert.Equal(Link.Protocol.ViewportReflections.Probes, again.ViewportSettings.Reflections);
+        Assert.Equal(Link.Protocol.ViewportLevel.Ultra, again.ViewportSettings.ReflectionsLevel);
         Assert.Equal(2f / 3, again.ViewportSettings.RenderScale, 1e-4f);
         Assert.Empty(Problems(again));
     }

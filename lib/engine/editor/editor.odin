@@ -102,6 +102,9 @@ Watched :: struct {
 	sent:          u64,
 	// The same for its Animator's view, where 0 is also that the editor knows of none (see animators.odin).
 	animator_sent: u64,
+	// The hash of its reflection probe's view that the editor last got, 0 for None, or nil before the first, which then
+	// goes out whatever it is, so a watch tells the editor even of no probe (see reflection_probes.odin).
+	probe_sent:    Maybe(u64),
 }
 
 // init starts the editor's game side. The viewport tools load their shaders from assets, which must outlive the
@@ -153,6 +156,7 @@ end_session :: proc(e: ^Editor) {
 	delete(s.watched)
 	delete(s.view.selection)
 	delete(s.view.hidden)
+	delete(s.view.handles)
 	delete(s.view.picks)
 	s^ = {}
 }
@@ -241,6 +245,8 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			}
 		case link.Run_Game_Command:
 			run_command(e, w, scripts, user, v.id, out, frame)
+		case link.Capture_Reflection_Probes:
+			capture_probes(e, v.entities)
 		case link.Sky_Sun_Request:
 			answer := link.Sky_Sun{state = .No_Texture_Sky}
 			if e.renderer != nil {
@@ -278,6 +284,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 		s.last_values = now
 		send_values(e, w, scripts, out, frame)
 		send_animators(e, w, out, frame)
+		send_reflection_probes(e, w, out)
 		send_preview_views(e, out, frame)
 		send_ui_layouts(e, out, frame)
 	}
@@ -303,6 +310,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			rp := render.reflection_probe_stats(e.renderer)
 			stats.reflection_probes, stats.reflection_probe_slots = rp.probes, rp.slots
 			stats.reflection_probe_capacity, stats.reflection_probe_faces = rp.capacity, rp.faces
+			stats.reflection_memory = render.reflection_memory(e.renderer)
 		}
 		link.write_message(out, stats)
 	}

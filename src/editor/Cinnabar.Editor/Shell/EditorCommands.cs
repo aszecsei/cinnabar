@@ -11,6 +11,7 @@ static partial class EditorCommands
     public const string Redo = "edit.redo";
     public const string CreateEntity = "entity.create";
     public const string CreateVolume = "entity.createVolume";
+    public const string CreateReflectionProbe = "entity.createReflectionProbe";
     public const string DuplicateEntity = "entity.duplicate";
     public const string DeleteEntity = "entity.delete";
     public const string RestartHost = "host.restart";
@@ -163,6 +164,10 @@ static partial class EditorCommands
     public const string ViewportAntiAliasing = "view.antiAliasing";
     public const string ViewportGiTechnique = "view.giTechnique";
     public const string ViewportRenderScale = "view.renderScale";
+    public const string ViewportReflections = "view.reflections";
+    public const string ViewportReflectionsLevel = "view.reflectionsLevel";
+    public const string CaptureProbe = "reflections.captureProbe";
+    public const string CaptureAllProbes = "reflections.captureAllProbes";
     public const string RunGame = "game.run";
     public const string StopGame = "game.stop";
     public const string ProjectOutput = "project.output";
@@ -205,6 +210,7 @@ static partial class EditorCommands
         RegisterWindow(shell);
         RegisterRendering(shell);
         RegisterAtmosphere(shell);
+        RegisterReflections(shell);
         RegisterProfiler(shell);
         RegisterCapture(shell);
         RegisterGameWindow(shell);

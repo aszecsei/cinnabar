@@ -321,6 +321,26 @@ public sealed partial class EditorShell
         }
     }
 
+    /// <summary>
+    /// Adds a reflection probe where the selected entity is, as New Entity does, with its default boxes, which its
+    /// handles resize in the viewport (see docs/editor/viewport.md#reflection-probes).
+    /// </summary>
+    public void CreateReflectionProbe()
+    {
+        if (Scene == null)
+        {
+            return;
+        }
+        var at = SelectedSceneEntity is { } selected ? SceneEdits.WorldPose(Scene.Expanded.Flat, selected)?.Position : null;
+        var create = UnderPrefabRoot(SceneEdits.NewEntity(Scene.Expanded.Flat, at ?? [0, 0, 0]));
+        create.Created.Name = "Reflection Probe";
+        create.Created.Components.Add(new SceneComponent(SceneEdits.ReflectionProbeId, "Reflection_Probe", []));
+        if (Edit("Create Reflection Probe", create))
+        {
+            SelectScene(create.Created.Id);
+        }
+    }
+
     /// <summary>Copies the selected entities with their descendants, and selects the copies.</summary>
     public void DuplicateSelected()
     {
