@@ -10,16 +10,24 @@ import format "cinnabar:engine/asset/format"
 
 // Index is what the daemon knows of the content after a pass: every asset with its status and problems, and every
 // folder (see docs/content/daemon-and-operations.md#cook-daemon). Its entries are the cook link's, so they go to the editor as
-// they are. Each pass builds a new index, which the daemon compares with the last one.
+// they are. Each pass builds a new index, which the daemon compares with the last one, and saves for the next daemon
+// (see saved_index.odin). The next pass carries from it what nothing changed in.
 Index :: struct {
-	arena:    virtual.Arena,
+	arena:     virtual.Arena,
 	// By GUID.
-	assets:   map[string]cook_link.Asset,
-	folders:  []cook_link.Folder,
+	assets:    map[string]cook_link.Asset,
+	folders:   []cook_link.Folder,
 	// By GUID, with "" for the problems that belong to no asset. An asset without problems has no entry.
-	problems: map[string][]cook_link.Problem,
+	problems:  map[string][]cook_link.Problem,
 	// The shading models that cook, by name.
-	shading:  cook_link.Shading_Models,
+	shading:   cook_link.Shading_Models,
+	// Every file and directory that the pass saw, in path order, and every source with what its cook learnt.
+	files:     []File_Record,
+	sources:   []Saved_Source,
+	// By path, into sources.
+	source_at: map[string]int,
+	// The cache's generation after the pass.
+	generation: u64,
 }
 
 // index_build makes an index from a pass, in memory of its own.
@@ -141,6 +149,27 @@ index_build :: proc(index: ^Index, pass: Pass, roots: []Root) {
 	}
 	slice.sort_by(models[:], proc(a, b: cook_link.Shading_Model_Info) -> bool {return a.name < b.name})
 	index.shading = {models[:]}
+	// A pass that carries every material parses no shading model, so the models are the last pass's.
+	if pass.shadings == nil && pass.saved != nil {
+		index.shading = {clone_shading_models(pass.saved.shading.models, allocator)}
+	}
+	index.generation = pass.generation
+	index_keep_sources(index, pass)
+}
+
+@(private = "file")
+clone_shading_models :: proc(models: []cook_link.Shading_Model_Info, allocator := context.allocator) -> []cook_link.Shading_Model_Info {
+	result := make([]cook_link.Shading_Model_Info, len(models), allocator)
+	for m, i in models {
+		inputs := make([]cook_link.Node_Pin, len(m.inputs), allocator)
+		for input, j in m.inputs {
+			inputs[j] = input
+			inputs[j].name = strings.clone(input.name, allocator)
+			inputs[j].default_label = strings.clone(input.default_label, allocator)
+		}
+		result[i] = {name = strings.clone(m.name, allocator), guid = strings.clone(m.guid, allocator), inputs = inputs, no_lighting = m.no_lighting}
+	}
+	return result
 }
 
 // link_status is an asset's status in the index: current when its blob is up to date, and failed otherwise, also when

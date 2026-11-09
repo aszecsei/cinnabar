@@ -1,5 +1,6 @@
 // The commands that cook the content roots share their options and one pass: a scan of the roots, and then each kind
-// of asset in turn. See docs/content/identity-and-cooking.md#cooking.
+// of asset in turn. See docs/content/identity-and-cooking.md#cooking. The daemon's passes scan only what changed (see
+// scan.odin).
 package cook
 
 import "core:fmt"
@@ -53,6 +54,15 @@ Pass :: struct {
 	shadings:   [dynamic]^Shading_Decl,
 	compiled:   map[u64][][]byte,
 	progress:   Progress,
+	// The daemon's index from the last pass, which the pass carries what nothing changed in from, or nil for a pass that
+	// looks at everything (see docs/content/daemon-and-operations.md#saved-index).
+	saved:      ^Index,
+	// The GUIDs of the assets that the pass looks at, when it has a saved index.
+	scope:      map[format.Guid]bool,
+	// Every file and directory that the scan saw, which the next index keeps.
+	files:      []File_Record,
+	// The sources that the pass read, by path: the scan's, and those that asset_source read for another asset.
+	read:       [dynamic]string,
 }
 
 // parse_cook_args reads `--cache <dir> --config dev|release [--definitions <file>] [--dxc <dxc.exe>] [--include <dir>]...
@@ -130,12 +140,16 @@ parse_cook_args :: proc(args: []string, daemon := false) -> (options: Cook_Optio
 // cook scans the roots and cooks the assets of the kinds whose keys changed. When it writes a blob, it then writes the
 // cache's generation, so a running game swaps the pass's blobs together (see docs/content/blobs-and-loading.md#loading). It
 // logs each problem as it finds it, unless log_problems is false. It cooks the assets in force whatever their keys.
+// With the daemon's saved index, it scans what changes says changed, and carries what nothing changed in (see
+// scan_pass and pass_scope).
 cook :: proc(
 	options: Cook_Options,
 	kinds: Asset_Kinds,
 	log_problems := true,
 	force: map[format.Guid]bool = nil,
 	progress: Progress = {},
+	saved: ^Index = nil,
+	changes: Watch_Changes = Changed_Everything{},
 ) -> (
 	pass: Pass,
 ) {
@@ -143,9 +157,14 @@ cook :: proc(
 	pass.force = force
 	pass.progress = progress
 	pass.progress.start = time.tick_now()
-	scanned: bool
-	pass.assets, pass.folders, pass.shared, scanned = scan(options.roots[:], &pass.problems)
-	pass.ok = scanned
+	pass.saved = saved
+	pass.read = make([dynamic]string, context.temp_allocator)
+	scanned := scan_pass(options.roots[:], options.includes[:], options.definitions, saved, changes, &pass)
+	pass.assets, pass.folders, pass.shared, pass.files = scanned.assets, scanned.folders, scanned.shared, scanned.files
+	pass.ok = scanned.ok
+	if saved != nil {
+		pass_scope(&pass, scanned, saved, options.roots[:], options.includes[:], options.definitions, force)
+	}
 	// A stage's material instances and prefab are text that its cook generates, which the material and scene passes
 	// then cook as they would files, so the stages go first whenever either pass runs.
 	if kinds & {.Stage, .Scene, .Prefab, .Shading_Model, .Material, .Material_Instance, .Material_Function} != {} {

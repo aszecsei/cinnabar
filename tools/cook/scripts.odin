@@ -66,8 +66,14 @@ Found_Require :: struct {
 // cook_scripts cooks the scripts among the assets whose keys changed. A script that fails keeps its old blob, so the
 // running game keeps the last good version, and so does every script that requires it, directly or not. The other
 // scripts still cook. It reports every failure, and returns false if any.
+//
+// A require names a path, and the type checker reads every module, so a daemon's pass that looks at one script looks at
+// every one (see carry_kind).
 cook_scripts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
+	if len(carry_kind(pass, {.Script}, all_or_nothing = true)) == 0 {
+		return true
+	}
 	scripts := collect_scripts(pass)
 	// The index learns what each script depends on and its behaviour class.
 	defer for s in scripts {
@@ -198,7 +204,7 @@ collect_scripts :: proc(pass: ^Pass) -> []Script_Source {
 				name = a.name,
 				meta_text = a.meta_text,
 				meta = a.meta,
-				source = a.source,
+				source = asset_source(pass, i),
 				requires = make([dynamic]Found_Require, context.temp_allocator),
 				resolved = make([dynamic]Resolved_Require, context.temp_allocator),
 			},

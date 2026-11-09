@@ -47,7 +47,7 @@ AUDIO_SETTINGS := []Setting_Info {
 
 cook_audio :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	sounds := assets_of(assets, .Audio)
+	sounds := carry_kind(pass, {.Audio})
 	if len(sounds) > 0 && !make_output_dir(pass, out_dir, {.Audio}) {
 		return false
 	}
@@ -55,6 +55,7 @@ cook_audio :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -
 	step_begin(pass, .Audio, "", len(sounds))
 	for i in sounds {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_sound(&assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -79,7 +80,7 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 	}
 	// A setting is part of the key through the .meta file's text, and so are the codecs through their versions.
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%s\x00%x\x00", AUDIO_COOK_VERSION, ma.BINDINGS_VERSION_STRING, OPUS_VERSION, VORBIS_VERSION, a.name, format.audio_layout()))
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a^), key)
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
@@ -88,7 +89,7 @@ cook_sound :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Resu
 	if cooked_key(output, .Audio, format.audio_layout()) == key && !pass.force[guid] {
 		return .Current
 	}
-	samples, channels, decoded := decode_sound(a.source, audio_setting(a^, "channels"))
+	samples, channels, decoded := decode_sound(source_of(a^), audio_setting(a^, "channels"))
 	defer delete(samples)
 	// A sound that fails keeps its old blob, so the running game keeps the last good version.
 	if !decoded {

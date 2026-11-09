@@ -81,7 +81,7 @@ font_setting :: proc(a: Asset_Source, key: string) -> string {
 
 cook_fonts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	fonts := assets_of(assets, .Font)
+	fonts := carry_kind(pass, {.Font})
 	if len(fonts) > 0 && !make_output_dir(pass, out_dir, {.Font}) {
 		return false
 	}
@@ -89,6 +89,7 @@ cook_fonts :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -
 	step_begin(pass, .Font, "", len(fonts))
 	for i in fonts {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_font(options, &assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -146,7 +147,7 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 			index,
 		),
 	)
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a^), key)
 	key = hash.fnv64a(guid[:], key)
 	key = hash.fnv64a(atlas_guid[:], key)
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))
@@ -155,7 +156,7 @@ cook_font :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pass
 		return .Current
 	}
 
-	data := a.source
+	data := source_of(a^)
 	offset := int(stbtt.GetFontOffsetForIndex(raw_data(data), i32(index))) if len(data) >= 12 else -1
 	if offset < 0 {
 		report_error(problems, a.path, 0, 0, "has no font %d", index)

@@ -108,7 +108,7 @@ Model_Part :: struct {
 // file. A model whose meshes do not all cook keeps every old blob. It reports every failure, and returns false if any.
 cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	models := assets_of(assets, .Model)
+	models := carry_kind(pass, {.Model})
 	if len(models) > 0 && !make_output_dir(pass, out_dir, {.Model}) {
 		return false
 	}
@@ -116,6 +116,7 @@ cook_models :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	step_begin(pass, .Model, "", len(models))
 	for i in models {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_model(options, &assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -130,7 +131,7 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		return .Failed
 	}
 	gltf_options: cgltf.options
-	data, result := cgltf.parse(gltf_options, raw_data(a.source), uint(len(a.source)))
+	data, result := cgltf.parse(gltf_options, raw_data(source_of(a^)), uint(len(source_of(a^))))
 	if result != .success {
 		report_error(problems, a.path, 0, 0, "cannot read the glTF file: %v", result)
 		return .Failed
@@ -174,7 +175,7 @@ cook_model :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 	skin_guids := a.subassets[len(meshes):][:len(skins)]
 	animation_guids := a.subassets[len(meshes) + len(skins):][:len(animations)]
 
-	key, key_ok := model_key(options, a^, data, problems)
+	key, key_ok := model_key(options, a, data, problems)
 	if !key_ok {
 		return .Failed
 	}
@@ -337,11 +338,12 @@ model_meshes :: proc(data: ^cgltf.data, combine: bool, stem: string) -> []Model_
 
 // model_key covers what the meshes depend on: the cooker, meshoptimizer, the path, the source, the GUID and the
 // settings, and the buffer files that a .gltf file names. The sub-asset lines of the .meta file are not in it, because
-// the cooker writes them: a mesh's GUID is its blob's name instead.
+// the cooker writes them: a mesh's GUID is its blob's name instead. The buffers are the model's inputs, which a change
+// to puts it in a daemon's pass.
 @(private = "file")
-model_key :: proc(options: Cook_Options, a: Asset_Source, data: ^cgltf.data, problems: ^Problems) -> (key: u64, ok: bool) {
+model_key :: proc(options: Cook_Options, a: ^Asset_Source, data: ^cgltf.data, problems: ^Problems) -> (key: u64, ok: bool) {
 	key = hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00", MODEL_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout() ~ format.skin_layout() * 31 ~ format.animation_layout() * 961))
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	for s in a.meta.settings {
@@ -353,6 +355,9 @@ model_key :: proc(options: Cook_Options, a: Asset_Source, data: ^cgltf.data, pro
 			continue
 		}
 		path := fmt.tprintf("%s/%s", filepath.dir(a.path), uri)
+		if size, modified, stamped := file_stamp(path); stamped {
+			append(&a.inputs, Input_Stamp{path, size, modified})
+		}
 		bytes, err := os.read_entire_file(path, context.temp_allocator)
 		if err != nil {
 			report_error(problems, a.path, 0, 0, "cannot read its buffer %s: %v", uri, err)

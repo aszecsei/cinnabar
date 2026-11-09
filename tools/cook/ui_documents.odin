@@ -32,7 +32,7 @@ UI_TEMPLATE :: `ui 1
 
 cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	documents := assets_of(assets, .Ui)
+	documents := carry_kind(pass, {.Ui})
 	if len(documents) > 0 && !make_output_dir(pass, out_dir, {.Ui}) {
 		return false
 	}
@@ -47,6 +47,7 @@ cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^
 	step_begin(pass, .Ui, "", len(documents))
 	for i in documents {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_ui_document(&assets[i], out_dir, kinds, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -58,7 +59,7 @@ cook_ui_documents :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^
 cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Guid]format.Asset_Kind, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	document, parse_problems, parsed := format.ui_parse(string(a.source))
+	document, parse_problems, parsed := format.ui_parse(string(source_of(a^)))
 	for p in parse_problems {
 		if p.error {
 			report_error(problems, a.path, p.line, p.column, "%s", p.message)
@@ -78,7 +79,7 @@ cook_ui_document :: proc(a: ^Asset_Source, out_dir: string, kinds: map[format.Gu
 		return .Failed
 	}
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", UI_COOK_VERSION, a.name, format.ui_layout()))
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	output := fmt.tprintf("%s/%s.blob", out_dir, guid_text(guid))

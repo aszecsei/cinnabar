@@ -74,7 +74,11 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	// Previews are of a running editor's unsaved materials, so an earlier editor's are stale.
 	clear_previews(d.options)
 
-	daemon_pass(&d)
+	// With the last daemon's index, the first pass checks every file's stamp, and reads only what changed meanwhile.
+	if index_load(&d.index, d.options) {
+		log.infof("cook: loaded the saved index of %d sources", len(d.index.sources))
+	}
+	daemon_pass(&d, Changed_Everything{})
 	for {
 		free_all(context.temp_allocator)
 		switch watcher_wait(&d.watcher, WAIT_FOREVER) {
@@ -90,7 +94,7 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 					return false
 				}
 			}
-			daemon_pass(&d)
+			daemon_pass(&d, watcher_take(&d.watcher, context.temp_allocator))
 		case .Woken:
 			handle_messages(&d)
 		case .Timeout:
@@ -100,11 +104,12 @@ run_daemon :: proc(parsed: Cook_Options) -> bool {
 	}
 }
 
-// daemon_pass cooks every kind of asset, and updates the index. It sends the editor its progress while it cooks, logs
-// the problems that changed, says what it cooked, and sends the editor what changed. It cooks the assets in force
-// whatever their keys.
-@(private = "file")
-daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
+// daemon_pass cooks every kind of asset, and updates the index. It scans what changed, and carries the rest from the
+// last pass's index (see docs/content/daemon-and-operations.md#saved-index). It sends the editor its progress while it
+// cooks, logs the problems that changed, says what it cooked, sends the editor what changed, and saves the index when
+// it changed. It cooks the assets in force whatever their keys.
+@(private)
+daemon_pass :: proc(d: ^Daemon, watched: Watch_Changes, force: map[format.Guid]bool = nil) -> (report: Pass_Report) {
 	start := time.tick_now()
 	progress := Progress {
 		data     = d,
@@ -118,15 +123,21 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 			server_send_linked(&d.server, p)
 		}
 	}
-	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress)
+	pass := cook(d.options, ALL_KINDS, log_problems = false, force = force, progress = progress, saved = &d.index, changes = watched)
+	report = pass_report(pass)
 	next: Index
 	index_build(&next, pass, d.options.roots[:])
-	thumbnails_update(&next, pass, d.options)
+	thumbnails_update(&next, &pass, d.options)
 	changes := index_diff(&d.index, &next)
 	// What went away is in the old index, so it stays until the changes are sent.
 	defer {
 		index_destroy(&d.index)
 		d.index = next
+	}
+	if index_changed(changes) || changes.shading || len(pass.read) > 0 || next.generation != d.index.generation || !slice.equal(next.files, d.index.files) {
+		if !index_write(&next, d.options) {
+			log.warnf("cook: cannot save the index in %s, so the next daemon reads every source again", config_dir(d.options))
+		}
 	}
 
 	for p in changes.problems {
@@ -172,6 +183,32 @@ daemon_pass :: proc(d: ^Daemon, force: map[format.Guid]bool = nil) {
 			milliseconds = f32(time.duration_milliseconds(elapsed)),
 		},
 	)
+	return
+}
+
+// Pass_Report is what a daemon's pass did, in the temporary allocator: the sources that it read and the assets that it
+// looked at, by path, and what it cooked. The pass itself points into the last index, which the pass frees.
+Pass_Report :: struct {
+	ok:      bool,
+	read:    []string,
+	checked: []string,
+	cooked:  [format.Asset_Kind]int,
+	current: [format.Asset_Kind]int,
+}
+
+@(private = "file")
+pass_report :: proc(pass: Pass) -> Pass_Report {
+	read := make([]string, len(pass.read), context.temp_allocator)
+	for path, i in pass.read {
+		read[i] = strings.clone(path, context.temp_allocator)
+	}
+	checked := make([dynamic]string, context.temp_allocator)
+	for a in pass.assets {
+		if a.carried == nil {
+			append(&checked, strings.clone(a.path, context.temp_allocator))
+		}
+	}
+	return {pass.ok, read, checked[:], pass.cooked, pass.current}
 }
 
 // remove_blobs deletes the blobs of the assets that left the content, so a game that starts later does not load them.
@@ -276,7 +313,8 @@ handle_taken :: proc(d: ^Daemon, taken: serve.Taken) {
 	if len(answers) == 0 {
 		return
 	}
-	daemon_pass(d, force)
+	// An operation can move, delete or write anything in the roots, so the pass checks every file's stamp.
+	daemon_pass(d, Changed_Everything{}, force)
 	for a in answers {
 		server_send_linked(&d.server, a.result, a.request)
 	}

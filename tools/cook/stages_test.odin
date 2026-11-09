@@ -165,11 +165,11 @@ a_stage_makes_meshes_material_instances_and_a_prefab :: proc(t: ^testing.T) {
 		if a.owner == {} {
 			continue
 		}
-		if a.kind == .Material_Instance && strings.contains(string(a.source), "/root/mtl/glass") {
-			instance_text = string(a.source)
+		if a.kind == .Material_Instance && strings.contains(string(source_of(a)), "/root/mtl/glass") {
+			instance_text = string(source_of(a))
 		}
 		if a.kind == .Prefab {
-			prefab_text = string(a.source)
+			prefab_text = string(source_of(a))
 		}
 	}
 	transparent, _ := format.meta_parse(#load("../../lib/engine/content/materials/preview_surface_transparent.material.meta", string), context.temp_allocator)
@@ -328,7 +328,7 @@ a_texture_through_a_node_graph_is_a_mask_of_its_red :: proc(t: ^testing.T) {
 	instance := ""
 	for a in pass.assets {
 		if a.kind == .Material_Instance && a.owner != {} {
-			instance = string(a.source)
+			instance = string(source_of(a))
 		}
 	}
 	testing.expectf(t, strings.contains(instance, fmt.tprintf("metallic_tex = $%s", guid_text(guid))), "the metallic texture is not set: %s", instance)
@@ -453,7 +453,7 @@ point_instancers_are_instance_sets_of_shared_prototypes :: proc(t: ^testing.T) {
 	prefab_text := ""
 	for a in again.assets {
 		if a.owner != {} && a.kind == .Prefab {
-			prefab_text = string(a.source)
+			prefab_text = string(source_of(a))
 		}
 	}
 	testing.expect_value(t, strings.count(prefab_text, "component 53 Instanced_Mesh_Renderer"), 2)
@@ -555,7 +555,7 @@ a_dome_light_is_a_texture_sky :: proc(t: ^testing.T) {
 	prefab_text := ""
 	for a in pass.assets {
 		if a.owner != {} && a.kind == .Prefab {
-			prefab_text = string(a.source)
+			prefab_text = string(source_of(a))
 		}
 	}
 	for want in ([]string{"component 42 Volume", "shape = Global", "mode = Texture", fmt.tprintf("texture = $%s", guid_text(guid)), "texture_intensity = 4"}) {

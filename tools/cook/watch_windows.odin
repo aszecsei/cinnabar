@@ -1,17 +1,50 @@
 package cook
 
+import "core:fmt"
 import "core:log"
+import "core:strings"
 import win "core:sys/windows"
 import "core:time"
 
-// Watcher waits for changes under a set of directories, or for another thread to wake it. It does not say what
-// changed: each pass scans the roots again, and the cache keys find what is dirty, so a change that Windows drops
-// (when its buffer fills) loses nothing.
+// Watcher waits for changes under a set of directories, or for another thread to wake it, and remembers which paths
+// changed until watcher_take hands them over. When it cannot say, as when Windows drops changes because its buffer
+// filled, or a directory was not watched for a while, it says that everything changed, so the next pass scans all of
+// it (see docs/content/daemon-and-operations.md#saved-index).
 Watcher :: struct {
-	dirs:   [dynamic]^Watched_Dir,
+	dirs:    [dynamic]^Watched_Dir,
 	// The directories' events, then the wake event.
-	events: [dynamic]win.HANDLE,
-	wake:   win.HANDLE,
+	events:  [dynamic]win.HANDLE,
+	wake:    win.HANDLE,
+	// What changed since the last watcher_take, in the heap. Only note_path, note_everything and watcher_take change it.
+	pending: Pending_Changes,
+}
+
+// Watch_Changes is what changed since the last watcher_take: nil for nothing, the paths that changed, or everything.
+Watch_Changes :: union {
+	Changed_Paths,
+	Changed_Everything,
+}
+
+// Changed_Paths are the files and directories that changed: absolute, with forward slashes, each once.
+Changed_Paths :: struct {
+	paths: []string,
+}
+
+// Changed_Everything is a change that the watcher cannot say more of.
+Changed_Everything :: struct {}
+
+// More changed paths than this is a change of everything: a scan of everything costs less than looking at each.
+MAX_CHANGED_PATHS :: 4096
+
+@(private = "file")
+Pending_Changes :: union {
+	Pending_Paths,
+	Changed_Everything,
+}
+
+@(private = "file")
+Pending_Paths :: struct {
+	paths: map[string]bool,
 }
 
 Wait_Result :: enum {
@@ -56,6 +89,10 @@ Dir_Identity :: struct {
 @(private = "file")
 WATCH_FILTER :: win.FILE_NOTIFY_CHANGE_FILE_NAME | win.FILE_NOTIFY_CHANGE_DIR_NAME | win.FILE_NOTIFY_CHANGE_LAST_WRITE | win.FILE_NOTIFY_CHANGE_SIZE
 
+// A read whose changes did not fit in the buffer, which Windows may give instead of a read of no bytes.
+@(private = "file")
+ERROR_NOTIFY_ENUM_DIR :: 1022
+
 // How long a wait goes, at most, between tries to open a broken directory again.
 @(private = "file")
 REOPEN_MS :: 500
@@ -93,7 +130,84 @@ watcher_close :: proc(w: ^Watcher) {
 	}
 	delete(w.dirs)
 	delete(w.events)
+	pending_free(&w.pending)
 	w^ = {}
+}
+
+// watcher_take hands over what changed since the last take, in allocator, and forgets it.
+watcher_take :: proc(w: ^Watcher, allocator := context.allocator) -> Watch_Changes {
+	defer pending_free(&w.pending)
+	switch p in w.pending {
+	case Pending_Paths:
+		paths := make([]string, len(p.paths), allocator)
+		i := 0
+		for path in p.paths {
+			paths[i] = strings.clone(path, allocator)
+			i += 1
+		}
+		return Changed_Paths{paths}
+	case Changed_Everything:
+		return Changed_Everything{}
+	}
+	return nil
+}
+
+// notify_paths adds the paths that a ReadDirectoryChangesW buffer names, under the directory that it watches, to out.
+notify_paths :: proc(dir: string, buffer: []byte, out: ^[dynamic]string, allocator := context.allocator) {
+	NAME_OFFSET :: int(offset_of(win.FILE_NOTIFY_INFORMATION, FileName))
+	for offset := 0; offset + NAME_OFFSET <= len(buffer); {
+		info := (^win.FILE_NOTIFY_INFORMATION)(raw_data(buffer[offset:]))
+		length := int(info.FileNameLength)
+		if offset + NAME_OFFSET + length > len(buffer) {
+			return
+		}
+		name := ([^]u16)(raw_data(buffer[offset + NAME_OFFSET:]))[:length / 2]
+		utf8, _ := win.utf16_to_utf8(name, context.temp_allocator)
+		path, _ := strings.replace_all(fmt.tprintf("%s/%s", dir, utf8), "\\", "/", context.temp_allocator)
+		append(out, strings.clone(path, allocator))
+		if info.NextEntryOffset == 0 {
+			return
+		}
+		offset += int(info.NextEntryOffset)
+	}
+}
+
+// note_path remembers that a path changed.
+@(private = "file")
+note_path :: proc(w: ^Watcher, path: string) {
+	switch &p in w.pending {
+	case nil:
+		w.pending = Pending_Paths{make(map[string]bool)}
+		note_path(w, path)
+	case Pending_Paths:
+		if path in p.paths {
+			return
+		}
+		if len(p.paths) >= MAX_CHANGED_PATHS {
+			note_everything(w)
+			return
+		}
+		p.paths[strings.clone(path)] = true
+	case Changed_Everything:
+	}
+}
+
+// note_everything remembers that the watcher cannot say what changed.
+@(private = "file")
+note_everything :: proc(w: ^Watcher) {
+	pending_free(&w.pending)
+	w.pending = Changed_Everything{}
+}
+
+@(private = "file")
+pending_free :: proc(pending: ^Pending_Changes) {
+	if p, is_paths := pending.(Pending_Paths); is_paths {
+		for path in p.paths {
+			delete(path)
+		}
+		delete(p.paths)
+	}
+	pending^ = nil
 }
 
 // WAIT_FOREVER is watcher_wait's timeout for no limit.
@@ -104,14 +218,16 @@ watcher_wake :: proc(w: ^Watcher) {
 	win.SetEvent(w.wake)
 }
 
-// watcher_wait waits up to timeout milliseconds for a change under any directory, or for watcher_wake. A directory
-// that went, or whose read failed, is Broken: the change is Changed, and while any directory is Broken the wait tries
-// to open it again every REOPEN_MS. A directory that opens again is Changed too, since what changed in it meanwhile
-// was not seen.
+// watcher_wait waits up to timeout milliseconds for a change under any directory, or for watcher_wake, and remembers
+// the paths that changed. A directory that went, or whose read failed, is Broken: the change is Changed, and while any
+// directory is Broken the wait tries to open it again every REOPEN_MS. A directory that opens again is Changed too.
+// Both are a change of everything, since what changed in it meanwhile was not seen, as is a read that Windows could
+// not fit in its buffer.
 watcher_wait :: proc(w: ^Watcher, timeout: u32) -> Wait_Result {
 	start := time.tick_now()
 	for {
 		if reopen_dirs(w) {
+			note_everything(w)
 			return .Changed
 		}
 		wait := timeout
@@ -142,13 +258,27 @@ watcher_wait :: proc(w: ^Watcher, timeout: u32) -> Wait_Result {
 		read := win.GetOverlappedResult(d.handle, &d.overlapped, &transferred, false)
 		error := win.GetLastError()
 		win.ResetEvent(d.overlapped.hEvent)
-		if !read {
+		switch {
+		case !read && error == ERROR_NOTIFY_ENUM_DIR, read && transferred == 0:
+			// Windows dropped what changed, as more changed than its buffer holds.
+			note_everything(w)
+		case read:
+			paths := make([dynamic]string, context.temp_allocator)
+			notify_paths(d.path, ([^]byte)(&d.buffer)[:transferred], &paths, context.temp_allocator)
+			for path in paths {
+				note_path(w, path)
+			}
+		}
+		if !read && error != ERROR_NOTIFY_ENUM_DIR {
 			break_dir(d, error)
+			note_everything(w)
 		} else if !same_dir(d) {
 			// The directory at the path went, or is going: it was deleted while the handle kept it.
 			break_dir(d, 0)
+			note_everything(w)
 		} else if !start_read(d) {
 			break_dir(d, win.GetLastError())
+			note_everything(w)
 		}
 		return .Changed
 	}
