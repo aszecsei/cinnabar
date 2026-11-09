@@ -701,7 +701,7 @@ parse_function :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (dec
 		outputs = make([dynamic]Function_Pin, context.temp_allocator),
 		ok      = true,
 	}
-	lines, _, _, _ := decl_lines(string(a.source))
+	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "material_function 1" {
 		report_error(problems, a.path, 1, 0, "a material function starts with `material_function 1`")
 		decl.ok = false

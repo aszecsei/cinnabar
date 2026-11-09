@@ -68,7 +68,7 @@ CURVE_COMPONENTS := [format.Effect_Curve]int {
 
 cook_effects :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	effects := assets_of(assets, .Effect)
+	effects := carry_kind(pass, {.Effect})
 	if len(effects) > 0 && !make_output_dir(pass, out_dir, {.Effect}) {
 		return false
 	}
@@ -76,6 +76,7 @@ cook_effects :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	step_begin(pass, .Effect, "", len(effects))
 	for i in effects {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_effect(&assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -87,7 +88,7 @@ cook_effects :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	emitters, parse_problems := effect_parse(string(a.source), context.temp_allocator)
+	emitters, parse_problems := effect_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parse_problems {
 		report_error(problems, a.path, p.line, 0, "%s", p.message)
 	}
@@ -95,21 +96,22 @@ cook_effect :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Res
 	if len(parse_problems) > 0 || !settings_ok {
 		return .Failed
 	}
-	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", EFFECT_COOK_VERSION, a.name, format.effect_layout()))
-	key = hash.fnv64a(a.source, key)
-	guid := a.meta.guid
-	key = hash.fnv64a(guid[:], key)
-	buffer: [32]u8
-	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
-	if cooked_key(output, .Effect, format.effect_layout()) == key && !pass.force[guid] {
-		return .Current
-	}
+	// What it names is known whether it cooks or not, so the index has it either way.
 	for e in emitters {
 		for dependency in ([]format.Guid{e.emitter.texture, e.emitter.material, e.emitter.mesh}) {
 			if dependency != {} {
 				append(&a.dependencies, dependency)
 			}
 		}
+	}
+	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", EFFECT_COOK_VERSION, a.name, format.effect_layout()))
+	key = hash.fnv64a(source_of(a^), key)
+	guid := a.meta.guid
+	key = hash.fnv64a(guid[:], key)
+	buffer: [32]u8
+	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
+	if cooked_key(output, .Effect, format.effect_layout()) == key && !pass.force[guid] {
+		return .Current
 	}
 	blob := format.effect_write({guid = guid, key = key, emitters = emitters, source_path = a.name}, context.temp_allocator)
 	if !write_blob(output, blob) {

@@ -187,23 +187,39 @@ Stage_Manifest_Subasset :: struct {
 // cook_stages cooks the stages among the assets whose files changed, and adds each stage's generated material
 // instances and prefab to the pass's assets, for the passes that cook them. It reports every failure, and returns
 // false if any.
+//
+// A carried stage's generated sources are the last pass's, from the saved index, which the material and scene passes
+// carry too, unless they look at them.
 cook_stages :: proc(options: Cook_Options, pass: ^Pass) -> bool {
-	stages := assets_of(pass.assets, .Stage)
-	if len(stages) == 0 {
-		return true
-	}
-	out_dir := config_dir(options)
-	for dir in ([]string{out_dir, fmt.tprintf("%s/stages", out_dir), fmt.tprintf("%s/generated/stages", out_dir)}) {
-		if !make_output_dir(pass, dir, {.Stage}) {
-			return false
+	stages := carry_kind(pass, {.Stage})
+	generated := make([dynamic]Asset_Source, context.temp_allocator)
+	if pass.saved != nil {
+		carried := make(map[format.Guid]bool, context.temp_allocator)
+		for a in pass.assets {
+			if a.kind == .Stage && a.carried != nil {
+				carried[a.meta.guid] = true
+			}
+		}
+		for src in pass.saved.sources {
+			if src.owner != {} && carried[src.owner] {
+				append(&generated, carried_generated(pass, src))
+			}
 		}
 	}
-	generated := make([dynamic]Asset_Source, context.temp_allocator)
 	ok := true
-	for i in stages {
-		result := cook_stage(options, &pass.assets[i], out_dir, pass, &generated)
-		settle(pass, i, result)
-		ok &&= !asset_failed(result)
+	if len(stages) > 0 {
+		out_dir := config_dir(options)
+		for dir in ([]string{out_dir, fmt.tprintf("%s/stages", out_dir), fmt.tprintf("%s/generated/stages", out_dir)}) {
+			if !make_output_dir(pass, dir, {.Stage}) {
+				return false
+			}
+		}
+		for i in stages {
+			asset_source(pass, i)
+			result := cook_stage(options, &pass.assets[i], out_dir, pass, &generated)
+			settle(pass, i, result)
+			ok &&= !asset_failed(result)
+		}
 	}
 	if len(generated) > 0 {
 		all := make([]Asset_Source, len(pass.assets) + len(generated), context.temp_allocator)
@@ -239,7 +255,7 @@ stage_key :: proc(options: Cook_Options, a: Asset_Source) -> u64 {
 	for ext in TEXTURE_EXTENSIONS {
 		key = hash.fnv64a(transmute([]byte)ext, key)
 	}
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	for s in a.meta.settings {
@@ -390,7 +406,7 @@ cook_stage :: proc(options: Cook_Options, a: ^Asset_Source, out_dir: string, pas
 		report_error(problems, manifest_path, 0, 0, "cannot write the stage's manifest")
 		return .Failed
 	}
-	add_generated(a^, manifest, generated, problems)
+	add_generated(a, manifest, generated, problems)
 	return .Cooked
 }
 
@@ -885,7 +901,7 @@ stage_basis :: proc(a: Asset_Source, info: Cn_Usd_Info) -> (basis: matrix[3, 3]f
 	return
 }
 
-@(private = "file")
+@(private)
 file_stamp :: proc(path: string) -> (size, modified: i64, ok: bool) {
 	info, err := os.stat(path, context.temp_allocator)
 	if err != nil {
@@ -1731,12 +1747,16 @@ use_manifest :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]A
 	for s in m.subassets {
 		append(&a.subassets, Subasset{s.kind, s.name, s.guid})
 	}
-	return add_generated(a^, m, generated, problems)
+	return add_generated(a, m, generated, problems)
 }
 
-// add_generated adds a stage's generated texts to the pass's assets, as sources that it owns.
+// add_generated adds a stage's generated texts to the pass's assets, as sources that it owns. The files that the stage
+// read are its inputs, which a change to puts it in a daemon's pass.
 @(private = "file")
-add_generated :: proc(a: Asset_Source, m: Stage_Manifest, generated: ^[dynamic]Asset_Source, problems: ^Problems) -> bool {
+add_generated :: proc(a: ^Asset_Source, m: Stage_Manifest, generated: ^[dynamic]Asset_Source, problems: ^Problems) -> bool {
+	for f in m.files {
+		append(&a.inputs, Input_Stamp{f.path, f.size, f.modified})
+	}
 	ok := true
 	for s in m.subassets {
 		if s.generated == "" {
@@ -1757,7 +1777,9 @@ add_generated :: proc(a: Asset_Source, m: Stage_Manifest, generated: ^[dynamic]A
 			meta         = {guid = s.guid},
 			source       = source,
 			dependencies = make([dynamic]format.Guid, context.temp_allocator),
+			visual       = make([dynamic]format.Guid, context.temp_allocator),
 			subassets    = make([dynamic]Subasset, context.temp_allocator),
+			inputs       = make([dynamic]Input_Stamp, context.temp_allocator),
 			owner        = a.meta.guid,
 		})
 	}

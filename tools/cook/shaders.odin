@@ -37,7 +37,7 @@ Target :: struct {
 // running game keeps drawing with the last good version. It reports every failure, and returns false if any.
 cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
-	shaders := assets_of(assets, .Shader)
+	shaders := carry_kind(pass, {.Shader})
 	if len(shaders) == 0 {
 		return true
 	}
@@ -57,7 +57,7 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 	for i in shaders {
 		defer step_advance(pass)
 		s := &assets[i]
-		inputs, inputs_ok := gather_includes(s.path, s.source, options.includes[:], problems)
+		inputs, inputs_ok := gather_includes(s.path, asset_source(pass, i), options.includes[:], problems)
 		if !check_settings(s^, problems) || !inputs_ok {
 			settle(pass, i, .Failed)
 			ok = false
@@ -72,7 +72,7 @@ cook_shaders :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass)
 		}
 		entries := make([dynamic]format.Shader_Code, context.temp_allocator)
 		compiled := true
-		for target in targets(string(s.source)) {
+		for target in targets(string(source_of(s^))) {
 			code, code_ok := compile(options, s^, target, out_dir, problems)
 			if !code_ok {
 				compiled = false

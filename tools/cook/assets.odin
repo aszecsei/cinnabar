@@ -131,9 +131,13 @@ Asset_Source :: struct {
 	name:         string,
 	meta_text:    string,
 	meta:         format.Meta,
-	source:       []byte,
+	// nil until it is read: a pass reads a carried asset's source only when another asset needs it (see asset_source).
+	source:       Maybe([]byte),
 	// What the pass did with it. Only settle changes it.
 	result:       Asset_Result,
+	// Set while the pass carries it: nothing that it depends on changed, so what the last pass learnt of it stands
+	// (see docs/content/daemon-and-operations.md#saved-index). Only carry_source sets it, and only uncarry clears it.
+	carried:      Maybe(Carried),
 	// The assets that it depends on: a script's requires, and the scripts that a scene's or a prefab's behaviours name
 	// and the prefabs that it instantiates.
 	dependencies: [dynamic]format.Guid,
@@ -153,6 +157,99 @@ Asset_Source :: struct {
 	// For a source that a stage generates, such as its prefab, the stage's GUID: it is not a file of its own, and its
 	// meta is only its GUID (see stages.odin).
 	owner:        format.Guid,
+	// The files outside the content that its key covers, as they were when it cooked: a model's buffers and a stage's
+	// layers and images. A change to one puts it in a daemon's pass.
+	inputs:       [dynamic]Input_Stamp,
+}
+
+// Carried is what a pass keeps of an asset that it does not look at: the problems that the last pass found in it.
+Carried :: struct {
+	problems: []Problem,
+}
+
+// Input_Stamp is a file as an asset's cook read it: its absolute path, its size and its modification time.
+Input_Stamp :: struct {
+	path:     string,
+	size:     i64,
+	modified: i64,
+}
+
+// source_of is an asset's source, which the pass must have read.
+source_of :: proc(a: Asset_Source, loc := #caller_location) -> []byte {
+	source, read := a.source.?
+	assert(read, "the pass reads an asset's source before it uses it (see asset_source)", loc)
+	return source
+}
+
+// asset_source is an asset's source, which it reads first if the pass has not. Only the pass's own thread calls it,
+// so a parallel step reads what its jobs need before it starts.
+asset_source :: proc(pass: ^Pass, index: int) -> []byte {
+	a := &pass.assets[index]
+	if source, read := a.source.?; read {
+		return source
+	}
+	source, err := os.read_entire_file(a.path, context.temp_allocator)
+	if err != nil {
+		// The file went or cannot be read: the asset's cook then reports the problems of an empty source, and the next
+		// pass, which the change starts, sees what happened to it.
+		report_error(&pass.problems, a.path, 0, 0, "%v", err)
+	}
+	a.source = source
+	append(&pass.read, a.path)
+	return source
+}
+
+// uncarry makes a carried asset one that the pass looks at: what the last pass learnt of it goes, as its cook learns
+// it again.
+uncarry :: proc(a: ^Asset_Source) {
+	a.carried = nil
+	clear(&a.dependencies)
+	clear(&a.visual)
+	clear(&a.subassets)
+	clear(&a.inputs)
+	a.behaviour = ""
+	a.permutations = 0
+	a.size = {}
+	a.tool_texture = {}
+	a.hotspots = nil
+}
+
+// carry_kind settles the carried assets of some kinds, with the problems that the last pass found in them, and gives
+// the others, which the kinds' pass looks at. With all_or_nothing, it carries them only when it carries every one:
+// a pass that looks at one looks at all.
+carry_kind :: proc(pass: ^Pass, kinds: Asset_Kinds, all_or_nothing := false) -> []int {
+	if all_or_nothing {
+		any_checked := false
+		for a in pass.assets {
+			if a.kind in kinds && a.carried == nil {
+				any_checked = true
+				break
+			}
+		}
+		if any_checked {
+			for &a in pass.assets {
+				if a.kind in kinds && a.carried != nil {
+					uncarry(&a)
+				}
+			}
+		}
+	}
+	checked := make([dynamic]int, context.temp_allocator)
+	for a, i in pass.assets {
+		if a.kind not_in kinds {
+			continue
+		}
+		if c, is_carried := a.carried.?; is_carried {
+			if pass.problems.list == nil {
+				pass.problems.list = make([dynamic]Problem, context.temp_allocator)
+			}
+			append(&pass.problems.list, ..c.problems)
+			settle(pass, i, .Current)
+		} else {
+			append(&checked, i)
+		}
+	}
+	return checked[:]
 }
 
 // Asset_Result is what a pass did with an asset. It is Pending until the pass of its kind settles it, and a pass that
@@ -222,90 +319,8 @@ Folder :: struct {
 	path: string,
 }
 
-// scan reads every asset in the roots, with its .meta file, in path order, and lists the folders. An asset without a
-// .meta file gets a new GUID, and the cooker writes its .meta file. A .meta file without its asset, as when Explorer
-// or git moves a source without it, is a warning. Files and directories whose names start with a dot are skipped.
-scan :: proc(roots: []Root, problems: ^Problems) -> (assets: []Asset_Source, folders: []Folder, shared: []format.Guid, ok: bool) {
-	found := make([dynamic]Asset_Source, context.temp_allocator)
-	found_folders := make([dynamic]Folder, context.temp_allocator)
-	ok = true
-	for root, root_index in roots {
-		// os.walker leaves the last directory that it reads open, which stops a rename or a delete of it, so the scan
-		// reads each directory itself.
-		todo := make([dynamic]string, context.temp_allocator)
-		append(&todo, root.dir)
-		for len(todo) > 0 {
-			dir := pop(&todo)
-			infos, err := os.read_all_directory_by_path(dir, context.temp_allocator)
-			if err != nil {
-				report_error(problems, forward_slashes(dir), 0, 0, "%v", err)
-				ok = false
-				continue
-			}
-			for info in infos {
-				if strings.has_prefix(info.name, ".") {
-					continue
-				}
-				if info.type == .Directory {
-					append(&todo, info.fullpath)
-				}
-				if !found_entry(root, root_index, info, &found, &found_folders, problems) {
-					ok = false
-				}
-			}
-		}
-	}
-	return found_assets(found[:], found_folders[:], problems, ok)
-}
-
 // found_assets sorts what the scan found, and leaves out the assets that share a GUID, which it also gives.
-
-// found_entry adds a file or a directory that the scan found to what it found.
-@(private = "file")
-found_entry :: proc(
-	root: Root,
-	root_index: int,
-	info: os.File_Info,
-	found: ^[dynamic]Asset_Source,
-	found_folders: ^[dynamic]Folder,
-	problems: ^Problems,
-) -> bool {
-	if info.type == .Directory {
-		path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
-		append(found_folders, Folder{root_index, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))})
-		return true
-	}
-	kind := kind_of(info.name)
-	if info.type == .Regular && strings.has_suffix(info.name, format.META_EXTENSION) {
-		meta_path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
-		if !os.exists(strings.trim_suffix(meta_path, format.META_EXTENSION)) {
-			report_warning(problems, meta_path, 0, 0, "has no asset next to it. Move it to its asset, which then keeps its GUID, or delete it.")
-		}
-		return true
-	}
-	if info.type != .Regular || kind == .None {
-		return true
-	}
-	path := forward_slashes(strings.clone(info.fullpath, context.temp_allocator))
-	a := Asset_Source {
-		kind = kind,
-		root = root_index,
-		path = path,
-		name = fmt.tprintf("%s/%s", root.name, strings.trim_prefix(path, fmt.tprintf("%s/", root.dir))),
-		dependencies = make([dynamic]format.Guid, context.temp_allocator),
-		subassets = make([dynamic]Subasset, context.temp_allocator),
-	}
-	switch read_asset(root.dir, &a, problems) {
-	case .Read:
-		append(found, a)
-	case .Gone:
-	case .Failed:
-		return false
-	}
-	return true
-}
-
-@(private = "file")
+@(private)
 found_assets :: proc(
 	found: []Asset_Source,
 	found_folders: []Folder,
@@ -443,7 +458,7 @@ assets_of :: proc(assets: []Asset_Source, kind: format.Asset_Kind) -> []int {
 	return result[:]
 }
 
-@(private = "file")
+@(private)
 Read_Result :: enum {
 	Read,
 	// The asset moved or was deleted while the scan read it, so the next pass finds it where it went.
@@ -451,7 +466,7 @@ Read_Result :: enum {
 	Failed,
 }
 
-@(private = "file")
+@(private)
 read_asset :: proc(root_dir: string, a: ^Asset_Source, problems: ^Problems) -> Read_Result {
 	source, err := os.read_entire_file(a.path, context.temp_allocator)
 	if err != nil {

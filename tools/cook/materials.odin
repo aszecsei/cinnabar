@@ -136,6 +136,9 @@ Material_Set :: struct {
 	kinds:     map[format.Guid]format.Asset_Kind,
 }
 
+// The kinds that cook_materials cooks.
+MATERIAL_KINDS :: Asset_Kinds{.Shading_Model, .Material, .Material_Instance, .Material_Function}
+
 // material_set parses the shading models and the material functions, and settles them: those with errors fail, and
 // so does every shading model whose name another has.
 material_set :: proc(pass: ^Pass) -> (set: Material_Set, ok: bool) {
@@ -207,8 +210,18 @@ add_function_dependency :: proc(a: ^Asset_Source, n: ^Graph_Node) {
 // cook_materials checks the shading models and the material functions, and cooks the materials and instances whose
 // keys changed. A material cooks a variant for each combination of switches that it or an instance uses. It reports
 // every failure, and returns false if any.
+//
+// A material's variants come from the instances that resolve to it, which no dependency says, so a daemon's pass that
+// looks at one of these kinds looks at all of them (see carry_kind).
 cook_materials :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
+	checked := carry_kind(pass, MATERIAL_KINDS, all_or_nothing = true)
+	if len(checked) == 0 {
+		return true
+	}
+	for i in checked {
+		asset_source(pass, i)
+	}
 	set, ok := material_set(pass)
 	if pass.shadings == nil {
 		pass.shadings = make([dynamic]^Shading_Decl, context.temp_allocator)
@@ -435,7 +448,7 @@ input_count :: proc(type: string) -> int {
 parse_shading :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Shading_Decl, ok: bool) {
 	decl = {asset = index, name = filepath.stem(a.path), inputs = make([dynamic]Shading_Input, context.temp_allocator)}
 	ok = true
-	lines, _, _, _ := decl_lines(string(a.source))
+	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "shading 1" {
 		report_error(problems, a.path, 1, 0, "a shading model starts with `shading 1`")
 		ok = false
@@ -514,7 +527,7 @@ parse_material :: proc(a: Asset_Source, index: int, kinds: map[format.Guid]forma
 		ok           = true,
 	}
 	cutoff_line, transparency_line, geometry_line := 0, 0, 0
-	lines, body, body_line, has_body := decl_lines(string(a.source), stop_at_body = true)
+	lines, body, body_line, has_body := decl_lines(string(source_of(a)), stop_at_body = true)
 	if len(lines) == 0 || lines[0].text != "material 1" {
 		report_error(problems, a.path, 1, 0, "a material starts with `material 1`")
 		decl.ok = false
@@ -784,7 +797,7 @@ param_count :: proc(type: format.Material_Param_Type) -> int {
 
 parse_instance :: proc(a: Asset_Source, index: int, problems: ^Problems) -> (decl: Instance_Decl) {
 	decl = {asset = index, overrides = make([dynamic]Override, context.temp_allocator), ok = true}
-	lines, _, _, _ := decl_lines(string(a.source))
+	lines, _, _, _ := decl_lines(string(source_of(a)))
 	if len(lines) == 0 || lines[0].text != "material_instance 1" {
 		report_error(problems, a.path, 1, 0, "a material instance starts with `material_instance 1`")
 		decl.ok = false
@@ -862,7 +875,7 @@ resolve :: proc(
 		current = decl.parent
 	}
 	m := r.material
-	append(&r.chain, assets[m.asset].source)
+	append(&r.chain, source_of(assets[m.asset]))
 	for s, i in m.switches {
 		if s.default {
 			r.switches |= 1 << u32(i)
@@ -874,7 +887,7 @@ resolve :: proc(
 	// The material's parameters, then each instance's overrides, from the one nearest the material.
 	#reverse for decl in path {
 		a := assets[decl.asset]
-		append(&r.chain, a.source)
+		append(&r.chain, source_of(a))
 		if decl.tool_texture != {} {
 			r.tool_texture = decl.tool_texture
 		}
@@ -1297,7 +1310,7 @@ cook_material :: proc(
 	// adds the parameters' values.
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%x\x00%x\x00", a.name, format.material_layout(), inputs_hash))
 	key = hash.fnv64a(transmute([]byte)a.meta_text, key)
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a), key)
 	for source in sources {
 		key = hash.fnv64a(transmute([]byte)source, key)
 	}

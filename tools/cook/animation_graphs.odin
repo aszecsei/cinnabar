@@ -40,7 +40,7 @@ Animation_Graph_Problem :: struct {
 
 cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	graphs := assets_of(assets, .Animation_Graph)
+	graphs := carry_kind(pass, {.Animation_Graph})
 	if len(graphs) > 0 && !make_output_dir(pass, out_dir, {.Animation_Graph}) {
 		return false
 	}
@@ -48,6 +48,7 @@ cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pas
 	step_begin(pass, .Animation_Graph, "", len(graphs))
 	for i in graphs {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_animation_graph(&assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -59,7 +60,7 @@ cook_animation_graphs :: proc(options: Cook_Options, assets: []Asset_Source, pas
 cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	contents, parse_problems := animation_graph_parse(string(a.source), context.temp_allocator)
+	contents, parse_problems := animation_graph_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parse_problems {
 		report_error(problems, a.path, p.line, 0, "%s", p.message)
 	}
@@ -67,20 +68,21 @@ cook_animation_graph :: proc(a: ^Asset_Source, out_dir: string, pass: ^Pass) -> 
 	if len(parse_problems) > 0 || !settings_ok {
 		return .Failed
 	}
+	// What it names is known whether it cooks or not, so the index has it either way.
+	for c in contents.clips {
+		if c.clip != {} {
+			append(&a.dependencies, c.clip)
+		}
+	}
 	layout := format.animation_graph_layout()
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%x\x00", ANIMATION_GRAPH_COOK_VERSION, a.name, layout))
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a^), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	buffer: [32]u8
 	output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(guid, &buffer))
 	if cooked_key(output, .Animation_Graph, layout) == key && !pass.force[guid] {
 		return .Current
-	}
-	for c in contents.clips {
-		if c.clip != {} {
-			append(&a.dependencies, c.clip)
-		}
 	}
 	contents.guid, contents.key, contents.source_path = guid, key, a.name
 	if !write_blob(output, format.animation_graph_write(contents, context.temp_allocator)) {

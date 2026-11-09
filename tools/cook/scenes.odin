@@ -14,12 +14,17 @@ SCENE_COOK_VERSION :: "scenes 2"
 
 // cook_scenes cooks the prefabs and the scenes among the assets whose keys changed. The cooker cannot lay out native
 // components, because their types exist only in the game DLL, so it checks only what the file itself says: its
-// syntax, its prefabs, and that the scene IDs and script GUIDs that it refers to exist. It parses every prefab first,
-// since a scene's cook expands the prefabs that it instantiates, and writes both kinds flat. It parses every scene,
-// also one that is up to date, so its warnings and the assets that it names are known at every cook. It reports every
-// failure, and returns false if any.
+// syntax, its prefabs, and that the scene IDs and script GUIDs that it refers to exist. It parses every prefab that it
+// looks at first, since a scene's cook expands the prefabs that it instantiates, and writes both kinds flat. It parses
+// every scene that it looks at, also one that is up to date, so its warnings and the assets that it names are known.
+// A carried prefab parses only when a scene that it looks at instantiates it. It reports every failure, and returns
+// false if any.
 cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	problems := &pass.problems
+	checked := carry_kind(pass, {.Scene, .Prefab})
+	if len(checked) == 0 {
+		return true
+	}
 	scripts := make(map[format.Guid]bool, context.temp_allocator)
 	for i in assets_of(assets, .Script) {
 		scripts[assets[i].meta.guid] = true
@@ -36,28 +41,42 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	if !make_output_dir(pass, out_dir, {.Scene, .Prefab}) {
 		return false
 	}
-	// Each prefab that parses, by GUID, for the expansions, and the source of every prefab, for the scenes' keys.
-	prefabs := make(map[format.Guid]format.Scene, context.temp_allocator)
-	sources := make(map[format.Guid][]byte, context.temp_allocator)
-	parsed := make(map[int]format.Scene, context.temp_allocator)
+	prefabs := Scene_Prefabs {
+		pass   = pass,
+		parsed = make(map[format.Guid]Maybe(format.Scene), context.temp_allocator),
+		index  = make(map[format.Guid]int, context.temp_allocator),
+	}
 	for i in assets_of(assets, .Prefab) {
+		prefabs.index[assets[i].meta.guid] = i
+	}
+	// The prefabs that the pass looks at parse with their problems.
+	parsed := make(map[int]format.Scene, context.temp_allocator)
+	for i in checked {
 		s := &assets[i]
-		sources[s.meta.guid] = s.source
-		if scene, ok := parse_scene(s^, problems); ok {
+		if s.kind != .Prefab {
+			continue
+		}
+		asset_source(pass, i)
+		scene, ok := parse_scene(s^, problems)
+		prefabs.parsed[s.meta.guid] = scene if ok else nil
+		if ok {
 			parsed[i] = scene
-			prefabs[s.meta.guid] = scene
 		}
 	}
 	resolver := format.Prefab_Resolver {
 		data = &prefabs,
 		find = proc(data: rawptr, prefab: format.Guid) -> (format.Scene, bool) {
-			scene, found := (^map[format.Guid]format.Scene)(data)[prefab]
-			return scene, found
+			return scene_prefab((^Scene_Prefabs)(data), prefab)
 		},
 	}
 	ok := true
 	for kind in ([]format.Asset_Kind{.Prefab, .Scene}) {
-		of_kind := assets_of(assets, kind)
+		of_kind := make([dynamic]int, context.temp_allocator)
+		for i in checked {
+			if assets[i].kind == kind {
+				append(&of_kind, i)
+			}
+		}
 		step_begin(pass, kind, "", len(of_kind))
 		for i in of_kind {
 			defer step_advance(pass)
@@ -65,6 +84,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 			settings_ok := check_settings(s^, problems)
 			scene, scene_ok := parsed[i]
 			if kind == .Scene {
+				asset_source(pass, i)
 				scene, scene_ok = parse_scene(s^, problems)
 			}
 			flat: format.Scene
@@ -100,7 +120,7 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 					}
 				}
 			}
-			key := scene_key(options.config, s^, scene, prefabs, sources)
+			key := scene_key(options.config, s^, scene, &prefabs)
 			buffer: [32]u8
 			output := fmt.tprintf("%s/%s.blob", out_dir, format.guid_format(s.meta.guid, &buffer))
 			if cooked_key(output, kind, format.scene_layout()) == key && !pass.force[s.meta.guid] {
@@ -118,11 +138,39 @@ cook_scenes :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) 
 	return ok
 }
 
+// Scene_Prefabs gives the scenes' cook the prefabs, each parsed once. A carried prefab parses when a scene first
+// instantiates it, and its problems are not reported again, as the pass carries them.
+@(private = "file")
+Scene_Prefabs :: struct {
+	pass:   ^Pass,
+	// By GUID, nil for one that did not parse.
+	parsed: map[format.Guid]Maybe(format.Scene),
+	// Every prefab's asset, by GUID.
+	index:  map[format.Guid]int,
+}
+
+@(private = "file")
+scene_prefab :: proc(p: ^Scene_Prefabs, guid: format.Guid) -> (format.Scene, bool) {
+	if known, found := p.parsed[guid]; found {
+		return known.?
+	}
+	i, is_prefab := p.index[guid]
+	if !is_prefab {
+		return {}, false
+	}
+	asset_source(p.pass, i)
+	carried: Problems
+	scene, ok := parse_scene(p.pass.assets[i], &carried)
+	p.parsed[guid] = scene if ok else nil
+	return scene, ok
+}
+
 // scene_key covers what the blob depends on: the cooker, the configuration, the path, the source, the settings, and
 // the source of every prefab that the scene instantiates, through the prefabs inside them, or that it is missing.
-scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, prefabs: map[format.Guid]format.Scene, sources: map[format.Guid][]byte) -> u64 {
+@(private = "file")
+scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, prefabs: ^Scene_Prefabs) -> u64 {
 	key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%v\x00%s\x00%x\x00", SCENE_COOK_VERSION, config, s.name, format.scene_layout()))
-	key = hash.fnv64a(s.source, key)
+	key = hash.fnv64a(source_of(s), key)
 	key = hash.fnv64a(transmute([]byte)s.meta_text, key)
 	used := make(map[format.Guid]bool, context.temp_allocator)
 	pending := make([dynamic]format.Scene, context.temp_allocator)
@@ -133,7 +181,7 @@ scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, p
 				continue
 			}
 			used[e.prefab] = true
-			if inner, found := prefabs[e.prefab]; found {
+			if inner, found := scene_prefab(prefabs, e.prefab); found {
 				append(&pending, inner)
 			}
 		}
@@ -152,8 +200,8 @@ scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, p
 	})
 	for &g in guids {
 		key = hash.fnv64a(g[:], key)
-		if source, found := sources[g]; found {
-			key = hash.fnv64a(source, key)
+		if i, found := prefabs.index[g]; found {
+			key = hash.fnv64a(asset_source(prefabs.pass, i), key)
 		} else {
 			key = hash.fnv64a(transmute([]byte)string("\x00missing"), key)
 		}
@@ -164,7 +212,7 @@ scene_key :: proc(config: Script_Config, s: Asset_Source, scene: format.Scene, p
 // parse_scene parses a scene or a prefab and reports the problems of its text.
 parse_scene :: proc(s: Asset_Source, problems: ^Problems) -> (scene: format.Scene, ok: bool) {
 	parsed: []format.Scene_Problem
-	scene, parsed, ok = format.scene_parse(string(s.source), context.temp_allocator)
+	scene, parsed, ok = format.scene_parse(string(source_of(s)), context.temp_allocator)
 	for p in parsed {
 		if p.error {
 			report_error(problems, s.path, p.line, 0, "%s", p.message)

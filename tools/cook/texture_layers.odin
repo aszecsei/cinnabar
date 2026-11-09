@@ -50,7 +50,7 @@ parse_texture_set :: proc(a: Asset_Source, assets: []Asset_Source, by_guid: map[
 	face_seen: [6]bool
 	has_faces := false
 	layers := make([dynamic]int, context.temp_allocator)
-	text := string(a.source)
+	text := string(source_of(a))
 	line_number := 0
 	for raw_line in strings.split_lines_iterator(&text) {
 		line_number += 1
@@ -161,7 +161,7 @@ texture_layers :: proc(a: Asset_Source, assets: []Asset_Source, set: Texture_Set
 		layers = make([]Image, len(set.children), context.temp_allocator)
 		for child, i in set.children {
 			c := assets[child]
-			layers[i] = decode_image_bytes(c.source, c.path, t, problems) or_return
+			layers[i] = decode_image_bytes(source_of(c), c.path, t, problems) or_return
 			if layers[i].width != layers[0].width || layers[i].height != layers[0].height {
 				report_error(problems, a.path, 0, 0, "%s is %dx%d, and %s is %dx%d: a set's images are one size", c.name, layers[i].width, layers[i].height, assets[set.children[0]].name, layers[0].width, layers[0].height)
 				return
@@ -173,7 +173,7 @@ texture_layers :: proc(a: Asset_Source, assets: []Asset_Source, set: Texture_Set
 		}
 		return layers, set.dimension, true
 	}
-	image := decode_image_bytes(a.source, a.path, t, problems) or_return
+	image := decode_image_bytes(source_of(a), a.path, t, problems) or_return
 	switch t.layout {
 	case .D2:
 		layers = make([]Image, 1, context.temp_allocator)

@@ -125,7 +125,14 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	problems := &pass.problems
 	out_dir := config_dir(options)
 	ok := true
-	textures := assets_of(assets, .Texture)
+	// An image that turns off standalone is looked at in every pass: whether a set names it is up to every set, and its
+	// check reads only its .meta file.
+	for &a in assets {
+		if a.kind == .Texture && a.carried != nil && !is_texture_set(a) && texture_setting(a, "standalone") == "false" {
+			uncarry(&a)
+		}
+	}
+	textures := carry_kind(pass, {.Texture})
 	if len(textures) > 0 && !make_output_dir(pass, out_dir, {.Texture}) {
 		return false
 	}
@@ -140,8 +147,18 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	for a, i in assets {
 		by_guid[a.meta.guid] = i
 	}
-	// Every set first, so that an image that turns off standalone knows whether one names it.
+	// Every set first, so that an image that turns off standalone knows whether one names it. A carried set names what
+	// it named at the last pass.
 	named := make(map[int]bool, context.temp_allocator)
+	for a in assets {
+		if a.kind == .Texture && a.carried != nil && is_texture_set(a) {
+			for child in a.dependencies {
+				if j, found := by_guid[child]; found {
+					named[j] = true
+				}
+			}
+		}
+	}
 	sets := make(map[int]Texture_Set, context.temp_allocator)
 	for i in textures {
 		a := &assets[i]
@@ -153,6 +170,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 		if !is_texture_set(a^) {
 			continue
 		}
+		asset_source(pass, i)
 		set, set_ok := parse_texture_set(a^, assets, by_guid, &named, problems)
 		if !set_ok {
 			settle(pass, i, .Failed)
@@ -178,6 +196,11 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 			settle(pass, i, .Current)
 			continue
 		}
+		// The jobs run on other threads, so the pass reads their sources first.
+		asset_source(pass, i)
+		for child in sets[i].children {
+			asset_source(pass, child)
+		}
 		append(&work.jobs, Texture_Job{asset = i, force = pass.force[a.meta.guid], set = sets[i], scratch = {problems = {log = problems.log}}})
 	}
 	Sized :: struct {
@@ -185,7 +208,7 @@ cook_textures :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass
 	}
 	by_size := make([]Sized, len(work.jobs), context.temp_allocator)
 	for job, i in work.jobs {
-		by_size[i] = {len(assets[job.asset].source), i}
+		by_size[i] = {len(source_of(assets[job.asset])), i}
 	}
 	slice.stable_sort_by(by_size, proc(x, y: Sized) -> bool {
 		return x.size > y.size
@@ -280,9 +303,9 @@ texture_key :: proc(options: Cook_Options, a: Asset_Source, assets: []Asset_Sour
 	key := hash.fnv64a(
 		transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%v\x00%s\x00%x\x00", TEXTURE_COOK_VERSION, COMPRESSONATOR_VERSION, openexr_version(), options.config, a.name, format.texture_layout()),
 	)
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a), key)
 	for child in set.children {
-		key = hash.fnv64a(assets[child].source, key)
+		key = hash.fnv64a(source_of(assets[child]), key)
 	}
 	return hash.fnv64a(transmute([]byte)a.meta_text, key)
 }

@@ -50,7 +50,7 @@ MESH_SETTINGS := []Setting_Info {
 // to date, so its problems are known at every cook. It reports every failure, and returns false if any.
 cook_mesh_files :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pass) -> bool {
 	out_dir := config_dir(options)
-	meshes := assets_of(assets, .Mesh)
+	meshes := carry_kind(pass, {.Mesh})
 	if len(meshes) > 0 && !make_output_dir(pass, out_dir, {.Mesh}) {
 		return false
 	}
@@ -58,6 +58,7 @@ cook_mesh_files :: proc(options: Cook_Options, assets: []Asset_Source, pass: ^Pa
 	step_begin(pass, .Mesh, "", len(meshes))
 	for i in meshes {
 		defer step_advance(pass)
+		asset_source(pass, i)
 		result := cook_mesh_file(options, &assets[i], out_dir, pass)
 		settle(pass, i, result)
 		ok &&= !asset_failed(result)
@@ -74,7 +75,7 @@ cook_mesh_file :: proc(
 ) -> Asset_Result {
 	problems := &pass.problems
 	settings_ok := check_settings(a^, problems)
-	mesh, parsed, parsed_ok := format.mesh_text_parse(string(a.source), context.temp_allocator)
+	mesh, parsed, parsed_ok := format.mesh_text_parse(string(source_of(a^)), context.temp_allocator)
 	for p in parsed {
 		if p.error {
 			report_error(problems, a.path, p.line, 0, "%s", p.message)
@@ -164,7 +165,7 @@ mesh_file_key :: proc(a: Asset_Source) -> u64 {
 			format.mesh_layout(),
 		),
 	)
-	key = hash.fnv64a(a.source, key)
+	key = hash.fnv64a(source_of(a), key)
 	guid := a.meta.guid
 	key = hash.fnv64a(guid[:], key)
 	for s in a.meta.settings {

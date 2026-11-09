@@ -186,7 +186,7 @@ a_parts_picture_goes_with_its_prefabs :: proc(t: ^testing.T) {
 	index: Index
 	index_build(&index, pass, options.roots[:])
 	defer index_destroy(&index)
-	thumbnails_update(&index, pass, options)
+	thumbnails_update(&index, &pass, options)
 	entry, found := asset_at(&index, "a.png")
 	testing.expect(t, found)
 	stem := strings.trim_suffix(entry.thumbnail, ".png")
@@ -196,7 +196,7 @@ a_parts_picture_goes_with_its_prefabs :: proc(t: ^testing.T) {
 	other := fmt.tprintf("%s/00000000000000000000000000000000.1111111111111111.e7e4b781f0a1effe.png", dir)
 	testing.expect(t, os.write_entire_file(other, transmute([]byte)string("old")) == nil)
 
-	thumbnails_update(&index, pass, options)
+	thumbnails_update(&index, &pass, options)
 
 	testing.expect(t, os.exists(part))
 	testing.expect(t, !os.exists(other))
@@ -216,7 +216,7 @@ a_stale_thumbnail_is_pruned :: proc(t: ^testing.T) {
 	stale := fmt.tprintf("%s/00000000000000000000000000000000.1111111111111111.png", dir)
 	testing.expect(t, os.write_entire_file(stale, transmute([]byte)string("old")) == nil)
 
-	thumbnails_update(&index, pass, options)
+	thumbnails_update(&index, &pass, options)
 
 	testing.expect(t, !os.exists(stale))
 	entry, found := asset_at(&index, "a.png")
@@ -234,7 +234,7 @@ a_stale_thumbnail_is_pruned :: proc(t: ^testing.T) {
 	next: Index
 	index_build(&next, pass, options.roots[:])
 	defer index_destroy(&next)
-	thumbnails_update(&next, pass, options)
+	thumbnails_update(&next, &pass, options)
 	again, _ := asset_at(&next, "a.png")
 	testing.expect_value(t, again.thumbnail, path)
 	testing.expect(t, again.thumbnail_ready)

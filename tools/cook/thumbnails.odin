@@ -94,8 +94,9 @@ thumbnail_kind :: proc(kind: cook_link.Asset_Kind) -> bool {
 }
 
 // thumbnails_update gives each asset in the index its thumbnail's path, removes the files that no asset wants, and makes
-// the textures' and the sounds' that are missing.
-thumbnails_update :: proc(index: ^Index, pass: Pass, options: Cook_Options) {
+// the textures' and the sounds' that are missing. What the pass carries keeps the last pass's file, since nothing that
+// its picture shows changed.
+thumbnails_update :: proc(index: ^Index, pass: ^Pass, options: Cook_Options) {
 	allocator := virtual.arena_allocator(&index.arena)
 	dir := fmt.tprintf("%s/%s", config_dir(options), THUMBNAILS_DIR)
 	if err := os.make_directory_all(dir); err != nil && err != .Exist {
@@ -103,9 +104,20 @@ thumbnails_update :: proc(index: ^Index, pass: Pass, options: Cook_Options) {
 		return
 	}
 	sources := make(map[string]^Asset_Source, len(pass.assets), context.temp_allocator)
-	for &a in pass.assets {
+	positions := make(map[string]int, len(pass.assets), context.temp_allocator)
+	carried := make(map[string]bool, context.temp_allocator)
+	for &a, i in pass.assets {
 		buffer: [32]u8
-		sources[strings.clone(format.guid_format(a.meta.guid, &buffer), context.temp_allocator)] = &a
+		guid := strings.clone(format.guid_format(a.meta.guid, &buffer), context.temp_allocator)
+		sources[guid] = &a
+		positions[guid] = i
+		if a.carried == nil || pass.saved == nil {
+			continue
+		}
+		carried[guid] = true
+		for s in a.subassets {
+			carried[strings.clone(format.guid_format(s.guid, &buffer), context.temp_allocator)] = true
+		}
 	}
 	settled := options
 	keys := Thumbnail_Keys {
@@ -126,16 +138,37 @@ thumbnails_update :: proc(index: ^Index, pass: Pass, options: Cook_Options) {
 	wanted := make(map[string]bool, len(index.assets), context.temp_allocator)
 	pending := make([dynamic]Thumbnail_Job, context.temp_allocator)
 	for guid, &entry in index.assets {
-		if !thumbnail_kind(entry.kind) || thumbnail_blob(&keys, guid) == 0 {
+		if !thumbnail_kind(entry.kind) {
 			continue
 		}
-		name := fmt.tprintf("%s.%16x", guid, thumbnail_key(&keys, guid))
-		wanted[name] = true
-		file := fmt.tprintf("%s.png", name)
+		file: string
+		old: cook_link.Asset
+		kept := false
+		if carried[guid] {
+			old, kept = pass.saved.assets[guid]
+		}
+		if kept {
+			if old.thumbnail == "" {
+				continue
+			}
+			file = old.thumbnail[strings.last_index_byte(old.thumbnail, '/') + 1:]
+		} else {
+			if thumbnail_blob(&keys, guid) == 0 {
+				continue
+			}
+			file = fmt.tprintf("%s.%16x.png", guid, thumbnail_key(&keys, guid))
+		}
+		wanted[strings.trim_suffix(file, ".png")] = true
 		entry.thumbnail = strings.clone(fmt.tprintf("%s/%s", dir, file), allocator)
 		entry.thumbnail_ready = present[file]
 		if !entry.thumbnail_ready && (entry.kind == .Texture || entry.kind == .Audio) {
-			append(&pending, Thumbnail_Job{guid = guid, kind = entry.kind, output = entry.thumbnail, source = sources[guid] or_else nil, blob = fmt.tprintf("%s/%s.blob", config_dir(options), guid)})
+			source: ^Asset_Source
+			// The jobs run on other threads, so a sound's source is read first.
+			if i, found := positions[guid]; found && entry.kind == .Audio {
+				asset_source(pass, i)
+				source = &pass.assets[i]
+			}
+			append(&pending, Thumbnail_Job{guid = guid, kind = entry.kind, output = entry.thumbnail, source = source, blob = fmt.tprintf("%s/%s.blob", config_dir(options), guid)})
 		}
 	}
 	// A file goes when nothing wants its GUID and key, whatever comes after them, as a part of a prefab's picture.
@@ -182,7 +215,7 @@ thumbnail_make :: proc(job: Thumbnail_Job) -> bool {
 		}
 		pixels, size, ok = texture_thumbnail(data, context.temp_allocator)
 	} else if job.source != nil {
-		samples, channels, decoded := decode_sound(job.source.source, audio_setting(job.source^, "channels"))
+		samples, channels, decoded := decode_sound(source_of(job.source^), audio_setting(job.source^, "channels"))
 		defer delete(samples)
 		if decoded {
 			pixels, size, ok = waveform_thumbnail(samples[:], int(channels), context.temp_allocator)

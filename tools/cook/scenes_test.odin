@@ -118,7 +118,7 @@ component 35 Point_Light
 `
 
 @(private = "file")
-source_of :: proc(pass: Pass, path: string) -> (Asset_Source, bool) {
+asset_at :: proc(pass: Pass, path: string) -> (Asset_Source, bool) {
 	for a in pass.assets {
 		if strings.has_suffix(a.path, path) {
 			return a, true
@@ -166,9 +166,9 @@ scenes_cook_their_prefabs_flat :: proc(t: ^testing.T) {
 	testing.expect(t, door_ok && len(door.entities) == 3)
 
 	// A scene depends on the prefabs that it instantiates, and a prefab on the ones inside it.
-	hall_source, _ := source_of(pass, "hall.scene")
+	hall_source, _ := asset_at(pass, "hall.scene")
 	testing.expect(t, len(hall_source.dependencies) == 1 && hall_source.dependencies[0] == door_guid)
-	door_source, _ := source_of(pass, "door.prefab")
+	door_source, _ := asset_at(pass, "door.prefab")
 	testing.expect(t, len(door_source.dependencies) == 1 && door_source.dependencies[0] == (format.guid_parse("11111111111111111111111111111111") or_else {}))
 
 	// Editing the nested prefab cooks the scene again, through the door.
