@@ -282,11 +282,15 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	moon_light := s.moon_illuminance * phase
 
 	key := Sky_Light_Key{a, height, sun_direction, sun_illuminance, moon_direction, moon_light}
+	light := r.sky.ambient
 	if !r.sky.ambient_valid || r.sky.ambient_key != key {
-		r.sky.ambient = sky_ambient(a, height, {{sun_direction, sun_illuminance}, {moon_direction, moon_light}})
-		r.sky.ambient_key, r.sky.ambient_valid = key, true
+		light = sky_ambient(a, height, {{sun_direction, sun_illuminance}, {moon_direction, moon_light}})
+		// The sky's cubemap is keyed by the light of the frame's own view, so an extra view's at another height leaves it.
+		if !f.extra {
+			r.sky.ambient, r.sky.ambient_key, r.sky.ambient_valid = light, key, true
+		}
 	}
-	ambient := scale_ambient(r.sky.ambient, s.ambient_intensity)
+	ambient := scale_ambient(light, s.ambient_intensity)
 
 	platform := r.platform
 	for p in ([]^Shader_Pipeline{&r.sky.transmittance, &r.sky.multiscatter, &r.sky.view, &r.sky.background}) {

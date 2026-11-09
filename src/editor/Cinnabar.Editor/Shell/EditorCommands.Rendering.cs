@@ -22,7 +22,14 @@ static partial class EditorCommands
             Description = "Put every panel back where it starts.",
             Icon = "reset",
         });
-        commands.Register(new Command(Stats, "Viewport Stats", () => shell.Viewport.ShowStats = !shell.Viewport.ShowStats)
+        commands.Register(new Command(Stats, "Viewport Stats", () =>
+        {
+            var show = !shell.Viewport.ShowStats;
+            foreach (var viewport in shell.Viewports)
+            {
+                viewport.Session.ShowStats = show;
+            }
+        })
         {
             Description = "Show the frame rates and the adapter over the viewport.",
             Icon = "stats",
@@ -35,14 +42,31 @@ static partial class EditorCommands
             Shortcut = "Ctrl+F1",
             IsCheckedWhen = () => shell.RibbonCollapsed,
         });
-        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.Viewport.Scale, scale => shell.Viewport.Scale = scale,
+        commands.Register(ChoiceCommand.ForEnum<Viewport.ViewportScale>(ViewportScale, "Scale", () => shell.Viewport.Scale,
+            scale =>
+            {
+                foreach (var viewport in shell.Viewports)
+                {
+                    viewport.Session.Scale = scale;
+                }
+            },
             scale => scale == Viewport.ViewportScale.Fit ? "Fit" : "100%",
             description: "Fit the frame to the viewport, or show one frame pixel per screen pixel.",
             icon: "scale"));
+        commands.Register(ChoiceCommand.ForEnum<Shell.ViewportArrangement>(ViewportArrangement, "Viewports", () => shell.Arrangement, shell.SetArrangement,
+            arrangement => arrangement switch
+            {
+                Shell.ViewportArrangement.SideBySide => "Two, Side by Side",
+                Shell.ViewportArrangement.Stacked => "Two, Stacked",
+                Shell.ViewportArrangement.Quad => "Four",
+                _ => "One",
+            },
+            description: "Show one viewport of the scene, or two or four, each with its own camera and view. The tools act in the one that the mouse is in.",
+            icon: "viewport"));
     }
 
-    // The viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the features
-    // that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
+    // The active viewport's rendering (see docs/editor/viewport.md#viewport): what it shows in place of the lit scene, the
+    // features that it turns off, the exposure offset, and the helpers. Each toggle is checked while its feature is on.
     static void RegisterRendering(EditorShell shell)
     {
         var commands = shell.Commands;

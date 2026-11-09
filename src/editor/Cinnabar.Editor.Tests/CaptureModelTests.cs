@@ -58,14 +58,14 @@ public sealed class CaptureModelTests : IDisposable
         // The lit frame, then each view: the settings with the view, a wait for frames, the request; then the user's settings again.
         Assert.Collection(_sent,
             m => Assert.Equal(CaptureKind.Screenshot, Assert.IsType<CaptureRequest>(m).Kind),
-            m => Assert.Equal(DebugView.Depth, Assert.IsType<ViewportSettings>(m).DebugView),
+            m => Assert.Equal(DebugView.Depth, Assert.IsType<SetViewportSettings>(m).Settings.DebugView),
             m => Assert.EndsWith(".depth.png", Assert.IsType<CaptureRequest>(m).Path),
-            m => Assert.Equal(DebugView.Normals, Assert.IsType<ViewportSettings>(m).DebugView),
+            m => Assert.Equal(DebugView.Normals, Assert.IsType<SetViewportSettings>(m).Settings.DebugView),
             m => Assert.EndsWith(".normals.png", Assert.IsType<CaptureRequest>(m).Path),
-            m => Assert.Equal(settings, Assert.IsType<ViewportSettings>(m)));
+            m => Assert.Equal(new SetViewportSettings(0, settings), Assert.IsType<SetViewportSettings>(m)));
         Assert.Equal(2 * CaptureModel.SettleFrames, _framesAwaited);
         // The view's settings keep the user's other choices.
-        Assert.True(((ViewportSettings)_sent[1]).NoBloom);
+        Assert.True(((SetViewportSettings)_sent[1]).Settings.NoBloom);
 
         Assert.Equal(4, outcome.Files.Count);
         Assert.All(outcome.Files, f => Assert.StartsWith(_temp.Path, f));
@@ -115,7 +115,7 @@ public sealed class CaptureModelTests : IDisposable
 
         Assert.False(outcome.Ok);
         Assert.Contains("minimized", outcome.Error);
-        Assert.Equal(EditorShell.DefaultViewportSettings, Assert.IsType<ViewportSettings>(_sent[^1]));
+        Assert.Equal(new SetViewportSettings(0, EditorShell.DefaultViewportSettings), Assert.IsType<SetViewportSettings>(_sent[^1]));
         var sidecar = Assert.Single(outcome.Files);
         Assert.EndsWith(".json", sidecar);
         Assert.Contains("minimized", File.ReadAllText(sidecar));

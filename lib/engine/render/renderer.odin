@@ -1,5 +1,6 @@
 package render
 
+import "core:log"
 import "core:math"
 import "core:mem"
 
@@ -169,7 +170,37 @@ Frame_Desc :: struct {
 	// The pose of each skinned entity this frame, by entity (see Skin_Pose and docs/rendering/gpu-scene.md#skinned-meshes).
 	// A Mesh_Renderer with no pose here, or whose mesh has no skin stream, draws at rest.
 	skins:             []Skin_Pose,
+	// Other views of the same world that the frame also draws, each into a target of its own, after its own view (see
+	// docs/rendering/frame.md#extra-views). At most MAX_EXTRA_VIEWS draw.
+	extra_views:       []Extra_View,
 }
+
+// The most extra views that a frame draws. The texture cache holds the transient textures of this many and the frame's own.
+MAX_EXTRA_VIEWS :: 3
+
+// Extra_View is another camera on the frame's world, drawn after the frame's own view into its own target (see
+// docs/rendering/frame.md#extra-views). It keeps no state of its own between frames and changes none of the frame's: it
+// has no history, so no temporal anti-aliasing, global illumination, fog or clouds, and no exposure of its own, so it
+// reads the frame's. It uses the frame's hidden entities, skins, settings if Frame_Desc.settings is not nil, and quality
+// with the techniques that need a history or the ray scene turned off. It draws no particles, sprites or post effects.
+Extra_View :: struct {
+	view:       View,
+	size:       [2]u32,
+	// The output pass's target, in gpu.FRAME_TARGET_FORMAT (always SDR), in the render target layout, which the view
+	// leaves it in. A view with no target or no size is not drawn.
+	target:     gpu.Texture,
+	// As Frame_Desc's, for this view.
+	keep_ids:   bool,
+	no_debug:   bool,
+	debug_view: Debug_View,
+	// The features this view turns off, besides those that an extra view never has.
+	disable:    Features,
+	hooks:      Frame_Hooks,
+}
+
+// The features that an extra view never has: fog, clouds and global illumination keep histories, occlusion culling keeps
+// the camera's visibility from frame to frame, and the post effects may keep histories of their own.
+EXTRA_VIEW_DISABLED :: Features{.Fog, .Clouds, .Gi, .Occlusion_Culling, .Post_Effects}
 
 // Frame_Hooks add a game's passes and draws to the frame. Each is optional. They are procedures in the game, so a
 // Frame_Desc never outlives its frame.
@@ -202,6 +233,9 @@ Frame :: struct {
 	renderer:                 ^Renderer,
 	graph:                    ^Graph,
 	data:                     rawptr,
+	// This frame is an extra view's (see Extra_View), not the frame's own view. Its hooks run with its own frame, which
+	// has no histories, so a pass that keeps a state between frames must leave it out.
+	extra:                    bool,
 	view:                     View,
 	// The scene's size, which the world's targets, the debug layer and every pass before temporal AA have: the frame's
 	// size at the quality's render scale (see docs/rendering/anti-aliasing.md#upscaling).
@@ -448,7 +482,8 @@ renderer_destroy :: proc(r: ^Renderer) {
 
 // draw_frame draws a frame into the frame target: the world, the UI and the debug layer, combined by the output pass
 // (see docs/rendering/frame.md#frame). The world draws in a prepass, then in the forward pass with the lights' clusters and
-// the shadows, then post-processing runs on it. It returns false if the graph could not execute.
+// the shadows, then post-processing runs on it. Then each of the extra views draws into its own target (see
+// docs/rendering/frame.md#extra-views). It returns false if the frame's own graph could not execute.
 draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	profile.scope_text(&r.platform.profile, "Build frame", .Render)
 	residency_update(&r.residency)
@@ -461,9 +496,37 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		read_virtual_stats(r)
 	}
 	output := r.platform.gpu_output != nil ? r.platform.gpu_output() : gpu.Output{format = gpu.FRAME_TARGET_FORMAT}
-	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0)
-	g := begin(r.platform, &r.textures)
+	sync_frame_pipelines(r, output.mode, len(desc.previews) > 0 || len(desc.extra_views) > 0)
 	quality := desc.quality != nil ? clamp_quality(desc.quality^, r.caps) : r.quality
+	ok := draw_view(r, w, desc, output, quality, r.platform.gpu_frame_target(), false)
+	// The extra views come after the frame's own, which committed what it did: they read the exposure, the lookup table
+	// and the sky's cubemap as it left them. A view that fails does not fail the others.
+	if len(desc.extra_views) > MAX_EXTRA_VIEWS {
+		log.warnf("render: %d extra views, of which only the first %d draw", len(desc.extra_views), MAX_EXTRA_VIEWS)
+	}
+	for ev in desc.extra_views[:min(len(desc.extra_views), MAX_EXTRA_VIEWS)] {
+		if ev.target == {} || ev.size.x == 0 || ev.size.y == 0 {
+			continue
+		}
+		view := desc
+		view.view, view.size, view.keep_ids, view.no_debug, view.debug_view = ev.view, ev.size, ev.keep_ids, ev.no_debug, ev.debug_view
+		view.disable, view.hooks = ev.disable + EXTRA_VIEW_DISABLED, ev.hooks
+		view.extra_views, view.previews, view.sprites, view.playing = nil, nil, nil, nil
+		view.delta, view.shading_stats = 0, false
+		// The target is always SDR, whatever the frame's output is.
+		draw_view(r, w, view, {format = gpu.FRAME_TARGET_FORMAT}, extra_view_quality(quality), ev.target, true)
+	}
+	// After the last view, so the lines of this frame reach them all.
+	debug.end_frame(&r.debug)
+	return ok
+}
+
+// draw_view draws one view of the frame in a graph of its own: the frame's own, or an extra view's, which changes no
+// state that lasts between frames (see Frame.extra and docs/rendering/frame.md#extra-views). desc is the view's: for an
+// extra view, the frame's with the view's own fields. It returns false if the graph could not execute.
+@(private = "file")
+draw_view :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc, output: gpu.Output, quality: Quality, frame_target: gpu.Texture, extra: bool) -> bool {
+	g := extra ? begin_extra(r.platform, &r.textures) : begin(r.platform, &r.textures)
 	size := render_size(desc.size, quality.render_scale)
 	f := new(Frame, r.platform.frame_allocator)
 	f^ = {
@@ -480,8 +543,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 		scene_scale     = 1,
 		debug_view      = desc.debug_view,
 		lod_error       = quality.lod_error,
+		extra           = extra,
 	}
-	target := import_texture(&g, r.platform.gpu_frame_target(), .Color)
+	target := import_texture(&g, frame_target, .Color)
 	f.scene = create_texture(&g, {size = size, format = SCENE_FORMAT, label = "scene"})
 	f.ids = create_texture(&g, {size = size, format = ID_FORMAT, label = "entity ids"})
 	f.depth = create_texture(&g, {size = size, format = DEPTH_FORMAT, label = "scene depth"})
@@ -502,7 +566,9 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	f.shadow_settings = settings.shadows
 	f.no_occlusion = .Occlusion_Culling in desc.disable
 	f.no_meshlet_hierarchy = .Meshlet_Hierarchy in desc.disable
-	r.last_sky_mode = settings.sky.mode
+	if !extra {
+		r.last_sky_mode = settings.sky.mode
+	}
 	build_scene(f, w, desc.hidden, desc.skins)
 	f.lights = extract_lights(f, w, desc.hidden)
 	if .Shadows in desc.disable {
@@ -525,8 +591,10 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 	add_scene_passes(f, ambient)
 	// Every request for the ray scene came before, so its build is before every pass that traces it.
 	add_ray_scene_passes(f)
-	begin_sprites(f, desc.sprites, &r.sprites.main)
-	begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
+	if !extra {
+		begin_sprites(f, desc.sprites, &r.sprites.main)
+		begin_particles(f, w, desc.delta, desc.hidden, desc.playing)
+	}
 	lines := debug.frame_lines(&r.debug)
 	has_debug := !desc.no_debug && (len(lines) > 0 || desc.hooks.debug != nil)
 
@@ -654,7 +722,6 @@ draw_frame :: proc(r: ^Renderer, w: ^ecs.World, desc: Frame_Desc) -> bool {
 			}
 		}
 	}
-	debug.end_frame(&r.debug)
 	return ok
 }
 
@@ -670,13 +737,13 @@ frame_time :: proc(r: ^Renderer) -> f32 {
 // sync_frame_pipelines creates the renderer's pipelines from their shaders, and updates those whose shaders changed,
 // or all of them after a code reload.
 @(private = "file")
-sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, previews: bool) {
+sync_frame_pipelines :: proc(r: ^Renderer, mode: gpu.Output_Mode, sdr: bool) {
 	force := r.reloaded
 	r.reloaded = false
 	assets := r.residency.assets
 	sync_output_pipeline(r, mode, force)
-	// The previews' targets are always in FRAME_TARGET_FORMAT.
-	if mode != .Sdr && previews {
+	// The previews' and the extra views' targets are always in FRAME_TARGET_FORMAT.
+	if mode != .Sdr && sdr {
 		sync_output_pipeline(r, .Sdr, force)
 	}
 	sync_post_pipelines(r, force)

@@ -236,7 +236,7 @@ handle_taken :: proc(l: ^Link, taken: serve.Taken, game: core.Game_API, state: r
 @(private = "file")
 is_host_message :: proc(kind: u16) -> bool {
 	switch kind {
-	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording), link.kind_of(link.Capture_Request):
+	case link.kind_of(link.Hello), link.kind_of(link.Viewport_Size), link.kind_of(link.Frame_Acknowledged), link.kind_of(link.Preview_Acknowledged), link.kind_of(link.Viewport_Acknowledged), link.kind_of(link.Editor_Input), link.kind_of(link.Profile_Capture_Request), link.kind_of(link.Profile_Recording), link.kind_of(link.Capture_Request):
 		return true
 	case link.kind_of(link.Welcome), link.kind_of(link.Refused), link.kind_of(link.Log), link.kind_of(link.Game_Reloaded), link.kind_of(link.Frame_Target), link.kind_of(link.Host_Stats), link.kind_of(link.Profile_Summary), link.kind_of(link.Profile_Capture), link.kind_of(link.Capture_Result):
 		// Only the host sends these, so handle_message reports them.
@@ -279,6 +279,11 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		if linked {
 			core.acknowledge_preview_frame(int(m.id), m.generation, m.frame)
 		}
+	case link.Viewport_Acknowledged:
+		// Viewport 0 is the frame target, which a Frame_Acknowledged acknowledges.
+		if linked && m.viewport > 0 {
+			core.acknowledge_viewport_frame(int(m.viewport) - 1, m.generation, m.frame)
+		}
 	case link.Editor_Input:
 		if linked {
 			events := make([]core.Input_Event, len(m.events), context.temp_allocator)
@@ -315,7 +320,7 @@ handle_message :: proc(l: ^Link, message: link.Message, connection: u64) {
 		}
 	case link.Welcome, link.Refused, link.Log, link.Game_Reloaded, link.Frame_Target, link.Host_Stats, link.Profile_Summary, link.Profile_Capture, link.Capture_Result:
 		log.warnf("host: editor link: the editor sent a message that only the host sends: %v", message)
-	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Viewport_Settings, link.Live_Mesh, link.Live_Mesh_Vertices, link.Release_Live_Mesh, link.Mesh_Overlay, link.Sky_Sun_Request, link.Sky_Sun, link.Animator_View, link.Set_Preview_Parameter, link.Restart_Preview, link.Ui_Preview_Settings, link.Ui_Preview_Layout, link.Capture_Reflection_Probes, link.Reflection_Probe_View, link.Box_Handles, link.Bake_Thumbnail, link.Thumbnail_Failed:
+	case link.Component_Types, link.Entity_Snapshot, link.Entity_Delta, link.Watch_Entity, link.Unwatch_Entity, link.Entity_Values, link.Load_Scene, link.Apply_Operations, link.Edit_Problems, link.Editor_Camera, link.Set_Selection, link.Gizmo_State, link.Pick_Request, link.Pick_Result, link.Set_Hidden, link.Set_Mode, link.Step_Frame, link.Game_Stats, link.Game_Commands, link.Run_Game_Command, link.Game_Command_Result, link.Open_Preview, link.Preview_Settings, link.Close_Preview, link.Preview_Target, link.Set_Viewport_Settings, link.Open_Viewport, link.Close_Viewport, link.Viewport_Target, link.Live_Mesh, link.Live_Mesh_Vertices, link.Release_Live_Mesh, link.Mesh_Overlay, link.Sky_Sun_Request, link.Sky_Sun, link.Animator_View, link.Set_Preview_Parameter, link.Restart_Preview, link.Ui_Preview_Settings, link.Ui_Preview_Layout, link.Capture_Reflection_Probes, link.Reflection_Probe_View, link.Box_Handles, link.Bake_Thumbnail, link.Thumbnail_Failed:
 		// is_host_message sends these to the game.
 	}
 }

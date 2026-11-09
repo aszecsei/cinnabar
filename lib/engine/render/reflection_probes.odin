@@ -416,7 +416,8 @@ reflection_probe_memory :: proc(params: Reflection_Params) -> u64 {
 // capture its shadow view, and the scene's constants, which take the records and the capture's views: it extracts the
 // probes, gives them their slots, plans the capture's share of this frame, and uploads the records of the probes that
 // have a cube. The probes run with every technique but Off, with the Probes technique's parameters at the level: the
-// screen-space reflections fall back to them. With Off, the cubes are freed.
+// screen-space reflections fall back to them. With Off, the cubes are freed. An extra view only reads the slots that the
+// frame's own view left (see begin_extra_reflection_probes).
 @(private)
 begin_reflection_probes :: proc(
 	f: ^Frame,
@@ -427,6 +428,10 @@ begin_reflection_probes :: proc(
 ) {
 	r := f.renderer
 	rp := &r.reflection_probes
+	if f.extra {
+		begin_extra_reflection_probes(f, settings, ambient)
+		return
+	}
 	rp.stats = {}
 	if settings.off || settings.technique == .Off {
 		if rp.made {
@@ -490,6 +495,33 @@ begin_reflection_probes :: proc(
 	rp.stats.probes = u32(len(candidates))
 	rp.stats.capacity = params.probes
 	rp.stats.faces = pf.face_count
+}
+
+// begin_extra_reflection_probes gives an extra view the probes that the frame's own view finished: their records relative
+// to its position, which the clusters of its own bin. It extracts, ranks and captures nothing, counts nothing, and frees
+// no cube, whatever its settings are.
+@(private = "file")
+begin_extra_reflection_probes :: proc(f: ^Frame, settings: Reflection_Settings, ambient: Ambient) {
+	r := f.renderer
+	rp := &r.reflection_probes
+	if settings.off || settings.technique == .Off || rp.cubes.texture == {} {
+		return
+	}
+	platform := r.platform
+	pf := new(Reflection_Probe_Frame, platform.frame_allocator)
+	f.reflection_probes = pf
+	pf.params, pf.mips = rp.params, rp.mips
+	pf.ambient = ambient_constants(ambient)
+	pf.shadow_view, pf.shadow_light = -1, -1
+	pf.cubes = import_texture(f.graph, rp.cubes.texture, .Storage)
+	pf.records = reflection_probe_records(rp, f.view.position, platform.frame_allocator)
+	if len(pf.records) > 0 {
+		ok: bool
+		pf.upload, ok = upload_bytes(platform, slice.to_bytes(pf.records))
+		if !ok {
+			pf.records = nil
+		}
+	}
 }
 
 @(private = "file")

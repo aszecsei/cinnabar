@@ -97,6 +97,12 @@ Platform_API :: struct {
 	// shared objects.
 	gpu_preview_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
 	gpu_release_preview_target: proc(id: int),
+	// The editor's extra viewports have shared targets of the same kind (see docs/editor/viewport.md#several-viewports):
+	// gpu_viewport_target gives extra viewport id's texture for this frame, at most gpu.MAX_VIEWPORT_SIZE on a side, as
+	// gpu_preview_target gives a preview's, and gpu_release_viewport_target releases its shared objects. id is below
+	// gpu.MAX_VIEWPORT_TARGETS.
+	gpu_viewport_target:         proc(id: int, size: [2]u32) -> (gpu.Preview_Target, bool),
+	gpu_release_viewport_target: proc(id: int),
 	// gpu_capture_texture asks for a copy of a texture at this frame's end, which the host gets with the ticket, as the
 	// content browser's thumbnails do. The texture must end the frame in the render target layout. It is false when the
 	// backend has no room this frame, so ask again next frame.

@@ -233,7 +233,10 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	if noise == {} {
 		return
 	}
-	a.frame += 1
+	// An extra view has no temporal AA, so its noise stays where it is, and it leaves the frame's own view's slice.
+	if !f.extra {
+		a.frame += 1
+	}
 	// An upscaler averages the noise over time as temporal AA does.
 	temporal := f.post.temporal || f.post.upscaler != {}
 

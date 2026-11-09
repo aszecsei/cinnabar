@@ -267,6 +267,8 @@ Pipelines :: struct {
 // Frame is what the pass procedures need. It lives in frame memory.
 Frame :: struct {
 	state:          ^Game_State,
+	// The editor's viewport that the frame is: 0 for the frame's own view, and another for an extra view of it.
+	viewport:       int,
 	// The scene's size, at the quality's render scale, which before_world takes from the renderer's frame.
 	size:           [2]u32,
 	view:           render.View,
@@ -593,11 +595,16 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 	if size.x <= 0 || size.y <= 0 {
 		return true
 	}
-	pass, ok := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN)
-	if !ok {
-		return true
+	if frame, ok := view_frame(s, 0, {u32(size.x), u32(size.y)}, camera_view(s)); ok {
+		render_frame(s, frame)
 	}
-	view := camera_view(s)
+	return true
+}
+
+// view_frame is the sample's data for a view of the frame: the constants of its own passes, and its triangles relative
+// to the view. It is false when the upload ring has no room for the constants.
+view_frame :: proc(s: ^Game_State, viewport: int, size: [2]u32, view: render.View) -> (frame: ^Frame, ok: bool) {
+	pass := s.platform.gpu_upload(size_of(Pass_Constants), gpu.PASS_CONSTANTS_ALIGN) or_return
 	aspect := f32(size.x) / f32(size.y)
 	right, up, forward := render.view_axes(view)
 	(^Pass_Constants)(raw_data(pass.data))^ = {
@@ -610,8 +617,16 @@ update :: proc(state: rawptr, dt: time.Duration) -> (keep_running: bool) {
 		tan_half_fov    = math.tan(view.vertical_fov * 0.5),
 		near            = view.near,
 	}
-	render_frame(s, {u32(size.x), u32(size.y)}, view, pass)
-	return true
+	frame = new(Frame, s.platform.frame_allocator)
+	frame^ = {
+		state          = s,
+		viewport       = viewport,
+		size           = size,
+		view           = view,
+		pass_constants = pass,
+	}
+	extract_triangles(frame)
+	return frame, true
 }
 
 // tone_pan is the test tone's pan: how far the first spinning entity's presented X axis points along the view's right.
@@ -687,18 +702,19 @@ stream_rings :: proc(s: ^Game_State) {
 // render_frame draws the frame with the built-in renderer, which draws the Mesh_Renderers, and adds the sample's own
 // work through its hooks: the triangles in the world pass,
 // the ray-traced shadows and the post pass after it, the UI's documents in the UI layer, and the editor's tools in the
-// debug layer. The render graph places the barriers between the passes and the waits between the queues.
-render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_constants: gpu.Upload) {
-	frame := new(Frame, s.platform.frame_allocator)
-	frame^ = {
-		state          = s,
-		size           = size,
-		view           = view,
-		pass_constants = pass_constants,
-	}
-	extract_triangles(frame)
+// debug layer. The render graph places the barriers between the passes and the waits between the queues. The editor's
+// other viewports are extra views of the frame, each with the sample's own passes and the editor's tools, and no UI.
+render_frame :: proc(s: ^Game_State, frame: ^Frame) {
 	// A linked editor, in any mode: the frame writes the IDs for its picks and takes its viewport settings.
 	editing := editor.active(&s.editor)
+	extra_views := make([dynamic]render.Extra_View, s.platform.frame_allocator)
+	for extra in editor.extra_viewports(&s.editor) {
+		if extra_frame, ok := view_frame(s, extra.viewport, extra.size, extra.view); ok {
+			hooks := frame_hooks(extra_frame, editing)
+			hooks.ui = nil
+			append(&extra_views, editor.extra_view(&s.editor, extra, hooks))
+		}
+	}
 	// The editor's viewport settings and the shapes of lights, volumes and cameras (see docs/editor/viewport.md#viewport), or
 	// none without an editor. The shapes draw only in Edit.
 	overrides := editor.render_overrides(&s.editor)
@@ -706,8 +722,8 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
 	hidden := editor.visibility(&s.editor, &s.world).hidden
 	desc := render.Frame_Desc {
-		view            = view,
-		size            = size,
+		view            = frame.view,
+		size            = frame.size,
 		keep_ids        = editing,
 		// The debug layer, with the editor's overlays and the debug lines, only while editing or without an editor.
 		no_debug        = !editor.debug_shown(&s.editor),
@@ -725,18 +741,24 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View, pass_const
 		playing         = editor.playing(&s.editor),
 		// The skinned entities' poses, between the last two ticks.
 		skins           = anim.present(&s.animation, &s.world, s.platform.frame_allocator),
-		hooks           = {
-			data         = frame,
-			before_world = before_world,
-			world_uses   = world_uses,
-			world_draw   = draw_scene,
-			after_world  = after_world,
-			ui           = draw_ui_layer,
-			debug        = editing ? draw_editor_tools : nil,
-		},
+		hooks           = frame_hooks(frame, editing),
+		extra_views     = extra_views[:],
 	}
 	if render.draw_frame(&s.renderer, &s.world, desc) && frame.building_blas {
 		s.blas_built = true
+	}
+}
+
+// frame_hooks adds the sample's passes and draws to a view of the frame.
+frame_hooks :: proc(frame: ^Frame, editing: bool) -> render.Frame_Hooks {
+	return {
+		data         = frame,
+		before_world = before_world,
+		world_uses   = world_uses,
+		world_draw   = draw_scene,
+		after_world  = after_world,
+		ui           = draw_ui_layer,
+		debug        = editing ? draw_editor_tools : nil,
 	}
 }
 
@@ -792,12 +814,13 @@ draw_ui_layer :: proc(f: ^render.Frame) {
 // draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo, which draw into the debug layer.
 // In Play and Paused the frame has no debug layer, so only the pick runs.
 draw_editor_tools :: proc(f: ^render.Frame) {
-	s := (^Frame)(f.data).state
+	frame := (^Frame)(f.data)
+	s := frame.state
 	editor.add_viewport_passes(
 		&s.editor,
 		f.graph,
 		&s.world,
-		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
+		{viewport = frame.viewport, view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
 	)
 }
 

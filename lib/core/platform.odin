@@ -178,6 +178,8 @@ init :: proc(
 		gpu_request_output           = gpu_request_output,
 		gpu_preview_target           = backend.preview_target,
 		gpu_release_preview_target   = backend.release_preview_target,
+		gpu_viewport_target          = backend.viewport_target,
+		gpu_release_viewport_target  = backend.release_viewport_target,
 		gpu_capture_texture          = backend.request_texture_capture,
 		gpu_pipeline_status          = backend.pipeline_status,
 		gpu_submit                   = backend.submit,
@@ -447,6 +449,10 @@ acknowledge_shared_frame :: backend.acknowledge_shared_frame
 // acknowledge_preview_frame records that the reader has finished with a frame of a generation of a preview target
 // (see docs/rendering/materials.md#material-previews).
 acknowledge_preview_frame :: backend.acknowledge_preview_frame
+
+// acknowledge_viewport_frame records that the reader has finished with a frame of a generation of an extra viewport's
+// target (see docs/editor/viewport.md#several-viewports).
+acknowledge_viewport_frame :: backend.acknowledge_viewport_frame
 
 // window_size is the client area size at the start of the frame. It is zero while the window is minimized.
 window_size :: proc() -> [2]i32 {

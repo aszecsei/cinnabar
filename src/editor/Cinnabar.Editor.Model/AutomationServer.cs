@@ -21,7 +21,8 @@ public sealed record AutomationRequest(
     double[]? Position = null,
     double? Yaw = null,
     double? Pitch = null,
-    string? Window = null);
+    string? Window = null,
+    int? Viewport = null);
 
 /// <summary>What <c>status</c> answers: the host and the scene.</summary>
 public sealed record AutomationStatus(bool Linked, string HostState, string Mode, string? Scene, string? Game, int? HostPid);

@@ -487,7 +487,8 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	r := f.renderer
 	v := &r.clouds
 	platform := r.platform
-	if s.off || s.density <= 0 || !sky_draws(f) {
+	// An extra view has no history, and bakes no noise.
+	if f.extra || s.off || s.density <= 0 || !sky_draws(f) {
 		return
 	}
 	for p in ([]^Shader_Pipeline{&v.noise, &v.shadow, &v.march, &v.temporal, &v.composite}) {

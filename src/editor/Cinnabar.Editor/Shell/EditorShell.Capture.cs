@@ -36,7 +36,7 @@ public sealed partial class EditorShell
         CaptureOutcome outcome;
         try
         {
-            outcome = await Captures.CaptureAsync(kind, views, _options.CaptureDirectory, path, ViewportSettings, BuildCaptureContext, CancellationToken.None);
+            outcome = await Captures.CaptureAsync(kind, views, _options.CaptureDirectory, path, MainViewport.Settings, BuildCaptureContext, CancellationToken.None);
         }
         finally
         {
@@ -81,20 +81,22 @@ public sealed partial class EditorShell
     CaptureContext BuildCaptureContext()
     {
         const double unitsPerMeter = 1 << 24;
-        var position = Camera.Position;
+        // A capture is of the host's frame target, which the first viewport shows.
+        var view = MainViewport.Camera;
+        var position = view.Position;
         var camera = new CameraInfo(
             [.. position],
             [.. position.Select(p => p / unitsPerMeter)],
-            Camera.Yaw,
-            Camera.Pitch,
-            Camera.VerticalFov,
-            Camera.Near);
+            view.Yaw,
+            view.Pitch,
+            view.VerticalFov,
+            view.Near);
         return new CaptureContext(
             Mode.ToString(),
             FreeCamera,
             Scene?.Path,
             camera,
-            ViewportSettings,
+            MainViewport.Settings,
             Stats.Host,
             Stats.Game,
             Profiler.Summary,

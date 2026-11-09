@@ -174,9 +174,10 @@ public sealed class EditorCamera
         return new Vec2((x + 1) * width / 2, (1 - y) * height / 2);
     }
 
-    public Wire.EditorCamera ToMessage()
+    /// <summary>The camera as the game takes it, for one of the editor's viewports.</summary>
+    public Wire.EditorCamera ToMessage(uint viewport = 0)
     {
         var q = Rotation;
-        return new Wire.EditorCamera([.. Position], [(float)q.X, (float)q.Y, (float)q.Z, (float)q.W], (float)VerticalFov, (float)Near);
+        return new Wire.EditorCamera(viewport, [.. Position], [(float)q.X, (float)q.Y, (float)q.Z, (float)q.W], (float)VerticalFov, (float)Near);
     }
 }

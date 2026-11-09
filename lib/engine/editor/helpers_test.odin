@@ -89,7 +89,7 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 
 	// Without a selection, the default draws nothing; with None, nothing draws even for the selection.
 	testing.expect_value(t, line_count(f), 0)
-	f.editor.session.view.settings.helpers = .Selected
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
 	append(&f.editor.session.view.selection, quad)
 	// A quad's four edges and its normal's arrow.
 	quad_lines := line_count(f)
@@ -101,13 +101,13 @@ helpers_draw_the_shapes_of_the_selection_or_of_everything :: proc(t: ^testing.T)
 	testing.expect_value(t, line_count(f), 24)
 
 	// All: the spot light's cones, the quad and the box too. The global volume has no shape.
-	f.editor.session.view.settings.helpers = .All
+	f.editor.session.view.viewports[0].settings.helpers = .All
 	all := line_count(f)
 	testing.expect(t, all > 24 + quad_lines)
 	// A hidden entity has none.
 	append(&f.editor.session.view.hidden, spot)
 	testing.expect(t, line_count(f) < all)
-	f.editor.session.view.settings.helpers = link.Helper_Mode.None
+	f.editor.session.view.viewports[0].settings.helpers = link.Helper_Mode.None
 	testing.expect_value(t, line_count(f), 0)
 }
 
@@ -121,14 +121,14 @@ a_reflection_probe_draws_its_boxes :: proc(t: ^testing.T) {
 	f := helper_setup(t)
 	defer helper_teardown(f)
 	probe := spawn_with(f, render.Reflection_Probe{extent = {2, 1, 3}})
-	f.editor.session.view.settings.helpers = .All
+	f.editor.session.view.viewports[0].settings.helpers = .All
 	testing.expect_value(t, line_count(f), 12)
 	ecs.get(&f.world, probe, render.Reflection_Probe).blend_distance = 0.5
 	testing.expect_value(t, line_count(f), 24)
 	ecs.get(&f.world, probe, render.Reflection_Probe).box_projection = true
 	// Not selected, the three boxes are grey; with Selected, only the selection has them.
 	testing.expect_value(t, line_count(f), 36)
-	f.editor.session.view.settings.helpers = .Selected
+	f.editor.session.view.viewports[0].settings.helpers = .Selected
 	testing.expect_value(t, line_count(f), 0)
 	append(&f.editor.session.view.selection, probe)
 	testing.expect_value(t, line_count(f), 36)

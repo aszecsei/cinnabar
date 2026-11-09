@@ -28,7 +28,8 @@ To add a message: add a struct to the `Message` union in `lib/engine/editor/link
 | Types | Component types with their fields, behaviour classes with their fields, `Game_Commands`; `Run_Game_Command`, `Game_Command_Result` |
 | World | Entity list snapshot and deltas (create, destroy, rename, reparent), watch and unwatch an entity, field value deltas for watched entities |
 | Edit | `Load_Scene`, `Apply_Operations`, `Edit_Problems` |
-| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Viewport_Settings` |
+| Viewport | `Viewport_Size`, `Frame_Target`, `Frame_Acknowledged`, `Editor_Camera`, `Set_Selection`, `Set_Hidden`, `Gizmo_State`, `Box_Handles`, `Pick_Request`, `Pick_Result`, `Set_Viewport_Settings` |
+| Viewports | `Open_Viewport`, `Close_Viewport`, `Viewport_Target`, and `Viewport_Acknowledged`, which the host handles, for the viewports other than the first (see [Viewport](viewport.md#several-viewports)) |
 | Mode | `Set_Mode`, `Step_Frame`, and `Editor_Input`, which the host handles |
 | Stats | `Host_Stats`, which the host sends, and `Game_Stats` |
 | Profile | `Profile_Summary`, `Profile_Capture_Request`, `Profile_Capture` and `Profile_Recording`, which the host handles (see [Profile](#profile)) |
@@ -64,16 +65,17 @@ The game's side of the link is `lib/engine/editor`. The game keeps an `editor.Ed
 
 A new link, from a start, a restart or a crash, and a soft restart both give the editor a game state that knows nothing that the editor sent. A code reload keeps the game state, so it is not one.
 
-- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the camera, the selection, the hidden entities, the gizmo, the viewport settings and the picks (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
+- **The game's side.** What one connection has sent the game, and what the game has sent it, is the `Session` in `editor.Editor`: the entities that the editor knows and watches, the selection, the hidden entities, the picks, and each viewport's camera, gizmo, settings and target (`View`), the mode, the previews and the thumbnail, the live meshes and the mesh overlay, and when the game last sent each kind of update. `begin_session` starts one and `end_session` frees it, closes its previews and its extra viewports, and zeroes it, at `init`, at `destroy` and for each new connection. State that a new editor must not inherit goes in `Session`, so `end_session` frees it. The viewport tools' GPU objects, the commands, the UI state and `by_scene_id` stay outside it. A pick that the GPU still runs comes back with an old ticket, which the next session ignores.
 - **The editor's side.** `EditorShell.OnNewGameState` is the one handler. A new link and a `Game_Reloaded` of kind `Soft_Restart` both call it. It clears every cache of what the game was sent, drops every request that waits for the game, and sends again:
 
   | What | Message |
   |---|---|
   | The mode, which the editor resets to Edit, as the game does | none |
   | The open scene | `Load_Scene` |
-  | The camera and the gizmo | `Editor_Camera`, `Gizmo_State` |
+  | Each open viewport's camera and gizmo | `Editor_Camera`, `Gizmo_State` |
   | The selection and the hidden entities | `Set_Selection`, `Set_Hidden` |
-  | The viewport settings | `Viewport_Settings` |
+  | Each open viewport's settings | `Set_Viewport_Settings` |
+  | Each open viewport other than the first | `Open_Viewport` |
   | The mesh overlay | `Mesh_Overlay` |
   | The live meshes | `Live_Mesh` |
   | Each open preview, with what it shows | `Open_Preview`, `Preview_Settings` |

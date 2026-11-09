@@ -185,8 +185,26 @@ camera_view :: proc(s: ^Game_State) -> render.View {
 	return {rotation = 1, vertical_fov = render.DEFAULT_VERTICAL_FOV, near = render.DEFAULT_NEAR}
 }
 
+// View_Data is what the hooks of a view of the frame get: the game's state, and the editor's viewport that the view is,
+// 0 for the frame's own.
+View_Data :: struct {
+	state:    ^Game_State,
+	viewport: int,
+}
+
 render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View) {
 	editing := editor.active(&s.editor)
+	hooks :: proc(s: ^Game_State, viewport: int, editing: bool) -> render.Frame_Hooks {
+		data := new(View_Data, s.platform.frame_allocator)
+		data^ = {s, viewport}
+		return {data = data, debug = editing ? draw_editor_tools : nil}
+	}
+	// The editor's other viewports are extra views of the frame.
+	extras := editor.extra_viewports(&s.editor)
+	extra_views := make([]render.Extra_View, len(extras), s.platform.frame_allocator)
+	for extra, i in extras {
+		extra_views[i] = editor.extra_view(&s.editor, extra, hooks(s, extra.viewport, editing))
+	}
 	overrides := editor.render_overrides(&s.editor)
 	quality, viewport_quality := editor.viewport_quality(&s.editor, &s.renderer)
 	editor.draw_helpers(&s.editor, &s.world, &s.renderer.debug)
@@ -204,19 +222,21 @@ render_frame :: proc(s: ^Game_State, size: [2]u32, view: render.View) {
 		previews        = editor.previews(&s.editor),
 		delta           = s.frame_step,
 		playing         = editor.playing(&s.editor),
-		hooks           = {data = s, debug = editing ? draw_editor_tools : nil},
+		hooks           = hooks(s, 0, editing),
+		extra_views     = extra_views,
 	}
 	render.draw_frame(&s.renderer, &s.world, desc)
 }
 
 // draw_editor_tools adds the editor's pick, and in Edit its icons, outline and gizmo.
 draw_editor_tools :: proc(f: ^render.Frame) {
-	s := (^Game_State)(f.data)
+	data := (^View_Data)(f.data)
+	s := data.state
 	editor.add_viewport_passes(
 		&s.editor,
 		f.graph,
 		&s.world,
-		{view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
+		{viewport = data.viewport, view = f.view, size = f.size, output_size = f.output_size, target = f.debug, ids = f.ids, depth = f.depth},
 	)
 }
 

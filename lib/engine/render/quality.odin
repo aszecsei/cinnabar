@@ -274,6 +274,24 @@ set_quality :: proc(r: ^Renderer, q: Quality) {
 	r.quality = clamp_quality(q, r.caps)
 }
 
+// extra_view_quality is the quality of an extra view from the frame's (see Extra_View): the techniques that keep a history
+// or trace the ray scene are off or have a stateless one. Anti-aliasing is spatial (SMAA for temporal AA and FSR), the
+// global illumination is off, the reflections are the probes alone, which an extra view only reads, and the shadows are the
+// cascades in the atlas, traced by nothing. The levels and the render scale stay.
+@(private)
+extra_view_quality :: proc(q: Quality) -> Quality {
+	q := q
+	q.shadows.ray_traced, q.shadows.virtual = false, false
+	q.gi.technique = .Off
+	if q.reflections.technique != .Off {
+		q.reflections.technique = .Probes
+	}
+	if q.aa == .Taa || q.aa == .Fsr {
+		q.aa = .Smaa
+	}
+	return q
+}
+
 // apply_quality gives a frame's settings the quality's techniques and levels. It only turns features off: a volume that
 // turned one off keeps it off.
 apply_quality :: proc(settings: ^Frame_Settings, q: Quality) {

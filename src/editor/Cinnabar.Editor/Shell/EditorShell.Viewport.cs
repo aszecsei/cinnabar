@@ -24,17 +24,15 @@ public enum SelectMode
 }
 
 /// <summary>
-/// The viewport's tools (see docs/editor/viewport.md#viewport): the editor's camera, picking, and the gizmo with its drags and
-/// snapping. The camera, the selection and the gizmo go to the game, which draws them. The viewport's controls turn
-/// input into calls here, in pixels of the host's frame, so tests can drive the tools without a window.
+/// The viewport's tools (see docs/editor/viewport.md#viewport): picking, and the gizmo with its drags and snapping. The
+/// cameras, the selection and the gizmo go to the game, which draws them. The viewport's controls turn input into calls
+/// here, in pixels of the active viewport's frame (see <see cref="ActiveViewport"/>), so tests can drive the tools
+/// without a window.
 /// </summary>
 public sealed partial class EditorShell
 {
     readonly PendingReplies<Action<PickResult>> _picks = new();
-    string _sentGizmo = "";
     readonly GizmoController _gizmo;
-
-    public EditorCamera Camera { get; } = new();
 
     public Tool Tool { get; private set; } = Tool.Move;
 
@@ -79,16 +77,6 @@ public sealed partial class EditorShell
         ToolsChanged?.Invoke();
     }
 
-    /// <summary>The frame's size in pixels: the host's, or before its first frame, the viewport's.</summary>
-    public (double Width, double Height) FrameSize
-    {
-        get
-        {
-            var size = Viewport.FrameSize is { Width: > 0, Height: > 0 } frame ? frame : Viewport.RequestedSize;
-            return (Math.Max(size.Width, 1), Math.Max(size.Height, 1));
-        }
-    }
-
     /// <summary>
     /// Selects what is drawn at a pixel of the frame. A click on nothing clears the selection, unless it adds. In mesh
     /// mode, the editor picks the element itself, at once.
@@ -131,7 +119,7 @@ public sealed partial class EditorShell
         {
             return false;
         }
-        Host.Send(new PickRequest(_picks.Add(then), x, y, width, height));
+        Host.Send(new PickRequest(_picks.Add(then), (uint)ActiveViewport.Index, x, y, width, height));
         return true;
     }
 
@@ -308,41 +296,54 @@ public sealed partial class EditorShell
         OnToolsChanged();
     }
 
-    /// <summary>Orbits by pixels of mouse movement: about the selection with <see cref="OrbitSelection"/>, and otherwise about the pivot ahead.</summary>
-    public void Orbit(double dx, double dy)
+    /// <summary>Orbits the active viewport's camera by pixels of mouse movement.</summary>
+    public void Orbit(double dx, double dy) => Orbit(Camera, dx, dy);
+
+    /// <summary>Orbits a camera by pixels of mouse movement: about the selection with <see cref="OrbitSelection"/>, and otherwise about the pivot ahead.</summary>
+    public void Orbit(EditorCamera camera, double dx, double dy)
     {
         if (OrbitSelection && Bounds(SelectedSceneEntities) is var (center, _))
         {
-            Camera.OrbitAround(center, dx, dy);
+            camera.OrbitAround(center, dx, dy);
         }
         else
         {
-            Camera.Orbit(dx, dy);
+            camera.Orbit(dx, dy);
         }
     }
 
-    void SendCamera()
+    // A closed viewport's camera goes to the game when the viewport opens.
+    void SendCamera(SceneViewport viewport)
     {
-        Host.Send(Camera.ToMessage());
-        SendGizmo();
+        if (viewport.IsOpen)
+        {
+            Host.Send(viewport.Camera.ToMessage((uint)viewport.Index));
+            SendGizmo();
+        }
     }
 
     void SendSelection() => Host.Send(new SetSelection([.. Selection.Entities]));
 
-    // The gizmo state when it changes: its pose follows the document, and its size the camera and the frame.
+    // Each open viewport's gizmo state when it changes: its pose follows the document, and its size the viewport's
+    // camera and frame, so the gizmo is as large on screen in each. The hot part shows in all of them.
     void SendGizmo()
     {
-        var state = new GizmoState(GizmoKind.None, [0, 0, 0], [0, 0, 0, 1], 0, GizmoPart.None, false);
-        if (GizmoPose() is var (pivot, axes))
+        var pose = GizmoPose();
+        foreach (var viewport in OpenViewports)
         {
-            var size = Gizmo.Size(Camera, Camera.RelativeTo(pivot), FrameSize.Height);
-            state = new GizmoState(Mesh.ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _gizmo.IsDragging);
-        }
-        var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
-        if (key != _sentGizmo && Host.Linked)
-        {
-            _sentGizmo = key;
-            Host.Send(state);
+            var index = (uint)viewport.Index;
+            var state = new GizmoState(index, GizmoKind.None, [0, 0, 0], [0, 0, 0, 1], 0, GizmoPart.None, false);
+            if (pose is var (pivot, axes))
+            {
+                var size = Gizmo.Size(viewport.Camera, viewport.Camera.RelativeTo(pivot), viewport.FrameSize.Height);
+                state = new GizmoState(index, Mesh.ActiveGizmoKind, pivot, [(float)axes.X, (float)axes.Y, (float)axes.Z, (float)axes.W], (float)size, HotPart, _gizmo.IsDragging);
+            }
+            var key = $"{state.Kind}|{string.Join(",", state.Position)}|{string.Join(",", state.Rotation)}|{state.Size}|{state.Hot}|{state.Dragging}";
+            if (key != viewport.SentGizmo && Host.Linked)
+            {
+                viewport.SentGizmo = key;
+                Host.Send(state);
+            }
         }
         SendBoxHandles();
     }
@@ -350,14 +351,20 @@ public sealed partial class EditorShell
     // A new game state knows none of the tools' state and answers none of the old state's picks (see OnNewGameState).
     void SendViewportTools()
     {
-        _sentGizmo = "";
-        _sentHandles = "";
         _picks.Clear();
         _aimingSun = false;
-        SendCamera();
+        foreach (var viewport in Viewports)
+        {
+            viewport.SentGizmo = "";
+            viewport.SentHandles = "";
+        }
+        foreach (var viewport in OpenViewports)
+        {
+            SendViewport(viewport);
+        }
+        SendGizmo();
         SendSelection();
         Visibility.Resend();
-        SendViewportSettings();
         Mesh.ResendMeshOverlay();
     }
 

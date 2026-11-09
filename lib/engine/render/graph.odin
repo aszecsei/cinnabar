@@ -95,6 +95,8 @@ Graph :: struct {
 	buffers:   [dynamic]Buffer_Node,
 	passes:    [dynamic]Pass_Node,
 	commits:   [dynamic]Commit,
+	// An extra view's graph (see begin_extra).
+	extra:     bool,
 }
 
 // State is what a resource's last uses did. Buffers have no layout, so theirs stays Undefined.
@@ -191,6 +193,22 @@ Barriers :: struct {
 // begin starts the frame's graph. Build one graph per frame for each cache.
 begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache) -> Graph {
 	cache_begin_frame(cache, platform)
+	return new_graph(platform, cache)
+}
+
+// begin_extra starts a graph that belongs to the frame that the last begin started, as an extra view's does (see
+// docs/rendering/frame.md#extra-views): it does not start a cache frame, so the histories of the frame's own graph keep
+// their validity. It has no histories itself: history_texture gives the zero History. Its textures are its own, since the
+// cache gives no texture twice in a frame. Its execute commits no histories, and its first submission on each queue
+// waits for the earlier work of the other, which the frame's own graph did.
+begin_extra :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache) -> Graph {
+	g := new_graph(platform, cache)
+	g.extra = true
+	return g
+}
+
+@(private = "file")
+new_graph :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache) -> Graph {
 	allocator := platform.frame_allocator
 	return {
 		platform = platform,
@@ -260,8 +278,11 @@ History :: struct {
 // read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
 // Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history or did not
 // execute, or when desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
-// zero History when the cache has no room or the backend cannot create the textures.
+// zero History when the cache has no room or the backend cannot create the textures, and for the graph of an extra view.
 history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
+	if g.extra {
+		return {}
+	}
 	current, previous, valid, ok := cache_history(g.cache, g.platform, desc)
 	if !ok {
 		return {}
@@ -429,17 +450,26 @@ Submission :: struct {
 
 // execute records the graph and submits it, then runs the commits (see on_executed) and marks the histories this frame
 // used as written. It returns false if recording or a submission failed, and then commits nothing, even when earlier
-// submissions went to the GPU. Call it from the game's frame code or from a job: it waits for the recording jobs.
+// submissions went to the GPU. Call it from the game's frame code or from a job: it waits for the recording jobs. The
+// graph of an extra view marks no histories: it has none, and the frame's own graph marks its own.
 execute :: proc(g: ^Graph) -> bool {
 	submissions := record(g) or_return
 	profile.scope_text(&g.platform.profile, "Submit", .Render)
+	started: gpu.Queues
 	for s in submissions {
-		g.platform.gpu_submit(s.buffers[:], s.queue, s.wait_for) or_return
+		wait_for := s.wait_for
+		if g.extra && s.queue not_in started {
+			wait_for += {.Graphics, .Compute}
+		}
+		started += {s.queue}
+		g.platform.gpu_submit(s.buffers[:], s.queue, wait_for) or_return
 	}
 	for c in g.commits {
 		c.commit(c.data)
 	}
-	cache_commit_frame(g.cache)
+	if !g.extra {
+		cache_commit_frame(g.cache)
+	}
 	return true
 }
 

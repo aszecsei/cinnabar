@@ -178,9 +178,11 @@ assign_shadows :: proc(f: ^Frame) {
 		// Synced whether or not this frame traces, so turning tracing on does not wait for it to compile.
 		sync_compute_pipeline(&r.shadows.mask_pipeline, r.platform, r.residency.assets, {label = "shadow mask"}, r.reloaded)
 	}
-	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
+	// An extra view draws the cascades in its own atlas: it traces nothing, and the virtual shadow map's pool is the frame's
+	// own view's.
+	trace := !f.extra && f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
 	params := SHADOW_PARAMS[f.shadow_settings.level]
-	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, params)
+	virtual := !f.extra && f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, params)
 	assign_shadow_views(f, trace, virtual)
 }
 

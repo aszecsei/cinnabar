@@ -85,22 +85,44 @@ public sealed partial class EditorShell
             case "gif":
                 return Response(request.Id, await Gif(request.Path));
             case "viewport":
-                if (request.Settings is not { Count: > 0 } changes)
+                if (request.Settings is not { Count: > 0 } all)
                 {
                     return new AutomationResponse(request.Id, false, Error: "viewport takes settings to change");
                 }
-                if (!ViewportSettingsPatch.TryApply(ViewportSettings, changes, out var settings, out var error))
+                // The arrangement is the shell's, not a viewport's, so it is not one of the settings to patch.
+                var changes = new Dictionary<string, System.Text.Json.JsonElement>(all, StringComparer.OrdinalIgnoreCase);
+                if (changes.Remove("arrangement", out var arrangement))
+                {
+                    if (!Enum.TryParse<ViewportArrangement>(arrangement.ToString(), true, out var chosen) || !Enum.IsDefined(chosen))
+                    {
+                        return new AutomationResponse(request.Id, false, Error: $"unknown arrangement {arrangement}; the arrangements are {string.Join(", ", Enum.GetNames<ViewportArrangement>())}");
+                    }
+                    SetArrangement(chosen);
+                }
+                if (AutomationViewport(request) is not { } target)
+                {
+                    return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} is not open; the arrangement shows {OpenViewports.Count()}");
+                }
+                if (changes.Count == 0)
+                {
+                    return new AutomationResponse(request.Id, true);
+                }
+                if (!ViewportSettingsPatch.TryApply(target.Settings, changes, out var settings, out var error))
                 {
                     return new AutomationResponse(request.Id, false, Error: error);
                 }
-                ViewportSettings = settings;
+                ApplyViewportSettings(target, settings);
                 return new AutomationResponse(request.Id, true);
             case "camera":
                 if (request.Position is not { Length: 3 } meters)
                 {
                     return new AutomationResponse(request.Id, false, Error: "camera takes a position of three numbers, in meters");
                 }
-                Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? Camera.Yaw, request.Pitch ?? Camera.Pitch);
+                if (AutomationViewport(request) is not { } placed)
+                {
+                    return new AutomationResponse(request.Id, false, Error: $"viewport {request.Viewport} is not open; the arrangement shows {OpenViewports.Count()}");
+                }
+                placed.Camera.Place([.. meters.Select(m => (long)Math.Round(m * (1 << 24)))], request.Yaw ?? placed.Camera.Yaw, request.Pitch ?? placed.Camera.Pitch);
                 return new AutomationResponse(request.Id, true);
             case "ui":
                 return CaptureUiResponse(request);
@@ -110,6 +132,10 @@ public sealed partial class EditorShell
                 return new AutomationResponse(request.Id, false, Error: $"unknown command {request.Command}; the commands are status, screenshot, gif, viewport, camera, ui and content");
         }
     }
+
+    // The viewport that a request names, the first without a name, or null when the arrangement does not show it.
+    SceneViewport? AutomationViewport(AutomationRequest request) =>
+        request.Viewport is not { } index ? MainViewport : Viewports.FirstOrDefault(v => v.Index == index && v.IsOpen);
 
     // Changes what the content browser shows, each setting in turn, and answers with what it shows then.
     AutomationResponse ContentResponse(AutomationRequest request)

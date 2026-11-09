@@ -210,11 +210,12 @@ sync_ray_scene_pipelines :: proc(r: ^Renderer, force: bool) {
 }
 
 // request_ray_scene asks for the scene's acceleration structure this frame, which it makes on the first request. It is
-// false without Ray_Query. Requests come before add_ray_scene_passes.
+// false without Ray_Query, and for an extra view, whose scene has no acceleration structure instances. Requests come before
+// add_ray_scene_passes.
 @(private)
 request_ray_scene :: proc(f: ^Frame) -> bool {
 	r := f.renderer
-	if !r.caps.ray_query {
+	if !r.caps.ray_query || f.extra {
 		return false
 	}
 	if r.ray_scene.accel == {} {

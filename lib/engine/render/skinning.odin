@@ -194,6 +194,16 @@ skin_instance :: proc(
 	return instance, true, true
 }
 
+// skin_posed gives the buffers of the entity in an instance slot as the frame's own view posed them in this frame, for an
+// extra view, which poses none: ok is false when they were not posed this frame for this entity and mesh. It changes
+// nothing.
+@(private)
+skin_posed :: proc(s: ^Skin_State, frame: u64, slot: u32, entity: ecs.Entity, mesh: ^Resident_Mesh) -> (instance: Skinned_Instance, ok: bool) {
+	found, has := s.instances[slot]
+	ok = has && found.frame == frame && found.entity == entity && found.source == mesh.positions && found.vertex_count == mesh.vertex_count && found.attribute_stride == mesh.attribute_stride
+	return found, ok
+}
+
 // skin_release destroys the buffers of an instance slot, if it has any.
 @(private)
 skin_release :: proc(s: ^Skin_State, platform: ^core.Platform_API, slot: u32) {
@@ -280,6 +290,13 @@ skin_add :: proc(b: ^Skin_Build, mesh: ^Resident_Mesh, instance: Skinned_Instanc
 	b.max_vertices = max(b.max_vertices, mesh.vertex_count)
 }
 
+// skin_reuse adds the slot of an entity that an extra view draws as the frame's own view posed it: a slot to read, and no
+// job.
+@(private)
+skin_reuse :: proc(b: ^Skin_Build, slot: u32) {
+	append(&b.slots, slot)
+}
+
 // skin_upload uploads the frame's jobs and palette and the pass's constants into the upload ring. It is false only
 // when the ring is full.
 @(private)
@@ -310,19 +327,26 @@ skin_upload :: proc(f: ^Frame, b: ^Skin_Build) -> bool {
 }
 
 // add_skinning_pass adds the pass that poses the frame's skinned entities, before the scene's update and so before
-// every pass that draws, casts shadows or traces. It declares the writes of each entity's three buffers.
+// every pass that draws, casts shadows or traces. It declares the writes of each entity's three buffers. An extra view
+// adds no pass: it imports the buffers that the frame's own view posed, which its passes read.
 @(private)
 add_skinning_pass :: proc(f: ^Frame) {
 	sf := f.scene_frame
-	if sf.skin.jobs == 0 {
+	if sf.skin.jobs == 0 && len(sf.skin.slots) == 0 {
 		return
 	}
 	g := f.graph
 	sf.skin.buffers = make([][3]Buffer, len(sf.skin.slots), f.renderer.platform.frame_allocator)
-	p := add_compute_pass(g, "skin meshes", pose_meshes, f)
+	p: Pass
+	if !f.extra {
+		p = add_compute_pass(g, "skin meshes", pose_meshes, f)
+	}
 	for slot, i in sf.skin.slots {
 		instance := f.renderer.scene.skins.instances[slot]
 		sf.skin.buffers[i] = {import_buffer(g, instance.positions), import_buffer(g, instance.previous), import_buffer(g, instance.attributes)}
+		if f.extra {
+			continue
+		}
 		for buffer in sf.skin.buffers[i] {
 			write(g, p, buffer)
 		}

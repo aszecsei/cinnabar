@@ -7,9 +7,10 @@ using LogLevel = Cinnabar.Editor.Model.LogLevel;
 namespace Cinnabar.Editor.Shell;
 
 /// <summary>
-/// How the viewport draws (see docs/editor/viewport.md#viewport): the debug view, the features that it turns off, the exposure
-/// offset, the icons and shapes of lights, volumes and cameras, and its quality in place of the game's. The game draws them while the editor is linked. The
-/// settings are the user's, in <c>viewport.json</c>, so they stay across sessions.
+/// How a viewport draws (see docs/editor/viewport.md#viewport): the debug view, the features that it turns off, the exposure
+/// offset, the icons and shapes of lights, volumes and cameras, and its quality in place of the game's. The game draws
+/// them while the editor is linked. Each viewport has its own, and the ribbon shows and changes the active one's. The
+/// settings are the user's, in <c>viewport.json</c> with the arrangement, so they stay across sessions.
 /// </summary>
 public sealed partial class EditorShell
 {
@@ -53,25 +54,28 @@ public sealed partial class EditorShell
     // How far one press of Exposure Up or Down moves the exposure, in stops.
     const float ExposureStep = 0.5f;
 
-    ViewportSettings? _viewportSettings;
-
+    /// <summary>How the active viewport draws.</summary>
     public ViewportSettings ViewportSettings
     {
-        get => _viewportSettings ??= LoadViewportSettings();
-        set
-        {
-            if (value == ViewportSettings)
-            {
-                return;
-            }
-            _viewportSettings = value;
-            SendViewportSettings();
-            WriteSetting("viewport", EditorSettings.ViewportFileName, JsonSerializer.Serialize(value));
-            Commands.InvalidateAll();
-            ViewportSettingsChanged?.Invoke();
-        }
+        get => ActiveViewport.Settings;
+        set => ApplyViewportSettings(ActiveViewport, value);
     }
 
+    /// <summary>Changes how a viewport draws, tells the game, and keeps it for the next session.</summary>
+    public void ApplyViewportSettings(SceneViewport viewport, ViewportSettings settings)
+    {
+        if (settings == viewport.Settings)
+        {
+            return;
+        }
+        viewport.Settings = settings;
+        SendViewportSettings(viewport);
+        SaveViewportFile();
+        Commands.InvalidateAll();
+        ViewportSettingsChanged?.Invoke();
+    }
+
+    /// <summary>A viewport's settings changed, or another viewport is the active one.</summary>
     public event Action? ViewportSettingsChanged;
 
     /// <summary>The debug views, by their names as the ribbon shows them.</summary>
@@ -81,28 +85,11 @@ public sealed partial class EditorShell
 
     public void ChangeExposure(float stops) => ViewportSettings = ViewportSettings with { ExposureOffset = stops == 0 ? 0 : ViewportSettings.ExposureOffset + stops * ExposureStep };
 
-    void SendViewportSettings()
+    void SendViewportSettings(SceneViewport viewport)
     {
         if (Host.Linked)
         {
-            Host.Send(ViewportSettings);
-        }
-    }
-
-    ViewportSettings LoadViewportSettings()
-    {
-        if (Settings.Read(EditorSettings.ViewportFileName) is not { } json)
-        {
-            return DefaultViewportSettings;
-        }
-        try
-        {
-            return JsonSerializer.Deserialize<ViewportSettings>(json) ?? DefaultViewportSettings;
-        }
-        catch (JsonException)
-        {
-            Console.Add(LogLevel.Warning, $"viewport: {Path.Combine(Settings.Directory, EditorSettings.ViewportFileName)} is not the viewport's settings, so the defaults are used");
-            return DefaultViewportSettings;
+            Host.Send(new SetViewportSettings((uint)viewport.Index, viewport.Settings));
         }
     }
 

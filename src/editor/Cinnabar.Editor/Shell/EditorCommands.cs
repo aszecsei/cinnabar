@@ -123,6 +123,7 @@ static partial class EditorCommands
     public const string CaptureGif = "capture.gif";
     public const string CollapseRibbon = "view.collapseRibbon";
     public const string ViewportScale = "viewport.scale";
+    public const string ViewportArrangement = "viewport.arrangement";
     public const string SelectAll = "edit.selectAll";
     public const string PopOutContentBrowser = "window.popOutContentBrowser";
     public const string PlayMode = "mode.play";

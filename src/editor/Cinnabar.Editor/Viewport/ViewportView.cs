@@ -15,13 +15,14 @@ using Cinnabar.Editor.Tools;
 namespace Cinnabar.Editor.Viewport;
 
 /// <summary>
-/// The viewport panel: the frames, the tool palette, the camera's speed and the stats over them, and the input that
-/// drives the editor's tools (see docs/editor/viewport.md#viewport). The right button flies with WASD, Q and E; Alt with the
-/// left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a box, or drags
-/// the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides it. While
-/// the game plays, the viewport gives the game its keyboard and mouse instead, unless the free camera is on, and a
-/// frame in the mode's color goes around it. A material dragged from the content browser shows on the submesh under
-/// the mouse, and drops onto it.
+/// One viewport of the scene: its frames, the tool palette, its view, the camera's speed and the stats over them, and
+/// the input that drives the editor's tools (see docs/editor/viewport.md#viewport). The right button flies with WASD, Q and
+/// E; Alt with the left button orbits, the middle button pans, and the wheel dollies. The left button selects, drags a
+/// box, or drags the gizmo. Q, W, E and R pick a tool, X switches the gizmo's space, F frames the selection, and H hides
+/// it. While the game plays, the first viewport gives the game its keyboard and mouse instead, unless the free camera is
+/// on, and a frame in the mode's color goes around it; the other viewports keep the editor's camera. A material
+/// dragged from the content browser shows on the submesh under the mouse, and drops onto it. The mouse makes its
+/// viewport the active one, which the shell's tools act in (see docs/editor/viewport.md#several-viewports).
 /// </summary>
 public sealed class ViewportView : Grid
 {
@@ -42,7 +43,11 @@ public sealed class ViewportView : Grid
     }
 
     readonly EditorShell _shell;
+    readonly SceneViewport _viewport;
     readonly ViewportSession _session;
+    readonly Border _activeFrame;
+    readonly ComboBox _view;
+    bool _showingView;
     readonly ViewportControl _control;
     readonly Border _overlay;
     readonly TextBlock _stats;
@@ -76,10 +81,14 @@ public sealed class ViewportView : Grid
     bool _dragPicking;
     int _dragGeneration;
 
-    public ViewportView(EditorShell shell)
+    // The game has the keyboard and the mouse of the first viewport only.
+    bool InputGoesToGame => _viewport.IsMain && _shell.InputGoesToGame;
+
+    public ViewportView(EditorShell shell, SceneViewport viewport)
     {
         _shell = shell;
-        _session = shell.Viewport;
+        _viewport = viewport;
+        _session = viewport.Session;
         Background = Brushes.Black;
         Focusable = true;
         ClipToBounds = true;
@@ -95,6 +104,8 @@ public sealed class ViewportView : Grid
             IsHitTestVisible = false,
         };
         Children.Add(_box);
+        _activeFrame = new Border { Classes = { "viewport-active" }, BorderThickness = new Thickness(1), IsHitTestVisible = false };
+        Children.Add(_activeFrame);
         _modeFrame = new Border { Classes = { "viewport-frame" }, BorderThickness = new Thickness(2), IsHitTestVisible = false };
         Children.Add(_modeFrame);
 
@@ -108,6 +119,25 @@ public sealed class ViewportView : Grid
         speed.IsHitTestVisible = false;
         Children.Add(speed);
         Children.Add(Palette());
+        // What this viewport shows in place of the lit scene, which the ribbon's View choice also sets for the active one.
+        _view = new ComboBox
+        {
+            Classes = { "viewport-view" },
+            ItemsSource = EditorShell.DebugViewNames,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = new Thickness(8),
+            Focusable = false,
+        };
+        ToolTip.SetTip(_view, "What this viewport shows: the lit scene, or a debug view of what makes it.");
+        _view.SelectionChanged += (_, _) =>
+        {
+            if (!_showingView && _view.SelectedIndex >= 0)
+            {
+                _shell.ApplyViewportSettings(_viewport, _viewport.Settings with { DebugView = (Link.Protocol.DebugView)_view.SelectedIndex });
+            }
+        };
+        Children.Add(_view);
 
         DragDrop.SetAllowDrop(this, true);
         AddHandler(DragDrop.DragOverEvent, (_, e) => OnDragOver(e));
@@ -128,24 +158,36 @@ public sealed class ViewportView : Grid
         var textClient = new GameTextClient(this, new Rect(16, CompositionBottom, 0, 16), ShowComposition);
         TextInputMethodClientRequested += (_, e) =>
         {
-            if (_shell.InputGoesToGame)
+            if (InputGoesToGame)
             {
                 e.Client = textClient;
             }
         };
 
-        GotFocus += (_, _) => _shell.ViewportHasFocus = true;
+        // The game's keys are the first viewport's, so only its focus gives them to the game.
+        GotFocus += (_, _) =>
+        {
+            _shell.ActivateViewport(_viewport);
+            if (_viewport.IsMain)
+            {
+                _shell.ViewportHasFocus = true;
+            }
+        };
         // Keys that are released elsewhere would keep the camera flying, or stay down in the game.
         LostFocus += (_, _) =>
         {
-            _shell.ViewportHasFocus = false;
             _held.Clear();
-            _shell.SendInput(GameInput.ReleaseAll());
+            if (_viewport.IsMain)
+            {
+                _shell.ViewportHasFocus = false;
+                _shell.SendInput(GameInput.ReleaseAll());
+            }
         };
         DoubleTapped += (_, e) =>
         {
-            if (!_shell.InputGoesToGame && _control.FramePoint(e.GetPosition(this)) is { } pixel)
+            if (!InputGoesToGame && _control.FramePoint(e.GetPosition(this)) is { } pixel)
             {
+                _shell.ActivateViewport(_viewport);
                 _shell.Mesh.EnterMeshModeAt(pixel);
             }
         };
@@ -154,26 +196,47 @@ public sealed class ViewportView : Grid
             _session.ViewChanged += ShowOverlay;
             _shell.ToolsChanged += ShowTools;
             _shell.Mesh.MeshModeChanged += ShowTools;
-            _shell.Camera.Changed += ShowSpeed;
+            _viewport.Camera.Changed += ShowSpeed;
             _shell.ModeChanged += ShowMode;
+            _shell.ActiveViewportChanged += ShowActive;
+            _shell.ArrangementChanged += ShowActive;
+            _shell.ViewportSettingsChanged += ShowView;
             _timer.Start();
-            _gamepadTimer.Start();
+            if (_viewport.IsMain)
+            {
+                _gamepadTimer.Start();
+            }
             ShowMode();
             ShowTools();
             ShowSpeed();
+            ShowActive();
+            ShowView();
         };
         DetachedFromVisualTree += (_, _) =>
         {
             _session.ViewChanged -= ShowOverlay;
             _shell.ToolsChanged -= ShowTools;
             _shell.Mesh.MeshModeChanged -= ShowTools;
-            _shell.Camera.Changed -= ShowSpeed;
+            _viewport.Camera.Changed -= ShowSpeed;
             _shell.ModeChanged -= ShowMode;
+            _shell.ActiveViewportChanged -= ShowActive;
+            _shell.ArrangementChanged -= ShowActive;
+            _shell.ViewportSettingsChanged -= ShowView;
             _timer.Stop();
             _flyTimer.Stop();
             _gamepadTimer.Stop();
         };
         UpdateStats();
+    }
+
+    // The active viewport has a frame around it while the arrangement shows more than one.
+    void ShowActive() => _activeFrame.Classes.Set("active", _shell.ActiveViewport == _viewport && _shell.OpenViewports.Skip(1).Any());
+
+    void ShowView()
+    {
+        _showingView = true;
+        _view.SelectedIndex = (int)_viewport.Settings.DebugView;
+        _showingView = false;
     }
 
     static Border Overlay(Control child, HorizontalAlignment horizontal, VerticalAlignment vertical) => new()
@@ -243,9 +306,10 @@ public sealed class ViewportView : Grid
 
     void ShowMode()
     {
-        _modeFrame.Classes.Set("playing", _shell.Mode == Link.Protocol.EditorMode.Play);
-        _modeFrame.Classes.Set("paused", _shell.Mode == Link.Protocol.EditorMode.Paused);
-        if (_shell.InputGoesToGame)
+        // The mode's frame is around the viewport that shows the game.
+        _modeFrame.Classes.Set("playing", _viewport.IsMain && _shell.Mode == Link.Protocol.EditorMode.Play);
+        _modeFrame.Classes.Set("paused", _viewport.IsMain && _shell.Mode == Link.Protocol.EditorMode.Paused);
+        if (InputGoesToGame)
         {
             EndGesture();
         }
@@ -253,7 +317,7 @@ public sealed class ViewportView : Grid
         ShowSpeed();
     }
 
-    void ShowSpeed() => _speed.Text = $"{FormatSpeed(_shell.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
+    void ShowSpeed() => _speed.Text = $"{FormatSpeed(_viewport.Camera.Speed)}   ·   {_shell.Tool}, {_shell.Space}{(_shell.Snap ? ", snapping" : "")}"
         + (_shell.Mesh.InMeshMode ? $"   ·   grid {Mesh.MeshGrid.Format(_shell.Mesh.GridSize)}" : "");
 
     static string FormatSpeed(double metersPerSecond) => metersPerSecond >= 1000 ? $"{metersPerSecond / 1000:0.##} km/s" : $"{metersPerSecond:0.##} m/s";
@@ -283,6 +347,7 @@ public sealed class ViewportView : Grid
 
     void OnDragOver(DragEventArgs e)
     {
+        _shell.ActivateViewport(_viewport);
         if (DraggedPrefab(e) is var (prefab, node, at))
         {
             e.DragEffects = DragDropEffects.Copy;
@@ -402,9 +467,10 @@ public sealed class ViewportView : Grid
         {
             return;
         }
+        _shell.ActivateViewport(_viewport);
         Focus();
         var point = e.GetCurrentPoint(this);
-        if (_shell.InputGoesToGame)
+        if (InputGoesToGame)
         {
             ForwardMove(point.Position);
             if (GameInput.Button(point.Properties.PointerUpdateKind) is { } button)
@@ -460,7 +526,7 @@ public sealed class ViewportView : Grid
     {
         base.OnPointerMoved(e);
         var position = e.GetPosition(this);
-        if (_shell.InputGoesToGame)
+        if (InputGoesToGame)
         {
             ForwardMove(position);
             return;
@@ -471,7 +537,9 @@ public sealed class ViewportView : Grid
         switch (_gesture)
         {
             case Gesture.None:
-                if (_control.FramePoint(position) is { } hover)
+                // The mouse over a viewport makes it the active one, so the gizmo's hover is in its frame.
+                _shell.ActivateViewport(_viewport);
+                if (_shell.ActiveViewport == _viewport && _control.FramePoint(position) is { } hover)
                 {
                     _shell.HoverGizmo(hover);
                     _shell.Mesh.HoverMesh(hover);
@@ -484,16 +552,16 @@ public sealed class ViewportView : Grid
                 }
                 break;
             case Gesture.Fly:
-                _shell.Camera.Look(delta.X, delta.Y);
+                _viewport.Camera.Look(delta.X, delta.Y);
                 break;
             case Gesture.Orbit:
-                _shell.Orbit(delta.X, delta.Y);
+                _shell.Orbit(_viewport.Camera, delta.X, delta.Y);
                 break;
             case Gesture.Pan:
-                _shell.Camera.Pan(delta.X, delta.Y, _shell.FrameSize.Height);
+                _viewport.Camera.Pan(delta.X, delta.Y, _viewport.FrameSize.Height);
                 break;
             case Gesture.Dolly:
-                _shell.Camera.Dolly(-delta.Y * DollyPerPixel);
+                _viewport.Camera.Dolly(-delta.Y * DollyPerPixel);
                 break;
             case Gesture.Gizmo:
                 if (_control.FramePoint(position) is { } drag)
@@ -518,7 +586,7 @@ public sealed class ViewportView : Grid
     {
         base.OnPointerReleased(e);
         var position = e.GetPosition(this);
-        if (_shell.InputGoesToGame)
+        if (InputGoesToGame)
         {
             if (GameInput.Button(e.GetCurrentPoint(this).Properties.PointerUpdateKind) is { } button)
             {
@@ -577,7 +645,7 @@ public sealed class ViewportView : Grid
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
         base.OnPointerWheelChanged(e);
-        if (_shell.InputGoesToGame)
+        if (InputGoesToGame)
         {
             _shell.SendInput(GameInput.Scroll(e.Delta.Y));
             e.Handled = true;
@@ -585,11 +653,11 @@ public sealed class ViewportView : Grid
         }
         if (_gesture == Gesture.Fly)
         {
-            _shell.Camera.ChangeSpeed(e.Delta.Y);
+            _viewport.Camera.ChangeSpeed(e.Delta.Y);
         }
         else
         {
-            _shell.Camera.Dolly(e.Delta.Y);
+            _viewport.Camera.Dolly(e.Delta.Y);
         }
         e.Handled = true;
     }
@@ -597,7 +665,7 @@ public sealed class ViewportView : Grid
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (_shell.InputGoesToGame && e.Text is { } text && _characters.Join(text) is { Length: > 0 } joined)
+        if (InputGoesToGame && e.Text is { } text && _characters.Join(text) is { Length: > 0 } joined)
         {
             _shell.SendInput(GameInput.Text(joined));
             e.Handled = true;
@@ -615,7 +683,7 @@ public sealed class ViewportView : Grid
     // whichever window asks. A viewport that loses them lets go of everything, and tells the game about them again later.
     void PollGamepads()
     {
-        if (_shell.GameHasKeys && TopLevel.GetTopLevel(this) is WindowBase { IsActive: true })
+        if (_viewport.IsMain && _shell.GameHasKeys && TopLevel.GetTopLevel(this) is WindowBase { IsActive: true })
         {
             _pollingGamepads = true;
             _shell.SendInput(_gamepads.Poll(Environment.TickCount64));
@@ -631,7 +699,7 @@ public sealed class ViewportView : Grid
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (_shell.InputGoesToGame)
+        if (InputGoesToGame)
         {
             if (GameInput.Key(e.Key) is { } key)
             {
@@ -743,7 +811,7 @@ public sealed class ViewportView : Grid
     {
         base.OnKeyUp(e);
         _held.Remove(e.Key);
-        if (_shell.InputGoesToGame && GameInput.Key(e.Key) is { } key)
+        if (InputGoesToGame && GameInput.Key(e.Key) is { } key)
         {
             _shell.SendInput(GameInput.Up(key));
         }
@@ -758,7 +826,7 @@ public sealed class ViewportView : Grid
         double Axis(Key positive, Key negative) => (_held.Contains(positive) ? 1 : 0) - (_held.Contains(negative) ? 1 : 0);
         var direction = new Vec3(Axis(Key.D, Key.A), Axis(Key.E, Key.Q), Axis(Key.W, Key.S));
         var boost = _held.Contains(Key.LeftShift) || _held.Contains(Key.RightShift) ? 4 : 1;
-        _shell.Camera.Fly(direction, seconds, boost);
+        _viewport.Camera.Fly(direction, seconds, boost);
     }
 
     // The game sees the mouse in pixels of its frame.

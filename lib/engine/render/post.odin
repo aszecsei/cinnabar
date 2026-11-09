@@ -413,17 +413,23 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	f.post = pf
 	pf.settings = settings
 	aa := settings.no_aa ? Aa_Technique.Off : settings.aa
-	// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
-	pf.upscaler = frame_upscaler(f, aa)
-	_, upscales := upscaler_kind(aa)
-	pf.temporal = (aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
+	// An extra view has no history, so it has no temporal AA, no upscaler and no exposure of its own, and it leaves the
+	// jitter, the upscaler's state and the adapted exposure to the frame's own view.
+	if !f.extra {
+		// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
+		pf.upscaler = frame_upscaler(f, aa)
+		_, upscales := upscaler_kind(aa)
+		pf.temporal = (aa == .Taa || (upscales && pf.upscaler == {})) && pipeline_ready(platform, &p.temporal_aa)
+	}
 	if spatial_aa_ready(platform, &p.spatial, aa) {
 		pf.spatial = aa
 	}
-	u := &p.upscalers
-	pf.upscale_reset = !u.active || u.render_size != f.size
-	u.active, u.render_size = pf.upscaler != {}, f.size
-	pf.exposure = pipeline_ready(platform, &p.adapt)
+	if !f.extra {
+		u := &p.upscalers
+		pf.upscale_reset = !u.active || u.render_size != f.size
+		u.active, u.render_size = pf.upscaler != {}, f.size
+	}
+	pf.exposure = !f.extra && pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
 	if pf.temporal || pf.upscaler != {} {
 		p.jitter_index += 1
@@ -432,9 +438,11 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 		pixel := [2]f32{halton(n, 2) - 0.5, halton(n, 3) - 0.5}
 		f.jitter = {2 * pixel.x / f32(f.size.x), -2 * pixel.y / f32(f.size.y)}
 	}
-	now := platform.time_seconds != nil ? platform.time_seconds() : 0
-	pf.delta = p.last_time > 0 ? f32(clamp(now - p.last_time, 0, 0.25)) : 0
-	p.last_time = now
+	if !f.extra {
+		now := platform.time_seconds != nil ? platform.time_seconds() : 0
+		pf.delta = p.last_time > 0 ? f32(clamp(now - p.last_time, 0, 0.25)) : 0
+		p.last_time = now
+	}
 	f.exposure = import_buffer(f.graph, p.exposure)
 	f.lut = import_texture(f.graph, p.lut, .Storage)
 	pf.lut = p.lut_bake
@@ -561,8 +569,9 @@ add_post_passes :: proc(f: ^Frame) {
 		pf.paper_white = pf.grading.paper_white
 	}
 	bake := Lut_Bake{pf.grading, p.tone_lut.version}
+	// An extra view takes the table as the frame's own view baked it, in the output mode it baked it for.
 	if last, has_last := p.lut_bake.?;
-	   (!has_last || last != bake) && pipeline_ready(platform, &p.tone_lut) {
+	   !f.extra && (!has_last || last != bake) && pipeline_ready(platform, &p.tone_lut) {
 		pass := add_compute_pass(g, "tone mapping lut", run_tone_lut, f)
 		write(g, pass, f.lut)
 		pf.lut, pf.baked = bake, true

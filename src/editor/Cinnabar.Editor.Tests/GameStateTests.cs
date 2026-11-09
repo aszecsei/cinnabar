@@ -50,7 +50,7 @@ public sealed class GameStateTests : IDisposable
         Assert.Single(_sent.OfType<LoadScene>());
         Assert.Single(_sent.OfType<EditorCamera>());
         Assert.Equal([Box], Assert.Single(_sent.OfType<SetSelection>()).Entities);
-        Assert.Single(_sent.OfType<ViewportSettings>());
+        Assert.Equal(0u, Assert.Single(_sent.OfType<SetViewportSettings>()).Viewport);
         Assert.Single(_sent.OfType<MeshOverlay>());
         Assert.Equal(0u, Assert.Single(_sent.OfType<OpenPreview>()).Id);
         Assert.Equal(0u, Assert.Single(_sent.OfType<PreviewSettings>()).Id);

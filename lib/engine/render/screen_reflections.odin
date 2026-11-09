@@ -195,6 +195,10 @@ begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	r := f.renderer
 	s := &r.ssr
 	platform := r.platform
+	// An extra view has no history to reflect from, and leaves the memory that the frame's own view counted.
+	if f.extra {
+		return
+	}
 	s.memory = 0
 	if settings.off || (settings.technique != .Screen && settings.technique != .Ray_Traced) {
 		return

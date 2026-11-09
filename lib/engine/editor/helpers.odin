@@ -47,9 +47,10 @@ FRUSTUM_LENGTH :: 1
 FRUSTUM_ASPECT :: 16.0 / 9.0
 
 // draw_helpers draws the helpers of this frame into d, while a linked editor is in Edit. Call it before the frame draws
-// d's lines. Hidden entities have none, and Play and Paused have none.
+// d's lines. Hidden entities have none, and Play and Paused have none. The lines are the frame's, which every viewport
+// draws, so the frame's viewport chooses them for all.
 draw_helpers :: proc(e: ^Editor, w: ^ecs.World, d: ^debug.Draw) {
-	mode := e.session.view.settings.helpers
+	mode := e.session.view.viewports[0].settings.helpers
 	if !editing(e) || mode == .None {
 		return
 	}
@@ -293,10 +294,10 @@ icon_instances :: proc(
 	return icons[:]
 }
 
-// icons_shown is whether the viewport shows the icons: while editing, when the editor asks for them.
+// icons_shown is whether a viewport shows the icons: while editing, when the editor asks for them.
 @(private)
-icons_shown :: proc(e: ^Editor) -> bool {
-	return editing(e) && e.session.view.settings.show_icons
+icons_shown :: proc(e: ^Editor, viewport := 0) -> bool {
+	return editing(e) && e.session.view.viewports[viewport].settings.show_icons
 }
 
 // draw_collider draws a collider's shape as the simulation has it, at its offset and rotation in the entity (see

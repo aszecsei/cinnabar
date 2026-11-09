@@ -162,7 +162,7 @@ public sealed class CaptureModel
                     {
                         continue;
                     }
-                    _send(current with { DebugView = view });
+                    _send(new SetViewportSettings(0, current with { DebugView = view }));
                     sentView = true;
                     await _awaitFrames(SettleFrames, cancel);
                     var viewResult = await RequestAsync(CaptureKind.Screenshot, $"{stem}.{ViewName(view)}.png", cancel);
@@ -184,7 +184,7 @@ public sealed class CaptureModel
             {
                 if (sentView)
                 {
-                    _send(current);
+                    _send(new SetViewportSettings(0, current));
                 }
             }
 

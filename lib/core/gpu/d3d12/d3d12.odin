@@ -474,7 +474,7 @@ end_frame :: proc() {
 	}
 	record_texture_capture(list)
 	if dev.shared_mode {
-		end_shared_previews(list)
+		end_shared_sides(list)
 	}
 	resolve_timestamps(frame, list)
 	check(list->Close(), "ICommandList.Close")

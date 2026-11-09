@@ -122,7 +122,7 @@ run_command :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, user: r
 			scripts    = scripts,
 			user       = user,
 			selection  = e.session.view.selection[:],
-			camera     = e.session.view.camera,
+			camera     = e.session.view.viewports[0].camera.? or_else {},
 			operations = make([dynamic]link.Operation, allocator),
 			allocator  = allocator,
 		}

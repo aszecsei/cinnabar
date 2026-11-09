@@ -14,8 +14,6 @@ namespace Cinnabar.Editor.Shell;
 /// </summary>
 public sealed partial class EditorShell
 {
-    string _sentHandles = "";
-
     /// <summary>The box handle under the mouse, or the one that a drag holds, or null.</summary>
     public ProbeHandle? HotHandle { get; private set; }
 
@@ -68,21 +66,26 @@ public sealed partial class EditorShell
         }
     }
 
-    // The selected probe's handles when they change, with the hot one marked, or none.
+    // The selected probe's handles in each open viewport when they change, with the hot one marked, or none. Their
+    // size follows the viewport's camera and frame, as the gizmo's does.
     void SendBoxHandles()
     {
-        var message = new BoxHandles(0, []);
-        if (SelectedProbe() is var (_, boxes))
+        var probe = SelectedProbe();
+        foreach (var viewport in OpenViewports)
         {
-            var size = boxes.HandleSize(Camera, FrameSize.Height);
-            var gap = ProbeBoxes.Gap(size);
-            message = new BoxHandles((float)size, [.. boxes.Handles().Select(h => new BoxHandle(boxes.Position(h, gap), h.Box, h == HotHandle))]);
-        }
-        var key = $"{message.Size}|{string.Join(";", message.Handles.Select(h => $"{string.Join(",", h.Position)},{h.Kind},{h.Hot}"))}";
-        if (key != _sentHandles && Host.Linked)
-        {
-            _sentHandles = key;
-            Host.Send(message);
+            var message = new BoxHandles((uint)viewport.Index, 0, []);
+            if (probe is var (_, boxes))
+            {
+                var size = boxes.HandleSize(viewport.Camera, viewport.FrameSize.Height);
+                var gap = ProbeBoxes.Gap(size);
+                message = message with { Size = (float)size, Handles = [.. boxes.Handles().Select(h => new BoxHandle(boxes.Position(h, gap), h.Box, h == HotHandle))] };
+            }
+            var key = $"{message.Size}|{string.Join(";", message.Handles.Select(h => $"{string.Join(",", h.Position)},{h.Kind},{h.Hot}"))}";
+            if (key != viewport.SentHandles && Host.Linked)
+            {
+                viewport.SentHandles = key;
+                Host.Send(message);
+            }
         }
     }
 

@@ -221,6 +221,14 @@ release_preview_target :: proc(id: int) {}
 
 acknowledge_preview_frame :: proc(id: int, generation: u32, frame: u64) {}
 
+viewport_target :: proc(id: int, size: [2]u32) -> (target: gpu.Preview_Target, ok: bool) {
+	return
+}
+
+release_viewport_target :: proc(id: int) {}
+
+acknowledge_viewport_frame :: proc(id: int, generation: u32, frame: u64) {}
+
 // Nothing compiles, so a pipeline is Ready once it exists, and a handle that is not a pipeline's is Failed.
 pipeline_status :: proc(pipeline: gpu.Pipeline) -> gpu.Pipeline_Status {
 	_, ok := gpu.pool_lookup(&state.pipelines, pipeline)

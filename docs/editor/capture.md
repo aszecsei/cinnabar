@@ -21,7 +21,7 @@ A capture is a request to a running host for an image of what it draws: its next
 - **Output modes.** In shared mode the frame is sRGB bytes already. A standalone host in HDR10 or scRGB gets the same PNG: PQ is decoded to nits and divided by the display's SDR white, scRGB's linear halves are scaled the same way, and both are clamped and sRGB-encoded, so the display's white is the PNG's white. The result's `output` says which mode the frame had, and the sidecar keeps it.
 - **A frame that draws nothing.** When the window is minimized after the host asks, the frame records nothing and the backend cancels its copy. The cancel comes back with its ticket: a screenshot waits for the next frame, and a ring sample is taken on the next frame. A copy that cannot get its readback memory is cancelled in the same way. A thumbnail's cancelled copy fails with a reason.
 - **A request that cannot copy** fails with a reason: a window that stays minimized, or every capture slot held, for 8 frames, or a format the conversion does not know.
-- **Debug views.** For each view that a screenshot asks for, the editor sends `Viewport_Settings` with that view, waits for three frames to reach the viewport, requests another screenshot, and after the last one sends the user's settings again (see [Viewport: Rendering](viewport.md#viewport)). The views are the renderer's (see [Rendering: Debug views](../rendering/post-processing.md#debug-views)), named in snake case: `depth`, `normals`, `albedo`, `entity_ids`. The `velocity` view needs a frame of history, so its first frame can be empty. The user's settings file is never changed.
+- **Debug views.** For each view that a screenshot asks for, the editor sends the first viewport's `Set_Viewport_Settings` with that view, waits for three frames to reach the viewport, requests another screenshot, and after the last one sends the user's settings again (see [Viewport: Rendering](viewport.md#viewport)). The views are the renderer's (see [Rendering: Debug views](../rendering/post-processing.md#debug-views)), named in snake case: `depth`, `normals`, `albedo`, `entity_ids`. The `velocity` view needs a frame of history, so its first frame can be empty. The user's settings file is never changed.
 
 ## History ring
 
@@ -42,8 +42,8 @@ Beside every capture the editor writes `<name>.json`, so an image can be read ba
 | `failures` | Why any image is missing |
 | `context.mode`, `freeCamera` | Edit, Play or Paused, and whether the editor's camera flies in play |
 | `context.scene` | The open scene's file |
-| `context.camera` | The editor's camera: the raw `World_Position`, the same in meters, the yaw and pitch in radians, the vertical field of view and the near plane |
-| `context.settings` | The viewport's `Viewport_Settings`: the debug view, the features turned off, the exposure, the helpers and the quality choices |
+| `context.camera` | The first viewport's camera: the raw `World_Position`, the same in meters, the yaw and pitch in radians, the vertical field of view and the near plane |
+| `context.settings` | The first viewport's `Viewport_Settings`: the debug view, the features turned off, the exposure, the helpers and the quality choices |
 | `context.hostStats`, `gameStats` | The last `Host_Stats` and `Game_Stats`: frame times, memory, resource counts, entities and script memory |
 | `context.profile` | The last `Profile_Summary`: the CPU and GPU frame times, and each system's, script's and render pass's cost, the passes' GPU milliseconds among them (see [Profiling](../core/profiling.md#gpu-timestamps)) |
 | `context.game`, `hostPid`, `hostArguments`, `editorPid` | Which game, which processes |
@@ -62,8 +62,8 @@ A tool outside the editor cannot link to the host: the host serves one editor at
 | `status` | | `status`: `linked`, `hostState`, `mode`, `scene`, `game`, `hostPid` |
 | `screenshot` | `views`: debug view names; `path`: the PNG's path, absolute | `files`: the images, then the sidecar |
 | `gif` | `path`: the GIF's path, absolute | `files`: the GIF, then the sidecar |
-| `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"shadingStats":true}` | `ok`, or an error that names the settings |
-| `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out | `ok` |
+| `viewport` | `settings`: an object of viewport settings by their sidecar names, such as `{"shadingStats":true}`, and `arrangement`, one of `Single`, `SideBySide`, `Stacked` and `Quad`; `viewport`: the number of the viewport to change, the first when left out | `ok`, or an error that names the settings, or says that the viewport is not open |
+| `camera` | `position`: three numbers in meters; `yaw` and `pitch` in radians, each kept when left out; `viewport`: the number of the viewport whose camera to place, the first when left out | `ok` |
 | `ui` | `window`: a panel's ID, for the window that holds it, or left out for the main window; `path`: the PNG's path, absolute | `files`: the image |
 | `content` | `settings`: what to change in the content browser, each left out to keep it: `folder`, as `<root>/<path>`; `search`; `view`, `grid` or `list`; `tileSize`; `kinds`, the filter's kinds, separated by commas; `tags`, the filter's tags, likewise; `showTags`; `popOut`; `enter`, a file's GUID, to show what it makes, or a prefab's; `enterNode`, an entity's ID in the open prefab; `leave`; `reveal`, an asset's GUID; `shown`, whether its panel is open | `content`: `folder`, `search`, `selection` and the names of the shown assets, `items` |
 
@@ -84,8 +84,8 @@ A capture that fails answers `ok` false with the reason in `error`, and still li
 editorctl [--automation <file>] [--json] status
 editorctl [--automation <file>] [--json] screenshot [--view <name>]... [--out <path>]
 editorctl [--automation <file>] [--json] gif [--out <path>]
-editorctl [--automation <file>] [--json] viewport --set <name>=<value>...
-editorctl [--automation <file>] [--json] camera --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
+editorctl [--automation <file>] [--json] viewport [--viewport <number>] --set <name>=<value>...
+editorctl [--automation <file>] [--json] camera [--viewport <number>] --position <x>,<y>,<z> [--yaw <radians>] [--pitch <radians>]
 editorctl [--automation <file>] [--json] ui [--window <panel>] [--out <path>]
 editorctl [--automation <file>] [--json] content [--set <name>=<value>]...
 ```

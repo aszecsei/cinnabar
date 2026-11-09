@@ -110,7 +110,8 @@ read_cull_stats :: proc(r: ^Renderer) {
 @(private)
 add_cull_stats_copy :: proc(f: ^Frame) {
 	sf := f.scene_frame
-	if sf == nil || sf.stats == 0 {
+	// An extra view tallies into the same buffer after the frame's own view copied it, and copies nothing.
+	if f.extra || sf == nil || sf.stats == 0 {
 		return
 	}
 	r := f.renderer

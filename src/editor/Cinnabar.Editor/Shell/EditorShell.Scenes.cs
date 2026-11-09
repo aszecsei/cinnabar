@@ -520,6 +520,9 @@ public sealed partial class EditorShell
             case Link.Protocol.PreviewTarget target:
                 _previewSlots.Route(target);
                 return;
+            case Link.Protocol.ViewportTarget target:
+                OnViewportTarget(target);
+                return;
             case Link.Protocol.AnimatorView { Entity: 0 } preview:
                 OnPreviewView(preview);
                 return;

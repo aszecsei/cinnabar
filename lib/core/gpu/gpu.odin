@@ -243,6 +243,12 @@ output_mode :: proc(request: Output_Request, display: Display) -> Output_Mode {
 MAX_PREVIEW_TARGETS :: 4
 MAX_PREVIEW_SIZE :: 1024
 
+// The editor's extra viewports render into shared targets of their own too, at most this many beside the frame target,
+// which is the first viewport's, each at most this large on a side, as the frame target is (see
+// docs/editor/viewport.md#several-viewports).
+MAX_VIEWPORT_TARGETS :: 3
+MAX_VIEWPORT_SIZE :: 8192
+
 // Preview_Target is a frame of a preview target: its texture, in the render target layout until the frame ends, in
 // FRAME_TARGET_FORMAT, its shared objects' name prefix, in temporary memory, its generation and its size.
 Preview_Target :: struct {
