@@ -26,6 +26,8 @@ Hook_Record :: struct {
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
 	// The reflections, and whether they traced the ray scene.
 	reflections, traced:                                bool,
+	// The clouds, and their shadow map.
+	clouds, cloud_shadow:                               bool,
 	// The exposure's histogram counts the background, which the sky drew.
 	sky_background:                                     bool,
 	temporal, upscaled, display:                        bool,
@@ -157,6 +159,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	// The fog is a setting of the volume around the camera.
 	ecs.add(w, mist, volume.Volume{shape = .Global})
 	ecs.add(w, mist, Fog{density = {true, 0.05}, height_falloff = {true, 0.5}})
+	// And the clouds, whose shadow the sun casts.
+	ecs.add(w, mist, Clouds{density = {true, 1}})
 	// So is the sky, whose sun is the directional light.
 	environment := DEFAULT_ENVIRONMENT
 	environment.mode = {true, .Atmosphere}
@@ -210,6 +214,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
 				rec.reflections, rec.traced = f.reflections != 0, f.ssr != nil && f.ssr.traced != nil
+				rec.clouds, rec.cloud_shadow = f.clouds != nil, f.clouds != nil && f.clouds.shadow != 0
 				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
 				rec.baked, rec.sky_capture = f.post.baked, f.sky_cube != nil && f.sky_cube.capture
@@ -281,6 +286,12 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		&r.sky.cube.capture,
 		&r.sky.cube.atmosphere,
 		&r.sky.cube.prefilter,
+		// The clouds, which bake their noise in the first frame that executes and cast their shadow from the sun.
+		&r.clouds.noise,
+		&r.clouds.shadow,
+		&r.clouds.march,
+		&r.clouds.temporal,
+		&r.clouds.composite,
 		&r.post.upscalers.motion,
 		&r.scene.select_pipeline,
 		&r.scene.cull_patches_pipeline,
@@ -333,9 +344,12 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	testing.expect(t, !r.post.adapted, "the failed frame adapted the exposure")
 	testing.expect(t, !r.sky.cube.ring.valid, "the failed frame made the sky's cubemap")
 	testing.expect(t, r.gi.split.slots == {} || r.gi.split.fresh, "the failed frame cleared the split cascades' storage")
+	testing.expect(t, record.clouds && r.clouds.noise_state == .Pending, "the failed frame baked the clouds' noise")
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
 		testing.expect(t, record.bloom && record.occlusion && record.fog && record.gi && record.sky && record.reflections)
+		testing.expect(t, record.clouds && record.cloud_shadow, "the frame has no clouds or no cloud shadow")
+		testing.expect_value(t, r.clouds.noise_state, Cloud_Noise_State.Ready)
 		testing.expect(t, record.sky_background, "the histogram does not count the sky")
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect_value(t, record.baked, i == 0)
@@ -566,6 +580,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	desc.disable = ~Features{}
 	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")
 	testing.expect(t, !record.bloom && !record.occlusion && !record.fog && !record.gi)
+	testing.expect(t, !record.clouds && !record.cloud_shadow, "the clouds stayed on")
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
 	// The jitter cycles inside the pixel.
 	for n in u32(1) ..= JITTER_SAMPLES {

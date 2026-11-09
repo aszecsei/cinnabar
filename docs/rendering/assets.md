@@ -47,4 +47,4 @@ A component refers to an asset by GUID, in a `format.Guid` field with an `asset`
 - **`Surface_Renderer`** (51): a patch surface's size, material, hole mask, finest cell, height range and whether it casts shadows (see [Surfaces](surfaces.md#surfaces)).
 - **`Particle_System`** (52): an effect, whether it is paused, and a scale of its rates (see [Particles](particles.md#systems)).
 - **`Reflection_Probe`** (54): an influence box, its fade, a projection box, a priority, an intensity and when it captures again (see [Reflection probes](lighting-and-shadows.md#reflection-probes)).
-- **The settings components** (38 and 43 to 50), which volumes carry (see [Settings](frame.md#settings)).
+- **The settings components** (38, 43 to 50 and 55), which volumes carry (see [Settings](frame.md#settings)).

@@ -82,6 +82,7 @@ Quality_Key :: enum u8 {
 	Virtual_Shadows,
 	Reflections,
 	Reflections_Level,
+	Clouds,
 }
 
 Quality_Keys :: bit_set[Quality_Key]
@@ -102,6 +103,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Virtual_Shadows    = "quality.shadows.virtual",
 	.Reflections        = "quality.reflections",
 	.Reflections_Level  = "quality.reflections.level",
+	.Clouds             = "quality.clouds",
 }
 
 // Watch is a project's settings and when their files last changed. It is plain data, so a code reload keeps it.
@@ -302,6 +304,8 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				ok = enum_value(problems, line, key, value, &q.reflections.technique)
 			case .Reflections_Level:
 				ok = enum_value(problems, line, key, value, &q.reflections.level)
+			case .Clouds:
+				ok = enum_value(problems, line, key, value, &q.clouds)
 			}
 			if ok {
 				settings.quality_given += {k}
@@ -358,6 +362,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Virtual_Shadows in given {q.shadows.virtual = s.shadows.virtual}
 	if .Reflections in given {q.reflections.technique = s.reflections.technique}
 	if .Reflections_Level in given {q.reflections.level = s.reflections.level}
+	if .Clouds in given {q.clouds = s.clouds}
 	return render.clamp_quality(q, caps)
 }
 
@@ -382,6 +387,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Virtual_Shadows    = q.shadows.virtual ? "true" : "false",
 		.Reflections        = name(q.reflections.technique),
 		.Reflections_Level  = name(q.reflections.level),
+		.Clouds             = name(q.clouds),
 	}
 	return
 }

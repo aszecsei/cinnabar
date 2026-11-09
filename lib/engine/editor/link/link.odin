@@ -572,6 +572,7 @@ Debug_View :: enum u8 {
 	Roughness,
 	Reflection_Probes,
 	Reflections,
+	Clouds,
 }
 
 // Which entities the viewport draws the shapes of: lights' ranges and cones, volumes and cameras.
@@ -626,6 +627,7 @@ Viewport_Settings :: struct {
 	no_post_effects:      bool,
 	no_occlusion_culling: bool,
 	no_meshlet_hierarchy: bool,
+	no_clouds:            bool,
 	// Count the forward pass's quads for Game_Stats (see docs/rendering/lighting-and-shadows.md#quad-overdraw).
 	shading_stats:        bool,
 	// Stops added to the exposure.

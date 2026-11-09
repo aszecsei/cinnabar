@@ -190,6 +190,18 @@ Frame_Constants :: struct {
 	// The screen-space or traced reflections are in Material_Push.reflections: only the camera's view reads them (see
 	// screen_reflections.odin).
 	reflections:                  u32,
+	// The cloud shadow map (see cloud_shadow_constants in clouds.odin): its read index, 0 without one, its bilinear
+	// sampler, how dark the shadow is, the layer's bottom relative to the camera, the fade as the sun nears the horizon,
+	// the map's center relative to the camera, 1 over its side, and the layer's top relative to the camera, above which
+	// nothing takes the shadow. A reflection probe's faces have none.
+	cloud_shadow:                 u32,
+	cloud_shadow_sampler:         u32,
+	cloud_shadow_strength:        f32,
+	cloud_shadow_bottom:          f32,
+	cloud_shadow_fade:            f32,
+	cloud_shadow_center:          [2]f32,
+	cloud_shadow_inv_extent:      f32,
+	cloud_shadow_top:             f32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -532,7 +544,7 @@ Cell_Range :: struct {
 }
 
 #assert(size_of(Instance_Record) == 112 && size_of(Cull_Item) == 80 && size_of(Draw_Record) == 32 && size_of(Mesh_Record) == 64)
-#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 860 && size_of(Cull_Constants) == 144)
+#assert(size_of(Cull_View) == 128 && size_of(Frame_Constants) == 896 && size_of(Cull_Constants) == 144)
 #assert(size_of(Instance_Set_Record) == 112 && size_of(Instance_Cull_Constants) == 112)
 
 // Gpu_Scene is the GPU scene's state between frames, in the Renderer.
@@ -1280,6 +1292,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	constants.sky_cube_blend, constants.sky_cube_mips = cube.blend, cube.mips
 	constants.sky_cube_sampler = gpu.sampler_index(r.post.sampler)
 	reflection_probe_constants(&constants, f)
+	cloud_shadow_constants(&constants, f)
 	if shadows.virtual.count > 0 {
 		virtual_constants(&constants, f)
 	}

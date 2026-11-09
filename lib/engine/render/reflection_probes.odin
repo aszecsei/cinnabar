@@ -821,6 +821,8 @@ reflection_probe_view_constants :: proc(
 	c.jitter = {}
 	c.exposure = gpu.read_index(r.post.unit_exposure)
 	c.fog, c.gi, c.debug_view, c.occlusion = 0, 0, 0, 0
+	// The faces see no clouds, so their light takes no cloud shadow either.
+	c.cloud_shadow = 0
 	c.virtual_levels, c.virtual_draw = 0, 0
 	c.reflection_probe_count, c.reflection_probe_clusters = 0, 0
 	c.capture = 1
@@ -935,7 +937,7 @@ add_reflection_probe_shadow :: proc(f: ^Frame, sf: ^Shadow_Frame, slot: int, max
 
 // upload_reflection_probe_lights writes the capture's copy of the lights, after the shadows give them theirs, and readies
 // its faces' clusters. The faces have no shadow mask, so no light takes a channel, and the directional light with the
-// probe's shadow view takes it as its only cascade; the others have none.
+// probe's shadow view takes it as its only cascade; the others have none. The faces have no cloud shadow map either.
 @(private)
 upload_reflection_probe_lights :: proc(f: ^Frame) {
 	pf := f.reflection_probes
@@ -953,7 +955,7 @@ upload_reflection_probe_lights :: proc(f: ^Frame) {
 		if record.type == .Directional {
 			record.shadow =
 				i == pf.shadow_light && pf.shadow_view < len(f.shadows.views) ? i32(pf.shadow_view) : -1
-			record.flags -= {.Virtual_Shadow}
+			record.flags -= {.Virtual_Shadow, .Cloud_Shadow}
 		}
 	}
 	ok: bool

@@ -185,8 +185,8 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	f.fog = ff
 }
 
-// add_fog_passes adds the injection and the integration, after the clusters and the shadows, whose results they read.
-// The integrated volume becomes Frame.fog_volume.
+// add_fog_passes adds the injection and the integration, after the clusters, the shadows and the cloud shadow map,
+// whose results they read. The integrated volume becomes Frame.fog_volume.
 @(private)
 add_fog_passes :: proc(f: ^Frame) {
 	ff := f.fog
@@ -205,6 +205,7 @@ add_fog_passes :: proc(f: ^Frame) {
 		read(g, p, f.shadows.atlas)
 	}
 	declare_virtual_shadows(f, p)
+	declare_cloud_shadow(f, p)
 	if ff.traced && f.shadows.mask_count > 0 {
 		ff.accel = ray_scene_accel(f)
 		read_accel(g, p, ff.accel)

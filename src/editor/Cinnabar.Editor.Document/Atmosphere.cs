@@ -4,9 +4,10 @@ namespace Cinnabar.Editor.Document;
 
 /// <summary>
 /// The scene's atmosphere (see docs/editor/shell-and-panels.md#atmosphere): the global volume whose Environment gives
-/// the sky, the sun and the ambient light, and whose Fog gives the fog (see docs/rendering/sky.md#sky). Each edit gives
-/// operations, which the caller applies as one undo entry. Setting a volume's setting overrides it, as the properties
-/// panel's edits do. The field names and the defaults are the engine's, in lib/engine/render/settings.odin.
+/// the sky, the sun and the ambient light, whose Fog gives the fog (see docs/rendering/sky.md#sky), and whose Clouds
+/// give the clouds (see docs/rendering/clouds.md#clouds). Each edit gives operations, which the caller applies as one
+/// undo entry. Setting a volume's setting overrides it, as the properties panel's edits do. The field names and the
+/// defaults are the engine's, in lib/engine/render/settings.odin.
 /// </summary>
 public static class Atmosphere
 {
@@ -17,8 +18,47 @@ public static class Atmosphere
     public const string StarIntensity = "night.star_intensity";
     public const string MoonIlluminance = "night.moon_illuminance";
 
+    // The Clouds' fields, as the engine's Clouds struct names them.
+    public const string CloudDensity = "density";
+    public const string CloudWeather = "weather";
+    public const string CloudCoverage = "coverage";
+    public const string CloudPrecipitation = "precipitation";
+    public const string CloudType = "cloud_type";
+    public const string Cirrus = "cirrus";
+    public const string WeatherMap = "weather_map";
+    public const string WeatherOrigin = "weather_origin";
+    public const string WeatherSize = "weather_size";
+    public const string WindSpeed = "wind_speed";
+    public const string WindDirection = "wind_direction";
+    public const string CloudBottom = "bottom";
+    public const string CloudThickness = "thickness";
+    public const string CirrusHeight = "cirrus_height";
+    public const string BaseVariation = "base_variation";
+    public const string FarDistance = "far_distance";
+    public const string FarCoverage = "far_coverage";
+    public const string CloudAmbientIntensity = "ambient_intensity";
+    public const string ShadowStrength = "shadow_strength";
+
     /// <summary>The Environment's modes, as the engine's Sky_Mode names them.</summary>
     public static readonly IReadOnlyList<string> Modes = ["Flat", "Atmosphere", "Texture"];
+
+    /// <summary>Where the clouds' weather comes from, as the engine's Weather_Source names them: the scalars, or the weather map.</summary>
+    public static readonly IReadOnlyList<string> WeatherSources = ["Scalars", "Map"];
+
+    /// <summary>
+    /// Weathers: the clouds' coverage, precipitation, type, cirrus and thickness. A preset sets the scalars, so it also
+    /// sets the weather's source to them.
+    /// </summary>
+    public static readonly IReadOnlyList<(string Name, (string Field, double Value)[] Settings)> Weathers =
+    [
+        ("Clear", [(CloudCoverage, 0.05), (CloudPrecipitation, 0), (CloudType, 0.5), (Cirrus, 0.15), (CloudThickness, 2000)]),
+        ("Scattered", [(CloudCoverage, 0.45), (CloudPrecipitation, 0), (CloudType, 0.5), (Cirrus, 0.25), (CloudThickness, 2500)]),
+        ("Overcast", [(CloudCoverage, 0.9), (CloudPrecipitation, 0.25), (CloudType, 0.15), (Cirrus, 0), (CloudThickness, 1500)]),
+        ("Storm", [(CloudCoverage, 0.95), (CloudPrecipitation, 0.9), (CloudType, 1), (Cirrus, 0), (CloudThickness, 4500)]),
+    ];
+
+    /// <summary>The weather presets' fields, all of which a preset resets before it sets its own.</summary>
+    static readonly string[] WeatherFields = [CloudCoverage, CloudPrecipitation, CloudType, Cirrus, CloudThickness, CloudWeather];
 
     /// <summary>The star intensity and the moon's illuminance that the Stars and Moon toggles turn on.</summary>
     public const double StarsOn = 1;
@@ -244,4 +284,72 @@ public static class Atmosphere
     /// <summary>The volume without its fog: its Fog's density set to 0, which keeps its other settings.</summary>
     public static Operation[] NoFog(SceneEntity volume) =>
         volume.Components.Any(c => c.Id == SceneEdits.FogId) ? Set(volume, SceneEdits.FogId, "density", SceneEdits.Floats(0)) : [];
+
+    /// <summary>Whether the volume's clouds show: its Clouds set a density above 0, which is 0 by default.</summary>
+    public static bool HasClouds(SceneEntity volume) =>
+        Setting(volume, SceneEdits.CloudsId, CloudDensity) is { Kind: SceneValueKind.Number } d && d.Numbers[0].Float > 0;
+
+    /// <summary>Where the volume's clouds take their weather from, the scalars by default.</summary>
+    public static string WeatherSourceOf(SceneEntity volume) =>
+        Setting(volume, SceneEdits.CloudsId, CloudWeather) is { Kind: SceneValueKind.Name } v && WeatherSources.Contains(v.Text) ? v.Text : "Scalars";
+
+    /// <summary>The GUID of the volume's weather map, or "" without one.</summary>
+    public static string WeatherMapOf(SceneEntity volume) =>
+        Setting(volume, SceneEdits.CloudsId, WeatherMap) is { Kind: SceneValueKind.Asset } v ? v.Asset : "";
+
+    /// <summary>
+    /// Toggles the volume's clouds: without clouds, a Clouds with a density of 1, added when the volume has none; with
+    /// them, a density of 0, which keeps the other settings, as <see cref="NoFog"/> does.
+    /// </summary>
+    public static Operation[] Clouds(SceneEntity volume) =>
+        HasClouds(volume) ? Set(volume, SceneEdits.CloudsId, CloudDensity, SceneEdits.Floats(0)) : [.. WithClouds(volume), .. Set(volume, SceneEdits.CloudsId, CloudDensity, SceneEdits.Floats(1))];
+
+    /// <summary>
+    /// Sets the clouds' weather to a preset's, after resetting every setting that a weather sets: the volume gets a
+    /// Clouds when it has none, and a density of 1 when it has none, and the weather comes from the scalars. The map
+    /// stays, for when the source goes back to it.
+    /// </summary>
+    public static Operation[] Weather(SceneEntity volume, string name)
+    {
+        var weather = Weathers.First(w => w.Name == name);
+        return
+        [
+            .. WithClouds(volume),
+            .. HasClouds(volume) ? [] : Set(volume, SceneEdits.CloudsId, CloudDensity, SceneEdits.Floats(1)),
+            .. WeatherFields.SelectMany(f => Reset(volume, SceneEdits.CloudsId, f)),
+            .. weather.Settings.SelectMany(s => Set(volume, SceneEdits.CloudsId, s.Field, SceneEdits.Floats(s.Value))),
+            .. Set(volume, SceneEdits.CloudsId, CloudWeather, SceneValue.Name("Scalars")),
+        ];
+    }
+
+    /// <summary>Takes the clouds' weather from the scalars or the map, with a Clouds if the volume has none.</summary>
+    public static Operation[] WeatherSource(SceneEntity volume, string name) =>
+        [.. WithClouds(volume), .. Set(volume, SceneEdits.CloudsId, CloudWeather, SceneValue.Name(name))];
+
+    /// <summary>
+    /// Centers the weather map on a world position, in the engine's raw units of 2^-24 m, as a Transform's position
+    /// is, with a Clouds if the volume has none.
+    /// </summary>
+    public static Operation[] CenterWeather(SceneEntity volume, long[] position) =>
+        [.. WithClouds(volume), .. Set(volume, SceneEdits.CloudsId, WeatherOrigin, SceneValue.Of([.. position.Select(SceneNumber.Of)]))];
+
+    /// <summary>Gives the volume a weather map, from which its weather comes, with a Clouds if the volume has none.</summary>
+    public static Operation[] UseWeatherMap(SceneEntity volume, string guid) => UseWeatherMap(volume, guid, null);
+
+    /// <summary>
+    /// <see cref="UseWeatherMap(SceneEntity, string)"/>, with the map centered on a world position too when there is
+    /// one, in the engine's raw units. The Clouds is added once, so one list can do both.
+    /// </summary>
+    public static Operation[] UseWeatherMap(SceneEntity volume, string guid, long[]? origin) =>
+    [
+        .. WithClouds(volume),
+        .. Set(volume, SceneEdits.CloudsId, WeatherMap, SceneValue.AssetRef(guid)),
+        .. Set(volume, SceneEdits.CloudsId, CloudWeather, SceneValue.Name("Map")),
+        .. origin == null ? [] : Set(volume, SceneEdits.CloudsId, WeatherOrigin, SceneValue.Of([.. origin.Select(SceneNumber.Of)])),
+    ];
+
+    // The Clouds that the volume's clouds settings go on, added empty when the volume has none, so a Set after it has a
+    // component to set.
+    static Operation[] WithClouds(SceneEntity volume) =>
+        volume.Components.Any(c => c.Id == SceneEdits.CloudsId) ? [] : [new AddComponent(volume.Id, new SceneComponent(SceneEdits.CloudsId, "Clouds", []))];
 }

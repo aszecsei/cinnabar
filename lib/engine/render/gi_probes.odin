@@ -522,6 +522,7 @@ add_hit_light_passes :: proc(f: ^Frame, inputs: ^Hit_Light_Inputs, name: string,
 	read_accel(g, pass, ray_scene_accel(f))
 	read(g, pass, hits)
 	read(g, pass, surfaces)
+	declare_cloud_shadow(f, pass)
 	if inputs.radiance != 0 {
 		read(g, pass, inputs.radiance)
 		read(g, pass, inputs.irradiance)

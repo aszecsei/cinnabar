@@ -87,8 +87,9 @@ TEXTURE_SETTINGS := []Setting_Info {
 }
 
 // texture_usage_for is the usage that a new texture's .meta file gets, from its name: .hdr and .exr files are hdr, a
-// name that ends in _n or _normal is normal, one that ends in _r, _rough, _ao, _m, _metal or _mask is mask, and the
-// rest are color.
+// name that ends in _n or _normal is normal, one that ends in _r, _rough, _ao, _m, _metal, _mask, _height or _hole is
+// mask, one that ends in _weather is data (a clouds' weather map, see docs/rendering/clouds.md#weather), and the rest
+// are color.
 texture_usage_for :: proc(path: string) -> string {
 	name := strings.to_lower(filepath.stem(path), context.temp_allocator)
 	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
@@ -104,6 +105,9 @@ texture_usage_for :: proc(path: string) -> string {
 		if strings.has_suffix(name, suffix) {
 			return "mask"
 		}
+	}
+	if strings.has_suffix(name, "_weather") {
+		return "data"
 	}
 	return "color"
 }

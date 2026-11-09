@@ -64,7 +64,7 @@ The specular light along a reflection is the sky's cubemap, prefiltered by rough
   - **Atmosphere:** the sky view table (`sky_cube_atmosphere.hlsl`), times `ambient_intensity`, once the frame makes the tables.
   - **Texture:** the texture (`sky_cube_capture.hlsl`), turned and scaled as the background is, times `ambient_intensity`, once it is resident, at the texture's mip whose texels are about as wide as a direction.
   - **Ambient:** otherwise the frame's linear `Ambient`: Flat's colors, an atmosphere whose pipelines are not ready, or a texture that is not resident. So the cubemap always matches the diffuse light's fallback.
-  - The sun's and the moon's discs and the stars are left out. The directional lights give the specular highlights, so a disc would count them twice, and a star is narrower than a texel.
+  - The sun's and the moon's discs and the stars are left out. The directional lights give the specular highlights, so a disc would count them twice, and a star is narrower than a texel. The [clouds](clouds.md#limits) are left out too: the cubemap is the sky's, so a mirror under an overcast reflects the clear sky.
 - **The prefilter** (`sky cube prefilter`, `cube_prefilter.hlsl`) convolves the source with a GGX lobe for each mip: the split sum's first term, whose second is the environment BRDF fit that `shade_indirect` applies (`lit.hlsli`). Mip 0 is a mirror, the source's mip 0 as it is, and mip `m` of `n` is roughness `m / (n − 1)`, so the last is roughness 1. The lobe takes the normal, the view and the reflection as one direction, as Karis does, and is importance sampled at Hammersley points, each weighted by its cosine. Each sample reads the source's mip whose texels cover about the solid angle that the sample stands for, `0.5 · log2(Ωs / Ωp) + 1` (filtered importance sampling, Křivánek and Colbert), so a small bright light, such as the glow around the sun, leaves no fireflies at any roughness. It takes any sampled cube with its mip chain, not only the sky's.
 - **Parameters:** `SKY_CUBE_PARAMS` at the reflections' level (see [Quality](quality.md#quality)). The mips go down to faces `SKY_CUBE_MIN_FACE` (4) wide.
 
@@ -107,20 +107,20 @@ The specular light along a reflection is the sky's cubemap, prefiltered by rough
 | `sky transmittance` | 256×64 | The share of light from the top of the atmosphere that reaches each height along each direction, laid out as Bruneton's |
 | `sky multiscatter` | 32×32 | At each height and sun angle, the light scattered twice in 64 directions with an even phase, over one minus the share that the air around scatters back, which sums every further order |
 | `sky view` | 256×128 | The light from every direction at the camera: the sun's and the moon's scattering, once from the transmittance and more from the multiple scattering table, and the ground's. Rows are squeezed toward the horizon. |
-| `sky` | The scene | Where the depth is 0, after the world pass and before the fog over the background: the sky view table, and above the horizon the sun, the moon and the stars, pre-exposed |
+| `sky` | The scene | Where the depth is 0, after the world pass and before the [clouds](clouds.md#passes) compose over it and the fog over the background: the sky view table, and above the horizon the sun, the moon and the stars, pre-exposed |
 
 `Texture` has two passes of its own, when its texture is resident and their pipelines exist: `sky texture` draws over the background where `sky` would, and `sky texture ambient`, with its copy to the readback buffer, runs only in a frame that integrates the texture.
 
 Every mode has the [cubemap](#specular-light)'s two passes, in a frame that updates it: `sky cube capture`, which writes every mip of the source cube, and `sky cube prefilter`, which writes one mip of the next cube, or every mip at once when there is no current one. They run after the tables, which the atmosphere's capture reads.
 
 - The tables are made again each frame, since the blended settings can change each frame. They are small.
-- The world pass clears the scene to black under the sky. The fog over the background then dims the sky by the whole fog volume, as it did the background color (see [Volumetric fog](fog.md#volumetric-fog)).
+- The world pass clears the scene to black under the sky. The [clouds](clouds.md#clouds) compose over the sky after `sky`, dimming its discs and stars by their transmittance, and the fog over the background then dims both by the whole fog volume, as it did the background color (see [Volumetric fog](fog.md#volumetric-fog)).
 - **Precision:** the planet's radius is thousands of kilometers, and a float keeps only about a meter of it, which can be the camera's whole height. The shaders keep a point as its height above the ground and the cosine of a direction from its zenith, and find each height along a ray from a difference that keeps it (`height_along` in `sky_common.hlsli`). The CPU works in f64.
 
 ## Limits
 
 - **No aerial perspective:** the air between the camera and the world's surfaces does not dim or color them. The fog does that within its 500 m.
-- **No clouds**, and the stars do not turn with the time.
+- **The stars do not turn with the time.**
 - **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's. Its reflections are the image's, through the [cubemap](#specular-light).
 - **Reflections show no discs and no stars:** the cubemap leaves out the sun's and the moon's discs, whose highlights are the directional lights', and the stars, which are narrower than its texels. A mirror at night shows the air's light but not the stars.
 - **The sky's sun lights nothing without a link.** A scene that wants sunlight links a directional light, which the Atmosphere tab does (see [Editor](../editor/shell-and-panels.md#atmosphere)).

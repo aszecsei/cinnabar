@@ -100,6 +100,13 @@ component 49 Environment
 component 38 Fog
 	density = 0.01
 	height_falloff = 0.3
+component 55 Clouds
+	density = 1.0
+	weather = Map
+	weather_map = $4579ba72082063c6088c1ba1901550ba
+	coverage = 0.45
+	cloud_type = 0.5
+	cirrus = 0.25
 
 entity 6b0d549b6f03675a
 name = "Red Glass Sphere"

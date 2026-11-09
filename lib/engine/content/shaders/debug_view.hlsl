@@ -13,6 +13,8 @@ struct Push {
 	float near;
 	// The shadow mask's channels that hold a light.
 	uint mask_channels;
+	// The source's texels are this many pixels on a side, as the clouds' are: 1 for the others.
+	uint divisor;
 };
 CN_PUSH_CONSTANTS(Push, push);
 
@@ -31,6 +33,7 @@ static const uint DEBUG_GI_PROBES = 21;
 static const uint DEBUG_QUAD_OVERDRAW = 22;
 static const uint DEBUG_ROUGHNESS = 24;
 static const uint DEBUG_REFLECTIONS = 26;
+static const uint DEBUG_CLOUDS = 27;
 
 // The prepass clears the velocity to render.VELOCITY_NONE where it draws nothing; anything this large is that.
 static const float VELOCITY_NONE = 1000;
@@ -110,6 +113,10 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	case DEBUG_GI_PROBES:
 		// The split cascades' gather drew the colors.
 		color = cn_texture(push.source).Load(pixel).rgb;
+		break;
+	case DEBUG_CLOUDS:
+		// The clouds' history, a texel for each block of divisor pixels: their light, not pre-exposed, over black.
+		color = cn_texture(push.source).Load(int3(id.xy / max(push.divisor, 1), 0)).rgb * exposure;
 		break;
 	case DEBUG_SHADOW_MASK: {
 		// Each light's channel in its own color: red, green, blue and yellow. A channel without a light is black.

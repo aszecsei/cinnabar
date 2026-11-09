@@ -171,6 +171,17 @@ struct Frame_Constants {
 	// Whether this view reads the screen-space or traced reflections in Material_Push.reflections: the camera's view
 	// does, and the view model, the probes' captures and the previews do not.
 	uint reflections;
+	// The cloud shadow map (see cloud_shadow.hlsli): its read index, 0 without one, its bilinear sampler, how dark the
+	// shadow is, the cloud layer's bottom relative to the camera, the map's fade as the sun nears the horizon, its center
+	// relative to the camera, 1 over its side in meters, and the layer's top relative to the camera.
+	uint cloud_shadow;
+	uint cloud_shadow_sampler;
+	float cloud_shadow_strength;
+	float cloud_shadow_bottom;
+	float cloud_shadow_fade;
+	float2 cloud_shadow_center;
+	float cloud_shadow_inv_extent;
+	float cloud_shadow_top;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -199,6 +210,8 @@ static const uint DEBUG_SHADOW_VIRTUAL = 23;
 static const uint DEBUG_REFLECTION_PROBES = 25;
 // The screen-space or traced reflections, which debug_view.hlsl draws from their texture.
 static const uint DEBUG_REFLECTIONS = 26;
+// The clouds' history, which debug_view.hlsl draws from their texture.
+static const uint DEBUG_CLOUDS = 27;
 
 // Match Shading_Stats in lib/engine/render/shading.odin: the words of the forward pass's tally, in bytes.
 static const uint SHADING_STATS_FORWARD_QUADS = 0;
@@ -384,6 +397,8 @@ static const uint LIGHT_LINE = 5;
 static const uint LIGHT_TWO_SIDED = 1;
 // The light's shadow is the virtual shadow map (see virtual_shadow.hlsli).
 static const uint LIGHT_VIRTUAL_SHADOW = 2;
+// The clouds shadow the light (see cloud_shadow.hlsli).
+static const uint LIGHT_CLOUD_SHADOW = 4;
 struct Light_Record {
 	float3 position;
 	float range;

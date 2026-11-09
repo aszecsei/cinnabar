@@ -42,6 +42,19 @@ texture_blob :: proc(t: ^testing.T, tree: Tree, path: string) -> (data: []byte, 
 }
 
 @(test)
+a_new_textures_usage_comes_from_its_name :: proc(t: ^testing.T) {
+	testing.expect_value(t, texture_usage_for("content/sky.hdr"), "hdr")
+	testing.expect_value(t, texture_usage_for("content/sky.EXR"), "hdr")
+	testing.expect_value(t, texture_usage_for("content/bricks_n.png"), "normal")
+	testing.expect_value(t, texture_usage_for("content/bricks_Normal.png"), "normal")
+	testing.expect_value(t, texture_usage_for("content/bricks_height.png"), "mask")
+	testing.expect_value(t, texture_usage_for("content/island_hole.png"), "mask")
+	testing.expect_value(t, texture_usage_for("content/sponza_weather.png"), "data")
+	testing.expect_value(t, texture_usage_for("content/weather.png"), "color")
+	testing.expect_value(t, texture_usage_for("content/bricks.png"), "color")
+}
+
+@(test)
 textures_cook_by_usage_with_their_mips :: proc(t: ^testing.T) {
 	tree := make_tree(t, {})
 	defer remove_tree(tree)

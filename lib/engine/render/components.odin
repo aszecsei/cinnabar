@@ -21,6 +21,7 @@ SURFACE_RENDERER_ID :: ecs.Component_Id(51)
 // 52 is the Particle_System (see particles.odin).
 INSTANCED_MESH_RENDERER_ID :: ecs.Component_Id(53)
 REFLECTION_PROBE_ID :: ecs.Component_Id(54)
+// 55 is the Clouds settings component (see settings.odin).
 
 // The view of a Camera that leaves a field at 0, as a component added in the editor does.
 DEFAULT_VERTICAL_FOV :: math.PI / 3

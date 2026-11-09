@@ -549,6 +549,11 @@ sample-audio:
 sample-textures:
     python -I tools/surface_textures.py .
 
+# Write the samples' weather maps, the clouds' coverage, precipitation and type (see docs/rendering/clouds.md#weather).
+# Commit what it writes.
+sample-weather:
+    python -I tools/weather_map.py .
+
 fmt:
     odinfmt lib src samples -w
 

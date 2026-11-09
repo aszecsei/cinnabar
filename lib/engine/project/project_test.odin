@@ -164,6 +164,39 @@ the_reflections_keys_read_write_and_may_be_missing :: proc(t: ^testing.T) {
 }
 
 @(test)
+the_clouds_key_reads_writes_and_may_be_missing :: proc(t: ^testing.T) {
+	caps := render.Caps{}
+	// A file from before the clouds keeps the preset's level.
+	s: Settings
+	problems := make([dynamic]string, context.temp_allocator)
+	parse("quality.preset = Medium\n", &s, &problems)
+	testing.expect_value(t, len(problems), 0)
+	testing.expect(t, .Clouds not_in s.quality_given)
+	testing.expect_value(t, quality(s, caps).clouds, render.Quality_Level.Medium)
+
+	// The key replaces the preset's, Ultra included, and a value that does not fit is a problem.
+	s = {}
+	parse("quality.preset = Medium\nquality.clouds = Ultra\nquality.clouds = Stormy\n", &s, &problems)
+	testing.expect_value(t, len(problems), 1)
+	testing.expect_value(t, problems[0], `3: quality.clouds takes Low, Medium, High, Ultra, not "Stormy"`)
+	q := quality(s, caps)
+	testing.expect_value(t, q.clouds, render.Quality_Level.Ultra)
+	testing.expect_value(t, render.quality_preset(q, caps), render.Quality_Preset.Custom)
+
+	// It writes and reads back.
+	values := quality_values(q, caps)
+	testing.expect_value(t, values[.Clouds], "Ultra")
+	written: Settings
+	text := ""
+	for value, k in values {
+		text = set_value(text, QUALITY_KEY_NAMES[k], value)
+	}
+	parse(text, &written)
+	testing.expect_value(t, quality(written, caps), q)
+	free_all(context.temp_allocator)
+}
+
+@(test)
 a_saved_world_probes_technique_reads_as_the_split_cascades :: proc(t: ^testing.T) {
 	// World_Probes was Split_Cascades' name: a file that a build before the rename saved reads without a problem, and
 	// is written with the new name.

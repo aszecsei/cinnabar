@@ -11,6 +11,7 @@ quality_only_turns_features_off :: proc(t: ^testing.T) {
 	testing.expect_value(t, settings.shadows.level, Quality_Level.Ultra)
 	testing.expect(t, settings.shadows.ray_traced)
 	testing.expect_value(t, settings.fog.level, Quality_Level.Ultra)
+	testing.expect_value(t, settings.clouds.level, Quality_Level.Ultra)
 	testing.expect_value(t, settings.gi.technique, Gi_Technique.Split_Cascades)
 	q.aa = .Smaa
 	apply_quality(&settings, q)
@@ -45,6 +46,9 @@ low_takes_the_probes_medium_the_screen_and_high_the_traced_reflections :: proc(t
 			}
 			testing.expect_value(t, q.reflections, Reflection_Quality{technique, Quality_Level(u8(preset))})
 			testing.expect_value(t, clamp_quality(q, caps).reflections, q.reflections)
+			// The clouds take the preset's level too, Ultra included.
+			testing.expect_value(t, q.clouds, Quality_Level(u8(preset)))
+			testing.expect_value(t, clamp_quality(q, caps).clouds, q.clouds)
 			testing.expect_value(t, quality_preset(q, caps), preset)
 			settings: Frame_Settings
 			apply_quality(&settings, q)
@@ -169,6 +173,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	bad.ao.technique = Ao_Technique(200)
 	bad.gi.technique = Gi_Technique(200)
 	bad.reflections = {Reflection_Technique(200), Quality_Level(200)}
+	bad.clouds = Quality_Level(200)
 	bad.aa = Aa_Technique(200)
 	bad.render_scale = 0.1
 	clamped := clamp_quality(bad, {})
@@ -189,6 +194,7 @@ quality_keeps_to_what_the_device_can_do :: proc(t: ^testing.T) {
 	testing.expect_value(t, clamped.ao.technique, Ao_Technique.Off)
 	testing.expect_value(t, clamped.gi.technique, Gi_Technique.Off)
 	testing.expect_value(t, clamped.reflections, Reflection_Quality{.Off, .High})
+	testing.expect_value(t, clamped.clouds, Quality_Level.High)
 	testing.expect_value(t, clamped.aa, Aa_Technique.Off)
 
 	// An upscaler that the device does not run gives temporal AA, which upscales too.
