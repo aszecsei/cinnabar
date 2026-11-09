@@ -571,6 +571,13 @@ Probe_Run :: struct {
 	transient: int,
 	stats:     Reflection_Probe_Stats,
 	frame:     Reflection_Probe_Frame,
+	// With the global illumination or the ambient occlusion: the faces' constants' gi, the voxel cones' radiance
+	// textures that each face's gather reads, the faces' own ambient occlusion's depth passes, and whether each face's
+	// forward pass reads the faces' indirect light.
+	face_gi:   [dynamic]u32,
+	gi_reads:  [dynamic]int,
+	face_ao:   int,
+	lit_reads: [dynamic]bool,
 }
 
 // The platform of a test's probe frames, over the null backend, which streams assets too.
@@ -620,6 +627,9 @@ run_probe_frame :: proc(
 	w: ^ecs.World,
 	settings: Reflection_Settings,
 	scene: []gpu.Buffer = nil,
+	gi: Maybe(Gi_Settings) = nil,
+	ao := false,
+	camera := ecs.World_Position{},
 ) -> (
 	run: Probe_Run,
 ) {
@@ -629,6 +639,7 @@ run_probe_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	view := View {
+		position     = camera,
 		rotation     = 1,
 		vertical_fov = 1,
 		near         = 0.1,
@@ -676,7 +687,82 @@ run_probe_frame :: proc(
 		add_reflection_probe_shadow(f, f.shadows, 0, max_shadow_views(f.shadows.params))
 	}
 	upload_reflection_probe_lights(f)
+	// The camera's prepass, ambient occlusion and global illumination, and the scene's constants: the camera's, then the
+	// faces', which the probe passes give their indirect light.
+	_, has_gi := gi.?
+	if has_gi || ao {
+		f.post = new(Post_Frame, platform.frame_allocator)
+		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
+		f.normals = create_texture(&g, {size = f.size, format = NORMAL_FORMAT, label = "normals"})
+		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})
+		f.roughness = create_texture(&g, {size = f.size, format = ROUGHNESS_FORMAT, label = "roughness"})
+		prepass := add_render_pass(&g, "prepass", proc(_: ^Pass_Context) {}, nil)
+		depth(&g, prepass, f.depth, .Clear)
+		color(&g, prepass, f.normals, .Clear)
+		color(&g, prepass, f.velocity, .Clear)
+		color(&g, prepass, f.roughness, .Clear)
+		if f.scene_frame == nil {
+			f.scene_frame = new(Scene_Frame, platform.frame_allocator)
+		}
+		sf := f.scene_frame
+		sf.view_constants = make([]gpu.Upload, 7, platform.frame_allocator)
+		for &c in sf.view_constants {
+			c, _ = platform.gpu_upload(size_of(Frame_Constants), gpu.PASS_CONSTANTS_ALIGN)
+			(^Frame_Constants)(raw_data(c.data))^ = {}
+		}
+		if pf := f.reflection_probes; pf != nil {
+			pf.first_view = 1
+		}
+		if ao {
+			add_ao_passes(f, {technique = .Gtao, level = .Low})
+		}
+		if settings, ok := gi.?; ok {
+			begin_gi(f, settings, {})
+			add_gi_passes(f)
+		}
+	}
 	add_reflection_probe_passes(f)
+	run.face_gi = make([dynamic]u32, platform.frame_allocator)
+	run.gi_reads = make([dynamic]int, platform.frame_allocator)
+	run.lit_reads = make([dynamic]bool, platform.frame_allocator)
+	if pf := f.reflection_probes; pf != nil && pf.capturing && f.scene_frame != nil && f.scene_frame.view_constants != nil {
+		for k in 0 ..< int(pf.face_count) {
+			c := (^Frame_Constants)(raw_data(f.scene_frame.view_constants[pf.first_view + k].data))
+			append(&run.face_gi, c.gi)
+		}
+		radiance := make(map[u32]bool, platform.frame_allocator)
+		if gf := f.gi; gf != nil && gf.voxel != nil {
+			for l in 0 ..< int(gf.voxel.params.levels) {
+				radiance[u32(gf.voxel.textures[l][.Radiance] - 1)] = true
+			}
+		}
+		lit := make(map[u32]bool, platform.frame_allocator)
+		switch light in pf.face_light {
+		case Reflection_Probe_Voxel_Light:
+			lit[u32(light.diffuse - 1)], lit[u32(light.specular - 1)] = true, true
+		case Reflection_Probe_Occlusion:
+			lit[u32(light.texture - 1)] = true
+		}
+		for node in g.passes {
+			switch node.name {
+			case "reflection probe gi":
+				reads := 0
+				for use in node.uses {
+					reads += int(!use.buffer && use.reads && radiance[use.index])
+				}
+				append(&run.gi_reads, reads)
+			case "reflection probe face":
+				reads := false
+				for use in node.uses {
+					reads ||= !use.buffer && use.reads && lit[use.index]
+				}
+				append(&run.lit_reads, reads)
+			case "reflection probe ao depth":
+				testing.expect_value(t, node.queue, gpu.Queue.Graphics)
+				run.face_ao += 1
+			}
+		}
+	}
 	p := add_compute_pass(&g, "forward", proc(_: ^Pass_Context) {}, nil)
 	declare_reflection_probe_reads(f, p)
 	if f.reflection_probes != nil {
@@ -836,6 +922,143 @@ a_capture_draws_its_faces_in_the_graph :: proc(t: ^testing.T) {
 	run = run_probe_frame(t, r, &cache, w, {technique = .Off, off = true})
 	testing.expect(t, !rp.made && rp.cubes.texture == {})
 	testing.expect_value(t, run.stats, Reflection_Probe_Stats{})
+}
+
+// A capture's indirect light (see docs/rendering/lighting-and-shadows.md#reflection-probes). With the voxel cones, each
+// face gathers them at its own pixels, between its prepass and its forward pass: the gather reads every level's light,
+// the forward pass reads what it gave, and the faces' constants take it as their GI. A probe outside every level takes
+// the light that a capture takes without them, and reads no voxels. With the screen cascades, which a face cannot read,
+// each face takes the ambient occlusion of its own depth, on the graphics queue, and with the voxel cones it does not.
+@(test)
+a_capture_takes_the_voxel_cones_or_its_own_ambient_occlusion :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	arena: virtual.Arena
+	testing.expect(t, virtual.arena_init_growing(&arena) == nil)
+	defer virtual.arena_destroy(&arena)
+	testing.expect(t, jobs.init(2))
+	defer jobs.shutdown()
+	testing.expect(t, null.init(nil, {64, 32}))
+	defer null.shutdown()
+	platform := probe_platform(&arena)
+	w := new(ecs.World)
+	defer free(w)
+	testing.expect(t, ecs.init(w, &platform))
+	defer ecs.destroy(w)
+	ecs.register_engine_components(&w.registry)
+	register_components(&w.registry)
+	r := new(Renderer)
+	defer free(r)
+	r.platform = &platform
+	reflection_probes_init(&r.reflection_probes, r, w)
+	defer reflection_probes_destroy(&r.reflection_probes, r)
+	rp := &r.reflection_probes
+	gi := &r.gi
+	pipelines := []^Shader_Pipeline {
+		&rp.face,
+		&rp.downsample,
+		&r.sky.cube.prefilter,
+		&r.lights.pipeline,
+		&gi.trace,
+		&gi.merge,
+		&gi.gather,
+		&gi.lit,
+		&gi.voxel.clear,
+		&gi.voxel.inject,
+		&gi.voxel.filter,
+		&gi.voxel.gather,
+		&r.ao.depth,
+		&r.ao.searches[.Gtao],
+		&r.ao.denoise,
+	}
+	for p in pipelines {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test"})
+	}
+	defer destroy_shader_pipeline(&r.sky.cube.prefilter, &platform)
+	defer destroy_shader_pipeline(&r.lights.pipeline, &platform)
+	defer gi_destroy(gi, &platform)
+	defer for p in ([]^Shader_Pipeline{&r.ao.depth, &r.ao.searches[.Gtao], &r.ao.denoise}) {
+		destroy_shader_pipeline(p, &platform)
+	}
+	r.blue_noise.texture = platform.gpu_create_texture(
+		{
+			size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE},
+			layers = BLUE_NOISE_SLICES,
+			format = .RGBA8_Unorm,
+			usage = {.Sampled, .Storage},
+			label = "noise",
+		},
+		nil,
+	)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	cache: Texture_Cache
+	defer cache_destroy(&cache, &platform)
+
+	probe := ecs.spawn(w)
+	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1.5, 0}), rotation = 1, scale = 1})
+	ecs.add(w, probe, Reflection_Probe{extent = {3, 1.5, 4}})
+	ultra := Reflection_Settings {
+		technique = .Probes,
+		level     = .Ultra,
+	}
+	voxel_cones := Gi_Settings {
+		technique = .Voxel_Cones,
+		level     = .Low,
+	}
+	levels := int(GI_VOXEL_PARAMS[.Low].levels)
+
+	// The camera is at the probe: Ultra captures its six faces in a frame, each with the voxel cones.
+	run := run_probe_frame(t, r, &cache, w, ultra, gi = voxel_cones, ao = true)
+	testing.expect(t, run.frame.capturing && run.frame.face_count == 6)
+	testing.expect_value(t, run.passes["reflection probe gi"], 6)
+	testing.expect_value(t, len(run.gi_reads), 6)
+	for reads in run.gi_reads {
+		testing.expect_value(t, reads, levels)
+	}
+	testing.expect_value(t, len(run.lit_reads), 6)
+	for reads in run.lit_reads {
+		testing.expect(t, reads, "a face's forward pass does not read its gather")
+	}
+	testing.expect_value(t, len(run.face_gi), 6)
+	for gi in run.face_gi {
+		testing.expect_value(t, gi, 1)
+	}
+	testing.expect_value(t, run.face_ao, 0)
+	_, voxel_light := run.frame.face_light.(Reflection_Probe_Voxel_Light)
+	testing.expect(t, voxel_light)
+
+	// From 10 km away, the probe is outside every level: its faces read no voxels, and take the ambient light.
+	far := ecs.position_offset({}, {10000, 0, 0})
+	testing.expect(t, capture_reflection_probe(r, probe))
+	run = run_probe_frame(t, r, &cache, w, ultra, gi = voxel_cones, camera = far)
+	testing.expect(t, run.frame.capturing && run.frame.face_count == 6)
+	testing.expect_value(t, run.passes["reflection probe gi"], 0)
+	testing.expect_value(t, len(run.gi_reads), 0)
+	for gi in run.face_gi {
+		testing.expect_value(t, gi, 0)
+	}
+	testing.expect(t, run.frame.face_light == nil)
+
+	// With the screen cascades, each face takes the ambient occlusion of its own depth, which its forward pass reads, and
+	// the faces share its textures.
+	testing.expect(t, capture_reflection_probe(r, probe))
+	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low}, ao = true)
+	testing.expect(t, run.frame.capturing && run.frame.face_count == 6)
+	testing.expect_value(t, run.passes["reflection probe gi"], 0)
+	testing.expect_value(t, run.face_ao, 6)
+	_, occlusion := run.frame.face_light.(Reflection_Probe_Occlusion)
+	testing.expect(t, occlusion)
+	for reads in run.lit_reads {
+		testing.expect(t, reads, "a face's forward pass does not read its ambient occlusion")
+	}
+	for gi in run.face_gi {
+		testing.expect_value(t, gi, 0)
+	}
+
+	// Without the camera's ambient occlusion, the faces have none either.
+	testing.expect(t, capture_reflection_probe(r, probe))
+	run = run_probe_frame(t, r, &cache, w, ultra, gi = Gi_Settings{technique = .Screen_Cascades, level = .Low})
+	testing.expect_value(t, run.face_ao, 0)
+	testing.expect(t, run.frame.face_light == nil)
 }
 
 // An On_Load probe that captures while a mesh streams keeps a provisional capture. It does not capture again while

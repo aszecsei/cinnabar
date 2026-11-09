@@ -63,6 +63,11 @@ struct Gi_Constants {
 	uint sky_cube_previous;
 	float sky_cube_blend;
 	float sky_cube_mips;
+	// Whether the voxel cones' gather is a reflection probe capture's face, and the face's origin relative to the
+	// camera, which its positions are relative to. The camera's is 0.
+	uint capture;
+	uint2 padding;
+	float4 origin;
 };
 CN_PASS_CONSTANTS(Gi_Constants, constants);
 

@@ -26,6 +26,8 @@ Hook_Record :: struct {
 	bloom, history_valid, occlusion, fog, gi, sky:      bool,
 	// The reflections, and whether they traced the ray scene.
 	reflections, traced:                                bool,
+	// A reflection probe's capture's faces' own voxel cones' light, and their own ambient occlusion.
+	capture_gi, capture_occlusion:                      bool,
 	// The clouds, and their shadow map.
 	clouds, cloud_shadow:                               bool,
 	// The exposure's histogram counts the background, which the sky drew.
@@ -214,6 +216,13 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 				rec.bloom, rec.history_valid = f.bloom != 0, f.post.history.valid
 				rec.occlusion, rec.fog, rec.gi = f.ambient_occlusion != 0, f.fog_volume != 0, f.gi_diffuse != 0
 				rec.reflections, rec.traced = f.reflections != 0, f.ssr != nil && f.ssr.traced != nil
+				pf := f.reflection_probes
+				if pf != nil {
+					_, rec.capture_gi = pf.face_light.(Reflection_Probe_Voxel_Light)
+					_, rec.capture_occlusion = pf.face_light.(Reflection_Probe_Occlusion)
+				} else {
+					rec.capture_gi, rec.capture_occlusion = false, false
+				}
 				rec.clouds, rec.cloud_shadow = f.clouds != nil, f.clouds != nil && f.clouds.shadow != 0
 				rec.sky, rec.sky_background = f.sky != nil, f.post.background
 				rec.temporal, rec.upscaled, rec.display = f.post.temporal, f.post.upscaler != {}, f.display != 0
@@ -435,8 +444,18 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 			// The lights trace their shadows into the mask, which the faces cannot read, so while it captures, the probe has
 			// a shadow view of its own of the sun.
 			testing.expect_value(t, record.shadow_views, k < 3 ? 1 : 0)
+			// The screen cascades are the camera's screen, so the faces take the ambient occlusion of their own depth.
+			testing.expect_value(t, record.capture_occlusion, k < 3)
+			testing.expect(t, !record.capture_gi)
 		}
 		testing.expect_value(t, reflection_probe_stats(r).slots, 1)
+		// A capture with the voxel cones gathers them at each face, between its prepass and its forward pass.
+		q.gi = {technique = .Voxel_Cones, level = .Low}
+		testing.expect(t, capture_reflection_probe(r, probe))
+		testing.expect(t, draw_frame(r, w, desc), "the reflection probes' frame with the voxel cones did not execute")
+		testing.expect_value(t, reflection_probe_stats(r).faces, 6)
+		testing.expect(t, record.capture_gi && !record.capture_occlusion)
+		q.gi = r.quality.gi
 		desc.debug_view = .Reflection_Probes
 		testing.expect(t, draw_frame(r, w, desc), "the reflection probes' view did not execute")
 		desc.debug_view = .Lit

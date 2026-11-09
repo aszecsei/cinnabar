@@ -198,6 +198,25 @@ Reflection_Probe_Frame :: struct {
 	face_indices:      Buffer,
 	face_counter:      Buffer,
 	source:            Texture,
+	// What the faces' forward passes read for their indirect light, once the passes are added, or nil for nothing.
+	face_light:        Reflection_Probe_Face_Light,
+}
+
+// Reflection_Probe_Face_Light is the textures that a capture's faces read for their indirect light, which the frame's
+// faces share (see add_reflection_probe_passes): the voxel cones' diffuse and specular light that the faces' gathers
+// give, or the ambient occlusion of their own depth, which scales capture_indirect's light.
+Reflection_Probe_Face_Light :: union {
+	Reflection_Probe_Voxel_Light,
+	Reflection_Probe_Occlusion,
+}
+
+Reflection_Probe_Voxel_Light :: struct {
+	diffuse:  Texture,
+	specular: Texture,
+}
+
+Reflection_Probe_Occlusion :: struct {
+	texture: Texture,
 }
 
 // Reflection_Probe_Step is one face's passes' data, in frame memory, or with face a mip, a downsample's.
@@ -1195,17 +1214,26 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 	g := f.graph
 	platform := r.platform
 	pf.source = import_texture(g, rp.source.texture, .Storage)
-	// The world probes' grid exists once their passes are added, after the scene's constants.
-	if gf := f.gi; gf != nil && gf.probes != nil {
-		sf := f.scene_frame
+	// The faces' indirect light: the world probes' or the voxel cones', which are known once the global illumination's
+	// passes are added, after the scene's constants, or without either the ambient light, which the faces' own ambient
+	// occlusion scales.
+	gf := f.gi
+	world_probes := gf != nil && gf.probes != nil
+	voxels := reflection_probe_voxels(f)
+	occlusion := !world_probes && !voxels && f.ao != nil
+	if sf := f.scene_frame; world_probes || voxels {
 		for k in 0 ..< int(pf.face_count) {
 			view := pf.first_view + k
 			if sf == nil || view >= len(sf.view_constants) || sf.view_constants[view].data == nil {
 				continue
 			}
 			c := (^Frame_Constants)(raw_data(sf.view_constants[view].data))
-			c.world_probes, c.world_probe_grid, c.world_probe_grid_offset =
-				1, gpu.read_index(gf.probes.upload.buffer), gf.probes.upload.offset
+			if voxels {
+				c.gi = 1
+			} else {
+				c.world_probes, c.world_probe_grid, c.world_probe_grid_offset =
+					1, gpu.read_index(gf.probes.upload.buffer), gf.probes.upload.offset
+			}
 		}
 	}
 	if pf.face_clustered {
@@ -1272,6 +1300,18 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 		{size = size, format = ROUGHNESS_FORMAT, label = "reflection probe roughness"},
 	)
 	ids := create_texture(g, {size = size, format = ID_FORMAT, label = "reflection probe ids"})
+	voxel_light: Reflection_Probe_Voxel_Light
+	if voxels {
+		voxel_light = {
+			diffuse  = create_texture(g, {size = size, format = GI_FORMAT, label = "reflection probe gi diffuse"}),
+			specular = create_texture(g, {size = size, format = GI_FORMAT, label = "reflection probe gi specular"}),
+		}
+		pf.face_light = voxel_light
+	}
+	// The gather and the ambient occlusion read the prepass's normals, and the gather its roughness.
+	keep: gpu.Store_Op = voxels || occlusion ? .Store : .Discard
+	axes := REFLECTION_PROBE_FACES
+	first_occlusion: ^Ao_Frame
 	for k in 0 ..< pf.face_count {
 		step := new(Reflection_Probe_Step, platform.frame_allocator)
 		step^ = {
@@ -1285,11 +1325,33 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 				step := (^Reflection_Probe_Step)(ctx.data)
 				draw_scene_view(step.frame, ctx.cb, step.view, .Prepass, filter = .No_Particles)
 			}, step)
-		color(g, p, normals, .Clear, store = .Discard)
+		color(g, p, normals, .Clear, store = keep)
 		color(g, p, velocity, .Clear, {VELOCITY_NONE, VELOCITY_NONE, 0, 0}, store = .Discard)
-		color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, store = .Discard)
+		color(g, p, roughness, .Clear, {ROUGHNESS_NONE, 0, 0, 0}, store = voxels ? .Store : .Discard)
 		depth(g, p, step.depth, .Clear)
 		declare_scene_draws(f, p)
+		if voxels {
+			capture := new(Voxel_Capture, platform.frame_allocator)
+			capture^ = {
+				frame     = f,
+				axes      = axes[step.face],
+				origin    = pf.center,
+				size      = pf.params.face,
+				depth     = face_depth,
+				normals   = normals,
+				roughness = roughness,
+				diffuse   = voxel_light.diffuse,
+				specular  = voxel_light.specular,
+			}
+			add_voxel_capture_gather(f, capture)
+		}
+		if occlusion {
+			af := ao_face(f, axes[step.face], pf.params.face, face_depth, normals, first_occlusion)
+			if first_occlusion == nil {
+				first_occlusion = af
+			}
+			pf.face_light = Reflection_Probe_Occlusion{af.output}
+		}
 		p = add_render_pass(g, "reflection probe face", proc(ctx: ^Pass_Context) {
 				step := (^Reflection_Probe_Step)(ctx.data)
 				draw_scene_view(step.frame, ctx.cb, step.view, .Forward, filter = .No_Particles)
@@ -1343,7 +1405,7 @@ add_reflection_probe_passes :: proc(f: ^Frame) {
 }
 
 // declare_reflection_probe_face_lighting declares what a face's forward pass reads: the shadow atlas, the sky's
-// cubemap, the face's clusters and the world probes.
+// cubemap, the face's clusters, the world probes, and the face's own voxel cones' light or ambient occlusion.
 @(private = "file")
 declare_reflection_probe_face_lighting :: proc(f: ^Frame, p: Pass) {
 	g := f.graph
@@ -1363,10 +1425,26 @@ declare_reflection_probe_face_lighting :: proc(f: ^Frame, p: Pass) {
 		read(g, p, gf.probes.irradiance)
 		read(g, p, gf.probes.states)
 	}
+	switch light in pf.face_light {
+	case Reflection_Probe_Voxel_Light:
+		read(g, p, light.diffuse)
+		read(g, p, light.specular)
+	case Reflection_Probe_Occlusion:
+		read(g, p, light.texture)
+	}
 }
 
-// reflection_probe_push is a capture face's textures for the forward pass: the shadow atlas, and white for the
-// screen-space ones, which it reads none of.
+// reflection_probe_voxels is whether this frame's capture takes the voxel cones' light: they run this frame, and a level
+// that holds surfaces holds the probe. A probe outside every level takes the light that a capture takes without them.
+@(private)
+reflection_probe_voxels :: proc(f: ^Frame) -> bool {
+	gf := f.gi
+	pf := f.reflection_probes
+	return gf != nil && gf.voxel != nil && pf != nil && voxel_holds(gf.voxel, pf.center)
+}
+
+// reflection_probe_push is a capture face's textures for the forward pass: the shadow atlas, the face's own voxel cones'
+// light or ambient occlusion, and white for the camera's screen-space ones, which it reads none of.
 @(private)
 reflection_probe_push :: proc(f: ^Frame) -> Material_Push {
 	white := gpu.read_index(f.renderer.materials.defaults[.White])
@@ -1380,6 +1458,15 @@ reflection_probe_push :: proc(f: ^Frame) -> Material_Push {
 	}
 	if f.shadows.atlas != 0 {
 		push.shadow_atlas = gpu.read_index(gpu_texture(f.graph, f.shadows.atlas))
+	}
+	if pf := f.reflection_probes; pf != nil {
+		switch light in pf.face_light {
+		case Reflection_Probe_Voxel_Light:
+			push.gi_diffuse = gpu.read_index(gpu_texture(f.graph, light.diffuse))
+			push.gi_specular = gpu.read_index(gpu_texture(f.graph, light.specular))
+		case Reflection_Probe_Occlusion:
+			push.ambient_occlusion = gpu.read_index(gpu_texture(f.graph, light.texture))
+		}
 	}
 	return push
 }

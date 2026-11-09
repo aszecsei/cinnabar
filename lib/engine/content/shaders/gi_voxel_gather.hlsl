@@ -5,7 +5,8 @@
 // of the pixel's that stays from frame to frame: a turn that moved each frame flickered, as the histories hold too few
 // frames to average it. Both lights blend into their histories, found by the velocity, as the screen cascades' gather's
 // do. The view model's pixels take the light around the camera. With the Gi_Probes debug view, it draws the
-// voxels that each pixel's view ray meets first, in their albedo.
+// voxels that each pixel's view ray meets first, in their albedo. A reflection probe capture's face gathers the same
+// way at its own pixels, from the probe.
 #include "gi_common.hlsli"
 #include "gi_voxel.hlsli"
 
@@ -97,6 +98,21 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float turn = 6.28318531 * interleaved_noise(float2(pixel));
 	float roughness = gather_roughness(pixel);
 	float3 diffuse, specular;
+	// A reflection probe capture's face (see docs/rendering/lighting-and-shadows.md#reflection-probes): its positions are
+	// relative to the probe, it keeps no history, and a point outside every level takes the light that a capture takes
+	// without the cones, the ambient light along its normal and the sky's cubemap along its reflection.
+	if (constants.capture != 0) {
+		float3 p = position + constants.origin.xyz;
+		if (voxel_level_of(g, 0, p, 1) >= g.level_count) {
+			diffuse = sky_light(normal);
+			specular = sky_cube_light(reflected, roughness);
+		} else {
+			gather_cones(g, p, normal, reflected, roughness, turn, diffuse, specular);
+		}
+		out_diffuse[pixel] = float4(diffuse, z);
+		out_specular[pixel] = float4(specular, 1);
+		return;
+	}
 	if (!surface) {
 		gather_cones(g, 0, normal, reflected, roughness, turn, diffuse, specular);
 		out_diffuse[pixel] = float4(diffuse, 0);

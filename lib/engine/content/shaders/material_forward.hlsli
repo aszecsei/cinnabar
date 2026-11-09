@@ -45,9 +45,10 @@ void ms_forward(
 	}
 }
 
-// capture_indirect is a reflection probe's capture's indirect light (see docs/rendering/lighting-and-shadows.md#reflection-probes):
-// the world probes' where they run, and otherwise the ambient light along the normal and the sky's cubemap along the
-// reflection. A capture has no screen-space light of its own.
+// capture_indirect is a reflection probe's capture's indirect light without the voxel cones (see
+// docs/rendering/lighting-and-shadows.md#reflection-probes): the world probes' where they run, and otherwise the ambient
+// light along the normal and the sky's cubemap along the reflection, which the face's own ambient occlusion scales. With
+// the voxel cones, the face's gather gives its light as the camera's gather does, through frame.gi.
 Indirect capture_indirect(float3 p, float3 normal, float3 reflected, float roughness) {
 	Indirect indirect;
 	indirect.diffuse = ambient_light(frame.ambient, normal);
@@ -142,7 +143,7 @@ float3 forward_color(Varyings i, Material_Inputs inputs, Surface s, float scatte
 	float3 reflected = reflect(-p.view, p.normal);
 	float roughness = shading_roughness(s);
 	Indirect indirect;
-	if (frame.capture != 0) {
+	if (frame.capture != 0 && frame.gi == 0) {
 		indirect = capture_indirect(p.position, p.normal, reflected, roughness);
 	} else {
 		float probe_weight;

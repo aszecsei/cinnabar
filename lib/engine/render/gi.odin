@@ -119,7 +119,14 @@ Gi_Constants :: struct {
 	sky_cube_previous: u32,
 	sky_cube_blend:    f32,
 	sky_cube_mips:     f32,
+	// Whether the voxel cones' gather is a reflection probe capture's face, and the face's origin relative to the
+	// camera, which its positions are relative to (see add_voxel_capture_gather). The camera's is 0.
+	capture:           u32,
+	padding:           [2]u32,
+	origin:            [4]f32,
 }
+
+#assert(size_of(Gi_Constants) == 368)
 
 // Gi_Frame is what one frame's global illumination passes need, in frame memory.
 @(private)
@@ -140,7 +147,8 @@ Gi_Frame :: struct {
 	// The split cascades' probes, or the voxel cones' voxels, as the Gi_Probes debug view shows them, which their gather
 	// draws when the view is on.
 	probe_view: Texture,
-	// The voxel cones, once begin_gi has placed their levels, or nil.
+	// The voxel cones, once begin_gi has placed their levels, or nil. add_gi_passes makes it nil when they gave way to
+	// the screen cascades, so from then on it is whether they run this frame.
 	voxel:      ^Gi_Voxel_Frame,
 }
 
@@ -302,6 +310,8 @@ add_gi_passes :: proc(f: ^Frame) {
 		if voxels {
 			return
 		}
+		// The frame takes the screen cascades, so a capture takes no voxel cones either.
+		gf.voxel = nil
 	}
 	split := add_gi_split_passes(f)
 	note_split_fallback(f, split)
