@@ -595,6 +595,93 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 	return true
 }
 
+// voxel_holds is whether a level that holds surfaces holds a point relative to the camera, at least a voxel in from its
+// faces, as voxel_inside tests it in gi_voxel.hlsli.
+@(private)
+voxel_holds :: proc(vf: ^Gi_Voxel_Frame, p: [3]f32) -> bool {
+	res := f32(vf.params.res)
+	for l in 0 ..< int(vf.params.levels) {
+		level := vf.grid.levels[l]
+		if level.phase.w == 0 {
+			continue
+		}
+		local := (p - level.min.xyz) / level.min.w
+		if local.x >= 1 && local.y >= 1 && local.z >= 1 && local.x <= res - 1 && local.y <= res - 1 && local.z <= res - 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// Voxel_Capture is a reflection probe capture's face, which gathers the voxel cones at its own pixels (see
+// docs/rendering/lighting-and-shadows.md#reflection-probes): its axes, as REFLECTION_PROBE_FACES gives them, its origin
+// relative to the camera, its size, the targets of its prepass and the textures that its forward pass reads as its
+// diffuse and specular light.
+@(private)
+Voxel_Capture :: struct {
+	frame:     ^Frame,
+	axes:      [3][3]f32,
+	origin:    [3]f32,
+	size:      u32,
+	depth:     Texture,
+	normals:   Texture,
+	roughness: Texture,
+	diffuse:   Texture,
+	specular:  Texture,
+}
+
+// add_voxel_capture_gather adds a capture face's gather of the voxel cones, between its prepass and its forward pass on
+// the graphics queue, after the levels' injection and filter, as the camera's gather does at its pixels. It keeps no
+// history, and a point outside every level takes the ambient light and the sky's cubemap.
+@(private)
+add_voxel_capture_gather :: proc(f: ^Frame, c: ^Voxel_Capture) {
+	g := f.graph
+	vf := f.gi.voxel
+	p := add_compute_pass(g, "reflection probe gi", run_voxel_capture_gather, c)
+	read(g, p, c.depth)
+	read(g, p, c.normals)
+	read(g, p, c.roughness)
+	for l in 0 ..< int(vf.params.levels) {
+		read(g, p, vf.textures[l][.Radiance])
+	}
+	declare_sky_cube_reads(f, p)
+	write(g, p, c.diffuse)
+	write(g, p, c.specular)
+}
+
+@(private = "file")
+run_voxel_capture_gather :: proc(ctx: ^Pass_Context) {
+	c := (^Voxel_Capture)(ctx.data)
+	f := c.frame
+	gf := f.gi
+	vf := gf.voxel
+	g := ctx.graph
+	k := gf.constants
+	right, up, forward := c.axes[0], c.axes[1], c.axes[2]
+	k.right, k.up, k.forward = {right.x, right.y, right.z, 0}, {up.x, up.y, up.z, 0}, {forward.x, forward.y, forward.z, 0}
+	// A 90° view's x and y scales are 1.
+	k.projection = {1, 1, REFLECTION_PROBE_NEAR, 0}
+	k.size = {c.size, c.size}
+	depth := gpu_texture(g, c.depth)
+	k.depth, k.stencil = gpu.read_index(depth), gpu.stencil_index(depth)
+	k.normals = gpu.read_index(gpu_texture(g, c.normals))
+	k.roughness = gpu.read_index(gpu_texture(g, c.roughness))
+	k.out_diffuse = gpu.write_index(gpu_texture(g, c.diffuse))
+	k.out_specular = gpu.write_index(gpu_texture(g, c.specular))
+	k.sampler_index = gpu.sampler_index(f.renderer.post.sampler)
+	k.valid, k.velocity, k.history_diffuse, k.history_specular = 0, 0, 0, 0
+	k.capture, k.origin = 1, {c.origin.x, c.origin.y, c.origin.z, 0}
+	push := Voxel_Push {
+		grid        = gpu.read_index(vf.upload.buffer),
+		grid_offset = vf.upload.offset,
+	}
+	gpu.cmd_set_pipeline(ctx.cb, f.renderer.gi.voxel.gather.pipeline)
+	if upload_gi_constants(ctx, f, k) {
+		gpu.cmd_push_constants(ctx.cb, &push)
+		gpu.cmd_dispatch(ctx.cb, groups(k.size, POST_GROUP_SIZE))
+	}
+}
+
 // note_voxel_fallback warns when a frame that wants the voxel cones takes the screen cascades after a frame that had
 // them, which changes the whole frame's indirect light with nothing moving. It warns once, until they run again.
 @(private)

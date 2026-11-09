@@ -124,7 +124,10 @@ What they show:
 - **Each face** is a view of the GPU scene, after the voxel cones' views: a square 90° view along the face, as a `TextureCube` samples it, from `REFLECTION_PROBE_NEAR` (5 cm).
   - It draws the opaque and masked surfaces, in a prepass and a forward pass of its own, into targets that all of the frame's faces share. It draws no view model, particles, transparent surfaces, patch surfaces or post-processing.
   - It takes the camera's level of detail, as the shadow views do, so it draws the meshlets that the camera's walk of their hierarchy picked.
-  - **Its light** is linear, not pre-exposed. Its indirect light is the [world probes](global-illumination.md#world-probes)' light where they run. Without them, it is the ambient light along the normal and the sky's cubemap along the reflection. It has no screen-space GI, ambient occlusion, fog or reflection probes.
+  - **Its light** is linear, not pre-exposed. It has no fog, screen-space or traced reflections, or reflection probes. Its indirect light comes from the frame's [global illumination](global-illumination.md#global-illumination), by its technique:
+    - **The [voxel cones](global-illumination.md#voxel-cones):** the clipmap is in world space around the camera, and the faces draw after the levels' injection and filter. So between its prepass and its forward pass, the face gathers the cones at its own pixels (`reflection probe gi`, `add_voxel_capture_gather`), as the camera's gather does at its pixels: the diffuse cones around the normal and the cone along the reflection, with no history. The forward pass reads that light as the camera's reads its GI. A texel outside every level takes the ambient light along its normal and the sky's cubemap along its reflection. A probe outside every level (`reflection_probe_voxels`) has no gather, and all of its texels take that light.
+    - **The [split cascades](global-illumination.md#split-cascades):** the [world probes](global-illumination.md#world-probes)' light, where they run.
+    - **The screen cascades, or no GI:** the screen cascades and their history are the camera's screen, so a face cannot read them. The face takes the ambient light along the normal and the sky's cubemap along the reflection, scaled by the ambient occlusion of its own depth (`ao_face`). It is the camera's technique, radius and power, along the face's axes, on the graphics queue. A capture has no temporal AA, so its noise stays at one slice and the denoiser takes both of its passes. The frame's faces share its textures. Without the camera's ambient occlusion, a face has none.
   - **Its lights:** the face bins the punctual and area lights into clusters of its own, from the probe's position (`cluster_lights.hlsl`). It uses a copy of the lights without mask channels, because the mask covers only the camera's screen. The punctual lights keep their shadow maps, which are in world space. A light traced into the mask has no shadow in a capture.
   - **The directional light's shadow:** the camera's cascades do not cover a probe far from the camera. So while a probe captures, the first directional light that casts shadows gets a shadow view of its own, in a slot of the atlas (`add_orthographic_shadow_view`). It is an orthographic view of the sphere around the probe's boxes, from 1 m to 200 m across. The faces take every depth in their first cascade, which is that view. The other directional lights have no shadow in a capture.
   - **The copy** (`reflection probe copy`) writes the face into mip 0 of the source cube. Where the face drew nothing, it writes the sky's cubemap's light along the texel.
@@ -141,10 +144,21 @@ What they show:
   - A probe samples its cube along the reflection, at the mip for the surface's roughness, times its intensity. With a projection box, the reflection is box-projected first.
   - The rest of the light comes from the sky's cubemap.
 - **With the GI**, on opaque surfaces, the probes blend over the GI's specular light below a roughness fade, from `rough_start` to `rough_end`, so rough surfaces keep the GI's dynamic occlusion. The ambient occlusion scales the probes' light, which has no local occlusion of its own. Transparent surfaces take the probes and then the sky's cubemap, never the GI's specular light.
-- **The fade's range**, 0.2 to 0.45 at every level, comes from Intel's Sponza at Ultra with the voxel cones and a probe filling its courtyard.
-  - A capture has no GI, so its walls take the sky's ambient light without occlusion, and its rough mips are brighter than the GI's light inside the arcades.
-  - With the fade at 0.5 to 0.8, Sponza's stone, at roughness 0.5 to 0.75, took much of that light: the frame's mean brightness rose from 52 to 70, and the columns and arches turned milky.
-  - From 0.2 to 0.45, the stone and the curtains keep the GI's specular light, which is within capture noise of the frame without probes, and only glossy surfaces take the probe.
+- **The capture's brightness**, measured in Intel's Sponza with the probe that fills its courtyard, `Realtime`. A mirror, 4 m by 3 m, stood in the courtyard and reflected the arcade behind the camera, through the probe. The reference is the arcade itself, seen from the camera's image across the mirror's plane with the mirror taken away, flipped. Both views had a manual exposure, no tone mapping, bloom or clouds, and the reflections at `Probes`. The table gives the mirror's mean linear luminance over the reference's, for the arcade above the floor and for the floor. The mirror's reflectance is about 0.95.
+
+  | Quality | Arcade, without the GI in captures | Arcade, with it | Floor, without | Floor, with |
+  |---|---|---|---|---|
+  | Ultra, voxel cones | 10.5 | 1.92 | 2.53 | 1.31 |
+  | Low, voxel cones | 8.9 | 1.79 | 2.46 | 1.27 |
+  | Ultra, screen cascades | 2.28 | 1.80 | 1.56 | 1.52 |
+  | Low, screen cascades | 2.21 | 1.93 | 1.56 | 1.54 |
+
+  - With the shadows off in both views, the voxel cones' ratios were 1.59 for the arcade and 1.08 for the floor. So part of what is left is the capture's own shadow view, which lights the floor under the arcade where the camera's shadows do not.
+  - The faces' own ambient occlusion on top of the voxel cones took the arcade's ratio only from 1.92 to 1.81, for 14 to 34 µs a face, so the faces take it only where their light is the ambient light.
+- **The fade's range** is 0.2 to 0.45 at every level. It comes from the same courtyard, from the frame's mean linear luminance with the probes over the frame without them, at three views: the courtyard from its end, the arcade, and the nave.
+  - Before captures had GI, with the fade at 0.5 to 0.8, Sponza's stone, at roughness 0.5 to 0.75, took the captures' unoccluded light: at Ultra with the voxel cones, the frame's mean brightness rose from 52 to 70, and the columns and arches turned milky.
+  - With GI in the captures, the fade at 0.5 to 0.8 still made the frame brighter with the voxel cones, at every level: by 5 to 10% in the view of the courtyard, 2 to 7% in the nave, and 0.4 to 1% at the arcade. With the screen cascades it changed the frame by -2 to +1%, and with the split cascades by +1 to +2%.
+  - From 0.2 to 0.45, the stone and the curtains keep the GI's specular light, and the probes change the frame by at most 0.1%, or 2% with the split cascades. Only glossy surfaces take the probe.
 - **Parameters:** `REFLECTION_PARAMS[.Probes]` at the reflections' level (see [Quality](quality.md#quality)), with the sky cubemap's samples per texel.
 
 | Level | Faces | Mips | Slots | Faces a frame | Fade | Memory |
@@ -167,6 +181,15 @@ What they show:
 | High | 28 µs | about 30 µs |
 | Ultra | 24 µs | 82 µs |
 
+- **The GI's cost in a face** was measured the same way in Sponza, whose faces draw more than the glass scene's, with the courtyard's probe `Realtime`, in a viewport of 746x481. Each level ran at its preset, with the reflections at `Probes` and the GI's technique set. A face is its prepass, its forward pass, its copy, and its gather or its ambient occlusion.
+
+| Level | A face without the GI | With the voxel cones | Their gather | With the screen cascades | Their ambient occlusion |
+|---|---|---|---|---|---|
+| Low | 57 µs | 113 µs | 56 µs | 71 µs | 14 µs |
+| Medium | 60 µs | 148 µs | 85 µs | 79 µs | 16 µs |
+| High | 62 µs | 185 µs | 119 µs | 84 µs | 18 µs |
+| Ultra | 77 to 86 µs | 226 µs | 144 µs | 115 µs | 34 µs |
+
 - **The debug view** `Reflection_Probes` colors each pixel by its strongest probe's cube, and red where no probe counts.
 - **The Resource Monitor** shows the probes, the slots whose probe has a cube, and the faces that the frame captured (`reflection_probe_stats`), and the reflections' memory: the probes' cubes while they are made, and the screen-space or traced reflections' histories (`reflection_memory`).
 - **The sample:**
@@ -177,6 +200,8 @@ What they show:
   - A capture sees no patch surfaces, particles or transparent surfaces.
   - A probe's light is the light at its position. The box projection corrects the parallax only for its box.
   - A probe has no occlusion of its own beyond the ambient occlusion, so the reflections in a dark corner are as bright as in the middle of the probe.
+  - A capture is still brighter than the scene that it reflects: 1.8 to 1.9 times in Sponza's arcade (see [The capture's brightness](#reflection-probes)). Its own shadow view is a part of that, and so are the faces' sun without the clouds' shadow, and the box projection, which spreads each part of the cube over another share of a surface than the scene's own view does.
+  - The voxel cones' gather costs 56 to 144 µs a face, so at Ultra a `Realtime` probe adds about 0.9 ms to each frame for its six faces.
 
 ### Screen-space reflections
 

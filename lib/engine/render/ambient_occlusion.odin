@@ -141,22 +141,33 @@ Ao_Denoise_Push :: struct {
 	size:   [2]u32,
 }
 
-// Ao_Frame is what one frame's ambient occlusion passes need, in frame memory.
+// Ao_Frame is what one view's ambient occlusion passes need, in frame memory: the camera's, in Frame.ao, or a
+// reflection probe capture's face's (see ao_face). depth and normals are the view's prepass's, output is the
+// denoiser's result, which the view's forward pass reads, and queue and names are the passes' queue and names: the
+// depth's, the search's and the denoiser's.
 @(private)
 Ao_Frame :: struct {
+	frame:           ^Frame,
 	depth_constants: Ao_Depth_Constants,
 	constants:       Ao_Constants,
 	search:          gpu.Pipeline,
+	names:           [3]string,
+	queue:           gpu.Queue,
+	size:            [2]u32,
+	depth:           Texture,
+	normals:         Texture,
 	levels:          [AO_DEPTH_LEVELS]Texture,
 	raw:             Texture,
 	edges:           Texture,
 	denoise:         [AO_DENOISE_PASSES]Ao_Denoise_Pass,
+	denoise_count:   int,
+	output:          Texture,
 }
 
 // Ao_Denoise_Pass is one of the denoiser's passes, which reads source and writes output.
 @(private)
 Ao_Denoise_Pass :: struct {
-	frame:  ^Frame,
+	view:   ^Ao_Frame,
 	source: Texture,
 	output: Texture,
 	blur:   f32,
@@ -222,15 +233,6 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	if noise == {} {
 		return
 	}
-	g := f.graph
-	af := new(Ao_Frame, platform.frame_allocator)
-	for &level, i in af.levels {
-		round := u32(1) << u32(i) - 1
-		size := [2]u32{(f.size.x + round) >> u32(i), (f.size.y + round) >> u32(i)}
-		level = create_texture(g, {size = size, format = AO_DEPTH_FORMAT, label = "ambient occlusion depth"})
-	}
-	af.raw = create_texture(g, {size = f.size, format = AO_FORMAT, label = "ambient occlusion raw"})
-	af.edges = create_texture(g, {size = f.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"})
 	a.frame += 1
 	// An upscaler averages the noise over time as temporal AA does.
 	temporal := f.post.temporal || f.post.upscaler != {}
@@ -241,6 +243,17 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	view_model := view_model_view(f.view)
 	view_model_scale := projection_scale(view_projection(view_model, aspect))
 	radius := settings.radius > 0 ? settings.radius : DEFAULT_AO_RADIUS
+	af := new(Ao_Frame, platform.frame_allocator)
+	af^ = {
+		frame         = f,
+		search        = a.searches[settings.technique].pipeline,
+		names         = {"gtao depth", AO_SEARCH_LABELS[settings.technique], "gtao denoise"},
+		queue         = .Compute,
+		size          = f.size,
+		depth         = f.depth,
+		normals       = f.normals,
+		denoise_count = temporal ? AO_DENOISE_PASSES_TEMPORAL : AO_DENOISE_PASSES,
+	}
 	af.depth_constants = {
 		radius          = radius,
 		size            = f.size,
@@ -263,51 +276,107 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 		samples     = AO_PARAMS[settings.technique][settings.level].samples,
 		steps       = AO_PARAMS[settings.technique][settings.level].steps,
 	}
-	af.search = a.searches[settings.technique].pipeline
+	create_ao_textures(f.graph, af)
+	add_ao_view_passes(f.graph, af)
 	f.ao = af
+	f.ambient_occlusion = af.output
+}
 
-	p := add_compute_pass(g, "gtao depth", run_ao_depth, f, queue = .Compute)
-	read(g, p, f.depth)
+// ao_face adds a reflection probe capture's face's ambient occlusion, from the camera's (see
+// docs/rendering/lighting-and-shadows.md#reflection-probes): the same search, radius and power, from the face's own
+// depth and normals, a 90° view of size pixels along axes (right, up and forward) from REFLECTION_PROBE_NEAR, with no
+// jitter and a noise that stays, since nothing averages a capture over time, so the denoiser takes all of its passes.
+// It runs on the graphics queue, between the face's prepass and its forward pass, in passes named for the probes. first is the frame's first face's,
+// whose textures the frame's faces share, or nil for the first face. It is nil without the camera's ambient occlusion.
+@(private)
+ao_face :: proc(f: ^Frame, axes: [3][3]f32, size: u32, depth, normals: Texture, first: ^Ao_Frame) -> ^Ao_Frame {
+	if f.ao == nil {
+		return nil
+	}
+	af := new_clone(f.ao^, f.renderer.platform.frame_allocator)
+	right, up, forward := axes[0], axes[1], axes[2]
+	af.queue = .Graphics
+	af.names = {"reflection probe ao depth", "reflection probe ao", "reflection probe ao denoise"}
+	af.size = {size, size}
+	af.depth, af.normals = depth, normals
+	af.denoise_count = AO_DENOISE_PASSES
+	af.depth_constants.size = af.size
+	af.depth_constants.near, af.depth_constants.view_model_near = REFLECTION_PROBE_NEAR, REFLECTION_PROBE_NEAR
+	af.constants.right = {right.x, right.y, right.z, 0}
+	af.constants.up = {up.x, up.y, up.z, 0}
+	af.constants.forward = {forward.x, forward.y, forward.z, 0}
+	af.constants.projection = {1, 1, REFLECTION_PROBE_NEAR, 0}
+	af.constants.view_model = af.constants.projection
+	af.constants.size = af.size
+	af.constants.jitter = {}
+	af.constants.noise_slice = 0
+	if first != nil {
+		af.levels, af.raw, af.edges = first.levels, first.raw, first.edges
+		for i in 0 ..< af.denoise_count {
+			af.denoise[i].output = first.denoise[i].output
+		}
+	} else {
+		create_ao_textures(f.graph, af)
+	}
+	add_ao_view_passes(f.graph, af)
+	return af
+}
+
+// create_ao_textures makes a view's depth levels, its search's results and its denoiser's outputs.
+@(private = "file")
+create_ao_textures :: proc(g: ^Graph, af: ^Ao_Frame) {
+	for &level, i in af.levels {
+		round := u32(1) << u32(i) - 1
+		size := [2]u32{(af.size.x + round) >> u32(i), (af.size.y + round) >> u32(i)}
+		level = create_texture(g, {size = size, format = AO_DEPTH_FORMAT, label = "ambient occlusion depth"})
+	}
+	af.raw = create_texture(g, {size = af.size, format = AO_FORMAT, label = "ambient occlusion raw"})
+	af.edges = create_texture(g, {size = af.size, format = AO_EDGES_FORMAT, label = "ambient occlusion edges"})
+	for i in 0 ..< af.denoise_count {
+		af.denoise[i].output = create_texture(g, {size = af.size, format = AO_FORMAT, label = "ambient occlusion"})
+	}
+}
+
+// add_ao_view_passes adds a view's depth levels, its search and its denoiser, and sets its output.
+@(private = "file")
+add_ao_view_passes :: proc(g: ^Graph, af: ^Ao_Frame) {
+	p := add_compute_pass(g, af.names[0], run_ao_depth, af, queue = af.queue)
+	read(g, p, af.depth)
 	for level in af.levels {
 		write(g, p, level)
 	}
-	p = add_compute_pass(g, AO_SEARCH_LABELS[settings.technique], run_ao_search, f, queue = .Compute)
+	p = add_compute_pass(g, af.names[1], run_ao_search, af, queue = af.queue)
 	for level in af.levels {
 		read(g, p, level)
 	}
-	read(g, p, f.normals)
+	read(g, p, af.normals)
 	write(g, p, af.raw)
 	write(g, p, af.edges)
 
-	passes := temporal ? AO_DENOISE_PASSES_TEMPORAL : AO_DENOISE_PASSES
 	source := af.raw
-	for i in 0 ..< passes {
-		last := i == passes - 1
+	for i in 0 ..< af.denoise_count {
 		d := &af.denoise[i]
-		d^ = {
-			frame  = f,
-			source = source,
-			output = create_texture(g, {size = f.size, format = AO_FORMAT, label = "ambient occlusion"}),
-			blur   = last ? AO_BLUR : AO_BLUR / 5,
-		}
-		p = add_compute_pass(g, "gtao denoise", run_ao_denoise, d, queue = .Compute)
+		d.view, d.source = af, source
+		d.blur = i == af.denoise_count - 1 ? AO_BLUR : AO_BLUR / 5
+		p = add_compute_pass(g, af.names[2], run_ao_denoise, d, queue = af.queue)
 		read(g, p, d.source)
 		read(g, p, af.edges)
 		write(g, p, d.output)
 		source = d.output
 	}
-	f.ambient_occlusion = source
+	af.output = source
 }
 
 @(private = "file")
 run_ao_depth :: proc(ctx: ^Pass_Context) {
-	f := (^Frame)(ctx.data)
+	af := (^Ao_Frame)(ctx.data)
 	g := ctx.graph
-	constants := f.ao.depth_constants
-	depth := gpu_texture(g, f.depth)
+	r := af.frame.renderer
+	constants := af.depth_constants
+	depth := gpu_texture(g, af.depth)
 	constants.depth = gpu.read_index(depth)
 	constants.stencil = gpu.stencil_index(depth)
-	for level, i in f.ao.levels {
+	for level, i in af.levels {
 		index := gpu.write_index(gpu_texture(g, level))
 		if i < 4 {
 			constants.levels[i] = index
@@ -315,22 +384,22 @@ run_ao_depth :: proc(ctx: ^Pass_Context) {
 			constants.level4 = index
 		}
 	}
-	upload, ok := f.renderer.platform.gpu_upload(size_of(Ao_Depth_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	upload, ok := r.platform.gpu_upload(size_of(Ao_Depth_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		return
 	}
 	(^Ao_Depth_Constants)(raw_data(upload.data))^ = constants
-	gpu.cmd_set_pipeline(ctx.cb, f.renderer.ao.depth.pipeline)
+	gpu.cmd_set_pipeline(ctx.cb, r.ao.depth.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, upload)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, AO_DEPTH_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(af.size, AO_DEPTH_GROUP_SIZE))
 }
 
 @(private = "file")
 run_ao_search :: proc(ctx: ^Pass_Context) {
-	f := (^Frame)(ctx.data)
+	af := (^Ao_Frame)(ctx.data)
 	g := ctx.graph
-	constants := f.ao.constants
-	for level, i in f.ao.levels {
+	constants := af.constants
+	for level, i in af.levels {
 		index := gpu.read_index(gpu_texture(g, level))
 		if i < 4 {
 			constants.levels[i] = index
@@ -338,32 +407,32 @@ run_ao_search :: proc(ctx: ^Pass_Context) {
 			constants.level4 = index
 		}
 	}
-	constants.normals = gpu.read_index(gpu_texture(g, f.normals))
-	constants.output = gpu.write_index(gpu_texture(g, f.ao.raw))
-	constants.edges = gpu.write_index(gpu_texture(g, f.ao.edges))
-	upload, ok := f.renderer.platform.gpu_upload(size_of(Ao_Constants), gpu.PASS_CONSTANTS_ALIGN)
+	constants.normals = gpu.read_index(gpu_texture(g, af.normals))
+	constants.output = gpu.write_index(gpu_texture(g, af.raw))
+	constants.edges = gpu.write_index(gpu_texture(g, af.edges))
+	upload, ok := af.frame.renderer.platform.gpu_upload(size_of(Ao_Constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		return
 	}
 	(^Ao_Constants)(raw_data(upload.data))^ = constants
-	gpu.cmd_set_pipeline(ctx.cb, f.ao.search)
+	gpu.cmd_set_pipeline(ctx.cb, af.search)
 	gpu.cmd_set_pass_constants(ctx.cb, upload)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(af.size, POST_GROUP_SIZE))
 }
 
 @(private = "file")
 run_ao_denoise :: proc(ctx: ^Pass_Context) {
 	d := (^Ao_Denoise_Pass)(ctx.data)
-	f := d.frame
+	af := d.view
 	g := ctx.graph
 	push := Ao_Denoise_Push {
 		source = gpu.read_index(gpu_texture(g, d.source)),
-		edges  = gpu.read_index(gpu_texture(g, f.ao.edges)),
+		edges  = gpu.read_index(gpu_texture(g, af.edges)),
 		output = gpu.write_index(gpu_texture(g, d.output)),
 		blur   = d.blur,
-		size   = f.size,
+		size   = af.size,
 	}
-	gpu.cmd_set_pipeline(ctx.cb, f.renderer.ao.denoise.pipeline)
+	gpu.cmd_set_pipeline(ctx.cb, af.frame.renderer.ao.denoise.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
-	gpu.cmd_dispatch(ctx.cb, groups(f.size, POST_GROUP_SIZE))
+	gpu.cmd_dispatch(ctx.cb, groups(af.size, POST_GROUP_SIZE))
 }
