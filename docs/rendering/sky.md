@@ -10,7 +10,7 @@ The world's surroundings: the background where nothing draws, the ambient light 
 - **Flat:** the world pass clears the scene to `background`, which is not pre-exposed. The ambient light is `sky`'s color from above and `ground`'s from below, which blend on the horizon (`DEFAULT_SKY_COLOR` and `DEFAULT_GROUND_COLOR` by default).
 - **Atmosphere:** the background is the sky of a planet's air, which the sun and the moon light. It is pre-exposed, as the rest of the scene is. The ambient light comes from the same sky.
 - **Texture:** the background is an hdr texture of the light from every direction, such as a captured sky, and the ambient light comes from it (see [Texture](#texture)).
-- **`ambient_intensity`** multiplies the ambient light in either mode (1 by default).
+- **`ambient_intensity`** multiplies the ambient light in either mode (1 by default). The ambient light of an `Atmosphere` is cached for the height of each [view](frame.md#views), in its `View_State` (`Sky_State`); the cubemap is the frame's own view's, and the other views read it.
 - **The auto exposure** counts the sky that `Atmosphere` and `Texture` draw, so it adapts to a bright day sky and a dark night one. It does not count Flat's `background`, or a sky's while it draws the `background` color (see [Post-processing](post-processing.md#post-processing)).
 - **Missing shaders:** an `Atmosphere` whose pipelines do not exist yet, because their shaders are not cooked, draws the `background` color. Its ambient light, which the CPU makes, is still the sky's.
 

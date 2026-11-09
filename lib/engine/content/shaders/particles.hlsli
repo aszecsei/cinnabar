@@ -19,9 +19,10 @@ static const uint CURVE_SIZE = 1;
 static const uint CURVE_EMISSION = 2;
 // Matches format.EFFECT_CURVE_SAMPLES.
 static const uint CURVE_SAMPLES = 64;
-// Matches EMITTER_RIBBON, EMITTER_MESH and NO_PARTICLE_INSTANCES in lib/engine/render/particles.odin.
+// Matches EMITTER_RIBBON, EMITTER_MESH, EMITTER_DRAW and NO_PARTICLE_INSTANCES in lib/engine/render/particles.odin.
 static const uint EMITTER_RIBBON = 1;
 static const uint EMITTER_MESH = 2;
+static const uint EMITTER_DRAW = 4;
 static const uint NO_PARTICLE_INSTANCES = 0xffffffff;
 // The second half of the counters, after a frame's most emitters: each mesh emitter's living particles. Matches
 // MAX_FRAME_EMITTERS in lib/engine/render/particles.odin.

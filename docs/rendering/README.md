@@ -78,14 +78,15 @@ The shaders are engine content in `lib/engine/content/shaders`: one `.hlsl` asse
 
 | Type | Where it lives | What it is |
 |---|---|---|
-| `Renderer` | `Game_State` | Handles only: the residency table, the texture cache, the debug lines, the extractors, the materials, the GPU scene, the lights' clusters, the ray scene's acceleration structure, the volumes' query, and each feature's pipelines |
+| `Renderer` | `Game_State` | Handles only: the residency table, the texture cache, the debug lines, the extractors, the materials, the GPU scene, the lights' clusters, the ray scene's acceleration structure, the volumes' query, the frame's own view's `View_State`, and each feature's pipelines |
+| `View_State` | `Renderer.view`, or the caller's, in `Game_State` | What the renderer keeps for one camera between frames: its histories, last frame's camera, exposure, occlusion culling, global illumination and stats ([Views](frame.md#views)) |
 | `Frame_Desc` | Frame memory | What the game asks for this frame: the view, the size, the editor's flags, the settings or nil, the hooks, the previews |
 | `Frame` | Frame memory | What the hooks see: the graph, the view and its projections, the targets, the exposure, the jitter, the hooks' `data` |
 | `View` | Either | A camera: pose, projection, viewport, and the view model's projection |
 | `Gpu_Scene` | `Renderer` | The persistent instance buffer, its slots, the render origin, the draw items and bins |
 | `Material_Table` | `Renderer` | The loaded materials and instances, their pipelines, and the frame's parameter blocks |
 | `Residency` | `Renderer` | The resident textures and meshes by GUID, and their streaming state |
-| `Texture_Cache` | `Renderer` | Transient textures and history pairs, keyed by description and label |
+| `Texture_Cache` | `Renderer` | The transient textures that every view shares, keyed by description and label, and the frame count |
 
 ## Goals
 

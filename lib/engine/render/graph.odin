@@ -95,6 +95,10 @@ Graph :: struct {
 	buffers:   [dynamic]Buffer_Node,
 	passes:    [dynamic]Pass_Node,
 	commits:   [dynamic]Commit,
+	// The histories of the view that the graph draws (see history_texture).
+	histories: ^History_Set,
+	// A graph after the first of its frame (see begin_extra).
+	extra:     bool,
 }
 
 // State is what a resource's last uses did. Buffers have no layout, so theirs stays Undefined.
@@ -188,13 +192,32 @@ Barriers :: struct {
 	accels:   [dynamic]gpu.Accel_Barrier,
 }
 
-// begin starts the frame's graph. Build one graph per frame for each cache.
-begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache) -> Graph {
+// begin starts the frame's graph, and with it the cache's frame. Build one graph per frame for each cache. histories is
+// the set of history textures that the graph's view keeps (see View_State); nil takes the cache's own.
+begin :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set = nil) -> Graph {
 	cache_begin_frame(cache, platform)
+	return new_graph(platform, cache, histories)
+}
+
+// begin_extra starts the graph of another view of the frame that the last begin started (see
+// docs/rendering/frame.md#views): it does not start a cache frame, so the histories of every view of the frame are valid
+// by the same count. Its textures are its own, since the cache gives no texture twice in a frame, and its first
+// submission on each queue waits for the earlier work of the other, which the views before it did.
+begin_extra :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set = nil) -> Graph {
+	g := new_graph(platform, cache, histories)
+	g.extra = true
+	return g
+}
+
+@(private = "file")
+new_graph :: proc(platform: ^core.Platform_API, cache: ^Texture_Cache, histories: ^History_Set) -> Graph {
 	allocator := platform.frame_allocator
+	set := histories != nil ? histories : &cache.histories
+	history_set_trim(cache, set, platform)
 	return {
 		platform = platform,
 		cache = cache,
+		histories = set,
 		allocator = allocator,
 		textures = make([dynamic]Texture_Node, allocator),
 		buffers = make([dynamic]Buffer_Node, allocator),
@@ -260,9 +283,10 @@ History :: struct {
 // read it; the next frame's previous is this frame's current. Both rest in the storage layout, and desc.usage gets
 // Sampled and Storage. previous is not valid in the first frame, after a frame that did not use the history or did not
 // execute, or when desc changes, as when the view's size does. Each label is one history, used at most once a frame. It returns the
-// zero History when the cache has no room or the backend cannot create the textures.
+// zero History when the cache has no room or the backend cannot create the textures. The history is the graph's view's,
+// so two views of a frame keep one each.
 history_texture :: proc(g: ^Graph, desc: gpu.Texture_Desc) -> History {
-	current, previous, valid, ok := cache_history(g.cache, g.platform, desc)
+	current, previous, valid, ok := cache_history(g.cache, g.histories, g.platform, desc)
 	if !ok {
 		return {}
 	}
@@ -429,17 +453,24 @@ Submission :: struct {
 
 // execute records the graph and submits it, then runs the commits (see on_executed) and marks the histories this frame
 // used as written. It returns false if recording or a submission failed, and then commits nothing, even when earlier
-// submissions went to the GPU. Call it from the game's frame code or from a job: it waits for the recording jobs.
+// submissions went to the GPU. Call it from the game's frame code or from a job: it waits for the recording jobs. It
+// marks only the histories of the graph's own view, so a view that did not execute leaves its histories unwritten.
 execute :: proc(g: ^Graph) -> bool {
 	submissions := record(g) or_return
 	profile.scope_text(&g.platform.profile, "Submit", .Render)
+	started: gpu.Queues
 	for s in submissions {
-		g.platform.gpu_submit(s.buffers[:], s.queue, s.wait_for) or_return
+		wait_for := s.wait_for
+		if g.extra && s.queue not_in started {
+			wait_for += {.Graphics, .Compute}
+		}
+		started += {s.queue}
+		g.platform.gpu_submit(s.buffers[:], s.queue, wait_for) or_return
 	}
 	for c in g.commits {
 		c.commit(c.data)
 	}
-	cache_commit_frame(g.cache)
+	cache_commit_frame(g.cache, g.histories)
 	return true
 }
 

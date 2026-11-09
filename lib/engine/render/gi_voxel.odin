@@ -117,14 +117,18 @@ Voxel_Box :: struct {
 	voxelized: bool,
 }
 
-// Gi_Voxel is the voxel cones' state between frames, in Gi_Passes: their pipelines, the levels' textures, made for a
-// level's parameters, each level's box, and the level that voxelizes next in turn.
+// Gi_Voxel is the voxel cones' pipelines and sampler, which every view shares, in Gi_Passes.
 Gi_Voxel :: struct {
-	clear:    Shader_Pipeline,
-	inject:   Shader_Pipeline,
-	filter:   Shader_Pipeline,
-	gather:   Shader_Pipeline,
-	sampler:  gpu.Sampler,
+	clear:   Shader_Pipeline,
+	inject:  Shader_Pipeline,
+	filter:  Shader_Pipeline,
+	gather:  Shader_Pipeline,
+	sampler: gpu.Sampler,
+}
+
+// Gi_Voxel_State is one view's voxel cones between frames, in Gi_State: the levels' textures, made for a level's
+// parameters, each level's box, and the level that voxelizes next in turn.
+Gi_Voxel_State :: struct {
 	params:   Gi_Voxel_Params,
 	textures: [VOXEL_MAX_LEVELS][Voxel_Texture]gpu.Texture,
 	boxes:    [VOXEL_MAX_LEVELS]Voxel_Box,
@@ -172,15 +176,14 @@ gi_voxel_destroy :: proc(v: ^Gi_Voxel, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&v.clear, &v.inject, &v.filter, &v.gather}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	destroy_voxel_storage(v, platform)
 	if v.sampler != {} {
 		platform.gpu_destroy_sampler(v.sampler)
 		v.sampler = {}
 	}
 }
 
-@(private = "file")
-destroy_voxel_storage :: proc(v: ^Gi_Voxel, platform: ^core.Platform_API) {
+@(private)
+destroy_voxel_storage :: proc(v: ^Gi_Voxel_State, platform: ^core.Platform_API) {
 	for &level in v.textures {
 		for &t in level {
 			if t != {} {
@@ -336,11 +339,10 @@ voxel_box_planes :: proc(min: [3]f32, extent: f32) -> (planes: [6][4]f32) {
 
 // ensure_voxel_storage makes the levels' textures for a level's parameters. New textures hold no surfaces.
 @(private = "file")
-ensure_voxel_storage :: proc(r: ^Renderer, params: Gi_Voxel_Params) {
-	v := &r.gi.voxel
+ensure_voxel_storage :: proc(r: ^Renderer, v: ^Gi_Voxel_State, params: Gi_Voxel_Params) {
 	platform := r.platform
-	if v.sampler == {} {
-		v.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Repeat, label = "gi voxel sampler"})
+	if r.gi.voxel.sampler == {} {
+		r.gi.voxel.sampler = platform.gpu_create_sampler({filter = .Linear, address = .Repeat, label = "gi voxel sampler"})
 	}
 	if v.params == params && v.textures[0][.Radiance] != {} {
 		return
@@ -385,8 +387,8 @@ begin_gi_voxels :: proc(f: ^Frame, settings: Gi_Settings) -> ^Gi_Voxel_Frame {
 	if !upload_ok || !lights_ok {
 		return nil
 	}
-	ensure_voxel_storage(r, params)
-	v := &r.gi.voxel
+	v := &f.state.gi.voxel
+	ensure_voxel_storage(r, v, params)
 	if v.textures[params.levels - 1][.Radiance] == {} {
 		return nil
 	}
@@ -462,7 +464,7 @@ begin_gi_voxels :: proc(f: ^Frame, settings: Gi_Settings) -> ^Gi_Voxel_Frame {
 		cones             = cones,
 		level_count       = params.levels,
 		res               = params.res,
-		sampler_index     = gpu.sampler_index(v.sampler),
+		sampler_index     = gpu.sampler_index(r.gi.voxel.sampler),
 		cone_count        = params.cones,
 		cone_aperture     = aperture,
 		specular_aperture = VOXEL_SPECULAR_APERTURE,
@@ -528,7 +530,7 @@ add_gi_voxel_passes :: proc(f: ^Frame) -> bool {
 	// The levels count as voxelized once the frame executes, so a frame that fails voxelizes them again.
 	on_executed(g, proc(data: rawptr) {
 			vf := (^Gi_Voxel_Frame)(data)
-			v := &vf.frame.renderer.gi.voxel
+			v := &vf.frame.state.gi.voxel
 			for l in 0 ..< int(vf.params.levels) {
 				if vf.voxelize[l] {
 					v.boxes[l].voxelized = true
@@ -687,7 +689,7 @@ run_voxel_capture_gather :: proc(ctx: ^Pass_Context) {
 @(private)
 note_voxel_fallback :: proc(f: ^Frame, ran: bool) {
 	r := f.renderer
-	v := &r.gi.voxel
+	v := &f.state.gi.voxel
 	if ran || f.gi.settings.technique != .Voxel_Cones {
 		v.running = ran
 		return
@@ -740,6 +742,7 @@ run_voxel_pass :: proc(ctx: ^Pass_Context) {
 	vf := step.voxels
 	f := vf.frame
 	v := &f.renderer.gi.voxel
+	state := &f.state.gi.voxel
 	g := ctx.graph
 	push := Voxel_Push {
 		grid        = gpu.read_index(vf.upload.buffer),
@@ -772,7 +775,7 @@ run_voxel_pass :: proc(ctx: ^Pass_Context) {
 		c.history_specular = gpu.read_index(gpu_texture(g, gf.specular.previous))
 		c.out_diffuse = gpu.write_index(gpu_texture(g, gf.diffuse.current))
 		c.out_specular = gpu.write_index(gpu_texture(g, gf.specular.current))
-		c.frame = v.frame
+		c.frame = state.frame
 		c.max_frames = vf.params.history_frames
 		if gf.probe_view != 0 {
 			push.view_output = gpu.write_index(gpu_texture(g, gf.probe_view))

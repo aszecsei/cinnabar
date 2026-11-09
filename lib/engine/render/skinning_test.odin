@@ -73,7 +73,7 @@ the_skinning_pass_poses_the_vertices_before_the_passes_that_read_them :: proc(t:
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, graph = &g, size = {64, 32}}
+	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 	f.scene_frame = new(Scene_Frame, platform.frame_allocator)
 	testing.expect(t, skin_upload(f, &build))
 	add_skinning_pass(f)

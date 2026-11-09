@@ -109,20 +109,27 @@ Post :: struct {
 	upscalers:      Upscalers,
 	// Bilinear and clamped: the history, bloom's chain and the lookup table read with it.
 	sampler:        gpu.Sampler,
-	// Two floats: the exposure that pre-exposes this frame's scene, then last frame's. The exposure pass writes the
-	// next frame's.
-	exposure:       gpu.Buffer,
 	// Holds 1: the previews are not pre-exposed.
 	unit_exposure:  gpu.Buffer,
+	// The luminance histogram that a view's exposure pass fills and empties, within its graph.
 	histogram_bins: gpu.Buffer,
 	lut:            gpu.Texture,
-	// What the lookup table holds, from the last frame that baked it and executed, or nil before.
+	// What the lookup table holds, from the last frame that baked it and executed, or nil before. The frame's own view
+	// bakes it, and every view tone maps with it.
 	lut_bake:       Maybe(Lut_Bake),
+}
+
+// Post_State is one view's post-processing between frames, in View_State.
+Post_State :: struct {
+	// Two floats: the exposure that pre-exposes this frame's scene, then last frame's. The exposure pass writes the
+	// next frame's.
+	exposure:     gpu.Buffer,
 	// Counts the frames with temporal AA, for the jitter.
-	jitter_index:   u32,
-	last_time:      f64,
+	jitter_index: u32,
+	last_time:    f64,
 	// The exposure has adapted once. The first frame takes its target at once.
-	adapted:        bool,
+	adapted:      bool,
+	upscaler:     Upscaler_State,
 }
 
 // Grading is what the lookup table bakes: the tone mapper and the color grading, with the defaults resolved.
@@ -314,7 +321,6 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	p.tone_lut = shader_pipeline(TONE_LUT_SHADER)
 	p.sampler = platform.gpu_create_sampler({filter = .Linear, mip_filter = .Linear, address = .Clamp, label = "post sampler"})
 	ones := [4]f32{1, 1, 0, 0}
-	p.exposure = platform.gpu_create_buffer({size = size_of(ones), usage = {.Storage}, label = "exposure"}, transmute([]byte)ones[:])
 	p.unit_exposure = platform.gpu_create_buffer({size = size_of(ones), label = "unit exposure"}, transmute([]byte)ones[:])
 	zeros: [HISTOGRAM_BINS]u32
 	p.histogram_bins = platform.gpu_create_buffer({size = size_of(zeros), usage = {.Storage}, label = "luminance histogram"}, transmute([]byte)zeros[:])
@@ -323,12 +329,26 @@ post_init :: proc(p: ^Post, platform: ^core.Platform_API) {
 	upscalers_init(&p.upscalers)
 }
 
+// post_state_init makes a view's exposure, which starts at 1.
+@(private)
+post_state_init :: proc(s: ^Post_State, platform: ^core.Platform_API) {
+	ones := [4]f32{1, 1, 0, 0}
+	s.exposure = platform.gpu_create_buffer({size = size_of(ones), usage = {.Storage}, label = "exposure"}, transmute([]byte)ones[:])
+}
+
+@(private)
+post_state_destroy :: proc(s: ^Post_State, platform: ^core.Platform_API) {
+	platform.gpu_destroy_buffer(s.exposure)
+	upscaler_state_destroy(&s.upscaler, platform)
+	s^ = {}
+}
+
 post_destroy :: proc(p: ^Post, platform: ^core.Platform_API) {
 	for pipeline in ([]^Shader_Pipeline{&p.temporal_aa, &p.bloom, &p.histogram, &p.adapt, &p.tone_lut}) {
 		destroy_shader_pipeline(pipeline, platform)
 	}
 	platform.gpu_destroy_sampler(p.sampler)
-	for b in ([]gpu.Buffer{p.exposure, p.unit_exposure, p.histogram_bins}) {
+	for b in ([]gpu.Buffer{p.unit_exposure, p.histogram_bins}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	platform.gpu_destroy_texture(p.lut)
@@ -413,6 +433,7 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	f.post = pf
 	pf.settings = settings
 	aa := settings.no_aa ? Aa_Technique.Off : settings.aa
+	s := &f.state.post
 	// Temporal AA stands in for an upscaler that the device cannot make, or while its motion pass compiles.
 	pf.upscaler = frame_upscaler(f, aa)
 	_, upscales := upscaler_kind(aa)
@@ -420,22 +441,22 @@ begin_post :: proc(f: ^Frame, settings: Post_Settings) {
 	if spatial_aa_ready(platform, &p.spatial, aa) {
 		pf.spatial = aa
 	}
-	u := &p.upscalers
+	u := &s.upscaler
 	pf.upscale_reset = !u.active || u.render_size != f.size
 	u.active, u.render_size = pf.upscaler != {}, f.size
 	pf.exposure = pipeline_ready(platform, &p.adapt)
 	pf.exposure_auto = pf.exposure && settings.exposure_mode == .Auto && pipeline_ready(platform, &p.histogram)
 	if pf.temporal || pf.upscaler != {} {
-		p.jitter_index += 1
+		s.jitter_index += 1
 		ratio := f32(f.output_size.x * f.output_size.y) / f32(max(f.size.x * f.size.y, 1))
-		n := p.jitter_index % u32(f32(JITTER_SAMPLES) * max(ratio, 1) + 0.5) + 1
+		n := s.jitter_index % u32(f32(JITTER_SAMPLES) * max(ratio, 1) + 0.5) + 1
 		pixel := [2]f32{halton(n, 2) - 0.5, halton(n, 3) - 0.5}
 		f.jitter = {2 * pixel.x / f32(f.size.x), -2 * pixel.y / f32(f.size.y)}
 	}
 	now := platform.time_seconds != nil ? platform.time_seconds() : 0
-	pf.delta = p.last_time > 0 ? f32(clamp(now - p.last_time, 0, 0.25)) : 0
-	p.last_time = now
-	f.exposure = import_buffer(f.graph, p.exposure)
+	pf.delta = s.last_time > 0 ? f32(clamp(now - s.last_time, 0, 0.25)) : 0
+	s.last_time = now
+	f.exposure = import_buffer(f.graph, s.exposure)
 	f.lut = import_texture(f.graph, p.lut, .Storage)
 	pf.lut = p.lut_bake
 }
@@ -450,13 +471,12 @@ lut_ready :: proc(f: ^Frame) -> bool {
 @(private = "file")
 commit_post :: proc(data: rawptr) {
 	f := (^Frame)(data)
-	p := &f.renderer.post
 	pf := f.post
 	if pf.exposure {
-		p.adapted = true
+		f.state.post.adapted = true
 	}
 	if pf.baked {
-		p.lut_bake = pf.lut
+		f.renderer.post.lut_bake = pf.lut
 	}
 }
 
@@ -494,7 +514,7 @@ add_post_passes :: proc(f: ^Frame) {
 	add_post_effects(f, .After_Temporal_Aa)
 
 	if pf.exposure {
-		pf.reset = !p.adapted
+		pf.reset = !f.state.post.adapted
 		pf.background = sky_draws(f)
 		pf.histogram = import_buffer(g, p.histogram_bins)
 		if pf.exposure_auto {
@@ -561,8 +581,9 @@ add_post_passes :: proc(f: ^Frame) {
 		pf.paper_white = pf.grading.paper_white
 	}
 	bake := Lut_Bake{pf.grading, p.tone_lut.version}
+	// The frame's own view bakes the table; every other view tone maps with it as baked, in the frame's output mode.
 	if last, has_last := p.lut_bake.?;
-	   (!has_last || last != bake) && pipeline_ready(platform, &p.tone_lut) {
+	   !f.extra && (!has_last || last != bake) && pipeline_ready(platform, &p.tone_lut) {
 		pass := add_compute_pass(g, "tone mapping lut", run_tone_lut, f)
 		write(g, pass, f.lut)
 		pf.lut, pf.baked = bake, true

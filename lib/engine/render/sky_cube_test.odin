@@ -54,7 +54,7 @@ run_sky_cube_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r,
+		renderer = r, state = &r.view,
 		graph    = &g,
 		size     = {64, 32},
 	}
@@ -254,7 +254,7 @@ an_atmosphere_without_its_tables_captures_the_ambient_light :: proc(t: ^testing.
 		commits = make([dynamic]Commit, platform.frame_allocator),
 	}
 	f := Frame {
-		renderer = r,
+		renderer = r, state = &r.view,
 		graph    = &g,
 	}
 	s := Sky_Settings {

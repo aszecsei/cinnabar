@@ -287,6 +287,10 @@ make_sky_cube_texture :: proc(
 begin_sky_cube :: proc(f: ^Frame, s: Sky_Settings, level: Quality_Level, ambient: Ambient) {
 	r := f.renderer
 	c := &r.sky.cube
+	if f.extra {
+		begin_extra_sky_cube(f)
+		return
+	}
 	if !ensure_sky_cube(r, SKY_CUBE_PARAMS[level]) {
 		return
 	}
@@ -336,6 +340,31 @@ begin_sky_cube :: proc(f: ^Frame, s: Sky_Settings, level: Quality_Level, ambient
 	}
 }
 
+// begin_extra_sky_cube gives an extra view the cubemap as the frame's own view left it: the finished cube, blended with the
+// one before by the frames since it finished, which the frame's own view counted. It starts no capture, makes no cube and
+// keeps no ring.
+@(private = "file")
+begin_extra_sky_cube :: proc(f: ^Frame) {
+	r := f.renderer
+	c := &r.sky.cube
+	ring := c.ring
+	if !ring.valid {
+		return
+	}
+	cf := new(Sky_Cube_Frame, r.platform.frame_allocator)
+	f.sky_cube = cf
+	g := f.graph
+	current := c.cubes[ring.current].texture
+	previous, blend := current, f32(1)
+	if ring.has_previous {
+		previous = c.cubes[(ring.current + 2) % 3].texture
+		blend = min(1, f32(ring.blend_frames) / f32(c.mips))
+	}
+	cf.current = import_texture(g, current, .Storage)
+	cf.previous = import_texture(g, previous, .Storage)
+	cf.reads = {gpu.read_index(current), gpu.read_index(previous), blend, f32(c.mips)}
+}
+
 // commit_sky_cube keeps the ring that the frame's work made.
 @(private = "file")
 commit_sky_cube :: proc(data: rawptr) {
@@ -365,7 +394,7 @@ sky_cube_source :: proc(
 			cf.source, cf.intensity = .Atmosphere, s.ambient_intensity
 			return {
 					source = .Atmosphere,
-					light = r.sky.ambient_key,
+					light = f.state.sky.ambient_key,
 					intensity = s.ambient_intensity,
 				},
 				true

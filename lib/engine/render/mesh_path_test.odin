@@ -102,7 +102,7 @@ opaque_materials_draw_meshlets_where_the_device_has_mesh_shaders :: proc(t: ^tes
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, graph = &g, size = {64, 32}}
+	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 	sf := new(Scene_Frame, platform.frame_allocator)
 	f.scene_frame = sf
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)
@@ -179,7 +179,7 @@ skinned_bins_draw_with_vertex_pulling :: proc(t: ^testing.T) {
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, graph = &g, size = {64, 32}}
+	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 	sf := new(Scene_Frame, platform.frame_allocator)
 	f.scene_frame = sf
 	sf.items = make([]Cull_Item, 1, platform.frame_allocator)

@@ -182,7 +182,7 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 		cache: Texture_Cache
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = camera}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		// The prepass's depth, which the hits' light reads.
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
@@ -226,13 +226,13 @@ the_probes_update_on_the_compute_queue_and_pass_validation :: proc(t: ^testing.T
 	}
 
 	// Without their pipelines, the probes wait, and their levels stay where they were.
-	before := probes.levels
+	before := r.view.gi.probes.levels
 	destroy_shader_pipeline(&probes.update, &platform)
 	cache: Texture_Cache
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = meters(500, 0, 0)}}
+	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = meters(500, 0, 0)}}
 	testing.expect(t, add_gi_probe_passes(f, settings, {}) == nil)
-	testing.expect_value(t, probes.levels, before)
+	testing.expect_value(t, r.view.gi.probes.levels, before)
 }

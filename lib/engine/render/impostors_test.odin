@@ -121,7 +121,7 @@ impostors_take_bins_of_their_own_and_draw_with_the_impostor_passes :: proc(t: ^t
 	defer cache_destroy(&cache, &platform)
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
-	f^ = {renderer = r, graph = &g, size = {64, 32}}
+	f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 	sf := new(Scene_Frame, platform.frame_allocator)
 	f.scene_frame = sf
 	// The material is on the mesh shader path, but its impostors' bin draws quads with vertex pulling.

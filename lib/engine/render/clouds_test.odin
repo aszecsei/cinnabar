@@ -221,7 +221,7 @@ run_cloud_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r,
+		renderer = r, state = &r.view,
 		graph    = &g,
 		size     = {64, 32},
 		view     = {rotation = 1, vertical_fov = 1, near = 0.05},
@@ -346,7 +346,7 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 		testing.expectf(t, run.passes[name] == 1, "%s ran %d times", name, run.passes[name])
 	}
 	testing.expect_value(t, v.noise_state, Cloud_Noise_State.Ready)
-	testing.expect(t, v.shadow_map != {} && v.shadow_size == CLOUD_PARAMS[.Low].shadow_size)
+	testing.expect(t, r.view.clouds.shadow_map != {} && r.view.clouds.shadow_size == CLOUD_PARAMS[.Low].shadow_size)
 	free_all(platform.frame_allocator)
 
 	run = run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
@@ -360,7 +360,7 @@ the_clouds_bake_their_noise_once_and_draw_every_frame_after :: proc(t: ^testing.
 	settings.level = .Ultra
 	run = run_cloud_frame(t, r, &cache, exposure, settings, sky, true)
 	testing.expect(t, run.ok && run.clouds)
-	testing.expect_value(t, v.shadow_size, CLOUD_PARAMS[.Ultra].shadow_size)
+	testing.expect_value(t, r.view.clouds.shadow_size, CLOUD_PARAMS[.Ultra].shadow_size)
 	settings.level = .Low
 	free_all(platform.frame_allocator)
 

@@ -1,6 +1,7 @@
 package render
 
 import "base:runtime"
+import "core:fmt"
 import "core:log"
 import "core:mem/virtual"
 import "core:os"
@@ -13,6 +14,7 @@ import "cinnabar:core/gpu"
 import null "cinnabar:core/gpu/null"
 import "cinnabar:core/jobs"
 import "cinnabar:engine/asset"
+import format "cinnabar:engine/asset/format"
 import "cinnabar:engine/debug"
 import "cinnabar:engine/ecs"
 import "cinnabar:engine/volume"
@@ -103,6 +105,86 @@ test_platform :: proc(arena: ^virtual.Arena) -> core.Platform_API {
 		gpu_create_compute_pipeline  = null.create_compute_pipeline,
 		gpu_update_compute_pipeline  = null.update_compute_pipeline,
 	}
+}
+
+// enable_pipelines gives the renderer a pipeline for every compute pass of the frame, with the code of a shader that does
+// nothing, which the null backend accepts, and a texture for the blue noise. The test's cache cannot cook any shader.
+@(private = "file")
+enable_pipelines :: proc(r: ^Renderer) {
+	platform := r.platform
+	code := []byte{1}
+	compute := []^Shader_Pipeline {
+		&r.post.temporal_aa,
+		&r.post.bloom,
+		&r.post.histogram,
+		&r.post.adapt,
+		&r.post.tone_lut,
+		&r.ao.depth,
+		&r.ao.searches[.Gtao],
+		&r.ao.searches[.Ssao],
+		&r.ao.searches[.Hbao],
+		&r.ao.denoise,
+		&r.gi.trace,
+		&r.gi.merge,
+		&r.gi.gather,
+		&r.gi.lit,
+		&r.fog.inject,
+		&r.fog.integrate,
+		&r.fog.background,
+		&r.sky.transmittance,
+		&r.sky.multiscatter,
+		&r.sky.view,
+		&r.sky.background,
+		// The sky's cubemap, which the atmosphere captures from its tables.
+		&r.sky.cube.capture,
+		&r.sky.cube.atmosphere,
+		&r.sky.cube.prefilter,
+		// The clouds, which bake their noise in the first frame that executes and cast their shadow from the sun.
+		&r.clouds.noise,
+		&r.clouds.shadow,
+		&r.clouds.march,
+		&r.clouds.temporal,
+		&r.clouds.composite,
+		&r.post.upscalers.motion,
+		&r.scene.select_pipeline,
+		&r.scene.cull_patches_pipeline,
+		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
+		&r.shadows.mask_pipeline,
+		&r.ray_scene.bin_pipeline,
+		&r.ray_scene.fallback,
+		// The world probes, which the quality's Split_Cascades runs on the traced scene.
+		&r.gi.probes.reset,
+		&r.gi.probes.trace,
+		&r.gi.probes.light,
+		&r.gi.probes.screen,
+		&r.gi.probes.update,
+		// The split cascades, which take the screen cascades' place with the world probes.
+		&r.gi.split.table,
+		&r.gi.split.trace,
+		&r.gi.split.deposit,
+		&r.gi.split.merge,
+		&r.gi.split.gather,
+		// The voxel cones, which a quality may choose in the cascades' place.
+		&r.gi.voxel.clear,
+		&r.gi.voxel.inject,
+		&r.gi.voxel.filter,
+		&r.gi.voxel.gather,
+		// The screen-space reflections, which the default quality takes.
+		&r.ssr.depth,
+		&r.ssr.trace,
+		&r.ssr.resolve,
+		&r.ssr.temporal,
+		&r.ssr.lit,
+		// The traced reflections, which the default quality takes with ray queries.
+		&r.rtr.trace,
+		&r.rtr.light,
+	}
+	for p in compute {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	}
+	// The test's cache has no textures, so the ambient occlusion and the screen-space reflections take this one as
+	// their blue noise.
+	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
 }
 
 @(test)
@@ -269,78 +351,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	// test's cache cannot cook, every pass runs: the frames after the first read their histories, and the lookup table
 	// bakes once. The ambient occlusion and the global illumination run on the compute queue. The null backend checks every barrier and wait.
 	code := []byte{1}
-	compute := []^Shader_Pipeline {
-		&r.post.temporal_aa,
-		&r.post.bloom,
-		&r.post.histogram,
-		&r.post.adapt,
-		&r.post.tone_lut,
-		&r.ao.depth,
-		&r.ao.searches[.Gtao],
-		&r.ao.searches[.Ssao],
-		&r.ao.searches[.Hbao],
-		&r.ao.denoise,
-		&r.gi.trace,
-		&r.gi.merge,
-		&r.gi.gather,
-		&r.gi.lit,
-		&r.fog.inject,
-		&r.fog.integrate,
-		&r.fog.background,
-		&r.sky.transmittance,
-		&r.sky.multiscatter,
-		&r.sky.view,
-		&r.sky.background,
-		// The sky's cubemap, which the atmosphere captures from its tables.
-		&r.sky.cube.capture,
-		&r.sky.cube.atmosphere,
-		&r.sky.cube.prefilter,
-		// The clouds, which bake their noise in the first frame that executes and cast their shadow from the sun.
-		&r.clouds.noise,
-		&r.clouds.shadow,
-		&r.clouds.march,
-		&r.clouds.temporal,
-		&r.clouds.composite,
-		&r.post.upscalers.motion,
-		&r.scene.select_pipeline,
-		&r.scene.cull_patches_pipeline,
-		// The traced shadows, so the lights trace their mask, and the frame builds the ray scene before it.
-		&r.shadows.mask_pipeline,
-		&r.ray_scene.bin_pipeline,
-		&r.ray_scene.fallback,
-		// The world probes, which the quality's Split_Cascades runs on the traced scene.
-		&r.gi.probes.reset,
-		&r.gi.probes.trace,
-		&r.gi.probes.light,
-		&r.gi.probes.screen,
-		&r.gi.probes.update,
-		// The split cascades, which take the screen cascades' place with the world probes.
-		&r.gi.split.table,
-		&r.gi.split.trace,
-		&r.gi.split.deposit,
-		&r.gi.split.merge,
-		&r.gi.split.gather,
-		// The voxel cones, which a quality may choose in the cascades' place.
-		&r.gi.voxel.clear,
-		&r.gi.voxel.inject,
-		&r.gi.voxel.filter,
-		&r.gi.voxel.gather,
-		// The screen-space reflections, which the default quality takes.
-		&r.ssr.depth,
-		&r.ssr.trace,
-		&r.ssr.resolve,
-		&r.ssr.temporal,
-		&r.ssr.lit,
-		// The traced reflections, which the default quality takes with ray queries.
-		&r.rtr.trace,
-		&r.rtr.light,
-	}
-	for p in compute {
-		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
-	}
-	// The test's cache has no textures, so the ambient occlusion and the screen-space reflections take this one as
-	// their blue noise.
-	r.blue_noise.texture = platform.gpu_create_texture({size = {BLUE_NOISE_SIZE, BLUE_NOISE_SIZE}, layers = BLUE_NOISE_SLICES, format = .RGBA8_Unorm, usage = {.Sampled, .Storage}, label = "noise"}, nil)
+	enable_pipelines(r)
 	defer platform.gpu_destroy_texture(r.blue_noise.texture)
 	// A frame that does not execute changes nothing that its GPU work would have: the lookup table is not baked, the
 	// exposure has not adapted, the sky's cubemap and the split cascades' storage are as new, and the frames after
@@ -350,9 +361,9 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	platform.gpu_submit = null.submit
 	testing.expect(t, record.baked && record.sky_capture, "the failed frame had no work to lose")
 	testing.expect(t, r.post.lut_bake == nil, "the failed frame baked the lookup table")
-	testing.expect(t, !r.post.adapted, "the failed frame adapted the exposure")
+	testing.expect(t, !r.view.post.adapted, "the failed frame adapted the exposure")
 	testing.expect(t, !r.sky.cube.ring.valid, "the failed frame made the sky's cubemap")
-	testing.expect(t, r.gi.split.slots == {} || r.gi.split.fresh, "the failed frame cleared the split cascades' storage")
+	testing.expect(t, r.view.gi.split.slots == {} || r.view.gi.split.fresh, "the failed frame cleared the split cascades' storage")
 	testing.expect(t, record.clouds && r.clouds.noise_state == .Pending, "the failed frame baked the clouds' noise")
 	for i in 0 ..< 3 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
@@ -363,7 +374,7 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		testing.expect_value(t, record.history_valid, i > 0)
 		testing.expect_value(t, record.baked, i == 0)
 		testing.expect_value(t, record.sky_capture, i == 0)
-		testing.expect(t, r.post.lut_bake != nil && r.post.adapted)
+		testing.expect(t, r.post.lut_bake != nil && r.view.post.adapted)
 		testing.expect(t, r.ray_scene.accel != {} && r.residency.accels, "the traced shadows did not request the ray scene")
 		// The first frame makes the sky's whole cubemap, from the atmosphere's tables.
 		testing.expect(t, r.sky.cube.ring.valid && r.sky.cube.ring.key.source == .Atmosphere)
@@ -380,24 +391,24 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 		desc.quality = &q
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.High].virtual_levels + 6)
-		testing.expect(t, r.shadows.virtual.pool != {})
-		testing.expect_value(t, r.shadows.virtual.pool_pages, SHADOW_PARAMS[.High].pool_pages)
+		testing.expect(t, r.view.virtual_shadows.pool != {})
+		testing.expect_value(t, r.view.virtual_shadows.pool_pages, SHADOW_PARAMS[.High].pool_pages)
 		// A level with another pool remakes it.
 		q.shadows.level = .Ultra
 		testing.expect(t, draw_frame(r, w, desc), "the virtual shadow map's frame did not execute")
-		testing.expect_value(t, r.shadows.virtual.pool_pages, SHADOW_PARAMS[.Ultra].pool_pages)
+		testing.expect_value(t, r.view.virtual_shadows.pool_pages, SHADOW_PARAMS[.Ultra].pool_pages)
 		// A frame that records the stats' copy and then fails writes no copy and does not move on, so its stats show none.
-		next := r.shadows.virtual.stats_ring.next
+		next := r.view.virtual_shadows.stats_ring.next
 		platform.gpu_submit = fail_submit
 		testing.expect(t, !draw_frame(r, w, desc), "the frame executed with a submit that fails")
 		platform.gpu_submit = null.submit
-		testing.expect_value(t, r.shadows.virtual.stats_ring.next, next)
+		testing.expect_value(t, r.view.virtual_shadows.stats_ring.next, next)
 		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
 		q.shadows = {level = .Low, virtual = true}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
 		testing.expect_value(t, record.shadow_views, SHADOW_PARAMS[.Low].cascades + 6)
 		// The cascades' frame copies no virtual stats, so none are written, and none show.
-		testing.expect_value(t, r.shadows.virtual.stats_ring.written, [READBACK_COPIES]bool{})
+		testing.expect_value(t, r.view.virtual_shadows.stats_ring.written, [READBACK_COPIES]bool{})
 		testing.expect_value(t, virtual_shadow_stats(r), Virtual_Shadow_Stats{})
 		q.shadows = {level = .High, virtual = false}
 		testing.expect(t, draw_frame(r, w, desc), "the cascades' frame did not execute")
@@ -416,8 +427,8 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 			testing.expect(t, draw_frame(r, w, desc), "the voxel cones' frame did not execute")
 			testing.expect(t, record.gi)
 		}
-		testing.expect(t, r.gi.voxel.running, "the voxel cones did not run")
-		testing.expect(t, r.gi.voxel.boxes[0].voxelized)
+		testing.expect(t, r.view.gi.voxel.running, "the voxel cones did not run")
+		testing.expect(t, r.view.gi.voxel.boxes[0].voxelized)
 		desc.quality = nil
 	}
 	testing.expectf(t, len(record.problems) == 0, "problems: %v", record.problems)
@@ -591,10 +602,10 @@ a_frame_runs_every_hook_and_passes_validation :: proc(t: ^testing.T) {
 	for _ in 0 ..< 2 {
 		testing.expect(t, draw_frame(r, w, desc), "the frame with the shading stats did not execute")
 	}
-	testing.expect_value(t, r.shading.stats_ring.next, 2)
+	testing.expect_value(t, r.view.shading.stats_ring.next, 2)
 	desc.shading_stats = false
 	testing.expect(t, draw_frame(r, w, desc), "the frame without the shading stats did not execute")
-	testing.expect_value(t, r.shading.stats_ring.next, 2)
+	testing.expect_value(t, r.view.shading.stats_ring.next, 2)
 	testing.expect_value(t, shading_stats(r), Shading_Stats{})
 	desc.disable = ~Features{}
 	testing.expect(t, draw_frame(r, w, desc), "the frame without its features did not execute")
@@ -674,6 +685,7 @@ frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
 		context.logger = log.nil_logger()
 		f := new(Frame, r.platform.frame_allocator)
 		f.renderer = r
+		f.state = &r.view
 		f.view = {position = at, rotation = 1, vertical_fov = 1, near = 0.05}
 		f.size = {64, 32}
 		build_scene(f, w, nil, nil)
@@ -735,4 +747,1041 @@ frames_upload_only_the_records_that_changed :: proc(t: ^testing.T) {
 	testing.expect_value(t, frame(r, w, far), 1)
 	testing.expect_value(t, s.slots[fresh], freed)
 	testing.expect_value(t, s.records[freed].id, entity_id(fresh))
+}
+
+// The null backend, a world and a renderer, for the tests of the extra views (see Extra_View).
+@(private = "file")
+Rig :: struct {
+	arena:    virtual.Arena,
+	platform: core.Platform_API,
+	record:   Hook_Record,
+	w:        ^ecs.World,
+	dir:      string,
+	assets:   asset.Assets,
+	r:        ^Renderer,
+}
+
+// rig_start starts the rig. The caller then sets context.logger to record_problems with the rig's record, so a frame's
+// warnings and errors come to rig.record.problems.
+@(private = "file")
+rig_start :: proc(t: ^testing.T, rig: ^Rig) {
+	testing.expect(t, virtual.arena_init_growing(&rig.arena) == nil)
+	testing.expect(t, jobs.init(2))
+	testing.expect(t, null.init(nil, {64, 32}))
+	rig.platform = test_platform(&rig.arena)
+	rig.record.problems = make([dynamic]string)
+	rig.record.runner = context.logger
+	rig.w = new(ecs.World)
+	testing.expect(t, ecs.init(rig.w, &rig.platform))
+	ecs.register_engine_components(&rig.w.registry)
+	volume.register_components(&rig.w.registry)
+	register_components(&rig.w.registry)
+	dir, err := os.make_directory_temp("", "renderer_test_*", context.temp_allocator)
+	testing.expect(t, err == nil)
+	rig.dir = strings.clone(dir)
+	asset.init(&rig.assets, &rig.platform, asset.loose_cache(rig.dir))
+	rig.r = new(Renderer)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	renderer_init(rig.r, &rig.platform, &rig.assets, rig.w)
+}
+
+@(private = "file")
+rig_stop :: proc(rig: ^Rig) {
+	renderer_destroy(rig.r)
+	free(rig.r)
+	asset.destroy(&rig.assets)
+	os.remove_all(rig.dir)
+	delete(rig.dir)
+	ecs.destroy(rig.w)
+	free(rig.w)
+	null.shutdown()
+	jobs.shutdown()
+	virtual.arena_destroy(&rig.arena)
+	for p in rig.record.problems {
+		delete(p)
+	}
+	delete(rig.record.problems)
+}
+
+// forget_problems drops the problems that a test expected.
+@(private = "file")
+forget_problems :: proc(rig: ^Rig) {
+	for p in rig.record.problems {
+		delete(p)
+	}
+	clear(&rig.record.problems)
+}
+
+// enable_output_pipelines gives the output pass a pipeline for each output mode, so it draws.
+@(private = "file")
+enable_output_pipelines :: proc(r: ^Renderer) {
+	code := []byte{1}
+	for mode in gpu.Output_Mode {
+		r.output_pipelines[mode].pipeline = r.platform.gpu_create_graphics_pipeline(
+			{vertex = code, pixel = code, colors = {{format = gpu.output_format(mode)}}, label = "test output"},
+		)
+	}
+}
+
+// enable_frame_pipelines is enable_pipelines with the rest of what a frame at the default quality draws with: the output
+// passes, FXAA and SMAA, the reflection probes and the virtual shadow map.
+@(private = "file")
+enable_frame_pipelines :: proc(r: ^Renderer) {
+	platform := r.platform
+	code := []byte{1}
+	enable_pipelines(r)
+	enable_output_pipelines(r)
+	r.post.spatial.tone_map.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	r.post.spatial.fxaa.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	smaa := [?]struct {
+		pipeline: ^Shader_Pipeline,
+		format:   gpu.Format,
+	}{{&r.post.spatial.smaa_edges, SMAA_EDGES_FORMAT}, {&r.post.spatial.smaa_weights, SMAA_WEIGHTS_FORMAT}, {&r.post.spatial.smaa_blend, DISPLAY_FORMAT}}
+	for s in smaa {
+		s.pipeline.pipeline = platform.gpu_create_graphics_pipeline({vertex = code, pixel = code, colors = {{format = s.format}}, label = "test smaa"})
+	}
+	rp := &r.reflection_probes
+	for p in ([]^Shader_Pipeline{&rp.face, &rp.downsample, &r.lights.pipeline, &r.shadows.virtual.mark_pipeline, &r.shadows.virtual.allocate_pipeline}) {
+		p.pipeline = platform.gpu_create_compute_pipeline({compute = code, label = "test"})
+	}
+}
+
+// fill_world makes the world of the extra views' tests: a sun and a lamp that cast shadows, meshes that hold slots, a
+// reflection probe, and a global volume with fog, clouds and an atmosphere whose sun is the directional light.
+@(private = "file")
+fill_world :: proc(w: ^ecs.World) {
+	sun := ecs.spawn(w)
+	ecs.add(w, sun, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, sun, Directional_Light{intensity = 1, cast_shadows = true})
+	lamp := ecs.spawn(w)
+	ecs.add(w, lamp, ecs.Transform{position = ecs.position_offset({}, {0, 0, 2}), rotation = 1, scale = 1})
+	ecs.add(w, lamp, Point_Light{intensity = 1, cast_shadows = true})
+	for k in 0 ..< 3 {
+		mesh := ecs.spawn(w)
+		ecs.add(w, mesh, ecs.Transform{position = ecs.position_offset({}, {f32(k), 0, 5}), rotation = 1, scale = 1})
+		ecs.add(w, mesh, Mesh_Renderer{})
+	}
+	probe := ecs.spawn(w)
+	ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {0, 1, 3}), rotation = 1, scale = 1})
+	ecs.add(w, probe, Reflection_Probe{extent = {2, 1, 2}, box_projection = true})
+	mist := ecs.spawn(w)
+	ecs.add(w, mist, ecs.TRANSFORM_IDENTITY)
+	ecs.add(w, mist, volume.Volume{shape = .Global})
+	ecs.add(w, mist, Fog{density = {true, 0.05}, height_falloff = {true, 0.5}})
+	ecs.add(w, mist, Clouds{density = {true, 1}})
+	environment := DEFAULT_ENVIRONMENT
+	environment.mode = {true, .Atmosphere}
+	environment.sun = {true, sun}
+	ecs.add(w, mist, environment)
+}
+
+// extra_target makes a target for an extra view, as the editor's shared ones are: in the render target layout.
+@(private = "file")
+extra_target :: proc(platform: ^core.Platform_API, size: [2]u32) -> gpu.Texture {
+	return platform.gpu_create_texture({size = size, format = gpu.FRAME_TARGET_FORMAT, usage = {.Render_Target}, label = "extra view"}, nil)
+}
+
+// What a view's hooks saw.
+@(private = "file")
+View_Record :: struct {
+	before_world, after_prepass, before_post, ui, debug: int,
+	position:      ecs.World_Position,
+	size:          [2]u32,
+	output_size:   [2]u32,
+	extra:         bool,
+	// The debug hook's layer, the lines it was given, the first of them, and the temporal AA's history.
+	layer:         bool,
+	lines:         int,
+	first_line:    Debug_Vertex_Line,
+	history_valid: bool,
+	// The bloom that the view's settings turn off.
+	no_bloom:      bool,
+	// Whether the temporal AA's history was valid in each frame that the debug hook ran, and the passes of the last, by name.
+	sequence:      [16]bool,
+	passes:        map[string]int,
+	// The particles that the debug hook saw: the frame had them, and drew them without stepping.
+	particles:     bool,
+	draw_only:     bool,
+}
+
+// RECORD_HOOKS record into the View_Record that is their data.
+@(private = "file")
+RECORD_HOOKS :: Frame_Hooks {
+	before_world = proc(f: ^Frame) {
+		rec := (^View_Record)(f.data)
+		rec.before_world += 1
+		rec.position, rec.size, rec.output_size, rec.extra = f.view.position, f.size, f.output_size, f.extra
+	},
+	after_prepass = proc(f: ^Frame) {
+		(^View_Record)(f.data).after_prepass += 1
+	},
+	before_post = proc(f: ^Frame) {
+		rec := (^View_Record)(f.data)
+		rec.before_post += 1
+		rec.no_bloom = f.post.settings.no_bloom
+	},
+	ui = proc(f: ^Frame) {
+		(^View_Record)(f.data).ui += 1
+		p := add_render_pass(f.graph, "hud", proc(_: ^Pass_Context) {}, nil)
+		color(f.graph, p, f.ui, .Load)
+	},
+	debug = proc(f: ^Frame) {
+		rec := (^View_Record)(f.data)
+		rec.sequence[rec.debug % len(rec.sequence)] = f.post.history.valid
+		rec.debug += 1
+		rec.layer, rec.lines, rec.history_valid = f.debug != 0, f.tested_lines + f.overlay_lines, f.post.history.valid
+		rec.particles, rec.draw_only = f.particles != nil, f.particles != nil && f.particles.draw_only
+		if rec.passes == nil {
+			rec.passes = make(map[string]int, f.renderer.platform.frame_allocator)
+		}
+		clear(&rec.passes)
+		for pass in f.graph.passes {
+			rec.passes[pass.name] += 1
+		}
+		if rec.lines > 0 {
+			rec.first_line = ([^]Debug_Vertex_Line)(raw_data(f.debug_lines.data))[0]
+		}
+	},
+}
+
+// The target of each draw that the submissions made, in order, and whether the next submission fails.
+@(private = "file")
+Draw_Log :: struct {
+	drawn:     [dynamic]gpu.Texture,
+	fail_next: bool,
+}
+
+@(private = "file")
+draw_log: Draw_Log
+
+// logging_submit submits to the null backend, and logs the color target of each draw. With draw_log.fail_next, the next
+// submission fails before it reaches the backend, as a lost device's does, and the ones after it do not.
+@(private = "file")
+logging_submit :: proc(buffers: []gpu.Command_Buffer, queue := gpu.Queue.Graphics, wait_for := gpu.Queues{}) -> bool {
+	if draw_log.fail_next {
+		draw_log.fail_next = false
+		return false
+	}
+	for cb in buffers {
+		it := gpu.packet_iterator(cb)
+		target: gpu.Texture
+		for p in gpu.next_packet(&it) {
+			#partial switch p.kind {
+			case .Begin_Pass:
+				pass := gpu.payload(p, gpu.Begin_Pass)
+				target = pass.color_count > 0 ? pass.colors[0].texture : {}
+			case .End_Pass:
+				target = {}
+			case .Draw:
+				if target != {} {
+					append(&draw_log.drawn, target)
+				}
+			}
+		}
+	}
+	return null.submit(buffers, queue, wait_for)
+}
+
+// draws_into is how many draws the log has into a target, and the index of the first.
+@(private = "file")
+draws_into :: proc(target: gpu.Texture) -> (count: int, first: int) {
+	first = -1
+	for t, i in draw_log.drawn {
+		if t == target {
+			count += 1
+			first = first < 0 ? i : first
+		}
+	}
+	return
+}
+
+// second_renderer makes another renderer on the rig's platform and world, with every pipeline, for a reference.
+@(private = "file")
+second_renderer :: proc(rig: ^Rig) -> ^Renderer {
+	r := new(Renderer)
+	renderer_init(r, &rig.platform, &rig.assets, rig.w)
+	enable_frame_pipelines(r)
+	r.transparency_composite.pipeline = rig.platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test composite"})
+	return r
+}
+
+@(private = "file")
+destroy_second_renderer :: proc(rig: ^Rig, r: ^Renderer) {
+	rig.platform.gpu_destroy_texture(r.blue_noise.texture)
+	renderer_destroy(r)
+	free(r)
+}
+
+// View_Snapshot is what a view keeps between frames, without the handles of its resources: its frames, its last frame's
+// camera, the histories' use, its post-processing's jitter, exposure and upscaler, its occlusion culling's pyramid, the
+// counters of the features that keep a history, its sky's cached ambient light, and the cursors and levels of its global
+// illumination, with the use of its stats' rings.
+@(private = "file")
+View_Snapshot :: struct {
+	frames:         u64,
+	previous:       Previous_Camera,
+	histories:      [MAX_HISTORY_TEXTURES][5]u64,
+	jitter_index:   u32,
+	last_time:      f64,
+	adapted:        bool,
+	upscaler:       [3]u32,
+	hzb_size:       [2]u32,
+	hzb_levels:     int,
+	ao_frame:       u32,
+	fog_frame:      u32,
+	ssr:            Ssr_State,
+	clouds_frame:   u32,
+	shadow_size:    u32,
+	sky:            Sky_State,
+	gi_frame:       u32,
+	probe_frame:    u32,
+	probe_levels:   [MAX_PROBE_LEVELS]Gi_Probe_Level,
+	probe_schedule: Probe_Schedule,
+	split_params:   Gi_Split_Params,
+	split_windows:  [MAX_SPLIT_LEVELS]Split_Window,
+	split_lifetime: [MAX_SPLIT_CASCADES]u32,
+	split_frame:    u32,
+	voxel_params:   Gi_Voxel_Params,
+	voxel_boxes:    [VOXEL_MAX_LEVELS]Voxel_Box,
+	voxel_frame:    u32,
+	voxel_turn:     u32,
+	virtual_pages:  [2]u32,
+	rings:          [4]int,
+}
+
+@(private = "file")
+view_snapshot :: proc(v: ^View_State) -> (s: View_Snapshot) {
+	s = {
+		frames         = v.frames,
+		previous       = v.previous,
+		jitter_index   = v.post.jitter_index,
+		last_time      = v.post.last_time,
+		adapted        = v.post.adapted,
+		upscaler       = {u32(v.post.upscaler.active), v.post.upscaler.render_size.x, v.post.upscaler.render_size.y},
+		hzb_size       = v.occlusion.hzb_size,
+		hzb_levels     = v.occlusion.hzb_levels,
+		ao_frame       = v.ao_frame,
+		fog_frame      = v.fog_frame,
+		ssr            = v.ssr,
+		clouds_frame   = v.clouds.frame,
+		shadow_size    = v.clouds.shadow_size,
+		sky            = v.sky,
+		gi_frame       = v.gi.frame,
+		probe_frame    = v.gi.probes.frame,
+		probe_levels   = v.gi.probes.levels,
+		probe_schedule = v.gi.probes.schedule,
+		split_params   = v.gi.split.params,
+		split_windows  = v.gi.split.windows,
+		split_lifetime = v.gi.split.lifetimes,
+		split_frame    = v.gi.split.frame,
+		voxel_params   = v.gi.voxel.params,
+		voxel_boxes    = v.gi.voxel.boxes,
+		voxel_frame    = v.gi.voxel.frame,
+		voxel_turn     = v.gi.voxel.turn,
+		virtual_pages  = v.virtual_shadows.pool_pages,
+		rings          = {v.occlusion.stats_ring.next, v.gi.split.stats_ring.next, v.virtual_shadows.stats_ring.next, v.shading.stats_ring.next},
+	}
+	for h, i in v.histories.entries {
+		s.histories[i] = {h.label_hash, h.written, h.last_used, u64(h.current), u64(h.textures[0] != {})}
+	}
+	return
+}
+
+// gpu_objects counts the textures and buffers that a view's state holds.
+@(private = "file")
+gpu_objects :: proc(v: ^View_State) -> (textures, buffers: int) {
+	texture :: proc(handles: []gpu.Texture) -> (n: int) {
+		for h in handles {
+			n += int(h != {})
+		}
+		return
+	}
+	buffer :: proc(handles: []gpu.Buffer) -> (n: int) {
+		for h in handles {
+			n += int(h != {})
+		}
+		return
+	}
+	for &h in v.histories.entries {
+		textures += texture(h.textures[:])
+	}
+	textures += texture(v.occlusion.hzb[:])
+	textures += texture({v.clouds.shadow_map, v.gi.probes.radiance, v.gi.probes.irradiance, v.gi.split.atlas, v.virtual_shadows.pool})
+	for level in v.gi.voxel.textures {
+		for kind in Voxel_Texture {
+			textures += texture({level[kind]})
+		}
+	}
+	buffers += buffer({v.post.exposure, v.occlusion.cell_seen, v.occlusion.stats, v.gi.probes.states, v.virtual_shadows.stats, v.shading.stats})
+	buffers += buffer(v.occlusion.slot_seen[:])
+	buffers += buffer({v.gi.split.slots, v.gi.split.deposits, v.gi.split.index, v.gi.split.lists, v.gi.split.counters})
+	buffers += buffer({v.gi.split.arguments, v.gi.split.accum, v.gi.split.history, v.gi.split.merged})
+	for ring in ([]^Readback_Ring{&v.occlusion.stats_ring, &v.gi.split.stats_ring, &v.virtual_shadows.stats_ring, &v.shading.stats_ring}) {
+		buffers += buffer(ring.copies[:])
+	}
+	return
+}
+
+// A frame's extra views each draw into their own target, after the frame's own view, which is the first to draw. A view
+// with no target or no size draws nothing and runs no hook, and so does a view past MAX_EXTRA_VIEWS. If the frame's own
+// view does not execute, the extra views still draw, and the frame says that it failed.
+@(test)
+an_extra_view_draws_into_its_own_target :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	enable_output_pipelines(r)
+	main_target := platform.gpu_frame_target()
+	first, second, third := extra_target(platform, {32, 16}), extra_target(platform, {40, 20}), extra_target(platform, {16, 8})
+	defer {
+		for target in ([]gpu.Texture{first, second, third}) {
+			platform.gpu_destroy_texture(target)
+		}
+	}
+	states: [4]View_State
+	for &state in states {
+		view_state_init(&state, r)
+	}
+	defer {
+		for &state in states {
+			view_state_destroy(&state, r)
+		}
+	}
+	platform.gpu_submit = logging_submit
+	defer platform.gpu_submit = null.submit
+	defer {
+		delete(draw_log.drawn)
+		draw_log = {}
+	}
+
+	records: [4]View_Record
+	views: [4]Extra_View
+	targets := [4]gpu.Texture{first, second, third, first}
+	for &v, i in views {
+		v = {
+			view   = {position = ecs.position_offset({}, {f32(i), 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+			size   = {32, 16},
+			target = targets[i],
+			state  = &states[i],
+			hooks  = RECORD_HOOKS,
+		}
+		v.hooks.data = &records[i]
+	}
+	desc := Frame_Desc {
+		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		extra_views = views[:],
+	}
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame with extra views did not execute")
+	main_draws, main_first := draws_into(main_target)
+	first_draws, first_first := draws_into(first)
+	second_draws, second_first := draws_into(second)
+	third_draws, third_first := draws_into(third)
+	testing.expect_value(t, main_draws, 1)
+	testing.expect_value(t, first_draws, 1)
+	testing.expect_value(t, second_draws, 1)
+	testing.expect_value(t, third_draws, 1)
+	testing.expect(t, main_first < first_first && first_first < second_first && second_first < third_first, "the views did not draw in order")
+	for i in 0 ..< 3 {
+		testing.expect_value(t, records[i].before_world, 1)
+	}
+	// The fourth view is past the limit, and the frame says so.
+	testing.expect_value(t, records[3].before_world, 0)
+	testing.expect_value(t, len(rig.record.problems), 1)
+	testing.expect(t, len(rig.record.problems) == 1 && strings.contains(rig.record.problems[0], "extra views"))
+	forget_problems(rig)
+
+	// A view with no target or no size draws nothing and runs no hook, and keeps no frame.
+	skipped := [3]Extra_View{views[0], views[1], views[2]}
+	skipped[0].target = {}
+	skipped[1].size = {}
+	desc.extra_views = skipped[:]
+	clear(&draw_log.drawn)
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame with views to skip did not execute")
+	first_draws, _ = draws_into(first)
+	second_draws, _ = draws_into(second)
+	third_draws, _ = draws_into(third)
+	testing.expect_value(t, first_draws, 0)
+	testing.expect_value(t, second_draws, 0)
+	testing.expect_value(t, third_draws, 1)
+	testing.expect_value(t, records[0].before_world, 1)
+	testing.expect_value(t, records[1].before_world, 1)
+	testing.expect_value(t, records[2].before_world, 2)
+	testing.expect_value(t, states[0].frames, 1)
+	testing.expect_value(t, states[2].frames, 2)
+
+	// The frame's own view does not execute, the extra views do, and the frame says so.
+	desc.extra_views = views[:3]
+	clear(&draw_log.drawn)
+	draw_log.fail_next = true
+	testing.expect(t, !draw_frame(r, rig.w, desc), "the frame executed with a submit that fails")
+	first_draws, _ = draws_into(first)
+	second_draws, _ = draws_into(second)
+	third_draws, _ = draws_into(third)
+	testing.expect_value(t, first_draws, 1)
+	testing.expect_value(t, second_draws, 1)
+	testing.expect_value(t, third_draws, 1)
+	testing.expect_value(t, records[0].before_world, 2)
+	forget_problems(rig)
+}
+
+// With two views drawn every frame, each keeps what it would if it were the only one: the view state of the frame's own
+// view equals a renderer's that draws it alone, and the state of an extra view equals that of a renderer that draws it as
+// its own view. Every feature runs, at the default quality, and the null backend checks every barrier and wait.
+@(test)
+two_views_keep_the_state_that_each_would_alone :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	platform := &rig.platform
+	both, only_a, only_b := rig.r, second_renderer(rig), second_renderer(rig)
+	defer {
+		destroy_second_renderer(rig, only_a)
+		destroy_second_renderer(rig, only_b)
+	}
+	fill_world(rig.w)
+	enable_frame_pipelines(both)
+	defer platform.gpu_destroy_texture(both.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, both)
+	defer view_state_destroy(&state_b, both)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+
+	// Records: A in the renderer with both, B in it, A alone, B alone.
+	records: [4]View_Record
+	for k in 0 ..< 10 {
+		a := View{position = ecs.position_offset({}, {f32(k) * 2, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05}
+		// High above the others, where the sky's ambient light is not A's.
+		b := View{position = ecs.position_offset({}, {-300 + f32(k), 3000, 10}), rotation = 1, vertical_fov = 1, near = 0.05}
+		desc_a := Frame_Desc {
+			view  = a,
+			size  = {64, 32},
+			hooks = RECORD_HOOKS,
+		}
+		desc_b := Frame_Desc {
+			view  = b,
+			size  = {48, 24},
+			hooks = RECORD_HOOKS,
+		}
+		extras := [1]Extra_View{{view = b, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+		extras[0].hooks.data = &records[1]
+		together := desc_a
+		together.hooks.data, together.extra_views = &records[0], extras[:]
+		testing.expect(t, draw_frame(both, rig.w, together), "the frame with two views did not execute")
+		desc_a.hooks.data = &records[2]
+		testing.expect(t, draw_frame(only_a, rig.w, desc_a), "the frame of the first view alone did not execute")
+		desc_b.hooks.data = &records[3]
+		testing.expect(t, draw_frame(only_b, rig.w, desc_b), "the frame of the second view alone did not execute")
+
+		got_a, want_a := view_snapshot(&both.view), view_snapshot(&only_a.view)
+		testing.expectf(t, got_a == want_a, "frame %d: the first view's state differs from the view alone: %v != %v", k, got_a, want_a)
+		got_b, want_b := view_snapshot(&state_b), view_snapshot(&only_b.view)
+		testing.expectf(t, got_b == want_b, "frame %d: the second view's state differs from the view alone: %v != %v", k, got_b, want_b)
+		testing.expect_value(t, got_b.sky.ambient_valid, true)
+		testing.expect(t, got_a.sky.ambient_key != got_b.sky.ambient_key, "the views' skies are at one height")
+	}
+	// Each view read the histories that its own frame before wrote, as it does alone.
+	testing.expect_value(t, records[0].sequence, records[2].sequence)
+	testing.expect_value(t, records[1].sequence, records[3].sequence)
+	testing.expect(t, !records[1].sequence[0] && records[1].sequence[1] && records[1].sequence[9], "the second view had no history")
+	testing.expect(t, records[1].extra && !records[0].extra && !records[3].extra)
+	// Both views have adapted their own exposure and keep it apart.
+	testing.expect(t, both.view.post.adapted && state_b.post.adapted)
+	testing.expect(t, both.view.post.exposure != state_b.post.exposure)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// Views keep histories of their own, at their own sizes: both are valid from the second frame on, a view that is not drawn
+// in a frame has none in the next, and a view whose frame did not execute leaves the others as they are. view_state_destroy
+// frees a view's GPU objects, histories first, at once, and a zero view state is safe to destroy.
+@(test)
+views_keep_histories_of_their_own :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+	platform.gpu_submit = logging_submit
+	defer platform.gpu_submit = null.submit
+	defer {
+		delete(draw_log.drawn)
+		draw_log = {}
+	}
+
+	record_a, record_b: View_Record
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras[0].hooks.data = &record_b
+	desc := Frame_Desc {
+		view  = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size  = {64, 32},
+		hooks = RECORD_HOOKS,
+	}
+	desc.hooks.data = &record_a
+	// Which views draw in each frame, and whether the frame's own view fails.
+	Step :: struct {
+		own_fails, extra_draws: bool,
+		valid_a, valid_b:       bool,
+	}
+	steps := [?]Step {
+		{false, true, false, false},
+		{false, true, true, true},
+		// The extra view is not drawn, and its history is not valid in the next frame, once.
+		{false, false, true, false},
+		{false, true, true, false},
+		{false, true, true, true},
+		// The frame's own view fails: its frame is not written, and the extra view's is.
+		{true, true, true, true},
+		{false, true, false, true},
+		{false, true, true, true},
+	}
+	for step, i in steps {
+		desc.extra_views = step.extra_draws ? extras[:] : nil
+		draw_log.fail_next = step.own_fails
+		draws := len(draw_log.drawn)
+		testing.expectf(t, draw_frame(r, rig.w, desc) == !step.own_fails, "frame %d: executed %v", i, !step.own_fails)
+		testing.expectf(t, record_a.history_valid == step.valid_a, "frame %d: the first view's history is valid %v, want %v", i, record_a.history_valid, step.valid_a)
+		if step.extra_draws {
+			testing.expectf(t, record_b.history_valid == step.valid_b, "frame %d: the second view's history is valid %v, want %v", i, record_b.history_valid, step.valid_b)
+			extra_draws, _ := draws_into(target)
+			testing.expect(t, extra_draws > 0 && len(draw_log.drawn) > draws)
+		}
+	}
+	// The views' histories are the sizes of their own views.
+	sizes: [2][2]u32
+	for h in state_b.histories.entries {
+		if h.textures[0] != {} && h.desc.size == {48, 24} {
+			sizes[1] = h.desc.size
+		}
+	}
+	for h in r.view.histories.entries {
+		if h.textures[0] != {} && h.desc.size == {64, 32} {
+			sizes[0] = h.desc.size
+		}
+	}
+	testing.expect_value(t, sizes, [2][2]u32{{64, 32}, {48, 24}})
+
+	// Destroying the view state frees what it holds, at once, and nothing else.
+	textures, buffers := gpu_objects(&state_b)
+	testing.expect(t, textures > 0 && buffers > 0)
+	before := null.stats()
+	view_state_destroy(&state_b, r)
+	after := null.stats()
+	testing.expect_value(t, int(before.textures - after.textures), textures)
+	testing.expect_value(t, int(before.buffers - after.buffers), buffers)
+	testing.expect_value(t, state_b, View_State{})
+	view_state_destroy(&state_b, r)
+	zero: View_State
+	view_state_destroy(&zero, r)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// An extra view draws the passes that the frame's own view does at the same quality: once the world's work is done, the
+// two graphs have the same passes, by name and count.
+@(test)
+an_extra_view_draws_the_passes_of_the_frames_own_view :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	target := extra_target(platform, {64, 32})
+	defer platform.gpu_destroy_texture(target)
+
+	record_a, record_b: View_Record
+	view := View{position = ecs.position_offset({}, {0, 1, -4}), rotation = 1, vertical_fov = 1, near = 0.05}
+	extras := [1]Extra_View{{view = view, size = {64, 32}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras[0].hooks.data = &record_b
+	desc := Frame_Desc {
+		view        = view,
+		size        = {64, 32},
+		hooks       = RECORD_HOOKS,
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &record_a
+	// The frames that do the world's work once: the lookup table's bake, the sky's cubemap, the noise, the probes' captures.
+	for _ in 0 ..< 24 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	same := true
+	for name, count in record_a.passes {
+		if record_b.passes[name] != count {
+			same = false
+			testing.expectf(t, false, "%q: %d passes in the frame's own view, %d in the extra view", name, count, record_b.passes[name])
+		}
+	}
+	for name, count in record_b.passes {
+		if name not_in record_a.passes {
+			same = false
+			testing.expectf(t, false, "%q: no pass in the frame's own view, %d in the extra view", name, count)
+		}
+	}
+	testing.expect(t, same)
+	testing.expectf(t, record_a.passes["gi trace"] > 0 && record_a.passes["exposure"] > 0 && record_a.passes["temporal aa"] > 0, "the frame lacks passes: %v", record_a.passes)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The systems step once a frame, in the frame's own view, whatever the count of views, and every view draws their sprites
+// from the pool that it stepped, relative to its own camera, without stepping it again.
+@(test)
+particles_step_once_a_frame_and_every_view_draws_them :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	// A world with fog, whose constants the sprites need.
+	fill_world(rig.w)
+	// An effect of one emitter, in the cache, and a system that plays it.
+	guid := format.Guid{0 = 0x42, 15 = 0xaa}
+	smoke: [format.Effect_Curve]format.Effect_Curve_Row
+	smoke[.Size][63] = {0.5, 0, 0, 0}
+	emitters := []format.Effect_Emitter_Contents{{emitter = {capacity = 100, rate = 60, lifetime = {1, 2}, shape = .Sphere, shape_size = {0.1, 0, 0}}, name = "smoke", curves = smoke}}
+	blob := format.effect_write({guid = guid, key = 1, emitters = emitters, source_path = "game/effects/smoke.effect"}, context.temp_allocator)
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)), blob) == nil)
+	system := ecs.spawn(rig.w)
+	ecs.add(rig.w, system, ecs.Transform{position = ecs.position_offset({}, {0, 0, 5}), rotation = 1, scale = 1})
+	ecs.add(rig.w, system, Particle_System{effect = guid})
+	reference := second_renderer(rig)
+	defer destroy_second_renderer(rig, reference)
+	for renderer in ([]^Renderer{r, reference}) {
+		for p in ([]^Shader_Pipeline{&renderer.particles.update, &renderer.particles.history, &renderer.particles.ribbon, &renderer.particles.meshes}) {
+			p.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test particles"})
+		}
+		fake_sprite_pipelines(renderer)
+	}
+	r.transparency_composite.pipeline = platform.gpu_create_compute_pipeline({compute = []byte{1}, label = "test composite"})
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+
+	record_a, record_b, record_reference: View_Record
+	view_a := View{rotation = 1, vertical_fov = 1, near = 0.05}
+	view_b := View{position = ecs.position_offset({}, {4, 1, 0}), rotation = 1, vertical_fov = 1, near = 0.05}
+	extras := [1]Extra_View{{view = view_b, size = {48, 24}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras[0].hooks.data = &record_b
+	desc := Frame_Desc {
+		view  = view_a,
+		size  = {64, 32},
+		delta = 1.0 / 60,
+		hooks = RECORD_HOOKS,
+	}
+	alone := desc
+	desc.hooks.data, desc.extra_views = &record_a, extras[:]
+	alone.hooks.data = &record_reference
+	for _ in 0 ..< 8 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+		testing.expect(t, draw_frame(reference, rig.w, alone))
+		// The pool, the counters and the system's clock are those of a frame with one view.
+		p, q := &r.particles, &reference.particles
+		testing.expect_value(t, p.frame, q.frame)
+		testing.expect_value(t, p.free_count, q.free_count)
+		testing.expect_value(t, p.slots[0], q.slots[0])
+		testing.expect_value(t, p.previous_view_projection, q.previous_view_projection)
+		testing.expect_value(t, p.has_previous, q.has_previous)
+	}
+	testing.expect_value(t, r.particles.frame, 8)
+	slot := r.particles.slots[0]
+	testing.expect(t, slot.used && slot.started, "the system did not start")
+	testing.expect(t, slot.age > 0.1, "the system did not age")
+	// The frame's own view stepped them, and the other drew them from the same records.
+	testing.expect(t, record_a.particles && !record_a.draw_only, "the frame's own view had no particles to step")
+	testing.expect(t, record_b.particles && record_b.draw_only, "the extra view did not draw the particles")
+	testing.expect(t, record_a.passes["particle counters"] == 1 && record_b.passes["particle counters"] == 0)
+	testing.expect(t, record_a.passes["particle update"] == 1 && record_b.passes["particle update"] == 1)
+	testing.expect(t, record_a.passes["particle history"] == 1 && record_b.passes["particle history"] == 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// With more probes than slots and two cameras far apart, the probes rank by the nearest of the views: each camera keeps
+// its nearest probes, and no frame moves a probe from one slot to another.
+@(test)
+no_view_evicts_the_probes_of_another :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	w := rig.w
+	slots := int(REFLECTION_PARAMS[.Probes][.Low].probes)
+	// Twice the slots of probes, in two groups, a group around each camera.
+	groups: [2][dynamic]ecs.Entity
+	defer for g in groups {
+		delete(g)
+	}
+	for group in 0 ..< 2 {
+		for k in 0 ..< slots {
+			probe := ecs.spawn(w)
+			at := f32(group) * 1000 + f32(k) + 1
+			ecs.add(w, probe, ecs.Transform{position = ecs.position_offset({}, {at, 0, 0}), rotation = 1, scale = 1})
+			ecs.add(w, probe, Reflection_Probe{})
+			append(&groups[group], probe)
+		}
+	}
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	target := extra_target(platform, {32, 16})
+	defer platform.gpu_destroy_texture(target)
+	quality := r.quality
+	quality.reflections = {.Probes, .Low}
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {1000, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = target, state = &state_b}}
+	desc := Frame_Desc {
+		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		quality     = &quality,
+		extra_views = extras[:],
+	}
+	held :: proc(rp: ^Reflection_Probes, slots: int, group: []ecs.Entity) -> (count: int) {
+		for s in rp.slots[:slots] {
+			for e in group {
+				count += int(s.used && s.entity == e)
+			}
+		}
+		return
+	}
+	rp := &r.reflection_probes
+	var_slots: [16]ecs.Entity
+	for k in 0 ..< 6 {
+		testing.expect(t, draw_frame(r, w, desc))
+		now: [16]ecs.Entity
+		for s, i in rp.slots[:slots] {
+			now[i] = s.used ? s.entity : 0
+		}
+		// The slots are the nearest to the two cameras, half each, and stay where they are.
+		testing.expect_value(t, held(rp, slots, groups[0][:]) + held(rp, slots, groups[1][:]), slots)
+		testing.expect_value(t, held(rp, slots, groups[0][:]), slots / 2)
+		testing.expect_value(t, held(rp, slots, groups[1][:]), slots / 2)
+		if k > 0 {
+			testing.expect_value(t, now, var_slots)
+		}
+		var_slots = now
+	}
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// Each view has the level of its own quality, and the storage of its own: one with the voxel cones and one with the screen
+// cascades keep apart, and a view that changes its level makes its storage again without touching the other's.
+@(test)
+views_with_other_gi_techniques_keep_separate_storage :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	fill_world(rig.w)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+	target := extra_target(platform, {48, 24})
+	defer platform.gpu_destroy_texture(target)
+
+	quality_a, quality_b := r.quality, r.quality
+	quality_a.gi = {.Voxel_Cones, .Low}
+	quality_b.gi = {.Screen_Cascades, .Low}
+	extras := [1]Extra_View{{view = {position = ecs.position_offset({}, {20, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05}, size = {48, 24}, target = target, state = &state_b, quality = &quality_b}}
+	desc := Frame_Desc {
+		view        = {rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		quality     = &quality_a,
+		extra_views = extras[:],
+	}
+	for _ in 0 ..< 3 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	a, b := &r.view.gi, &state_b.gi
+	testing.expect_value(t, a.voxel.params, GI_VOXEL_PARAMS[.Low])
+	testing.expect(t, a.voxel.textures[0][.Radiance] != {}, "the first view has no voxels")
+	testing.expect_value(t, b.voxel.params, Gi_Voxel_Params{})
+	testing.expect(t, b.voxel.textures[0][.Radiance] == {}, "the screen cascades made voxels")
+	testing.expect_value(t, a.split.params, Gi_Split_Params{})
+	testing.expect(t, a.frame > 0 && b.frame > 0)
+	voxels := a.voxel.textures
+	boxes := a.voxel.boxes
+
+	// The second view takes the voxel cones at another level: it makes its voxels, and the first view's are as they were.
+	quality_b.gi = {.Voxel_Cones, .High}
+	for _ in 0 ..< 2 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	testing.expect_value(t, b.voxel.params, GI_VOXEL_PARAMS[.High])
+	testing.expect_value(t, a.voxel.params, GI_VOXEL_PARAMS[.Low])
+	testing.expect_value(t, a.voxel.textures, voxels)
+	testing.expect(t, a.voxel.boxes[0].voxelized && boxes[0].voxelized)
+	testing.expect(t, b.voxel.textures[0][.Radiance] != a.voxel.textures[0][.Radiance])
+
+	// And the first view changes its level: the second's storage stays.
+	voxels_b := b.voxel.textures
+	quality_a.gi = {.Voxel_Cones, .Medium}
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, a.voxel.params, GI_VOXEL_PARAMS[.Medium])
+	testing.expect_value(t, b.voxel.textures, voxels_b)
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// An extra view's hooks run at the same points as the frame's, with a frame of its own: its view, its size and its output
+// size, at its quality's render scale, and the settings of the volumes at its place. The settings that the view is given
+// are its own, not the frame's. Frame.extra says which it is.
+@(test)
+an_extra_views_hooks_run_with_its_own_view_and_size :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	w := rig.w
+	// A box of volume around the extra view, with no bloom.
+	room := ecs.spawn(w)
+	ecs.add(w, room, ecs.Transform{position = ecs.position_offset({}, {100, 0, 0}), rotation = 1, scale = 1})
+	ecs.add(w, room, volume.Volume{shape = .Box, extents = {10, 10, 10}})
+	ecs.add(w, room, Bloom{off = {true, true}})
+	target := extra_target(platform, {32, 16})
+	defer platform.gpu_destroy_texture(target)
+	state_b: View_State
+	view_state_init(&state_b, r)
+	defer view_state_destroy(&state_b, r)
+
+	main_record, extra_record: View_Record
+	extra_at := ecs.position_offset({}, {100, 0, 0})
+	quality := r.quality
+	quality.render_scale = 0.5
+	extras := [1]Extra_View{{view = {position = extra_at, rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = target, state = &state_b, hooks = RECORD_HOOKS}}
+	extras[0].hooks.data = &extra_record
+	desc := Frame_Desc {
+		view        = {position = ecs.position_offset({}, {1, 2, 3}), rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		quality     = &quality,
+		hooks       = RECORD_HOOKS,
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &main_record
+	testing.expect(t, draw_frame(r, w, desc), "the frame did not execute")
+	for rec in ([]View_Record{main_record, extra_record}) {
+		for count in ([]int{rec.before_world, rec.after_prepass, rec.before_post, rec.ui, rec.debug}) {
+			testing.expect_value(t, count, 1)
+		}
+	}
+	testing.expect(t, !main_record.extra && extra_record.extra)
+	testing.expect_value(t, main_record.position, desc.view.position)
+	testing.expect_value(t, extra_record.position, extra_at)
+	testing.expect_value(t, main_record.size, [2]u32{32, 16})
+	testing.expect_value(t, main_record.output_size, [2]u32{64, 32})
+	// The frame's quality is the extra view's, with its render scale.
+	testing.expect_value(t, extra_record.size, [2]u32{16, 8})
+	testing.expect_value(t, extra_record.output_size, [2]u32{32, 16})
+	// The volumes at each view's place give its settings.
+	testing.expect(t, !main_record.no_bloom && extra_record.no_bloom, "the settings are not the volumes' at each view")
+
+	// The view's own quality and settings are its own.
+	own_quality := r.quality
+	settings := resolve_settings(r, w, desc.view.position)
+	desc.extra_views[0].quality, desc.extra_views[0].settings = &own_quality, &settings
+	testing.expect(t, draw_frame(r, w, desc), "the frame with the view's own quality did not execute")
+	testing.expect_value(t, extra_record.size, [2]u32{32, 16})
+	testing.expect(t, !main_record.no_bloom && !extra_record.no_bloom, "the extra view did not take its own settings")
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
+}
+
+// The debug lines of a frame reach its extra views as well as its own view, each relative to its own camera, unless the
+// view has none. The frame drops them after its last view, and keeps those with a duration for the next frames.
+@(test)
+the_debug_lines_of_a_frame_reach_its_extra_views :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	r, platform := rig.r, &rig.platform
+	first, second := extra_target(platform, {32, 16}), extra_target(platform, {32, 16})
+	defer {
+		platform.gpu_destroy_texture(first)
+		platform.gpu_destroy_texture(second)
+	}
+	states: [2]View_State
+	for &state in states {
+		view_state_init(&state, r)
+	}
+	defer {
+		for &state in states {
+			view_state_destroy(&state, r)
+		}
+	}
+
+	records: [3]View_Record
+	extra_at := ecs.position_offset({}, {10, 0, 0})
+	extras := [2]Extra_View {
+		{view = {position = extra_at, rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = first, state = &states[0], hooks = RECORD_HOOKS},
+		// This one has no debug layer, and its hook still runs.
+		{view = {rotation = 1, vertical_fov = 1, near = 0.05}, size = {32, 16}, target = second, state = &states[1], no_debug = true, hooks = RECORD_HOOKS},
+	}
+	extras[0].hooks.data = &records[1]
+	extras[1].hooks.data = &records[2]
+	desc := Frame_Desc {
+		view        = {position = ecs.position_offset({}, {1, 0, 0}), rotation = 1, vertical_fov = 1, near = 0.05},
+		size        = {64, 32},
+		hooks       = RECORD_HOOKS,
+		extra_views = extras[:],
+	}
+	desc.hooks.data = &records[0]
+	from, to := ecs.position_offset({}, {2, 3, 4}), ecs.position_offset({}, {2, 3, 5})
+	debug.line(&r.debug, from, to, {1, 0, 0, 1})
+	debug.line(&r.debug, from, to, {0, 1, 0, 1}, duration = 60, mode = .Overlay)
+	testing.expect(t, draw_frame(r, rig.w, desc), "the frame did not execute")
+	for rec, i in records {
+		testing.expect_value(t, rec.debug, 1)
+		testing.expectf(t, rec.layer == (i != 2), "view %d: debug layer %v", i, rec.layer)
+		testing.expect_value(t, rec.lines, i != 2 ? 2 : 0)
+	}
+	testing.expect_value(t, records[0].first_line.a, ecs.position_sub(from, desc.view.position))
+	testing.expect_value(t, records[1].first_line.a, ecs.position_sub(from, extra_at))
+	testing.expect_value(t, records[1].first_line.b, ecs.position_sub(to, extra_at))
+	// The line of this frame is gone, and the one with a duration stays for the views of the next.
+	testing.expect_value(t, len(debug.frame_lines(&r.debug)), 1)
+	testing.expect(t, draw_frame(r, rig.w, desc), "the next frame did not execute")
+	for rec, i in records {
+		testing.expect_value(t, rec.debug, 2)
+		testing.expect_value(t, rec.lines, i != 2 ? 1 : 0)
+	}
+	testing.expect_value(t, records[1].first_line.a, ecs.position_sub(from, extra_at))
+	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }

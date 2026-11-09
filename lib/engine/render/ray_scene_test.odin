@@ -150,7 +150,7 @@ run_accel_frame :: proc(
 	g := begin(platform, cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r,
+		renderer = r, state = &r.view,
 		graph    = &g,
 		size     = {64, 32},
 	}
@@ -325,7 +325,7 @@ hit_shading_bins_the_hits_and_dispatches_each_bin_indirectly :: proc(t: ^testing
 		cache: Texture_Cache
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.view_constants = make([]gpu.Upload, 1, platform.frame_allocator)

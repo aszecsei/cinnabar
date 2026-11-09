@@ -58,11 +58,15 @@ Screen_Reflections :: struct {
 	resolve:    Shader_Pipeline,
 	temporal:   Shader_Pipeline,
 	lit:        Shader_Pipeline,
+}
+
+// Ssr_State is one view's screen-space or traced reflections between frames, in View_State.
+Ssr_State :: struct {
 	// Counts the frames, for the noise and the half resolution's pixel.
-	frame:      u32,
+	frame:  u32,
 	// The bytes of the histories that the last frame kept, its own lit scene's and the reflections', each with its
 	// previous frame's: 0 in a frame without the screen-space or traced reflections.
-	memory:     u64,
+	memory: u64,
 }
 
 // Ssr_Constants matches Ssr_Constants in ssr_common.hlsli.
@@ -193,13 +197,13 @@ ssr_level_size :: proc(size: [2]u32, level: int) -> [2]u32 {
 @(private)
 begin_screen_reflections :: proc(f: ^Frame, settings: Reflection_Settings) {
 	r := f.renderer
-	s := &r.ssr
+	s := &f.state.ssr
 	platform := r.platform
 	s.memory = 0
 	if settings.off || (settings.technique != .Screen && settings.technique != .Ray_Traced) {
 		return
 	}
-	for p in screen_reflection_pipelines(s) {
+	for p in screen_reflection_pipelines(&r.ssr) {
 		if !pipeline_ready(platform, p) {
 			return
 		}

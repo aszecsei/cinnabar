@@ -205,7 +205,7 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
@@ -266,10 +266,10 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 		testing.expect_value(t, passes["gi trace"], 0)
 		free_all(platform.frame_allocator)
 	}
-	testing.expect(t, voxel.running)
-	testing.expect_value(t, voxel.params, GI_VOXEL_PARAMS[.Low])
+	testing.expect(t, r.view.gi.voxel.running)
+	testing.expect_value(t, r.view.gi.voxel.params, GI_VOXEL_PARAMS[.Low])
 	// A level that voxelized without draws holds no surfaces, and is up to date.
-	testing.expect(t, voxel.boxes[0].voxelized)
+	testing.expect(t, r.view.gi.voxel.boxes[0].voxelized)
 
 	// With the Gi_Probes debug view, the gather draws the voxels too.
 	passes := run_frame(t, r, &cache, settings, meters(16, 2, -3), .Gi_Probes)
@@ -280,6 +280,6 @@ the_voxel_cones_run_without_ray_queries_and_pass_validation :: proc(t: ^testing.
 	settings.level = .High
 	passes = run_frame(t, r, &cache, settings, meters(0, 0, 0))
 	testing.expect_value(t, passes["gi voxel inject"], int(GI_VOXEL_PARAMS[.High].levels))
-	testing.expect_value(t, voxel.params, GI_VOXEL_PARAMS[.High])
+	testing.expect_value(t, r.view.gi.voxel.params, GI_VOXEL_PARAMS[.High])
 	free_all(platform.frame_allocator)
 }

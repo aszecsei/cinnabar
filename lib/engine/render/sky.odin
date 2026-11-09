@@ -96,14 +96,18 @@ Sky :: struct {
 	multiscatter:  Shader_Pipeline,
 	view:          Shader_Pipeline,
 	background:    Shader_Pipeline,
-	// The last ambient light, and what it came from, since the sky seldom changes between frames.
-	ambient_key:   Sky_Light_Key,
-	ambient:       Ambient,
-	ambient_valid: bool,
 	// The Texture mode's (see sky_texture.odin).
 	texture:       Sky_Texture_State,
 	// The cubemap of the sky's specular light (see sky_cube.odin).
 	cube:          Sky_Cube,
+}
+
+// Sky_State is one view's sky between frames, in View_State: the last ambient light, and what it came from, since the sky
+// seldom changes between frames and its height is the view's.
+Sky_State :: struct {
+	ambient_key:   Sky_Light_Key,
+	ambient:       Ambient,
+	ambient_valid: bool,
 }
 
 // Sky_Light_Key is what the ambient light of an Atmosphere depends on.
@@ -282,11 +286,12 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	moon_light := s.moon_illuminance * phase
 
 	key := Sky_Light_Key{a, height, sun_direction, sun_illuminance, moon_direction, moon_light}
-	if !r.sky.ambient_valid || r.sky.ambient_key != key {
-		r.sky.ambient = sky_ambient(a, height, {{sun_direction, sun_illuminance}, {moon_direction, moon_light}})
-		r.sky.ambient_key, r.sky.ambient_valid = key, true
+	cache := &f.state.sky
+	if !cache.ambient_valid || cache.ambient_key != key {
+		cache.ambient = sky_ambient(a, height, {{sun_direction, sun_illuminance}, {moon_direction, moon_light}})
+		cache.ambient_key, cache.ambient_valid = key, true
 	}
-	ambient := scale_ambient(r.sky.ambient, s.ambient_intensity)
+	ambient := scale_ambient(cache.ambient, s.ambient_intensity)
 
 	platform := r.platform
 	for p in ([]^Shader_Pipeline{&r.sky.transmittance, &r.sky.multiscatter, &r.sky.view, &r.sky.background}) {

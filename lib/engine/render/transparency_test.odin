@@ -138,7 +138,7 @@ the_transparent_passes_match_their_pipelines :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, output_size = {64, 32}, debug_view = view}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, output_size = {64, 32}, debug_view = view}
 		f.post = new(Post_Frame, platform.frame_allocator)
 		f.post.upscaler = upscaler
 		f.lights = new(Light_Frame, platform.frame_allocator)

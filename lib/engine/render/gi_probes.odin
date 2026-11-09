@@ -71,27 +71,31 @@ Gi_Probe_Level :: struct {
 	valid:    bool,
 }
 
-// Gi_Probes is the world probes' state between frames, in Gi_Passes: their pipelines, their textures and states, which
-// are made for a count of levels, the rays' buffers, each level's box, and which probes wait for an update.
+// Gi_Probes is the world probes' pipelines and the rays' buffers, which every view's update shares, in Gi_Passes.
 Gi_Probes :: struct {
 	reset:        Shader_Pipeline,
 	trace:        Shader_Pipeline,
 	light:        Shader_Pipeline,
 	screen:       Shader_Pipeline,
 	update:       Shader_Pipeline,
-	radiance:     gpu.Texture,
-	irradiance:   gpu.Texture,
-	states:       gpu.Buffer,
-	level_count:  u32,
-	spacing:      u32,
 	hits:         gpu.Buffer,
 	surfaces:     gpu.Buffer,
 	rays:         gpu.Buffer,
 	ray_capacity: int,
-	levels:       [MAX_PROBE_LEVELS]Gi_Probe_Level,
-	schedule:     Probe_Schedule,
+}
+
+// Gi_Probe_State is one view's world probes between frames, in Gi_State: their textures and states, which are made for a
+// count of levels, each level's box, and which probes wait for an update.
+Gi_Probe_State :: struct {
+	radiance:    gpu.Texture,
+	irradiance:  gpu.Texture,
+	states:      gpu.Buffer,
+	level_count: u32,
+	spacing:     u32,
+	levels:      [MAX_PROBE_LEVELS]Gi_Probe_Level,
+	schedule:    Probe_Schedule,
 	// Counts the updates, for the rays' rotation.
-	frame:        u32,
+	frame:       u32,
 }
 
 // Probe_Schedule is which probes the next frames update: those that wait since their reset, a bit each, then each
@@ -196,14 +200,13 @@ gi_probes_destroy :: proc(p: ^Gi_Probes, platform: ^core.Platform_API) {
 	for s in ([]^Shader_Pipeline{&p.reset, &p.trace, &p.light, &p.screen, &p.update}) {
 		destroy_shader_pipeline(s, platform)
 	}
-	destroy_probe_storage(p, platform)
 	for b in ([]gpu.Buffer{p.hits, p.surfaces, p.rays}) {
 		platform.gpu_destroy_buffer(b)
 	}
 }
 
-@(private = "file")
-destroy_probe_storage :: proc(p: ^Gi_Probes, platform: ^core.Platform_API) {
+@(private)
+destroy_probe_storage :: proc(p: ^Gi_Probe_State, platform: ^core.Platform_API) {
 	platform.gpu_destroy_texture(p.radiance)
 	platform.gpu_destroy_texture(p.irradiance)
 	platform.gpu_destroy_buffer(p.states)
@@ -340,8 +343,7 @@ probe_jobs :: proc(schedule: ^Probe_Schedule, levels: u32, budget: int, allocato
 // ensure_probe_storage makes the probes' textures and states for a count of levels and a spacing, and their rays'
 // buffers for a count of rays. New textures reset every level.
 @(private = "file")
-ensure_probe_storage :: proc(r: ^Renderer, params: Gi_Probe_Params, rays: int) {
-	p := &r.gi.probes
+ensure_probe_storage :: proc(r: ^Renderer, p: ^Gi_Probe_State, params: Gi_Probe_Params, rays: int) {
 	platform := r.platform
 	if p.radiance == {} || p.level_count != params.levels || p.spacing != params.spacing {
 		destroy_probe_storage(p, platform)
@@ -353,15 +355,16 @@ ensure_probe_storage :: proc(r: ^Renderer, params: Gi_Probe_Params, rays: int) {
 		p.levels = {}
 		p.schedule = {}
 	}
-	if rays > p.ray_capacity {
-		for b in ([]gpu.Buffer{p.hits, p.surfaces, p.rays}) {
+	shared := &r.gi.probes
+	if rays > shared.ray_capacity {
+		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays}) {
 			platform.gpu_destroy_buffer(b)
 		}
-		p.ray_capacity = max(rays, p.ray_capacity * 2)
-		capacity := u32(p.ray_capacity)
-		p.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi probe hits"}, nil)
-		p.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "gi probe surfaces"}, nil)
-		p.rays = platform.gpu_create_buffer({size = capacity * 16, usage = {.Storage}, label = "gi probe rays"}, nil)
+		shared.ray_capacity = max(rays, shared.ray_capacity * 2)
+		capacity := u32(shared.ray_capacity)
+		shared.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi probe hits"}, nil)
+		shared.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "gi probe surfaces"}, nil)
+		shared.rays = platform.gpu_create_buffer({size = capacity * 16, usage = {.Storage}, label = "gi probe rays"}, nil)
 	}
 }
 
@@ -426,16 +429,17 @@ add_gi_probe_passes :: proc(f: ^Frame, settings: Gi_Settings, lit: History) -> ^
 	if !reserved {
 		return nil
 	}
-	ensure_probe_storage(r, params, int(params.budget * params.rays))
-	p := &r.gi.probes
+	p := &f.state.gi.probes
+	ensure_probe_storage(r, p, params, int(params.budget * params.rays))
+	shared := &r.gi.probes
 	g := f.graph
 	pf := new(Gi_Probe_Frame, platform.frame_allocator)
 	pf.radiance = import_texture(g, p.radiance, .Storage)
 	pf.irradiance = import_texture(g, p.irradiance, .Storage)
 	pf.states = import_buffer(g, p.states)
-	pf.hits = import_buffer(g, p.hits)
-	pf.surfaces = import_buffer(g, p.surfaces)
-	pf.rays = import_buffer(g, p.rays)
+	pf.hits = import_buffer(g, shared.hits)
+	pf.surfaces = import_buffer(g, shared.surfaces)
+	pf.rays = import_buffer(g, shared.rays)
 
 	grid := &pf.grid
 	reach: f32

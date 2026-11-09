@@ -180,7 +180,7 @@ assign_shadows :: proc(f: ^Frame) {
 	}
 	trace := f.shadow_settings.ray_traced && r.shadows.mask_pipeline.pipeline != {} && request_ray_scene(f)
 	params := SHADOW_PARAMS[f.shadow_settings.level]
-	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, params)
+	virtual := f.shadow_settings.virtual && params.virtual_levels > 0 && ensure_virtual_shadows(r, &f.state.virtual_shadows, params)
 	assign_shadow_views(f, trace, virtual)
 }
 

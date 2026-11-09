@@ -92,7 +92,7 @@ the_particle_passes_append_sprites :: proc(t: ^testing.T) {
 	for frame in 0 ..< 2 {
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.shadows = new(Shadow_Frame, platform.frame_allocator)
 		sf := new(Scene_Frame, platform.frame_allocator)
@@ -211,7 +211,7 @@ an_effect_preview_plays_on_a_frame_of_its_own :: proc(t: ^testing.T) {
 	for frame in 0 ..< 2 {
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		f.lut = create_texture(&g, {size = {16, 16}, format = .RGBA16_Float, label = "lut"})
 		pass := add_render_pass(&g, "lut", proc(_: ^Pass_Context) {}, f)
 		color(&g, pass, f.lut, .Clear)
@@ -286,7 +286,7 @@ ribbons_build_and_take_their_draws :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
@@ -362,7 +362,7 @@ mesh_particles_take_their_draws :: proc(t: ^testing.T) {
 		defer cache_destroy(&cache, &platform)
 		g := begin(&platform, &cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		sf := new(Scene_Frame, platform.frame_allocator)
 		f.scene_frame = sf
 		sf.items = make([]Cull_Item, 1, platform.frame_allocator)
