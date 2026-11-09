@@ -63,19 +63,26 @@ Virtual_Shadow_Stats :: struct {
 	capacity:  u32,
 }
 
-// Virtual_Shadows is the virtual shadow map's state between frames, in Shadow_Passes. The pool is not a graph's
-// transient texture: every view's Frame_Constants holds its indices, and they are written before transients have any.
+// Virtual_Shadows is the virtual shadow map's pipelines and the buffers that a view's passes fill and use within its graph,
+// which every view shares, in Shadow_Passes: every page allocates and draws again each frame, and the requests and the page
+// table start empty in it.
 Virtual_Shadows :: struct {
 	mark_pipeline:     Shader_Pipeline,
 	allocate_pipeline: Shader_Pipeline,
 	requests:          gpu.Buffer,
 	table:             gpu.Buffer,
 	arguments:         gpu.Buffer,
-	stats:             gpu.Buffer,
-	stats_ring:        Readback_Ring,
-	last_stats:        Virtual_Shadow_Stats,
-	pool:              gpu.Texture,
-	pool_pages:        [2]u32,
+}
+
+// Virtual_State is one view's virtual shadow map between frames, in View_State: its pool of pages, which the level
+// sizes, so a view at another level has a pool of its own, and its stats. The pool is not a graph's transient texture:
+// every view's Frame_Constants holds its indices, and they are written before transients have any.
+Virtual_State :: struct {
+	stats:      gpu.Buffer,
+	stats_ring: Readback_Ring,
+	last_stats: Virtual_Shadow_Stats,
+	pool:       gpu.Texture,
+	pool_pages: [2]u32,
 }
 
 // Virtual_Frame is one frame's virtual shadow map, in Shadow_Frame. count is its levels, 0 without it, which are the
@@ -505,9 +512,10 @@ virtual_lookup_level :: proc(s: Virtual_Selection, distance: f32) -> int {
 	return max(virtual_footprint_level(s, distance) - 1, 0)
 }
 
-// virtual_shadow_stats is the virtual shadow map's pages, a frame or two ago, all 0 after a frame without it.
+// virtual_shadow_stats is the frame's own view's virtual shadow map's pages, a frame or two ago, all 0 after a frame
+// without it.
 virtual_shadow_stats :: proc(r: ^Renderer) -> Virtual_Shadow_Stats {
-	return r.shadows.virtual.last_stats
+	return r.view.virtual_shadows.last_stats
 }
 
 @(private)
@@ -523,6 +531,12 @@ virtual_shadows_destroy :: proc(v: ^Virtual_Shadows, platform: ^core.Platform_AP
 	platform.gpu_destroy_buffer(v.requests)
 	platform.gpu_destroy_buffer(v.table)
 	platform.gpu_destroy_buffer(v.arguments)
+	v^ = {}
+}
+
+// virtual_state_destroy frees a view's virtual shadow map.
+@(private)
+virtual_state_destroy :: proc(v: ^Virtual_State, platform: ^core.Platform_API) {
 	platform.gpu_destroy_buffer(v.stats)
 	destroy_readback_ring(&v.stats_ring, platform)
 	platform.gpu_destroy_texture(v.pool)
@@ -532,8 +546,8 @@ virtual_shadows_destroy :: proc(v: ^Virtual_Shadows, platform: ^core.Platform_AP
 // read_virtual_stats keeps the newest stats' copy that has come back. After a frame without the virtual shadow map, or
 // one that did not execute, the stats are empty.
 @(private)
-read_virtual_stats :: proc(r: ^Renderer) {
-	v := &r.shadows.virtual
+read_virtual_stats :: proc(r: ^Renderer, view: ^View_State) {
+	v := &view.virtual_shadows
 	data, take := take_readback(&v.stats_ring, r.platform, size_of(Virtual_Shadow_Stats))
 	switch take {
 	case .Fresh:
@@ -547,7 +561,7 @@ read_virtual_stats :: proc(r: ^Renderer) {
 // ensure_virtual_shadows syncs the virtual shadow map's pipelines and creates what the level's parameters need, and says
 // whether this frame can use it: until they compile, the frame draws the cascades. The pool changes with the quality.
 @(private)
-ensure_virtual_shadows :: proc(r: ^Renderer, p: Shadow_Params) -> bool {
+ensure_virtual_shadows :: proc(r: ^Renderer, s: ^Virtual_State, p: Shadow_Params) -> bool {
 	v := &r.shadows.virtual
 	platform := r.platform
 	sync_compute_pipeline(
@@ -592,7 +606,9 @@ ensure_virtual_shadows :: proc(r: ^Renderer, p: Shadow_Params) -> bool {
 			},
 			nil,
 		)
-		v.stats = platform.gpu_create_buffer(
+	}
+	if s.stats == {} {
+		s.stats = platform.gpu_create_buffer(
 			{
 				size = size_of(Virtual_Shadow_Stats),
 				usage = {.Storage},
@@ -601,13 +617,13 @@ ensure_virtual_shadows :: proc(r: ^Renderer, p: Shadow_Params) -> bool {
 			nil,
 		)
 	}
-	if !ensure_readback_ring(&v.stats_ring, platform, size_of(Virtual_Shadow_Stats), "virtual shadow stats readback") {
+	if !ensure_readback_ring(&s.stats_ring, platform, size_of(Virtual_Shadow_Stats), "virtual shadow stats readback") {
 		return false
 	}
-	if v.pool_pages != p.pool_pages {
-		platform.gpu_destroy_texture(v.pool)
+	if s.pool_pages != p.pool_pages {
+		platform.gpu_destroy_texture(s.pool)
 		size := p.pool_pages * VIRTUAL_PAGE_TEXELS
-		v.pool = platform.gpu_create_texture(
+		s.pool = platform.gpu_create_texture(
 			{
 				size = size,
 				format = VIRTUAL_POOL_FORMAT,
@@ -616,9 +632,9 @@ ensure_virtual_shadows :: proc(r: ^Renderer, p: Shadow_Params) -> bool {
 			},
 			nil,
 		)
-		v.pool_pages = p.pool_pages
+		s.pool_pages = p.pool_pages
 	}
-	return v.requests != {} && v.table != {} && v.arguments != {} && v.stats != {} && v.pool != {}
+	return v.requests != {} && v.table != {} && v.arguments != {} && s.stats != {} && s.pool != {}
 }
 
 // add_virtual_levels adds the levels of a directional light as the first shadow views.
@@ -662,16 +678,17 @@ virtual_camera :: proc(f: ^Frame, p: Shadow_Params) -> Virtual_Camera {
 virtual_constants :: proc(c: ^Frame_Constants, f: ^Frame) {
 	sf := f.shadows
 	v := &f.renderer.shadows.virtual
+	pool := &f.state.virtual_shadows
 	s := sf.virtual.camera.selection
 	c.virtual_levels = u32(s.levels)
 	c.virtual_first_texel = s.first_texel
 	c.virtual_pixel_angle = s.pixel_angle
 	c.virtual_bias = s.bias
-	c.virtual_pool = gpu.read_index(v.pool)
-	c.virtual_pool_storage = gpu.write_index(v.pool)
+	c.virtual_pool = gpu.read_index(pool.pool)
+	c.virtual_pool_storage = gpu.write_index(pool.pool)
 	c.virtual_table = gpu.read_index(v.table)
-	c.virtual_pool_pages_per_row = v.pool_pages.x
-	c.virtual_pool_pages = v.pool_pages.x * v.pool_pages.y
+	c.virtual_pool_pages_per_row = pool.pool_pages.x
+	c.virtual_pool_pages = pool.pool_pages.x * pool.pool_pages.y
 }
 
 // declare_virtual_shadows declares that a pass reads the virtual shadow map, if the frame has it.
@@ -691,14 +708,15 @@ declare_virtual_shadows :: proc(f: ^Frame, p: Pass) {
 add_virtual_shadow_passes :: proc(f: ^Frame) {
 	r := f.renderer
 	v := &r.shadows.virtual
+	state := &f.state.virtual_shadows
 	sf := f.shadows
 	vf := &sf.virtual
 	g := f.graph
-	vf.pool = import_texture(g, v.pool, .Storage)
+	vf.pool = import_texture(g, state.pool, .Storage)
 	vf.requests = import_buffer(g, v.requests)
 	vf.table = import_buffer(g, v.table)
 	vf.arguments = import_buffer(g, v.arguments)
-	vf.stats = import_buffer(g, v.stats)
+	vf.stats = import_buffer(g, state.stats)
 
 	p := add_compute_pass(g, "virtual shadow clear", run_virtual_clear, f)
 	write(g, p, vf.requests)
@@ -727,7 +745,7 @@ add_virtual_shadow_passes :: proc(f: ^Frame) {
 	declare_scene_draws(f, p)
 
 	// The stats' copy, for read_virtual_stats to take once it is back.
-	add_readback_copy(g, f.renderer.platform, &v.stats_ring, vf.stats, size_of(Virtual_Shadow_Stats), "virtual shadow stats")
+	add_readback_copy(g, f.renderer.platform, &state.stats_ring, vf.stats, size_of(Virtual_Shadow_Stats), "virtual shadow stats")
 }
 
 // add_virtual_culling adds the culling of the levels' views, which the page table has to be written for: their instance

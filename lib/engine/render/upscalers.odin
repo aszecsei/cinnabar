@@ -22,10 +22,14 @@ MOTION_FORMAT :: VELOCITY_FORMAT
 // optical depth.
 UPSCALE_MASK_FORMAT :: gpu.Format.R8_Unorm
 
-// Upscalers is the upscalers' state between frames, in Post. One upscaler upscales into the frame's size; a frame of
-// another size, or another technique, makes a new one.
+// Upscalers is the upscalers' pipeline, in Post, which every view shares.
 Upscalers :: struct {
-	motion:      Shader_Pipeline,
+	motion: Shader_Pipeline,
+}
+
+// Upscaler_State is one view's upscaler between frames, in Post_State. One upscaler upscales into the view's size; a frame
+// of another size, or another technique, makes a new one.
+Upscaler_State :: struct {
 	upscaler:    gpu.Upscaler,
 	// What upscaler was made for, or failed to be made for, which is not tried again.
 	desc:        gpu.Upscaler_Desc,
@@ -59,6 +63,12 @@ upscalers_init :: proc(u: ^Upscalers) {
 
 upscalers_destroy :: proc(u: ^Upscalers, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&u.motion, platform)
+	u^ = {}
+}
+
+// upscaler_state_destroy frees a view's upscaler.
+@(private)
+upscaler_state_destroy :: proc(u: ^Upscaler_State, platform: ^core.Platform_API) {
 	if u.upscaler != {} {
 		platform.gpu_destroy_upscaler(u.upscaler)
 	}
@@ -85,9 +95,9 @@ upscaler_kind :: proc(technique: Aa_Technique) -> (kind: gpu.Upscaler_Kind, ok: 
 @(private)
 frame_upscaler :: proc(f: ^Frame, technique: Aa_Technique) -> gpu.Upscaler {
 	r := f.renderer
-	u := &r.post.upscalers
+	u := &f.state.post.upscaler
 	kind, ok := upscaler_kind(technique)
-	if !ok || kind not_in r.caps.upscalers || !pipeline_ready(r.platform, &u.motion) || r.platform.gpu_create_upscaler == nil {
+	if !ok || kind not_in r.caps.upscalers || !pipeline_ready(r.platform, &r.post.upscalers.motion) || r.platform.gpu_create_upscaler == nil {
 		return {}
 	}
 	desc := gpu.Upscaler_Desc {

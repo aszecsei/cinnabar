@@ -38,8 +38,6 @@ Volumetric_Fog :: struct {
 	inject_traced: Shader_Pipeline,
 	integrate:     Shader_Pipeline,
 	background:    Shader_Pipeline,
-	// Counts the frames with fog, for the jitter within each slice.
-	frame:         u32,
 }
 
 // Fog_Push matches Fog_Push in fog_inject.hlsli.
@@ -157,7 +155,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 	if history.current == 0 {
 		return
 	}
-	v.frame += 1
+	f.state.fog_frame += 1
 	right, up, forward := view_axes(f.view)
 	scale := projection_scale(f.view_projection)
 	ff := new(Fog_Frame, platform.frame_allocator)
@@ -176,7 +174,7 @@ begin_fog :: proc(f: ^Frame, fog: Fog_Settings) {
 			// Relative to the camera, in f64 so a camera far from the origin keeps it exact.
 			base_height = f32(f64(fog.base_height) - ecs.position_to_meters(f.view.position).y),
 			anisotropy = clamp(fog.anisotropy, -0.95, 0.95),
-			jitter = halton(v.frame % JITTER_SAMPLES + 1, 2),
+			jitter = halton(f.state.fog_frame % JITTER_SAMPLES + 1, 2),
 			grid = grid,
 			valid = u32(history.valid),
 			blend = FOG_BLEND,

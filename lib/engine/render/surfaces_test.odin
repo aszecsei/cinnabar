@@ -208,7 +208,7 @@ surface_passes_select_and_cull_patches_into_the_bins :: proc(t: ^testing.T) {
 	g := begin(&platform, &cache)
 	f := new(Frame, platform.frame_allocator)
 	f^ = {
-		renderer = r,
+		renderer = r, state = &r.view,
 		graph    = &g,
 		size     = {64, 32},
 	}

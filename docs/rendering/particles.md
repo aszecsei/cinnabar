@@ -80,6 +80,15 @@ An emitter with `render = mesh` draws a mesh at each of its particles, with its 
 - **The prepass.** The camera's draws of mesh particles go into a particle prepass of their own, after the particle history (see [Collision](#collision)).
 - **Limits:** mesh particles are not culled, by view or by particle, nor in the ray-traced shadows; and an effect's preview draws no mesh particles.
 
+## Views
+
+Every [view](frame.md#views) of a frame draws the particles, and the systems step once. The own view steps them in `begin_particles`: it ages the systems, spawns, and writes the emitters' records, and its update pass moves the pool's particles and appends their sprites. It collides with the depth that its camera saw last frame, in its own history. The other views run `begin_particles_draw` instead: they copy the step's records with each system's anchor relative to their camera and the `EMITTER_DRAW` flag, so their update pass steps and spawns nothing and only appends the sprites of the particles that are alive, relative to their camera.
+
+- **Sprites** are appended by the update pass in each view, from the same pool, into the view's own sprite buffers.
+- **Ribbons** are built in each view from the pool: the build faces the ribbon to the view's camera, and draws it in the view's bins.
+- **Mesh particles** are the own view's instances, relative to the render origin and the same for every view. The other views read the counts that the own view's update left, and draw the instances in their own bins.
+- **A frame whose own view fails** leaves the pool as it was, and the other views draw it. A system that the own view has not reset yet draws nothing in them.
+
 ## Previews
 
 The editor shows an effect in a preview of its own, as it shows a material (see [Material previews](materials.md#material-previews)). A preview of an effect is the same `Open_Preview` with the effect's GUID: the game's `editor` package finds that its blob is an effect's, sets `Preview_Desc.effect`, and draws the preview in every frame that it can, since the effect plays.

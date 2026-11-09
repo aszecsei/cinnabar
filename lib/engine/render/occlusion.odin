@@ -69,10 +69,14 @@ Cull_Stats :: struct {
 CULL_STATS_WORDS :: 8
 #assert(size_of(Cull_Stats) == CULL_STATS_WORDS * 4)
 
-// Occlusion is occlusion culling's state between frames, in Gpu_Scene: the pyramid's levels, made again when the
-// frame's size changes, each slot's bit of last frame and of this one, which alternate, and each cell's bits.
+// Occlusion is occlusion culling's pipeline, in Gpu_Scene, which every view's culling shares.
 Occlusion :: struct {
-	pipeline:   Shader_Pipeline,
+	pipeline: Shader_Pipeline,
+}
+
+// Occlusion_State is one view's occlusion culling between frames, in View_State: the pyramid's levels, made again when the
+// view's size changes, each slot's bit of its last frame and of this one, which alternate, and each cell's bits.
+Occlusion_State :: struct {
 	hzb:        [MAX_HZB_LEVELS]gpu.Texture,
 	hzb_levels: int,
 	hzb_size:   [2]u32,
@@ -85,16 +89,16 @@ Occlusion :: struct {
 	last_stats:     Cull_Stats,
 }
 
-// cull_stats is what the camera drew, a frame or two ago (see Cull_Stats).
+// cull_stats is what the frame's own view's camera drew, a frame or two ago (see Cull_Stats).
 cull_stats :: proc(r: ^Renderer) -> Cull_Stats {
-	return r.scene.occlusion.last_stats
+	return r.view.occlusion.last_stats
 }
 
-// read_cull_stats keeps the newest tally's copy that has come back. After a frame that tallied nothing, or that did not
-// execute, the stats are empty.
+// read_cull_stats keeps the newest tally's copy of a view that has come back. After a frame that tallied nothing, or that
+// did not execute, the stats are empty.
 @(private)
-read_cull_stats :: proc(r: ^Renderer) {
-	o := &r.scene.occlusion
+read_cull_stats :: proc(r: ^Renderer, v: ^View_State) {
+	o := &v.occlusion
 	data, take := take_readback(&o.stats_ring, r.platform, size_of(Cull_Stats))
 	switch take {
 	case .Fresh:
@@ -113,14 +117,13 @@ add_cull_stats_copy :: proc(f: ^Frame) {
 	if sf == nil || sf.stats == 0 {
 		return
 	}
-	r := f.renderer
-	add_readback_copy(f.graph, r.platform, &r.scene.occlusion.stats_ring, sf.stats, CULL_STATS_WORDS * 4, "cull stats")
+	add_readback_copy(f.graph, f.renderer.platform, &f.state.occlusion.stats_ring, sf.stats, CULL_STATS_WORDS * 4, "cull stats")
 }
 
 // ensure_cull_stats creates the tally and its copies the first time.
 @(private)
-ensure_cull_stats :: proc(r: ^Renderer) -> bool {
-	o := &r.scene.occlusion
+ensure_cull_stats :: proc(r: ^Renderer, v: ^View_State) -> bool {
+	o := &v.occlusion
 	if o.stats == {} {
 		o.stats = r.platform.gpu_create_buffer({size = CULL_STATS_WORDS * 4, usage = {.Storage}, label = "cull stats"}, nil)
 	}
@@ -146,6 +149,11 @@ occlusion_init :: proc(o: ^Occlusion) {
 @(private)
 occlusion_destroy :: proc(o: ^Occlusion, platform: ^core.Platform_API) {
 	destroy_shader_pipeline(&o.pipeline, platform)
+}
+
+// occlusion_state_destroy frees a view's occlusion culling.
+@(private)
+occlusion_state_destroy :: proc(o: ^Occlusion_State, platform: ^core.Platform_API) {
 	for t in o.hzb[:o.hzb_levels] {
 		platform.gpu_destroy_texture(t)
 	}
@@ -153,7 +161,7 @@ occlusion_destroy :: proc(o: ^Occlusion, platform: ^core.Platform_API) {
 		platform.gpu_destroy_buffer(b)
 	}
 	destroy_readback_ring(&o.stats_ring, platform)
-	o^ = {pipeline = o.pipeline}
+	o^ = {}
 }
 
 // occlusion_ready is whether a frame culls by occlusion: the editor has not turned it off, its pyramid's shader is
@@ -161,8 +169,8 @@ occlusion_destroy :: proc(o: ^Occlusion, platform: ^core.Platform_API) {
 @(private)
 occlusion_ready :: proc(f: ^Frame, disabled: bool) -> bool {
 	r := f.renderer
-	o := &r.scene.occlusion
-	if disabled || !pipeline_ready(r.platform, &o.pipeline) || f.size.x < 2 || f.size.y < 2 {
+	o := &f.state.occlusion
+	if disabled || !pipeline_ready(r.platform, &r.scene.occlusion.pipeline) || f.size.x < 2 || f.size.y < 2 {
 		return false
 	}
 	platform := r.platform
@@ -200,13 +208,12 @@ occlusion_ready :: proc(f: ^Frame, disabled: bool) -> bool {
 @(private)
 occlusion_constants :: proc(f: ^Frame) -> bool {
 	r := f.renderer
-	s := &r.scene
-	o := &s.occlusion
+	o := &f.state.occlusion
 	sf := f.scene_frame
 	of := &sf.occlusion
 	g := f.graph
-	// Last frame wrote one of the slots' bits; this frame reads it and writes the other.
-	this := s.frame & 1
+	// The view's last frame wrote one of the slots' bits; this frame reads it and writes the other.
+	this := f.state.frames & 1
 	c := Occlusion_Constants {
 		view_projection = f.view_projection,
 		hzb_size        = o.hzb_size,
@@ -243,7 +250,7 @@ add_occlusion_passes :: proc(f: ^Frame) {
 	}
 	g := f.graph
 	of := &sf.occlusion
-	o := &f.renderer.scene.occlusion
+	o := &f.state.occlusion
 	for level in 0 ..< o.hzb_levels {
 		p := add_compute_pass(g, "depth pyramid", run_hzb_level, new_clone(Hzb_Step{f, level}, f.renderer.platform.frame_allocator))
 		read(g, p, level == 0 ? f.depth : of.hzb[level - 1])
@@ -293,7 +300,7 @@ run_hzb_level :: proc(ctx: ^Pass_Context) {
 	step := (^Hzb_Step)(ctx.data)
 	f, level := step.frame, step.level
 	g := ctx.graph
-	o := &f.renderer.scene.occlusion
+	o := &f.state.occlusion
 	push := Hzb_Push {
 		output = gpu.write_index(o.hzb[level]),
 		size   = level_size(o.hzb_size, level),
@@ -303,7 +310,7 @@ run_hzb_level :: proc(ctx: ^Pass_Context) {
 	} else {
 		push.source, push.source_size = gpu.read_index(o.hzb[level - 1]), level_size(o.hzb_size, level - 1)
 	}
-	gpu.cmd_set_pipeline(ctx.cb, o.pipeline.pipeline)
+	gpu.cmd_set_pipeline(ctx.cb, f.renderer.scene.occlusion.pipeline.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_dispatch(ctx.cb, groups(push.size, 8))
 }

@@ -575,14 +575,6 @@ Gpu_Scene :: struct {
 	// Slots below this have been used.
 	high:                     u32,
 	frame:                    u64,
-	// Last frame's camera and projections, for the velocities.
-	previous_position:        ecs.World_Position,
-	previous_rotation:        quaternion128,
-	previous_view_projection: matrix[4, 4]f32,
-	previous_view_model:      matrix[4, 4]f32,
-	// Last frame's time, which a displacement's previous pose takes.
-	previous_time:            f32,
-	has_previous:             bool,
 	instances:                gpu.Buffer,
 	// This frame's indirect draws, the mesh shader path's in a buffer of their own, and draw records, and each view's
 	// bins' counts, which grow with the frame's draws.
@@ -770,33 +762,45 @@ snap_origin :: proc(p: ecs.World_Position) -> ecs.World_Position {
 // build_scene writes the GPU scene's records for the frame: every instance, a draw item for each visible submesh with
 // its material's block, the mesh records and the material table. add_scene_passes then culls the items. An entity that
 // has a pose in skins and a skinned mesh draws posed (see skinning.odin).
+//
+// An extra view (see Frame.extra) writes none of the scene's records and keeps none of its state: it takes the slots, the
+// records and the origin that the frame's own view's call left in this frame, and makes the items and the bins of its own.
+// A skinned entity draws as the frame's own view posed it. The view model is left out, as its records are relative to the
+// frame's own camera, and so are the ribbons and the mesh particles.
 @(private)
 build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose) {
 	r := f.renderer
 	s := &r.scene
-	s.frame += 1
+	extra := f.extra
+	if !extra {
+		s.frame += 1
+	}
 	sf := new(Scene_Frame, r.platform.frame_allocator)
 	f.scene_frame = sf
 
-	// Every slot is written if the persistent buffer may not hold what records does, or if the poses mean something else.
-	full := s.world != w || s.copied_frame != s.frame - 1
-	s.world = w
-	// The origin moves when the camera is far from it, and then every pose is written relative to the new one.
-	if !s.origin_set || max_abs(ecs.position_sub(f.view.position, s.origin)) > REBASE_CELLS * ORIGIN_CELL {
-		s.origin, s.origin_set = snap_origin(f.view.position), true
-		full = true
-	}
-	since := full ? 0 : s.versions[0]
-	s.versions[0], s.versions[1] = s.versions[1], ecs.take_version(w)
-	if w.clock.alpha != s.alpha {
-		s.alpha, s.alpha_frame = w.clock.alpha, s.frame
-	}
-	// A Transform written since the last tick's snapshot differs from its Previous_Transform, so the pose between them
-	// moves with alpha. The frame after alpha stops is that one more write too.
-	poses := Pose_Change {
-		since         = since,
-		snapshot      = w.snapshot_version,
-		interpolating = s.frame - s.alpha_frame <= 1,
+	full: bool
+	poses: Pose_Change
+	if !extra {
+		// Every slot is written if the persistent buffer may not hold what records does, or if the poses mean something else.
+		full = s.world != w || s.copied_frame != s.frame - 1
+		s.world = w
+		// The origin moves when the camera is far from it, and then every pose is written relative to the new one.
+		if !s.origin_set || max_abs(ecs.position_sub(f.view.position, s.origin)) > REBASE_CELLS * ORIGIN_CELL {
+			s.origin, s.origin_set = snap_origin(f.view.position), true
+			full = true
+		}
+		since := full ? 0 : s.versions[0]
+		s.versions[0], s.versions[1] = s.versions[1], ecs.take_version(w)
+		if w.clock.alpha != s.alpha {
+			s.alpha, s.alpha_frame = w.clock.alpha, s.frame
+		}
+		// A Transform written since the last tick's snapshot differs from its Previous_Transform, so the pose between them
+		// moves with alpha. The frame after alpha stops is that one more write too.
+		poses = {
+			since         = since,
+			snapshot      = w.snapshot_version,
+			interpolating = s.frame - s.alpha_frame <= 1,
+		}
 	}
 	sync_compute_pipeline(&s.cull_pipeline, r.platform, r.residency.assets, {label = "cull draws"}, r.reloaded)
 	sync_compute_pipeline(&s.select_pipeline, r.platform, r.residency.assets, {label = "select patches"}, r.reloaded)
@@ -815,7 +819,7 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	items := make([dynamic]Cull_Item, r.platform.frame_allocator)
 	accel_instances := make([dynamic]gpu.Accel_Instance, r.platform.frame_allocator)
 	// An entity with a pose draws at rest until the skinning pipeline has compiled.
-	skin := skin_build(pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil, r.platform.frame_allocator)
+	skin := skin_build(extra || pipeline_ready(r.platform, &s.skins.pipeline) ? skins : nil, r.platform.frame_allocator)
 	// Once a feature has traced, the meshes have acceleration structures, and hit shading needs the hit table.
 	tracing := r.residency.accels
 	hits: Hit_Table
@@ -833,28 +837,31 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		view_model := len(ecs.column(view, EXTRACT_TERMS + 1, View_Model)) > 0
 		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
-			slot, slot_ok := scene_slot(s, e)
+			slot, slot_ok := frame_slot(s, e, extra)
 			if !slot_ok {
 				continue
 			}
 			if view_model {
+				if extra {
+					continue
+				}
 				pose := current[i]
 				if previous != nil {
 					pose = ecs.interpolate(ecs.Transform(previous[i]), pose, w.clock.alpha)
 				}
 				last := s.seen[slot] == s.frame - 1 ? s.previous[slot] : pose
 				// Relative to the camera, and last frame's relative to last frame's camera, so it changes without its chunk.
-				last_camera := s.has_previous ? s.previous_position : f.view.position
+				last_camera := f.state.previous.valid ? f.state.previous.position : f.view.position
 				scene_write_record(s, slot, {rows = pose_rows(pose, f.view.position), previous_rows = pose_rows(last, last_camera), id = entity_id(e)})
 				s.previous[slot], s.seen[slot] = pose, s.frame
-			} else {
+			} else if !extra {
 				scene_write_instance(s, w, e, slot, moved, i, current, previous)
 			}
 			if is_hidden(hidden, e) {
 				continue
 			}
 			first_item := len(items)
-			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, &skin, renderers[i], e, slot, view_model)
+			mesh := add_items(r, &table, &meshes, &mesh_indices, &items, &skin, renderers[i], e, slot, view_model, extra)
 			// A skinned entity's rays see its own structure, over its posed positions, which the ray scene refits.
 			skinned := mesh != nil && first_item < len(items) && items[first_item].flags & ITEM_SKINNED != 0
 			blas := mesh != nil ? mesh.accel : {}
@@ -870,7 +877,8 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 				if mask != 0 {
 					reference := r.platform.gpu_accel_reference(blas)
 					append(&accel_instances, gpu.accel_instance(s.records[slot].rows, reference, id = slot, mask = mask, flags = {.Force_Opaque}))
-					if skinned {
+					// The frame's own view refits the skinned structures, over the positions that it posed.
+					if skinned && !extra {
 						append(&skin.refits, Skin_Refit{slot = slot, indices = mesh.indices})
 					}
 				}
@@ -890,15 +898,17 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		renderers := ecs.column(view, EXTRACT_TERMS, Instanced_Mesh_Renderer)
 		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
-			slot, slot_ok := scene_slot(s, e)
+			slot, slot_ok := frame_slot(s, e, extra)
 			if !slot_ok {
 				continue
 			}
-			scene_write_instance(s, w, e, slot, moved, i, current, previous)
+			if !extra {
+				scene_write_instance(s, w, e, slot, moved, i, current, previous)
+			}
 			if is_hidden(hidden, e) {
 				continue
 			}
-			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot)
+			set_instances += add_instanced_items(r, &table, &meshes, &mesh_indices, &items, &sets, &jobs, renderers[i], slot, extra)
 		}
 	}
 	// The patch surfaces: an instance record as a mesh's, and one item each, whose draws the GPU adds (see
@@ -914,11 +924,13 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 		renderers := ecs.column(view, EXTRACT_TERMS, Surface_Renderer)
 		moved := chunk_poses_changed(view, poses, previous != nil)
 		for e, i in entities {
-			slot, slot_ok := scene_slot(s, e)
+			slot, slot_ok := frame_slot(s, e, extra)
 			if !slot_ok {
 				continue
 			}
-			scene_write_instance(s, w, e, slot, moved, i, current, previous)
+			if !extra {
+				scene_write_instance(s, w, e, slot, moved, i, current, previous)
+			}
 			if is_hidden(hidden, e) || len(surfaces) >= MAX_SURFACES {
 				continue
 			}
@@ -929,16 +941,18 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	ribbons := add_ribbon_items(f, w, &table, &items, hidden)
 	// The mesh particles: an item for each submesh of each mesh emitter, whose draws the GPU writes.
 	mesh_particles := add_mesh_particle_items(f, w, &table, &meshes, &mesh_indices, &items, hidden)
-	sweep_skins(&s.skins, r.platform, s.frame)
-	// A slot whose entity has no Mesh_Renderer, Instanced_Mesh_Renderer, Surface_Renderer or particle system any more is
-	// free again, and so are its cells.
-	for slot in 0 ..< s.high {
-		if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
-			delete_key(&s.slots, s.slot_entities[slot])
-			s.slot_entities[slot] = 0
-			scene_write_record(s, slot, {})
-			free_cells(s, slot)
-			append(&s.free, slot)
+	if !extra {
+		sweep_skins(&s.skins, r.platform, s.frame)
+		// A slot whose entity has no Mesh_Renderer, Instanced_Mesh_Renderer, Surface_Renderer or particle system any more is
+		// free again, and so are its cells.
+		for slot in 0 ..< s.high {
+			if s.seen[slot] != s.frame && s.slot_entities[slot] != 0 {
+				delete_key(&s.slots, s.slot_entities[slot])
+				s.slot_entities[slot] = 0
+				scene_write_record(s, slot, {})
+				free_cells(s, slot)
+				append(&s.free, slot)
+			}
 		}
 	}
 
@@ -978,13 +992,18 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	sf.meshlet_select.items = meshlet_select_items(r, items[:], f.no_meshlet_hierarchy, r.platform.frame_allocator)
 
 	platform := r.platform
-	sf.instance_runs = instance_runs(&s.dirty, s.high, full, r.platform.frame_allocator)
-	s.dirty = {}
-	s.uploaded_slots = 0
-	for run in sf.instance_runs {
-		s.uploaded_slots += int(run.count)
+	// The frame's own view uploads the records that changed. An extra view uploads none, and leaves them dirty for that.
+	uploaded := 0
+	if !extra {
+		sf.instance_runs = instance_runs(&s.dirty, s.high, full, r.platform.frame_allocator)
+		s.dirty = {}
+		s.uploaded_slots = 0
+		for run in sf.instance_runs {
+			s.uploaded_slots += int(run.count)
+		}
+		uploaded = s.uploaded_slots
 	}
-	packed := make([]Instance_Record, s.uploaded_slots, r.platform.frame_allocator)
+	packed := make([]Instance_Record, uploaded, r.platform.frame_allocator)
 	packed_count := 0
 	for run in sf.instance_runs {
 		packed_count += copy(packed[packed_count:], s.records[run.first:][:run.count])
@@ -1008,6 +1027,10 @@ build_scene :: proc(f: ^Frame, w: ^ecs.World, hidden: []u32, skins: []Skin_Pose)
 	set_upload, sets_ok := upload_bytes(platform, slice.to_bytes(sets[:]))
 	job_upload, jobs_ok := upload_bytes(platform, slice.to_bytes(jobs[:]))
 	skin_ok := skin_upload(f, &skin)
+	// The entities that an extra view draws as the frame's own view posed them, which it only reads.
+	if extra {
+		sf.skin.slots = skin.slots[:]
+	}
 	if !(ok && items_ok && meshes_ok && table_ok && bins_ok && accel_ok && hits_ok && surfaces_ok && sets_ok && jobs_ok && skin_ok) {
 		log.error("render: the upload ring is full, so the frame draws no meshes")
 		sf.items = nil
@@ -1177,14 +1200,19 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	shadows := f.shadows
 	platform := r.platform
 	view_model := view_projection(view_model_view(f.view), f32(f.size.x) / f32(max(f.size.y, 1)))
-	f.previous_view_projection = s.has_previous ? s.previous_view_projection : f.view_projection
-	f.camera_motion = s.has_previous ? ecs.position_sub(f.view.position, s.previous_position) : {}
+	// The view's last frame's camera, for the velocities. A view that was not drawn last frame has none.
+	previous := &f.state.previous
+	has_previous := previous.valid
+	f.previous_view_projection = has_previous ? previous.view_projection : f.view_projection
+	f.camera_motion = has_previous ? ecs.position_sub(f.view.position, previous.position) : {}
 	now := frame_time(r)
-	defer {
-		s.previous_position, s.previous_view_projection, s.has_previous = f.view.position, f.view_projection, true
-		s.previous_rotation = f.view.rotation
-		s.previous_view_model = view_model
-		s.previous_time = now
+	defer previous^ = {
+		position        = f.view.position,
+		rotation        = f.view.rotation,
+		view_projection = f.view_projection,
+		view_model      = view_model,
+		time            = now,
+		valid           = true,
 	}
 	// The fog's injection and the voxel cones' read the camera's constants, so they are written without draws too.
 	has_items := len(sf.items) > 0
@@ -1227,11 +1255,11 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	previous_projection := f.view_projection
 	previous_view_model := view_model
 	previous_rotation := f.view.rotation
-	if s.has_previous {
-		previous_offset = ecs.position_sub(s.previous_position, s.origin)
-		previous_projection = s.previous_view_projection
-		previous_view_model = s.previous_view_model
-		previous_rotation = s.previous_rotation
+	if has_previous {
+		previous_offset = ecs.position_sub(previous.position, s.origin)
+		previous_projection = previous.view_projection
+		previous_view_model = previous.view_model
+		previous_rotation = previous.rotation
 	}
 	right, up, _ := view_axes(f.view)
 	previous_right, previous_up, _ := view_axes({rotation = previous_rotation})
@@ -1254,7 +1282,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		materials                = gpu.read_index(sf.table_upload.buffer),
 		sampler_index            = gpu.sampler_index(r.materials.sampler),
 		time                     = now,
-		previous_time            = s.has_previous ? s.previous_time : now,
+		previous_time            = has_previous ? previous.time : now,
 		meshes_offset            = sf.mesh_upload.offset,
 		materials_offset         = sf.table_upload.offset,
 		surfaces                 = gpu.read_index(sf.surface_upload.buffer),
@@ -1275,7 +1303,7 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		shadow_views_offset      = shadows.views_upload.offset,
 		clustered                = u32(lf.clustered),
 		screen_size              = {f32(f.size.x), f32(f.size.y)},
-		exposure                 = gpu.read_index(r.post.exposure),
+		exposure                 = gpu.read_index(f.state.post.exposure),
 		ltc_matrix               = gpu.read_index(r.lights.ltc_matrix),
 		ltc_amplitude            = gpu.read_index(r.lights.ltc_amplitude),
 		ltc_sampler              = gpu.sampler_index(r.lights.ltc_sampler),
@@ -1412,9 +1440,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 		lod_near           = constants.lod_near,
 		selections         = gpu.read_index(s.meshlet_select.selections),
 	}
-	if ensure_cull_stats(r) {
-		cull.stats = gpu.write_index(s.occlusion.stats)
-		sf.stats = import_buffer(g, s.occlusion.stats)
+	if ensure_cull_stats(r, f.state) {
+		cull.stats = gpu.write_index(f.state.occlusion.stats)
+		sf.stats = import_buffer(g, f.state.occlusion.stats)
 	}
 	if sf.occluding {
 		if !occlusion_constants(f) {
@@ -1654,6 +1682,16 @@ scene_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity) -> (slot: u32, ok: bool) {
 	return slot, true
 }
 
+// frame_slot gives an entity's slot: scene_slot's for the frame's own view, which gives a new entity a free one, and the
+// slot that it holds for an extra view, which takes none, so an entity without a slot is not drawn there.
+@(private = "file")
+frame_slot :: proc(s: ^Gpu_Scene, e: ecs.Entity, extra: bool) -> (slot: u32, ok: bool) {
+	if extra {
+		return s.slots[e]
+	}
+	return scene_slot(s, e)
+}
+
 // scene_cells gives a slot's range of the instance sets' cells, which it keeps while its set's count of cells does, so
 // their visibility bits are last frame's, or a new one.
 @(private)
@@ -1731,13 +1769,18 @@ add_instanced_items :: proc(
 	jobs: ^[dynamic]u32,
 	renderer: Instanced_Mesh_Renderer,
 	slot: u32,
+	extra: bool,
 ) -> int {
 	mesh, mesh_ready := resident_mesh(&r.residency, renderer.mesh)
 	set, set_ready := resident_instance_set(&r.residency, renderer.instances)
 	if !mesh_ready || !set_ready {
 		return 0
 	}
-	cells, cells_ok := scene_cells(&r.scene, slot, set.cell_count)
+	// An extra view takes the cells that the frame's own view gave the slot, and none if they are not the set's.
+	cells, cells_ok := r.scene.slot_cells[slot], r.scene.slot_cells[slot].count == set.cell_count
+	if !extra {
+		cells, cells_ok = scene_cells(&r.scene, slot, set.cell_count)
+	}
 	if !cells_ok {
 		return 0
 	}
@@ -1836,9 +1879,11 @@ add_instanced_items :: proc(
 	for _ in 0 ..< set.cell_count {
 		append(jobs, index)
 	}
-	record := r.scene.records[slot]
-	record.instance_set = gpu.read_index(set.instances)
-	scene_write_record(&r.scene, slot, record)
+	if !extra {
+		record := r.scene.records[slot]
+		record.instance_set = gpu.read_index(set.instances)
+		scene_write_record(&r.scene, slot, record)
+	}
 	return int(set.count)
 }
 
@@ -1860,6 +1905,7 @@ add_items :: proc(
 	entity: ecs.Entity,
 	slot: u32,
 	view_model: bool,
+	extra: bool,
 ) -> ^Resident_Mesh {
 	mesh, ready := resident_mesh(&r.residency, renderer.mesh)
 	if !ready {
@@ -1868,7 +1914,15 @@ add_items :: proc(
 	mesh_index: u32
 	pose := skins.poses[entity] if mesh.skin != {} else nil
 	skinned := false
-	if pose != nil {
+	if pose != nil && extra {
+		// The buffers that the frame's own view posed this frame. An entity that it did not pose draws at rest.
+		if instance, posed := skin_posed(&r.scene.skins, r.scene.frame, slot, entity, mesh); posed {
+			skinned = true
+			mesh_index = u32(len(meshes))
+			append(meshes, skinned_mesh_record(mesh, instance))
+			skin_reuse(skins, slot)
+		}
+	} else if pose != nil {
 		instance, reset, instance_ok := skin_instance(
 			&r.scene.skins,
 			r.platform,
@@ -2178,7 +2232,7 @@ add_instance_phases :: proc(f: ^Frame, views: Instance_Views, table: Buffer = 0)
 	}
 	if sf.occluding && views != .Virtual {
 		if views == .Late {
-			for t in sf.occlusion.hzb[:f.renderer.scene.occlusion.hzb_levels] {
+			for t in sf.occlusion.hzb[:f.state.occlusion.hzb_levels] {
 				read(g, p, t)
 			}
 		}
@@ -2253,7 +2307,10 @@ update_scene :: proc(ctx: ^Pass_Context) {
 		gpu.cmd_copy_buffer(ctx.cb, sf.instance_upload.buffer, source, gpu_buffer(g, sf.instances), run.first * size_of(Instance_Record), size)
 		source += size
 	}
-	f.renderer.scene.copied_frame = f.renderer.scene.frame
+	// An extra view uploads no records, so it does not say that the copy ran.
+	if !f.extra {
+		f.renderer.scene.copied_frame = f.renderer.scene.frame
+	}
 	gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.counts), 0, u32(len(sf.bin_pipelines) * sf.draw_views * 4))
 	if sf.counter_words > 0 {
 		gpu.cmd_copy_buffer(ctx.cb, sf.zero_upload.buffer, sf.zero_upload.offset, gpu_buffer(g, sf.instance_counters), 0, u32(sf.counter_words * 4))

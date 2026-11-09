@@ -645,7 +645,7 @@ run_probe_frame :: proc(
 		near         = 0.1,
 	}
 	f^ = {
-		renderer        = r,
+		renderer        = r, state = &r.view,
 		graph           = &g,
 		view            = view,
 		size            = {64, 32},

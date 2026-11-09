@@ -61,17 +61,36 @@ Gi_Settings :: struct {
 	level:     Quality_Level,
 }
 
-// Gi_Passes is the global illumination's state between frames, in the Renderer.
+// Gi_Passes is the global illumination's pipelines and the scratch that its passes share, in the Renderer. What a
+// technique keeps for a camera from frame to frame is in Gi_State.
 Gi_Passes :: struct {
 	trace:  Shader_Pipeline,
 	merge:  Shader_Pipeline,
 	gather: Shader_Pipeline,
 	lit:    Shader_Pipeline,
-	// Counts the frames, for the noise.
-	frame:  u32,
 	probes: Gi_Probes,
 	split:  Gi_Split,
 	voxel:  Gi_Voxel,
+}
+
+// Gi_State is one view's global illumination between frames, in View_State: the screen cascades' frame count, and the
+// storage and the cursors of the world probes, the split cascades and the voxel cones, each made for the view's own
+// level.
+Gi_State :: struct {
+	// Counts the frames, for the noise.
+	frame:  u32,
+	probes: Gi_Probe_State,
+	split:  Gi_Split_State,
+	voxel:  Gi_Voxel_State,
+}
+
+// gi_state_destroy frees a view's global illumination.
+@(private)
+gi_state_destroy :: proc(g: ^Gi_State, platform: ^core.Platform_API) {
+	destroy_probe_storage(&g.probes, platform)
+	gi_split_state_destroy(&g.split, platform)
+	destroy_voxel_storage(&g.voxel, platform)
+	g^ = {}
 }
 
 // Gi_Constants matches Gi_Constants in gi_common.hlsli.
@@ -222,6 +241,7 @@ gi_fit :: proc(size: [2]u32, params: Gi_Params) -> Gi_Params {
 begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	r := f.renderer
 	gi := &r.gi
+	state := &f.state.gi
 	platform := r.platform
 	for p in ([]^Shader_Pipeline{&gi.trace, &gi.merge, &gi.gather, &gi.lit}) {
 		if !pipeline_ready(platform, p) {
@@ -242,7 +262,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 	if gf.lit.current == 0 || gf.diffuse.current == 0 || gf.specular.current == 0 {
 		return
 	}
-	gi.frame += 1
+	state.frame += 1
 	gf.settings = settings
 	if settings.technique == .Split_Cascades && gi_probes_ready(r) {
 		request_ray_scene(f)
@@ -258,7 +278,7 @@ begin_gi :: proc(f: ^Frame, settings: Gi_Settings, ambient: Ambient) {
 		ambient        = ambient_constants(ambient),
 		lit_valid      = u32(gf.lit.valid),
 		valid          = u32(gf.diffuse.valid && gf.specular.valid),
-		frame          = gi.frame,
+		frame          = state.frame,
 		cascade_count  = gf.params.cascades,
 		size           = f.size,
 		lit_size       = gf.lit_size,

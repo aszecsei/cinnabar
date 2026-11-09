@@ -188,14 +188,22 @@ Split_Window :: struct {
 	valid:  bool,
 }
 
-// Gi_Split is the split cascades' state between frames, in Gi_Passes: their pipelines, their tables, bins and atlas,
-// made for a level's parameters, the rays' buffers, and each level of detail's window.
+// Gi_Split is the split cascades' pipelines and the rays' buffers, which every view shares, in Gi_Passes.
 Gi_Split :: struct {
 	table:        Shader_Pipeline,
 	trace:        Shader_Pipeline,
 	deposit:      Shader_Pipeline,
 	merge:        Shader_Pipeline,
 	gather:       Shader_Pipeline,
+	hits:         gpu.Buffer,
+	surfaces:     gpu.Buffer,
+	rays:         gpu.Buffer,
+	ray_capacity: int,
+}
+
+// Gi_Split_State is one view's split cascades between frames, in Gi_State: their tables, bins and atlas, made for a
+// level's parameters, and each level of detail's window.
+Gi_Split_State :: struct {
 	params:       Gi_Split_Params,
 	layout:       Split_Layout,
 	slots:        gpu.Buffer,
@@ -208,10 +216,6 @@ Gi_Split :: struct {
 	history:      gpu.Buffer,
 	merged:       gpu.Buffer,
 	atlas:        gpu.Texture,
-	hits:         gpu.Buffer,
-	surfaces:     gpu.Buffer,
-	rays:         gpu.Buffer,
-	ray_capacity: int,
 	// Where the tables were last keyed, as of the last frame that executed.
 	windows:      [MAX_SPLIT_LEVELS]Split_Window,
 	// The frames that each cascade's probes live without a ray (see split_lifetime).
@@ -262,24 +266,30 @@ gi_split_destroy :: proc(s: ^Gi_Split, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&s.table, &s.trace, &s.deposit, &s.merge, &s.gather}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	destroy_split_storage(s, platform)
 	for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays}) {
 		platform.gpu_destroy_buffer(b)
 	}
 	s.hits, s.surfaces, s.rays, s.ray_capacity = {}, {}, {}, 0
-	destroy_readback_ring(&s.stats_ring, platform)
 }
 
-// gi_split_stats is the split cascades' tables, a frame or two ago (see Gi_Split_Stats).
+// gi_split_state_destroy frees a view's split cascades.
+@(private)
+gi_split_state_destroy :: proc(s: ^Gi_Split_State, platform: ^core.Platform_API) {
+	destroy_split_storage(s, platform)
+	destroy_readback_ring(&s.stats_ring, platform)
+	s^ = {}
+}
+
+// gi_split_stats is the split cascades' tables of the frame's own view, a frame or two ago (see Gi_Split_Stats).
 gi_split_stats :: proc(r: ^Renderer) -> Gi_Split_Stats {
-	return r.gi.split.last_stats
+	return r.view.gi.split.last_stats
 }
 
 // read_gi_split_stats keeps the newest counters' copy that has come back, with the cascades' slots. Without the split
 // cascades last frame, or after a frame that did not execute, the stats are empty, whatever older copies came back.
 @(private)
-read_gi_split_stats :: proc(r: ^Renderer) {
-	s := &r.gi.split
+read_gi_split_stats :: proc(r: ^Renderer, v: ^View_State) {
+	s := &v.gi.split
 	data, take := take_readback(&s.stats_ring, r.platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE)
 	switch take {
 	case .Fresh:
@@ -301,12 +311,12 @@ read_gi_split_stats :: proc(r: ^Renderer) {
 @(private = "file")
 commit_gi_split :: proc(data: rawptr) {
 	sf := (^Gi_Split_Frame)(data)
-	s := &sf.frame.renderer.gi.split
+	s := &sf.frame.state.gi.split
 	s.fresh, s.windows = false, sf.windows
 }
 
 @(private = "file")
-destroy_split_storage :: proc(s: ^Gi_Split, platform: ^core.Platform_API) {
+destroy_split_storage :: proc(s: ^Gi_Split_State, platform: ^core.Platform_API) {
 	for b in ([]gpu.Buffer{s.slots, s.deposits, s.index, s.lists, s.counters, s.arguments, s.accum, s.history, s.merged}) {
 		platform.gpu_destroy_buffer(b)
 	}
@@ -521,8 +531,7 @@ split_bytes :: proc(params: Gi_Split_Params) -> int {
 // ensure_split_storage makes the tables, bins and atlas for a level's parameters, and the rays' buffers for a count
 // of rays. New storage frees every probe.
 @(private = "file")
-ensure_split_storage :: proc(r: ^Renderer, params: Gi_Split_Params, rays: int) {
-	s := &r.gi.split
+ensure_split_storage :: proc(r: ^Renderer, s: ^Gi_Split_State, params: Gi_Split_Params, rays: int) {
 	platform := r.platform
 	if s.slots == {} || s.params != params {
 		destroy_split_storage(s, platform)
@@ -550,15 +559,16 @@ ensure_split_storage :: proc(r: ^Renderer, params: Gi_Split_Params, rays: int) {
 		}
 		s.fresh = true
 	}
-	if rays > s.ray_capacity {
-		for b in ([]gpu.Buffer{s.hits, s.surfaces, s.rays}) {
+	shared := &r.gi.split
+	if rays > shared.ray_capacity {
+		for b in ([]gpu.Buffer{shared.hits, shared.surfaces, shared.rays}) {
 			platform.gpu_destroy_buffer(b)
 		}
-		s.ray_capacity = max(rays, s.ray_capacity * 2)
-		capacity := u32(s.ray_capacity)
-		s.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi split hits"}, nil)
-		s.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "gi split surfaces"}, nil)
-		s.rays = platform.gpu_create_buffer({size = capacity * 16, usage = {.Storage}, label = "gi split rays"}, nil)
+		shared.ray_capacity = max(rays, shared.ray_capacity * 2)
+		capacity := u32(shared.ray_capacity)
+		shared.hits = platform.gpu_create_buffer({size = capacity * size_of(Hit_Record), usage = {.Storage}, label = "gi split hits"}, nil)
+		shared.surfaces = platform.gpu_create_buffer({size = capacity * size_of(Hit_Surface), usage = {.Storage}, label = "gi split surfaces"}, nil)
+		shared.rays = platform.gpu_create_buffer({size = capacity * 16, usage = {.Storage}, label = "gi split rays"}, nil)
 	}
 }
 
@@ -587,8 +597,9 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	if !reserved {
 		return false
 	}
-	ensure_split_storage(r, params, int(ray_count))
-	s := &r.gi.split
+	s := &f.state.gi.split
+	ensure_split_storage(r, s, params, int(ray_count))
+	shared := &r.gi.split
 	g := f.graph
 	sf := new(Gi_Split_Frame, platform.frame_allocator)
 	sf.frame, sf.upload, sf.fresh, sf.windows = f, upload, s.fresh, s.windows
@@ -602,9 +613,9 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 	sf.history = import_buffer(g, s.history)
 	sf.merged = import_buffer(g, s.merged)
 	sf.atlas = import_texture(g, s.atlas, .Storage)
-	sf.hits = import_buffer(g, s.hits)
-	sf.surfaces = import_buffer(g, s.surfaces)
-	sf.rays = import_buffer(g, s.rays)
+	sf.hits = import_buffer(g, shared.hits)
+	sf.surfaces = import_buffer(g, shared.surfaces)
+	sf.rays = import_buffer(g, shared.rays)
 	if f.debug_view == .Gi_Probes {
 		gf.probe_view = create_texture(g, {size = f.size, format = GI_FORMAT, label = "gi probe view"})
 	}
@@ -740,7 +751,7 @@ add_gi_split_passes :: proc(f: ^Frame) -> bool {
 @(private)
 note_split_fallback :: proc(f: ^Frame, ran: bool) {
 	r := f.renderer
-	s := &r.gi.split
+	s := &f.state.gi.split
 	if ran || f.gi.settings.technique != .Split_Cascades {
 		s.running = ran
 		return
@@ -765,7 +776,7 @@ note_split_fallback :: proc(f: ^Frame, ran: bool) {
 // it is back.
 @(private = "file")
 add_split_stats_copy :: proc(f: ^Frame, sf: ^Gi_Split_Frame) {
-	s := &f.renderer.gi.split
+	s := &f.state.gi.split
 	platform := f.renderer.platform
 	if !ensure_readback_ring(&s.stats_ring, platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "gi split stats readback") {
 		return

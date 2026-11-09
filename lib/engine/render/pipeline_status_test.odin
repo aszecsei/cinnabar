@@ -61,7 +61,7 @@ a_pipeline_that_failed_is_not_one_that_compiles :: proc(t: ^testing.T) {
 	r.platform = &platform
 	r.materials.pipeline_count = 1
 	f := Frame {
-		renderer    = r,
+		renderer    = r, state = &r.view,
 		scene_frame = &Scene_Frame{items = make([]Cull_Item, 1, context.temp_allocator), bin_pipelines = {0}},
 	}
 	r.materials.pipelines[0] = {}

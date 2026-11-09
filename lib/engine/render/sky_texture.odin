@@ -154,7 +154,9 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	cube := t.dimension == .Cube
 	around := cube ? t.size.x * 4 : t.size.x
 	key := Sky_Texture_Key{settings.texture, t.texture}
-	if s.pending {
+	// An extra view takes the integral as it is: it takes no result and asks for none, and the sun it leaves to the
+	// frame's own view.
+	if s.pending && !f.extra {
 		if data, back := platform.gpu_read_buffer(s.readback); back && len(data) >= SKY_AMBIENT_RESULT_SIZE {
 			values := mem.slice_data_cast([]f32, data[:SKY_AMBIENT_RESULT_SIZE])
 			if transmute(u32)values[20] == s.ticket {
@@ -172,7 +174,7 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	}
 	sf := new(Sky_Texture_Frame, platform.frame_allocator)
 	sf.texture, sf.cube = t.texture, cube
-	if (!s.valid || s.key != key) && !s.pending && pipeline_ready(platform, &s.ambient) && ensure_sky_texture_buffers(r) {
+	if !f.extra && (!s.valid || s.key != key) && !s.pending && pipeline_ready(platform, &s.ambient) && ensure_sky_texture_buffers(r) {
 		s.ticket += 1
 		s.pending, s.pending_key, s.pending_frame = true, key, r.scene.frame
 		mip := u32(0)
@@ -191,7 +193,9 @@ begin_sky_texture :: proc(f: ^Frame, settings: Sky_Settings) -> Ambient {
 	if s.valid && s.key == key {
 		turn := math.to_radians(settings.texture_rotation)
 		ambient = scale_ambient(turn_ambient(s.light, turn), settings.texture_intensity * settings.ambient_intensity)
-		s.world_sun, s.sun_frame = turn_direction(s.sun, turn), r.scene.frame
+		if !f.extra {
+			s.world_sun, s.sun_frame = turn_direction(s.sun, turn), r.scene.frame
+		}
 	}
 
 	if pipeline_ready(platform, &s.background) {

@@ -74,7 +74,7 @@ sprite_frames_match_their_sprites :: proc(t: ^testing.T) {
 			defer cache_destroy(&cache, &platform)
 			g := begin(&platform, &cache)
 			f := new(Frame, platform.frame_allocator)
-			f^ = {renderer = r, graph = &g, size = {64, 32}, debug_view = view}
+			f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, debug_view = view}
 			f.view.position = camera
 			f.lights = new(Light_Frame, platform.frame_allocator)
 			f.shadows = new(Shadow_Frame, platform.frame_allocator)

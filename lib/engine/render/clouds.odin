@@ -124,15 +124,20 @@ Volumetric_Clouds :: struct {
 	shape, detail, curl:                       gpu.Texture,
 	noise_state:                               Cloud_Noise_State,
 	noise_sampler:                             gpu.Sampler,
-	// The shadow map, made again when the level's size changes.
-	shadow_map:                                gpu.Texture,
-	shadow_size:                               u32,
 	// How far the wind has carried the weather, in meters, and when it was last advanced (platform.time_seconds), in
-	// f64 so hours of wind lose nothing; the constants take it reduced modulo the periods.
+	// f64 so hours of wind lose nothing; the constants take it reduced modulo the periods. The first view of a frame with
+	// clouds advances it, in the frame of wind_frame (Gpu_Scene.frame), and the others take it as it is.
 	wind_offset:                               [2]f64,
 	wind_time:                                 f64,
-	// Counts the frames with clouds, for the blue noise's slice.
-	frame:                                     u32,
+	wind_frame:                                u64,
+}
+
+// Cloud_State is one view's clouds between frames, in View_State: its shadow map, made again when the level's size
+// changes, and the count of frames with clouds, for the blue noise's slice.
+Cloud_State :: struct {
+	shadow_map:  gpu.Texture,
+	shadow_size: u32,
+	frame:       u32,
 }
 
 // Cloud_Noise_State is whether the noise textures hold noise: Pending until a frame that bakes them executes, whose
@@ -260,7 +265,7 @@ clouds_destroy :: proc(v: ^Volumetric_Clouds, platform: ^core.Platform_API) {
 	for p in ([]^Shader_Pipeline{&v.noise, &v.shadow, &v.march, &v.temporal, &v.composite}) {
 		destroy_shader_pipeline(p, platform)
 	}
-	for t in ([]^gpu.Texture{&v.shape, &v.detail, &v.curl, &v.shadow_map}) {
+	for t in ([]^gpu.Texture{&v.shape, &v.detail, &v.curl}) {
 		if t^ != {} {
 			platform.gpu_destroy_texture(t^)
 			t^ = {}
@@ -271,7 +276,13 @@ clouds_destroy :: proc(v: ^Volumetric_Clouds, platform: ^core.Platform_API) {
 		v.noise_sampler = {}
 	}
 	v.noise_state = .Pending
-	v.shadow_size = 0
+}
+
+// cloud_state_destroy frees a view's clouds.
+@(private)
+cloud_state_destroy :: proc(c: ^Cloud_State, platform: ^core.Platform_API) {
+	platform.gpu_destroy_texture(c.shadow_map)
+	c^ = {}
 }
 
 @(private)
@@ -308,8 +319,7 @@ ensure_cloud_noise :: proc(r: ^Renderer) -> bool {
 
 // ensure_cloud_shadow_map makes the shadow map for a level's size, and again when the size changes.
 @(private = "file")
-ensure_cloud_shadow_map :: proc(r: ^Renderer, size: u32) -> bool {
-	v := &r.clouds
+ensure_cloud_shadow_map :: proc(r: ^Renderer, v: ^Cloud_State, size: u32) -> bool {
 	platform := r.platform
 	if v.shadow_map != {} && v.shadow_size == size {
 		return true
@@ -509,16 +519,20 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	if history.current == 0 {
 		return
 	}
-	v.frame += 1
+	state := &f.state.clouds
+	state.frame += 1
 
-	// The wind carries the weather and the shapes between frames, by the platform's clock.
-	now := platform.time_seconds != nil ? platform.time_seconds() : 0
-	wind := wind_vector(s.wind_speed, s.wind_direction)
-	if v.wind_time != 0 {
-		elapsed := clamp(now - v.wind_time, 0, 0.1)
-		v.wind_offset += {f64(wind.x) * elapsed, f64(wind.y) * elapsed}
+	// The wind carries the weather and the shapes between frames, by the platform's clock, once a frame: the first view
+	// with clouds advances it by its own wind, and the others take where it is.
+	if v.wind_frame != r.scene.frame {
+		now := platform.time_seconds != nil ? platform.time_seconds() : 0
+		wind := wind_vector(s.wind_speed, s.wind_direction)
+		if v.wind_time != 0 {
+			elapsed := clamp(now - v.wind_time, 0, 0.1)
+			v.wind_offset += {f64(wind.x) * elapsed, f64(wind.y) * elapsed}
+		}
+		v.wind_time, v.wind_frame = now, r.scene.frame
 	}
-	v.wind_time = now
 	camera := ecs.position_to_meters(f.view.position)
 	origin := ecs.position_to_meters(s.weather_origin)
 	// The lookups add the offsets to a point relative to the camera, so a feature that the wind has carried along it
@@ -586,8 +600,8 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 	bottom_rel := s.bottom - camera_height
 	camera_offset := ecs.position_sub(f.view.position, r.scene.origin)
 	center := cloud_shadow_center(sun_direction, bottom_rel, camera_offset.xz, params.shadow_size)
-	if shadow_record >= 0 && ensure_cloud_shadow_map(r, params.shadow_size) {
-		cf.shadow = import_texture(g, v.shadow_map, .Storage)
+	if shadow_record >= 0 && ensure_cloud_shadow_map(r, state, params.shadow_size) {
+		cf.shadow = import_texture(g, state.shadow_map, .Storage)
 		cf.shadow_fade = clamp((sun_direction.y - 0.05) / 0.1, 0, 1)
 	}
 
@@ -628,7 +642,7 @@ begin_clouds :: proc(f: ^Frame, s: Cloud_Settings, sky: Sky_Settings, ambient: A
 		steps              = params.steps,
 		light_steps        = params.light_steps,
 		divisor            = params.divisor,
-		frame              = v.frame,
+		frame              = state.frame,
 		size               = size,
 		use_map            = u32(cf.weather != {}),
 		shape              = gpu.read_index(v.shape),
@@ -654,7 +668,7 @@ cloud_shadow_constants :: proc(c: ^Frame_Constants, f: ^Frame) {
 		return
 	}
 	r := f.renderer
-	c.cloud_shadow = gpu.read_index(r.clouds.shadow_map)
+	c.cloud_shadow = gpu.read_index(f.state.clouds.shadow_map)
 	c.cloud_shadow_sampler = gpu.sampler_index(r.post.sampler)
 	c.cloud_shadow_strength = cf.settings.shadow_strength
 	c.cloud_shadow_bottom = cf.constants.bottom - cf.constants.camera_height

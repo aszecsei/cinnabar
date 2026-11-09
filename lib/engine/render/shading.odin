@@ -24,8 +24,8 @@ Shading_Stats :: struct {
 SHADING_STATS_WORDS :: 2
 #assert(size_of(Shading_Stats) == SHADING_STATS_WORDS * 4)
 
-// Shading is the measurements' state between frames, in Renderer: the tally, its copies, and the last that came back.
-Shading :: struct {
+// Shading_State is one view's measurements' state between frames, in View_State: the tally, its copies, and the last that came back.
+Shading_State :: struct {
 	stats:      gpu.Buffer,
 	stats_ring: Readback_Ring,
 	last_stats: Shading_Stats,
@@ -44,11 +44,11 @@ Shading_Frame :: struct {
 // shading_stats is what the opaque surfaces' shading cost, a frame or two ago (see Shading_Stats). It is all 0 after a
 // frame without Frame_Desc.shading_stats.
 shading_stats :: proc(r: ^Renderer) -> Shading_Stats {
-	return r.shading.last_stats
+	return r.view.shading.last_stats
 }
 
 @(private)
-shading_destroy :: proc(s: ^Shading, platform: ^core.Platform_API) {
+shading_state_destroy :: proc(s: ^Shading_State, platform: ^core.Platform_API) {
 	platform.gpu_destroy_buffer(s.stats)
 	destroy_readback_ring(&s.stats_ring, platform)
 	s^ = {}
@@ -57,8 +57,8 @@ shading_destroy :: proc(s: ^Shading, platform: ^core.Platform_API) {
 // read_shading_stats keeps the newest tally's copy that has come back. After a frame without Frame_Desc.shading_stats,
 // or one that did not execute, the stats are empty.
 @(private)
-read_shading_stats :: proc(r: ^Renderer) {
-	s := &r.shading
+read_shading_stats :: proc(r: ^Renderer, v: ^View_State) {
+	s := &v.shading
 	data, take := take_readback(&s.stats_ring, r.platform, size_of(Shading_Stats))
 	switch take {
 	case .Fresh:
@@ -71,8 +71,8 @@ read_shading_stats :: proc(r: ^Renderer) {
 
 // ensure_shading_stats creates the tally and its copies the first time.
 @(private = "file")
-ensure_shading_stats :: proc(r: ^Renderer) -> bool {
-	s := &r.shading
+ensure_shading_stats :: proc(r: ^Renderer, v: ^View_State) -> bool {
+	s := &v.shading
 	if s.stats == {} {
 		s.stats = r.platform.gpu_create_buffer({size = SHADING_STATS_WORDS * 4, usage = {.Storage}, label = "shading stats"}, nil)
 	}
@@ -89,11 +89,11 @@ begin_shading :: proc(f: ^Frame, stats: bool) {
 	}
 	g := f.graph
 	sf := new(Shading_Frame, r.platform.frame_allocator)
-	if stats && ensure_shading_stats(r) {
+	if stats && ensure_shading_stats(r, f.state) {
 		zeros: [SHADING_STATS_WORDS * 4]byte
 		ok: bool
 		if sf.zeros, ok = upload_bytes(r.platform, zeros[:]); ok {
-			sf.stats = import_buffer(g, r.shading.stats)
+			sf.stats = import_buffer(g, f.state.shading.stats)
 			p := add_compute_pass(g, "shading stats clear", proc(ctx: ^Pass_Context) {
 				f := (^Frame)(ctx.data)
 				zeros := f.shading.zeros
@@ -143,6 +143,6 @@ add_shading_stats_copy :: proc(f: ^Frame) {
 		return
 	}
 	r := f.renderer
-	add_readback_copy(f.graph, r.platform, &r.shading.stats_ring, f.shading.stats, SHADING_STATS_WORDS * 4, "shading stats")
+	add_readback_copy(f.graph, r.platform, &f.state.shading.stats_ring, f.shading.stats, SHADING_STATS_WORDS * 4, "shading stats")
 }
 

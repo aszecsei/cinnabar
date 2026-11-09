@@ -81,7 +81,7 @@ the_screen_reflections_run_on_the_compute_queue_and_skip_without_their_technique
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}}
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = NORMAL_FORMAT, label = "normals"})
 		f.velocity = create_texture(&g, {size = f.size, format = VELOCITY_FORMAT, label = "velocity"})

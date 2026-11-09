@@ -65,7 +65,7 @@ post_effects_run_in_order_where_their_volumes_reach :: proc(t: ^testing.T) {
 
 	calls: Calls
 	pf: Post_Frame
-	f := Frame{renderer = r, post = &pf, data = &calls}
+	f := Frame{renderer = r, state = &r.view, post = &pf, data = &calls}
 	run :: proc(f: ^Frame, w: ^ecs.World, point: Post_Point) {
 		f.post.effect_settings = resolve_settings(f.renderer, w, {}).effects
 		add_post_effects(f, point)

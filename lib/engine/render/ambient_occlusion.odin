@@ -90,8 +90,6 @@ Ao_Passes :: struct {
 	// Each technique's search. Every one is synced, so switching technique does not wait for a compile.
 	searches: [Ao_Technique]Shader_Pipeline,
 	denoise:  Shader_Pipeline,
-	// Counts the frames, for the noise.
-	frame:   u32,
 }
 
 // Ao_Depth_Constants matches Depth_Constants in gtao_depth.hlsl.
@@ -233,7 +231,7 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 	if noise == {} {
 		return
 	}
-	a.frame += 1
+	f.state.ao_frame += 1
 	// An upscaler averages the noise over time as temporal AA does.
 	temporal := f.post.temporal || f.post.upscaler != {}
 
@@ -272,7 +270,7 @@ add_ao_passes :: proc(f: ^Frame, settings: Ao_Settings) {
 		power       = settings.power > 0 ? settings.power : DEFAULT_AO_POWER,
 		noise       = gpu.read_index(noise),
 		// Without temporal AA nothing averages the noise over time, so it stays where it is.
-		noise_slice = temporal ? a.frame % BLUE_NOISE_SLICES : 0,
+		noise_slice = temporal ? f.state.ao_frame % BLUE_NOISE_SLICES : 0,
 		samples     = AO_PARAMS[settings.technique][settings.level].samples,
 		steps       = AO_PARAMS[settings.technique][settings.level].steps,
 	}

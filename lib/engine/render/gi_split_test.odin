@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:math"
 import "core:mem"
 import "core:mem/virtual"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 
@@ -331,7 +332,7 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		platform := r.platform
 		g := begin(platform, cache)
 		f := new(Frame, platform.frame_allocator)
-		f^ = {renderer = r, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
+		f^ = {renderer = r, state = &r.view, graph = &g, size = {64, 32}, view = {position = camera}, debug_view = view}
 		f.lights = new(Light_Frame, platform.frame_allocator)
 		f.depth = create_texture(&g, {size = f.size, format = DEPTH_FORMAT, label = "depth"})
 		f.normals = create_texture(&g, {size = f.size, format = .RG16_Float, label = "normals"})
@@ -393,22 +394,22 @@ the_split_cascades_run_on_the_compute_queue_and_pass_validation :: proc(t: ^test
 		testing.expect_value(t, passes["gi trace"], 0)
 		free_all(platform.frame_allocator)
 	}
-	testing.expect_value(t, split.stats_ring.next, 3 % READBACK_COPIES)
+	testing.expect_value(t, r.view.gi.split.stats_ring.next, 3 % READBACK_COPIES)
 	// New storage starts each cascade at the longest lifetime.
-	testing.expect_value(t, split.lifetimes[0], SPLIT_LIFETIME)
+	testing.expect_value(t, r.view.gi.split.lifetimes[0], SPLIT_LIFETIME)
 
 	// With the Gi_Probes debug view, the gather draws the probes too.
 	passes := run_frame(t, r, &cache, instances, exposure, settings, meters(16, 2, -3), .Gi_Probes)
 	testing.expect_value(t, passes["gi split gather"], 1)
 	free_all(platform.frame_allocator)
-	testing.expect_value(t, split.params, GI_SPLIT_PARAMS[.Low])
+	testing.expect_value(t, r.view.gi.split.params, GI_SPLIT_PARAMS[.Low])
 
 	// Another level makes its own storage, which is cleared.
 	settings.level = .High
 	passes = run_frame(t, r, &cache, instances, exposure, settings, meters(0, 0, 0))
 	testing.expect_value(t, passes["gi split gather"], 1)
 	testing.expect_value(t, passes["gi split clear"], 1)
-	testing.expect_value(t, split.params, GI_SPLIT_PARAMS[.High])
+	testing.expect_value(t, r.view.gi.split.params, GI_SPLIT_PARAMS[.High])
 	free_all(platform.frame_allocator)
 
 	// Without the split's pipelines, the frame takes the screen cascades.
@@ -446,14 +447,14 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	r := new(Renderer)
 	defer free(r)
 	r.platform = &platform
-	s := &r.gi.split
-	defer gi_split_destroy(s, &platform)
+	s := &r.view.gi.split
+	defer gi_split_state_destroy(s, &platform)
 	s.layout = split_layout(GI_SPLIT_PARAMS[.High])
 	testing.expect(t, ensure_readback_ring(&s.stats_ring, &platform, MAX_SPLIT_CASCADES * SPLIT_COUNTERS_SIZE, "test"))
 
 	// Each cascade's counters: free slots, slots taken, active slots and dropped keys, in a frame's copy, as its commit
 	// leaves the ring (see a_readback_ring_shows_what_the_frames_that_executed_copied).
-	tally :: proc(s: ^Gi_Split, active, dropped: u32) {
+	tally :: proc(s: ^Gi_Split_State, active, dropped: u32) {
 		ring := &s.stats_ring
 		data, _ := null.read_buffer(ring.copies[ring.next])
 		counters := mem.slice_data_cast([]u32, data)
@@ -464,7 +465,7 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	}
 	// The newest copy is kept, with each cascade's slots.
 	tally(s, 70, 3)
-	read_gi_split_stats(r)
+	read_gi_split_stats(r, &r.view)
 	stats := gi_split_stats(r)
 	testing.expect_value(t, stats.count, 4)
 	testing.expect_value(t, stats.cascades[0], Split_Cascade_Stats{active = 70, slots = 16384, dropped = 3})
@@ -473,7 +474,7 @@ the_split_stats_are_the_newest_copy_that_came_back :: proc(t: ^testing.T) {
 	// A frame without the split cascades empties them, even when an older copy comes back then.
 	tally(s, 90, 0)
 	s.stats_ring.copied = false
-	read_gi_split_stats(r)
+	read_gi_split_stats(r, &r.view)
 	testing.expect_value(t, gi_split_stats(r), Gi_Split_Stats{})
 }
 
@@ -520,13 +521,16 @@ a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
 		text:  string,
 	}
 	warnings: Warnings
+	defer delete(warnings.text)
 	runner := context.logger
 	context.logger = {
 		procedure = proc(data: rawptr, level: runtime.Logger_Level, text: string, _: runtime.Logger_Options, _ := #caller_location) {
 			w := (^Warnings)(data)
 			if level == .Warning {
 				w.count += 1
-				w.text = text
+				// The text is in the logger's temporary buffer, which the test's own formatting reuses.
+				delete(w.text)
+				w.text = strings.clone(text)
 			}
 		},
 		data = &warnings,
@@ -534,7 +538,7 @@ a_frame_that_loses_the_split_cascades_warns_once :: proc(t: ^testing.T) {
 	}
 	r := new(Renderer)
 	defer free(r)
-	f := Frame{renderer = r, gi = &Gi_Frame{settings = {technique = .Split_Cascades}}}
+	f := Frame{renderer = r, state = &r.view, gi = &Gi_Frame{settings = {technique = .Split_Cascades}}}
 	// Waiting for its first frame is not losing it.
 	note_split_fallback(&f, false)
 	count_while_waiting := warnings.count
