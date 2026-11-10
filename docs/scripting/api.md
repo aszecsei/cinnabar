@@ -2,7 +2,7 @@
 
 What scripts see: the value types, entities and component references, the engine's global libraries, and the mapping from Unity's names. Behaviours have [their own document](behaviours.md).
 
-**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Unity mapping](#unity-mapping)
+**In this document:** [Values](#values) · [The entity and component view](#the-entity-and-component-view) · [Engine libraries](#engine-libraries) · [Random](#random) · [Unity mapping](#unity-mapping)
 
 ## Values
 
@@ -62,6 +62,7 @@ Scripts change the world structure **immediately**, except for despawns. The scr
 | `GamepadButton` | `GamepadButton.A`, `GamepadButton.LeftBumper`, `GamepadButton.DpadUp` and the other values of `core.Gamepad_Button` |
 | `GamepadAxis` | `GamepadAxis.LeftX`, `GamepadAxis.RightY`, `GamepadAxis.LeftTrigger` and the other values of `core.Gamepad_Axis` |
 | `Debug` | `log`, `warn`, `error` |
+| `Random` | The world's generator: `value()`, `range(min, max)`, `integer(min, max)`, `seed(n)`, `get_seed()`, `inside_unit_sphere()`, `on_unit_sphere()`, `inside_unit_circle()`, `rotation()` (see [Random](#random)) |
 | `Render` | The render quality, for a settings menu, where the game defines it (see [Render](#render)) |
 | `Profile` | `begin(name)`, `finish()`, `zone(name, fn, ...)`: zones in the editor's profiler (see [Profile](#profile)) |
 | `Audio` | `play(sound, position?, gain?, bus?)` and `set_bus_gain(bus, gain)`. See [Audio: Scripts](../audio/design.md#scripts). |
@@ -116,6 +117,27 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 - **Names are interned**, so a name built from changing values, such as an entity's ID, fills the profiler's name table. Use fixed names.
 - Without the profiler (`-define:PROFILE=false`), the bindings do nothing, and `zone` only calls `fn`.
 
+## Random
+
+The world's random numbers (`lib/engine/script/random.odin`). Use them in place of `math.random` when a replay or a test must repeat. The generator is xoshiro256\*\*, so one seed gives one sequence on every platform.
+
+| Binding | What it gives |
+|---|---|
+| `Random.value()` | A number from 0 up to 1, without 1 |
+| `Random.range(min, max)` | A number from `min` up to `max`, without `max` |
+| `Random.integer(min, max)` | An integer from `min` to `max`, with both, as `math.random(min, max)` gives. Unity's `Range` for integers leaves out `max` |
+| `Random.seed(n)` | Makes `n` the world's seed and starts its sequence. `n` is an integer from -2^53 to 2^53 |
+| `Random.get_seed()` | The world's seed, for example to log it for a replay |
+| `Random.inside_unit_sphere()`, `Random.on_unit_sphere()` | A `vector` inside the sphere of radius 1, or on its surface |
+| `Random.inside_unit_circle()` | A `vector` inside the circle of radius 1 in the XY plane, with `z` 0 |
+| `Random.rotation()` | A uniform `Quaternion` |
+
+- **One generator for each world.** Its state is in the `Runtime` in `Game_State`, so a code reload keeps it. `math.random` is a different generator, and the world does not seed it.
+- **The seed comes from the clock** when `script.init` opens the VM, as in Unity, so each run is different. To repeat a run, a script calls `Random.seed(n)`, or the game calls `script.seed_random(&state.scripts, seed)` from Odin.
+- **Play in the editor starts the sequence again.** Each Play from Edit calls `script.restart_random`, so the same play draws the same numbers. Play after Pause continues the sequence (see [Editor: Modes](../editor/document-and-scenes.md#modes)).
+- **The same calls give the same numbers.** The sequence depends only on the seed and on the order of the draws. A draw in `update` runs once for each frame, so a different frame rate changes the sequence after it. Draw in `fixed_update` when a replay must repeat at any frame rate.
+- **Errors:** `integer` raises an error when a bound is not an integer or `max` is less than `min`. `seed` raises an error when `n` is not an integer in its range.
+
 ## Unity mapping
 
 | Unity | cinnabar |
@@ -134,7 +156,7 @@ Zones of a script's own code in the editor's profiler ([Profiling](../core/profi
 | `Time.deltaTime`, `Time.time` | `Time.delta`, `Time.time` |
 | `Input.GetKey(KeyCode.Space)`, `GetKeyDown` | `Input.is_down(Key.Space)`, `Input.was_pressed` |
 | `Debug.Log` | `Debug.log` |
-| `Random` | Luau's `math.random`, one generator per VM, not seeded by the world |
+| `Random.value`, `Random.Range`, `Random.InitState`, `insideUnitSphere`, `onUnitSphere`, `insideUnitCircle`, `rotation` | `Random.value()`, `Random.range(min, max)` for numbers and `Random.integer(min, max)` for integers, `Random.seed(n)`, `Random.inside_unit_sphere()`, `Random.on_unit_sphere()`, `Random.inside_unit_circle()`, `Random.rotation()` (see [Random](#random)) |
 | `StartCoroutine`, `yield return new WaitForSeconds(t)` | `self:start_coroutine(fn)`, `wait(t)` |
 | `yield return new WaitForFixedUpdate()` | `wait_fixed()` |
 | `SendMessage` | `entity:send(name, ...)` |

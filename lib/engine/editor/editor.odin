@@ -242,6 +242,7 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 				link.write_message(out, edit_problems(problems[:], false, frame))
 			}
 		case link.Set_Mode:
+			started := e.session.mode == .Edit && v.mode == .Play
 			e.session.mode = v.mode
 			if v.mode != .Paused {
 				e.session.steps = 0
@@ -249,6 +250,10 @@ poll :: proc(e: ^Editor, w: ^ecs.World, scripts: ^script.Runtime, connection: u6
 			// The edits that follow in this poll run no script code outside Play.
 			if scripts != nil {
 				script.set_quiet(scripts, v.mode != .Play)
+				// Each Play from Edit draws the same numbers (see docs/scripting/api.md#random).
+				if started {
+					script.restart_random(scripts)
+				}
 			}
 		case link.Run_Game_Command:
 			run_command(e, w, scripts, user, v.id, out, frame)

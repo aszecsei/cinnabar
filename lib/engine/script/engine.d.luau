@@ -124,6 +124,19 @@ declare Profile: {
 	zone: <A..., R...>(name: string, fn: (A...) -> R..., A...) -> R...,
 }
 
+-- The world's generator (see docs/scripting/api.md#random). One seed gives one sequence. integer includes both ends.
+declare Random: {
+	value: () -> number,
+	range: (min: number, max: number) -> number,
+	integer: (min: number, max: number) -> number,
+	seed: (seed: number) -> (),
+	get_seed: () -> number,
+	inside_unit_sphere: () -> vector,
+	on_unit_sphere: () -> vector,
+	inside_unit_circle: () -> vector,
+	rotation: () -> Quaternion,
+}
+
 declare Field: {
 	number: (default: number?) -> FieldSpec,
 	boolean: (default: boolean?) -> FieldSpec,

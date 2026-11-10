@@ -27,6 +27,7 @@ Scripting is split across the boundary. The host owns the VM and everything Luau
 | | | `entity.odin` | `Entity`'s methods and the `World` library. |
 | | | `components.odin` | `expose`: component fields from Odin type info, component references. |
 | | | `math.odin` | `Quaternion` and `WorldPosition`. |
+| | | `random.odin` | The world's generator and the `Random` library. |
 | | | `behaviour.odin` | `Behaviours`, the prelude, classes, instances, attaching and the lifecycle. |
 | | | `scheduler.odin` | Coroutines, waits, and the scheduler. |
 | | | `phase.odin`, `frame.odin` | `run_phase`, `begin_phase`, `end_phase`, events. |

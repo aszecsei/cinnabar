@@ -93,6 +93,9 @@ Runtime :: struct {
 	profile_base:      int,
 	warned_unbalanced: bool,
 	coroutine_name:    profile.Name,
+	// The world's seed and its generator, which Random draws from (see random.odin). A code reload keeps both.
+	random_seed:       u64,
+	random:            Random_State,
 }
 
 // Phase is the script step that runs: none, the script phase (begin_phase to end_phase), or a fixed step (fixed_update
@@ -136,6 +139,7 @@ init :: proc(r: ^Runtime, platform: ^core.Platform_API, world: ^ecs.World, asset
 	r.current_waiter = -1
 	r.phase = .None
 	r.commands = {}
+	seed_random(r, clock_seed())
 	r.bindings.ctx = context
 	r.L = platform.script_open(&r.bindings)
 	if r.L == nil {
@@ -430,6 +434,7 @@ register_engine :: proc(r: ^Runtime) {
 	register_frame(r)
 	register_math(r)
 	register_profile(r)
+	register_random(r)
 	if r.world != nil {
 		register_world(r)
 	}
