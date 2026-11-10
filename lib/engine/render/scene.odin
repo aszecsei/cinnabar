@@ -209,7 +209,10 @@ Frame_Constants :: struct {
 	// meshlets from (see mesh_pages.odin).
 	mesh_pool:                    u32,
 	mesh_pages:                   u32,
-	mesh_pages_padding:           [2]u32,
+	// Whether Material_Push has the aerial perspective volume, and its clamping sampler. A reflection probe's faces have
+	// none.
+	aerial:                       u32,
+	aerial_sampler:               u32,
 }
 
 // Material_Push matches Material_Push in material_common.hlsli: the forward pass's textures that exist only once the
@@ -233,6 +236,8 @@ Material_Push :: struct {
 	quad_counts:       u32,
 	shading_stats:     u32,
 	reflections:       u32,
+	// The aerial perspective volume, read only when Frame_Constants.aerial says so.
+	aerial:            u32,
 }
 
 // Draw_Record matches Draw_Record in material_common.hlsli. material is its block's offset in the material table.
@@ -1362,6 +1367,9 @@ add_scene_passes :: proc(f: ^Frame, ambient: Ambient) {
 	if f.fog != nil {
 		constants.fog, constants.fog_sampler, constants.fog_scale = 1, gpu.sampler_index(r.post.sampler), f.fog.scale
 		constants.fog_slices = f.fog.grid.z
+	}
+	if f.sky != nil && f.sky.has_aerial {
+		constants.aerial, constants.aerial_sampler = 1, gpu.sampler_index(r.post.sampler)
 	}
 	if lf.clustered {
 		constants.clusters = gpu.read_index(r.lights.clusters)
@@ -2495,13 +2503,16 @@ material_push :: proc(f: ^Frame, pass: format.Material_Pass, group: Bin_Group) -
 	g := f.graph
 	white := gpu.read_index(f.renderer.materials.defaults[.White])
 	black := gpu.read_index(f.renderer.materials.defaults[.Black])
-	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, reflections = black}
+	push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, reflections = black, aerial = white}
 	if f.gi_diffuse != 0 {
 		push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))
 		push.gi_specular = gpu.read_index(gpu_texture(g, f.gi_specular))
 	}
 	if f.fog_volume != 0 {
 		push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
+	}
+	if f.aerial != 0 {
+		push.aerial = gpu.read_index(gpu_texture(g, f.aerial))
 	}
 	if f.shadows.atlas != 0 {
 		push.shadow_atlas = gpu.read_index(gpu_texture(g, f.shadows.atlas))

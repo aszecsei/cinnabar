@@ -6,14 +6,15 @@
 
 #define MATERIAL_PUSH Sheet_Sprite_Push
 // Matches Sheet_Sprite_Push in lib/engine/render/sheet_sprites.odin. It starts with Material_Push's shadow textures,
-// which the light loop reads, and has the fog volume in fog, as fog_at reads it.
+// which the light loop reads, and has the fog volume in fog and the aerial perspective volume in aerial, as
+// air_and_fog_at reads them.
 struct Sheet_Sprite_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
 	uint fog;
 	uint records;
 	uint records_offset;
-	uint padding;
+	uint aerial;
 };
 #define SHADING_NO_LIGHTING 1
 #include "material_lighting.hlsli"
@@ -128,7 +129,7 @@ float4 sheet_sprite_color(Varyings i) {
 		}
 		light = light * (SHEET_SPRITE_COSINE / PI) + ambient_average(frame.ambient);
 	}
-	float4 fog = frame.fog != 0 ? fog_at(p) : float4(0, 0, 0, 1);
+	float4 fog = air_and_fog_at(p);
 	float3 color = (texel.rgb * light * fog.a + fog.rgb) * frame_exposure();
 	// Premultiplied, so the blend adds it over what is behind.
 	return float4(color * texel.a, texel.a);

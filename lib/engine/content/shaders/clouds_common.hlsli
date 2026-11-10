@@ -72,7 +72,7 @@ CN_PASS_CONSTANTS(Cloud_Constants, clouds);
 
 // Matches Cloud_Push in lib/engine/render/clouds.odin: one pass's textures, which exist only once the frame records.
 // kind is the noise pass's texture: 0 the shape, 1 the detail, 2 the curl. valid is whether the history holds last
-// frame's clouds.
+// frame's clouds. aerial is the composite's aerial perspective volume, 0 without one.
 struct Cloud_Push {
 	uint depth;
 	uint current;
@@ -82,6 +82,7 @@ struct Cloud_Push {
 	uint kind;
 	uint valid;
 	uint exposure;
+	uint aerial;
 };
 CN_PUSH_CONSTANTS(Cloud_Push, push);
 

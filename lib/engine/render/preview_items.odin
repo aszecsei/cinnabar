@@ -489,7 +489,7 @@ draw_preview_bins :: proc(ctx: ^Pass_Context, pass: format.Material_Pass) {
 			gpu.cmd_set_pass_constants(cb, pf.constants)
 			if pass != .Prepass {
 				white := gpu.read_index(pf.renderer.materials.defaults[.White])
-				push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white}
+				push := Material_Push{shadow_atlas = white, shadow_mask = white, ambient_occlusion = white, fog = white, gi_diffuse = white, gi_specular = white, aerial = white}
 				gpu.cmd_push_constants(cb, &push)
 			}
 			gpu.cmd_draw_indirect(cb, gpu_buffer(ctx.graph, pf.arguments), bin.first * size_of(gpu.Draw_Indirect_Args), bin.count)

@@ -2,7 +2,7 @@
 
 The world's surroundings: the background where nothing draws, the ambient light until global illumination, and the specular light that reflects the sky. Both come from the `Environment` settings (stable ID 49, see [Settings](frame.md#settings)), on a volume at the camera (`lib/engine/render/settings.odin`, `sky.odin`).
 
-**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Texture](#texture) · [Ambient light](#ambient-light) · [Specular light](#specular-light) · [Passes](#passes) · [Limits](#limits)
+**In this document:** [Modes](#modes) · [The atmosphere](#the-atmosphere) · [The sun](#the-sun) · [Night](#night) · [Texture](#texture) · [Ambient light](#ambient-light) · [Specular light](#specular-light) · [Aerial perspective](#aerial-perspective) · [Passes](#passes) · [Limits](#limits)
 
 ## Modes
 
@@ -99,15 +99,39 @@ The specular light along a reflection is the sky's cubemap, prefiltered by rough
   - **A reflection probe's capture:** its faces' specular light without the world probes, and where a face draws nothing, its background.
   - The material previews have none and take the ambient light.
 
+## Aerial perspective
+
+In `Atmosphere`, the air between the camera and what it sees dims that light and adds its own, as the sky's air does, so a mountain kilometers away is paler and bluer than a rock nearby (`sky_aerial.hlsl`, `aerial.hlsli`). It is Hillaire's aerial perspective volume, from the same tables as the sky view, so it adds one small pass and no new data.
+
+- **The volume** (`sky aerial`) is a 3D texture, `RGBA16_Float`: 32×32 texels over the screen (`SKY_AERIAL_SIZE`), and 32 slices along each texel's ray out to 32 km (`SKY_AERIAL_DISTANCE`). RGB is the light that the air scatters toward the camera, not pre-exposed, and A is the mean share of light that it lets through.
+- **The slices** are squared, as Hillaire's: slice `k` holds the air up to `32 km · ((k + 0.5) / 32)²`, which is 8 m, 70 m, 195 m and so on, up to 30 km. So most of them are in the first kilometers, where the world is.
+- **The march:** one thread for each texel of the screen marches its ray outward from the camera, four steps between one slice's distance and the next. After each slice, it writes the light so far and the transmittance. The sky view takes the same steps (`sky_step` in `sky_common.hlsli`), so the two give the same light. Heights come from `height_along`, as the sky view's do.
+- **A lookup** (`aerial_sample`) reads the volume at a point's place on the screen and at the square root of its distance over 32 km. A point nearer than the first slice takes its share of that slice's air, so the air fades in from none at the camera. Past 32 km, the lookup takes the last slice.
+- **The readers:** the forward pass, which is the opaque, transparent, sorted, additive and impostor surfaces, the ribbons and the mesh particles; the [sprites' light](transparency.md#sprites), which is the GPU particles'; and the [sprite renderers](2d.md#drawing). Each takes `color × T_air + S_air`, then the [fog](fog.md#volumetric-fog) as before, through `air_and_fog_at` in `fog_at.hlsli`, then the exposure. An additive surface takes no light from the air, as it takes none from the fog. The fog counts the first 500 m too, and there the air takes about 10⁻⁵ of the light per meter, so the error is about 0.5 %.
+- **The [clouds](clouds.md#passes)** take the air at their mean distance before they compose (`clouds composite`).
+- **The background** does not take the volume: the sky view table already holds the air along the whole ray.
+- **No volume:** `Flat` and `Texture` skies, an [orthographic view](frame.md#orthographic-views), which has no sky, an `Atmosphere` whose aerial pipeline does not exist yet, and a reflection probe's faces. Then `Frame_Constants.aerial` is 0 and the readers read no volume. The other passes of the sky draw without the aerial pipeline.
+- **Cost:** the volume does not change with the screen or the quality, so the pass costs the same at each level. On an RTX 5090, in the editor's scene view at 596x282, in Jungle Ruins under an atmosphere, the median of five captures at each level:
+
+| Level | `sky aerial` |
+|---|---|
+| Low | 0.041 ms |
+| Medium | 0.042 ms |
+| High | 0.042 ms |
+| Ultra | 0.042 ms |
+
+  It is about three times the sky view's 0.015 ms: each of its 1024 threads takes 128 steps in a row. The readers add one trilinear read to the fog's.
+
 ## Passes
 
-`sky.odin` adds them when the frame's `Environment` is `Atmosphere` and its four pipelines exist. Every texture is 2D and `RGBA16_Float`, and every pass is a compute pass.
+`sky.odin` adds them when the frame's `Environment` is `Atmosphere` and the pipelines of its tables and its background exist. `sky aerial` also needs its own pipeline and a perspective view. Every pass is a compute pass, and every texture is `RGBA16_Float`.
 
 | Pass | Writes | What it does |
 |---|---|---|
 | `sky transmittance` | 256×64 | The share of light from the top of the atmosphere that reaches each height along each direction, laid out as Bruneton's |
 | `sky multiscatter` | 32×32 | At each height and sun angle, the light scattered twice in 64 directions with an even phase, over one minus the share that the air around scatters back, which sums every further order |
 | `sky view` | 256×128 | The light from every direction at the camera: the sun's and the moon's scattering, once from the transmittance and more from the multiple scattering table, and the ground's. Rows are squeezed toward the horizon. |
+| `sky aerial` | 32×32×32, 3D | The [aerial perspective](#aerial-perspective) volume: the light that the air scatters toward the camera along each texel's ray, and its transmittance, for 32 slices up to 32 km. The world pass, the transparent surfaces, the sprites and the clouds' composite read it. |
 | `sky` | The scene | Where the depth is 0, after the world pass and before the [clouds](clouds.md#passes) compose over it and the fog over the background: the sky view table, and above the horizon the sun, the moon and the stars, pre-exposed |
 
 `Texture` has two passes of its own, when its texture is resident and their pipelines exist: `sky texture` draws over the background where `sky` would, and `sky texture ambient`, with its copy to the readback buffer, runs only in a frame that integrates the texture.
@@ -120,7 +144,7 @@ Every mode has the [cubemap](#specular-light)'s two passes, in a frame that upda
 
 ## Limits
 
-- **No aerial perspective:** the air between the camera and the world's surfaces does not dim or color them. The fog does that within its 500 m.
+- **The aerial perspective has no shadows:** the air in the world's shadow scatters as much light as the air in the sun, so there are no shafts of light at kilometer scale. The reflection probes' captures and the GI's hit light have no air.
 - **The stars do not turn with the time.**
 - **A texture sky's light is one image**, which does not change with the time, and its ambient light is as coarse as the atmosphere's. Its reflections are the image's, through the [cubemap](#specular-light).
 - **Reflections show no discs and no stars:** the cubemap leaves out the sun's and the moon's discs, whose highlights are the directional lights', and the stars, which are narrower than its texels. A mirror at night shows the air's light but not the stars.

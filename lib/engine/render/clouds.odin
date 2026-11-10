@@ -216,6 +216,8 @@ Cloud_Push :: struct {
 	kind:     u32,
 	valid:    u32,
 	exposure: u32,
+	// The composite's aerial perspective volume, 0 without one.
+	aerial:   u32,
 }
 
 #assert(size_of(Cloud_Push) <= 128)
@@ -753,8 +755,9 @@ add_cloud_passes :: proc(f: ^Frame) {
 	write(g, p, cf.history.current)
 }
 
-// add_cloud_composite adds the pass that draws the clouds over the sky after the world pass, where the sky drew, before
-// the fog over the background dims them with it.
+// add_cloud_composite adds the pass that draws the clouds over the sky after the world pass, where the sky drew, behind
+// the air in front of them, from the aerial perspective volume, and before the fog over the background dims them with
+// it.
 @(private)
 add_cloud_composite :: proc(f: ^Frame) {
 	cf := f.clouds
@@ -768,6 +771,9 @@ add_cloud_composite :: proc(f: ^Frame) {
 	read(g, p, cf.history.current)
 	read(g, p, cf.distance)
 	read(g, p, f.exposure)
+	if f.aerial != 0 {
+		read(g, p, f.aerial)
+	}
 	write(g, p, f.scene)
 }
 
@@ -852,6 +858,9 @@ run_cloud_composite :: proc(ctx: ^Pass_Context) {
 		distance = gpu.read_index(gpu_texture(g, cf.distance)),
 		output   = gpu.write_index(gpu_texture(g, cf.scene)),
 		exposure = gpu.read_index(gpu_buffer(g, f.exposure)),
+	}
+	if f.aerial != 0 {
+		push.aerial = gpu.read_index(gpu_texture(g, f.aerial))
 	}
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.clouds.composite.pipeline)
 	gpu.cmd_set_pass_constants(ctx.cb, cf.upload)

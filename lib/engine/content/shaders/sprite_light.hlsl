@@ -1,11 +1,12 @@
 // The sprites' light (see docs/rendering/transparency.md#sprites): a group for each sprite, whose threads light an 8x8
 // grid of points on it, as the paper's particle lightmap does. Each point takes every directional light and its
 // cluster's punctual lights with their shadow maps, as a surface lit from every side would, the global illumination at
-// the opaque surface behind it or the ambient light, and the fog between it and the camera. light holds the light,
-// dimmed by the fog, in rgb and the share of light that the fog lets through in a; fog_light holds the fog's own light.
+// the opaque surface behind it or the ambient light, and the air and the fog between it and the camera. light holds the
+// light, dimmed by the air and the fog, in rgb and the share of light that they let through in a; fog_light holds their
+// own light.
 #define MATERIAL_PUSH Light_Push
 // Matches Light_Push in lib/engine/render/sprites.odin. It starts with Material_Push's shadow textures, which the light
-// loop reads, and has the fog volume in fog, as fog_at reads it.
+// loop reads, and has the fog volume in fog and the aerial perspective volume in aerial, as air_and_fog_at reads them.
 struct Light_Push {
 	uint shadow_atlas;
 	uint shadow_mask;
@@ -16,6 +17,7 @@ struct Light_Push {
 	uint capacity;
 	uint light;
 	uint fog_light;
+	uint aerial;
 };
 #define SHADING_NO_LIGHTING 1
 #include "material_lighting.hlsli"
@@ -74,7 +76,7 @@ void cs_main(uint3 group : SV_GroupID, uint3 thread : SV_GroupThreadID) {
 	} else {
 		light += ambient_average(frame.ambient);
 	}
-	float4 fog = frame.fog != 0 ? fog_at(p) : float4(0, 0, 0, 1);
+	float4 fog = air_and_fog_at(p);
 	uint2 texel = group.xy * SPRITE_LIGHT_TEXELS + thread.xy;
 	cn_rw_texture(push.light)[texel] = float4(light * fog.a, fog.a);
 	cn_rw_texture(push.fog_light)[texel] = float4(fog.rgb, 1);

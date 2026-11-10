@@ -169,6 +169,7 @@ Light_Push :: struct {
 	capacity:     u32,
 	light:        u32,
 	fog_light:    u32,
+	aerial:       u32,
 }
 
 // Raster_Push matches Raster_Push in sprite_raster.hlsli.
@@ -573,6 +574,7 @@ run_sprite_light :: proc(ctx: ^Pass_Context) {
 		shadow_atlas = white,
 		shadow_mask  = white,
 		fog          = white,
+		aerial       = white,
 		gi_diffuse   = white,
 		records      = gpu.read_index(gpu_buffer(g, sf.records)),
 		count        = gpu.read_index(gpu_buffer(g, sf.count)),
@@ -585,6 +587,9 @@ run_sprite_light :: proc(ctx: ^Pass_Context) {
 	}
 	if f.fog_volume != 0 {
 		push.fog = gpu.read_index(gpu_texture(g, f.fog_volume))
+	}
+	if f.aerial != 0 {
+		push.aerial = gpu.read_index(gpu_texture(g, f.aerial))
 	}
 	if f.gi_diffuse != 0 {
 		push.gi_diffuse = gpu.read_index(gpu_texture(g, f.gi_diffuse))

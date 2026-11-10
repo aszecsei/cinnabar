@@ -15,6 +15,7 @@ flowchart TB
     SSR["Screen-space or traced reflections<br/>depth pyramid, trace, hit shading, resolve, temporal"]
     FOG["Fog volume"]
     SKYLUT["Sky tables<br/>transmittance, multiple scattering, view"]
+    AERIAL["Aerial perspective<br/>the air's volume"]
     SKYCUBE["Sky cubemap<br/>capture, prefilter"]
     PROBES["Reflection probe faces<br/>clusters, prepass, forward, prefilter"]
     CLOUDSHADOW["Cloud shadow map<br/>noise once"]
@@ -38,6 +39,7 @@ flowchart TB
     SHADOW & CLUSTER & AO & GI & SSR & FOG --> FWD
     FWD -.->|"lit scene, next frame"| GI & SSR
     SKYLUT --> SKY
+    SKYLUT --> AERIAL --> FWD & CLOUDCOMP & TRANS
     SKYLUT --> SKYCUBE -.->|"next frames"| GI & FWD & TRANS
     SHADOW & SKYCUBE --> PROBES -.->|"next frames"| FWD & TRANS
     FWD --> VMFWD --> SKY --> CLOUDCOMP --> TRANS --> POST --> TONE --> OUT
@@ -48,6 +50,7 @@ flowchart TB
 - The render graph culls every pass whose result nothing reads. A feature that is off adds no passes, and the passes that read its result read a default texture instead, for example a white ambient occlusion texture.
 - With a feature that traces, such as traced shadows, the frame builds the ray scene's acceleration structures after the culling and before the prepass, so every pass after can trace them (see [Ray scene](ray-scene.md#ray-scene)). The global illumination's [world probes](global-illumination.md#world-probes) update after the prepass, on the compute queue, before the cascades, which read them.
 - The ambient occlusion, the global illumination and the [screen-space](lighting-and-shadows.md#screen-space-reflections) or [traced](lighting-and-shadows.md#ray-traced-reflections) reflections run on the compute queue (see [GPU](../gpu/queues-streaming-readback.md#queues)). They depend only on the prepass and on textures from last frame, so they overlap with the light clusters and the shadow maps. The clusters, the fog volume and the exposure run on the graphics queue: the fog reads the shadow maps, which are drawn just before it, after the [virtual shadow map](lighting-and-shadows.md#virtual-shadow-maps)'s marking and allocation, which read the prepass's depth, and the exposure is explained in [Post-processing](post-processing.md#post-processing).
+- The sky's [aerial perspective](sky.md#aerial-perspective) volume is made after its tables and before the world pass, on the graphics queue. The forward pass, the transparent surfaces, the sprites and the clouds' composite read it.
 - The sky's [cubemap](sky.md#specular-light) is captured and prefiltered after the sky's tables, on the graphics queue. The global illumination, the forward pass and the transparent surfaces sample only cubes that earlier frames finished, so they do not wait for it.
 - The [clouds](clouds.md#passes) run on the compute queue: their shadow map right after the prepass, before every pass that lights the world, since the light loop reads it, with their noise in the first frame; their march and temporal pass after the shadow maps and before the fog. Their composite runs on the graphics queue after the sky's background and before the fog's, so the fog dims the clouds with the sky.
 - A [reflection probe](lighting-and-shadows.md#reflection-probes)'s capture draws its share of faces after the shadow maps and the sky's cubemap, which its faces read, and before the world pass, on the graphics queue. The forward pass and the transparent surfaces sample only probes' cubes that earlier frames finished.

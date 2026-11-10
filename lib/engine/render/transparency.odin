@@ -160,7 +160,7 @@ add_transparent_id_pass :: proc(f: ^Frame, keep_ids: bool) {
 }
 
 // declare_lighting declares what the forward template reads: the exposure, the clusters, the shadow maps, the cloud
-// shadow map, the fog volume, the global illumination, the sky's cubemap and the reflection probes, and for opaque
+// shadow map, the fog volume, the aerial perspective volume, the global illumination, the sky's cubemap and the reflection probes, and for opaque
 // surfaces the shadow mask, the ambient occlusion and the screen-space or traced reflections.
 @(private)
 declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
@@ -177,6 +177,9 @@ declare_lighting :: proc(f: ^Frame, p: Pass, opaque: bool) {
 	declare_cloud_shadow(f, p)
 	if f.fog_volume != 0 {
 		read(g, p, f.fog_volume)
+	}
+	if f.aerial != 0 {
+		read(g, p, f.aerial)
 	}
 	if f.gi_diffuse != 0 {
 		read(g, p, f.gi_diffuse)

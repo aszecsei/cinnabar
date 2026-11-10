@@ -998,7 +998,7 @@ reflection_probe_view :: proc(f: ^Frame, view: int) -> (face: u32, ok: bool) {
 }
 
 // reflection_probe_view_constants gives a capture face's view its constants: its projection and culling, a linear
-// color with no screen-space light, no fog and no probes of its own, its own clusters and copy of the lights, and every
+// color with no screen-space light, no air or fog and no probes of its own, its own clusters and copy of the lights, and every
 // depth in the first cascade, which is the probe's own shadow view. It keeps the camera's level of detail, as the
 // shadow views do, so it draws the meshlets that the camera's walk of their hierarchy picked.
 @(private)
@@ -1023,7 +1023,7 @@ reflection_probe_view_constants :: proc(
 	c.screen_size = {f32(size), f32(size)}
 	c.jitter = {}
 	c.exposure = gpu.read_index(r.post.unit_exposure)
-	c.fog, c.gi, c.debug_view, c.occlusion = 0, 0, 0, 0
+	c.fog, c.aerial, c.gi, c.debug_view, c.occlusion = 0, 0, 0, 0, 0
 	// The faces see no clouds, so their light takes no cloud shadow either.
 	c.cloud_shadow = 0
 	c.virtual_levels, c.virtual_draw = 0, 0
@@ -1472,6 +1472,7 @@ reflection_probe_push :: proc(f: ^Frame, face: u32) -> Material_Push {
 		fog               = white,
 		gi_diffuse        = white,
 		gi_specular       = white,
+		aerial            = white,
 	}
 	if f.shadows.atlas != 0 {
 		push.shadow_atlas = gpu.read_index(gpu_texture(f.graph, f.shadows.atlas))

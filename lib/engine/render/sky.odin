@@ -10,14 +10,16 @@ import "cinnabar:engine/ecs"
 // The sky (see docs/rendering/sky.md#sky): with an Environment of Atmosphere, compute passes make Hillaire's lookup
 // tables each frame, the transmittance to the top of the atmosphere, the light of multiple scattering, and the sky in
 // every direction from the camera, and a pass after the world pass draws the sky, the sun, the moon and the stars
-// where nothing drew. The ambient light is the same model's, which the CPU integrates, and the sun's light is dimmed
-// and colored by the air between it and the camera.
+// where nothing drew. Another integrates the air in front of the camera into the aerial perspective volume, which the
+// surfaces, the sprites and the clouds read. The ambient light is the same model's, which the CPU integrates, and the
+// sun's light is dimmed and colored by the air between it and the camera.
 
 // The engine's sky shaders, by their .meta files.
 SKY_TRANSMITTANCE_SHADER :: #load("../content/shaders/sky_transmittance.hlsl.meta", string)
 SKY_MULTISCATTER_SHADER :: #load("../content/shaders/sky_multiscatter.hlsl.meta", string)
 SKY_VIEW_SHADER :: #load("../content/shaders/sky_view.hlsl.meta", string)
 SKY_BACKGROUND_SHADER :: #load("../content/shaders/sky.hlsl.meta", string)
+SKY_AERIAL_SHADER :: #load("../content/shaders/sky_aerial.hlsl.meta", string)
 
 // The lookup tables' sizes, which match sky_common.hlsli.
 SKY_TRANSMITTANCE_SIZE :: [2]u32{256, 64}
@@ -25,6 +27,11 @@ SKY_MULTISCATTER_SIZE :: [2]u32{32, 32}
 SKY_VIEW_SIZE :: [2]u32{256, 128}
 SKY_FORMAT :: gpu.Format.RGBA16_Float
 SKY_GROUP_SIZE :: 8
+// The aerial perspective volume (see docs/rendering/sky.md#aerial-perspective): the screen in 32x32 texels, and the
+// distance along each ray to SKY_AERIAL_DISTANCE kilometers in 32 slices, squared toward the camera. Matches
+// aerial.hlsli.
+SKY_AERIAL_SIZE :: [3]u32{32, 32, 32}
+SKY_AERIAL_DISTANCE :: 32
 
 // The sun's and the moon's angular diameters, in degrees, as they are seen from Earth.
 DEFAULT_SUN_DISC :: 0.53
@@ -96,6 +103,7 @@ Sky :: struct {
 	multiscatter:  Shader_Pipeline,
 	view:          Shader_Pipeline,
 	background:    Shader_Pipeline,
+	aerial:        Shader_Pipeline,
 	// The Texture mode's (see sky_texture.odin).
 	texture:       Sky_Texture_State,
 	// The cubemap of the sky's specular light (see sky_cube.odin).
@@ -174,6 +182,9 @@ Sky_Frame :: struct {
 	view:          Texture,
 	// The scene that the background pass draws into: later passes replace Frame.scene before the passes record.
 	scene:         Texture,
+	// Whether the frame has the aerial perspective volume, which begin_sky decides before the scene's constants say so;
+	// add_sky_passes makes it, as Frame.aerial.
+	has_aerial:    bool,
 }
 
 sky_init :: proc(s: ^Sky) {
@@ -181,12 +192,13 @@ sky_init :: proc(s: ^Sky) {
 	s.multiscatter = shader_pipeline(SKY_MULTISCATTER_SHADER)
 	s.view = shader_pipeline(SKY_VIEW_SHADER)
 	s.background = shader_pipeline(SKY_BACKGROUND_SHADER)
+	s.aerial = shader_pipeline(SKY_AERIAL_SHADER)
 	sky_texture_init(&s.texture)
 	sky_cube_init(&s.cube)
 }
 
 sky_destroy :: proc(s: ^Sky, r: ^Renderer) {
-	for p in ([]^Shader_Pipeline{&s.transmittance, &s.multiscatter, &s.view, &s.background}) {
+	for p in ([]^Shader_Pipeline{&s.transmittance, &s.multiscatter, &s.view, &s.background, &s.aerial}) {
 		destroy_shader_pipeline(p, r.platform)
 	}
 	sky_texture_destroy(&s.texture, r)
@@ -201,6 +213,7 @@ sync_sky_pipelines :: proc(r: ^Renderer, force: bool) {
 	sync_compute_pipeline(&s.multiscatter, r.platform, assets, {label = "sky multiscatter"}, force)
 	sync_compute_pipeline(&s.view, r.platform, assets, {label = "sky view"}, force)
 	sync_compute_pipeline(&s.background, r.platform, assets, {label = "sky"}, force)
+	sync_compute_pipeline(&s.aerial, r.platform, assets, {label = "sky aerial"}, force)
 	sync_sky_texture_pipelines(r, force)
 	sync_sky_cube_pipelines(r, force)
 }
@@ -254,7 +267,8 @@ sky_direction :: proc(azimuth, elevation: f32) -> [3]f32 {
 // begin_sky readies the frame's sky, after the lights are extracted and before they are uploaded, and gives the frame's
 // ambient light. With Atmosphere, it tints a linked sun's light by the air that it crosses to reach the camera.
 // Without Atmosphere or its pipelines, Frame.sky stays nil and the world pass clears to the background color. Texture
-// is begin_sky_texture's.
+// is begin_sky_texture's. A perspective view whose aerial pipeline is ready also has the aerial perspective volume;
+// without that pipeline, the sky still draws.
 @(private)
 begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	switch s.mode {
@@ -325,11 +339,13 @@ begin_sky :: proc(f: ^Frame, s: Sky_Settings) -> Ambient {
 	}
 	(^Sky_Constants)(raw_data(upload.data))^ = sf.constants
 	sf.upload = upload
+	sf.has_aerial = !is_orthographic(f.view) && pipeline_ready(platform, &r.sky.aerial)
 	f.sky = sf
 	return ambient
 }
 
-// add_sky_passes adds the lookup tables' passes, which only the background pass reads.
+// add_sky_passes adds the lookup tables' passes, which the background pass reads, and the aerial perspective volume's,
+// which becomes Frame.aerial.
 @(private)
 add_sky_passes :: proc(f: ^Frame) {
 	sf := f.sky
@@ -349,6 +365,13 @@ add_sky_passes :: proc(f: ^Frame) {
 	read(g, p, sf.transmittance)
 	read(g, p, sf.multiscatter)
 	write(g, p, sf.view)
+	if sf.has_aerial {
+		f.aerial = create_texture(g, {size = SKY_AERIAL_SIZE.xy, depth = SKY_AERIAL_SIZE.z, format = SKY_FORMAT, label = "sky aerial"})
+		p = add_compute_pass(g, "sky aerial", run_sky_aerial, f)
+		read(g, p, sf.transmittance)
+		read(g, p, sf.multiscatter)
+		write(g, p, f.aerial)
+	}
 }
 
 // add_sky_background adds the pass that draws the sky after the world pass, where nothing drew, before the fog covers
@@ -419,6 +442,19 @@ run_sky_view :: proc(ctx: ^Pass_Context) {
 	gpu.cmd_set_pipeline(ctx.cb, f.renderer.sky.view.pipeline)
 	gpu.cmd_push_constants(ctx.cb, &push)
 	gpu.cmd_dispatch(ctx.cb, groups(SKY_VIEW_SIZE, SKY_GROUP_SIZE))
+}
+
+@(private = "file")
+run_sky_aerial :: proc(ctx: ^Pass_Context) {
+	f := (^Frame)(ctx.data)
+	g := ctx.graph
+	push := sky_push(ctx, f)
+	push.transmittance = gpu.read_index(gpu_texture(g, f.sky.transmittance))
+	push.multiscatter = gpu.read_index(gpu_texture(g, f.sky.multiscatter))
+	push.output = gpu.write_index(gpu_texture(g, f.aerial))
+	gpu.cmd_set_pipeline(ctx.cb, f.renderer.sky.aerial.pipeline)
+	gpu.cmd_push_constants(ctx.cb, &push)
+	gpu.cmd_dispatch(ctx.cb, groups(SKY_AERIAL_SIZE.xy, SKY_GROUP_SIZE))
 }
 
 @(private = "file")

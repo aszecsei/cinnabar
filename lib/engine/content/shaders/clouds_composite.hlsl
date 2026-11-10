@@ -3,7 +3,10 @@
 // each weighted by how near its block's depth is to the pixel's, so the clouds stay crisp at the edges of what is in
 // front of them, leaves the pixel alone where a surface is nearer than the clouds, and dims the scene by the clouds'
 // transmittance and adds their light, pre-exposed. The sky's discs and stars are in the scene already, and are dimmed.
+// The air between the camera and the clouds' mean distance dims their light and adds its own over the share of the
+// pixel that they cover, from the aerial perspective volume.
 #include "clouds_common.hlsli"
+#include "aerial.hlsli"
 
 // A pixel whose surface is nearer than this share of the clouds' mean distance keeps its surface.
 static const float SURFACE_SHARE = 0.9;
@@ -77,6 +80,13 @@ void cs_main(uint3 id : SV_DispatchThreadID) {
 	float3 rgb = max(cloud.rgb, 0);
 	if (T >= 0.999 && all(rgb == 0)) {
 		return;
+	}
+	if (push.aerial != 0) {
+		// What is behind the clouds, the sky's light or a far surface's, holds the air in front of them already, so only
+		// the share of the pixel that they cover takes the air's light: scene * T + light * air.a + air.rgb * (1 - T).
+		float2 uv = (float2(id.xy) + 0.5) / clouds.screen_size;
+		float4 air = aerial_sample(cn_texture3d(push.aerial), cn_sampler(clouds.clamp_sampler), uv, mean);
+		rgb = rgb * air.a + air.rgb * (1 - T);
 	}
 	RWTexture2D<float4> scene = cn_rw_texture(push.output);
 	float exposure = cn_buffer(push.exposure).Load<float>(0);

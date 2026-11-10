@@ -328,6 +328,9 @@ Frame :: struct {
 	// The ambient occlusion in r, which the forward pass reads, and the integrated fog volume: zero without them.
 	ambient_occlusion:        Texture,
 	fog_volume:               Texture,
+	// The aerial perspective volume, which the forward pass, the sprites and the clouds read: zero without it (see
+	// add_sky_passes).
+	aerial:                   Texture,
 	// The global illumination's diffuse and specular light, zero without it.
 	gi_diffuse:               Texture,
 	gi_specular:              Texture,
