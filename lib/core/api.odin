@@ -51,6 +51,14 @@ Platform_API :: struct {
 	file_read_range:  proc(path: string, offset: i64, buffer: []byte) -> int,
 	file_modified:    proc(path: string) -> i64,
 	file_write:       proc(path: string, data: []byte) -> bool,
+	// Reads of file ranges that go on across frames, on the host's threads (see docs/core/platform.md#file-reads).
+	// file_read_begin starts one, and returns its ticket, or 0 if it cannot start. file_read_result is the read's bytes
+	// once it is Done, in the host's memory, valid until file_read_end, which frees the read and cancels one that is
+	// still Pending. A read of more bytes than the file has fails. core ends every read that the game still holds at a
+	// soft restart.
+	file_read_begin:  proc(path: string, offset: i64, size: int) -> File_Read,
+	file_read_result: proc(read: File_Read) -> ([]byte, File_Read_State),
+	file_read_end:    proc(read: File_Read),
 	// The client area size at the start of the frame. The frame target has this size. It is zero while minimized.
 	window_size:      proc() -> [2]i32,
 	set_window_title: proc(title: string),
@@ -205,6 +213,16 @@ Game_API :: struct {
 	// the editor's messages for the game, and the game appends its own messages, framed, to out. connection changes
 	// for each editor, and is 0 while none is linked. A game without editor support leaves it nil.
 	editor_poll:     proc(state: rawptr, connection: u64, incoming: []Editor_Message, out: ^[dynamic]byte),
+}
+
+// File_Read is the ticket of a read that file_read_begin started. 0 is no read.
+File_Read :: distinct u64
+
+// File_Read_State is where a read is. The zero value is a failure, so a ticket that names no read never reads as done.
+File_Read_State :: enum u8 {
+	Failed,
+	Pending,
+	Done,
 }
 
 // Editor_Message is a message of the editor link that the host does not handle, still encoded. The payload is valid

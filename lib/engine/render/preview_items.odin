@@ -246,7 +246,7 @@ preview_has_room :: proc(r: ^Renderer) -> bool {
 preview_touch :: proc(r: ^Renderer, item: ^Preview_Item) {
 	r.residency.baking = true
 	defer r.residency.baking = false
-	resident_mesh(&r.residency, item.mesh)
+	resident_whole_mesh(&r.residency, item.mesh)
 	table := Material_Table {
 		uses  = make(map[format.Guid]Material_Use, r.platform.frame_allocator),
 		bytes = make([dynamic]byte, r.platform.frame_allocator),
@@ -285,7 +285,7 @@ add_preview_item_passes :: proc(f: ^Frame, desc: ^Preview_Desc) {
 	settled := true
 	placed := make([dynamic]Placed, 0, len(desc.items), context.temp_allocator)
 	for &item in desc.items {
-		mesh, ready := resident_mesh(&r.residency, item.mesh)
+		mesh, ready := resident_whole_mesh(&r.residency, item.mesh)
 		if !ready {
 			settled &&= resident_failed(&r.residency, item.mesh)
 			continue

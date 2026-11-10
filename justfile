@@ -49,6 +49,8 @@ cmake_generator := "Visual Studio 17 2022"
 compressonator_dir := obj_dir + "/compressonator"
 meshoptimizer_dir := obj_dir + "/meshoptimizer"
 opus_dir := obj_dir + "/opus"
+# lib/core/lz4/lz4.odin links its library from build/obj/lz4.
+lz4_dir := obj_dir + "/lz4"
 vorbis_dir := obj_dir + "/vorbis"
 clusterlod_dir := obj_dir + "/clusterlod"
 # LightUSD (TinyUSDZ) and the cooker's interface to it, tools/cook/usd, which tools/cook/usd.odin links from here.
@@ -63,6 +65,8 @@ luau_version := `git -C vendor/luau describe --tags --always`
 compressonator_version := `git -C vendor/compressonator describe --tags --always 2>/dev/null || echo unknown`
 # The cooker puts this in every mesh's cache key, so a meshoptimizer update cooks every mesh again.
 meshoptimizer_version := `git -C vendor/meshoptimizer describe --tags --always 2>/dev/null || echo unknown`
+# The cooker puts this in every mesh's cache key too, so an LZ4 update cooks every mesh again.
+lz4_version := `git -C vendor/lz4 describe --tags --always 2>/dev/null || echo unknown`
 # The cooker puts this in every stage's keys, so a LightUSD update cooks every stage again.
 lightusd_version := `git -C vendor/lightusd describe --tags --always 2>/dev/null || echo unknown`
 # The cooker puts these in every sound's cache key, so an update of either cooks every sound again.
@@ -81,7 +85,7 @@ cache_dir := dev_dir + "/content"
 release_content := release_dir + "/content"
 # The scripts' Luau definition file, which the cooker type checks against and luau-lsp reads.
 script_types := obj_dir + "/script-types/cinnabar.d.luau"
-packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/stbn tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
+packages := "lib/core lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/gpu/" + gpu_backend + " lib/core/luau lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/physics/conformance lib/core/audio lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/opus lib/core/lz4 lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/audio/dll lib/core/audio/conformance lib/core/script lib/engine lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/wire/servetest lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/viewer tools/cook tools/ltc_fit tools/stbn tools/editorctl samples/mygame samples/mygame/main_release samples/intel samples/intel/main_release"
 
 # =================================
 # Help
@@ -165,7 +169,7 @@ setup: install
     echo "✓ Project ready"
 
 # Update all vendored submodules
-update: update-luau update-compressonator update-meshoptimizer update-jolt update-lightusd update-opus update-vorbis update-msdfgen
+update: update-luau update-compressonator update-meshoptimizer update-jolt update-lightusd update-opus update-vorbis update-msdfgen update-lz4
 
 # Update Luau to a release tag (default: latest)
 [script]
@@ -222,6 +226,17 @@ update-opus tag="":
     git add vendor/opus
     echo "✓ Opus at $tag"
 
+# Update LZ4 to a release tag (default: latest)
+[script]
+update-lz4 tag="":
+    set -euo pipefail
+    git -C vendor/lz4 fetch --tags --quiet
+    tag="{{tag}}"
+    [ -z "$tag" ] && tag=$(git -C vendor/lz4 tag --list 'v*' --sort=-v:refname | head -n 1)
+    git -C vendor/lz4 -c advice.detachedHead=false checkout --quiet "$tag"
+    git add vendor/lz4
+    echo "✓ LZ4 at $tag"
+
 # Update libogg and libvorbis to release tags (default: latest)
 [script]
 update-vorbis tag="" ogg_tag="":
@@ -269,7 +284,7 @@ alias b := build
 build: host game-dll script-types scripts scenes shaders textures models meshes stages materials effects animation_graphs audio fonts ui sprite_sheets
 
 # Build the development host
-host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus
+host: (agility-runtime dev_dir) (fidelityfx-runtime dev_dir) luau jolt opus lz4
     mkdir -p "{{dev_dir}}"
     odin build src/host {{dev_collections}} {{dev_defines}} -out:"{{dev_dir}}/host.exe" -debug
 
@@ -329,6 +344,11 @@ opus:
     [ -f "{{opus_dir}}/CMakeCache.txt" ] || cmake -S vendor/opus -B "{{opus_dir}}" -G "{{cmake_generator}}" -A x64 -DOPUS_STATIC_RUNTIME=ON -DOPUS_INSTALL_PKG_CONFIG_MODULE=OFF -DOPUS_INSTALL_CMAKE_CONFIG_MODULE=OFF > /dev/null
     cmake --build "{{opus_dir}}" --config Release --target opus -- -m -nologo -v:quiet
 
+# Build LZ4's block codec for the cooker and the runtime, with the static CRT that Odin links
+lz4:
+    [ -f "{{lz4_dir}}/CMakeCache.txt" ] || cmake -S lib/core/lz4 -B "{{lz4_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
+    cmake --build "{{lz4_dir}}" --config Release -- -m -nologo -v:quiet
+
 # Build libogg and libvorbis's encoder for the cooker. The runtime decodes with vendor:stb/vorbis.
 vorbis:
     [ -f "{{vorbis_dir}}/CMakeCache.txt" ] || cmake -S tools/cook/vorbis -B "{{vorbis_dir}}" -G "{{cmake_generator}}" -A x64 > /dev/null
@@ -345,9 +365,9 @@ msdfgen:
     cmake --build "{{msdfgen_dir}}" --config Release -- -m -nologo -v:quiet
 
 # Build the cooker
-cook: luau compressonator meshoptimizer lightusd opus vorbis msdfgen
+cook: luau compressonator meshoptimizer lightusd opus vorbis msdfgen lz4
     mkdir -p "{{tools_dir}}"
-    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -out:"{{tools_dir}}/cook.exe" -o:speed
+    odin build tools/cook -collection:cinnabar=lib -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" -out:"{{tools_dir}}/cook.exe" -o:speed
 
 # Cook the game's scripts into the loose cache of the configuration. A script without a .meta file gets one: commit it.
 scripts config="dev": cook
@@ -428,7 +448,7 @@ shaders config="dev": install-dxc cook
     "./{{tools_dir}}/cook.exe" shaders --cache "{{ if config == "release" { release_content } else { cache_dir } }}" --config {{config}} {{shader_tools}} {{roots}}
 
 # Build the game DLL. A running host picks it up and hot-reloads it.
-game-dll: luau jolt opus
+game-dll: luau jolt opus lz4
     mkdir -p "{{dev_dir}}" "{{obj_dir}}/pdb"
     odin build "samples/{{game}}" {{dev_collections}} {{dev_defines}} -build-mode:dll \
         -out:"{{dev_dir}}/{{game}}.dll" \
@@ -454,7 +474,7 @@ dev: build
     "./{{dev_dir}}/host.exe" "{{dev_dir}}/{{game}}.dll" --project "samples/{{game}}/project.settings"
 
 # Build the viewer, which shows a host's shared frames in place of the editor's viewport
-viewer: opus
+viewer: opus lz4
     mkdir -p "{{tools_dir}}"
     odin build tools/viewer {{collections}} -out:"{{tools_dir}}/viewer.exe" -debug
 
@@ -519,7 +539,7 @@ edit: build editor
 
 # Build the statically linked release executable into build/release, with its content and project settings beside it,
 # so the folder runs from anywhere as it is
-release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt opus script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release") (audio "release") (fonts "release") (ui "release") (sprite_sheets "release")
+release: (agility-runtime release_dir) (fidelityfx-runtime release_dir) luau jolt opus lz4 script-types (scripts "release") (scenes "release") (shaders "release") (textures "release") (models "release") (meshes "release") (materials "release") (effects "release") (animation_graphs "release") (audio "release") (fonts "release") (ui "release") (sprite_sheets "release")
     mkdir -p "{{release_dir}}"
     cp "samples/{{game}}/project.settings" "{{release_dir}}/project.settings"
     odin build "samples/{{game}}/main_release" {{collections}} {{luau_features}} -define:DEBUG_DRAW=false -define:PROFILE=false -define:CAPTURE=false -out:"{{release_dir}}/{{game}}.exe" -o:speed
@@ -594,8 +614,8 @@ intel-report: cook
 # =================================
 
 # The cooker's tests compile shaders, so they need DXC.
-test: luau jolt opus vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen link-schema install-dxc
-    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/cook tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" || exit 1; done
+test: luau jolt opus lz4 vorbis audio-plugin compressonator meshoptimizer lightusd msdfgen link-schema install-dxc
+    for p in lib/core lib/core/testlog lib/core/layout lib/core/profile lib/core/jobs lib/core/capture lib/core/gpu lib/core/gpu/null lib/core/physics lib/core/physics/host lib/core/physics/null lib/core/physics/jolt lib/core/physics/plugin lib/core/audio/host lib/core/audio/null lib/core/audio/adpcm lib/core/audio/codec lib/core/audio/mixer lib/core/audio/plugin lib/core/lz4 lib/core/script lib/engine/asset lib/engine/asset/format lib/engine/asset/cook_link lib/engine/wire lib/engine/wire/serve lib/engine/render lib/engine/debug lib/engine/ecs lib/engine/script lib/engine/scene lib/engine/volume lib/engine/physics lib/engine/audio lib/engine/anim lib/engine/anim/graph lib/engine/sprite lib/engine/ui lib/engine/project lib/engine/editor lib/engine/editor/link src/host tools/cook tools/ltc_fit tools/stbn tools/flickerstat; do odin test "$p" {{collections}} -define:LUAU_VERSION="{{luau_version}}" -define:COMPRESSONATOR_VERSION="{{compressonator_version}}" -define:MESHOPTIMIZER_VERSION="{{meshoptimizer_version}}" -define:LIGHTUSD_VERSION="{{lightusd_version}}" -define:OPUS_VERSION="{{opus_version}}" -define:LZ4_VERSION="{{lz4_version}}" -define:VORBIS_VERSION="{{vorbis_version}}" -define:MSDFGEN_VERSION="{{msdfgen_version}}" || exit 1; done
     # The optional direct field access path must behave the same (see docs/scripting/embedding.md#direct-field-access).
     odin test lib/engine/script {{collections}} -define:LUAU_DIRECT_ACCESS=true
     # Release builds have no profiler, and everything must still run (see docs/core/profiling.md#builds).

@@ -79,6 +79,7 @@ Quality_Key :: enum u8 {
 	Aa,
 	Render_Scale,
 	Lod_Error,
+	Mesh_Pool,
 	Virtual_Shadows,
 	Reflections,
 	Reflections_Level,
@@ -100,6 +101,7 @@ QUALITY_KEY_NAMES := [Quality_Key]string {
 	.Aa                 = "quality.aa",
 	.Render_Scale       = "quality.render_scale",
 	.Lod_Error          = "quality.lod_error",
+	.Mesh_Pool          = "quality.mesh_pool",
 	.Virtual_Shadows    = "quality.shadows.virtual",
 	.Reflections        = "quality.reflections",
 	.Reflections_Level  = "quality.reflections.level",
@@ -291,6 +293,15 @@ parse :: proc(text: string, settings: ^Settings, problems: ^[dynamic]string = ni
 				} else {
 					problem(problems, line, "%s takes a number of pixels from %v to %v, not %q", key, render.MIN_LOD_ERROR, render.MAX_LOD_ERROR, value)
 				}
+			case .Mesh_Pool:
+				megabytes: uint
+				megabytes, ok = strconv.parse_uint(value, 10)
+				if ok && megabytes <= render.MAX_MESH_POOL {
+					q.mesh_pool = u32(megabytes)
+				} else {
+					ok = false
+					problem(problems, line, "%s takes a whole number of MiB from %v to %v, not %q", key, render.MIN_MESH_POOL, render.MAX_MESH_POOL, value)
+				}
 			case .Virtual_Shadows:
 				switch value {
 				case "true":
@@ -359,6 +370,7 @@ with_keys :: proc(q: render.Quality, settings: Settings, caps: render.Caps) -> r
 	if .Aa in given {q.aa = s.aa}
 	if .Render_Scale in given {q.render_scale = s.render_scale}
 	if .Lod_Error in given {q.lod_error = s.lod_error}
+	if .Mesh_Pool in given {q.mesh_pool = s.mesh_pool}
 	if .Virtual_Shadows in given {q.shadows.virtual = s.shadows.virtual}
 	if .Reflections in given {q.reflections.technique = s.reflections.technique}
 	if .Reflections_Level in given {q.reflections.level = s.reflections.level}
@@ -384,6 +396,7 @@ quality_values :: proc(q: render.Quality, caps: render.Caps) -> (values: [Qualit
 		.Aa                 = name(q.aa),
 		.Render_Scale       = fmt.tprintf("%v", q.render_scale),
 		.Lod_Error          = fmt.tprintf("%v", q.lod_error),
+		.Mesh_Pool          = fmt.tprintf("%v", q.mesh_pool),
 		.Virtual_Shadows    = q.shadows.virtual ? "true" : "false",
 		.Reflections        = name(q.reflections.technique),
 		.Reflections_Level  = name(q.reflections.level),

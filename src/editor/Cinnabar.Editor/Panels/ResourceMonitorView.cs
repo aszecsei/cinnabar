@@ -99,6 +99,8 @@ public sealed class ResourceMonitorView : Grid
                 .. ShadingRows(g),
                 // The virtual shadow map's pages, while a frame draws one: those it asked for, those it got of the pool's, and those it had no room for.
                 .. VirtualShadowRows(g),
+                // The pool of mesh pages, while a paged mesh is resident: the pages in it of its slots, those that views wait for, and what the frames copy in a second.
+                .. MeshPageRows(g),
                 // The split cascades' tables: the probes that rays reached of each cascade's slots, and the keys that found no room.
                 .. g.GiCascades.Select((c, k) => ($"GI cascade {k} probes", c.Dropped > 0 ? $"{c.Active:N0} / {c.Slots:N0}, {c.Dropped:N0} dropped" : $"{c.Active:N0} / {c.Slots:N0}")),
                 // The reflections: while the quality has the probes, the probes, the slots whose probe has a cube and the faces captured, and their memory.
@@ -119,6 +121,19 @@ public sealed class ResourceMonitorView : Grid
             yield return ("Shadow pages requested", $"{g.VirtualPagesRequested:N0}");
             yield return ("Shadow pages allocated", $"{g.VirtualPagesAllocated:N0} / {g.VirtualPagesCapacity:N0} ({g.VirtualPagesAllocated * 100.0 / g.VirtualPagesCapacity:0}% full)");
             yield return ("Shadow pages missed", $"{g.VirtualPagesMissed:N0}");
+        }
+    }
+
+    // The pool of mesh pages' rows, none without a paged mesh (see docs/rendering/assets.md#mesh-pages). A page is 128 KiB.
+    internal static IEnumerable<(string Name, string Value)> MeshPageRows(Link.Protocol.GameStats g)
+    {
+        if (g.MeshPagesCapacity > 0)
+        {
+            const ulong PageBytes = 128 * 1024;
+            yield return ("Mesh pages resident", $"{g.MeshPagesResident:N0} / {g.MeshPagesCapacity:N0} ({g.MeshPagesResident * 100.0 / g.MeshPagesCapacity:0}% full)");
+            yield return ("Mesh page pool", $"{ResourceStats.Bytes(g.MeshPagesResident * PageBytes)} / {ResourceStats.Bytes(g.MeshPagesCapacity * PageBytes)}");
+            yield return ("Mesh pages pending", $"{g.MeshPagesPending:N0}");
+            yield return ("Mesh pages streamed", $"{ResourceStats.Bytes(g.MeshPagesStreamedBytes)} / s");
         }
     }
 

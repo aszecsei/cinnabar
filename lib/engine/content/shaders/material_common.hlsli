@@ -186,6 +186,11 @@ struct Frame_Constants {
 	// The view's projection (see view_projection.hlsli): the camera's in every view's copy, the view model's in its own,
 	// and a face's in a reflection probe's capture.
 	float4 projection;
+	// The pool of mesh pages and its page table, which the mesh shader path draws a paged mesh's meshlets from (see
+	// mesh_pages.hlsli).
+	uint mesh_pool;
+	uint mesh_pages;
+	uint2 mesh_pages_padding;
 };
 CN_PASS_CONSTANTS(Frame_Constants, frame);
 
@@ -330,6 +335,10 @@ static const uint MESH_INDEX32 = 1;
 static const uint MESH_UV1 = 2;
 static const uint MESH_COLOR = 4;
 static const uint MESH_SKINNED = 8;
+// The mesh's meshlets and their vertices are in pages (see mesh_pages.hlsli): its pages are page_count entries of the
+// page table from pages, and it has no meshlet buffers. Its positions, attributes and indices are its level 0, once
+// that is resident.
+static const uint MESH_PAGED = 16;
 struct Mesh_Record {
 	uint positions;
 	uint attributes;
@@ -344,6 +353,12 @@ struct Mesh_Record {
 	uint meshlet_nodes;
 	uint previous_positions;
 	float4 impostor_sphere;
+	uint pages;
+	uint page_count;
+	// Where the vertices start in positions and attributes, in bytes: 0 for a mesh's own buffers, and a page's streams
+	// for a meshlet of a paged mesh, which load_cluster sets.
+	uint positions_offset;
+	uint attributes_offset;
 };
 
 // Matches Instance_Record in lib/engine/render/scene.odin: the pose relative to the render origin as the rows of a
@@ -596,9 +611,9 @@ uint mesh_index(Mesh_Record m, uint corner) {
 // octahedron, uv0, and uv1 and a color when the mesh has them.
 Mesh_Vertex read_vertex(Mesh_Record m, uint index) {
 	Mesh_Vertex v;
-	v.local = cn_buffer(m.positions).Load<float3>(index * 12);
+	v.local = cn_buffer(m.positions).Load<float3>(m.positions_offset + index * 12);
 	ByteAddressBuffer attributes = cn_buffer(m.attributes);
-	uint base = index * m.attribute_stride;
+	uint base = m.attributes_offset + index * m.attribute_stride;
 	v.normal = octahedral(snorm16(attributes.Load(base)));
 	uint tangent_word = attributes.Load(base + 4);
 	v.tangent = octahedral(unorm16(tangent_word) * 2 - 1);

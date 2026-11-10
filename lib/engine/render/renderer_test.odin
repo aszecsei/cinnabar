@@ -2404,3 +2404,73 @@ sprite_renderers_draw_sorted_by_layer_order_and_depth :: proc(t: ^testing.T) {
 	testing.expect(t, linalg.length(turned.right - [3]f32{0, 1, 0}) < 1e-5 && linalg.length(turned.up - [3]f32{-2, 0, 0}) < 1e-5)
 	testing.expectf(t, len(rig.record.problems) == 0, "problems: %v", rig.record.problems)
 }
+
+// A frame brings the pool of mesh pages up to date in its first pass, whether or not anything draws yet, so a paged
+// mesh's roots come in, the mesh is ready, and its level 0 is assembled for the ray scene.
+@(test)
+a_frame_streams_a_paged_meshs_pages :: proc(t: ^testing.T) {
+	sync.guard(&backend_lock)
+	rig := new(Rig)
+	defer free(rig)
+	rig_start(t, rig)
+	defer rig_stop(rig)
+	context.logger = {record_problems, &rig.record, .Debug, {}}
+	fake: Page_Fake
+	context.user_ptr = &fake
+	r, platform := rig.r, &rig.platform
+	platform.time_seconds = proc() -> f64 {return 0.1}
+	platform.gpu_stream_texture, platform.gpu_stream_buffer, platform.gpu_transfer_done = null.stream_texture, null.stream_buffer, null.transfer_done
+	page_file_reads(platform)
+	enable_frame_pipelines(r)
+	defer platform.gpu_destroy_texture(r.blue_noise.texture)
+
+	guid := format.Guid{0 = 0x52, 15 = 2}
+	buffer: [32]u8
+	testing.expect(t, os.write_entire_file(fmt.tprintf("%s/%s.blob", rig.dir, format.guid_format(guid, &buffer)), paged_mesh_bytes(guid, chain_pages())) == nil)
+	e := ecs.spawn(rig.w)
+	ecs.add(rig.w, e, ecs.Transform{position = ecs.position_offset({}, {0, 0, -5}), rotation = 1, scale = 1})
+	ecs.add(rig.w, e, Mesh_Renderer{mesh = guid})
+
+	passes := make(map[string]int)
+	defer delete(passes)
+	desc := Frame_Desc {
+		view = {rotation = 1, projection = Perspective{1, 0.1}},
+		size = {64, 32},
+		hooks = {
+			ui = proc(f: ^Frame) {
+				passes := (^map[string]int)(f.data)
+				clear(passes)
+				for pass in f.graph.passes {
+					passes[pass.name] += 1
+				}
+			},
+		},
+	}
+	desc.hooks.data = &passes
+	// The first frame makes the pool when it first asks for the mesh, after its passes began: it has no pass for it.
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, passes["stream pages"], 0)
+	_, ready := resident_mesh(&r.residency, guid)
+	testing.expect(t, !ready)
+	// The second copies the root, and the third finds the mesh ready.
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	testing.expect_value(t, passes["stream pages"], 1)
+	testing.expect_value(t, passes["copy page feedback"], 1)
+	testing.expect_value(t, mesh_stream_stats(&r.residency).resident_pages, 1)
+	testing.expect(t, draw_frame(r, rig.w, desc))
+	mesh, now_ready := resident_mesh(&r.residency, guid)
+	testing.expect(t, now_ready && mesh.paged)
+	for _ in 0 ..< 6 {
+		testing.expect(t, draw_frame(r, rig.w, desc))
+	}
+	testing.expect_value(t, passes["stream pages"], 1)
+	// The frame traces, so the mesh's level 0 was read from its pages and has an acceleration structure.
+	if r.residency.accels {
+		mesh, _ = resident_mesh(&r.residency, guid)
+		_, whole := mesh.level0.(Level0_Ready)
+		testing.expect(t, whole && mesh.accel != {} && mesh.positions != {})
+		testing.expect(t, fake.reads_begun > 0)
+	}
+	testing.expect_value(t, fake.reads_open, 0)
+	testing.expectf(t, len(rig.record.problems) == 0, "the frames logged %v", rig.record.problems)
+}

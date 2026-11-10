@@ -65,7 +65,10 @@ Meshlet_Select_Constants :: struct {
 	selections:        u32,
 	selected:          u32,
 	stats:             u32,
-	padding:           [3]u32,
+	// The page table's read index and the feedback's write index, 0 when the frame has no pool of mesh pages.
+	pages:             u32,
+	feedback:          u32,
+	padding:           u32,
 }
 
 #assert(size_of(Meshlet_Select_Constants) == 80)
@@ -143,6 +146,10 @@ meshlet_select_constants :: proc(f: ^Frame, cull: Cull_Constants) -> bool {
 		selected      = gpu.write_index(m.selected),
 		stats         = cull.stats,
 	}
+	if f.mesh_pool.pool != 0 {
+		pool := &f.renderer.residency.pool
+		constants.pages, constants.feedback = gpu.read_index(pool.table), gpu.write_index(pool.feedback)
+	}
 	ms.constants, ok = upload_bytes(platform, mem.ptr_to_bytes(&constants), gpu.PASS_CONSTANTS_ALIGN)
 	if !ok {
 		return false
@@ -168,6 +175,11 @@ add_meshlet_select_pass :: proc(f: ^Frame) {
 	write(g, p, sf.meshlet_select.selected)
 	if sf.stats != 0 {
 		write(g, p, sf.stats)
+	}
+	// A paged mesh's groups are listed by their pages' slots, and the walk says which pages it used and wants.
+	if f.mesh_pool.pool != 0 {
+		read(g, p, f.mesh_pool.table)
+		write(g, p, f.mesh_pool.feedback)
 	}
 }
 

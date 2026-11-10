@@ -25,7 +25,7 @@ import "core:time"
 import format "cinnabar:engine/asset/format"
 
 // Changing how the cooker cooks stages changes this, which invalidates every stage's sub-assets.
-STAGE_COOK_VERSION :: "stages 6"
+STAGE_COOK_VERSION :: "stages 8"
 // Changing what a stage's prefab or material instances hold, or which sub-assets it makes, changes this. It is in the
 // stage's key alone, so every stage converts again but keeps its meshes, textures and instance sets that are current.
 STAGE_PREFAB_VERSION :: "prefab 2"
@@ -48,6 +48,7 @@ STAGE_SETTINGS := []Setting_Info {
 		default = "true",
 		description = "Simplify the meshes' meshlets into a hierarchy of levels of detail, as for a model.",
 	},
+	PAGES_SETTING,
 	{
 		key = "collision",
 		values = {"true", "false"},
@@ -1044,7 +1045,7 @@ cook_stage_part :: proc(w: ^Stage_Work, p: Stage_Part, job: ^Stage_Job) -> Asset
 		report_error(problems, a.path, 0, 0, "mesh %s has no triangles", p.name)
 		return .Failed
 	}
-	blob_key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.collision, cook.impostor_size))
+	blob_key := hash.fnv64a(transmute([]byte)fmt.tprintf("%s\x00%s\x00%s\x00%s\x00%x\x00%s\x00%v\x00%v\x00%v\x00%v\x00", STAGE_COOK_VERSION, MESHOPTIMIZER_VERSION, LZ4_VERSION, a.name, format.mesh_layout(), p.name, cook.lod, cook.paged, cook.collision, cook.impostor_size))
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.corners), blob_key)
 	blob_key = hash.fnv64a(mem.slice_to_bytes(cook.ranges), blob_key)
 	for n in cook.names {
@@ -1124,6 +1125,7 @@ stage_cook_mesh :: proc(a: Asset_Source, m: Cn_Usd_Mesh, p: Stage_Part, basis: m
 		flags = flags,
 		generate_tangents = true,
 		lod = stage_setting(a, "cluster_lod") == "true",
+		paged = stage_setting(a, "pages") == "true",
 		collision = stage_setting(a, "collision") == "true",
 		impostor_size = stage_setting(a, "impostor") == "true" ? 64 : 0,
 		name = p.name,

@@ -2,7 +2,7 @@
 
 How `core` selects the platform and the GPU backend at compile time, the `Platform_API` struct that is the whole porting surface, and what `core` does at the start and end of every frame. Read [Hot reload](../overview/hot-reload.md) first for why the host owns everything here.
 
-**In this document:** [Platform and backend abstraction](#platform-and-backend-abstraction) · [Platform_API](#platform_api) · [The frame](#the-frame)
+**In this document:** [Platform and backend abstraction](#platform-and-backend-abstraction) · [Platform_API](#platform_api) · [File reads](#file-reads) · [The frame](#the-frame)
 
 ## Platform and backend abstraction
 
@@ -23,7 +23,7 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Memory | `permanent_allocator`, `frame_allocator`, `asset_allocator`, `heap_allocator`, `memory_reserve`, `memory_commit`, `memory_release` | See [Memory](jobs-and-memory.md#memory). |
 | Paths | `content_dir`, `project_path` | Where the game's loose cache and its project settings are, as absolute strings in host memory: beside the executable, unless the host's command line says otherwise. See [Building and running](../overview/building-and-running.md#build-layout). |
 | Time and input | `time_seconds`, `input` | `input` is the state at the start of the frame. See [Input](input.md#input). |
-| Files | `file_read`, `file_read_range`, `file_modified`, `file_write` | What the asset runtime reads the loose cache with, and the project package writes the user's settings with. `file_read_range` reads part of a file, such as a streamed sound's header. |
+| Files | `file_read`, `file_read_range`, `file_modified`, `file_write`, `file_read_begin`, `file_read_result`, `file_read_end` | What the asset runtime reads the loose cache with, and the project package writes the user's settings with. `file_read_range` reads part of a file, such as a streamed sound's header, before it returns. The last three read a range across frames. See [File reads](#file-reads). |
 | Window | `window_size`, `set_window_title` | The size is read once per frame. |
 | Jobs | `jobs_run`, `jobs_wait`, `jobs_lock`, `jobs_unlock`, `jobs_worker_count` | See [Job system](jobs-and-memory.md#job-system). Background jobs are deliberately absent. |
 | Profiler | `profile` | A `profile.Procs`, which the profile package's front-end takes. See [Profiling](profiling.md#zones). |
@@ -33,6 +33,16 @@ The porting surface is therefore exactly: the `*_windows.odin` files of `core`, 
 | Scripting | `script_open`, `script_close`, `script_push_binding`, `script_atom`, `script_direct_access` | The host trampolines. See [Scripting](../scripting/embedding.md#host-trampolines). |
 
 In release, `main_release` fills the same struct with direct references, so a game never knows which configuration it is in.
+
+## File reads
+
+A game cannot start work that goes on across frames, as its jobs are frame-scoped ([Jobs](jobs-and-memory.md#job-system)). So the host reads for it. The renderer reads a mesh's pages this way ([Rendering: GPU residency](../rendering/assets.md#gpu-residency)).
+
+- **`file_read_begin(path, offset, size)`** starts a read of `size` bytes from `offset` on a background job, and returns a `File_Read` ticket. It returns 0 if `MAX_FILE_READS` (256) reads are open, or if the size is 0 or more than `MAX_FILE_READ_SIZE` (256 MiB).
+- **`file_read_result(read)`** gives the state: `Pending`, `Done` or `Failed`. With `Done` it gives the bytes, which are in the host's memory at a blob's alignment, and stay valid until the read ends. A read fails if the file does not exist or has fewer bytes than the range. A ticket of 0, or of a read that ended, has failed, so no code reads a state as success by default.
+- **`file_read_end(read)`** frees the read. A read that is still `Pending` is cancelled: its job frees the buffer when it finishes. The owner of a read must end it.
+
+The host owns each buffer, so a job never writes to memory of a game that is gone. A ticket holds its slot's generation, so the ticket of an ended read never names the slot's next read. The job opens the file, reads and closes it, as the cooker cannot replace a blob that is open. At a soft restart `core` ends every read that the old game left, and `core.shutdown` waits for the jobs.
 
 ## The frame
 

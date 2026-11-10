@@ -61,7 +61,7 @@ test_gltf :: proc(wedge_name := "Wedge") -> string {
 	)
 }
 
-@(private = "file")
+@(private)
 read_meta :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Meta {
 	text, err := os.read_entire_file(fmt.tprintf("%s/content/%s.meta", tree.dir, path), context.temp_allocator)
 	testing.expect(t, err == nil)
@@ -70,7 +70,7 @@ read_meta :: proc(t: ^testing.T, tree: Tree, path: string) -> format.Meta {
 	return meta
 }
 
-@(private = "file")
+@(private)
 mesh_blob :: proc(t: ^testing.T, tree: Tree, guid: format.Guid) -> (data: []byte, blob: ^format.Mesh_Blob, ok: bool) {
 	data = tree_blob(t, tree, guid)
 	blob, ok = format.mesh_view(data)
@@ -194,7 +194,7 @@ octahedral_vectors_round_trip :: proc(t: ^testing.T) {
 }
 
 // grid_gltf is a mesh of one gently bumpy square of size by size quads, which simplifies into several levels.
-@(private = "file")
+@(private)
 grid_gltf :: proc(size: int) -> string {
 	positions := make([dynamic][3]f32, context.temp_allocator)
 	for y in 0 ..= size {
@@ -256,7 +256,8 @@ Grid_Mesh :: struct {
 
 @(private = "file")
 cook_grid :: proc(t: ^testing.T, meta: string) -> (grid: Grid_Mesh, ok: bool) {
-	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", meta}})
+	// The hierarchy's tests read the mesh's own streams, which a mesh with pages does not have (see mesh_pages_test.odin).
+	tree := make_tree(t, {{"content/grid.gltf", grid_gltf(48)}, {"content/grid.gltf.meta", strings.concatenate({meta, "pages = false\n"}, context.temp_allocator)}})
 	defer remove_tree(tree)
 	testing.expect(t, cook(tree_options(tree), {.Model}).ok)
 	guid, found := format.meta_subasset(read_meta(t, tree, "grid.gltf"), format.MESH_KIND, "Grid")

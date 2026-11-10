@@ -1,5 +1,7 @@
 package render
 
+import "core:mem"
+
 import "cinnabar:core"
 import "cinnabar:core/gpu"
 
@@ -125,6 +127,10 @@ Quality :: struct {
 	// The mesh shader path's level of detail: the largest error, in pixels, that a simplified part of a mesh may show,
 	// from MIN_LOD_ERROR to MAX_LOD_ERROR, 0 giving 1 (see docs/rendering/gpu-scene.md#mesh-shader-path).
 	lod_error:    f32,
+	// The budget of the pool of mesh pages in MiB, from MIN_MESH_POOL to MAX_MESH_POOL and at most a quarter of the
+	// device's video memory, 0 giving DEFAULT_MESH_POOL: the meshlets and vertices of paged meshes that are resident at
+	// once (see docs/rendering/assets.md#mesh-pages).
+	mesh_pool:    u32,
 }
 
 // Caps are what the device can do that quality depends on, from Platform_API.gpu_features and gpu_adapter.
@@ -153,6 +159,18 @@ LOD_ERRORS := [Quality_Level]f32 {
 }
 MIN_LOD_ERROR :: 0.25
 MAX_LOD_ERROR :: 8
+
+// The pool of mesh pages' budget at each level, in MiB.
+@(rodata)
+MESH_POOLS := [Quality_Level]u32 {
+	.Low    = 256,
+	.Medium = 512,
+	.High   = 1024,
+	.Ultra  = 2048,
+}
+MIN_MESH_POOL :: 16
+MAX_MESH_POOL :: 3584
+DEFAULT_MESH_POOL :: 1024
 
 // The video memory below which default_quality picks each preset. Unknown memory picks High.
 QUALITY_LOW_MEMORY :: 4 << 30
@@ -198,7 +216,17 @@ preset_quality :: proc(preset: Quality_Preset, caps: Caps) -> Quality {
 		aa = .Taa,
 		render_scale = 1,
 		lod_error = LOD_ERRORS[level],
+		mesh_pool = min(MESH_POOLS[level], max_mesh_pool(caps)),
 	}
+}
+
+// max_mesh_pool is the most that a device's pool of mesh pages may be, in MiB: a quarter of its video memory, and all
+// of MAX_MESH_POOL when that is unknown.
+max_mesh_pool :: proc(caps: Caps) -> u32 {
+	if caps.video_memory == 0 {
+		return MAX_MESH_POOL
+	}
+	return u32(clamp(caps.video_memory / 4 / mem.Megabyte, MIN_MESH_POOL, MAX_MESH_POOL))
 }
 
 // quality_preset is the preset that a quality is, or Custom.
@@ -258,6 +286,7 @@ clamp_quality :: proc(q: Quality, caps: Caps) -> Quality {
 	// Not a number, or 0, is full resolution.
 	q.render_scale = q.render_scale > 0 ? clamp(q.render_scale, MIN_RENDER_SCALE, 1) : 1
 	q.lod_error = q.lod_error > 0 ? clamp(q.lod_error, MIN_LOD_ERROR, MAX_LOD_ERROR) : 1
+	q.mesh_pool = clamp(q.mesh_pool > 0 ? q.mesh_pool : DEFAULT_MESH_POOL, MIN_MESH_POOL, max_mesh_pool(caps))
 	return q
 }
 

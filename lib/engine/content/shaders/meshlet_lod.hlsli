@@ -24,7 +24,8 @@ struct Meshlet_Node {
 	float error;
 	uint first;
 	uint count;
-	uint padding;
+	// A leaf's page in a paged mesh, which first is then relative to the first meshlet of.
+	uint page;
 };
 
 #endif

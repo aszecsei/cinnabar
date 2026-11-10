@@ -4,6 +4,7 @@ package asset
 
 import "core:fmt"
 import "core:log"
+import "core:mem"
 
 import "cinnabar:core"
 import "cinnabar:core/profile"
@@ -261,13 +262,52 @@ generation_path :: proc(a: ^Assets) -> string {
 	return ""
 }
 
-// read_blob reads and checks a blob. The modification time is read first, so a blob that changes during the read
-// is read again at the next poll.
+// modified is the modification time of the blob that an asset's data was read from, or 0 for no asset. What reads more
+// of the blob's file later, as the renderer reads a mesh's pages, compares the file's time with it.
+modified :: proc(a: ^Assets, h: Handle) -> i64 {
+	r := record(a, h)
+	return r != nil ? r.modified : 0
+}
+
+// read_head reads a paged mesh's head: the blob without the pages that stream (see
+// docs/content/blobs-and-loading.md#loading). It gives nil for any other blob, and for a platform without ranged reads.
+@(private)
+read_head :: proc(a: ^Assets, path: string) -> []byte {
+	if a.platform.file_read_range == nil {
+		return nil
+	}
+	Start :: struct #align (format.BLOB_ALIGN) {
+		bytes: [size_of(format.Mesh_Blob)]byte,
+	}
+	start: Start
+	if a.platform.file_read_range(path, 0, start.bytes[:]) != len(start.bytes) {
+		return nil
+	}
+	size := format.mesh_head_size(start.bytes[:])
+	if size == 0 {
+		return nil
+	}
+	head, err := mem.alloc_bytes_non_zeroed(size, format.BLOB_ALIGN, a.platform.asset_allocator)
+	if err != nil {
+		return nil
+	}
+	if a.platform.file_read_range(path, 0, head) != size {
+		delete(head, a.platform.asset_allocator)
+		return nil
+	}
+	return head
+}
+
+// read_blob reads and checks a blob: a paged mesh's head, and the whole of any other. The modification time is read
+// first, so a blob that changes during the read is read again at the next poll.
 @(private)
 read_blob :: proc(a: ^Assets, guid: format.Guid) -> (data: []byte, modified: i64, ok: bool) {
 	path := blob_path(a, guid)
 	modified = a.platform.file_modified(path)
-	data = a.platform.file_read(path, format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
+	data = read_head(a, path)
+	if data == nil {
+		data = a.platform.file_read(path, format.BLOB_ALIGN, a.platform.asset_allocator) or_else nil
+	}
 	if data == nil {
 		buffer: [32]u8
 		log.errorf("asset: no blob for %s at %s. Cook the content.", format.guid_format(guid, &buffer), path)
