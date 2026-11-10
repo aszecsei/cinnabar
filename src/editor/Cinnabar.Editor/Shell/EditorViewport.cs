@@ -150,4 +150,29 @@ public sealed class EditorViewport
     public event Action? TurnStarted;
 
     internal void RaiseTurnStarted() => TurnStarted?.Invoke();
+
+    // Whether the view should take the keyboard focus once its control is on screen. Play asks it of the Game view, whose
+    // control docking may make only after the tab changes.
+    bool _focusWanted;
+
+    /// <summary>The shell wants the view to take the keyboard focus (see <see cref="RequestFocus"/>).</summary>
+    public event Action? FocusRequested;
+
+    /// <summary>Asks the view's control to take the keyboard focus, now if it is attached, or else when it attaches.</summary>
+    internal void RequestFocus()
+    {
+        _focusWanted = true;
+        FocusRequested?.Invoke();
+    }
+
+    /// <summary>Whether the focus is wanted, which the control that takes it clears.</summary>
+    public bool TakeFocusRequest()
+    {
+        var wanted = _focusWanted;
+        _focusWanted = false;
+        return wanted;
+    }
+
+    /// <summary>Whether the focus is wanted, without taking the request.</summary>
+    public bool WantsFocus => _focusWanted;
 }
